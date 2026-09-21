@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   expandRoleSlotBindings, groupStagesByRole, MARKETING_CREATOR_ROLE_KEY, recipeKeyDomain,
-  stagesWithCapability, stagesWithGate, type RecipeStageMetadata,
+  roleActorKind, stagesWithCapability, stagesWithGate, type RecipeStageMetadata,
 } from './recipe-role-slots';
 
 // PO 判定(2026-09-18, story #4046 AC 업데이트) — 마케팅 레시피의 role_mapping
@@ -139,5 +139,27 @@ describe('recipeKeyDomain — preset.{domain}.{slug} 둘째 세그먼트 축(#40
 
   it('preset. 접두 없는 org 커스텀 정의 key(예: org.acme.widget_made) → null', () => {
     expect(recipeKeyDomain('org.acme.widget_made')).toBeNull();
+  });
+});
+
+describe('roleActorKind — story #4092(§b) 정의 선언 role_actor_kinds 리더', () => {
+  const KINDS = { Creator: 'agent', Director: 'human' } as const;
+
+  it('선언된 role은 그 값을 그대로 반환한다', () => {
+    expect(roleActorKind('Creator', KINDS)).toBe('agent');
+    expect(roleActorKind('Director', KINDS)).toBe('human');
+  });
+
+  it('선언 안에 없는 role명은 지어내지 않고 null("모름")', () => {
+    expect(roleActorKind('Compute', KINDS)).toBeNull();
+  });
+
+  it('role_actor_kinds 자체가 없으면(정의가 선언 안 함) null', () => {
+    expect(roleActorKind('Director', null)).toBeNull();
+    expect(roleActorKind('Director', undefined)).toBeNull();
+  });
+
+  it('role이 없으면(undefined) null', () => {
+    expect(roleActorKind(undefined, KINDS)).toBeNull();
   });
 });

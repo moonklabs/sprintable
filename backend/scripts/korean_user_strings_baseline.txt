@@ -868,6 +868,7 @@ app/services/event_definition_registry.py::].capability는 object({kind, connect
 app/services/event_definition_registry.py::].gate.approver는
 app/services/event_definition_registry.py::].gate.type은 비어있지 않은 문자열이어야 합니다.
 app/services/event_definition_registry.py::].gate는 object({type, approver})여야 합니다 —
+app/services/event_definition_registry.py::]는
 app/services/event_definition_registry.py::]는 object({role, action})여야 합니다 —
 app/services/event_definition_registry.py::]는 object여야 합니다.
 app/services/event_definition_registry.py::]는 {'label': str, 'value': str} 형태여야 합니다.
@@ -885,6 +886,8 @@ app/services/event_definition_registry.py::org 커스텀 정의는 org_slug 없�
 app/services/event_definition_registry.py::org 커스텀 정의의 key는 'org.{slug}.'로 시작해야 합니다:
 app/services/event_definition_registry.py::payload_schema는 top-level 'additionalProperties: false'를 명시해야 합니다 — 미선언 스키마는 모르는 필드를 조용히 통과시켜 등록을 거부합니다.
 app/services/event_definition_registry.py::payload가 payload_schema를 위반합니다(
+app/services/event_definition_registry.py::role_actor_kinds는 object({role명: 'human'|'agent'})여야 합니다 —
+app/services/event_definition_registry.py::role_actor_kinds에 선언된 role명
 app/services/event_definition_registry.py::role은 문자열 목록이어야 합니다.
 app/services/event_definition_registry.py::stage_metadata가 있으려면 payload_schema.properties.stage.enum이 먼저 선언돼야 합니다.
 app/services/event_definition_registry.py::stage_metadata에 payload_schema.properties.stage.enum에 없는 키가 있습니다:
@@ -896,6 +899,7 @@ app/services/event_definition_registry.py::은 v1 어휘(
 app/services/event_definition_registry.py::은 닫힌 어휘 밖입니다.
 app/services/event_definition_registry.py::은 제한 어휘 4종(
 app/services/event_definition_registry.py::이 없거나 object가 아닙니다.
+app/services/event_definition_registry.py::이 이 정의의 stage_metadata 어디에도 없습니다(오타로 의심됩니다) — 실재하는 role:
 app/services/event_definition_registry.py::중 하나여야 합니다 —
 app/services/event_definition_registry.py::중 하나여야 합니다:
 app/services/event_definition_registry.py::키만 허용합니다(action_auth v1 어휘 — human_only·role).

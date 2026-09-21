@@ -264,6 +264,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "gate_type={gate_type} 게이트를 열려면 다음 필드가 필요해요: {fields}.",
         "en": "Opening a gate_type={gate_type} gate requires the following field(s): {fields}.",
     },
+    # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21) — 사람 역할 stage(role_actor_kinds
+    # 선언 human) 발행은 애초 에이전트 바인딩이 없는 게 정상이라 zero_reach 경고 대신 이
+    # 중립 안내를 싣는다(MCP 표면은 "[안내] "로 강조, tools/events.py 참조).
+    "events.human_stage_zero_reach_notice": {
+        "ko": "이 단계는 사람이 판단해요 — 에이전트 바인딩이 필요 없어요.",
+        "en": "This stage is handled by a human — no agent binding is needed.",
+    },
     # story #4085 AC1 — 자기설명 렌더러가 다음 stage 발행 예시에 봉인 필드(예:
     # estimated_cost_minor)를 실값 예시로 채운 뒤, 그 값이 왜 필요한지 바로 아래 한 줄로
     # 붙이는 설명(recipe_gate_hooks.py::SealedFieldSpec.explanation_catalog_key).

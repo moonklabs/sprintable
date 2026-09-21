@@ -61,6 +61,16 @@ async def publish_event(args: PublishEventInput) -> list[TextContent]:
                 type="text",
                 text=warning_line + json.dumps(result, indent=2, ensure_ascii=False, default=_default_serializer),
             )]
+        # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 사람 역할 stage 발행은
+        # zero_reach_warning이 False로 오면서 이 notice가 같이 실린다(경고와 다른 접두
+        # "[안내]" — 경고가 아니라는 걸 에이전트가 즉시 구분하게, warning 분기와 동일 강조
+        # 관례만 재사용).
+        if isinstance(result, dict) and result.get("notice"):
+            notice_line = f"[안내] {result['notice']}\n\n"
+            return [TextContent(
+                type="text",
+                text=notice_line + json.dumps(result, indent=2, ensure_ascii=False, default=_default_serializer),
+            )]
         return ok(result)
     except Exception as exc:
         return err(str(exc))

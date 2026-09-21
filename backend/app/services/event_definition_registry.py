@@ -38,6 +38,11 @@ SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owne
 # resolver를 갖는지 모듈 로드 시점에 assert로 고정한다(event_routing_resolver.py의
 # _SERVER_DERIVED_RESOLVERS 완결성 assert와 동일 패턴).
 APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
+# story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — stage_metadata[stage].role_
+# actor_kinds(정의 레벨 옵션 사전, {role명: kind})의 **값** 어휘. role 이름 자체는
+# APPROVER_ROLE_REFERENCES와 달리 닫지 않는다(role은 저자 자유 문자열 — 기존 계약,
+# recipe-role-slots.ts 참조) — 닫는 건 "이 role이 사람인가 에이전트인가"라는 값 축뿐이다.
+ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
@@ -73,6 +78,12 @@ class InvalidStageMetadataError(ValueError):
     """story #2792(2790 P1) — stage_metadata 키가 payload_schema.properties.stage.enum의
     부분집합이 아님(페드루 판정 2026-08-19, 가드①). 오타 slug가 조용히 죽는 클래스
     (stage_metadata에는 있는데 실제 stage.enum엔 없어 영원히 안 읽히는 항목) 차단."""
+
+
+class InvalidRoleActorKindsError(ValueError):
+    """story #4092 — role_actor_kinds 값이 닫힌 어휘({"human","agent"}) 밖이거나, 선언된
+    role명이 이 정의의 stage_metadata 어디에도 실재하지 않음(오타로 영원히 안 읽히는 항목
+    차단 — InvalidStageMetadataError와 동일 클래스)."""
 
 
 class InvalidActionAuthError(ValueError):
@@ -454,6 +465,34 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                     f"stage_metadata[{slug!r}].capability.connector_key는 있으면 비어있지 않은 "
                     f"문자열이어야 합니다."
                 )
+
+
+def validate_role_actor_kinds(stage_metadata: dict, role_actor_kinds: dict | None) -> None:
+    """story #4092(§b) — 선택 필드. None/빈 dict면 "모름"(오늘 zero_reach 동작 그대로)이라
+    검증 대상 자체가 없어 통과. 있으면 두 가지를 강제:
+    ①값이 ROLE_ACTOR_KIND_VALUES({"human","agent"}) 밖이면 거부(role 이름 자체는 자유
+    문자열이라 안 막는다 — 막는 건 kind 값뿐).
+    ②선언된 role명이 이 정의의 stage_metadata 어디에도 실재하지 않으면 거부(오타 role명이
+    조용히 죽는 클래스 — validate_stage_metadata의 stage-key 부분집합 검증과 동일 정신)."""
+    if not role_actor_kinds:
+        return
+    if not isinstance(role_actor_kinds, dict):
+        raise InvalidRoleActorKindsError(
+            f"role_actor_kinds는 object({{role명: 'human'|'agent'}})여야 합니다 — "
+            f"{type(role_actor_kinds).__name__} 아님."
+        )
+    declared_roles = {meta.get("role") for meta in stage_metadata.values() if isinstance(meta, dict)}
+    for role, kind in role_actor_kinds.items():
+        if kind not in ROLE_ACTOR_KIND_VALUES:
+            raise InvalidRoleActorKindsError(
+                f"role_actor_kinds[{role!r}]는 {sorted(ROLE_ACTOR_KIND_VALUES)} 중 하나여야 "
+                f"합니다 — {kind!r}은 닫힌 어휘 밖입니다."
+            )
+        if role not in declared_roles:
+            raise InvalidRoleActorKindsError(
+                f"role_actor_kinds에 선언된 role명 {role!r}이 이 정의의 stage_metadata 어디에도 "
+                f"없습니다(오타로 의심됩니다) — 실재하는 role: {sorted(declared_roles)}"
+            )
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:

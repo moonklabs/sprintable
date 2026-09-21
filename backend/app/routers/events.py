@@ -2348,10 +2348,31 @@ async def _publish_registry_event_core(
         "zero_reach_warning": zero_reach,
     }
     if zero_reach:
-        result["warning"] = (
-            "발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — "
-            "work_item이 미배정이거나 routing이 아무도 가리키지 않습니다."
+        # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21) — 리허설 1호 실측: Director
+        # (사람) 역할 stage(concept_confirmed·structure_passed·pending_approval)는 애초
+        # 에이전트 바인딩이 없는 게 정상이라 zero_reach가 매번 뜨고 있었다. 정의가 자기
+        # role 어휘로 선언한 role_actor_kinds(§b)에서 이 stage의 role이 human으로 분류되면
+        # "진짜 갭"이 아니라 "정상"이므로 경고 대신 중립 안내로 대체한다. 선언이 없으면
+        # (role_actor_kinds가 None이거나 role이 그 안에 없음, "모름") 오늘과 동일하게
+        # 경고 그대로 — 개선은 선언한 정의만(회귀 0).
+        stage_value = payload.get("stage")
+        stage_meta_for_kind = (
+            (definition.stage_metadata or {}).get(stage_value)
+            if isinstance(stage_value, str) else None
         )
+        role_for_kind = stage_meta_for_kind.get("role") if isinstance(stage_meta_for_kind, dict) else None
+        actor_kind = (
+            (definition.role_actor_kinds or {}).get(role_for_kind)
+            if isinstance(role_for_kind, str) else None
+        )
+        if actor_kind == "human":
+            result["zero_reach_warning"] = False
+            result["notice"] = t("events.human_stage_zero_reach_notice", resolved_locale)
+        else:
+            result["warning"] = (
+                "발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — "
+                "work_item이 미배정이거나 routing이 아무도 가리키지 않습니다."
+            )
     return result
 
 
@@ -2516,6 +2537,8 @@ class EventDefinitionResponse(BaseModel):
     # 사이클형 정의의 stage별 role/action 카탈로그 메타 — {slug: {role, action}}. 신호형/
     # 측정형 정의는 빈 dict.
     stage_metadata: dict
+    # story #4092(§b) — 선언 없으면 None("모름").
+    role_actor_kinds: dict | None
     enabled: bool
     version: int
 
@@ -2545,6 +2568,7 @@ async def list_event_definitions(
             name=r.name, description=r.description,
             payload_schema=r.payload_schema, routing=r.routing,
             block_template=r.block_template, stage_metadata=r.stage_metadata,
+            role_actor_kinds=r.role_actor_kinds,
             enabled=r.enabled, version=r.version,
         )
         for r in rows
@@ -2703,6 +2727,10 @@ class CreateEventDefinitionRequest(BaseModel):
     # payload_schema.properties.stage.enum의 부분집합이어야 한다(validate_stage_metadata,
     # 가드①) — 비어 있으면(신호형/측정형) 검증 스킵.
     stage_metadata: dict = {}
+    # story #4092(§b) — 정의 자기 role 어휘의 사람/에이전트 선언(옵션, {role명: "human"|
+    # "agent"}). 없으면(대부분의 정의) "모름" — validate_role_actor_kinds가 값 어휘+
+    # stage_metadata 실재성만 강제, role 이름 자체는 안 막는다.
+    role_actor_kinds: dict | None = None
 
     # story #3745(name===key 잔존, 페드루 PO 決 2026-09-09) — 빈 이름을 막아도 org 커스텀
     # 정의가 name=key로(코드 키를 그대로 이름 자리에) 등록되면 화면 제목 자리에 코드 키가
@@ -2731,6 +2759,8 @@ class UpdateEventDefinitionRequest(BaseModel):
     block_template: dict | None = None
     action_auth: dict | None = None
     stage_metadata: dict | None = None
+    # story #4092(§b) — PATCH도 부분 갱신(None=안 건드림) 관례 그대로.
+    role_actor_kinds: dict | None = None
 
     @field_validator("name")
     @classmethod
@@ -2751,6 +2781,8 @@ class EventDefinitionDetailResponse(BaseModel):
     block_template: dict | None
     action_auth: dict | None
     stage_metadata: dict
+    # story #4092(§b) — 선언 없으면 None("모름").
+    role_actor_kinds: dict | None
     enabled: bool
     version: int
     created_by: str | None
@@ -2762,7 +2794,7 @@ def _event_definition_detail(d: "EventDefinition") -> EventDefinitionDetailRespo
         name=d.name, description=d.description,
         payload_schema=d.payload_schema, routing=d.routing,
         block_template=d.block_template, action_auth=d.action_auth,
-        stage_metadata=d.stage_metadata,
+        stage_metadata=d.stage_metadata, role_actor_kinds=d.role_actor_kinds,
         enabled=d.enabled, version=d.version,
         created_by=str(d.created_by) if d.created_by else None,
     )
@@ -2800,6 +2832,7 @@ async def create_event_definition(
         InvalidEventDefinitionKeyError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        InvalidRoleActorKindsError,
         InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
@@ -2807,6 +2840,7 @@ async def create_event_definition(
         validate_event_definition_key,
         validate_event_payload_schema_shape,
         validate_event_routing,
+        validate_role_actor_kinds,
         validate_stage_metadata,
     )
     from app.services.member_resolver import resolve_member
@@ -2828,10 +2862,11 @@ async def create_event_definition(
         if body.action_auth is not None:
             validate_action_auth(body.action_auth)
         validate_stage_metadata(body.payload_schema, body.stage_metadata)
+        validate_role_actor_kinds(body.stage_metadata, body.role_actor_kinds)
     except (
         InvalidEventDefinitionKeyError, InvalidPayloadSchemaError,
         InvalidEventRoutingError, InvalidBlockTemplateError, InvalidActionAuthError,
-        InvalidStageMetadataError,
+        InvalidStageMetadataError, InvalidRoleActorKindsError,
     ) as e:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_definition", "message": str(e)},
@@ -2854,7 +2889,7 @@ async def create_event_definition(
         name=body.name, description=body.description,
         payload_schema=body.payload_schema, routing=body.routing,
         block_template=body.block_template, action_auth=body.action_auth,
-        stage_metadata=body.stage_metadata,
+        stage_metadata=body.stage_metadata, role_actor_kinds=body.role_actor_kinds,
         created_by=sender.id,
     )
     db.add(definition)
@@ -2881,12 +2916,14 @@ async def update_event_definition(
         InvalidBlockTemplateError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        InvalidRoleActorKindsError,
         InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
         validate_block_template_refs,
         validate_event_payload_schema_shape,
         validate_event_routing,
+        validate_role_actor_kinds,
         validate_stage_metadata,
     )
 
@@ -2897,6 +2934,7 @@ async def update_event_definition(
         body.name is None and body.description is None
         and body.payload_schema is None and body.routing is None and body.enabled is None
         and body.block_template is None and body.action_auth is None and body.stage_metadata is None
+        and body.role_actor_kinds is None
     ):
         raise HTTPException(status_code=400, detail="at least one field must be provided")
 
@@ -2934,6 +2972,24 @@ async def update_event_definition(
                 status_code=400, detail={"code": "invalid_definition", "message": str(e)},
             ) from e
 
+    # story #4092(§b) — role_actor_kinds도 stage_metadata와 짝인 검증(선언된 role명이
+    # stage_metadata에 실재하는지 대조하므로) — 위와 동일 "유효 조합" 규율. stage_metadata만
+    # 바뀌고 role_actor_kinds를 안 건드리면 기존 선언이 고아가 될 수 있어(role명을 바꿨는데
+    # role_actor_kinds가 옛 이름을 그대로 가리킴) 이 경우도 여기서 걸린다.
+    if body.stage_metadata is not None or body.role_actor_kinds is not None:
+        effective_stage_metadata_for_kinds = (
+            body.stage_metadata if body.stage_metadata is not None else definition.stage_metadata
+        )
+        effective_role_actor_kinds = (
+            body.role_actor_kinds if body.role_actor_kinds is not None else definition.role_actor_kinds
+        )
+        try:
+            validate_role_actor_kinds(effective_stage_metadata_for_kinds, effective_role_actor_kinds)
+        except InvalidRoleActorKindsError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+
     # story #3332 — block_template↔payload_schema 교차검증도 위 stage_metadata와 동일
     # 규율: 둘 중 하나만 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로
     # 재검증한다 — payload_schema만 줄어들고 block_template을 안 건드리면 그 템플릿이
@@ -2963,6 +3019,9 @@ async def update_event_definition(
         content_changed = True
     if body.stage_metadata is not None:
         definition.stage_metadata = body.stage_metadata
+        content_changed = True
+    if body.role_actor_kinds is not None:
+        definition.role_actor_kinds = body.role_actor_kinds
         content_changed = True
     if body.payload_schema is not None:
         try:

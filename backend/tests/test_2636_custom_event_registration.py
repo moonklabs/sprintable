@@ -445,3 +445,173 @@ async def test_patch_preset_definition_not_reachable_via_org_scoped_route():
             assert ei.value.status_code == 404
     finally:
         await engine.dispose()
+
+
+# ─── story #4092(§b) — role_actor_kinds 등록·수정 API 왕복 ──────────────────────
+
+_CYCLIC_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "stage": {"type": "string", "enum": ["kickoff", "qa_review"]},
+        "widget_id": {"type": "string"},
+    },
+    "required": ["stage", "widget_id"],
+}
+_CYCLIC_STAGE_METADATA = {
+    "kickoff": {"role": "PO", "action": "명세 작성"},
+    "qa_review": {"role": "QA", "action": "검증"},
+}
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_register_accepts_role_actor_kinds_and_response_carries_it():
+    from app.routers.events import CreateEventDefinitionRequest, create_event_definition
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_org_member(s, org_id, role="admin")
+
+            body = CreateEventDefinitionRequest(
+                key="org.acme.widget.made", name="위젯 제작 완료",
+                payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING,
+                stage_metadata=_CYCLIC_STAGE_METADATA,
+                role_actor_kinds={"PO": "human", "QA": "agent"},
+            )
+            resp = await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
+            assert resp.role_actor_kinds == {"PO": "human", "QA": "agent"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_register_rejects_role_actor_kinds_value_outside_closed_vocabulary():
+    from app.routers.events import CreateEventDefinitionRequest, create_event_definition
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_org_member(s, org_id, role="admin")
+
+            body = CreateEventDefinitionRequest(
+                key="org.acme.widget.made", name="위젯 제작 완료",
+                payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING,
+                stage_metadata=_CYCLIC_STAGE_METADATA,
+                role_actor_kinds={"PO": "bot"},
+            )
+            with pytest.raises(HTTPException) as ei:
+                await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
+            assert ei.value.status_code == 400
+            assert ei.value.detail["code"] == "invalid_definition"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_register_rejects_role_actor_kinds_role_name_not_in_stage_metadata():
+    from app.routers.events import CreateEventDefinitionRequest, create_event_definition
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_org_member(s, org_id, role="admin")
+
+            body = CreateEventDefinitionRequest(
+                key="org.acme.widget.made", name="위젯 제작 완료",
+                payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING,
+                stage_metadata=_CYCLIC_STAGE_METADATA,
+                role_actor_kinds={"Typo Role": "human"},
+            )
+            with pytest.raises(HTTPException) as ei:
+                await create_event_definition(body, db=s, auth=_human_auth(user_id, org_id), org_id=org_id)
+            assert ei.value.status_code == 400
+            assert ei.value.detail["code"] == "invalid_definition"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_patch_adds_role_actor_kinds_without_touching_stage_metadata():
+    """⭐유효 조합 검증 — PATCH가 role_actor_kinds만 보내도(stage_metadata는 안 건드림)
+    기존 stage_metadata와 짝지어 재검증된다(실재하는 role명이라 통과)."""
+    from app.routers.events import (
+        CreateEventDefinitionRequest, UpdateEventDefinitionRequest,
+        create_event_definition, update_event_definition,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_org_member(s, org_id, role="admin")
+
+            created = await create_event_definition(
+                CreateEventDefinitionRequest(
+                    key="org.acme.widget.made", name="위젯 제작 완료",
+                    payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING,
+                    stage_metadata=_CYCLIC_STAGE_METADATA,
+                ),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            assert created.role_actor_kinds is None
+            assert created.version == 1
+
+            updated = await update_event_definition(
+                uuid.UUID(created.id), UpdateEventDefinitionRequest(role_actor_kinds={"PO": "human", "QA": "agent"}),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            assert updated.role_actor_kinds == {"PO": "human", "QA": "agent"}
+            assert updated.version == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_patch_rejects_role_actor_kinds_orphaned_by_stage_metadata_shrink():
+    """⭐유효 조합 검증 — stage_metadata에서 role을 없애는 PATCH가 role_actor_kinds를 안
+    건드려도, 그 role을 가리키던 선언이 고아가 되면 거부(effective 조합 재검증)."""
+    from app.routers.events import (
+        CreateEventDefinitionRequest, UpdateEventDefinitionRequest,
+        create_event_definition, update_event_definition,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_org_member(s, org_id, role="admin")
+
+            created = await create_event_definition(
+                CreateEventDefinitionRequest(
+                    key="org.acme.widget.made", name="위젯 제작 완료",
+                    payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING,
+                    stage_metadata=_CYCLIC_STAGE_METADATA,
+                    role_actor_kinds={"PO": "human", "QA": "agent"},
+                ),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+
+            shrunk_stage_metadata = {"kickoff": {"role": "Owner", "action": "명세 작성"}}
+            shrunk_schema = {
+                "type": "object", "additionalProperties": False,
+                "properties": {"stage": {"type": "string", "enum": ["kickoff"]}, "widget_id": {"type": "string"}},
+                "required": ["stage", "widget_id"],
+            }
+            with pytest.raises(HTTPException) as ei:
+                await update_event_definition(
+                    uuid.UUID(created.id),
+                    UpdateEventDefinitionRequest(payload_schema=shrunk_schema, stage_metadata=shrunk_stage_metadata),
+                    db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+                )
+            assert ei.value.status_code == 400
+            assert ei.value.detail["code"] == "invalid_definition"
+    finally:
+        await engine.dispose()

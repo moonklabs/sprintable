@@ -566,3 +566,60 @@ def test_stage_metadata_accepts_well_formed_values():
     validate_stage_metadata(
         _SCHEMA_2STAGE, {"kickoff": {"role": "PO", "action": "명세 작성"}, "qa_review": {"role": "QA", "action": "검증"}},
     )
+
+
+# ─── story #4092(§b) — validate_role_actor_kinds ────────────────────────────
+
+
+_STAGE_METADATA_2ROLE = {
+    "kickoff": {"role": "PO", "action": "명세 작성"},
+    "qa_review": {"role": "QA", "action": "검증"},
+}
+
+
+def test_role_actor_kinds_none_or_empty_always_passes():
+    """선택 필드 — 선언 없으면("모름") 검증 대상 자체가 없어 항상 통과."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, None)
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {})
+
+
+def test_role_actor_kinds_accepts_well_formed_declaration():
+    """양성대조 — 실재하는 role명 + 닫힌 어휘 값은 통과."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "human", "QA": "agent"})
+
+
+def test_role_actor_kinds_rejects_value_outside_closed_vocabulary():
+    """⭐AC1 핵심 — role 이름 자체는 자유 문자열이라 안 막지만, kind 값은 {"human","agent"}
+    로 닫혀 있다(PO 확定: "닫힌 어휘는 값이지 role 이름이 아니다")."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "Human"})  # 대소문자 다름
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "bot"})  # 닫힌 어휘 밖
+
+
+def test_role_actor_kinds_rejects_role_name_not_present_in_stage_metadata():
+    """⭐AC1 — 오타 role명이 조용히 죽는 클래스 차단(validate_stage_metadata의 stage-key
+    부분집합 검증과 동일 정신). "Product Owner"는 이 정의 어디에도 없는 role."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"Product Owner": "human"})
+
+
+def test_role_actor_kinds_rejects_non_dict_value():
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")  # dict 아님

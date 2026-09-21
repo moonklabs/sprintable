@@ -33,6 +33,26 @@ export interface RecipeStageMeta {
 
 export type RecipeStageMetadata = Record<string, RecipeStageMeta>;
 
+// story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로 선언하는
+// 옵션 사전({role명: "human"|"agent"}). role은 자유 문자열(위 docstring 그대로)이라 role
+// 이름 자체는 고정 어휘가 아니다 — 닫힌 건 kind 값 둘뿐(BE event_definition_registry.py
+// ROLE_ACTOR_KIND_VALUES와 동일 어휘, 재구현 아님·값만 미러).
+export type RoleActorKinds = Record<string, 'human' | 'agent'>;
+
+/**
+ * role 문자열 → 사람/에이전트 분류. 정의가 role_actor_kinds를 선언 안 했거나("모름") 그
+ * role이 선언 안에 없으면 null — 지어내지 않는다. 지금은 어떤 UI도 이 함수의 반환값으로
+ * 렌더 분기를 바꾸지 않는다(적용 다이얼로그의 크리에이터/디렉터 구분은 여전히 role_binding
+ * vs gate 존재라는 구조 신호로 판별 — #4046/#4048 기존 계약 그대로, AC1 "기존 관례와 충돌
+ * 0"). 이 함수는 그 구조 판별과 별개로 "이 role이 실제로 사람인가 에이전트인가"를 정의
+ * 저자가 명시한 값으로 정직하게 답하는 자리 — 향후 소비처(예: 연산/발행자 슬롯 확장)가
+ * role 이름 추측 대신 이 함수를 부를 수 있게 SSOT로 먼저 연다.
+ */
+export function roleActorKind(role: string | undefined, roleActorKinds: RoleActorKinds | null | undefined): 'human' | 'agent' | null {
+  if (!role || !roleActorKinds) return null;
+  return roleActorKinds[role] ?? null;
+}
+
 /** stage_metadata를 role 라벨별로 묶는다(정보 그룹핑 — "이 role이 role_mapping 바인딩
  * 대상"이라는 뜻이 아니다, 그건 expandRoleSlotBindings의 bindableRoles가 별도로 판단한다).
  * role이 없는(신호형/측정형 정의의 빈 stage_metadata 등) stage는 결과에서 빠진다. 순서는
