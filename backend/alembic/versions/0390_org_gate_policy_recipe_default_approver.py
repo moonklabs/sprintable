@@ -9,14 +9,14 @@ member_id(nullable UUID)를 추가 — merge_gate_default_approver_member_id(030
 1인에게 승인이 좁혀진다. 미설정(None, 기본값)은 현행(org owner) 무변경(회귀 0). 데이터
 마이그 없음.
 
-⚠️ 리비전 순서 메모(재-넘버링, 2026-09-21 07:33Z) — 최초 0384는 그 시점 develop head
-기준이었으나 이 카드가 Phase 3로 보류되는 사이 #4081(0384)·#4086(0385)·#4092(0386 예정)·
-디디군 #4090 1/2(0387 예정)·미르코 #4088 2/2(0388)가 먼저 자리를 잡았다. 이 카드는 그
-사슬 맨 뒤(0389)로 다시 붙는다 — 착지 순서가 바뀌면 재조율(이 세션 #4081↔#4083/#4086↔
-#4092/#4088 0387→0388 선례와 동형 절차).
+⚠️ 리비전 순서 메모(재-넘버링) — 최초 0384는 그 시점 develop head 기준이었으나 이
+카드가 Phase 3로 보류되는 사이 #4081(0384)·#4086(0385)·#4092(0386)·디디군 #4090(0387+
+0388, ①②③ 한 PR로 묶임)·미르코 #4088 2/2(0389)가 먼저 자리를 잡았다. 1차(07:33Z)
+0389→2차(07:54Z, 페드루 PO) 이 카드는 그 사슬 맨 뒤(0390)로 다시 붙는다 — 착지 순서가
+또 바뀌면 재조율.
 
-Revision ID: 0389
-Revises: 0388
+Revision ID: 0390
+Revises: 0389
 Create Date: 2026-09-21
 """
 from __future__ import annotations
@@ -25,8 +25,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0389"
-down_revision = "0388"
+revision = "0390"
+down_revision = "0389"
 branch_labels = None
 depends_on = None
 
