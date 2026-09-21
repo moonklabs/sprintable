@@ -142,21 +142,12 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
       if (res.ok) {
         setMessage({ type: 'success', text: t('saved') });
       } else {
-        // story e0c1b24c AC — 에이전트 멤버 지정 시 422 문구가 화면에 그대로 나와야 한다
-        // (backend/app/routers/hitl_config.py의 human-only 검증 메시지, HTTPException.detail).
-        //
-        // story #4083(페드루 PO 리뷰, 2026-09-21) — 위 원칙을 레시피 필드에 그대로 적용하면
-        // BE 문구(`recipe_gate_default_approver_member_id는 … human owner/admin …
-        // requires_human …`)가 필드명·영문 내부 속성어를 화면에 그대로 새긴다(BE 문구는
-        // API 소비자 대상, 화면 문구는 아님 — 그 경계가 e0c1b24c 당시엔 안 갈렸다). 이
-        // 필드 하나만 문자열 마커로 잡아 사람 문장으로 치환 — merge 쪽(기존 raw passthrough)
-        // 은 이 카드 범위 밖(별건).
+        // story e0c1b24c AC — 승인자 검증 422 문구가 화면에 그대로 나와야 한다(backend/
+        // app/routers/hitl_config.py의 human-only 검증 메시지, HTTPException.detail).
+        // merge·레시피 필드 둘 다 이 관례 그대로 — 문구 자체가 사람 문장이어야 하는 책임은
+        // 이 컴포넌트가 아니라 BE 카탈로그(i18n_catalog.py, story #4083 정정) 쪽에 있다.
         const body = (await res.json().catch(() => null)) as { detail?: string; error?: { message?: string } } | null;
-        const rawText = body?.detail ?? body?.error?.message ?? null;
-        const text = rawText?.includes('recipe_gate_default_approver_member_id')
-          ? t('recipeApproverInvalidMemberError')
-          : (rawText ?? t('saveFailed'));
-        setMessage({ type: 'error', text });
+        setMessage({ type: 'error', text: body?.detail ?? body?.error?.message ?? t('saveFailed') });
       }
     } catch {
       setMessage({ type: 'error', text: t('saveFailed') });

@@ -275,15 +275,15 @@ describe('OrgGatePolicySection — 저장(story e0c1b24c)', () => {
     expect(container.textContent).toContain(detailMsg);
   });
 
-  // story #4083(페드루 PO 리뷰, 2026-09-21) — merge 쪽(위 테스트)과 달리 레시피 필드의
-  // BE detail은 필드명·영문 내부 속성어("human owner/admin"·"requires_human")를 그대로
-  // 화면에 새겨 사람 문장이 아니었다. 이 필드 하나만 문자열 마커로 잡아 정적 i18n 문장으로
-  // 치환한다(BE 문구를 화면에 지어내는 게 아니라, BE 문구가 API 소비자용이라는 걸
-  // 인지하고 화면 전용 문장을 새로 두는 것 — merge 쪽 raw passthrough는 별건으로 남긴다).
-  it('⭐422(레시피 필드, 에이전트 멤버 지정) — raw BE 문구 대신 화면 전용 문장이 뜬다(필드명·영문 내부 속성어 미노출)', async () => {
+  // story #4083(페드루 PO 리뷰, 2026-09-21) — merge 쪽(위 테스트)과 같은 raw passthrough
+  // 관례(story e0c1b24c) 그대로 유지한다. 최초 처방은 이 필드만 FE 문자열 마커로 잡아
+  // 별도 i18n 키로 치환했으나(반창고 — API/MCP 등 다른 클라이언트엔 여전히 내부어 문장이
+  // 새고, FE는 문자열 마커에 매달림), 페드루 PO 재정정으로 뿌리(BE i18n_catalog.py의
+  // 카탈로그 문구 자체)를 사람 문장으로 고쳤다 — FE는 다시 raw passthrough, 이 테스트는
+  // 그 카탈로그 문구가 실제로 화면에 그대로(가공 없이) 뜨고 내부어가 안 섞였는지를 고정.
+  it('⭐422(레시피 필드, 에이전트 멤버 지정) — BE 카탈로그 문구(사람 문장)가 raw로 그대로 뜬다(필드명·영문 내부 속성어 미노출)', async () => {
     stubFetch(null);
-    const rawDetail =
-      'recipe_gate_default_approver_member_id는 이 조직의 human owner/admin 멤버여야 해요 (에이전트는 requires_human 게이트에 서명할 수 없어요).';
+    const rawDetail = '레시피 게이트 기본 승인자는 이 조직의 소유자 또는 관리자(사람)만 지정할 수 있어요.';
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -312,7 +312,7 @@ describe('OrgGatePolicySection — 저장(story e0c1b24c)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain(koMessages.orgGatePolicy.recipeApproverInvalidMemberError);
+    expect(container.textContent).toContain(rawDetail);
     expect(container.textContent).not.toContain('recipe_gate_default_approver_member_id');
     expect(container.textContent).not.toContain('requires_human');
   });

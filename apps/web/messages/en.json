@@ -5060,7 +5060,6 @@
     "posturePermissive": "Permissive",
     "approverLabel": "Merge Gate Default Approver",
     "recipeApproverLabel": "Recipe Gate Default Approver",
-    "recipeApproverInvalidMemberError": "The recipe gate default approver must be a human owner or admin of this organization.",
     "approverUnset": "Unset (current)",
     "approverPickPlaceholder": "Select an approver",
     "approverLoading": "Loading…",

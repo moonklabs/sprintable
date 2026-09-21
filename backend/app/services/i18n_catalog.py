@@ -99,12 +99,18 @@ _CATALOG: dict[str, dict[str, str]] = {
     },
     # story #4083 — recipe_gate_default_approver_member_id도 merge_gate_default_approver_
     # member_id(hitl_config.py, story #3319)와 같은 불변식(사람 owner/admin, 에이전트 불가)이라
-    # 검증 메시지 문구까지 같은 형으로 짓는다(발명 0). 다만 그 문구는 #3319 당시 grandfather돼
+    # 검증 자체는 같은 형으로 짓는다(발명 0). 다만 그 문구는 #3319 당시 grandfather돼
     # baseline에 남아 있고, 이 필드는 새로 만드는 거라 korean_user_strings_baseline.txt에 얹지
     # 않고(#4092 PO 정정 재적용) 이 카탈로그로 바로 옮긴다.
+    #
+    # ⚠️정정(페드루 PO 리뷰, 2026-09-21, PR #4477) — 최초 문구가 필드명(snake_case)·영문
+    # 내부 속성어("human owner/admin"·"requires_human")를 그대로 담아 API 소비자 전용
+    # 표현이었다. 이 카탈로그는 «사용자 문장 자리»(파일 docstring)이므로 화면에 그대로
+    # 떠도 되는 사람 문장으로 다시 짓는다 — API detail이 곧 화면 문구가 되는 이 레포 관례
+    # (story e0c1b24c, HTTPException.detail raw passthrough)상 카탈로그 쪽이 뿌리.
     "gates.recipe_default_approver_invalid_member": {
-        "ko": "recipe_gate_default_approver_member_id는 이 조직의 human owner/admin 멤버여야 해요 (에이전트는 requires_human 게이트에 서명할 수 없어요).",
-        "en": "recipe_gate_default_approver_member_id must be a human owner/admin member of this organization — agents cannot sign a requires_human gate",
+        "ko": "레시피 게이트 기본 승인자는 이 조직의 소유자 또는 관리자(사람)만 지정할 수 있어요.",
+        "en": "The recipe gate default approver must be a human owner or admin of this organization.",
     },
     "gates.approve_no_doc_access": {
         "ko": "doc 결재 권한이 없어요 (대상 프로젝트 접근 필요).",

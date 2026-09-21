@@ -307,7 +307,17 @@ async def test_upsert_org_policy_rejects_agent_member_for_recipe_field_422():
             assert resp.status_code == 422
             # 앱 전역 응답 envelope({"data","error":{"code","message"},"meta"}) — raw
             # {"detail":...}가 아니다(fastapi-proxy envelope 경계, story #4083 조사로 확인).
-            assert "recipe_gate_default_approver_member_id" in resp.json()["error"]["message"]
+            #
+            # 정정(페드루 PO 리뷰, 2026-09-21, PR #4477) — 이 detail이 그대로 화면에 뜨는
+            # 관례(story e0c1b24c)라 필드명(snake_case)·영문 내부 속성어("human owner/
+            # admin"·"requires_human")를 담으면 안 된다 — 카탈로그 문구 자체를 사람 문장
+            # 으로 고친 뒤(#4083 재정정), 그 사람 문장이 실제로 나오는지 + 내부어가 안
+            # 새는지를 함께 고정한다.
+            error_message = resp.json()["error"]["message"]
+            assert error_message == "레시피 게이트 기본 승인자는 이 조직의 소유자 또는 관리자(사람)만 지정할 수 있어요."
+            assert "recipe_gate_default_approver_member_id" not in error_message
+            assert "requires_human" not in error_message
+            assert "human owner/admin" not in error_message
         finally:
             app.dependency_overrides.clear()
     finally:
