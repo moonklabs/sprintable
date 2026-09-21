@@ -43,6 +43,13 @@ APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
 # APPROVER_ROLE_REFERENCES와 달리 닫지 않는다(role은 저자 자유 문자열 — 기존 계약,
 # recipe-role-slots.ts 참조) — 닫는 건 "이 role이 사람인가 에이전트인가"라는 값 축뿐이다.
 ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent"})
+# story #4090(alembic 0387·페드루 PO 確定 2026-09-21) — capability.target의 닫힌 어휘.
+# gate.approver·server_derived 축과 동형 설계 — apply_recipe_role_bindings가 role_mapping의
+# stage별 값을 어느 테이블(TeamMember/ChannelConnection)로 검증할지 이 값 하나로 가른다.
+# capability.kind(열린 값)와 섞지 않는다 — kind='publish'는 이미 "에이전트가 쓸 커넥터
+# 종류"라는 기존 계약을 여러 정의가 쓰고 있어(#3317 PR B), kind로 target을 유도하면 그
+# 계약을 조용히 바꾼다. "agent"가 기본(capability.target 생략 시)이라 기존 정의 전부 무변.
+_CAPABILITY_TARGETS = frozenset({"agent", "channel_connection"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
@@ -464,6 +471,22 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].capability.connector_key는 있으면 비어있지 않은 "
                     f"문자열이어야 합니다."
+                )
+            # story #4090(alembic 0385·페드루 PO 確定 2026-09-21) — capability.target 신설,
+            # kind와 달리 **닫힌 어휘**(생략 시 기본 "agent"). apply_recipe_role_bindings가
+            # 이 값으로 role_mapping의 stage별 target 테이블을 가른다(agent → TeamMember,
+            # channel_connection → ChannelConnection). kind는 여전히 열린 값(조직이 뜻을
+            # 정하는 커넥터 종류)이라 target을 kind에서 유도하지 않는다 — 명시 선언만 신뢰
+            # (7건 기존 픽스처가 "kind=publish + agent 바인딩"을 pin하고 있어, kind 값
+            # 자체로 판별하면 그 계약을 조용히 깬다).
+            if "target" in capability and capability["target"] not in _CAPABILITY_TARGETS:
+                # story #3779 BE 한글 사용자 문장 가드(story #3924 "baseline은 줄기만") —
+                # 이 정의 등록 검증 에러는 내부 개발자/설정 대상(에이전트가 event
+                # definition을 신설할 때 hits)이라 sibling raise들(위)과 달리 새로 여기
+                # 한글을 더하지 않고 영문으로 남긴다.
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].capability.target must be one of "
+                    f"{sorted(_CAPABILITY_TARGETS)} — got {capability.get('target')!r}."
                 )
 
 

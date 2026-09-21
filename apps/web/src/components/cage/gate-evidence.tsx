@@ -246,6 +246,11 @@ interface RecipeApprovalFacts {
   // 안 씀·최소단위 원값만).
   estimatedCostMinor: number | null;
   estimatedCostCurrency: 'KRW' | 'USD' | null;
+  // story #4090([E-RECIPE-1] Publisher 슬롯) AC2·AC3(2026-09-21) — 레시피 자동발행
+  // 훅의 기계 소유 결과(gate.publish_outcome, sealed 계열과 달리 승인 *후* 갱신될
+  // 수 있는 값 — 그래도 이 카드가 승인자가 자동발행 여부를 보는 유일한 자리라
+  // 여기 싣는다). external_publish(scope_key="") 게이트가 아니면 항상 null.
+  publishOutcome: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
@@ -305,13 +310,14 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     estimatedCostMinor:
       typeof gate.sealed_estimated_cost_minor === 'number' ? gate.sealed_estimated_cost_minor : null,
     estimatedCostCurrency: f?.['currency'] === 'KRW' || f?.['currency'] === 'USD' ? f['currency'] : null,
+    publishOutcome: realString(gate.publish_outcome),
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
     facts.contentBody || facts.contentVersion !== null || facts.contentSha256 || facts.scheduledAt !== null ||
     facts.sealedDocRef || facts.sealedDocBodySha256 || facts.adsBudgetMinor !== null ||
     facts.newsletterSegmentName !== null || facts.newsletterSendScheduledAt !== null || facts.newsletterSubject !== null ||
-    facts.estimatedCostMinor !== null;
+    facts.estimatedCostMinor !== null || facts.publishOutcome;
   return hasAny ? facts : null;
 }
 
@@ -672,6 +678,30 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
  * vs 기존 text-muted-foreground 5.1~5.9:1(AA 4.5:1은 이미 통과하던 값이라 접근성 위반은
  * 아니었으나, 값과 라벨의 시각적 위계가 안 갈렸다 — #2420과 동형 근거로 값을 승격).
  */
+// story #4090 AC3 정정(story #3779 BE 한글 사용자 문장 가드, 2026-09-21) — BE
+// gate.publish_outcome은 닫힌 어휘 코드(no_channel_binding|no_submitted_draft|
+// no_resolver|published|scheduled|publish_failed:*)를 저장한다(한글 완성 문장 아님,
+// channel_posts.py 주석과 동일 규율) — 이 함수가 코드→locale 문구로 번역한다.
+function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>): string {
+  if (code === 'published') return t('publishOutcomePublished');
+  if (code === 'scheduled') return t('publishOutcomeScheduled');
+  if (code === 'no_channel_binding') return t('publishOutcomeNoChannel');
+  if (code === 'no_submitted_draft') return t('publishOutcomeNoDraft');
+  if (code === 'no_resolver') return t('publishOutcomeNoResolver');
+  if (code.startsWith('publish_failed:')) {
+    // story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리(연결 원인)도 닫힌
+    // 어휘(connector_error|rate_limited|auth_expired, channel_posts.py::classify_
+    // publish_failure_outcome)라 그 코드도 각자 번역한다(커넥터 원문 미노출).
+    const failureCode = code.slice('publish_failed:'.length);
+    if (failureCode === 'auth_expired') return t('publishOutcomeFailedAuthExpired');
+    if (failureCode === 'rate_limited') return t('publishOutcomeFailedRateLimited');
+    return t('publishOutcomeFailedGeneric');
+  }
+  // 미지 코드(구버전 응답 등) — 지어내지 않고 원문 코드 그대로(사람이 읽기엔 어색해도
+  // 침묵보다 낫다, «모른다≠다르다» 규율).
+  return code;
+}
+
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
   // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
@@ -791,6 +821,12 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             {recipeStageLabel(facts.stage, tOrg)}
             {facts.stageRole ? ` (${stageRoleLabel(facts.stageRole, tOrg)})` : ''}
           </span>
+        </p>
+      ) : null}
+      {facts.publishOutcome ? (
+        <p>
+          <span className="text-muted-foreground">{t('recipeApprovalPublishOutcomeLabel')} · </span>
+          <span className="text-foreground">{publishOutcomeLabel(facts.publishOutcome, t)}</span>
         </p>
       ) : null}
       {facts.workItemRef ? (

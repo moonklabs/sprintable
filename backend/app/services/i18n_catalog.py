@@ -242,6 +242,61 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Publishing this will open a human approval gate — publish the following stage "
         "only after you receive the approval notification (preset.gate.verdict).",
     },
+    # story #4090([E-RECIPE-1] Publisher 슬롯) AC3(페드루 PO 確定 2026-09-21) — 다음
+    # stage가 채널 자동발행 대상(capability.target=="channel_connection")일 때의
+    # 네 갈래 안내(AC2 훅의 실제 gate.publish_outcome을 그대로 반영, 지어내지 않는다).
+    "events.gate_verdict_recipe_auto_published": {
+        "ko": "다음 행동: 할 일 없음 — 이 승인으로 바인딩된 채널에 이미 자동 발행됐어요.",
+        "en": "Next action: nothing — this approval already auto-published to the bound "
+        "channel connection.",
+    },
+    "events.gate_verdict_recipe_auto_publish_scheduled": {
+        "ko": "다음 행동: 할 일 없음 — 예약 시각에 자동 발행돼요.",
+        "en": "Next action: nothing — this will auto-publish at the scheduled time.",
+    },
+    "events.gate_verdict_recipe_auto_publish_skipped": {
+        "ko": "다음 행동: {reason}",
+        "en": "Next action: {reason}",
+    },
+    "events.gate_verdict_recipe_auto_publish_pending": {
+        "ko": "다음 행동: 채널 포스트 초안을 만들어 제출하면 승인이 자동으로 발행까지 이어져요.",
+        "en": "Next action: create and submit a channel post draft — approval will auto-publish it.",
+    },
+    # story #4090 AC3 정정(story #3779 가드, 2026-09-21) — gate.publish_outcome은 닫힌
+    # 어휘 코드(no_channel_binding|no_submitted_draft|no_resolver|publish_failed:*)라
+    # skipped 안내문의 {reason} 자리에 코드→문구 번역이 필요해졌다(4갈래 세분).
+    "events.gate_verdict_recipe_auto_publish_reason_no_channel": {
+        "ko": "발행 채널이 아직 지정되지 않았어요 — 레시피 적용 화면에서 발행 채널을 먼저 지정해 주세요.",
+        "en": "No publish channel is bound yet — bind one from the recipe apply screen first.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_no_draft": {
+        "ko": "제출된 채널 포스트 초안이 없어 발행을 건너뛰었어요 — 채널 포스트 초안을 만들어 제출한 뒤 "
+        "다시 승인해 주세요.",
+        "en": "No submitted channel post draft — create and submit one, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_no_resolver": {
+        "ko": "승인자를 확인할 수 없어 발행을 건너뛰었어요.",
+        "en": "Skipped — could not resolve an approver.",
+    },
+    # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — "publish_failed:<code>"의
+    # code도 닫힌 어휘(connector_error|rate_limited|auth_expired, channel_posts.py::
+    # classify_publish_failure_outcome)라 커넥터 원문을 안 싣고 각 코드별로 번역한다.
+    "events.gate_verdict_recipe_auto_publish_reason_auth_expired": {
+        "ko": "채널 연결이 끊겼거나 만료됐어요 — 조직 설정에서 연결을 갱신한 뒤 다시 승인해 주세요.",
+        "en": "The channel connection expired or was revoked — reconnect it, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_rate_limited": {
+        "ko": "채널 발행 한도에 걸렸어요 — 잠시 뒤 다시 승인해 주세요.",
+        "en": "Hit the channel's rate limit — re-approve again shortly.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_connector_error": {
+        "ko": "자동 발행이 실패했어요 — 채널 상태를 확인한 뒤 다시 승인해 주세요.",
+        "en": "Auto-publish failed — check the channel, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_unknown_failure": {
+        "ko": "자동 발행이 실패했어요 — 다시 승인해 주세요.",
+        "en": "Auto-publish failed — re-approve.",
+    },
     # story #4076 CI 정정(2026-09-21, 페드루 PO 지적) — 아래 두 키는 원래 events.py에
     # f-string 리터럴로 있었으나(라벨+발행 예시 JSON을 한 문자열로), 사이클 렌더러와
     # verdict 렌더러가 JSON 빌더 헬퍼(`_next_stage_publish_payload_json`)를 공유하도록

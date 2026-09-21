@@ -20,6 +20,7 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 from __future__ import annotations
 
 import asyncio
+import logging
 import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,8 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
     is_agent_caller,
 )
 from app.services.utm import attach_utm, resolve_utm_campaign
+
+logger = logging.getLogger(__name__)
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 예정시각 축.
@@ -1504,6 +1507,18 @@ async def submit_channel_post_draft(
 
     await db.commit()
     await db.refresh(gate)
+
+    # story #4090 AC2 호출 지점②(페드루 PO 確定 2026-09-21) — 「승인-뒤-제출」순서(B):
+    # 위에서 방금 auto_satisfied_by(레시피 unscoped 게이트)가 이 draft의 scoped 게이트를
+    # 승계-승인했다. `publish_recipe_approved_draft`는 gate_type/scope_key 가드가 있어
+    # auto_satisfied_by가 None(사람이 직접 승인한 일반 채널 발행)이면 이 호출 자체가
+    # 완전 no-op(회귀 0) — 매 submit()마다 불러도 안전하다.
+    if auto_satisfied_by is not None:
+        _recipe_gate = await db.get(Gate, auto_satisfied_by.id)
+        if _recipe_gate is not None:
+            await publish_recipe_approved_draft(db, gate=_recipe_gate, resolver_id=_recipe_gate.resolver_id)
+            await db.commit()
+
     return gate, target.id
 
 
@@ -2288,6 +2303,288 @@ async def publish_channel_post_draft(
         )
 
     return row
+
+
+# story #4090([E-RECIPE-1] Publisher 슬롯) AC2 — 자동발행 스킵-사유 3표면(승인 응답·게이트
+# 상세 facts 블록·verdict 안내문)의 유일한 소스는 `gate.publish_outcome`(migration 0388).
+# ⛔닫힌 어휘 **코드**로만 저장한다(한글 완성 문장 아님) — 각 표면이 자기 locale로 번역해
+# 렌더한다(BE i18n_catalog.py의 events.gate_verdict_recipe_auto_publish_* 키·FE ko/en.json
+# 매핑). 최초 구현은 여기 한글 완성 문장을 직접 저장했다가 story #3779 BE 한글 사용자
+# 문장 가드(verify_no_new_korean_user_strings.py)에 걸려 정정(2026-09-21, "baseline은
+# 줄기만 허용" story #3924 — grandfather 등재로 우회 불가, 정공법으로 코드화).
+_RECIPE_AUTO_PUBLISH_NO_CHANNEL_NOTE = "no_channel_binding"
+_RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE = "no_submitted_draft"
+_RECIPE_AUTO_PUBLISH_NO_RESOLVER_NOTE = "no_resolver"
+
+
+def classify_publish_failure_outcome(
+    exc: Exception | None = None, *, error_code: str | None = None,
+) -> str:
+    """story #4090/#4093(페드루 PO 지적 2026-09-21) — `publish_failed:` 꼬리도 닫힌
+    어휘여야 한다. 커넥터 원문(예외 클래스명·publication_command.py의 error_code
+    상수)을 그대로 노출하면 내부 구현·스택 문구가 verdict/facts 표면으로 샌다 —
+    ChannelTokenExpiredError·CHANNEL_TOKEN_EXPIRED류 원문은 로그/ActivityLog/
+    command.last_error에만 남기고, 사람이 읽는 표면엔 이 3값 중 하나만 노출한다.
+
+    두 호출부의 입력 shape이 다르다 — channel_posts.py의 즉시-발행 경로는 예외
+    "인스턴스"만 쥐고 있고(광범위 `except Exception`), publication_command.py의
+    워커 경로는 이미 계산된 `error_code` 문자열 상수를 쥐고 있다 — 어느 쪽이든
+    받는다(둘 다 안 주면 "connector_error"로 fail-closed, 미분류를 "정상"으로
+    치지 않는다)."""
+    _AUTH_ERROR_CODES = frozenset({
+        "CHANNEL_TOKEN_EXPIRED", "CHANNEL_CONNECTION_REVOKED", "CHANNEL_CONNECTION_AUTH_ERROR",
+        "CHANNEL_CONNECTION_NOT_ACTIVE",
+    })
+    if error_code == "CHANNEL_RATE_LIMITED":
+        return "rate_limited"
+    if error_code in _AUTH_ERROR_CODES:
+        return "auth_expired"
+    if isinstance(exc, ChannelRateLimitedError):
+        return "rate_limited"
+    if isinstance(exc, (ChannelTokenExpiredError, ChannelConnectionNotActiveError)):
+        return "auth_expired"
+    return "connector_error"
+
+
+async def _resolve_recipe_channel_connection_binding(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID,
+    event_definition_key: str, stage: str,
+) -> uuid.UUID | None:
+    """story #4090 — `event_routing_resolver.py::_resolve_recipe_role_binding`(agent_
+    member_id 축, project 스코프 우선·org 전역 폴백)과 동형이되 channel_connection_id
+    축을 읽는다. 판정 우선순위 로직을 복제한다(공유 함수로 합치지 않는 이유 — 그쪽은
+    라우팅 리졸버 내부 전용 셋 반환 shape, 이쪽은 단일 UUID|None — 반환 shape이 달라
+    억지 공통화하면 두 계약이 한 함수에 섞인다)."""
+    from app.models.pm import Story
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    project_id = (await db.execute(
+        select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+
+    if project_id is not None:
+        value = (await db.execute(
+            select(RecipeRoleBinding.channel_connection_id).where(
+                RecipeRoleBinding.org_id == org_id, RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == event_definition_key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+        if value is not None:
+            return value
+
+    return (await db.execute(
+        select(RecipeRoleBinding.channel_connection_id).where(
+            RecipeRoleBinding.org_id == org_id, RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == event_definition_key,
+            RecipeRoleBinding.stage == stage,
+        )
+    )).scalar_one_or_none()
+
+
+async def publish_recipe_approved_draft(
+    db: AsyncSession, *, gate: Gate, resolver_id: uuid.UUID | None,
+) -> None:
+    """story #4090 AC2(페드루 PO 確定 2026-09-21) — 레시피 `pending_approval`(external_
+    publish, scope_key="") 게이트가 승인되는 순간, 사람의 추가 클릭 0으로 바인딩된
+    채널까지 실제 발행을 잇는다.
+
+    호출 지점 둘(순서 무관, 같은 함수 하나 재사용) — ① `gate_service.py::transition_gate`의
+    approved 분기(이 함수를 부르는 그 자리가 #4069 「제출-뒤-승인」순서(B)의 승계-승인도
+    함께 접어서 처리 — 원래 gates.py 라우터에만 있던 그 로직을 서비스층으로 옮긴 이유는
+    라우터를 안 거치는 승인 호출자(workflow_line_config.py 등)가 승계·발행 둘 다 못 받는
+    구멍이었기 때문) ② `submit_channel_post_draft`의 #4069 자동충족 분기(「승인-뒤-제출」
+    순서(A)).
+
+    **생성·제출 0** — 이미 「제출된」(=scoped external_publish 게이트가 approved인) draft만
+    발행한다. 스킵 사유는 `gate.publish_outcome`(기계 소유 필드)에만 남긴다 —
+    `resolution_note`는 승인자 본인 문장 전용이라 덧붙이지도 않는다(사람 글과 시스템
+    상태를 한 칸에 섞지 않는다, PO 確定). 아직 pending인 scoped 게이트(자동충족 대기
+    中 — 호출 지점②가 곧 처리)는 "없음"으로 오판하지 않는다(still_pending 분기) —
+    이 시점에 스킵 사유를 남기면 몇 줄 뒤 실제로 발행되는데도 화면엔 거짓 문구가
+    남는 레이스가 생긴다.
+
+    예약(target_gate.sealed_scheduled_at) 존중 — 기존 `_maybe_create_scheduled_
+    publication_command`(gate_service.py)를 재사용해 큐잉만 하고 즉시발행은 하지
+    않는다(#4069 자동충족이 `transition_gate()`를 안 거쳐, 이 큐잉 훅이 원래 자동으로는
+    전혀 안 걸리던 두 번째 구멍이었다). ⚠️ 범위 밖 기록 — 예약 경로는 `publish_outcome=
+    "scheduled"`까지만 채운다. 실제 발행은 워커 tick이 나중에 처리하는데, 그 시점에
+    이 레시피의 `published` stage 이벤트를 잇는 코드는 이 스토리 스코프 밖(즉시-발행
+    경로만 AC2 대상, 페드루 PO에 별도 보고)."""
+    if gate.gate_type != _EXTERNAL_PUBLISH_GATE_TYPE or (gate.scope_key or "") != "":
+        return
+
+    facts = gate.neutral_facts or {}
+    triggered_by_event_key = facts.get("triggered_by_event")
+    gate_stage = facts.get("stage")
+    if not triggered_by_event_key or not gate_stage:
+        return
+
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == triggered_by_event_key, EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == gate.org_id, EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalars().first()
+    if definition is None:
+        return
+
+    from app.routers.events import _next_recipe_stage
+
+    next_stage = _next_recipe_stage(definition, gate_stage)
+    if next_stage is None:
+        return
+    next_meta = (definition.stage_metadata or {}).get(next_stage) or {}
+    if (next_meta.get("capability") or {}).get("target") != "channel_connection":
+        return
+
+    connection_id = await _resolve_recipe_channel_connection_binding(
+        db, org_id=gate.org_id, work_item_id=gate.work_item_id,
+        event_definition_key=definition.key, stage=next_stage,
+    )
+    if connection_id is None:
+        gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_CHANNEL_NOTE
+        return
+
+    drafts = (await db.execute(
+        select(ChannelPostDraft).where(
+            ChannelPostDraft.org_id == gate.org_id, ChannelPostDraft.work_item_id == gate.work_item_id,
+            ChannelPostDraft.status != "withdrawn",
+        ).order_by(ChannelPostDraft.created_at.desc())
+    )).scalars().all()
+    if not drafts:
+        gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE
+        return
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    ready: list[tuple[ChannelPostDraft, Gate, ChannelPostVersion]] = []
+    still_pending = False
+    for draft in drafts:
+        scoped_gate = await find_gate_slot_with_pr_fallback(
+            db, org_id=gate.org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+            gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+            scope_key=str(draft.connection_id),
+        )
+        if scoped_gate is None:
+            continue
+        if scoped_gate.status == "pending":
+            still_pending = True
+            continue
+        if scoped_gate.status != "approved":
+            continue
+        versions = await list_channel_post_draft_versions(db, draft_id=draft.id)
+        if not versions:
+            continue
+        latest = versions[-1]
+        already_published = (await db.execute(
+            select(ChannelPublication.id).where(
+                ChannelPublication.gate_id == scoped_gate.id, ChannelPublication.version_id == latest.id,
+                ChannelPublication.status == "published",
+            )
+        )).first()
+        if already_published is not None:
+            continue
+        ready.append((draft, scoped_gate, latest))
+
+    if not ready:
+        if not still_pending:
+            gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE
+        return
+
+    target_draft, target_gate, _target_latest = ready[0]
+    skipped = ready[1:]
+    if skipped:
+        # story #4090 AC2 point4 — 다중 초안(여러 목적지) 中 최신 1건만 자동발행 대상.
+        # 나머지는 조용히 안 삼킨다(로그로 표면화) — 각자 스스로의 scoped 게이트는 이미
+        # 사람이 approved로 만든 상태라 여기서 건드리지 않는 게 맞다(승인 자체를 되돌리지
+        # 않는다), 다만 "왜 발행이 안 됐는지" 진단 가능하게 남긴다.
+        logger.info(
+            "recipe auto-publish: %d개의 추가 제출-승인된 draft는 발행 대상에서 제외(최신 1건만) "
+            "gate=%s work_item=%s skipped_draft_ids=%s",
+            len(skipped), gate.id, gate.work_item_id, [str(d.id) for d, _g, _v in skipped],
+        )
+
+    publisher_member_id = resolver_id or gate.resolver_id
+    if publisher_member_id is None:
+        gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_RESOLVER_NOTE
+        return
+
+    # story #4090 AC2 — 여기서부터가 진짜 외부 발행(네트워크·어댑터 호출)이 걸린 구간이다.
+    # 이 함수의 호출부(submit_channel_post_draft·transition_gate)는 «제출/승인 자체는
+    # 이미 성공했다»는 사실을 자동발행 실패가 절대 되돌리면 안 된다(recipe_repeat_
+    # scheduler.py::_publish_next_collect_event의 side-channel 격리 선례와 동형 원칙) —
+    # publish_channel_post_draft가 던지는 타입 예외(연결 비활성·봉인 불일치·예산 초과·
+    # provider 오류 등)는 전부 이 시점 이전에 어떤 커밋도 없이 raise되거나(사전 검증
+    # 실패), 이미 부분성공 상태를 스스로 커밋한 뒤 raise된다(그 함수 자신의 docstring
+    # "부분 성공은 container_created로 남고" 설계) — 어느 쪽이든 세션을 dirty하게 안
+    # 남기므로 여기서 rollback 없이 just catch+기록만 한다.
+    try:
+        if target_gate.sealed_scheduled_at is not None:
+            from app.services.gate_service import _maybe_create_scheduled_publication_command
+
+            await _maybe_create_scheduled_publication_command(db, target_gate, publisher_member_id)
+            gate.publish_outcome = "scheduled"
+            await db.commit()
+            return
+
+        publication = await publish_channel_post_draft(
+            db, org_id=gate.org_id, draft_id=target_draft.id, published_by_member_id=publisher_member_id,
+        )
+        gate.publish_outcome = "published"
+
+        from app.services.activity_log import ActivityLogService
+
+        await ActivityLogService(db).record(
+            org_id=gate.org_id, action="channel_post.recipe_auto_published", actor_type="human",
+            actor_id=publisher_member_id, entity_type="channel_publication", entity_id=publication.id,
+            context={
+                "recipe_auto_publish": True, "recipe_definition_key": definition.key, "stage": next_stage,
+                "work_item_id": str(gate.work_item_id), "draft_id": str(target_draft.id),
+                "triggering_gate_id": str(gate.id),
+            },
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.warning(
+            "recipe auto-publish: 실제 발행 실패(gate=%s draft=%s) — 승인/제출 자체는 되돌리지 않는다",
+            gate.id, target_draft.id, exc_info=True,
+        )
+        # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리도 닫힌 어휘(3값)만,
+        # 예외 클래스명 원문은 안 싣는다(로그에만 — 위 logger.warning의 exc_info가 전문).
+        gate.publish_outcome = f"publish_failed:{classify_publish_failure_outcome(exc)}"
+        await db.commit()
+        return
+
+    from fastapi import BackgroundTasks
+
+    from app.dependencies.auth import AuthContext
+    from app.routers.events import _get_or_create_system_publisher, _publish_registry_event_core
+
+    system_member = await _get_or_create_system_publisher(db, gate.org_id)
+    auth = AuthContext(
+        user_id=str(system_member.id), email=None,
+        claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(gate.org_id),
+    )
+    background_tasks = BackgroundTasks()
+    try:
+        await _publish_registry_event_core(
+            db, gate.org_id, auth, definition.key,
+            {"stage": next_stage, "work_item_type": gate.work_item_type, "work_item_id": str(gate.work_item_id)},
+            background_tasks,
+        )
+        await background_tasks()
+    except Exception:
+        # story #3337 선례(recipe_repeat_scheduler.py) — «발행 자체는 이미 성공했다»를
+        # 「published stage 알림」 실패가 되돌리면 안 된다(side-channel 실패 격리).
+        logger.warning(
+            "recipe auto-publish: published stage 이벤트 발행 실패(gate=%s draft=%s)",
+            gate.id, target_draft.id, exc_info=True,
+        )
 
 
 async def _publish_x_thread_draft(

@@ -16,7 +16,7 @@ from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.i18n_catalog import t
 from app.models.doc import Doc
-from app.models.gate import Gate, is_valid_transition, set_gate_status
+from app.models.gate import Gate, is_valid_transition
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.hitl import HitlRequest
@@ -202,6 +202,12 @@ class GateResponse(BaseModel):
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
     resolution_note: str | None = None
+    # story #4090([E-RECIPE-1] Publisher 슬롯) AC2, migration 0388 — 레시피 자동발행 훅의
+    # 기계 소유 결과(스킵 사유|"published"|"scheduled"). `resolution_note`(승인자 본인
+    # 문장)와 절대 안 섞는다(페드루 PO 確定 2026-09-21) — Gate ORM 컬럼과 이름 일치라
+    # from_attributes로 자동 채워짐(resolution_note와 동일 선례). external_publish
+    # (scope_key="") 게이트가 아니면 항상 None.
+    publish_outcome: str | None = None
     # story #3001(선생님 정책 확定 2026-08-24) — FE가 "이 카드 원 수신자==나인데 지금은 다른
     # 사람이 지정돼 있다"(위임됨)를 로컬 판단하는 데 필요. Gate ORM 컬럼과 이름 일치라
     # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
@@ -1937,31 +1943,11 @@ async def _transition_gate_endpoint(
                 # gate.status 무관하게 "관측"은 항상 기록하도록 바뀌어, PR이 opened/
                 # synchronize될 때 거의 항상 먼저 오는 실 웹훅이 승인보다 앞서 워터마크를
                 # 이미 심어 둔다 — 이 승인 지점은 그 값을 그대로 둔다).
-        # story #4069(훅B, 페드루 PO 確定 2026-09-19) — 훅A(channel_posts.py
-        # submit_channel_post_draft)의 반대 순서 커버: draft가 ⓓ보다 먼저 제출돼 이미
-        # pending인 draft-scoped(scope_key=connection_id) external_publish 게이트가
-        # 있으면, 방금 이 unscoped(scope_key="") ⓓ 게이트가 approved로 전이되는 순간
-        # 그것도 같이 승계-승인한다. 정확히 1개(=단일 목적지)일 때만 — 2개 이상이면
-        # (#3478 멀티목적지) 손대지 않고 각자 사람 승인을 그대로 요구한다.
-        if (
-            body.status == "approved" and gate.gate_type == "external_publish"
-            and (gate.scope_key or "") == ""
-        ):
-            _scoped_pending = (await session.execute(
-                select(Gate).where(
-                    Gate.org_id == org_id, Gate.work_item_id == gate.work_item_id,
-                    Gate.work_item_type == gate.work_item_type,
-                    Gate.gate_type == "external_publish", Gate.scope_key != "",
-                    Gate.status == "pending",
-                )
-            )).scalars().all()
-            if len(_scoped_pending) == 1:
-                _scoped_gate = _scoped_pending[0]
-                set_gate_status(_scoped_gate, "approved", now=datetime.now(timezone.utc))
-                _scoped_gate.requires_human = False
-                _scoped_gate.resolver_id = gate.resolver_id
-                _scoped_gate.resolved_at = gate.resolved_at
-                _scoped_gate.resolution_note = "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
+        # story #4069(훅B) — 「승인-뒤-제출」순서 커버 + story #4090 AC2 자동발행 훅은
+        # story #4090에서 `gate_service.py::transition_gate`(approved 분기)로 이관됐다
+        # (라우터를 안 거치는 승인 호출자도 같은 혜택을 받게, 페드루 PO 確定 2026-09-21
+        # — 2026-09-19 원본은 여기 있었다). 위 `transition_gate()` 호출이 이미 처리를
+        # 마쳤으므로 이 라우터엔 더 남길 코드가 없다(중복 제거).
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)

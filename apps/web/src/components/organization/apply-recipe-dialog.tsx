@@ -6,8 +6,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cyclicStages, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { RecipeRoleMappingFields } from '@/components/organization/recipe-role-mapping-fields';
+import { RecipeRoleMappingFields, type ChannelConnectionOption } from '@/components/organization/recipe-role-mapping-fields';
 import type { useToast } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface AgentOption {
   id: string;
@@ -29,9 +30,13 @@ export function ApplyRecipeDialog({
   tc: ReturnType<typeof useTranslations>;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  const { orgId } = useDashboardContext();
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId] = useState('');
   const [agents, setAgents] = useState<AgentOption[]>([]);
+  // story #4090(alembic 0385) — org 스코프(project 무관, channel-connections는 org
+  // 소속)라 project 전환 useEffect가 아니라 다이얼로그 open 시 1회만 불러온다.
+  const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
   const [loadingProjectData, setLoadingProjectData] = useState(false);
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — memberRes leg 실패 여부. agents=[]가
@@ -45,6 +50,7 @@ export function ApplyRecipeDialog({
     if (!open) return;
     setProjectId('');
     setAgents([]);
+    setChannelConnections([]);
     setRoleMapping({});
     setError(null);
     setWarnings([]);
@@ -54,7 +60,17 @@ export function ApplyRecipeDialog({
       const json = await res.json() as { data?: { id: string; name: string }[] };
       setProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
     })();
-  }, [open]);
+    if (!orgId) return;
+    void (async () => {
+      // story #4090 — org 스코프 목록이라 project 선택과 무관하게 1회만(휴먼용 목록,
+      // organization/channels 화면과 동일 BFF — agent-visible 별도 축은 이 화면이
+      // 아니다).
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
+      if (!res.ok) return;
+      const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
+      setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+    })();
+  }, [open, orgId]);
 
   const loadProjectData = useCallback(() => {
     if (!projectId || !target) { setAgents([]); setRoleMapping({}); setAgentsLoadFailed(false); return; }
@@ -97,6 +113,9 @@ export function ApplyRecipeDialog({
 
   if (!target) return null;
   const stages = cyclicStages(target);
+  // story #4090 — 채널-대상 stage가 아예 없는 정의(레시피 1호 외 대부분)면 채널 목록
+  // 로딩/빈 상태 문구 자체가 노이즈다(#4075 "0건이면 섹션 숨김" 원칙과 동형).
+  const hasChannelStage = stages.some((s) => target.stage_metadata[s]?.capability?.target === 'channel_connection');
 
   const submit = async () => {
     if (!projectId) return;
@@ -175,13 +194,18 @@ export function ApplyRecipeDialog({
             ) : agents.length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-agents-empty">{t('eventApplyAgentsEmpty')}</p>
             ) : null}
+            {hasChannelStage && channelConnections.filter((c) => c.status === 'active').length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="apply-recipe-channels-empty">{t('eventApplyChannelsEmpty')}</p>
+            ) : null}
             <RecipeRoleMappingFields
               stages={stages}
               stageMetadata={target.stage_metadata}
               agents={agents}
+              channelConnections={channelConnections}
               roleMapping={roleMapping}
-              onChange={(stage, agentId) => setRoleMapping((prev) => ({ ...prev, [stage]: agentId }))}
+              onChange={(stage, value) => setRoleMapping((prev) => ({ ...prev, [stage]: value }))}
               agentPlaceholder={t('eventApplyAgentPlaceholder')}
+              channelPlaceholder={t('eventApplyChannelPlaceholder')}
             />
           </div>
         )}

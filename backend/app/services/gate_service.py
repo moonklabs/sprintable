@@ -1199,6 +1199,44 @@ async def transition_gate(
     if new_status == "approved":
         await _maybe_create_scheduled_publication_command(session, gate, resolver_id)
 
+        # story #4069(훅B, 페드루 PO 確定 2026-09-19 → story #4090에서 라우터→서비스층
+        # 이관, 페드루 PO 確定 2026-09-21) — 「승인-뒤-제출」순서(B) 커버: draft가 이
+        # unscoped(scope_key="") 게이트보다 먼저 제출돼 이미 pending인 draft-scoped
+        # (scope_key=connection_id) external_publish 게이트가 있으면, 이 게이트가
+        # approved로 전이되는 순간 그것도 같이 승계-승인한다. 정확히 1개(=단일 목적지)
+        # 일 때만 — 2개 이상이면(#3478 멀티목적지) 손대지 않고 각자 사람 승인을 그대로
+        # 요구한다. **원래 gates.py 라우터에만 있던 코드를 여기로 옮겼다** — 라우터를
+        # 안 거치는 승인 호출자(workflow_line_config.py 등)는 이 승계를 전혀 못 받는
+        # 구멍이었다(story #4089와 같은 "지목 경로만 막는 fix" 클래스). 라우터 쪽
+        # 코드는 삭제(중복 제거, 이 한 곳이 유일한 소유자).
+        if gate.gate_type == "external_publish" and (gate.scope_key or "") == "":
+            _scoped_pending = (await session.execute(
+                select(Gate).where(
+                    Gate.org_id == org_id, Gate.work_item_id == gate.work_item_id,
+                    Gate.work_item_type == gate.work_item_type,
+                    Gate.gate_type == "external_publish", Gate.scope_key != "",
+                    Gate.status == "pending",
+                )
+            )).scalars().all()
+            if len(_scoped_pending) == 1:
+                _scoped_gate = _scoped_pending[0]
+                set_gate_status(_scoped_gate, "approved", now=datetime.now(timezone.utc))
+                _scoped_gate.requires_human = False
+                _scoped_gate.resolver_id = gate.resolver_id
+                _scoped_gate.resolved_at = gate.resolved_at
+                _scoped_gate.resolution_note = (
+                    "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
+                )
+
+        # story #4090 AC2 — 위 승계-승인(있었다면) 직후, 같은 함수 하나로 실제 발행까지
+        # 잇는다(channel_posts.py::publish_recipe_approved_draft, 호출 지점 둘 중 하나 —
+        # 다른 하나는 submit_channel_post_draft의 #4069 자동충족 분기). gate_type/
+        # scope_key 가드가 있어 레시피와 무관한 external_publish 승인(scope_key≠"")·
+        # 다른 gate_type은 이 호출 자체가 완전 no-op(회귀 0).
+        from app.services.channel_posts import publish_recipe_approved_draft
+
+        await publish_recipe_approved_draft(session, gate=gate, resolver_id=resolver_id)
+
     # story #2631(PO 판정 ①, 2026-08-15): 게이트 해소 계열 액션(approve/reject/undo/
     # discuss-request)을 ActivityLog(immutable)에 처음으로 구조화 기록 — 지금까지 gate 행
     # (resolver_id/resolved_at/resolution_note)이 "현재 상태"만 담아, 취소(undo_gate_resolution

@@ -20,12 +20,16 @@
   4. 단일목적지 레시피 1회 관통 = 사람 클릭 정확히 4(ⓐⓑⓒⓓ, 5번째 없음) —
      [test_single_destination_gate_approved_before_draft_hook_a_auto_satisfies]가 직접 카운트.
 
-훅A(draft submit 시점, channel_posts.py::submit_channel_post_draft)·훅B(ⓓ 승인 시점,
-gates.py::_transition_gate_endpoint) 양방향 순서를 각각 별도 테스트로 잰다 — 훅B는 라우터
-계층에만 있으므로(MERGE_GATE_TYPE 사후처리와 동일 관례 위치) 그 경로를 실제로 타려면
-ASGI 클라이언트로 `POST /gates/{id}/transition`을 호출해야 한다(서비스 `transition_gate()`
-직접호출은 훅B를 우회한다) — ⓐⓑⓒ는 test_4050 선례대로 서비스 직접호출로 충분(훅B가
-external_publish·scope_key="" 전이에만 걸리므로)."""
+훅A(draft submit 시점, channel_posts.py::submit_channel_post_draft)·훅B(ⓓ 승인 시점) 양방향
+순서를 각각 별도 테스트로 잰다.
+
+**정정(story #4090, 페드루 PO 確定 2026-09-21)** — 훅B는 원래 라우터 계층(gates.py::
+_transition_gate_endpoint)에만 있었으나, 라우터를 안 거치는 승인 호출자(workflow_line_
+config.py 등)가 승계를 전혀 못 받는 구멍이라 서비스층(`gate_service.py::transition_gate`
+approved 분기)으로 옮겼다 — 지금은 `transition_gate()` 직접호출도 훅B를 그대로 탄다(우회
+불가). 아래 [test_draft_submitted_before_gate_approval_hook_b_auto_satisfies]는 여전히
+ASGI 클라이언트를 쓰지만 이제 필수가 아니다(서비스 직접호출로도 동일하게 재현된다) —
+기존 재현 경로를 그대로 두어 회귀 0(다른 테스트 변경 없음)."""
 from __future__ import annotations
 
 import os
