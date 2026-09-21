@@ -714,6 +714,8 @@
     "recipeDetailLegendBuilding": "이 카드가 지음",
     "recipeDetailGateLiveBadge": "강제",
     "recipeDetailGateBuildingBadge": "이 카드가 지음",
+    "recipeGateApproverOrgOwner": "조직 소유자",
+    "recipeGateApproverUnknown": "승인자 미지정",
     "recipeFlowRecipeLabel": "레시피",
     "recipeFlowRecipeValue": "여기서 고름",
     "recipeFlowWorkflowLabel": "워크플로우 · 개별 항목 · 이 화면",

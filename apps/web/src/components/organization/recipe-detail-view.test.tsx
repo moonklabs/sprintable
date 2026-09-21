@@ -85,6 +85,27 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     expect(container.querySelector('[data-testid="gate-marker-live_generation"]')).toBeNull();
   });
 
+  it('게이트 카드의 승인자가 raw 키 대신 사람 낱말로 렌더된다(story #4087 AC1)', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
+    const detail = container.querySelector('[data-testid="recipe-gate-detail"]')!;
+    expect(detail.textContent).toContain(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(detail.textContent).not.toContain('org_owner');
+  });
+
+  it('미등재 approver 키는 게이트 카드에서도 raw 값 대신 중립 문구로 렌더된다(story #4087 AC2)', async () => {
+    const recipeWithUnknownApprover: EventDefinitionResponse = {
+      ...RECIPE,
+      stage_metadata: {
+        ...RECIPE.stage_metadata,
+        pending_approval: { role: '발행자', gate: { type: 'external_publish', approver: 'some_future_unmapped_key' } },
+      },
+    };
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={recipeWithUnknownApprover} />)); });
+    const detail = container.querySelector('[data-testid="recipe-gate-detail"]')!;
+    expect(detail.textContent).toContain(koMessages.organization.recipeGateApproverUnknown);
+    expect(detail.textContent).not.toContain('some_future_unmapped_key');
+  });
+
   it('gate-type-label 레지스트리에 있는 gate_type만 "강제"(live) 배지, 미등재는 "이 카드가 지음"(building)', async () => {
     await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
     const cards = [...container.querySelectorAll('[data-testid="recipe-gate-detail"] > *')];

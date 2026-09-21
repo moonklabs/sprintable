@@ -8,6 +8,7 @@ import type { EventDefinitionResponse } from '@/components/loops/loop-create-dia
 import { cyclicStages } from '@/components/loops/loop-create-dialog';
 import { groupStagesByRole, stagesWithGate } from '@/lib/recipe-role-slots';
 import { gateTypeLabel, gateTypeLabelKey } from '@/lib/gate-type-label';
+import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { roleAccentVar } from '@/lib/role-accent';
@@ -138,7 +139,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
                     {isLive ? t('recipeDetailGateLiveBadge') : t('recipeDetailGateBuildingBadge')}
                   </Badge>
                 </div>
-                {g.gate.approver ? <p className="text-[10.5px] text-muted-foreground">{g.gate.approver}</p> : null}
+                <p className="text-[10.5px] text-muted-foreground">{gateApproverLabel(t, g.gate.approver)}</p>
               </CardBody>
             </Card>
           );

@@ -78,7 +78,32 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
       ));
     });
     const approverEl = document.body.querySelector('[data-testid="director-approver"]');
-    expect(approverEl?.textContent).toBe('org_owner');
+    // ⛔story #4087 — raw approver 키('org_owner')를 그대로 노출하던 게 이 스토리가
+    // 고치는 그 결함이다(내부어 0 캐논 위반). gate-approver-label.ts SSOT로 사람 낱말화.
+    expect(approverEl?.textContent).toBe(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(approverEl?.textContent).not.toBe('org_owner');
+  });
+
+  it('미등재 approver 키는 raw 값 대신 중립 문구(«승인자 미지정»)로 렌더된다(story #4087 AC2)', async () => {
+    stubMemberFetch();
+    const recipeWithUnknownApprover: EventDefinitionResponse & { id: string } = {
+      ...RECIPE,
+      stage_metadata: {
+        ...RECIPE.stage_metadata,
+        concept_confirmed: { role: '디렉터', gate: { type: 'concept_approval', approver: 'some_future_unmapped_key' } },
+      },
+    };
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={recipeWithUnknownApprover} open onOpenChange={() => {}} creatorRoleLabel="크리에이터"
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    const approverEl = document.body.querySelector('[data-testid="director-approver"]');
+    expect(approverEl?.textContent).toBe(koMessages.organization.recipeGateApproverUnknown);
+    expect(approverEl?.textContent).not.toContain('some_future_unmapped_key');
   });
 
   it('크리에이터 select는 프로젝트 선택 뒤 agent 타입만(human 제외) 채워진다', async () => {
