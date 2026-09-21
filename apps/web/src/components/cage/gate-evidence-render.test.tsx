@@ -455,6 +455,44 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
     });
 
+    // story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    // drafts는 「scoped 승인 済·미발행」 초안만 담아, 이미 승인·발행이 끝난 게이트에선
+    // linked_channel_draft가 항상 null이다. status를 안 보면 "승인해도 발행되지
+    // 않아요"(linkedChannelDraftNone)가 다른 세계의 문장으로 그대로 새는 결함.
+    it('승인 済 게이트 + publish_outcome=published → «없어요» 대신 publish_outcome 라벨', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
+        {
+          scope_key: '', status: 'approved', publish_outcome: 'published',
+          linked_channel_draft: null, linked_channel_draft_pending: false,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).toContain(koMessages.cage.publishOutcomePublished);
+    });
+
+    it('승인 済 게이트 + publish_outcome=null(0388 前 게이트) → 아무 문장도 안 낸다(지어내지 않음)', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
+        {
+          scope_key: '', status: 'approved', publish_outcome: null,
+          linked_channel_draft: null, linked_channel_draft_pending: false,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+
     it('scoped(초안 자체) 게이트(scope_key≠"")에는 카드 자체가 안 뜬다', async () => {
       // 까디르 QA 렌즈(b)(PR #4475 리뷰, 2026-09-21) — 이전 픽스처는 neutral_facts에 stage가
       // 없어 recipeFacts?.stage 자체가 falsy였다(scope_key 절과 무관하게 카드 미렌더) —

@@ -720,6 +720,23 @@ function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
   const draft = gate.linked_channel_draft;
 
   if (!draft) {
+    // story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    // drafts는 «scoped 승인 済·미발행» 초안만 ready에 담는다(#4090 자동발행 대상
+    // 정의) — 이미 승인돼 발행이 끝난 게이트에서도 항상 빈 목록이라 linked_channel_
+    // draft가 null이 된다. status를 안 보면 "승인해도 발행되지 않아요"가 이미 발행된
+    // 게이트에도 뜨는(다른 세계의 문장) 그 결함. pending일 때만 이 두 문구(제출 없음/
+    // scoped 게이트 대기)가 유효 — 승인 済(approved 등)이면 publish_outcome 라벨로
+    // 갈아 끼우고, 그 코드조차 없으면(0388 前 게이트) 아무 문장도 지어내지 않는다.
+    if (gate.status !== 'pending') {
+      if (gate.publish_outcome) {
+        return (
+          <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+            {publishOutcomeLabel(gate.publish_outcome, t)}
+          </p>
+        );
+      }
+      return null;
+    }
     return (
       <p className="mt-1.5 text-[11.5px] text-muted-foreground">
         {gate.linked_channel_draft_pending
