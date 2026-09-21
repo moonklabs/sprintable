@@ -441,8 +441,21 @@ async def _enrich_linked_channel_draft(
     차지하는 비중이 낮다, 페드루 PO 사전 승인 여지 없음 — 필요시 후속 배치 최적화).
 
     좁은 가드가 먼저라 다른 gate_type·scoped 게이트는 이 함수의 나머지 줄에 절대
-    안 들어간다(비용 0)."""
+    안 들어간다(비용 0).
+
+    ⛔페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰) — `external_publish && scope_key
+    ==""`만으로는 여전히 넓다. #4090 AC2 자동발행의 진짜 전제는 그보다 좁은 「레시피
+    게이트」(`neutral_facts.triggered_by_event`·`stage`가 실린 게이트,
+    `publish_recipe_approved_draft`의 첫 분기와 정확히 같은 조건)뿐이다 — facts가
+    없는 옛/비레시피 unscoped external_publish 행(있다면)까지 이 가드를 통과시키면
+    "승인해도 발행되지 않아요" 카드가 붙어 그 게이트엔 아예 다른 세계의 문장이
+    새고, list_gates에서도 그 행마다 불필요한 쿼리가 샌다. `publish_recipe_
+    approved_draft`와 완전히 동형인 가드로 좁힌다(새 조건 발명 0, 그 함수의 첫
+    return 문 그대로 복제)."""
     if gate.gate_type != "external_publish" or (gate.scope_key or "") != "":
+        return
+    facts = gate.neutral_facts or {}
+    if not facts.get("triggered_by_event") or not facts.get("stage"):
         return
 
     from app.services.channel_posts import find_ready_recipe_channel_drafts

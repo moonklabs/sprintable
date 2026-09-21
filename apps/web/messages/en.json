@@ -5263,7 +5263,6 @@
     "linkedChannelDraftPending": "Draft awaiting approval — it will be approved together with this.",
     "linkedChannelDraftDestinationLabel": "Destination",
     "linkedChannelDraftScheduledLabel": "Scheduled for",
-    "linkedChannelDraftScopedPending": "This draft is still pending — it will be approved and published together with this.",
     "linkedChannelDraftImageAlt": "Attached image",
     "linkedChannelDraftOpenLink": "Open draft",
     "publishOutcomePublished": "Published",

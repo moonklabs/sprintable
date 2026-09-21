@@ -709,6 +709,11 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * 예약)을 안 보고 딸깍하던 자리를 해소한다. BE `linked_channel_draft`(null이면
  * `linked_channel_draft_pending`으로 이유를 가른다)만 읽는다 — FE가 값을 계산하지
  * 않는다(선택 규칙은 BE 한 곳, channel_posts.py::find_ready_recipe_channel_drafts).
+ *
+ * ⛔페드루 PO 지적(PR #4475 리뷰) — `draft.scoped_gate_status`는 `linked_channel_draft`
+ * 가 non-null인 이상 항상 "approved"뿐이다(find_ready_recipe_channel_drafts가
+ * "pending"인 scoped 게이트는 애초에 ready에 안 넣는다) — "pending" 분기는 죽은
+ * 코드였다(제거, linkedChannelDraftScopedPending 키도 같이).
  */
 function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
   const t = useTranslations('cage');
@@ -736,9 +741,6 @@ function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
           <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
         </p>
-      ) : null}
-      {draft.scoped_gate_status === 'pending' ? (
-        <p className="text-muted-foreground">{t('linkedChannelDraftScopedPending')}</p>
       ) : null}
       {draft.video_url ? (
         <video

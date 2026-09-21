@@ -5263,7 +5263,6 @@
     "linkedChannelDraftPending": "초안 승인 대기 — 이 승인으로 함께 승인돼요.",
     "linkedChannelDraftDestinationLabel": "목적지",
     "linkedChannelDraftScheduledLabel": "예약 시각",
-    "linkedChannelDraftScopedPending": "이 초안은 아직 승인 대기 중이에요 — 이 승인으로 함께 승인·발행돼요.",
     "linkedChannelDraftImageAlt": "첨부 이미지",
     "linkedChannelDraftOpenLink": "초안 열기",
     "publishOutcomePublished": "발행됨",

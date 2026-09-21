@@ -451,6 +451,41 @@ async def test_ac1d_other_gate_type_and_scoped_gate_leave_field_null():
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_ac1e_unscoped_external_publish_gate_without_recipe_facts_gets_no_card():
+    """음성 대조(페드루 PO REQUIRED, PR #4475 리뷰) — `external_publish && scope_key==""`
+    만으로는 가드가 넓다. #4090 AC2 자동발행의 진짜 전제는 `neutral_facts.triggered_
+    by_event`·`stage`가 실린 「레시피 게이트」뿐(publish_recipe_approved_draft의 첫
+    분기와 동형) — facts 없는 unscoped external_publish 행은 이 카드 자체의 대상이
+    아니어야 한다(«승인해도 발행되지 않아요»는 다른 세계의 문장이라 지어내면 오도)."""
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id = await _seed_org_with_owner_shim(s, slug="4098e")
+            story_id = await _seed_story(s, org_id, project_id)
+
+            # 레시피 흐름을 안 거치고 직접 생성 — neutral_facts에 triggered_by_event/
+            # stage가 없는(레시피 무관) unscoped external_publish 게이트를 재현.
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="external_publish", scope_key="", status="pending",
+                neutral_facts={"destination": "some-non-recipe-context"},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+        async with Session() as s:
+            resp = await to_gate_response(s, org_id, await s.get(Gate, gate_id))
+            assert resp.linked_channel_draft is None
+            assert resp.linked_channel_draft_pending is False
+    finally:
+        await engine.dispose()
+
+
 async def _seed_org_with_owner_shim(session, *, slug):
     """story #4098 — team_members VIEW/TABLE 갭(test_3380 선례, #4090/#4093과 동형)을
     #4468 공용 헬퍼(seed_org_with_human_owner)로 바로 처방 — 이 파일은 human-owner
