@@ -467,8 +467,12 @@ _CATALOG: dict[str, dict[str, str]] = {
     "events.apply_kind_connector_config_incomplete": {
         # story #4119 — 위 not_registered와 동형으로 "종류"를 떼고 라벨을 커넥터에 바로
         # 붙인다("발행 커넥터는 등록돼 있지만…").
-        "ko": "{stage_label}: {kind} 커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있어요 — 조직 설정 화면에서 등록하세요.",
-        "en": "{stage_label}: a connector supporting kind {kind} is registered but its required configuration is incomplete — register it from organization settings",
+        # story #4119 CHANGES(유나 문구 확認, 페드루 PO 전달, 2026-09-21) — "등록돼
+        # 있지만 … 등록하세요"는 "이미 등록됨"과 "등록하라"가 한 문장에서 모순됐다.
+        # 이 갈래는 커넥터가 이미 등록돼 있고 필수 설정값만 비어 있는 상태라 꼬리를
+        # "설정을 완료하세요"로 교정(새 등록이 아니라 기존 등록의 설정 완결).
+        "ko": "{stage_label}: {kind} 커넥터는 등록돼 있지만 필수 설정값이 아직 비어 있어요 — 조직 설정 화면에서 설정을 완료하세요.",
+        "en": "{stage_label}: a connector supporting kind {kind} is registered but its required configuration is incomplete — complete its settings in organization settings",
     },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
