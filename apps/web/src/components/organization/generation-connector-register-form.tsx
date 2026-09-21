@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -86,7 +87,7 @@ export function GenerationConnectorRegisterForm({
   };
 
   return (
-    <div className="space-y-3 rounded-lg border border-border bg-card p-4" data-testid="gc-register-form">
+    <Card className="space-y-3 p-4" data-testid="gc-register-form">
       {error ? (
         <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
           <AlertDescription>{error}</AlertDescription>
@@ -182,6 +183,6 @@ export function GenerationConnectorRegisterForm({
           {tc('save')}
         </Button>
       </div>
-    </div>
+    </Card>
   );
 }
