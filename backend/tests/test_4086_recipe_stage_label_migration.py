@@ -130,6 +130,12 @@ async def test_start_candidates_response_unaffected_by_block_template_rewrite():
             assert "{{label.stage}}" in row_before, (
                 f"이 DB가 alembic head(0385 적용)가 아닌 것으로 의심 — 실측값: {row_before!r}"
             )
+            # ⭐PO CHANGES pin(PR #4463 코멘트 5756079751) — 조사 「로」가 라벨에 직접
+            # 붙으면 받침 있는 라벨(초안·확정 등)에서 틀린다. 「단계로」 고정 접미어(받침
+            # 없는 "계" 뒤 결합이라 항상 맞음)로 우회했는지 실측.
+            assert "{{label.stage}}** 단계로" in row_before, (
+                f"조사 결합 우회(「단계로」 고정 접미어)가 없음 — 실측값: {row_before!r}"
+            )
 
             response_new_template = await get_recipe_start_candidates(
                 project_id=PROJ, work_item_type="story", work_item_id=STORY_ID,
@@ -155,7 +161,10 @@ async def test_start_candidates_response_unaffected_by_block_template_rewrite():
             ), {"bt": _json.dumps({
                 "blocks": [
                     {"type": "header", "text": "영상 제작 레시피"},
-                    {"type": "text", "text": "**{{label.stage}}** 로 넘어갔습니다"},
+                    # 유나 design CHANGES(PR #4463 코멘트 5756079751) — 조사 「로」 결합
+                    # 오류 처방으로 "단계로" 고정 접미어(migration _NEW_BLOCK_TEMPLATE과
+                    # 동일 텍스트 유지).
+                    {"type": "text", "text": "**{{label.stage}}** 단계로 넘어갔습니다"},
                     {"type": "fields", "fields": [
                         {"label": "대상", "value": "{{label.work_item_target}}"},
                     ]},

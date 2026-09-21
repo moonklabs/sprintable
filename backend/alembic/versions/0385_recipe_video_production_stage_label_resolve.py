@@ -30,6 +30,15 @@ _find_existing_stage_publish 둘 다 block_template 컬럼을 참조하지 않�
 전부 이 컬럼과 무관 — 데이터 마이그 0·바인딩·진행 상태 전후 동일이 스키마 구조상
 보장된다(realdb round-trip 테스트가 그대로 pin).
 
+## 정정(유나 design CHANGES, PR #4463 코멘트 5756079751, 2026-09-21)
+최초 버전은 `**{{label.stage}}** 로 넘어갔습니다`였다 — 한글 라벨을 넣자 조사 「로」가
+받침 있는 stage 라벨(초안·확정·애니매틱·생성·검증·편집·발행 — 자음 종성 7/9)에서
+틀렸다(«초안으로»가 맞는데 «초안로»로 붙음, 두음법칙/조사 결합 규칙). 고유명사 뒤에 오는
+조사를 문법적으로 항상 맞게 고르려면 받침 유무 판별 로직이 필요한데, 그 판별 로직 자체를
+새로 발명하는 대신 「단계로」라는 받침 없는 고정 접미어를 라벨 뒤에 얹어 조사 결합 지점을
+"단계"(모음 계, 받침 없음 → 「로」 결합이 항상 맞음)로 옮겼다 — 신규 로직 0, 조사 규칙
+자체를 다루지 않고 우회.
+
 Revision ID: 0385
 Revises: 0384
 Create Date: 2026-09-21
@@ -61,7 +70,7 @@ _OLD_BLOCK_TEMPLATE = {
 _NEW_BLOCK_TEMPLATE = {
     "blocks": [
         {"type": "header", "text": "영상 제작 레시피"},
-        {"type": "text", "text": "**{{label.stage}}** 로 넘어갔습니다"},
+        {"type": "text", "text": "**{{label.stage}}** 단계로 넘어갔습니다"},
         {"type": "fields", "fields": [
             {"label": "대상", "value": "{{label.work_item_target}}"},
         ]},

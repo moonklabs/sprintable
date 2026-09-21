@@ -63,7 +63,10 @@ async function flush() {
 const RECIPE_TEMPLATE = {
   blocks: [
     { type: 'header' as const, text: '영상 제작 레시피' },
-    { type: 'text' as const, text: '**{{label.stage}}** 로 넘어갔습니다' },
+    // 유나 design CHANGES(PR #4463 코멘트 5756079751) — 라벨 뒤 조사 「로」가 받침 있는
+    // stage 라벨(초안·확정·애니매틱·생성·검증·편집·발행)에서 틀려(«초안로») 고정 접미어
+    // 「단계로」로 우회(0385 마이그 실 텍스트와 동일).
+    { type: 'text' as const, text: '**{{label.stage}}** 단계로 넘어갔습니다' },
     {
       type: 'fields' as const,
       fields: [{ label: '대상', value: '{{label.work_item_target}}' }],
@@ -135,6 +138,9 @@ describe('EventBlockCard — story #4086 레시피 단계 라벨 해소', () => 
       });
       await flush();
       expect(container.textContent, `stage=${slug}`).toContain(label);
+      // ⭐PO CHANGES pin — 받침 유무와 무관하게 「단계로」 고정 접미어라 9 stage 전부
+      // 조사 결합이 항상 맞다(라벨 자체에 조사를 붙이지 않는 설계 그 자체를 증명).
+      expect(container.textContent, `stage=${slug}`).toContain(`${label} 단계로`);
     }
   });
 
