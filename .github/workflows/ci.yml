@@ -120,13 +120,16 @@ jobs:
     # always()로 무조건 돌게 하고, 안에서 출력이 비어 있으면(=위 job 실패) 스텝 조건이
     # fail-closed로 정상 실행된다.
     #
-    # story #3929(2026-09-15, PO 지시) — `edited`가 base 변경 없이(title/body만) 발화하면
-    # 이 잡을 명시적으로 skip한다. 이건 위 landmine과 다른 클래스다 — GitHub Actions는
-    # "job이 자신의 `if:` 조건으로 skip되면 그 체크는 Success로 보고"하지만(트러블슈팅
-    # 문서 확認, 2026-09-15), "job이 실패한 `needs` 의존성 때문에 cascade로 skip되면 성공
-    # 처리가 안 되고 머지를 막을 수 있다" — 전자(명시적 조건)만 쓰고 always()는 그대로
-    # 둔다(cascade-skip 방지는 여전히 유효, 이 조건은 그 위에 AND로 얹는다).
-    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
+    # story #3929(2026-09-15, PO 지시) → story #4099로 폐기(2026-09-21, 머지 안전 실사고).
+    # `edited`(title/body만) 발화 시 이 잡 자체를 job-level `if:`로 skip하던 처방은
+    # GitHub의 "job이 자기 if:로 skip되면 그 체크는 Success" 특성 때문에, 같은 head SHA의
+    # 진짜 run이 아직 도는 중에도 이 required 체크가 조기에 초록으로 잡혀 머지를 열어버렸다
+    # (실사고: PR #4473 head 695390519). 처방 — 잡 자체는 always() 그대로 항상 돌게 두고,
+    # edited-only일 때만 아래 「Mirror sibling run conclusion」 스텝이 돌아 같은 SHA의
+    # 진짜 run이 완주할 때까지 폴링 후 그 결론을 미러한다(무거운 스텝은 전부 그 뒤 스텝들의
+    # if:에 이 조건의 역을 얹어 skip). 폴링 중엔 잡이 in_progress로 정직하게 남아 조기 초록이
+    # 안 난다.
+    if: always()
     runs-on: ubuntu-latest
     # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
     # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
@@ -183,7 +186,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # story #4099 — edited-only(제목/본문만, base 무변) 발화면 무거운 스텝은 전부 아래
+      # 역-조건으로 skip하고 이 스텝만 돈다: 같은 head SHA의 진짜 run이 이 잡과 동일한
+      # 이름("Alembic upgrade head (fresh DB)")의 잡을 완주할 때까지 기다렸다가 그 결론을
+      # 그대로 미러(exit 0=success, 그 외 exit 1)한다 — mirror_sibling_run_conclusion.sh
+      # docstring 참고.
+      - name: Mirror sibling run conclusion (story #4099 — edited-only)
+        if: github.event.action == 'edited' && github.event.changes.base == null
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          scripts/ci/mirror_sibling_run_conclusion.sh \
+            --job-name "Alembic upgrade head (fresh DB)" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --this-run-id "${{ github.run_id }}" \
+            --max-wait-seconds 1200
+
       - name: Install uv
+        if: github.event.action != 'edited' || github.event.changes.base != null
         uses: astral-sh/setup-uv@v5
         with:
           version: 'latest'
@@ -193,19 +214,19 @@ jobs:
       # story bda4beac: 0148(core) 재부모 후 이 checkout(develop, ee_pricing 포함)은 dual-head
       # (core 0155+ · ee_pricing 0147) — `head`(단수)는 이제 모호해 `heads`(복수)로 전환.
       - name: alembic upgrade heads (fresh DB → baseline)
-        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
         working-directory: backend
         run: uv run alembic upgrade heads
 
       - name: Verify tables created
-        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -c \
             "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" \
             | grep -E "^\s+[0-9]+"
 
       - name: Verify baseline parity (view + nullable + seed)
-        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           set -e
           P() { PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -tA -c "$1"; }
@@ -228,7 +249,7 @@ jobs:
       # 일치하는지(comm -3, 차집합 0행) 비교로 교체. 단일-head 컨텍스트(main)에서도 그대로
       # 성립(양쪽 다 1행이면 차집합도 0행).
       - name: Verify fresh DB reached heads (baseline + incremental)
-        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
         working-directory: backend
         run: |
           set -e
@@ -242,7 +263,7 @@ jobs:
       # existing-DB path: a DB already at heads must be a pure no-op — no migration re-runs.
       # (The fresh-DB run above already advanced this DB to heads via baseline + incremental.)
       - name: Existing-DB no-op (re-run upgrade heads)
-        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
         working-directory: backend
         run: |
           set -e
@@ -253,7 +274,7 @@ jobs:
           echo "OK: existing-DB upgrade heads is a no-op"
 
       - name: Skip reason (backend-irrelevant PR)
-        if: needs.detect-changed-scope.outputs.backend_relevant == 'false'
+        if: needs.detect-changed-scope.outputs.backend_relevant == 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           echo "story #2555 — 변경 파일 전부가 백엔드-무관 allowlist(docs/·*.md·apps/web/·packages/) 안이라 이 잡의 마이그레이션 검증 스텝을 건너뛰었다."
 
@@ -1241,11 +1262,13 @@ jobs:
     name: Backend pytest
     runs-on: ubuntu-latest
     needs: [backend-test-destructive, detect-changed-scope]
-    # story #3929 — required 체크("Backend pytest") 자신. edited(base 무변)면 명시적
-    # skip(alembic-fresh-db 상단 주석 참고 — cascade-skip과 달리 required 체크가
-    # Success로 보고된다). always()는 그대로(detect-changed-scope 실패 시 cascade-skip
-    # 방지 목적 유지).
-    if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
+    # story #3929(2026-09-15) → story #4099로 폐기(2026-09-21, 머지 안전 실사고 — PR #4473).
+    # required 체크("Backend pytest") 자신을 edited(base 무변)에서 job-level if:로 skip하던
+    # 처방은 alembic-fresh-db 상단 주석과 동일한 이유로 폐기했다. 이제 always() 그대로 항상
+    # 돌고, edited-only일 때만 「Mirror sibling run conclusion」 스텝이 돌아 같은 head SHA의
+    # 진짜 run이 완주할 때까지 기다렸다가 그 결론을 미러한다 — 무거운 나머지 스텝은 전부
+    # 그 뒤 스텝들의 if:에 이 조건의 역을 얹어 skip.
+    if: always()
     # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
     # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
     # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
@@ -1264,7 +1287,16 @@ jobs:
     # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 이 job 본체(non-destructive
     # pytest, story #2293 이관 후) 7~8분 → 천장 25분 대비 여유 17~18분. 재검 기준: p95가
     # 15분을 넘으면 값을 다시 본다.
-    timeout-minutes: 25
+    #
+    # ⭐story #4099 CHANGES-1(페드루 PO, 2026-09-21) — edited-only일 때 이 잡은 Mirror
+    # 스텝만 돌지만, 그 스텝이 기다리는 대상(run A의 Backend pytest)은 backend-test-
+    # destructive 4샤드(timeout 30분·오늘 runner 캡으로 최대 3회) 완주 **후에야** 시작해
+    # 자기 25분 천장까지 갈 수 있다 — 최악 대기 ≈55분. 아래 Mirror 스텝의
+    # `--max-wait-seconds 3300`(55분)이 이 잡 자신의 timeout-minutes(25분 그대로면
+    # GitHub이 스크립트보다 먼저 잡을 죽인다)보다 짧아야 의미가 있어, edited-only일
+    # 때만 60분으로 늘린다(실작업 분기는 원래 25분 그대로 — 25분 예산이 필요한 쪽은
+    # non-destructive pytest 본체뿐이라 안 늘려도 된다).
+    timeout-minutes: ${{ github.event.action == 'edited' && 60 || 25 }}
 
     services:
       postgres:
@@ -1294,7 +1326,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # story #4099 — edited-only(제목/본문만, base 무변) 발화면 아래 나머지 스텝은 전부
+      # 역-조건으로 skip하고 이 스텝만 돈다 — mirror_sibling_run_conclusion.sh docstring 참고.
+      - name: Mirror sibling run conclusion (story #4099 — edited-only)
+        if: github.event.action == 'edited' && github.event.changes.base == null
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          scripts/ci/mirror_sibling_run_conclusion.sh \
+            --job-name "Backend pytest" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --this-run-id "${{ github.run_id }}" \
+            --max-wait-seconds 3300
+
       - name: Install uv
+        if: github.event.action != 'edited' || github.event.changes.base != null
         uses: astral-sh/setup-uv@v5
         with:
           version: 'latest'
@@ -1315,6 +1362,7 @@ jobs:
       # 드리프트가 클 타임아웃 상황에 가드가 침묵하는 사각지대). 이제 이 잡의 첫
       # 스텝들이라 Require의 결과와 무관하게 항상 돈다.
       - name: Download shard durations (story #3558)
+        if: github.event.action != 'edited' || github.event.changes.base != null
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -1329,6 +1377,7 @@ jobs:
       # key가 없으면 GH가 접두 매치 중 최신을 준다) — save 쪽은 항상 실행(if: always(),
       # 이 잡이 실패해도 스트릭은 이어져야 다음 run이 이어 셀 수 있다).
       - name: Restore weights-drift streak state (story #3642)
+        if: github.event.action != 'edited' || github.event.changes.base != null
         id: drift-cache-restore
         uses: actions/cache/restore@v4
         with:
@@ -1345,11 +1394,12 @@ jobs:
       # 데이터가 원천적으로 없어 "센다"가 불가능하니 ::warning만(exit 0, 원칙 그대로
       # CI를 안 죽인다).
       - name: Audit shard durations vs weights.json (story #3558+#3642+#3653+#3678)
+        if: github.event.action != 'edited' || github.event.changes.base != null
         working-directory: backend
         run: uv run python scripts/shard_destructive_tests.py --audit-durations /tmp/shard-durations --drift-state /tmp/weights-drift-streak.json --run-id "${{ github.run_id }}" --shard-count 8 --shard-result "${{ needs.backend-test-destructive.result }}" --backend-relevant "${{ needs.detect-changed-scope.outputs.backend_relevant }}"
 
       - name: Save weights-drift streak state (story #3642)
-        if: always()
+        if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
         uses: actions/cache/save@v4
         with:
           path: /tmp/weights-drift-streak.json
@@ -1379,10 +1429,12 @@ jobs:
       # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
       # (그렇지 않으면 테이블 부재로 realdb 테스트가 실패한다).
       - name: alembic upgrade heads (fresh DB → baseline)
+        if: github.event.action != 'edited' || github.event.changes.base != null
         working-directory: backend
         run: uv run alembic upgrade heads
 
       - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
+        if: github.event.action != 'edited' || github.event.changes.base != null
         working-directory: backend
         run: |
           set -o pipefail
@@ -1395,7 +1447,7 @@ jobs:
       # 그래서 이건 "정상 완주했지만 느려지는 중"을 조기에 보이게 하는 것까지가 이 스텝의
       # 몫 — 그 이상(취소 순간의 실시간 heartbeat 등)은 짓지 않는다(AC6).
       - name: Slowest tests summary (story #2285 AC5)
-        if: always()
+        if: always() && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           {
             echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
@@ -1413,12 +1465,26 @@ jobs:
   # 테스트는 backend-test처럼 실PG 서비스가 필요 없다(tests/conftest.py가 sqlite+aiosqlite
   # 인메모리로 매 테스트를 격리) — 로컬 실측(2026-09-01) 87 passed, 0.94초.
   #
-  # ⚠️아직 develop 필수 상태 체크가 아니다(페드루 PO 지시, 2026-09-01) — 신설 잡을 곧장
-  # required에 태우면 이 잡 자체의 미지 플레이크가 전 머지를 막는 자리가 된다("게이트에
-  # 머지 뒤에만 아는 것 금지"의 사촌 원칙). develop에서 몇 사이클 돌아 플레이크 0을 확認한
-  # 뒤에만 PO가 branch protection에 수동으로 등재한다(`gh api --method PUT
-  # repos/moonklabs/sprintable/branches/develop/protection/required_status_checks/contexts`
-  # 로 "Support Gateway pytest" 추가 — 관리자 권한 필요, 이 PR이 하는 일 아님).
+  # ⚠️story #4099(2026-09-21, 부수·동작 무변) — 아래 문단(2026-09-01 작성)은 스테일. 실측
+  # (`gh api repos/moonklabs/sprintable/branches/develop/protection/required_status_checks`,
+  # 2026-09-21) 결과 "Support Gateway pytest"는 이미 develop 필수 상태 체크로 등재돼 있다 —
+  # 이 잡은 #3929/#4099의 edited-only skip 패턴 자체가 원래 없었으므로(위 if: always()는
+  # detect-changed-scope 실패 cascade-skip 방지용일 뿐) required 승격 자체는 코드 변경 없이
+  # 이미 끝나 있었던 것. 아래는 그 승격 이전 맥락 기록으로 남겨 두되, "아직 아니다"는 더는
+  # 사실이 아니다.
+  #
+  # story #3273(CI사각, 2026-09-01 카디르 QA 발견) — support-gateway/ 디렉토리엔 pytest
+  # 스위트(86건 시점 발견, 이 잡 도입 시점 87건)가 있었지만 GHA 어느 워크플로에도 실행 잡이
+  # 없었다 — backend-test와 달리 그동안 이 서비스를 건드린 PR도 "required CI green"이 스위트
+  # 0건 실행으로 통과했고, 검증은 QA의 codex exec 수동 실행에만 의존했다(«CI green≠관문 전부»
+  # 클래스). support-gateway는 story #3259(지원v1·1경계)의 "0 fleet 자격" 설계로 자기
+  # 디렉토리 밖 어떤 코드도 import하지 않는다(app/config.py 상단 주석) — 그래서 이 서비스
+  # 테스트는 backend-test처럼 실PG 서비스가 필요 없다(tests/conftest.py가 sqlite+aiosqlite
+  # 인메모리로 매 테스트를 격리) — 로컬 실측(2026-09-01) 87 passed, 0.94초.
+  #
+  # (구 문단, 승격 전 기록) 신설 잡을 곧장 required에 태우면 이 잡 자체의 미지 플레이크가
+  # 전 머지를 막는 자리가 된다("게이트에 머지 뒤에만 아는 것 금지"의 사촌 원칙) — develop에서
+  # 몇 사이클 돌아 플레이크 0을 확認한 뒤 PO가 branch protection에 수동으로 등재하기로 했었다.
   gateway-test:
     name: Support Gateway pytest
     needs: [detect-changed-scope]
@@ -1485,18 +1551,19 @@ jobs:
   # (별도 파일, `branches-ignore: [main, develop]`)이 required 체크 이름을 건드리지 않고
   # 메운다 — 이 job과 완전 분리라 required 체크 의미론엔 영향 없음. 새 verify:* 스텝을
   # 여기 추가하면 그 파일에도 반영할 것(리뷰에서 확인).
-  ci:
-    name: Lint, Type Check, Test, Build
+  # story #3929(2026-09-15, PO 지시) → story #4099로 구조 변경(2026-09-21, 머지 안전
+  # 실사고 — PR #4473). 이 잡은 79개 스텝(Lint/Type Check/Test/Build/verify:* 전량)이라
+  # backend-test류처럼 스텝마다 역-조건을 개별로 얹는 건 diff 크기·누락 위험이 과했다
+  # (스텝 하나만 빠뜨려도 mirror 모드에서 설치 안 된 의존성으로 죽는 클래스). 대신
+  # backend-test-destructive/backend-test 관계를 그대로 재사용 — 이 잡(`ci-work`)은
+  # required 체크가 «아니고» 무거운 실작업 전부를 옛 #3929 조건 그대로 안고 있다(비-required
+  # 잡이라 "skip=Success 오판정" 문제 자체가 없다 — required 체크 이름은 아래 `ci` 잡이
+  # 단독으로 가진다). `ci` 잡이 required 체크("Lint, Type Check, Test, Build")를 대신
+  # 받아 얇게 미러/위임한다(아래).
+  ci-work:
+    name: "CI work (Lint/Type Check/Test/Build/verify:*) — internal, not required"
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # story #3929(2026-09-15, PO 지시) — required 체크("Lint, Type Check, Test, Build")
-    # 자신. edited(base 무변, title/body만 편집)가 head SHA는 그대로인 채 이 무거운
-    # 잡을 매번 전량 재실행시켜(오늘 4328·4329 실사고, 러너 부하로 다른 required 잡의
-    # 8샤드가 timeout) 게이트가 «최신 run»을 잘못 판정·머지를 막았다. 이 잡은 다른
-    # job에 needs 의존이 없어(cascade-skip 대상 아님) alembic-fresh-db류의 always()
-    # 방어가 불필요 — 조건 자체만. GitHub는 "job이 자신의 if:로 skip되면 그 체크는
-    # Success로 보고"한다(required-status-check 트러블슈팅 문서 확認) — 머지를 막지
-    # 않는다.
     if: github.event.action != 'edited' || github.event.changes.base != null
 
     steps:
@@ -2167,3 +2234,46 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 3
           if-no-files-found: ignore
+
+  # story #4099 — required 체크("Lint, Type Check, Test, Build") 자체는 이 얇은 잡이
+  # 단독으로 가진다(위 ci-work 상단 주석 참고 — backend-test-destructive/backend-test와
+  # 동형 위임 관계). always()는 detect-changed-scope류 cascade-skip 방지 목적이 아니라
+  # ci-work가 자신의 if:(옛 #3929 조건)로 skip됐을 때도(edited-only) 이 잡 자체는 항상
+  # 돌아야 Mirror 스텝이 실행되기 때문 — needs 실패 cascade-skip 기본 동작을 여기서도
+  # 명시로 막는다.
+  ci:
+    name: Lint, Type Check, Test, Build
+    needs: [ci-work]
+    if: always()
+    runs-on: ubuntu-latest
+    # story #4099 CHANGES-1(페드루 PO, 2026-09-21) — ci-work 자신의 timeout-minutes(20분)에
+    # 큐 지연(러너 대기)이 얹히면 아래 Mirror 스텝의 `--max-wait-seconds 1500`(25분)에 붙을
+    # 수 있다 — 이 잡 자신의 timeout-minutes가 그보다 짧으면 GitHub이 스크립트보다 먼저
+    # 잡을 죽인다. edited-only일 때만 30분으로 늘린다(실작업 분기는 이 잡 자체가 거의
+    # 즉시 끝나는 위임 스텝뿐이라 25분 그대로 충분).
+    timeout-minutes: ${{ github.event.action == 'edited' && 30 || 25 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Mirror sibling run conclusion (story #4099 — edited-only)
+        if: github.event.action == 'edited' && github.event.changes.base == null
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          scripts/ci/mirror_sibling_run_conclusion.sh \
+            --job-name "Lint, Type Check, Test, Build" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --this-run-id "${{ github.run_id }}" \
+            --max-wait-seconds 1500
+
+      # backend-test의 "Require all destructive-schema shards to have succeeded"와 동형 —
+      # ci-work가 자신의 if:(edited-only 아닐 때만 실행)로 정상 skip된 경우(result=skipped)는
+      # 이 카드가 막으려는 클래스가 아니므로 통과, 그 밖의 모든 non-success(진짜 실패)만 잡는다.
+      - name: Require ci-work to have succeeded
+        if: needs.ci-work.result != 'success' && (github.event.action != 'edited' || github.event.changes.base != null)
+        run: |
+          echo "ci-work result=${{ needs.ci-work.result }} — Lint/Type Check/Test/Build/verify:* 실행처(ci-work)가 실패했거나 안 돎"
+          exit 1
