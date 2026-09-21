@@ -68,6 +68,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
 
       {/* (3) 사용처 */}
       {usageCount > 0 ? (
+        // tint-guard-ok: info on info/10 selected row, AA 양테마 L5.2~5.7·D4.8~5.5 @11px
         <span className="inline-flex items-center gap-[5px] text-[11px] font-semibold text-info">
           <Link2 className="size-[13px]" />
           {t('usageCount', { count: usageCount })}
