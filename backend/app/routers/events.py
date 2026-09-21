@@ -1379,14 +1379,15 @@ def _next_recipe_stage(definition, stage: str) -> str | None:
     return enum[idx + 1] if idx + 1 < len(enum) else None
 
 
-def _build_next_stage_publish_example(definition, next_stage: str, base_payload: dict) -> str:
-    """story #4076 — `next_stage`로 넘어가는 `publish_event` 호출 예시 문자열. `base_payload`의
-    기존 키(`stage` 제외)를 그대로 이어받아 실값 예시를 만든다(스키마만이 아니라 실제로
-    복붙 가능한 예시 — AC3)."""
+def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: dict) -> str:
+    """story #4076 — `next_stage`로 넘어가는 `publish_event` 호출의 JSON 페이로드만(라벨·
+    "publish_event(" 감싸기는 호출부가 i18n_catalog 문구로 한다 — BE 한글 사용자 문장 가드
+    #3779가 라벨 literal도 AST로 잡으므로, 라벨은 이 함수가 아니라 카탈로그 쪽에 둔다).
+    `base_payload`의 기존 키(`stage` 제외)를 그대로 이어받아 실값 예시를 만든다(스키마만이
+    아니라 실제로 복붙 가능한 예시 — AC3)."""
     next_payload = {k: v for k, v in base_payload.items() if k != "stage"}
     next_payload["stage"] = next_stage
-    example = json.dumps({"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False)
-    return f"publish_event({example})"
+    return json.dumps({"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False)
 
 
 async def _render_gate_verdict_message(
@@ -1616,7 +1617,7 @@ async def _render_gate_verdict_message(
         # story #4076 — ④ 갭 처방: "다음 stage 이벤트를 발행하세요"뿐이던 자리를
         # triggered_by_event_key(위, gate_row.neutral_facts — 이 게이트를 만든 recipe
         # 정의)로 그 정의를 재조회해 구체 definition_key+payload 예시로 채운다(사이클
-        # 렌더러 `_next_recipe_stage`/`_build_next_stage_publish_example`과 동일 계산 재사용,
+        # 렌더러 `_next_recipe_stage`/`_next_stage_publish_payload_json`과 동일 계산 재사용,
         # 새 로직 0). 키가 없는 옛 게이트 row·정의를 못 찾음·다음 stage가 없음(마지막
         # stage) 중 하나라도 걸리면 크래시 대신 기존 제네릭 문구로 폴백(PO 확定).
         _example_line: str | None = None
@@ -1638,9 +1639,11 @@ async def _render_gate_verdict_message(
                         _base_payload["work_item_type"] = work_item_type
                     if work_item_id_raw:
                         _base_payload["work_item_id"] = work_item_id_raw
-                    _example = _build_next_stage_publish_example(_recipe_definition, _next_stage, _base_payload)
+                    _example_json = _next_stage_publish_payload_json(_recipe_definition, _next_stage, _base_payload)
                     _next_meta = (_recipe_definition.stage_metadata or {}).get(_next_stage) or {}
-                    _example_line = f"- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요: {_example}"
+                    _example_line = (
+                        f"- {t('events.gate_verdict_next_action_publish_example', resolved_locale, example=_example_json)}"
+                    )
                     if _next_meta.get("gate") is not None:
                         _example_line += f" — {t('events.stage_gate_opens_on_publish', resolved_locale)}"
         lines.append(
@@ -1736,8 +1739,8 @@ async def _render_event_message_content(
         next_meta = definition.stage_metadata.get(next_stage) or {}
         next_role = next_meta.get("role")
         lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
-        example = _build_next_stage_publish_example(definition, next_stage, payload)
-        lines.append(f"- 다음 단계로 넘기는 발행 예시: {example}")
+        example_json = _next_stage_publish_payload_json(definition, next_stage, payload)
+        lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
         if next_meta.get("gate") is not None:
             lines.append(f"- {t('events.stage_gate_opens_on_publish', resolved_locale)}")
     else:

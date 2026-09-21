@@ -242,6 +242,21 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Publishing this will open a human approval gate — publish the following stage "
         "only after you receive the approval notification (preset.gate.verdict).",
     },
+    # story #4076 CI 정정(2026-09-21, 페드루 PO 지적) — 아래 두 키는 원래 events.py에
+    # f-string 리터럴로 있었으나(라벨+발행 예시 JSON을 한 문자열로), 사이클 렌더러와
+    # verdict 렌더러가 JSON 빌더 헬퍼(`_next_stage_publish_payload_json`)를 공유하도록
+    # 리팩터하면서 라벨 부분의 AST 리터럴 경계가 바뀌어 BE 한글 사용자 문장 가드(#3779)가
+    # "신규 한글"로 잡았다 — 라벨을 카탈로그로 옮겨 근본 해결(리터럴 경계가 코드 구조를
+    # 바꿀 때마다 다시 걸리는 일을 막는다).
+    "events.stage_next_publish_example": {
+        "ko": "다음 단계로 넘기는 발행 예시: publish_event({example})",
+        "en": "Publish example for the next stage: publish_event({example})",
+    },
+    "events.gate_verdict_next_action_publish_example": {
+        "ko": "다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요: publish_event({example})",
+        "en": "Next action: publish the next stage event for this definition: "
+        "publish_event({example})",
+    },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
     # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).
