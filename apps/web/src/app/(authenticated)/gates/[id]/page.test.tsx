@@ -925,3 +925,81 @@ describe('GateDetailPage — 단계(역할) 표시(story #4082, #4091로 렌더 
     expect(container.textContent).toContain(`${koMessages.cage.recipeApprovalStageLabel} · 컨셉 확정 (디렉터)`);
   });
 });
+
+// story #4121(E-RECIPE-1 Phase 3 폴리시, 유나 #4056 v2 제안·PO 확定 2026-09-21) — 게이트
+// 상세 2열+sticky 레이아웃. CSS `lg:` 브레이크포인트만(JS useIsMobile 신규 분기 0 — PO/유나
+// canon: hydration flash·CLS 회피) — jsdom은 CSS 미디어쿼리를 실행하지 않으므로 여기선
+// matchMedia mock이 아니라 「단일열/2열 grid 클래스 존재」+「우 열 lg:sticky 클래스 존재」만
+// 단언한다(AC2 유나 정정). 실 브레이크포인트 전환 시각 검증은 유나 design:pass(픽셀 캡처)의
+// 몫 — 이 테스트는 «올바른 유틸리티 클래스가 배선됐는가»만 고정.
+describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
+  it('우 열에 액션이 있을 때(needsAction&&canAct, 평문 버튼 갈래)만 2열 grid+sticky 클래스가 붙는다', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low' }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]');
+    expect(outer?.className).toContain('max-w-2xl');
+    expect(outer?.className).toContain('lg:max-w-6xl');
+
+    const twoCol = container.querySelector('[data-testid="gate-detail-two-col"]');
+    expect(twoCol).toBeTruthy();
+    expect(twoCol?.className).toContain('lg:grid');
+    expect(twoCol?.className).toContain('lg:grid-cols-[minmax(0,1fr)_360px]');
+
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
+    expect(actionCol).toBeTruthy();
+    expect(actionCol?.className).toContain('lg:sticky');
+    // 페드루 PO 정정(2026-09-21) — 시안 mock의 top-4가 아니라 셸 상단바(top-bar.tsx h-12)
+    // sticky 선례(docs-client-layout.tsx sticky top-12)와 동형 오프셋.
+    expect(actionCol?.className).toContain('lg:top-12');
+
+    expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeNull();
+  });
+
+  it('서명 플로우 갈래(risk_grade=high)도 같은 2열 grid+sticky 클래스를 쓴다(우 열 콘텐츠만 GateSignatureApproval로 갈림)', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'high' }));
+    expect(container.querySelector('[data-testid="gate-detail-two-col"]')).toBeTruthy();
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
+    expect(actionCol?.className).toContain('lg:sticky');
+    // 서명 플로우는 evidenceViewed 체크박스가 우 열 안에 있어야 한다(액션 콘텐츠가 실제로 거기).
+    expect(actionCol?.querySelector('input[type="checkbox"]')).toBeTruthy();
+  });
+
+  it('우 열이 빌 자리(무권한, can_approve=false)는 2열 클래스 없이 단일열 그대로다(회귀 0)', async () => {
+    await mount(gate({ can_approve: false }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]');
+    expect(outer?.className).not.toContain('lg:max-w-6xl');
+    expect(container.querySelector('[data-testid="gate-detail-two-col"]')).toBeNull();
+    expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeTruthy();
+  });
+
+  it('우 열이 빌 자리(이미 해소, status=approved)도 2열 클래스 없이 단일열 그대로다(회귀 0)', async () => {
+    await mount(gate({ status: 'approved', resolver_id: 'someone', resolved_at: new Date().toISOString() }));
+    const outer = container.querySelector('[data-testid="gate-detail-container"]');
+    expect(outer?.className).not.toContain('lg:max-w-6xl');
+    expect(container.querySelector('[data-testid="gate-detail-two-col"]')).toBeNull();
+    expect(container.querySelector('[data-testid="gate-detail-single-col"]')).toBeTruthy();
+  });
+
+  it('2열일 때 좌 열(산출물·초안)과 우 열(액션)이 구조적으로 분리된 형제 컨테이너다(중복 마운트 없음 — 컴포넌트 내부 diff 0)', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low' }));
+    const twoCol = container.querySelector('[data-testid="gate-detail-two-col"]')!;
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
+    // twoCol의 직계 자식은 정확히 좌 열 1개 + 우 열(action-column) 1개(같은 컴포넌트 트리가
+    // 두 번 마운트되는 게 아니라 하나의 렌더 결과가 좌/우로 «배치»만 됐다는 구조적 증거).
+    expect(twoCol.children).toHaveLength(2);
+    expect(twoCol.children[1]).toBe(actionCol);
+  });
+
+  it('2열일 때 게이트 메타(배지·컨텍스트)는 우 열(sticky)에서만 뜬다', async () => {
+    await mount(gate({ can_approve: true, risk_grade: 'low', reapproval_required: true }));
+    const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]')!;
+    expect(actionCol.textContent).toContain(koMessages.cage.gateReapprovalRequiredChip);
+    const leftCol = container.querySelector('[data-testid="gate-detail-two-col"] > div:first-child')!;
+    expect(leftCol.textContent).not.toContain(koMessages.cage.gateReapprovalRequiredChip);
+  });
+
+  it('단일열(무권한)에서도 평문 승인/거부 버튼이 안 뜨는 대신 무권한 문구는 그대로 뜬다(기존 pin과 정합)', async () => {
+    await mount(gate({ can_approve: false }));
+    const singleCol = container.querySelector('[data-testid="gate-detail-single-col"]')!;
+    expect(singleCol.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+  });
+});
