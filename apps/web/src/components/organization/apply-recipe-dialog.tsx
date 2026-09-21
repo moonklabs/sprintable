@@ -186,7 +186,15 @@ export function ApplyRecipeDialog({
       if ((data.warnings ?? []).length > 0) {
         setWarnings(data.warnings ?? []);
       } else {
-        addToast({ type: 'success', title: t('eventApplySuccessToast', { count: data.bindings_upserted ?? 0 }) });
+        // story #4118 — bindings_upserted=0(예: 기존과 동일한 role_mapping 재제출)이면
+        // "배정 0건 저장 완료"라는 어색한 문장 대신 별도 무변경 문구로.
+        const upserted = data.bindings_upserted ?? 0;
+        addToast({
+          type: 'success',
+          title: upserted > 0
+            ? t('eventApplySuccessToast', { count: upserted })
+            : t('eventApplySuccessNoChangeToast'),
+        });
         onOpenChange(false);
       }
     } catch (e) {

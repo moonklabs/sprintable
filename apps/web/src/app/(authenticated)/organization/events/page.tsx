@@ -105,6 +105,10 @@ export default function OrganizationEventsPage() {
   // 버튼만 보여주므로(marketing-recipe-apply-dialog.tsx), onOpenChange(false)가 오는
   // 시점 = 사용자가 경고를 읽고 확認한 시점 — 그때 이 값을 소비해 성공 경로를 이어간다.
   const [marketingApplyPendingDetailTarget, setMarketingApplyPendingDetailTarget] = useState<EventDefinitionResponse | null>(null);
+  // story #4118 — 토스트 count는 실 upsert 건수여야 한다(리터럴 1 고정 결함 재발
+  // 방지). onOpenChange가 소비하는 시점엔 onSubmit의 result가 이미 클로저 밖이라
+  // 값을 들고 있어야 한다 — pending target과 같은 생애주기로 짝지어 저장.
+  const [marketingApplyPendingBindingsCount, setMarketingApplyPendingBindingsCount] = useState(0);
 
   useEffect(() => {
     if (!marketingApplyTarget) return;
@@ -345,9 +349,10 @@ export default function OrganizationEventsPage() {
           // 여기 도달 = 사용자가 경고를 확認한 시점. 그때서야 보류해 둔 성공 처리(토스트+
           // 상세 뷰)를 태운다(성공을 버린 게 아니라 닫힐 때까지 미룬 것).
           if (marketingApplyPendingDetailTarget) {
-            addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
+            addToast({ type: 'success', title: t('eventApplySuccessToast', { count: marketingApplyPendingBindingsCount }) });
             setMarketingDetailTarget(marketingApplyPendingDetailTarget);
             setMarketingApplyPendingDetailTarget(null);
+            setMarketingApplyPendingBindingsCount(0);
           }
         }}
         creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
@@ -363,7 +368,7 @@ export default function OrganizationEventsPage() {
           // [두문장 다른세계] — 실 배정이 1건이라도 있을 때만 성공 경로를 태운다.
           if (result.ok && (result.bindingsUpserted ?? 0) > 0) {
             if ((result.warnings ?? []).length === 0) {
-              addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
+              addToast({ type: 'success', title: t('eventApplySuccessToast', { count: result.bindingsUpserted ?? 0 }) });
               // 적용 성공 → 그 자리서 상세 뷰로 이어간다(AC2 "적용→상세 도달").
               setMarketingDetailTarget(marketingApplyTarget);
             } else {
@@ -371,6 +376,10 @@ export default function OrganizationEventsPage() {
               // (marketing-recipe-apply-dialog.tsx submit()) — 성공 처리는 버리지 않고
               // 다이얼로그가 닫힐 때(위 onOpenChange, 사용자의 「확認」 클릭)까지 미룬다.
               setMarketingApplyPendingDetailTarget(marketingApplyTarget);
+              // story #4118 — 위 onOpenChange가 이 시점의 count를 나중에 소비한다(이
+              // 분기에 들어온 순간 (result.bindingsUpserted ?? 0) > 0이 이미 보장돼
+              // 있다 — 바깥 if의 조건 그대로).
+              setMarketingApplyPendingBindingsCount(result.bindingsUpserted ?? 0);
             }
           }
           return result;

@@ -679,6 +679,7 @@
     "eventApplySubmit": "Apply",
     "eventApplySubmitting": "Applying…",
     "eventApplySuccessToast": "Saved {count} assignment(s)",
+    "eventApplySuccessNoChangeToast": "Already applied — no new assignments were made.",
     "eventApplyErrorGeneric": "Apply failed",
     "eventApplyWarningsHeading": "Note",
     "eventStageMetaLabel": "Stages",
