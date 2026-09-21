@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -50,11 +50,19 @@ export function MarketingRecipeApplyDialog({
 }: MarketingRecipeApplyDialogProps) {
   const t = useTranslations('organization');
   const tc = useTranslations('common');
+  // story #4103 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — channelConnect ns의 기존
+  // channelLoadFailed 키 재사용(신규 문구 발명 0).
+  const tChannel = useTranslations('channelConnect');
   const [projectId, setProjectId] = useState('');
   const [creatorAgentId, setCreatorAgentId] = useState('');
   // story #4103 — apply-recipe-dialog.tsx와 동형(org 스코프, project 무관, 다이얼로그
   // open 시 1회).
   const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
+  // story #4103 CHANGES-1 — #3521(유나 §22-2) agentsLoadFailed와 동형: fetch 실패/로딩
+  // 中을 "0건"과 구분한다(안 그러면 "없어요"+제출 차단이 네트워크 문제를 «진짜 0건»으로
+  // 오독시킨다). 3값 — 로딩 中(초기)·loaded(성공, 빈 배열일 수 있음)·failed(응답
+  // !ok 또는 네트워크 reject).
+  const [channelConnectionsStatus, setChannelConnectionsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [publisherConnectionId, setPublisherConnectionId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,20 +70,31 @@ export function MarketingRecipeApplyDialog({
   const { options, loading: loadingMembers } = useRecipeMemberOptions(projectId || null);
   const agentOptions = options.filter((o) => o.type === 'agent');
 
+  const loadChannelConnections = useCallback(() => {
+    if (!orgId) { setChannelConnectionsStatus('loaded'); return; }
+    setChannelConnectionsStatus('loading');
+    void (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
+        if (!res.ok) { setChannelConnectionsStatus('failed'); return; }
+        const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
+        setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+        setChannelConnectionsStatus('loaded');
+      } catch {
+        setChannelConnectionsStatus('failed');
+      }
+    })();
+  }, [orgId]);
+
   useEffect(() => {
     if (!open) return;
     setProjectId('');
     setCreatorAgentId('');
     setPublisherConnectionId('');
+    setChannelConnections([]);
     setError(null);
-    if (!orgId) return;
-    void (async () => {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
-      if (!res.ok) return;
-      const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
-      setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
-    })();
-  }, [open, orgId]);
+    loadChannelConnections();
+  }, [open, orgId, loadChannelConnections]);
 
   // 페드루 QA 지적(#4424 qa:changes, 2026-09-19) — 프로젝트 전환 시 이전 선택이 그대로
   // 남아 있으면(agentOptions가 새 프로젝트 것으로 바뀌어도 creatorAgentId state는 그대로)
@@ -231,7 +250,16 @@ export function MarketingRecipeApplyDialog({
                 {t('recipeApplyV2PublisherRole')} <Badge variant="secondary">{t('recipeApplyV2PublisherBadge')}</Badge>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2PublisherDesc')}</p>
-              {publisherRequired && activeChannelConnections.length === 0 ? (
+              {/* story #4103 CHANGES-1(페드루 PO 리뷰) — 3값: 로딩 中엔 아무 문구도
+                  안 낸다(성공/실패를 아직 모르는데 "없어요"부터 보이면 오독). failed는
+                  네트워크/서버 문제(«0건»과 다른 사실) — agentsLoadFailed(#3521)와
+                  동형으로 재시도 버튼. loaded인데 0건일 때만 진짜 empty 문구. */}
+              {publisherRequired && channelConnectionsStatus === 'failed' ? (
+                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-load-error">
+                  <span>{tChannel('channelLoadFailed')}</span>
+                  <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
+                </div>
+              ) : publisherRequired && channelConnectionsStatus === 'loaded' && activeChannelConnections.length === 0 ? (
                 <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-empty">
                   {t('eventApplyChannelsEmpty')}
                 </p>
@@ -241,7 +269,7 @@ export function MarketingRecipeApplyDialog({
               className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               value={publisherConnectionId}
               onChange={(e) => setPublisherConnectionId(e.target.value)}
-              disabled={!publisherRequired}
+              disabled={!publisherRequired || channelConnectionsStatus !== 'loaded'}
               data-testid="publisher-connection-select"
             >
               <option value="">{t('eventApplyChannelPlaceholder')}</option>
