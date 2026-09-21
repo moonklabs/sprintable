@@ -242,6 +242,26 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Publishing this will open a human approval gate — publish the following stage "
         "only after you receive the approval notification (preset.gate.verdict).",
     },
+    # story #4090([E-RECIPE-1] Publisher 슬롯) AC3(페드루 PO 確定 2026-09-21) — 다음
+    # stage가 채널 자동발행 대상(capability.target=="channel_connection")일 때의
+    # 네 갈래 안내(AC2 훅의 실제 gate.publish_outcome을 그대로 반영, 지어내지 않는다).
+    "events.gate_verdict_recipe_auto_published": {
+        "ko": "다음 행동: 할 일 없음 — 이 승인으로 바인딩된 채널에 이미 자동 발행됐어요.",
+        "en": "Next action: nothing — this approval already auto-published to the bound "
+        "channel connection.",
+    },
+    "events.gate_verdict_recipe_auto_publish_scheduled": {
+        "ko": "다음 행동: 할 일 없음 — 예약 시각에 자동 발행돼요.",
+        "en": "Next action: nothing — this will auto-publish at the scheduled time.",
+    },
+    "events.gate_verdict_recipe_auto_publish_skipped": {
+        "ko": "다음 행동: {reason}",
+        "en": "Next action: {reason}",
+    },
+    "events.gate_verdict_recipe_auto_publish_pending": {
+        "ko": "다음 행동: 채널 포스트 초안을 만들어 제출하면 승인이 자동으로 발행까지 이어져요.",
+        "en": "Next action: create and submit a channel post draft — approval will auto-publish it.",
+    },
     # story #4076 CI 정정(2026-09-21, 페드루 PO 지적) — 아래 두 키는 원래 events.py에
     # f-string 리터럴로 있었으나(라벨+발행 예시 JSON을 한 문자열로), 사이클 렌더러와
     # verdict 렌더러가 JSON 빌더 헬퍼(`_next_stage_publish_payload_json`)를 공유하도록

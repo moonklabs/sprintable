@@ -210,6 +210,14 @@ class Gate(Base):
     # 승인 후 수정으로 시스템이 되돌린 pending인지(사람이 처음 상신한 pending과 구분 — S4가
     # "재승인 필요" 배지를 그릴 신호) — 새 명시 submit()이 재봉인하면 False로 복귀한다.
     reapproval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # story #4090([E-RECIPE-1] Publisher 슬롯) AC2, migration 0388 — 레시피 자동발행 훅의
+    # 기계 소유 결과 필드. `resolution_note`(승인자 본인 문장)·`neutral_facts`(seal 시점
+    # 스냅샷) 둘 다 이 값을 담을 자리가 아니라는 게 페드루 PO 確定(2026-09-21) — 사람 글과
+    # 승인 *후* 벌어지는 시스템 상태를 한 칸에 섞지 않는다. external_publish 게이트
+    # (scope_key="", 레시피 unscoped 게이트)에서만 채워진다 — 다른 gate_type/scope는
+    # 항상 NULL. 자유 텍스트(evidence_status·auto_decision_reason과 동형 관례, CHECK로
+    # 안 잠근다 — gate_service.py::publish_recipe_approved_draft 참고).
+    publish_outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

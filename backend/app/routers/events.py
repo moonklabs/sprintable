@@ -1641,11 +1641,32 @@ async def _render_gate_verdict_message(
                         _base_payload["work_item_id"] = work_item_id_raw
                     _example_json = _next_stage_publish_payload_json(_recipe_definition, _next_stage, _base_payload)
                     _next_meta = (_recipe_definition.stage_metadata or {}).get(_next_stage) or {}
-                    _example_line = (
-                        f"- {t('events.gate_verdict_next_action_publish_example', resolved_locale, example=_example_json)}"
-                    )
-                    if _next_meta.get("gate") is not None:
-                        _example_line += f" — {t('events.stage_gate_opens_on_publish', resolved_locale)}"
+                    # story #4090 AC3(페드루 PO 確定 2026-09-21) — 다음 stage가 채널
+                    # 자동발행 대상(capability.target=="channel_connection")이면 "다음
+                    # stage 이벤트를 발행하세요" 지시 자체가 더는 맞지 않는다(AC2가 사람
+                    # 클릭 0으로 자동 처리) — gate_row.publish_outcome(AC2 훅이 이미 채운
+                    # 기계 소유 결과, transition_gate→publish_recipe_approved_draft가
+                    # _render_gate_verdict_message보다 먼저 실행되므로 이 시점에 이미
+                    # 값이 있다)을 그대로 안내문으로 쓴다 — 새 문구를 짓지 않고 AC2의
+                    # 실제 결과를 그대로 반영(지어내지 않는다, PO 확定 반복 원칙).
+                    if (_next_meta.get("capability") or {}).get("target") == "channel_connection":
+                        _outcome = gate_row.publish_outcome if gate_row is not None else None
+                        if _outcome == "published":
+                            _example_line = f"- {t('events.gate_verdict_recipe_auto_published', resolved_locale)}"
+                        elif _outcome == "scheduled":
+                            _example_line = f"- {t('events.gate_verdict_recipe_auto_publish_scheduled', resolved_locale)}"
+                        elif _outcome:
+                            _example_line = (
+                                f"- {t('events.gate_verdict_recipe_auto_publish_skipped', resolved_locale, reason=_outcome)}"
+                            )
+                        else:
+                            _example_line = f"- {t('events.gate_verdict_recipe_auto_publish_pending', resolved_locale)}"
+                    else:
+                        _example_line = (
+                            f"- {t('events.gate_verdict_next_action_publish_example', resolved_locale, example=_example_json)}"
+                        )
+                        if _next_meta.get("gate") is not None:
+                            _example_line += f" — {t('events.stage_gate_opens_on_publish', resolved_locale)}"
         lines.append(
             _connector_line
             or _example_line

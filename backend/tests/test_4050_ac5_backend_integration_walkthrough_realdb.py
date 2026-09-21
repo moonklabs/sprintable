@@ -95,13 +95,17 @@ def test_capability_field_has_exactly_two_consumers_in_codebase():
     알려준다(연산/발행자 슬롯에 실제 배선이 생겼다는 뜻이므로 이 카드의 결론을 재검토
     해야 한다).
 
-    ⛔story #4090(alembic 0385, 페드루 PO 確定 2026-09-21) — 바로 그 재검토가 일어난
+    ⛔story #4090(alembic 0387, 페드루 PO 確定 2026-09-21) — 바로 그 재검토가 일어난
     자리. 발행자(Publisher) 슬롯에 실제 배선(capability.target으로 채널-바인딩 stage
     판별, apply_recipe_role_bindings::_is_channel_stage)이 생겨 events.py의 소비처가
     1→2로 늘었다 — 이 테스트가 설계대로 그 사실을 잡았다(RED 확認 후 의도적 갱신,
     삭제/완화 아님). registry_module 쪽도 _CAPABILITY_TARGETS 검증(target 필드
     닫힌-어휘 체크)이 새 "capability" 리터럴을 더했지만, 그 축은 애초에 정확한 개수가
-    아니라 ">0"만 고정하므로 별도 갱신 불요."""
+    아니라 ">0"만 고정하므로 별도 갱신 불요.
+
+    ⛔재갱신(AC3, 같은 확定일) — `_render_gate_verdict_message`가 다음 stage의
+    capability.target을 읽어 자동발행 안내문 갈래를 고르는 세 번째 소비처가 추가돼
+    2→3으로 또 늘었다(같은 원리, 같은 절제 — RED 확認 후 의도적 갱신)."""
     import ast
     import inspect
 
@@ -116,9 +120,10 @@ def test_capability_field_has_exactly_two_consumers_in_codebase():
                 count += 1
         return count
 
-    # events.py: apply_recipe_role_bindings 안의 `.get("capability")` 2건 — 기존 warning
-    # 축(§3317 PR B) + story #4090 신설 `_is_channel_stage`(target 판별) 축.
-    assert _count_capability_subscripts(events_module) == 2
+    # events.py: `.get("capability")` 3건 — 기존 warning 축(§3317 PR B)·story #4090 AC1
+    # `_is_channel_stage`(target 판별)·같은 스토리 AC3 `_render_gate_verdict_message`
+    # (다음 stage capability.target으로 자동발행 안내 갈래 판별).
+    assert _count_capability_subscripts(events_module) == 3
     # event_definition_registry.py: validate_stage_metadata 안의 `meta["capability"]`류 —
     # shape 검증 로직 안에서 "capability" 리터럴이 여러 번 등장(object 검사·에러 메시지 등)
     # 하므로 정확한 개수보다 "0이 아님(소비자가 실존)"만 고정한다.
