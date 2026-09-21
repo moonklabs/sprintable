@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.event_definition_registry import SERVER_DERIVED_TARGETS
@@ -225,7 +225,52 @@ async def _resolve_recipe_role_binding(
             RecipeRoleBinding.stage == stage,
         )
     )).scalar_one_or_none()
-    return {agent_id} if agent_id is not None else set()
+    if agent_id is not None:
+        return {agent_id}
+
+    # story #4110(#4109 PO 결정, 2026-09-21) — generation_connector-target stage(예:
+    # live_generation)는 agent_member_id가 원천적으로 없다(그 stage의 바인딩 행은
+    # generation_connector_id로 채워짐, #4101 XOR). 그 stage에 **한해서만**(다른 미배정
+    # agent-target stage까지 번지면 위 PO 확定 「모르면 안 준다」 원칙과 충돌) "같은
+    # 적용(org·[project 특이 ∪ org 전역]·event_definition_key)의 crew"(agent_member_id가
+    # 채워진 모든 행의 집합)로 폴백한다 — 리허설 1호에서 댄이 live_generation을 스스로
+    # 발행하고 이어간 형상을 제품이 명시적으로 지지하는 것.
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        # org 커스텀이 프리셋보다 우선 — events.py::get_recipe_start_candidates/
+        # apply_recipe_role_bindings와 동일 우선순위(중복 정의 시나리오 대비).
+        .order_by(EventDefinition.org_id.is_(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    if definition is None:
+        return set()
+    capability = (definition.stage_metadata.get(stage) or {}).get("capability") or {}
+    if capability.get("target") != "generation_connector":
+        return set()
+
+    # ⛔`.in_([project_id, None])`은 SQL `IN (val, NULL)`로 컴파일되는데 `col = NULL`은
+    # 항상 UNKNOWN이라 project_id가 NULL인(org 전역) 행을 못 잡는다(`?`/`!=` NULL 함정과
+    # 같은 클래스) — `or_(... == project_id, ... .is_(None))`로 명시.
+    project_filter = (
+        or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None))
+        if project_id is not None else RecipeRoleBinding.project_id.is_(None)
+    )
+    crew_ids = (await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key == definition_key,
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            project_filter,
+        )
+    )).scalars().all()
+    return set(crew_ids)
 
 
 # SERVER_DERIVED_TARGETS(event_definition_registry.py) 전체를 커버해야 한다 — 모듈 로드
