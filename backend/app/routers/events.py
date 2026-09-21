@@ -3314,7 +3314,11 @@ async def apply_recipe_role_bindings(
                 continue
             missing = missing_required_org_config(row)
             if missing:
-                warnings.append(t("events.apply_connector_config_incomplete", "ko", stage_label=stage_label, connector_key=connector_key, missing=missing))
+                # story #4108 CHANGES(페드루 PO 리뷰, 2026-09-21) — missing이 list[str]
+                # 그대로 .format()에 들어가면 파이썬 list repr(대괄호·따옴표, `['api_key']`)
+                # 이 그대로 문장에 실린다 — 이 카드 AC1 "값은 따옴표 없는 사람말" 그 자체
+                # 위반이라 별건이 아니라 스코프 안. 쉼표로 이어 붙인 사람말 목록으로.
+                warnings.append(t("events.apply_connector_config_incomplete", "ko", stage_label=stage_label, connector_key=connector_key, missing=", ".join(missing)))
         else:
             candidates = await find_org_connectors_by_kind(db, org_id=org_id, kind=kind)
             if not candidates:

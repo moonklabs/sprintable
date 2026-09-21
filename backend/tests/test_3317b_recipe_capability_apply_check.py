@@ -283,6 +283,10 @@ async def test_apply_connector_key_specified_missing_required_config_warns():
             assert len(resp.warnings) == 1
             for required_field in ("create.senderEmail", "create.senderName", "create.listId"):
                 assert required_field in resp.warnings[0]
+            # story #4108 CHANGES(페드루 PO 리뷰, 2026-09-21) — missing(list[str])이 파이썬
+            # list repr(대괄호·따옴표)로 안 새는지 고정 — join된 사람말 목록이어야 한다.
+            assert "[" not in resp.warnings[0]
+            assert "'" not in resp.warnings[0]
     finally:
         await engine.dispose()
 
