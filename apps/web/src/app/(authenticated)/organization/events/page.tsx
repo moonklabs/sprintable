@@ -343,7 +343,10 @@ export default function OrganizationEventsPage() {
           // 표면화한다(marketing-recipe-apply-dialog.tsx). 그런데 그 경우까지 여기서 성공
           // 토스트+상세이동을 같이 태우면 "성공"과 "no-op 오류"가 한 화면에 공존하는
           // [두문장 다른세계] — 실 배정이 1건이라도 있을 때만 성공 경로를 태운다.
-          if (result.ok && (result.bindingsUpserted ?? 0) > 0) {
+          // story #4107 — warnings가 있으면 다이얼로그가 스스로 닫지 않고 경고를 보여준다
+          // (marketing-recipe-apply-dialog.tsx submit()). 여기서도 같은 조건으로 상세뷰
+          // 전환·성공 토스트를 보류한다 — 안 그러면 경고 다이얼로그와 상세 뷰가 동시에 뜬다.
+          if (result.ok && (result.bindingsUpserted ?? 0) > 0 && (result.warnings ?? []).length === 0) {
             addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
             // 적용 성공 → 그 자리서 상세 뷰로 이어간다(AC2 "적용→상세 도달").
             setMarketingDetailTarget(marketingApplyTarget);

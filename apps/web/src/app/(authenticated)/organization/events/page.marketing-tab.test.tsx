@@ -196,4 +196,49 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     expect(stepper.textContent).toContain('발행');
     expect(stepper.textContent).not.toContain('concept_confirmed');
   });
+
+  // story #4107 — apply 응답에 warnings가 있으면(적용은 성공, bindings_upserted>0) 상세
+  // 뷰로 안 넘어간다 — bindings_upserted:0 케이스와 같은 이유([두문장 다른세계] 방지):
+  // 다이얼로그가 경고를 보여주는 동안 페이지가 "성공" 상세뷰를 동시에 띄우면 안 된다.
+  it('apply 응답에 warnings가 있으면(적용 성공이어도) 상세 뷰로 안 넘어가고 경고가 다이얼로그에 남는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [MARKETING_RECIPE] };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: '9월 영상 캠페인' }] }) };
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true, bindings_upserted: 1,
+            warnings: ["stage='published': connector_key='x' 커넥터가 아직 등록돼 있지 않아요 — 조직 설정에서 채널을 먼저 연결하세요"],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    await switchToMarketingTab();
+
+    const applyBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용');
+    await act(async () => { applyBtn!.click(); });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    // 상세 뷰(9단계 스텝퍼)로 안 넘어간다 — 다이얼로그가 열린 채 경고 목록을 보여준다.
+    expect(document.body.querySelector('[data-testid="recipe-stepper"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('커넥터가 아직 등록돼 있지 않아요');
+  });
 });

@@ -305,6 +305,90 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     expect(document.body.textContent).toContain('저장된 배정이 없어요');
   });
 
+  // story #4107 — apply 응답의 warnings를 결과 영역에 표시한다(apply-recipe-dialog.tsx와
+  // 동형). 경고가 있어도 적용은 이미 성공했으니 no-op 에러가 아니라 경고 목록을 보여주고,
+  // 다이얼로그는 스스로 닫지 않는다(사용자가 봐야 하는 정보를 자동으로 치우지 않는다).
+  it('apply 응답에 warnings가 있으면 경고 목록을 보여주고 다이얼로그를 닫지 않는다', async () => {
+    stubMemberFetch();
+    const onSubmit = vi.fn(async () => ({
+      ok: true, bindingsUpserted: 2, warnings: ["stage='published': connector_key='x' 커넥터가 아직 등록돼 있지 않아요"],
+    }));
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={REAL_SEED_RECIPE} open onOpenChange={onOpenChange} creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false); // 경고가 있으면 자동으로 안 닫힌다.
+    const warningsBox = document.body.querySelector('[data-testid="marketing-apply-warnings"]');
+    expect(warningsBox).toBeTruthy();
+    expect(warningsBox!.textContent).toContain("stage='published'");
+    expect(document.body.textContent).not.toContain('저장된 배정이 없어요'); // no-op 에러 아님(적용은 성공).
+  });
+
+  it('apply 응답에 warnings가 없으면(빈 배열) 경고 없이 그대로 성공 경로(다이얼로그 닫힘)', async () => {
+    stubMemberFetch();
+    const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 2, warnings: [] }));
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={REAL_SEED_RECIPE} open onOpenChange={onOpenChange} creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).toBeNull();
+  });
+
+  it('ok:false(적용 실패)면 warnings 필드가 응답에 있어도 기존 오류 경로 그대로(경고 목록 안 뜸)', async () => {
+    stubMemberFetch();
+    const onSubmit = vi.fn(async () => ({ ok: false, error: '적용 실패 — 재시도해 주세요' }));
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={REAL_SEED_RECIPE} open onOpenChange={onOpenChange} creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={onSubmit}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).toBeNull();
+    expect(document.body.textContent).toContain('적용 실패 — 재시도해 주세요');
+  });
+
   it('creatorRoleLabel이 seed의 실제 role 키와 안 맞으면(예: 재발) 제출 자체를 로컬에서 막는다(네트워크 왕복 0)', async () => {
     stubMemberFetch();
     const onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 5 }));
@@ -476,5 +560,33 @@ describe('MarketingRecipeApplyDialog — 4슬롯 다른 메커니즘', () => {
     expect(publisherSelect.disabled).toBe(false);
     const optionTexts = Array.from(publisherSelect.querySelectorAll('option')).map((o) => o.textContent);
     expect(optionTexts).toContain('메인 인스타');
+  });
+});
+
+// story #4107 — submitMarketingRecipeApply(BE 응답→FE onSubmit 계약 wrapper)가 실제로
+// data.warnings를 읽어서 넘기는지 직접 핀(다이얼로그 레벨 테스트는 onSubmit을 목킹하므로
+// 이 wrapper 자체의 파싱 축은 별도로 확인해야 한다 — #4107의 근본 버그가 정확히 이
+// wrapper에 warnings 참조가 0이었다는 것).
+describe('submitMarketingRecipeApply — BE 응답 warnings 파싱', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('성공 응답(ok:true)의 warnings 배열을 그대로 반환한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, bindings_upserted: 2, warnings: ["stage='published': …"] }),
+    })));
+    const { submitMarketingRecipeApply } = await import('./marketing-recipe-apply-dialog');
+    const result = await submitMarketingRecipeApply({ recipeId: 'r1', projectId: 'p1', roleMapping: { draft: 'a1' } });
+    expect(result).toEqual({ ok: true, bindingsUpserted: 2, warnings: ["stage='published': …"] });
+  });
+
+  it('warnings가 없는 성공 응답은 warnings가 undefined로 남는다(신규 키 발명 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, bindings_upserted: 1 }),
+    })));
+    const { submitMarketingRecipeApply } = await import('./marketing-recipe-apply-dialog');
+    const result = await submitMarketingRecipeApply({ recipeId: 'r1', projectId: 'p1', roleMapping: { draft: 'a1' } });
+    expect(result.warnings).toBeUndefined();
   });
 });

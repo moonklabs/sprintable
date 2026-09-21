@@ -34,7 +34,10 @@ export interface MarketingRecipeApplyDialogProps {
   // story #4103(#4090 AC1 잔여, 페드루 PO 실측 2026-09-21) — 발행자 슬롯(채널 연결)
   // 목록을 org 스코프로 불러오는 데 필요(apply-recipe-dialog.tsx와 동형).
   orgId?: string;
-  onSubmit: (args: { recipeId: string; projectId: string; roleMapping: Record<string, string> }) => Promise<{ ok: boolean; error?: string; bindingsUpserted?: number }>;
+  // story #4107 — apply 응답의 준비 경고(warnings, BE 카탈로그 문장·재가공 0)를 다이얼로그
+  // 결과 영역에 표시하기 위한 필드. 경고가 있어도 적용 자체는 성공(BE 계약 그대로 — 막지
+  // 않음, ok/bindingsUpserted와 별개 축).
+  onSubmit: (args: { recipeId: string; projectId: string; roleMapping: Record<string, string> }) => Promise<{ ok: boolean; error?: string; bindingsUpserted?: number; warnings?: string[] }>;
 }
 
 interface ChannelConnectionOption {
@@ -66,6 +69,9 @@ export function MarketingRecipeApplyDialog({
   const [publisherConnectionId, setPublisherConnectionId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #4107 — apply-recipe-dialog.tsx(137~143행)와 동형. 경고가 있으면 다이얼로그는
+  // 닫지 않고(적용은 이미 성공) 결과 영역에 목록을 보여준다.
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const { options, loading: loadingMembers } = useRecipeMemberOptions(projectId || null);
   const agentOptions = options.filter((o) => o.type === 'agent');
@@ -93,6 +99,7 @@ export function MarketingRecipeApplyDialog({
     setPublisherConnectionId('');
     setChannelConnections([]);
     setError(null);
+    setWarnings([]);
     loadChannelConnections();
   }, [open, orgId, loadChannelConnections]);
 
@@ -135,6 +142,7 @@ export function MarketingRecipeApplyDialog({
     }
     setSubmitting(true);
     setError(null);
+    setWarnings([]);
     try {
       const roleMapping = expandRoleSlotBindings(recipe.stage_metadata, [creatorRoleLabel], {
         [creatorRoleLabel]: creatorAgentId,
@@ -164,6 +172,14 @@ export function MarketingRecipeApplyDialog({
       // 무관 — ok=true·bindings_upserted=0이 동시에 성립할 수 있다).
       if ((result.bindingsUpserted ?? 0) === 0) {
         setError(t('recipeApplyV2NoOpError'));
+        return;
+      }
+      // story #4107 — 경고가 있으면 다이얼로그를 닫지 않는다(apply-recipe-dialog.tsx와
+      // 동형). 적용은 이미 성공했으니(bindingsUpserted > 0 통과) 여기서 에러로 취급하지
+      // 않고, 사용자가 경고를 본 뒤 스스로 닫게 한다 — 조용한 실패 클래스(이 스토리의
+      // 근본 원인)를 막는 지점.
+      if ((result.warnings ?? []).length > 0) {
+        setWarnings(result.warnings ?? []);
         return;
       }
       onOpenChange(false);
@@ -284,6 +300,15 @@ export function MarketingRecipeApplyDialog({
           </p>
         </div>
 
+        {warnings.length > 0 ? (
+          <div className="space-y-1 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground" data-testid="marketing-apply-warnings">
+            <p className="font-medium text-warning-strong">{t('eventApplyWarningsHeading')}</p>
+            <ul className="list-disc space-y-0.5 pl-4">
+              {warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        ) : null}
+
         {error ? (
           <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
             {error}
@@ -306,7 +331,7 @@ export function MarketingRecipeApplyDialog({
  * 동일 엔드포인트·바디 shape, 신규 백엔드 없음). */
 export async function submitMarketingRecipeApply(
   { recipeId, projectId, roleMapping }: { recipeId: string; projectId: string; roleMapping: Record<string, string> },
-): Promise<{ ok: boolean; error?: string; bindingsUpserted?: number }> {
+): Promise<{ ok: boolean; error?: string; bindingsUpserted?: number; warnings?: string[] }> {
   const res = await fetchWithAuth(`/api/events/definitions/${recipeId}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -322,7 +347,9 @@ export async function submitMarketingRecipeApply(
   // 카디르 P1(#4426, 2026-09-19) — ApplyRecipeRoleBindingsResponse(events.py)는
   // bindings_upserted(int)를 실 필드로 낸다. ok=true는 요청 자체가 성공했다는 뜻일 뿐
   // 실제 배정 건수와 무관해 그대로 통과시키지 않고 호출부에 넘겨 판단하게 한다.
-  const data = await res.json().catch(() => ({})) as { ok?: boolean; bindings_upserted?: number; error?: { message?: string } };
+  const data = await res.json().catch(() => ({})) as {
+    ok?: boolean; bindings_upserted?: number; warnings?: string[]; error?: { message?: string };
+  };
   if (!data.ok) return { ok: false, error: data.error?.message };
-  return { ok: true, bindingsUpserted: data.bindings_upserted };
+  return { ok: true, bindingsUpserted: data.bindings_upserted, warnings: data.warnings };
 }
