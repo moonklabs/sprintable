@@ -3312,6 +3312,23 @@ async def apply_recipe_role_bindings(
         if not capability:
             continue
         kind = capability["kind"]
+        # story #4115(페드루 PO 確定, 2026-09-21 라이브 실사고 · CHANGES — 스킵 범위 확장) —
+        # target="channel_connection"·"generation_connector" stage 둘 다 이 루프가 묻는
+        # org_connectors 레지스트리(설정 스킬이 에이전트 손으로 등록하는 것)와 완전히 다른
+        # 준비 축이다 — 두 target의 실제 준비 여부는 이미 위(3251~3298행)의 apply 본문
+        # 검증(role_mapping 값이 이 org의 실존·active ChannelConnection/OrgGenerationConnector
+        # 인지, 422)이 판정했다. 그런데 이 루프는 target을 안 보고 capability만 있으면 전부
+        # 돌아, publish kind의 channel_connection-target stage도 find_org_connectors_by_kind
+        # (kind="publish")를 물어 레지스트리 미등록을 "미준비"로 오판했다(라이브 실사고: 채널
+        # 연결 10건·발행자=Instagram Sandbox 선택해도 «채널을 먼저 연결하세요» 거짓 경고 —
+        # 이미 연결된 채널을 "연결하라"는 모순 문장이었다). generation_connector-target은
+        # 첫 push 시점엔 kind="generate"가 이미 _AGENT_TOOL_CAPABILITY_KINDS에 있어 아래
+        # kind 스킵으로 "우연히" 커버됐지만, 그건 그 kind가 마침 겹쳤을 뿐(다른 kind로 선언된
+        # generation_connector-target stage — 예: connector_key 없이 kind="publish"류 —
+        # 는 여전히 오판 경로에 남아 있었다) — 두 target 다 명시로 같이 건너뛴다(우연한
+        # 커버가 아니라 "이 target들은 애초에 이 루프의 대상이 아니다"라는 규칙 자체로).
+        if _stage_target(stage) in ("channel_connection", "generation_connector"):
+            continue
         # story #4108(페드루 PO 確定, 2026-09-21 · design CHANGES) — 준비 경고 문장에
         # 내부 식별자를 그대로 싣지 않는다(#4104가 해요체·목적지 문장으로 바꿨지만 stage
         # 자체는 여전히 repr 토큰이었다). stage_metadata[stage].role은 사람말이 아니라
