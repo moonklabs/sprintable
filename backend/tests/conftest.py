@@ -808,3 +808,80 @@ async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
         yield client
 
     app.dependency_overrides.clear()
+
+
+async def _team_members_is_view(session) -> bool:
+    """story #4070 — `team_members`가 실 스키마의 VIEW(마이그 0088)인지 disposable
+    schema(`Base.metadata.create_all()`)의 평문 테이블인지는 스키마마다 갈린다.
+    `pg_class.relkind`('v'=view, 'r'=ordinary table)로 실측해 분기 — 파일마다 손으로
+    다르게 심어온 것(story #4083이 반대편 증상, #4070이 이쪽 증상을 겪음)이 이 클래스의
+    근본원인이라 «재는 코드 하나»로 합친다."""
+    from sqlalchemy import text
+
+    # relkind은 postgres "char" 유사타입 — asyncpg가 str이 아니라 bytes(b'v')로 돌려줘
+    # 드라이버에 따라 비교가 조용히 항상 False가 나는 함정이 있다(실측 확認, #4070).
+    # ::text 캐스트로 드라이버 무관하게 str을 강제.
+    relkind = (await session.execute(
+        text("SELECT relkind::text FROM pg_class WHERE relname = 'team_members'")
+    )).scalar_one_or_none()
+    return relkind == "v"
+
+
+async def seed_org_with_human_owner(session, *, slug: str, org_name: str = "Org"):
+    """story #4070 — org+project+human owner(OrgMember) 시드 + `team_members` 투영 보장을
+    스키마 형상 무관하게 한 자리에서 처리한다. `_seed_org_with_owner` 복붙 사본이 파일마다
+    schema shape(view vs table)을 다르게 가정해 산발적으로 깨진 것(test_4044 FK위반·#4083의
+    반대편 VIEW insert 실패)이 근본원인 — 이 헬퍼가 SSOT.
+
+    - disposable schema(`create_all()`, `team_members`=평문 테이블): test_4050 선례대로
+      `TeamMember(id=owner_member.id, type="human", ...)` 미러 행을 직접 심는다.
+    - 실 마이그 스키마(`team_members`=VIEW, human 분기는 `members ⋈ project_access`):
+      `Member(type="human", id=owner_member.id)` + `ProjectAccess(member_id=owner_member.id,
+      permission="granted", role="owner")`를 심어 뷰 투영 조건을 재현한다(#4083의 agent용
+      3-write 앵커와 동형 원리, human 축).
+
+    반환 = (org_id, project_id, owner_member_id) — 기존 `_seed_org_with_owner` 시그니처와
+    동일해 drop-in 교체 가능."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+
+    org = Organization(id=uuid.uuid4(), name=org_name, slug=slug)
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
+    session.add(owner_member)
+    await session.commit()
+
+    if await _team_members_is_view(session):
+        from app.models.member import Member
+        from app.models.project_access import ProjectAccess
+
+        # user_id=None — 기존 `_seed_org_with_owner` 관례(OrgMember.user_id=uuid.uuid4(),
+        # 매칭 User 행 없음)를 그대로 잇는다. OrgMember.user_id는 FK가 없어 무방하지만
+        # Member.user_id는 users.id FK라 그 임의값을 그대로 넣으면 위반 — 뷰의 human
+        # 분기는 JOIN/WHERE에 user_id를 쓰지 않으므로 None이어도 투영에 영향 없다.
+        session.add(Member(
+            id=owner_member.id, org_id=org.id, type="human", user_id=None,
+            name="org owner",
+        ))
+        await session.commit()
+        # org_member_id=owner_member.id — 0075 마이그 코멘트("project_access.member_id=
+        # org_member_id")가 서술하는 실 프로덕션 형상 그대로(휴먼은 두 id가 같다, agent는
+        # org_member 행이 아예 없어 NULL).
+        session.add(ProjectAccess(
+            id=uuid.uuid4(), project_id=project.id, org_member_id=owner_member.id,
+            member_id=owner_member.id, permission="granted", role="owner",
+        ))
+        await session.commit()
+    else:
+        from app.models.team import TeamMember
+
+        session.add(TeamMember(
+            id=owner_member.id, org_id=org.id, project_id=project.id, type="human",
+            name="org owner", is_active=True,
+        ))
+        await session.commit()
+
+    return org.id, project.id, owner_member.id

@@ -119,19 +119,12 @@ async def _seed_definition(session):
     return d
 
 
-async def _seed_org_with_owner(session, *, slug):
-    from app.models.organization import Organization
-    from app.models.project import OrgMember, Project
-
-    org = Organization(id=uuid.uuid4(), name="OrgRecipe4044", slug=slug)
-    session.add(org)
-    await session.commit()
-    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
-    session.add(project)
-    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
-    session.add(owner_member)
-    await session.commit()
-    return org.id, project.id, owner_member.id
+# story #4070 — 이 로컬 정의가 OrgMember만 심고 매칭 TeamMember 미러가 없어
+# dispatch_approval_request_cards가 org_owner를 참가자로 넣으려다 FK 위반을 내던 하네스
+# 갭(try/except로 삼켜져 assertion은 안 걸리지만 매번 트레이스백 노이즈) — 공용
+# conftest.seed_org_with_human_owner(스키마 형상 무관 SSOT, #4083의 반대편 증상과 함께
+# 통합)로 교체.
+from tests.conftest import seed_org_with_human_owner as _seed_org_with_owner
 
 
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
