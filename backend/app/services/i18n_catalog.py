@@ -231,14 +231,14 @@ _CATALOG: dict[str, dict[str, str]] = {
     # maybe_create_stage_gate — routing 직후·메시지 발송 전에 "지금 발행되는 그 stage"의
     # 게이트를 만든다, events.py:1845-1854).
     "events.stage_gate_already_open": {
-        "ko": "지금 사람 승인 게이트가 열려 있습니다(승인자 역할: {approver}) — 승인 알림"
-        "(preset.gate.verdict) 뒤 다음 단계를 발행하세요.",
+        "ko": "지금 사람 승인 게이트가 열려 있어요(승인자 역할: {approver}) — 승인 알림"
+        "(preset.gate.verdict) 뒤 다음 단계를 발행해 주세요.",
         "en": "A human approval gate is already open (approver role: {approver}) — publish "
         "the next stage after you receive the approval notification (preset.gate.verdict).",
     },
     "events.stage_gate_opens_on_publish": {
-        "ko": "이 발행을 하면 사람 승인 게이트가 열립니다 — 승인 알림(preset.gate.verdict) "
-        "뒤에 그다음 단계를 발행하세요.",
+        "ko": "이 발행을 하면 사람 승인 게이트가 열려요 — 승인 알림(preset.gate.verdict) "
+        "뒤에 그다음 단계를 발행해 주세요.",
         "en": "Publishing this will open a human approval gate — publish the following stage "
         "only after you receive the approval notification (preset.gate.verdict).",
     },
