@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -31,28 +31,70 @@ export interface MarketingRecipeApplyDialogProps {
   onOpenChange: (open: boolean) => void;
   creatorRoleLabel: string;
   projects: { id: string; name: string }[];
+  // story #4103(#4090 AC1 잔여, 페드루 PO 실측 2026-09-21) — 발행자 슬롯(채널 연결)
+  // 목록을 org 스코프로 불러오는 데 필요(apply-recipe-dialog.tsx와 동형).
+  orgId?: string;
   onSubmit: (args: { recipeId: string; projectId: string; roleMapping: Record<string, string> }) => Promise<{ ok: boolean; error?: string; bindingsUpserted?: number }>;
 }
 
+interface ChannelConnectionOption {
+  id: string;
+  channel: string;
+  account_label: string | null;
+  account_id: string;
+  status: string;
+}
+
 export function MarketingRecipeApplyDialog({
-  recipe, open, onOpenChange, creatorRoleLabel, projects, onSubmit,
+  recipe, open, onOpenChange, creatorRoleLabel, projects, orgId, onSubmit,
 }: MarketingRecipeApplyDialogProps) {
   const t = useTranslations('organization');
   const tc = useTranslations('common');
+  // story #4103 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — channelConnect ns의 기존
+  // channelLoadFailed 키 재사용(신규 문구 발명 0).
+  const tChannel = useTranslations('channelConnect');
   const [projectId, setProjectId] = useState('');
   const [creatorAgentId, setCreatorAgentId] = useState('');
+  // story #4103 — apply-recipe-dialog.tsx와 동형(org 스코프, project 무관, 다이얼로그
+  // open 시 1회).
+  const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
+  // story #4103 CHANGES-1 — #3521(유나 §22-2) agentsLoadFailed와 동형: fetch 실패/로딩
+  // 中을 "0건"과 구분한다(안 그러면 "없어요"+제출 차단이 네트워크 문제를 «진짜 0건»으로
+  // 오독시킨다). 3값 — 로딩 中(초기)·loaded(성공, 빈 배열일 수 있음)·failed(응답
+  // !ok 또는 네트워크 reject).
+  const [channelConnectionsStatus, setChannelConnectionsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const [publisherConnectionId, setPublisherConnectionId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { options, loading: loadingMembers } = useRecipeMemberOptions(projectId || null);
   const agentOptions = options.filter((o) => o.type === 'agent');
 
+  const loadChannelConnections = useCallback(() => {
+    if (!orgId) { setChannelConnectionsStatus('loaded'); return; }
+    setChannelConnectionsStatus('loading');
+    void (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
+        if (!res.ok) { setChannelConnectionsStatus('failed'); return; }
+        const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
+        setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+        setChannelConnectionsStatus('loaded');
+      } catch {
+        setChannelConnectionsStatus('failed');
+      }
+    })();
+  }, [orgId]);
+
   useEffect(() => {
     if (!open) return;
     setProjectId('');
     setCreatorAgentId('');
+    setPublisherConnectionId('');
+    setChannelConnections([]);
     setError(null);
-  }, [open]);
+    loadChannelConnections();
+  }, [open, orgId, loadChannelConnections]);
 
   // 페드루 QA 지적(#4424 qa:changes, 2026-09-19) — 프로젝트 전환 시 이전 선택이 그대로
   // 남아 있으면(agentOptions가 새 프로젝트 것으로 바뀌어도 creatorAgentId state는 그대로)
@@ -72,9 +114,18 @@ export function MarketingRecipeApplyDialog({
   // SSOT로 사람 낱말화한 뒤 dedupe(라벨 기준 — 서로 다른 raw 키가 같은 미지정 문구로
   // 떨어지는 경우까지 한 줄로 접는다).
   const gateApprovers = Array.from(new Set(gates.map((g) => gateApproverLabel(t, g.gate.approver))));
+  // story #4103 — capability.target(닫힌 어휘, #4090 0387)으로 발행자 대상 stage를
+  // 판별한다(role 라벨 문자열 매칭 아님 — RecipeRoleMappingFields·apply-recipe-dialog.tsx
+  // 와 같은 SSOT 축). 보통 1개(published)지만 정의가 여럿을 선언할 가능성을 배제 안 한다.
+  const publisherStages = Object.entries(recipe.stage_metadata)
+    .filter(([, meta]) => meta?.capability?.target === 'channel_connection')
+    .map(([stage]) => stage);
+  const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
+  const publisherRequired = publisherStages.length > 0;
 
   const submit = async () => {
     if (!projectId || !creatorAgentId) return;
+    if (publisherRequired && !publisherConnectionId) return;
     // 페드루 QA 지적(#4424 qa:changes) — 위 useEffect가 전환 시 선택을 비우지만, 그
     // 방어 하나에만 기대지 않고 제출 시점에도 소속(멤버십)을 다시 확認한다(fetch race 등
     // 어떤 경로로든 project와 어긋난 agentId가 실리지 않게 하는 마지막 문).
@@ -88,6 +139,12 @@ export function MarketingRecipeApplyDialog({
       const roleMapping = expandRoleSlotBindings(recipe.stage_metadata, [creatorRoleLabel], {
         [creatorRoleLabel]: creatorAgentId,
       });
+      // story #4103 — 발행자(채널 연결)는 role 라벨 그룹 확장 축이 아니라 capability.
+      // target=channel_connection stage에 직접 꽂는다(apply-recipe-dialog.tsx의
+      // RecipeRoleMappingFields onChange와 동형 계약 — stage→값 그대로).
+      if (publisherRequired) {
+        for (const stage of publisherStages) roleMapping[stage] = publisherConnectionId;
+      }
       // 카디르 P1 재현(#4426, 2026-09-19) — creatorRoleLabel이 이 레시피의 실제
       // stage_metadata.role 키와 하나도 안 맞으면(예: 표시라벨 vs seed 실제 role 키 불일치
       // 재발) expandRoleSlotBindings가 빈 매핑을 낸다 — 그 상태로 서버까지 보내지 않고
@@ -186,16 +243,39 @@ export function MarketingRecipeApplyDialog({
             </select>
           </div>
 
-          {/* 발행자 — 이 카드 범위 밖(채널 커넥션, 미르코와 인터페이스 확認 필요) */}
-          <div className="flex items-center gap-3 rounded-md border border-dashed border-input p-3 opacity-70" data-testid="slot-publisher">
+          {/* 발행자 — story #4103(#4090 AC1 잔여) — org 채널 연결(active) 실 배선. */}
+          <div className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-publisher">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 {t('recipeApplyV2PublisherRole')} <Badge variant="secondary">{t('recipeApplyV2PublisherBadge')}</Badge>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2PublisherDesc')}</p>
+              {/* story #4103 CHANGES-1(페드루 PO 리뷰) — 3값: 로딩 中엔 아무 문구도
+                  안 낸다(성공/실패를 아직 모르는데 "없어요"부터 보이면 오독). failed는
+                  네트워크/서버 문제(«0건»과 다른 사실) — agentsLoadFailed(#3521)와
+                  동형으로 재시도 버튼. loaded인데 0건일 때만 진짜 empty 문구. */}
+              {publisherRequired && channelConnectionsStatus === 'failed' ? (
+                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-load-error">
+                  <span>{tChannel('channelLoadFailed')}</span>
+                  <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
+                </div>
+              ) : publisherRequired && channelConnectionsStatus === 'loaded' && activeChannelConnections.length === 0 ? (
+                <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-empty">
+                  {t('eventApplyChannelsEmpty')}
+                </p>
+              ) : null}
             </div>
-            <select className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-muted-foreground" disabled>
-              <option>{t('recipeApplyV2ChannelPlaceholder')}</option>
+            <select
+              className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              value={publisherConnectionId}
+              onChange={(e) => setPublisherConnectionId(e.target.value)}
+              disabled={!publisherRequired || channelConnectionsStatus !== 'loaded'}
+              data-testid="publisher-connection-select"
+            >
+              <option value="">{t('eventApplyChannelPlaceholder')}</option>
+              {activeChannelConnections.map((c) => (
+                <option key={c.id} value={c.id}>{c.account_label || `${c.channel}(${c.account_id})`}</option>
+              ))}
             </select>
           </div>
 
@@ -212,7 +292,7 @@ export function MarketingRecipeApplyDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>{tc('cancel')}</Button>
-          <Button onClick={() => void submit()} disabled={submitting || !projectId || !creatorAgentId}>
+          <Button onClick={() => void submit()} disabled={submitting || !projectId || !creatorAgentId || (publisherRequired && !publisherConnectionId)}>
             {submitting ? t('eventApplySubmitting') : t('eventApplySubmit')}
           </Button>
         </DialogFooter>

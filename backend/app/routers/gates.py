@@ -465,6 +465,14 @@ async def _enrich_linked_channel_draft(
     facts = gate.neutral_facts or {}
     if not facts.get("triggered_by_event") or not facts.get("stage"):
         return
+    # story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    # drafts는 «scoped 승인 済·미발행» 초안만 담는다(#4090 자동발행 대상 정의) — 이
+    # 게이트가 이미 승인(또는 반려/보류 등 비-pending)이면 그 정의상 이 쿼리는 항상
+    # 빈 결과만 낸다(발행이 끝났으면 초안은 already_published로 걸러지고, 반려/보류면
+    # 애초에 자동발행 대상이 아니다). 쿼리 자체를 skip — FE는 gate.status로 판별해
+    # publish_outcome 라벨(또는 무문장)로 갈아 끼운다(gate-evidence.tsx).
+    if gate.status != "pending":
+        return
 
     from app.services.channel_posts import find_ready_recipe_channel_drafts
 

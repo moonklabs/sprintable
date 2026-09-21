@@ -234,34 +234,26 @@ export function deriveCrossCheckTextVars(vars: Map<string, string>): string[] {
   return [...new Set([...statusFamilies, ...CROSS_CHECK_EXTRA_TEXT_VARS])].sort();
 }
 
-/** story #4055 AC2(전수벤치) — CROSS_CHECK_TEXT_VARS를 처음 켠 실측(2026-09-18)에서 나온
- * 미달 10건 전부. ⚠️#4048의 흐름 밴드 컴포넌트 수정(text-brand→text-foreground)은 이 표의
- * light/brand/info 행을 안 지운다 — 그건 "이 조합을 쓰는 자리 1건을 없앤" 것이지 --brand·
- * --info-tint 토큰 값 자체를 안 바꿔서, 토큰 정의 수준 조합은 여전히 수학적으로 미달이다
- * (아무도 안 쓴다는 것과 조합이 안전해졌다는 것은 다른 말 — 이 표가 재는 건 후자).
- * 이 스토리가 새로 만든 빚이 아니라 발견만 한 빚이라 — 다 고치면 벌룬(PO 지시 그대로),
- * 그렇다고 게이트를 그냥 켜면 이 커밋 자체가 CI를 깬다. grandfather로 얼려 "원래 그런 것"
- * 으로 안 묻히게 로그엔 계속 찍되 FAIL은 «이 목록 밖 신규»만. PO 판단(브랜드를 이 자리들에
- * 실제로 쓸지·색을 바꿀지)이 서면 여기서 항목을 지우고 실 코드/토큰을 고치는 게 이 목록의
- * 유일한 정상 소멸 경로.
+/** story #4102(#4100 유나 定 A안, PO 결정 2026-09-21 10:45Z) — 이 21건은 전부 «상태색·
+ * 브랜드 색을 다른 계열 tint/bg 위 텍스트로» 쓰는 **이론적 조합**이었다(#4100 청산 doc,
+ * artifact 5329c727 v1 · PO 코드 대조 확認 — badge.tsx 28~46·baseline json 실측): 실 UI
+ * 렌더는 0건(badge/alert 모든 tint variant가 text-foreground만 쓴다, #2420 v3 규칙) ·
+ * same-family/중립 bg 위 검사는 `computeFamilyContrasts`가 그대로 게이트한다.
+ *
+ * 예전(story #4055/#4094)엔 이 표가 실 사용처 유무와 무관하게 «토큰 값 자체의 수학적
+ * 미달»을 grandfather로 얼려 CI를 지켰다 — 그런데 토큰 값 조정은 PO가 기각했다(자기
+ * 계열/중립 위 실사용 값이 옳고, 타 계열 통과시키려 낮추면 실사용을 훼손한다). 진짜 방어는
+ * «이 조합이 실제로 쓰이는가»를 보는 usage 층(verify-cross-element-tint-text.ts·
+ * verify-no-new-tint-color-text.ts, #4102 AC1에서 brand·primary 텍스트 축 추가·양성대조
+ * RED 확認)이어야 한다는 것이 이 스토리의 결론 — token-math 교차 열거는 그 방어를
+ * usage 층에 위임하고 여기서는 제거한다(아래 main()의 [story #4055/#4094 AC1] 섹션이
+ * 더 이상 실패시키지 않고 참고 로그만 남기는 이유).
+ *
+ * baseline은 이제 항상 빈 집합이어야 한다(«정확히 0» — 아래 파일의 pin 테스트) — 누가
+ * 다시 항목을 채우면 그 자체로 "usage 층 위임" 결정을 몰래 뒤집는 것이므로, 채워 넣는
+ * 대신 원인(같은 계열/중립 bg 검사가 실제로 빠졌는지)부터 usage 가드 쪽에서 고친다.
  */
-const GRANDFATHER_BASELINE = new Set([
-  'light|brand|destructive|tint', 'light|brand|destructive|bg',
-  'light|brand|info|tint', 'light|brand|info|bg',
-  'light|brand|primary|tint',
-  'light|brand|success|tint', 'light|brand|success|bg',
-  'light|brand|warning|tint', 'light|brand|warning|bg',
-  'dark|brand|primary|tint',
-  // story #4094 AC1 — deriveCrossCheckTextVars가 상태색 자신(destructive·info·success·
-  // warning·primary)을 처음 이 교차게이트에 편입하며 실측으로 드러난 신규 미달 11건(전부
-  // 4.24~4.46, AA 문턱 바로 아래 — 별도 카드 밖 발견만, 이 스토리에서 고치지 않는다).
-  'light|destructive|info|tint', 'light|destructive|info|bg',
-  'light|success|info|tint', 'light|success|info|bg',
-  'light|warning|destructive|tint', 'light|warning|destructive|bg',
-  'light|warning|info|tint', 'light|warning|info|bg',
-  'light|warning|success|tint', 'light|warning|success|bg',
-  'dark|destructive|primary|tint',
-]);
+export const GRANDFATHER_BASELINE = new Set<string>([]);
 
 /** story #4094 AC3 — CROSS_CHECK_EXTRA_TEXT_VARS(brand)에 붙던 GRANDFATHER_BASELINE과
  * 같은 계약이지만 이 스토리가 새로 켠 두 게이트(AC1의 상태색-자신 교차·AC2의 비텍스트)가
@@ -269,10 +261,6 @@ const GRANDFATHER_BASELINE = new Set([
  * 값은 실 globals.css를 이 스토리가 처음 스캔한 실측 그대로(추측 0) — 아래 main()의 로그가
  * 그 스캔 결과를 그대로 찍는다. */
 const NONTEXT_GRANDFATHER_BASELINE = new Set<string>([]);
-
-function crossCheckKey(r: { theme: string; textVar: string; family: string; kind: string }): string {
-  return `${r.theme}|${r.textVar}|${r.family}|${r.kind}`;
-}
 
 export interface CrossCheckTextResult {
   theme: 'light' | 'dark';
@@ -449,28 +437,21 @@ function main(): number {
     console.log(`  ${status === 'OK' ? '✅' : '❌'} ${r.theme}/${r.family}: foreground on bg = ${r.foregroundOnBackgroundRatio.toFixed(2)}${familyColorNote}`);
   }
 
+  // story #4102 — 강조/상태색 × 다른 계열 tint/bg의 «교차 열거를 게이트로 쓰는» 것을
+  // 제거했다(위 GRANDFATHER_BASELINE docstring 참고 — 실 UI 렌더 0건, 진짜 방어는
+  // usage 층 verify-cross-element-tint-text.ts·verify-no-new-tint-color-text.ts로
+  // 위임). computeCrossCheckContrasts 자체는 여전히 참고 수치로 로그만 남긴다(AC4의
+  // computeCrossFamilyBgReference 섹션과 동일하게 — failed에 절대 반영하지 않는다).
   const crossCheckTextVarsPreview = deriveCrossCheckTextVars(extractCssVarBlock(css, ':root').vars);
-  console.log(`\n[story #4055/#4094 AC1] 강조색·상태색 × 전 tint/bg 계열 교차 게이트 — 대상 ${crossCheckTextVarsPreview.length}개(${crossCheckTextVarsPreview.join('·')}) · brand-grandfather(발견만, 안 막음) ${GRANDFATHER_BASELINE.size}건`);
+  console.log(`\n[story #4102] 강조색·상태색 × 전 tint/bg 계열 교차 — 게이트 제거(usage 층 위임), 참고 전용 · 대상 ${crossCheckTextVarsPreview.length}개(${crossCheckTextVarsPreview.join('·')}) · GRANDFATHER_BASELINE = 정확히 ${GRANDFATHER_BASELINE.size}건(usage 층 위임 후 항상 0)`);
   const crossCheck = computeCrossCheckContrasts(css);
-  const grandfatherSeen = new Set<string>();
-  let newCrossCheckFailures = 0;
+  let crossCheckOk = 0;
   for (const r of crossCheck) {
-    const key = crossCheckKey(r);
     const isFail = r.ratio < AA_THRESHOLD;
-    const isGrandfathered = isFail && GRANDFATHER_BASELINE.has(key);
-    if (isGrandfathered) grandfatherSeen.add(key);
-    if (isFail && !isGrandfathered) { failed += 1; newCrossCheckFailures += 1; }
-    const label = isGrandfathered ? 'GRANDFATHER' : isFail ? 'FAIL' : 'OK';
-    const icon = label === 'OK' ? '✅' : label === 'GRANDFATHER' ? '📋' : '❌';
-    console.log(`  ${icon} ${r.theme}/text-${r.textVar} on ${r.family}-${r.kind} = ${r.ratio.toFixed(2)}${label === 'GRANDFATHER' ? ' (grandfather)' : ''}`);
+    if (!isFail) crossCheckOk += 1;
+    console.log(`  ${isFail ? 'ℹ️' : '✅'} ${r.theme}/text-${r.textVar} on ${r.family}-${r.kind} = ${r.ratio.toFixed(2)}${isFail ? ' (참고 — 게이트 대상 아님, usage 층에서 실사용 여부를 본다)' : ''}`);
   }
-  const staleGrandfather = [...GRANDFATHER_BASELINE].filter((k) => !grandfatherSeen.has(k));
-  if (staleGrandfather.length > 0) {
-    console.log(`  ℹ️ grandfather로 등재됐으나 이번 스캔에서 안 걸린(죽은 항목 후보, 목록에서 지워도 됨): ${staleGrandfather.join(', ')}`);
-  }
-  if (newCrossCheckFailures > 0) {
-    console.error(`  ❌ grandfather 밖 신규 교차 미달 ${newCrossCheckFailures}건 — 이 스토리 범위(발견만) 밖이니 baseline에 추가하지 말고 원인(새 조합을 실제로 썼는지)부터 본다.`);
-  }
+  console.log(`  참고: 전 ${crossCheck.length}조합 중 OK(≥${AA_THRESHOLD}) ${crossCheckOk}건 — 나머지는 이론적 정의-미달이나 실사용 0(usage 가드가 그 축을 지킨다).`);
 
   console.log(`\n[story #4094 AC2] 비텍스트(border·ring) × 전 tint/bg 계열 교차 게이트(3:1) · grandfather(발견만, 안 막음) ${NONTEXT_GRANDFATHER_BASELINE.size}건`);
   const nonTextCrossCheck = computeNonTextCrossCheckContrasts(css);

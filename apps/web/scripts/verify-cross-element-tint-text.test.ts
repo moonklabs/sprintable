@@ -44,6 +44,20 @@ describe('verify-cross-element-tint-text (story #2590 A — 교차-요소 정적
     expect(count(`<span className="bg-info-tint text-xs text-info">x</span>`)).toBe(0);
   });
 
+  // ── story #4102(#4100 유나 定 A안) — brand·primary 텍스트 축(#4048 text-brand on
+  // bg-info-tint 실사고 재현). 조상 pale-bg는 여전히 기존 4계열, 새로 잡는 건 그 위에
+  // 놓이는 글자색이 brand/primary인 자리(cross-family — ancestor.some(strong)이 계열
+  // 무관이라 자동으로 켜짐). ──
+  it('flags text-brand small text under a strong-tint ancestor of another family (#4048형 양성대조)', () => {
+    expect(count(`<div className="bg-info-tint"><span className="text-xs text-brand">라벨</span></div>`)).toBe(1);
+  });
+  it('flags text-primary small text under a strong-tint ancestor of another family', () => {
+    expect(count(`<div className="bg-success-tint"><span className="text-xs text-primary">라벨</span></div>`)).toBe(1);
+  });
+  it('does NOT flag text-foreground under the same ancestor (음성대조)', () => {
+    expect(count(`<div className="bg-info-tint"><span className="text-xs text-foreground">라벨</span></div>`)).toBe(0);
+  });
+
   // ── auditable suppress — 이유 있으면 통과, 이유 없으면 여전히 실패 ──
   it('suppresses with a reason (// tint-guard-ok: <reason>)', () => {
     const jsx = `<div className="bg-warning-tint">\n  {/* tint-guard-ok: 색이 데이터·PO 승인 #123 */}\n  <p className="text-xs text-warning">경고</p>\n</div>`;

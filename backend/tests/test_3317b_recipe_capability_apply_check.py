@@ -391,3 +391,37 @@ async def test_apply_kind_only_one_matching_configured_connector_yields_no_warni
             assert resp.warnings == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_agent_tool_hint_kind_yields_no_warning_even_with_zero_connectors():
+    """story #4104(페드루 PO 라이브 실측, 2026-09-21) — attach_video(#4088 2/2 자기설명
+    멘션 힌트, 에이전트가 자기 도구로 처리)는 org 커넥터로 채워지는 kind가 아니다.
+    커넥터를 org에 하나도 등록 안 한 채로 apply해도(위 test_apply_kind_only_no_matching_
+    connector_warns와 대조적으로) 경고 0건이어야 한다 — kind가 다르면 판정도 달라야
+    한다는 것을 같은 «커넥터 0건» 조건으로 대조한다."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="b4104a")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            agent_id = await _seed_agent(s, org_id, project_id, name="worker")
+            # 커넥터 0건 등록 — attach_video는 애초에 커넥터를 안 보므로 무관해야 한다.
+
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.b4104a.recipe_cap",
+                stage_metadata={
+                    "editing": {"role": "Creator", "action": "편집", "capability": {"kind": "attach_video"}},
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"editing": str(agent_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert resp.warnings == []
+    finally:
+        await engine.dispose()

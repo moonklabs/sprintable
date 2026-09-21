@@ -287,6 +287,61 @@ async def test_ac1a_ready_draft_populates_linked_channel_draft():
 
 
 @pytest.mark.anyio
+async def test_ac1g_approved_gate_skips_enrich_leaves_both_fields_default():
+    """story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
+    drafts는 「scoped 승인 済·미발행」 초안만 ready에 담는다(#4090 자동발행 대상
+    정의). 이 unscoped 게이트(ⓓ) 자체가 이미 approved면 그 정의상 이 쿼리는 항상
+    빈 결과만 내므로(발행이 끝난 초안은 already_published로 걸러지고, 승인이 끝난
+    게이트가 다시 「미리보기」 대상일 이유가 없다) 쿼리 자체를 skip한다 — test_ac1a와
+    똑같이 scoped 게이트를 approved로 만들어 두고도(ready가 있을 «착시» 조건) 이번엔
+    unscoped 게이트(ⓓ) 자체를 approved로 만든 뒤 조회 — linked_channel_draft/_pending
+    둘 다 기본값(null/False) 그대로여야 한다(스킵 확認 — 값이 채워지면 스킵이 아니라
+    쿼리가 여전히 돌았다는 뜻)."""
+    from app.models.gate import Gate, set_gate_status
+    from app.routers.gates import to_gate_response
+    from datetime import datetime, timezone
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id = await _seed_org_with_owner_shim(s, slug="4105a")
+            await _seed_default_role(s, org_id)
+            creator_id = await _seed_agent(s, org_id, project_id, name="댄")
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+            connection_id = await _seed_sandbox_connection(s, org_id, account_label="공식 계정")
+            await _seed_recipe_channel_binding(s, org_id, connection_id)
+
+            gate_d_id = await _walk_to_pending_approval_with_abc_approved(
+                s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
+            )
+            draft_id, scoped_gate = await _submit_draft(
+                s, org_id=org_id, story_id=story_id, connection_id=connection_id, creator_id=creator_id,
+                text="AC4105 이미 승인된 게이트",
+            )
+            set_gate_status(scoped_gate, "approved", now=datetime.now(timezone.utc))
+            scoped_gate.requires_human = False
+            scoped_gate.resolver_id = owner_member_id
+
+            gate_d = await s.get(Gate, gate_d_id)
+            set_gate_status(gate_d, "approved", now=datetime.now(timezone.utc))
+            gate_d.requires_human = False
+            gate_d.resolver_id = owner_member_id
+            gate_d.publish_outcome = "published"
+            await s.commit()
+
+        async with Session() as s:
+            gate_d = await s.get(Gate, gate_d_id)
+            assert gate_d.status == "approved"
+            resp = await to_gate_response(s, org_id, gate_d)
+            assert resp.linked_channel_draft is None
+            assert resp.linked_channel_draft_pending is False
+            assert resp.publish_outcome == "published"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_ac1b_no_draft_leaves_field_null():
     from app.models.gate import Gate
     from app.routers.gates import to_gate_response
