@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -31,6 +31,9 @@ export function ApplyRecipeDialog({
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
   const { orgId } = useDashboardContext();
+  // story #4106(페드루 PO 실측 2026-09-21, PR #4478/#4479 리뷰 계기) — channelConnect ns의
+  // 기존 channelLoadFailed 키 재사용(#4103과 동형, 신규 문구 발명 0).
+  const tChannel = useTranslations('channelConnect');
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId] = useState('');
   const [agents, setAgents] = useState<AgentOption[]>([]);
@@ -39,6 +42,11 @@ export function ApplyRecipeDialog({
   const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
   // story #4101 — 같은 org 스코프 원칙(project 무관, 다이얼로그 open 시 1회).
   const [generationConnectors, setGenerationConnectors] = useState<GenerationConnectorOption[]>([]);
+  // story #4106 — #3521 agentsLoadFailed와 동형 축을 채널·연산 두 leg에도: fetch 실패/
+  // 로딩 中을 "0건"과 구분한다(안 그러면 «없어요»+플래시가 네트워크 문제를 진짜 0건으로
+  // 오독시킨다). 3값 — 로딩 中(초기)·loaded(성공, 빈 배열일 수 있음)·failed.
+  const [channelConnectionsStatus, setChannelConnectionsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const [generationConnectorsStatus, setGenerationConnectorsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [roleMapping, setRoleMapping] = useState<Record<string, string>>({});
   const [loadingProjectData, setLoadingProjectData] = useState(false);
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — memberRes leg 실패 여부. agents=[]가
@@ -47,6 +55,43 @@ export function ApplyRecipeDialog({
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+
+  const loadChannelConnections = useCallback(() => {
+    if (!orgId) { setChannelConnectionsStatus('loaded'); return; }
+    setChannelConnectionsStatus('loading');
+    void (async () => {
+      try {
+        // story #4090 — org 스코프 목록이라 project 선택과 무관하게 1회만(휴먼용 목록,
+        // organization/channels 화면과 동일 BFF — agent-visible 별도 축은 이 화면이
+        // 아니다).
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
+        if (!res.ok) { setChannelConnectionsStatus('failed'); return; }
+        const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
+        setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+        setChannelConnectionsStatus('loaded');
+      } catch {
+        setChannelConnectionsStatus('failed');
+      }
+    })();
+  }, [orgId]);
+
+  const loadGenerationConnectors = useCallback(() => {
+    if (!orgId) { setGenerationConnectorsStatus('loaded'); return; }
+    setGenerationConnectorsStatus('loading');
+    void (async () => {
+      try {
+        // story #4101 — active_only=true(revoked는 애초에 선택지 밖, RecipeRoleMappingFields
+        // 의 status 필터와 이중 방어 — BE가 이미 걸러 주면 FE 필터는 no-op).
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=true`);
+        if (!res.ok) { setGenerationConnectorsStatus('failed'); return; }
+        const json = await res.json() as { data?: { connectors?: GenerationConnectorOption[] } };
+        setGenerationConnectors(json.data?.connectors ?? []);
+        setGenerationConnectorsStatus('loaded');
+      } catch {
+        setGenerationConnectorsStatus('failed');
+      }
+    })();
+  }, [orgId]);
 
   useEffect(() => {
     if (!open) return;
@@ -63,25 +108,9 @@ export function ApplyRecipeDialog({
       const json = await res.json() as { data?: { id: string; name: string }[] };
       setProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
     })();
-    if (!orgId) return;
-    void (async () => {
-      // story #4090 — org 스코프 목록이라 project 선택과 무관하게 1회만(휴먼용 목록,
-      // organization/channels 화면과 동일 BFF — agent-visible 별도 축은 이 화면이
-      // 아니다).
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
-      if (!res.ok) return;
-      const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
-      setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
-    })();
-    void (async () => {
-      // story #4101 — active_only=true(revoked는 애초에 선택지 밖, RecipeRoleMappingFields
-      // 의 status 필터와 이중 방어 — BE가 이미 걸러 주면 FE 필터는 no-op).
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=true`);
-      if (!res.ok) return;
-      const json = await res.json() as { data?: { connectors?: GenerationConnectorOption[] } };
-      setGenerationConnectors(json.data?.connectors ?? []);
-    })();
-  }, [open, orgId]);
+    loadChannelConnections();
+    loadGenerationConnectors();
+  }, [open, orgId, loadChannelConnections, loadGenerationConnectors]);
 
   const loadProjectData = useCallback(() => {
     if (!projectId || !target) { setAgents([]); setRoleMapping({}); setAgentsLoadFailed(false); return; }
@@ -208,10 +237,26 @@ export function ApplyRecipeDialog({
             ) : agents.length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-agents-empty">{t('eventApplyAgentsEmpty')}</p>
             ) : null}
-            {hasChannelStage && channelConnections.filter((c) => c.status === 'active').length === 0 ? (
+            {/* story #4106(페드루 PO 실측, PR #4478/#4479 리뷰 계기) — hasChannelStage/
+                hasGenerationStage는 무변(0건이면 섹션 자체를 숨긴다는 #4075/#4090 원칙
+                그대로), 그 안에서 fetch 실패/로딩 中을 "0건"과 갈랐을 뿐 — #3521
+                agentsLoadFailed와 동형 3값. 로딩 中엔 문장 0(성공/실패를 아직 모르는데
+                먼저 보이면 오독), failed면 실패 문구+재시도, loaded인데 0건일 때만
+                기존 empty 문구. */}
+            {hasChannelStage && channelConnectionsStatus === 'failed' ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-channels-load-error">
+                <span>{tChannel('channelLoadFailed')}</span>
+                <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
+              </div>
+            ) : hasChannelStage && channelConnectionsStatus === 'loaded' && channelConnections.filter((c) => c.status === 'active').length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-channels-empty">{t('eventApplyChannelsEmpty')}</p>
             ) : null}
-            {hasGenerationStage && generationConnectors.filter((c) => c.status === 'active').length === 0 ? (
+            {hasGenerationStage && generationConnectorsStatus === 'failed' ? (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-generation-connectors-load-error">
+                <span>{t('eventApplyGenerationConnectorsLoadError')}</span>
+                <Button variant="outline" size="sm" onClick={loadGenerationConnectors}>{t('eventApplyAgentsRetry')}</Button>
+              </div>
+            ) : hasGenerationStage && generationConnectorsStatus === 'loaded' && generationConnectors.filter((c) => c.status === 'active').length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-generation-connectors-empty">{t('eventApplyGenerationConnectorsEmpty')}</p>
             ) : null}
             <RecipeRoleMappingFields
