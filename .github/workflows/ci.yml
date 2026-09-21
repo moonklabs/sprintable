@@ -598,13 +598,30 @@ jobs:
             # 공통 조상이 그 밖에 있을 때 merge-base 계산이 실패할 수 있다).
             git fetch origin "$PR_BASE_REF" 2>&1 | tail -3 || true
             DEVELOP_SHA="$(git rev-parse FETCH_HEAD 2>/dev/null || true)"
-            git fetch origin "$PR_HEAD_SHA" --depth=1 2>&1 | tail -3 || true
+            # story #4113 CHANGES(페드루 PO 리뷰, 2026-09-21) — PR_HEAD_SHA를 다시
+            # --depth=1로 fetch했더니(이 job은 `fetch-depth: 0`이라 head와 그 조상이
+            # 체크아웃 시점에 이미 로컬에 있는데도) 그 커밋을 새 shallow 경계로
+            # `.git/shallow`에 기록해 이후 `git merge-base`가 그 지점에서 조상 탐색을
+            # 못 했다 — 실측(러너 CI run 35614578201): 이 fetch 이후 merge-base가
+            # 매번 빈 문자열, "merge-base 계산 실패"로 스킵(로컬 full-clone 재현에선
+            # 이미 동일 커밋이 있어 이 손상이 재현 안 됨 — 검사 장소가 값이었다). 이
+            # 재-fetch를 아예 없앤다 — fetch-depth: 0 체크아웃이 이미 가진 것.
             if [ -n "$DEVELOP_SHA" ]; then
               MERGE_BASE_SHA="$(git merge-base "$DEVELOP_SHA" "$PR_HEAD_SHA" 2>/dev/null || true)"
               if [ -n "$MERGE_BASE_SHA" ]; then
                 COMPARE_REF="$MERGE_BASE_SHA"
                 COMPARE_LABEL="merge-base(develop@$DEVELOP_SHA, head@$PR_HEAD_SHA)=$MERGE_BASE_SHA"
               fi
+            fi
+            # story #4113 CHANGES(페드루 PO 리뷰) — PR 문맥인데 비교 기준을 못 세우면
+            # (develop fetch 실패·merge-base 계산 실패 등) skip이 아니라 실패다. "기준이
+            # 없어 그냥 통과"는 오탐(#4113 본 처방 대상)을 고치려다 미탐(가드 무력화)
+            # 으로 바뀌는 것 — 실사고(이 PR 자신의 run 35614578201)가 정확히 이 경로를
+            # 탔다. push 문맥(아래 elif)만 "비교 기준 미상"을 skip으로 허용한다(develop/
+            # main 직push는 리뷰 게이트가 아니라 사고 반경이 다르다).
+            if [ -z "$COMPARE_REF" ]; then
+              echo "::error::PR 문맥인데 비교 기준(merge-base)을 못 세웠습니다 — develop=$DEVELOP_SHA head=$PR_HEAD_SHA. fail-closed로 종료합니다(스킵 아님)."
+              exit 1
             fi
           elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
             git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
@@ -615,7 +632,7 @@ jobs:
             echo "comparing against ($COMPARE_LABEL) vs PR head ($PR_HEAD_SHA)"
             python3 scripts/verify_no_new_korean_user_strings.py --check-growth /tmp/base_baseline.txt scripts/korean_user_strings_baseline.txt
           elif [ -z "$COMPARE_REF" ]; then
-            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push, 또는 merge-base 계산 실패)"
+            echo "baseline growth check skipped: no comparison base (push 문맥 + before 미상 — 예: 새 브랜치 최초 push. PR 문맥이면 위에서 이미 exit 1 했어야 하고 여기 도달하지 않는다)"
           else
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 korean_user_strings_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #3779 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
