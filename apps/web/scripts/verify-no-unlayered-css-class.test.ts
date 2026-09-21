@@ -6,7 +6,7 @@ import { findUnlayeredClassRules, ALLOWLIST } from './verify-no-unlayered-css-cl
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 
-describe('findUnlayeredClassRules (story #4125 — Cascade Layers 회귀가드)', () => {
+describe('findUnlayeredClassRules (story #4125/#4127 — Cascade Layers 회귀가드, 범위: 클래스/속성 선택자를 품은 depth-0 선택자 전부)', () => {
   it('does NOT flag a class rule inside @layer components', () => {
     const css = `@layer components {\n.foo {\n  position: relative;\n}\n}\n`;
     expect(findUnlayeredClassRules(css)).toEqual([]);
@@ -22,14 +22,29 @@ describe('findUnlayeredClassRules (story #4125 — Cascade Layers 회귀가드)'
     expect(findUnlayeredClassRules(css)).toEqual([{ line: 1, selector: '.x::before' }]);
   });
 
-  it('does NOT flag a compound/descendant selector (out of scope — ㉠ declared limitation)', () => {
+  it('⭐flags a compound/descendant selector at the top level (story #4127 — 범위 확장, 이전엔 스코프 밖이었음)', () => {
     const css = `.a .b {\n  position: relative;\n}\n`;
+    expect(findUnlayeredClassRules(css)).toEqual([{ line: 1, selector: '.a .b' }]);
+  });
+
+  it('⭐flags an attribute selector at the top level (story #4127 — 범위 확장)', () => {
+    const css = `[data-x] {\n  position: relative;\n}\n`;
+    expect(findUnlayeredClassRules(css)).toEqual([{ line: 1, selector: '[data-x]' }]);
+  });
+
+  it('flags a compound attribute+class descendant selector at the top level', () => {
+    const css = `[data-type="foo"] .bar {\n  position: relative;\n}\n`;
+    expect(findUnlayeredClassRules(css)).toEqual([{ line: 1, selector: '[data-type="foo"] .bar' }]);
+  });
+
+  it('does NOT flag a pure pseudo-class selector with no class/attribute component (e.g. :root)', () => {
+    const css = `:root {\n  --foo: 1;\n}\n`;
     expect(findUnlayeredClassRules(css)).toEqual([]);
   });
 
-  it('does NOT flag an attribute selector', () => {
-    const css = `[data-x] {\n  position: relative;\n}\n`;
-    expect(findUnlayeredClassRules(css)).toEqual([]);
+  it('normalizes a comma-separated selector that spans multiple physical lines into a single-space-joined string (story #4127 실측 — .tiptap-content ul,\\n.tiptap-content ol 꼴)', () => {
+    const css = `.a,\n.b {\n  color: red;\n}\n`;
+    expect(findUnlayeredClassRules(css)).toEqual([{ line: 2, selector: '.a, .b' }]);
   });
 
   it('does NOT flag a class rule inside @media', () => {
@@ -55,21 +70,49 @@ describe('findUnlayeredClassRules (story #4125 — Cascade Layers 회귀가드)'
   });
 });
 
-describe('ALLOWLIST — story #4125 정본(2건, 각 이유 실측 확認)', () => {
-  it('contains exactly .dark and .dashboard-shell-root (수 자체가 회귀가드 — 조용히 늘면 걸림)', () => {
-    expect([...ALLOWLIST].sort()).toEqual(['.dark', '.dashboard-shell-root']);
+describe('ALLOWLIST — story #4125/#4127 정본(47종 고유 selector — 48건 중 `.ProseMirror .scrollbar-visible pre`가 별개 규칙 2개로 같은 문자열이라 Set에선 1종, 각 이유 실측 확認)', () => {
+  it('has exactly 47 entries (수 자체가 회귀가드 — 조용히 늘면 걸림)', () => {
+    expect(ALLOWLIST.size).toBe(47);
+  });
+
+  it('contains the 2 theme-switch entries carried over from #4125', () => {
+    expect(ALLOWLIST.has('.dark')).toBe(true);
+    expect(ALLOWLIST.has('.dashboard-shell-root')).toBe(true);
+  });
+
+  it('contains the 7 story #2229 ProseMirror scrollbar entries (이관 절대 금지)', () => {
+    for (const s of [
+      '.ProseMirror .scrollbar-visible',
+      '.ProseMirror .scrollbar-visible pre',
+      '.ProseMirror .scrollbar-visible pre::-webkit-scrollbar',
+      '.ProseMirror .scrollbar-visible pre::-webkit-scrollbar-track',
+      '.ProseMirror .scrollbar-visible pre::-webkit-scrollbar-thumb',
+      '.ProseMirror .scrollbar-visible pre::-webkit-scrollbar-thumb:hover',
+    ]) {
+      expect(ALLOWLIST.has(s), `${s} 누락`).toBe(true);
+    }
+  });
+
+  it('contains the 2 sonner internal-DOM entries', () => {
+    expect(ALLOWLIST.has('[data-sonner-toast]')).toBe(true);
+    expect(ALLOWLIST.has('[data-sonner-toast] [data-icon]')).toBe(true);
+  });
+
+  it('does NOT contain the migrated sidebar rule (story #4127 — @layer components로 이관 완료)', () => {
+    expect(ALLOWLIST.has('[data-sidebar="menu-button"][data-popup-open]')).toBe(false);
   });
 });
 
-describe('실 globals.css 스캔 — story #4125 AC1(이관 완료) 확認', () => {
-  it('⭐실 globals.css의 최상위 단일-클래스 규칙이 ALLOWLIST와 정확히 일치한다(11건 이관 완료 pin)', () => {
+describe('실 globals.css 스캔 — story #4127 AC1(48건 판정 완료) 확認', () => {
+  it('found 48건(원문 규칙 수) 중 고유 selector 문자열이 ALLOWLIST(47종)와 정확히 일치한다', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const found = findUnlayeredClassRules(css);
-    const selectors = found.map((r) => r.selector).sort();
+    expect(found.length, '원문 규칙 수(중복 selector 포함) — 48건 고정').toBe(48);
+    const selectors = [...new Set(found.map((r) => r.selector))].sort();
     expect(selectors).toEqual([...ALLOWLIST].sort());
   });
 
-  it('.proof-surface(및 ::before/-lift/-press)·animate-* 7개는 더 이상 최상위에 없다(#4121 sticky 재발 방지 pin)', () => {
+  it('.proof-surface(및 ::before/-lift/-press)·animate-* 7개는 여전히 최상위에 없다(#4121 sticky 재발 방지 pin, #4125 이관 유지 확認)', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const found = findUnlayeredClassRules(css);
     const selectors = new Set(found.map((r) => r.selector));
@@ -78,5 +121,12 @@ describe('실 globals.css 스캔 — story #4125 AC1(이관 완료) 확認', () 
       '.animate-proof-pulse', '.animate-proof-sweep', '.animate-proof-check-in']) {
       expect(selectors.has(s), `${s}가 여전히 최상위(레이어 밖)에 있음`).toBe(false);
     }
+  });
+
+  it('⭐[data-sidebar="menu-button"][data-popup-open]는 더 이상 최상위에 없다(story #4127 이관 pin)', () => {
+    const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+    const found = findUnlayeredClassRules(css);
+    const selectors = new Set(found.map((r) => r.selector));
+    expect(selectors.has('[data-sidebar="menu-button"][data-popup-open]')).toBe(false);
   });
 });

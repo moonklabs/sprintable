@@ -779,10 +779,17 @@
   --paper-grain-blend: screen;
 }
 
-/* Sidebar: open triggers get active background */
-[data-sidebar="menu-button"][data-popup-open] {
-  background-color: var(--sidebar-accent);
-  color: var(--sidebar-accent-foreground);
+/* Sidebar: open triggers get active background.
+   story #4127 — sidebar.tsx:585의 `sidebar:"menu-button"` variant가 실제로 이 data attribute를
+   렌더된 요소에 붙이고, 같은 컴포넌트의 Tailwind 클래스(sidebar.tsx:539)에 같은 CSS 변수를
+   가리키는 `data-open:hover:bg-sidebar-accent` 유틸리티가 공존한다 — 값이 같아 지금은 시각
+   차이가 없지만(우연히 안전), 유틸리티와 실제로 경쟁 가능한 유일한 depth-0 복합 선택자라
+   예방적으로 @layer components 안으로 이관한다(선언 무변경). */
+@layer components {
+  [data-sidebar="menu-button"][data-popup-open] {
+    background-color: var(--sidebar-accent);
+    color: var(--sidebar-accent-foreground);
+  }
 }
 
 /* Sonner toast: align icon to first line */
