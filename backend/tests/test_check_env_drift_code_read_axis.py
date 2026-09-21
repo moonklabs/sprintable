@@ -333,12 +333,14 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # IaC-covered 전환 → high 4→3. story #1969(2026-08-30, PO 최종 판정) — inbox_items 기능
     # 완전 은퇴로 apps/web/src/services/inbox-item.service.ts 자체가 삭제돼 AGENT_INBOX_HMAC_SECRET
     # 코드 read가 스캔에서 통째로 사라짐(baseline exemption 불요, 가드가 자연히 green) → high
-    # 3→2. 남은 high 2건은 MCP_ALLOWED_TOKEN_REFS(baseline, 보안 정책 판단 대기) +
-    # `_INCIDENT_KEYS` 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET 1건.
+    # 3→2. 2026-09-17 story #4023 — MCP_ALLOWED_TOKEN_REFS를 baseline(until 만료
+    # 임박)에서 code_read_exempt로 승격(mcp-secrets.ts fail-closed 구조 코드 확認, #3174
+    # 착지 커밋 6a176fd70) → high 2→1·exempt 30→31. 남은 high 1건은 `_INCIDENT_KEYS`
+    # 고정 픽스처 FIREBASE_BFF_INTERNAL_SECRET.
     assert len(highest) == 1, highest
-    assert len(high) == 2, high
+    assert len(high) == 1, high
     assert len(low) == 9, low
-    assert len(exempt) == 30
+    assert len(exempt) == 31
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────
@@ -448,11 +450,12 @@ def test_repo_code_read_high_baseline_is_wellformed():
     APP_BASE_URL·NEXT_PUBLIC_APP_URL 형제 비대칭)으로 APP_BASE_URL도 cloudbuild.yaml
     deploy-frontend에 배선해 3→2, story #1969(2026-08-30, PO 최종 판정) — inbox_items 기능
     완전 은퇴로 AGENT_INBOX_HMAC_SECRET을 읽던 코드 자체가 삭제돼 baseline entry도 함께
-    걷혀 2→1 — infra/manual-env-allowlist.yml code_read_high_baseline 섹션 머리말 참고)이
-    형식을 지키는지."""
+    걷혀 2→1, story #4023(2026-09-17) — 남은 마지막 1건(MCP_ALLOWED_TOKEN_REFS)도
+    code_read_exempt로 승격해 1→0 — infra/manual-env-allowlist.yml
+    code_read_high_baseline 섹션 머리말 참고)이 형식을 지키는지."""
     mod = _load_check_env_drift()
     baseline = mod._load_code_read_high_baseline()
-    assert len(baseline) == 1
+    assert len(baseline) == 0
     for key, entry in baseline.items():
         problem = mod._baseline_entry_expired(entry, mod._today())
         assert problem is None, f"{key}: {problem}"
