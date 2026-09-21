@@ -2317,6 +2317,35 @@ _RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE = "no_submitted_draft"
 _RECIPE_AUTO_PUBLISH_NO_RESOLVER_NOTE = "no_resolver"
 
 
+def classify_publish_failure_outcome(
+    exc: Exception | None = None, *, error_code: str | None = None,
+) -> str:
+    """story #4090/#4093(페드루 PO 지적 2026-09-21) — `publish_failed:` 꼬리도 닫힌
+    어휘여야 한다. 커넥터 원문(예외 클래스명·publication_command.py의 error_code
+    상수)을 그대로 노출하면 내부 구현·스택 문구가 verdict/facts 표면으로 샌다 —
+    ChannelTokenExpiredError·CHANNEL_TOKEN_EXPIRED류 원문은 로그/ActivityLog/
+    command.last_error에만 남기고, 사람이 읽는 표면엔 이 3값 중 하나만 노출한다.
+
+    두 호출부의 입력 shape이 다르다 — channel_posts.py의 즉시-발행 경로는 예외
+    "인스턴스"만 쥐고 있고(광범위 `except Exception`), publication_command.py의
+    워커 경로는 이미 계산된 `error_code` 문자열 상수를 쥐고 있다 — 어느 쪽이든
+    받는다(둘 다 안 주면 "connector_error"로 fail-closed, 미분류를 "정상"으로
+    치지 않는다)."""
+    _AUTH_ERROR_CODES = frozenset({
+        "CHANNEL_TOKEN_EXPIRED", "CHANNEL_CONNECTION_REVOKED", "CHANNEL_CONNECTION_AUTH_ERROR",
+        "CHANNEL_CONNECTION_NOT_ACTIVE",
+    })
+    if error_code == "CHANNEL_RATE_LIMITED":
+        return "rate_limited"
+    if error_code in _AUTH_ERROR_CODES:
+        return "auth_expired"
+    if isinstance(exc, ChannelRateLimitedError):
+        return "rate_limited"
+    if isinstance(exc, (ChannelTokenExpiredError, ChannelConnectionNotActiveError)):
+        return "auth_expired"
+    return "connector_error"
+
+
 async def _resolve_recipe_channel_connection_binding(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID,
     event_definition_key: str, stage: str,
@@ -2525,10 +2554,9 @@ async def publish_recipe_approved_draft(
             "recipe auto-publish: 실제 발행 실패(gate=%s draft=%s) — 승인/제출 자체는 되돌리지 않는다",
             gate.id, target_draft.id, exc_info=True,
         )
-        # 닫힌 어휘 코드 + 영문 예외 클래스명만(사람이 읽는 문구는 렌더 표면의 몫,
-        # 원문 예외 메시지는 로그에만 — 한글 문장 가드 회피 목적이 아니라 사람이
-        # 읽는 문구가 지역화 없이 예외 원문 그대로 새는 것 자체가 다른 결함 클래스).
-        gate.publish_outcome = f"publish_failed:{type(exc).__name__}"
+        # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리도 닫힌 어휘(3값)만,
+        # 예외 클래스명 원문은 안 싣는다(로그에만 — 위 logger.warning의 exc_info가 전문).
+        gate.publish_outcome = f"publish_failed:{classify_publish_failure_outcome(exc)}"
         await db.commit()
         return
 

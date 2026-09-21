@@ -689,7 +689,13 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
   if (code === 'no_submitted_draft') return t('publishOutcomeNoDraft');
   if (code === 'no_resolver') return t('publishOutcomeNoResolver');
   if (code.startsWith('publish_failed:')) {
-    return t('publishOutcomeFailed', { detail: code.slice('publish_failed:'.length) });
+    // story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — 꼬리(연결 원인)도 닫힌
+    // 어휘(connector_error|rate_limited|auth_expired, channel_posts.py::classify_
+    // publish_failure_outcome)라 그 코드도 각자 번역한다(커넥터 원문 미노출).
+    const failureCode = code.slice('publish_failed:'.length);
+    if (failureCode === 'auth_expired') return t('publishOutcomeFailedAuthExpired');
+    if (failureCode === 'rate_limited') return t('publishOutcomeFailedRateLimited');
+    return t('publishOutcomeFailedGeneric');
   }
   // 미지 코드(구버전 응답 등) — 지어내지 않고 원문 코드 그대로(사람이 읽기엔 어색해도
   // 침묵보다 낫다, «모른다≠다르다» 규율).

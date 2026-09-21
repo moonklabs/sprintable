@@ -1666,14 +1666,27 @@ async def _render_gate_verdict_message(
                                 "no_submitted_draft": "events.gate_verdict_recipe_auto_publish_reason_no_draft",
                                 "no_resolver": "events.gate_verdict_recipe_auto_publish_reason_no_resolver",
                             }
-                            _reason_key = _reason_key_map.get(_outcome)
-                            _reason_text = (
-                                t(_reason_key, resolved_locale) if _reason_key
-                                else t(
-                                    "events.gate_verdict_recipe_auto_publish_reason_failed", resolved_locale,
-                                    detail=_outcome,
+                            # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) —
+                            # "publish_failed:<code>"의 <code>도 닫힌 어휘(connector_error|
+                            # rate_limited|auth_expired, channel_posts.py::classify_publish_
+                            # failure_outcome)라 그 코드도 별도 키로 번역한다 — 미지 코드가
+                            # 와도(구버전 등) 지어내지 않고 제네릭 실패 문구로 폴백.
+                            _failure_reason_key_map = {
+                                "connector_error": "events.gate_verdict_recipe_auto_publish_reason_connector_error",
+                                "rate_limited": "events.gate_verdict_recipe_auto_publish_reason_rate_limited",
+                                "auth_expired": "events.gate_verdict_recipe_auto_publish_reason_auth_expired",
+                            }
+                            if _outcome in _reason_key_map:
+                                _reason_text = t(_reason_key_map[_outcome], resolved_locale)
+                            elif _outcome.startswith("publish_failed:"):
+                                _failure_code = _outcome[len("publish_failed:"):]
+                                _failure_key = _failure_reason_key_map.get(_failure_code)
+                                _reason_text = (
+                                    t(_failure_key, resolved_locale) if _failure_key
+                                    else t("events.gate_verdict_recipe_auto_publish_reason_unknown_failure", resolved_locale)
                                 )
-                            )
+                            else:
+                                _reason_text = t("events.gate_verdict_recipe_auto_publish_reason_unknown_failure", resolved_locale)
                             _example_line = (
                                 f"- {t('events.gate_verdict_recipe_auto_publish_skipped', resolved_locale, reason=_reason_text)}"
                             )

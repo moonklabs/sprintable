@@ -278,9 +278,24 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "승인자를 확인할 수 없어 발행을 건너뛰었어요.",
         "en": "Skipped — could not resolve an approver.",
     },
-    "events.gate_verdict_recipe_auto_publish_reason_failed": {
-        "ko": "자동 발행이 실패했어요({detail}) — 채널 연결 상태를 확인한 뒤 다시 승인해 주세요.",
-        "en": "Auto-publish failed ({detail}) — check the channel connection and re-approve.",
+    # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) — "publish_failed:<code>"의
+    # code도 닫힌 어휘(connector_error|rate_limited|auth_expired, channel_posts.py::
+    # classify_publish_failure_outcome)라 커넥터 원문을 안 싣고 각 코드별로 번역한다.
+    "events.gate_verdict_recipe_auto_publish_reason_auth_expired": {
+        "ko": "채널 연결이 끊겼거나 만료됐어요 — 조직 설정에서 연결을 갱신한 뒤 다시 승인해 주세요.",
+        "en": "The channel connection expired or was revoked — reconnect it, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_rate_limited": {
+        "ko": "채널 발행 한도에 걸렸어요 — 잠시 뒤 다시 승인해 주세요.",
+        "en": "Hit the channel's rate limit — re-approve again shortly.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_connector_error": {
+        "ko": "자동 발행이 실패했어요 — 채널 상태를 확인한 뒤 다시 승인해 주세요.",
+        "en": "Auto-publish failed — check the channel, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_unknown_failure": {
+        "ko": "자동 발행이 실패했어요 — 다시 승인해 주세요.",
+        "en": "Auto-publish failed — re-approve.",
     },
     # story #4076 CI 정정(2026-09-21, 페드루 PO 지적) — 아래 두 키는 원래 events.py에
     # f-string 리터럴로 있었으나(라벨+발행 예시 JSON을 한 문자열로), 사이클 렌더러와
