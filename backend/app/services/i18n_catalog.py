@@ -264,6 +264,16 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "gate_type={gate_type} 게이트를 열려면 다음 필드가 필요해요: {fields}.",
         "en": "Opening a gate_type={gate_type} gate requires the following field(s): {fields}.",
     },
+    # story #4085 AC1 — 자기설명 렌더러가 다음 stage 발행 예시에 봉인 필드(예:
+    # estimated_cost_minor)를 실값 예시로 채운 뒤, 그 값이 왜 필요한지 바로 아래 한 줄로
+    # 붙이는 설명(recipe_gate_hooks.py::SealedFieldSpec.explanation_catalog_key).
+    "events.sealed_field_estimated_cost_minor": {
+        "ko": "estimated_cost_minor는 위 예시값이 아니라 실제 예상 비용(정수, 조직 통화의"
+        " 최소 단위)으로 바꿔서 채워야 해요 — 이 값이 승인 카드에 예상 비용으로 봉인돼요.",
+        "en": "Replace the example above with the actual estimated cost (an integer, in the"
+        " organization's minor currency unit) for estimated_cost_minor — this value is sealed"
+        " onto the approval card as the estimated cost.",
+    },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
     # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).

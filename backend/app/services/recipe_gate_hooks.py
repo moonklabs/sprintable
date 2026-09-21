@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import NamedTuple
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,15 +49,32 @@ class UnknownApproverRoleError(ValueError):
     클래스 아님 — 조용히 넘기면 게이트가 승인자 없이 붕 떠버리므로 발행 시점에 명시 거부)."""
 
 
+class SealedFieldSpec(NamedTuple):
+    """story #4085 AC1 — 자기설명 렌더러(events.py)가 발행 예시 payload에 이 필드를
+    실값 예시로 채우고(`example_value`), 그 바로 아래 "이 값이 왜 필요한지" 한 줄
+    (`explanation_catalog_key`, i18n_catalog `events.*` 키)을 붙이는 데 쓰는 메타데이터.
+    검증(AC2)은 `name`만 본다 — example_value/explanation은 렌더링 전용, 검증 로직과
+    분리해 렌더러가 죽어도 검증은 안 죽는다(반대도 마찬가지)."""
+
+    name: str
+    example_value: int
+    explanation_catalog_key: str
+
+
 # story #4085(리허설 1호 실측, PO 확定 2026-09-21) — gate_type별 "이 게이트가 봉인에 쓰는
 # payload 필드"의 단일 SSOT. 실사고: generation_budget 게이트가 estimated_cost_minor
 # 없이 열려(사전 하드체크는 "미설정이면 통과"가 맞는 규약 — #4044) 결재 카드에 예상 비용이
 # 0/null로 비어 있었다. 레시피 키·stage 하드코딩 없이 gate_type 하나로만 갈라 다음 레시피
 # 에도 그대로 적용된다(새 gate_type이 봉인 필드를 쓰려면 여기 한 줄만 추가). events.py의
-# 자기설명 렌더러(story #4085 AC1, #4458 rebase 뒤 착수)도 이 SSOT를 그대로 읽어 예시
-# payload에 실을 필드 목록을 구성한다 — 새 목록 발명 0.
-_GATE_TYPE_SEALED_FIELDS: dict[str, tuple[str, ...]] = {
-    _GENERATION_BUDGET_GATE_TYPE: ("estimated_cost_minor",),
+# 자기설명 렌더러(story #4085 AC1)도 이 SSOT를 그대로 읽어 예시 payload에 실을 필드
+# 목록·예시값·설명 문구를 구성한다 — 새 목록 발명 0.
+_GATE_TYPE_SEALED_FIELDS: dict[str, tuple[SealedFieldSpec, ...]] = {
+    _GENERATION_BUDGET_GATE_TYPE: (
+        SealedFieldSpec(
+            name="estimated_cost_minor", example_value=10_000,
+            explanation_catalog_key="events.sealed_field_estimated_cost_minor",
+        ),
+    ),
 }
 
 
@@ -299,8 +317,8 @@ async def maybe_create_stage_gate(
     # (기존 estimated_cost_minor 봉인 코드의 동일 방어와 동형, 새 방어 0).
     _required_sealed_fields = _GATE_TYPE_SEALED_FIELDS.get(gate_decl["type"], ())
     _missing_sealed_fields = [
-        f for f in _required_sealed_fields
-        if not isinstance(payload.get(f), int) or isinstance(payload.get(f), bool)
+        spec.name for spec in _required_sealed_fields
+        if not isinstance(payload.get(spec.name), int) or isinstance(payload.get(spec.name), bool)
     ]
     if _missing_sealed_fields:
         raise MissingGateSealedFieldError(gate_type=gate_decl["type"], missing_fields=_missing_sealed_fields)
