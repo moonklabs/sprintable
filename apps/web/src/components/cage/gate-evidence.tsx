@@ -725,16 +725,15 @@ function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
     // 정의) — 이미 승인돼 발행이 끝난 게이트에서도 항상 빈 목록이라 linked_channel_
     // draft가 null이 된다. status를 안 보면 "승인해도 발행되지 않아요"가 이미 발행된
     // 게이트에도 뜨는(다른 세계의 문장) 그 결함. pending일 때만 이 두 문구(제출 없음/
-    // scoped 게이트 대기)가 유효 — 승인 済(approved 등)이면 publish_outcome 라벨로
-    // 갈아 끼우고, 그 코드조차 없으면(0388 前 게이트) 아무 문장도 지어내지 않는다.
+    // scoped 게이트 대기)가 유효하다.
+    //
+    // ⛔페드루 PO CHANGES(PR #4481 리뷰) — 비-pending 게이트에서 publish_outcome
+    // 라벨을 여기서 또 그리면 같은 화면의 RecipeApprovalFactsBlock(facts.publishOutcome,
+    // 아래 913행)이 이미 «발행 결과 · {라벨}»로 그린 것과 완전히 같은 값이 한 줄 더
+    // 뜬다(같은 원천, gate.publish_outcome을 두 컴포넌트가 각자 렌더) — facts 블록이
+    // 정본이라 이 카드는 비-pending이면 아무것도 안 그린다(중복 제거, 지어내지 않는다
+    // 원칙의 반대급부 — "같은 사실을 두 번 말하지 않는다"도 같은 원칙).
     if (gate.status !== 'pending') {
-      if (gate.publish_outcome) {
-        return (
-          <p className="mt-1.5 text-[11.5px] text-muted-foreground">
-            {publishOutcomeLabel(gate.publish_outcome, t)}
-          </p>
-        );
-      }
       return null;
     }
     return (
