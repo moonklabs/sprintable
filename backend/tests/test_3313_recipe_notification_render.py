@@ -691,6 +691,45 @@ async def test_capability_kind_generate_shows_master_cut_evidence_hint():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_capability_kind_generate_also_shows_generation_connector_tool_hint():
+    """story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — capability.kind=="generate"
+    힌트에 get_generation_connector(플러그인 도구, sprintable-agent-plugins PR #52) 안내
+    문장이 마스터컷 evidence 문장과 나란히 뜬다(같은 키, 두 문장 — 서로 다른 사실 축)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="e4111a")
+            publisher_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            definition_key = await _seed_definition(
+                s, org_id, slug="e4111a",
+                stage_metadata={
+                    "live_generation": {
+                        "role": "Compute", "action": "실탄 생성",
+                        "capability": {"kind": "generate"},
+                    },
+                    "verification": {"role": "Creator", "action": "검증"},
+                },
+                payload_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["stage", "work_item_type", "work_item_id"],
+                    "properties": {
+                        "stage": {"type": "string", "enum": ["live_generation", "verification"]},
+                        "work_item_type": {"type": "string"}, "work_item_id": {"type": "string", "format": "uuid"},
+                    },
+                },
+            )
+            payload = {"stage": "live_generation", "work_item_type": "story", "work_item_id": str(story_id)}
+            content, _resp = await _publish_and_get_content(
+                s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
+            )
+            assert "get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요." in content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_next_stage_external_publish_gate_shows_auto_satisfy_hint():
     """⭐구멍③ — 다음 stage의 gate.type=="external_publish"면(gate_type 자체로 유도, stage
     이름 하드코딩 0) 같은 스토리에 채널 초안을 제출하면 승인이 자동 충족된다는 안내가

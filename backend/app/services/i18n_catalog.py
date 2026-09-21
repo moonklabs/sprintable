@@ -376,9 +376,16 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "영상은 attach_channel_post_video로 초안에 첨부해요.",
         "en": "Attach the video to the draft using attach_channel_post_video.",
     },
+    # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
+    # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
+    # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야
+    # 하는지"와 "무엇으로 실행하는지"는 다른 축) · 새 문장을 그 뒤에 붙인다.
     "events.capability_hint_master_cut_evidence": {
-        "ko": "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요.",
-        "en": "Record evidence with type=url and ref=live-run:master-cut so lineage gets created.",
+        "ko": "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요."
+        " 연산 단계에서는 get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요.",
+        "en": "Record evidence with type=url and ref=live-run:master-cut so lineage gets created."
+        " For the generation stage, call get_generation_connector to get the org connector's"
+        " config and credentials, then run it yourself.",
     },
     # story #4088 CHANGES(페드루 PO 리뷰, 2026-09-21) — 원문 "승인이 자동 충족돼요"는
     # "사람 승인이 아예 불요"로 오독될 수 있었다. 실물(#4069 자동충족 훅 + #4090 승인→
