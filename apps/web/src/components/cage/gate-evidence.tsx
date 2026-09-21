@@ -702,6 +702,76 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
   return code;
 }
 
+/**
+ * story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped external_
+ * publish 게이트(scope_key="") 상세에 "이 승인으로 발행될 채널 초안" 실물 카드.
+ * #4090 AC2로 이 게이트 승인=자동발행인데, 승인자가 실물(본문·이미지·영상·목적지·
+ * 예약)을 안 보고 딸깍하던 자리를 해소한다. BE `linked_channel_draft`(null이면
+ * `linked_channel_draft_pending`으로 이유를 가른다)만 읽는다 — FE가 값을 계산하지
+ * 않는다(선택 규칙은 BE 한 곳, channel_posts.py::find_ready_recipe_channel_drafts).
+ *
+ * ⛔페드루 PO 지적(PR #4475 리뷰) — `draft.scoped_gate_status`는 `linked_channel_draft`
+ * 가 non-null인 이상 항상 "approved"뿐이다(find_ready_recipe_channel_drafts가
+ * "pending"인 scoped 게이트는 애초에 ready에 안 넣는다) — "pending" 분기는 죽은
+ * 코드였다(제거, linkedChannelDraftScopedPending 키도 같이).
+ */
+function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
+  const t = useTranslations('cage');
+  const draft = gate.linked_channel_draft;
+
+  if (!draft) {
+    return (
+      <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+        {gate.linked_channel_draft_pending
+          ? t('linkedChannelDraftPending')
+          : t('linkedChannelDraftNone')}
+      </p>
+    );
+  }
+
+  const destinationLabel = draft.account_label || `${draft.channel}(${draft.account_id})`;
+
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]">
+      <p className="text-muted-foreground">
+        {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
+      </p>
+      {draft.sealed_scheduled_at ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftScheduledLabel')} ·{' '}
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+        </p>
+      ) : null}
+      {draft.video_url ? (
+        // 유나 design:CHANGES(PR #4475 리뷰, PO 確定) — object-cover가 9:16 릴스의 상·하
+        // ~22%(훅·CTA)를 잘라 이 카드의 목적(실물 보고 승인)과 어긋났다. 채널 영상 aspect가
+        // 혼재(릴스 9:16·피드 1:1/4:5/16:9)라 세로 고정 대신 object-contain(레터박스 면은
+        // bg-muted)으로 크롭 0.
+        <video
+          controls preload="metadata" src={draft.video_url}
+          className="max-h-64 w-auto max-w-full rounded bg-muted object-contain" data-testid="linked-channel-draft-video"
+        />
+      ) : draft.image_urls.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {draft.image_urls.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element -- content/[draftId] 동형 관례(외부 GCS URL).
+            <img key={i} src={url} alt={t('linkedChannelDraftImageAlt')} className="h-20 w-20 rounded object-cover" />
+          ))}
+        </div>
+      ) : null}
+      {draft.text ? (
+        <p className="whitespace-pre-wrap text-foreground">{draft.text}</p>
+      ) : null}
+      <a
+        href={`/content/channel-posts/${draft.draft_id}`}
+        className="inline-block text-[11px] text-primary underline underline-offset-2"
+      >
+        {t('linkedChannelDraftOpenLink')}
+      </a>
+    </div>
+  );
+}
+
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
   // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
@@ -1092,6 +1162,17 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
       {recipeFacts ? <RecipeApprovalFactsBlock facts={recipeFacts} /> : null}
+      {/* 페드루 PO REQUIRED(PR #4475 리뷰) — BE와 같은 전제(레시피 게이트, neutral_
+          facts.stage 실림 — BE 가드는 stage·triggered_by_event 둘 다 보지만 FE엔
+          stage만 노출돼 있고 둘은 _build_approval_neutral_facts에서 항상 같이
+          찍힌다)로 좁힌다. recipeFacts !== null만으로는 부족(sealed_content_* 등
+          다른 축으로도 non-null이 될 수 있다 — 뮤테이션 실측으로 확認) — 비레시피
+          unscoped external_publish 게이트에도 "승인해도 발행되지 않아요" 카드가
+          새 다른 세계의 문장이 붙는다. BE가 두 필드를 기본값(null/false)으로 둘
+          때 FE도 렌더 자체를 0으로. */}
+      {gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === '' && recipeFacts?.stage ? (
+        <LinkedChannelDraftCard gate={gate} />
+      ) : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}

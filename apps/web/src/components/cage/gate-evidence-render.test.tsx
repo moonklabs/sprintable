@@ -351,6 +351,133 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalPublishOutcomeLabel);
   });
 
+  // story #4098([E-RECIPE-1], 2026-09-21) — 「이 승인으로 발행될 채널 초안」 카드,
+  // 3상태(콘텐츠 있음·초안 없음·scoped 게이트 pending) 렌더.
+  describe('linked_channel_draft 카드(story #4098)', () => {
+    it('콘텐츠가 있으면 본문·목적지·「초안 열기」 링크가 실제 DOM에 나타난다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        {
+          scope_key: '',
+          linked_channel_draft: {
+            draft_id: 'draft-1', channel: 'sandbox', account_id: 'acct-1', account_label: '공식 계정',
+            text: '발행될 본문입니다', image_urls: [], video_url: null,
+            scoped_gate_status: 'approved', sealed_scheduled_at: null,
+          },
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain('발행될 본문입니다');
+      expect(container.textContent).toContain('공식 계정');
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftOpenLink);
+      const link = container.querySelector('a[href="/content/channel-posts/draft-1"]');
+      expect(link).toBeTruthy();
+    });
+
+    it('영상이 있으면 <video controls>로 재생 가능하게 그린다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        {
+          scope_key: '',
+          linked_channel_draft: {
+            draft_id: 'draft-2', channel: 'sandbox', account_id: 'acct-1', account_label: null,
+            text: null, image_urls: [], video_url: 'https://storage.example/video.mp4',
+            scoped_gate_status: 'approved', sealed_scheduled_at: null,
+          },
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const video = container.querySelector('video[data-testid="linked-channel-draft-video"]');
+      expect(video).toBeTruthy();
+      expect(video?.getAttribute('controls')).not.toBeNull();
+      expect(video?.getAttribute('src')).toBe('https://storage.example/video.mp4');
+      // 유나 design:CHANGES(PR #4475 리뷰) — object-cover가 9:16 릴스 훅·CTA를 잘랐다.
+      // object-contain(크롭 0)으로 교정 — 클래스 자체를 단언해 회귀를 고정.
+      expect(video?.className).toContain('object-contain');
+      expect(video?.className).not.toContain('object-cover');
+    });
+
+    it('제출된 초안이 없으면(linked_channel_draft=null·pending=false) «제출된 초안 없음» 문구', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        { scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    it('scoped 게이트가 아직 pending이면(linked_channel_draft_pending=true) 승계 승인 문구', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        { scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: true },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftPending);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    it('레시피 무관 unscoped external_publish 게이트(facts에 stage/triggered_by_event 없음)엔 카드 자체가 안 뜬다', async () => {
+      // 페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰) — BE가 이미 같은 전제(neutral_
+      // facts.triggered_by_event·stage)로 가드를 좁혀 이런 게이트엔 linked_channel_
+      // draft/_pending을 항상 기본값(null/false)으로 둔다. FE도 recipeFacts(레시피
+      // 게이트 판별)를 AND로 걸지 않으면 그 기본값을 «제출된 초안 없음» 문구로
+      // 오독해 렌더한다 — 다른 세계의 문장이 새는 자리(state B 진입은 sealed_
+      // content_*로, stage/channel 없이).
+      const gate = recipeApprovalGate(
+        {},
+        {
+          scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false,
+          sealed_content_body: '레시피 무관 본문', sealed_content_version: 1,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+
+    it('scoped(초안 자체) 게이트(scope_key≠"")에는 카드 자체가 안 뜬다', async () => {
+      // 까디르 QA 렌즈(b)(PR #4475 리뷰, 2026-09-21) — 이전 픽스처는 neutral_facts에 stage가
+      // 없어 recipeFacts?.stage 자체가 falsy였다(scope_key 절과 무관하게 카드 미렌더) —
+      // «scope_key 절 제거 → RED»가 실측과 달라 그 절 단독 검증이 안 됐다(까디르 뮤테이션
+      // 재현: scope_key 절만 빼도 63/63 그대로 GREEN). stage(+triggered_by_event, BE 가드와
+      // 같은 전제)를 실어 recipeFacts?.stage를 참으로 만들고 scope_key만으로 막히는지 pin.
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
+        {
+          scope_key: 'some-connection-id', linked_channel_draft: null, linked_channel_draft_pending: false,
+          sealed_content_body: '실 초안 본문', sealed_content_version: 1,
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
+    });
+  });
+
   // PO 변경요청①(2026-09-02, PR#3710 리뷰) — BE `_escape_title`(reference_token.py)이 라벨 안
   // `\ [ ] ( )`를 백슬래시-escape한다. 초기 구현이 escape 없는 픽스처로만 테스트해 못 잡았던
   // 자리 — 실 게이트 09631e56 제목(팀 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려

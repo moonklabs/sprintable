@@ -2382,6 +2382,63 @@ async def _resolve_recipe_channel_connection_binding(
     )).scalar_one_or_none()
 
 
+async def find_ready_recipe_channel_drafts(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
+) -> tuple[list[tuple[ChannelPostDraft, Gate, ChannelPostVersion]], bool]:
+    """story #4090/#4098 공유 SSOT — "이 work_item에서 지금 승인하면(또는 이미 승인됐다면)
+    어느 draft가 나가는가"의 유일한 판정 지점. `publish_recipe_approved_draft`(실제
+    자동발행 실행, #4090)와 게이트 상세의 «발행될 초안» 미리보기(#4098)가 같은 답을
+    두 자리에 재구현하면 조용히 갈릴 수 있다 — 그래서 한 곳에서만 계산하고 두 소비처
+    모두 `[0]`(최신 제출·scoped 게이트 approved·미발행)을 target으로 삼는다(뮤테이션
+    킬 대상 — 선택 규칙을 갈라놓으면 두 표면이 다른 draft를 가리키는 RED가 나야 한다).
+
+    반환 (ready 목록[최신순, 0번째=target]·still_pending) — still_pending은 scoped
+    게이트가 아직 pending(#4069 자동충족 대기 中)인 draft가 하나라도 있었다는 신호,
+    ready가 비어 있어도 그 이유가 "제출된 게 없음"인지 "승인 대기 中"인지 caller가
+    가른다."""
+    drafts = (await db.execute(
+        select(ChannelPostDraft).where(
+            ChannelPostDraft.org_id == org_id, ChannelPostDraft.work_item_id == work_item_id,
+            ChannelPostDraft.status != "withdrawn",
+        ).order_by(ChannelPostDraft.created_at.desc())
+    )).scalars().all()
+    if not drafts:
+        return [], False
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    ready: list[tuple[ChannelPostDraft, Gate, ChannelPostVersion]] = []
+    still_pending = False
+    for draft in drafts:
+        scoped_gate = await find_gate_slot_with_pr_fallback(
+            db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+            gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+            scope_key=str(draft.connection_id),
+        )
+        if scoped_gate is None:
+            continue
+        if scoped_gate.status == "pending":
+            still_pending = True
+            continue
+        if scoped_gate.status != "approved":
+            continue
+        versions = await list_channel_post_draft_versions(db, draft_id=draft.id)
+        if not versions:
+            continue
+        latest = versions[-1]
+        already_published = (await db.execute(
+            select(ChannelPublication.id).where(
+                ChannelPublication.gate_id == scoped_gate.id, ChannelPublication.version_id == latest.id,
+                ChannelPublication.status == "published",
+            )
+        )).first()
+        if already_published is not None:
+            continue
+        ready.append((draft, scoped_gate, latest))
+
+    return ready, still_pending
+
+
 async def publish_recipe_approved_draft(
     db: AsyncSession, *, gate: Gate, resolver_id: uuid.UUID | None,
 ) -> None:
@@ -2450,47 +2507,9 @@ async def publish_recipe_approved_draft(
         gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_CHANNEL_NOTE
         return
 
-    drafts = (await db.execute(
-        select(ChannelPostDraft).where(
-            ChannelPostDraft.org_id == gate.org_id, ChannelPostDraft.work_item_id == gate.work_item_id,
-            ChannelPostDraft.status != "withdrawn",
-        ).order_by(ChannelPostDraft.created_at.desc())
-    )).scalars().all()
-    if not drafts:
-        gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE
-        return
-
-    from app.services.gate_service import find_gate_slot_with_pr_fallback
-
-    ready: list[tuple[ChannelPostDraft, Gate, ChannelPostVersion]] = []
-    still_pending = False
-    for draft in drafts:
-        scoped_gate = await find_gate_slot_with_pr_fallback(
-            db, org_id=gate.org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
-            gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
-            scope_key=str(draft.connection_id),
-        )
-        if scoped_gate is None:
-            continue
-        if scoped_gate.status == "pending":
-            still_pending = True
-            continue
-        if scoped_gate.status != "approved":
-            continue
-        versions = await list_channel_post_draft_versions(db, draft_id=draft.id)
-        if not versions:
-            continue
-        latest = versions[-1]
-        already_published = (await db.execute(
-            select(ChannelPublication.id).where(
-                ChannelPublication.gate_id == scoped_gate.id, ChannelPublication.version_id == latest.id,
-                ChannelPublication.status == "published",
-            )
-        )).first()
-        if already_published is not None:
-            continue
-        ready.append((draft, scoped_gate, latest))
-
+    ready, still_pending = await find_ready_recipe_channel_drafts(
+        db, org_id=gate.org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
     if not ready:
         if not still_pending:
             gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE

@@ -152,6 +152,25 @@ class WorkItemSummary(BaseModel):
     slug: str | None = None
 
 
+class LinkedChannelDraft(BaseModel):
+    """story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped
+    external_publish 게이트(scope_key="")를 승인하면 #4090 AC2가 자동으로 발행하는
+    그 채널 초안의 실물. `channel_posts.py::find_ready_recipe_channel_drafts`(#4090의
+    실제 자동발행 실행 선택 규칙과 **같은 함수** — 두 표면이 다른 draft를 가리키는
+    드리프트 방지)가 고르는 draft만 싣는다."""
+    draft_id: uuid.UUID
+    channel: str
+    account_id: str
+    account_label: str | None = None
+    text: str | None = None
+    image_urls: list[str] = []
+    video_url: str | None = None
+    # scoped(초안 자체) external_publish 게이트 상태 — "approved"(승인하면 즉시 자동발행)
+    # | "pending"(#4069 자동충족 대기 中, 이 unscoped 게이트 승인과 함께 승계-승인된다).
+    scoped_gate_status: str
+    sealed_scheduled_at: datetime | None = None
+
+
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -198,6 +217,19 @@ class GateResponse(BaseModel):
     # #4253 원칙과 동형). additive·하위호환(신규 필드, 기존 소비처 무변).
     conversation_id: uuid.UUID | None = None
     gate_type: str
+    # story #4098 — FE가 "이 게이트가 레시피 unscoped external_publish(scope_key="")인지"
+    # 를 직접 판별해야 linked_channel_draft/_pending의 "값 없음"과 "이 카드 자체가 대상이
+    # 아님"을 구분할 수 있다(둘 다 null/false로 같아 보이는 값이라 별도 신호 필요). Gate
+    # ORM 컬럼과 이름 일치 — from_attributes로 자동 채워짐(resolution_note와 동일 선례).
+    #
+    # ⛔페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰, CI RED — test_1970/1972/1973 9건) —
+    # DB 컬럼은 `NOT NULL DEFAULT ''`(0328)지만, 아직 flush/refresh 안 된 in-memory Gate
+    # ORM 객체(또는 이 필드를 안 세팅한 옛 테스트 픽스처)는 Python 값이 `None`이라 model_
+    # validate(from_attributes=True)가 그대로 터진다 — 코드 곳곳의 `gate.scope_key or ""`
+    # 방어가 바로 그 증거. 응답 필드도 그 실태를 그대로 받아 `str | None`(FE는 이미
+    # `gate.scope_key ?? ''`로 처리 — gate-evidence.tsx). 기본값 ""는 "명시로 안 준 신규
+    # 필드는 무해한 기본값" 관례일 뿐 실제 None 유입을 못 막는다 — 타입 자체를 넓힌다.
+    scope_key: str | None = None
     status: str
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
@@ -208,6 +240,16 @@ class GateResponse(BaseModel):
     # from_attributes로 자동 채워짐(resolution_note와 동일 선례). external_publish
     # (scope_key="") 게이트가 아니면 항상 None.
     publish_outcome: str | None = None
+    # story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped external_
+    # publish 게이트(scope_key="") 상세에 "이 승인으로 발행될 채널 초안" 실물을 싣는다.
+    # Gate ORM 컬럼이 아니라(`work_item_summary`/`can_approve`와 동일 선례) `to_gate_
+    # response()`가 매 응답마다 배선 — 다른 gate_type·scoped 게이트는 항상 None/False.
+    linked_channel_draft: "LinkedChannelDraft | None" = None
+    # linked_channel_draft가 None인 이유가 "제출된 게 없음"(문구 A)인지 "제출은 됐지만
+    # scoped 게이트가 아직 pending, #4069 자동충족 대기 中"(문구 B — 이 unscoped 게이트
+    # 승인과 함께 승계-승인된다)인지 FE가 갈라야 해서 별도 플래그(같은 조회 한 번의
+    # 부산물, 새 쿼리 0 — find_ready_recipe_channel_drafts의 still_pending 그대로).
+    linked_channel_draft_pending: bool = False
     # story #3001(선생님 정책 확定 2026-08-24) — FE가 "이 카드 원 수신자==나인데 지금은 다른
     # 사람이 지정돼 있다"(위임됨)를 로컬 판단하는 데 필요. Gate ORM 컬럼과 이름 일치라
     # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
@@ -393,7 +435,67 @@ async def to_gate_response(
     if posture is _POSTURE_UNSET:
         posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(posture, gate.gate_type)
+    await _enrich_linked_channel_draft(session, org_id, gate, resp)
     return resp
+
+
+async def _enrich_linked_channel_draft(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4098 — `to_gate_response()`의 단일 통로 불변식(위 docstring)을 그대로
+    타 create/get/list/transition/void 전부가 이 enrich를 받는다(list_gates도 이미
+    gate마다 `to_gate_response()`를 부르므로 배치 전용 재구현 없이 한 곳으로 족하다
+    — 대상 자체가 「레시피 unscoped external_publish 게이트」뿐이라 일반 목록에서
+    차지하는 비중이 낮다, 페드루 PO 사전 승인 여지 없음 — 필요시 후속 배치 최적화).
+
+    좁은 가드가 먼저라 다른 gate_type·scoped 게이트는 이 함수의 나머지 줄에 절대
+    안 들어간다(비용 0).
+
+    ⛔페드루 PO REQUIRED(2026-09-21, PR #4475 리뷰) — `external_publish && scope_key
+    ==""`만으로는 여전히 넓다. #4090 AC2 자동발행의 진짜 전제는 그보다 좁은 「레시피
+    게이트」(`neutral_facts.triggered_by_event`·`stage`가 실린 게이트,
+    `publish_recipe_approved_draft`의 첫 분기와 정확히 같은 조건)뿐이다 — facts가
+    없는 옛/비레시피 unscoped external_publish 행(있다면)까지 이 가드를 통과시키면
+    "승인해도 발행되지 않아요" 카드가 붙어 그 게이트엔 아예 다른 세계의 문장이
+    새고, list_gates에서도 그 행마다 불필요한 쿼리가 샌다. `publish_recipe_
+    approved_draft`와 완전히 동형인 가드로 좁힌다(새 조건 발명 0, 그 함수의 첫
+    return 문 그대로 복제)."""
+    if gate.gate_type != "external_publish" or (gate.scope_key or "") != "":
+        return
+    facts = gate.neutral_facts or {}
+    if not facts.get("triggered_by_event") or not facts.get("stage"):
+        return
+
+    from app.services.channel_posts import find_ready_recipe_channel_drafts
+
+    ready, still_pending = await find_ready_recipe_channel_drafts(
+        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if not ready:
+        resp.linked_channel_draft_pending = still_pending
+        return
+
+    draft, scoped_gate, latest = ready[0]
+
+    from app.models.channel_connection import ChannelConnection
+    from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
+    from app.services.channel_post_videos import get_channel_post_video_for_version
+
+    connection = await session.get(ChannelConnection, draft.connection_id)
+    image_rows = await list_channel_post_images_for_version(session, version_id=latest.id)
+    image_urls = [
+        url for row in image_rows if (url := public_url_for_object_path(row.final_object_path)) is not None
+    ]
+    video_row = await get_channel_post_video_for_version(session, version_id=latest.id)
+    video_url = public_url_for_object_path(video_row.original_object_path) if video_row is not None else None
+
+    resp.linked_channel_draft = LinkedChannelDraft(
+        draft_id=draft.id, channel=draft.channel,
+        account_id=connection.account_id if connection is not None else "",
+        account_label=connection.account_label if connection is not None else None,
+        text=latest.text, image_urls=image_urls, video_url=video_url,
+        scoped_gate_status=scoped_gate.status, sealed_scheduled_at=scoped_gate.sealed_scheduled_at,
+    )
 
 
 @router.post("", response_model=GateResponse, status_code=201)
