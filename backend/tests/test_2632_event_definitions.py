@@ -623,3 +623,30 @@ def test_role_actor_kinds_rejects_non_dict_value():
 
     with pytest.raises(InvalidRoleActorKindsError):
         validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")  # dict 아님
+
+
+def test_role_actor_kinds_error_messages_route_through_i18n_catalog_not_raw_hardcoded():
+    """⭐페드루 PO CHANGES(2026-09-21, PR #4467) 핵심 pin — 정의 저자에게 닿는 이 3개
+    거부 사유는 raw f-string이 아니라 i18n_catalog(해요체)에서 온다. 뮤테이션 셀프체크:
+    i18n_catalog.py에서 이 3개 키를 지우면 이 테스트가 UnknownMessageKeyError로 RED가
+    된다(raw 문자열로 되돌아가면 애초에 이 assert 자체가 무의미해지므로 그 반대 방향
+    회귀도 이 테스트가 못 잡는다는 뜻 — 실제로는 이 3건이 baseline에 남아있지 않은지를
+    korean_user_strings_baseline.txt 자체가 §CI 스텝으로 대신 지킨다)."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError) as ei:
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")
+    assert str(ei.value) == "role_actor_kinds는 role명과 human/agent 값으로 이루어진 객체여야 해요 — 받은 타입: str"
+
+    with pytest.raises(InvalidRoleActorKindsError) as ei:
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "bot"})
+    assert str(ei.value) == "role_actor_kinds[PO]의 값이 닫힌 어휘(human/agent) 밖이에요 — 받은 값: bot"
+
+    with pytest.raises(InvalidRoleActorKindsError) as ei:
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"Product Owner": "human"})
+    assert str(ei.value) == (
+        "role_actor_kinds에 선언한 role명이 stage_metadata 어디에도 없어요(오타로 의심돼요) — "
+        "선언한 role: Product Owner · 실재하는 role: ['PO', 'QA']"
+    )

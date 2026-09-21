@@ -467,31 +467,42 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                 )
 
 
-def validate_role_actor_kinds(stage_metadata: dict, role_actor_kinds: dict | None) -> None:
+def validate_role_actor_kinds(
+    stage_metadata: dict, role_actor_kinds: dict | None, *, locale: str = "ko",
+) -> None:
     """story #4092(§b) — 선택 필드. None/빈 dict면 "모름"(오늘 zero_reach 동작 그대로)이라
     검증 대상 자체가 없어 통과. 있으면 두 가지를 강제:
     ①값이 ROLE_ACTOR_KIND_VALUES({"human","agent"}) 밖이면 거부(role 이름 자체는 자유
     문자열이라 안 막는다 — 막는 건 kind 값뿐).
     ②선언된 role명이 이 정의의 stage_metadata 어디에도 실재하지 않으면 거부(오타 role명이
-    조용히 죽는 클래스 — validate_stage_metadata의 stage-key 부분집합 검증과 동일 정신)."""
+    조용히 죽는 클래스 — validate_stage_metadata의 stage-key 부분집합 검증과 동일 정신).
+
+    ⛔페드루 PO CHANGES(2026-09-21, PR #4467 리뷰) — validate_stage_metadata 등 이웃
+    함수들의 raw 한글 f-string은 가드(story #3779) 도입 당시 grandfather된 것일 뿐 허가가
+    아니다. 이 함수는 새로 짜는 자리라 baseline에 새 항목을 얹지 않고 i18n_catalog로
+    바로 라우팅한다(정의 저자에게 닿는 사용자 문장) — create/update_event_definition
+    엔드포인트가 아직 locale 헤더를 안 받아 기본값 "ko"(그 두 엔드포인트의 기존 모든
+    거부 문구와 동일 실질 동작, 회귀 0)."""
+    from app.services.i18n_catalog import t
+
     if not role_actor_kinds:
         return
     if not isinstance(role_actor_kinds, dict):
         raise InvalidRoleActorKindsError(
-            f"role_actor_kinds는 object({{role명: 'human'|'agent'}})여야 합니다 — "
-            f"{type(role_actor_kinds).__name__} 아님."
+            t("events.role_actor_kinds_not_object", locale, type_name=type(role_actor_kinds).__name__)
         )
     declared_roles = {meta.get("role") for meta in stage_metadata.values() if isinstance(meta, dict)}
     for role, kind in role_actor_kinds.items():
         if kind not in ROLE_ACTOR_KIND_VALUES:
             raise InvalidRoleActorKindsError(
-                f"role_actor_kinds[{role!r}]는 {sorted(ROLE_ACTOR_KIND_VALUES)} 중 하나여야 "
-                f"합니다 — {kind!r}은 닫힌 어휘 밖입니다."
+                t("events.role_actor_kinds_value_outside_vocabulary", locale, role=role, kind=kind)
             )
         if role not in declared_roles:
             raise InvalidRoleActorKindsError(
-                f"role_actor_kinds에 선언된 role명 {role!r}이 이 정의의 stage_metadata 어디에도 "
-                f"없습니다(오타로 의심됩니다) — 실재하는 role: {sorted(declared_roles)}"
+                t(
+                    "events.role_actor_kinds_role_not_declared", locale,
+                    role=role, declared_roles=sorted(r for r in declared_roles if r is not None),
+                )
             )
 
 
