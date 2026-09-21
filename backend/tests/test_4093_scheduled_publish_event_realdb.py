@@ -437,12 +437,13 @@ async def test_ac3_duplicate_worker_tick_does_not_duplicate_published_event():
             from app.models.pm import Story  # noqa: F401 (경로 확인용, 미사용 억제)
 
             recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
-                s, org_id=org_id, work_item_id=story_id, work_item_type="story", connection_id=connection_id,
+                s, org_id=org_id, work_item_id=story_id, connection_id=connection_id,
             )
             assert recipe_ctx is not None
             _gate, definition_key, next_stage = recipe_ctx
+            assert _gate.work_item_type == "story"
             await emit_recipe_published_stage_event(
-                s, org_id=org_id, work_item_type="story", work_item_id=story_id,
+                s, org_id=org_id, work_item_type=_gate.work_item_type, work_item_id=story_id,
                 definition_key=definition_key, next_stage=next_stage,
             )
             await s.commit()

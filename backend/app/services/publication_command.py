@@ -395,15 +395,17 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             )
 
             recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
-                db, org_id=command.org_id, work_item_id=draft.work_item_id, work_item_type="story",
+                db, org_id=command.org_id, work_item_id=draft.work_item_id,
                 connection_id=draft.connection_id,
             )
             if recipe_ctx is not None:
                 recipe_gate, definition_key, next_stage = recipe_ctx
                 recipe_gate.publish_outcome = "published"
+                # 페드루 PO REQUIRED(PR #4473) — work_item_type을 하드코딩("story")
+                # 않고 찾은 게이트 행 자신의 값을 그대로 쓴다(SSOT는 행 자신).
                 await emit_recipe_published_stage_event(
-                    db, org_id=command.org_id, work_item_type="story", work_item_id=draft.work_item_id,
-                    definition_key=definition_key, next_stage=next_stage,
+                    db, org_id=command.org_id, work_item_type=recipe_gate.work_item_type,
+                    work_item_id=draft.work_item_id, definition_key=definition_key, next_stage=next_stage,
                 )
                 await db.commit()
         except Exception:
@@ -533,7 +535,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             from app.services.channel_posts import resolve_recipe_context_for_scheduled_publication
 
             recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
-                db, org_id=command.org_id, work_item_id=draft.work_item_id, work_item_type="story",
+                db, org_id=command.org_id, work_item_id=draft.work_item_id,
                 connection_id=draft.connection_id,
             )
             if recipe_ctx is not None:

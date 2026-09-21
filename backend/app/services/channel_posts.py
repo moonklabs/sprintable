@@ -2567,7 +2567,7 @@ async def publish_recipe_approved_draft(
 
 
 async def resolve_recipe_context_for_scheduled_publication(
-    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str, connection_id: uuid.UUID,
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, connection_id: uuid.UUID,
 ) -> tuple[Gate, str, str] | None:
     """story #4093(#4090 지름길 해소, 페드루 PO 確定 2026-09-21) — 예약 발행 워커가
     발행 성공 시점에 "이 draft가 레시피 Publisher 슬롯에 바인딩된 채널로 나간 것인지"
@@ -2575,6 +2575,16 @@ async def resolve_recipe_context_for_scheduled_publication(
     →next_stage→capability.target)을 그대로 재사용하되 방향이 반대다(거긴 게이트→
     채널, 이건 draft/connection→게이트) — #4090이 만든 `_resolve_recipe_channel_
     connection_binding` 자체는 신규 축 0으로 그대로 재사용.
+
+    ⛔페드루 PO REQUIRED(2026-09-21, PR #4473 리뷰) — `work_item_type`을 인자로
+    안 받는다. `(org_id, work_item_id, gate_type=external_publish, scope_key="")`
+    조합이 이미 게이트 슬롯을 유일하게 식별한다(work_item_type 없이도 전혀 모호하지
+    않다 — 이 도메인은 어차피 "story"만 다룬다, 즉시-발행 경로도 동형) — 그런데도
+    호출부가 "story"를 하드코딩해서 넘기면, 값이 하나라도 문자열을 두 곳(호출부·
+    이 함수 필터)에 따로 못 박아 둔 채 그중 하나가 실제와 어긋날 위험만 남는다(신규
+    work_item_type이 생겨도 이 함수가 절대 모를 수 있는 자리). 대신 **찾은 게이트
+    행 자신의 `work_item_type`**을 반환해 호출부가 그 값을 그대로 쓰게 한다(SSOT는
+    행 자신).
 
     바인딩 재확인(안전장치) — 지금 이 connection_id가 여전히 그 stage의 RecipeRoleBinding
     값과 같은지까지 본다. 예약 대기 中에 사람이 Publisher 슬롯을 다른 채널로 재지정했으면
@@ -2591,7 +2601,7 @@ async def resolve_recipe_context_for_scheduled_publication(
 
     gate = (await db.execute(
         select(Gate).where(
-            Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.work_item_type == work_item_type,
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id,
             Gate.gate_type == _EXTERNAL_PUBLISH_GATE_TYPE, Gate.scope_key == "",
         )
     )).scalar_one_or_none()
