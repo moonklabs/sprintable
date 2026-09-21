@@ -104,28 +104,6 @@ async def _realdb_session():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed_org_with_owner(session, *, slug):
-    from app.models.organization import Organization
-    from app.models.project import OrgMember, Project
-    from app.models.team import TeamMember
-
-    org = Organization(id=uuid.uuid4(), name="Org4093", slug=slug)
-    session.add(org)
-    await session.commit()
-    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
-    session.add(project)
-    owner_user_id = uuid.uuid4()
-    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=owner_user_id, role="owner")
-    session.add(owner_member)
-    await session.commit()
-    session.add(TeamMember(
-        id=owner_member.id, org_id=org.id, project_id=project.id, type="human",
-        name="org owner", is_active=True,
-    ))
-    await session.commit()
-    return org.id, project.id, owner_member.id, owner_user_id
-
-
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
     from app.models.team import TeamMember
 
@@ -311,7 +289,9 @@ async def test_ac1_worker_due_publish_emits_recipe_published_stage_event_once():
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
-            org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="4093a")
+            from tests.conftest import seed_org_with_human_owner
+
+            org_id, project_id, owner_member_id = await seed_org_with_human_owner(s, slug="4093a", org_name="Org4093")
             await _seed_default_role(s, org_id)
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
@@ -374,7 +354,9 @@ async def test_ac2_worker_publish_failure_emits_zero_events_and_records_machine_
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
-            org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="4093b")
+            from tests.conftest import seed_org_with_human_owner
+
+            org_id, project_id, owner_member_id = await seed_org_with_human_owner(s, slug="4093b", org_name="Org4093")
             await _seed_default_role(s, org_id)
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
@@ -428,7 +410,9 @@ async def test_ac3_duplicate_worker_tick_does_not_duplicate_published_event():
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
-            org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="4093c")
+            from tests.conftest import seed_org_with_human_owner
+
+            org_id, project_id, owner_member_id = await seed_org_with_human_owner(s, slug="4093c", org_name="Org4093")
             await _seed_default_role(s, org_id)
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
