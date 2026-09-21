@@ -5254,7 +5254,7 @@
     "outcomeAccumulating": "판정 데이터 누적 중",
     "evidenceNonePrompt": "근거 데이터 없음 — 내용으로 직접 판단",
     "recipeApprovalStageLabel": "단계",
-    "recipeApprovalPublishOutcomeLabel": "자동발행",
+    "recipeApprovalPublishOutcomeLabel": "자동 발행",
     "publishOutcomePublished": "발행됨",
     "publishOutcomeScheduled": "예약됨 — 예약 시각에 자동 발행돼요",
     "publishOutcomeNoChannel": "발행 채널이 아직 지정되지 않았어요",
