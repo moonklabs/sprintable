@@ -79,13 +79,21 @@ function isSmallText(cls: string): boolean {
 function classStringsFromExpr(e: ts.Expression): string[] {
   if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return [e.text];
   if (ts.isTemplateExpression(e)) {
-    const parts = [e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)];
-    return [parts.join(' ')];
+    // story #4126(PO 실측, 2026-09-21) — 정적 literal 조각만 잇고 `${…}` 표현식(삼항·중첩
+    // cn() 등)은 버려서 `` `bg-success-tint ${dense ? 'text-muted-foreground' : '…'}` ``
+    // 같은 자리를 못 봤다. 각 span의 `.expression`도 같은 함수로 재귀해 literal 조각과
+    // 함께 한 문자열로 합친다 — 이 가드의 판정(paleBgsIn/textFamiliesIn)은 부분문자열
+    // 존재 검사라, 어느 삼항 branch가 실제로 적용될지 가르지 않고 "나올 수 있는 조각
+    // 전부"를 한 문자열에 모아도 검출 정확도는 그대로다(아래 cn()과 동일 근거).
+    const exprParts = e.templateSpans.flatMap((sp) => classStringsFromExpr(sp.expression));
+    const literalParts = [e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)];
+    return [[...literalParts, ...exprParts].join(' ')];
   }
   if (ts.isCallExpression(e) && /(?:^|\.)cn$/.test(e.expression.getText())) {
-    return e.arguments.flatMap((a) =>
-      ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a) ? [a.text] : [],
-    );
+    // story #4126 — 리터럴/무치환 템플릿 인자만 받고 삼항·치환 템플릿·중첩 cn() 인자는
+    // 버렸다. 각 인자를 같은 함수로 재귀하면 삼항(ConditionalExpression 갈래)·템플릿
+    // (위 갈래, 이제 ${} 재귀 포함)·중첩 cn() 호출(이 갈래 재귀)까지 전부 자연히 커버된다.
+    return e.arguments.flatMap((a) => classStringsFromExpr(a));
   }
   if (ts.isConditionalExpression(e)) {
     return [...classStringsFromExpr(e.whenTrue), ...classStringsFromExpr(e.whenFalse)];
