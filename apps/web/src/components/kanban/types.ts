@@ -59,6 +59,9 @@ export interface GateItem {
   work_item_id: string;
   work_item_type: string;
   gate_type: string;
+  // story #4098 — "레시피 unscoped external_publish(scope_key="")인지" 판별(linked_
+  // channel_draft/_pending의 "값 없음"과 "이 카드 대상 자체가 아님"을 가른다).
+  scope_key?: string;
   status: string;
   resolver_id: string | null;
   // story #3001(선생님 정책 확定 2026-08-24) — 결재선(수신자) 지정+위임. resolver_id의
@@ -72,6 +75,18 @@ export interface GateItem {
   // 본인 문장)와 절대 안 섞는다(BE 페드루 PO 確定). external_publish(scope_key="")
   // 게이트가 아니면 항상 null.
   publish_outcome?: string | null;
+  // story #4098([E-RECIPE-1], 2026-09-21) — 레시피 unscoped external_publish 게이트
+  // (scope_key="")를 승인하면 #4090 AC2가 자동발행하는 그 채널 초안의 실물(본문·이미지·
+  // 영상·목적지·예약 시각). 다른 gate_type·scoped 게이트는 항상 null.
+  linked_channel_draft?: {
+    draft_id: string; channel: string; account_id: string; account_label: string | null;
+    text: string | null; image_urls: string[]; video_url: string | null;
+    scoped_gate_status: string; sealed_scheduled_at: string | null;
+  } | null;
+  // linked_channel_draft가 null인 이유 구분 — true면 "제출은 됐지만 scoped 게이트가
+  // 아직 pending"(이 게이트 승인과 함께 승계-승인됨), false/undefined면 "제출된 초안
+  // 자체가 없음".
+  linked_channel_draft_pending?: boolean;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
   // E-DG S33: owner 결재 강제(override) 메타(gate_overridden 이벤트 enrich·S32 reassign 패턴 동형). 디디 BE #1645 design-first·additive·머지 후 정합.
   overridden_by_member_id?: string | null;

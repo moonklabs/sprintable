@@ -702,6 +702,70 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
   return code;
 }
 
+/**
+ * story #4098([E-RECIPE-1], 페드루 PO 確定 2026-09-21) — 레시피 unscoped external_
+ * publish 게이트(scope_key="") 상세에 "이 승인으로 발행될 채널 초안" 실물 카드.
+ * #4090 AC2로 이 게이트 승인=자동발행인데, 승인자가 실물(본문·이미지·영상·목적지·
+ * 예약)을 안 보고 딸깍하던 자리를 해소한다. BE `linked_channel_draft`(null이면
+ * `linked_channel_draft_pending`으로 이유를 가른다)만 읽는다 — FE가 값을 계산하지
+ * 않는다(선택 규칙은 BE 한 곳, channel_posts.py::find_ready_recipe_channel_drafts).
+ */
+function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
+  const t = useTranslations('cage');
+  const draft = gate.linked_channel_draft;
+
+  if (!draft) {
+    return (
+      <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+        {gate.linked_channel_draft_pending
+          ? t('linkedChannelDraftPending')
+          : t('linkedChannelDraftNone')}
+      </p>
+    );
+  }
+
+  const destinationLabel = draft.account_label || `${draft.channel}(${draft.account_id})`;
+
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]">
+      <p className="text-muted-foreground">
+        {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
+      </p>
+      {draft.sealed_scheduled_at ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftScheduledLabel')} ·{' '}
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+        </p>
+      ) : null}
+      {draft.scoped_gate_status === 'pending' ? (
+        <p className="text-muted-foreground">{t('linkedChannelDraftScopedPending')}</p>
+      ) : null}
+      {draft.video_url ? (
+        <video
+          controls preload="metadata" src={draft.video_url}
+          className="h-32 w-32 rounded object-cover" data-testid="linked-channel-draft-video"
+        />
+      ) : draft.image_urls.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {draft.image_urls.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element -- content/[draftId] 동형 관례(외부 GCS URL).
+            <img key={i} src={url} alt={t('linkedChannelDraftImageAlt')} className="h-20 w-20 rounded object-cover" />
+          ))}
+        </div>
+      ) : null}
+      {draft.text ? (
+        <p className="whitespace-pre-wrap text-foreground">{draft.text}</p>
+      ) : null}
+      <a
+        href={`/content/channel-posts/${draft.draft_id}`}
+        className="inline-block text-[11px] text-primary underline underline-offset-2"
+      >
+        {t('linkedChannelDraftOpenLink')}
+      </a>
+    </div>
+  );
+}
+
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
   // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
@@ -1092,6 +1156,9 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
       {recipeFacts ? <RecipeApprovalFactsBlock facts={recipeFacts} /> : null}
+      {gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === '' ? (
+        <LinkedChannelDraftCard gate={gate} />
+      ) : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
