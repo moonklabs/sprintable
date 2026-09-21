@@ -1,0 +1,417 @@
+"""story #4075([E-RECIPE-1] 스토리 화면의 «레시피 시작») — draft(첫 stage) 한정·창 없는 영구
+발행이력 기반 dedup, `GET .../definitions/start-candidates` 활성화 판단 단일 읽기.
+
+AC6 — «시작됨» 근거는 발행된 draft 이벤트 자체(`_find_existing_stage_publish` 재사용) — 새로고침·
+다른 탭·다른 사람 화면에서도 같게 보인다.
+AC7 — 서버가 같은 work_item+definition의 draft 재발행을 거부(설계 정정 2026-09-21, 페드루 PO
+채널 재확定 — 409 거부가 아니라 200 + `deduplicated: true` + 기존 conversation_id/message_id
+반환). 두 탭 동시 클릭에도 메시지 2건이 생기면 안 된다 — check-then-insert는 그 자체로 TOCTOU라
+([[feedback_check_then_insert_toctou]] 동형) `pg_advisory_xact_lock`으로 직렬화
+(`app/repositories/story.py::allocate_story_number`와 동형 패턴).
+
+seed 하네스는 test_3337_recipe_repeat_scheduler.py와 동일 관례(파일별 로컬 중복이 이 스위트의
+기존 관례).
+"""
+from __future__ import annotations
+
+import asyncio
+import uuid
+
+import pytest
+from fastapi import BackgroundTasks
+
+_REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
+
+pytestmark = pytest.mark.destructive_schema
+_REAL_DB_SKIP = pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    """test_3337/test_2633와 동일 이유 — publish 경로의 background task가 전역 엔진
+    (app.core.database.async_session_factory)을 쓴다."""
+    yield
+    from app.core.database import engine as _global_engine
+    await _global_engine.dispose()
+
+
+async def _realdb_session():
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.core.database import Base
+    import app.models  # noqa: F401
+
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+asyncpg://" + url[len(prefix):]
+            break
+    engine = create_async_engine(url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def _seed_org_project_owner(session, *, slug="e4075"):
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+    from app.models.team import TeamMember
+    from app.models.user import User
+
+    org = Organization(id=uuid.uuid4(), name="Org4075", slug=slug)
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    owner_user = User(id=uuid.uuid4(), email=f"owner-{uuid.uuid4().hex[:8]}@test.com", hashed_password="x")
+    session.add(owner_user)
+    await session.commit()
+    owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=owner_user.id, role="owner")
+    session.add(owner_member)
+    await session.commit()
+    session.add(TeamMember(
+        id=owner_member.id, org_id=org.id, project_id=project.id, type="human", name="owner", is_active=True,
+    ))
+    await session.commit()
+    return org.id, project.id, owner_member.id
+
+
+async def _seed_agent(session, org_id, project_id, *, name="agent"):
+    from app.models.team import TeamMember
+
+    m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
+    session.add(m)
+    await session.commit()
+    return m.id
+
+
+async def _seed_story(session, org_id, project_id, *, title="S"):
+    from app.models.pm import Story
+
+    story = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title)
+    session.add(story)
+    await session.commit()
+    return story.id
+
+
+_CYCLIC_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["work_item_type", "work_item_id", "stage"],
+    "properties": {
+        "work_item_type": {"type": "string"},
+        "work_item_id": {"type": "string", "format": "uuid"},
+        "stage": {"type": "string", "enum": ["draft", "review", "publish"]},
+    },
+}
+_STAGE_METADATA = {
+    "draft": {"role": "Writer", "action": "초안 작성"},
+    "review": {"role": "Reviewer", "action": "검토"},
+    "publish": {"role": "Publisher", "action": "발행"},
+}
+_NONE_ROUTING = {
+    "escalation": {"kind": "server_derived", "target": "none"},
+    "broadcast": {"kind": "server_derived", "target": "none"},
+}
+
+
+async def _seed_cyclic_definition(session, *, org_id, key="org.e4075.cyclic"):
+    from app.models.event_definition import EventDefinition
+
+    d = EventDefinition(
+        id=uuid.uuid4(), key=key, org_id=org_id, name="테스트 레시피",
+        payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING, stage_metadata=_STAGE_METADATA,
+        enabled=True, version=1,
+    )
+    session.add(d)
+    await session.commit()
+    return d
+
+
+async def _seed_role_binding(session, *, org_id, project_id, definition_key, stage, agent_id):
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    session.add(RecipeRoleBinding(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id,
+        event_definition_key=definition_key, stage=stage, agent_member_id=agent_id,
+    ))
+    await session.commit()
+
+
+def _auth(member_id, org_id):
+    from app.dependencies.auth import AuthContext
+    return AuthContext(
+        user_id=str(member_id), email=None,
+        claims={"app_metadata": {"api_key_id": "test-agent"}}, org_id=str(org_id),
+    )
+
+
+async def _publish_stage(session, *, org_id, definition_key, story_id, stage, requester_id):
+    from app.routers.events import _publish_registry_event_core
+
+    return await _publish_registry_event_core(
+        session, org_id, _auth(requester_id, org_id), definition_key,
+        {"work_item_type": "story", "work_item_id": str(story_id), "stage": stage},
+        BackgroundTasks(),
+    )
+
+
+async def _get_candidates(session, *, org_id, project_id, story_id, user_id):
+    from app.routers.events import get_recipe_start_candidates
+
+    return await get_recipe_start_candidates(
+        project_id, work_item_type="story", work_item_id=story_id,
+        db=session, auth=_auth(user_id, org_id), org_id=org_id,
+    )
+
+
+# ─── AC7: 첫 stage(draft) 중복 발행 dedup ──────────────────────────────────
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_ac7_duplicate_draft_publish_returns_existing_not_new_message():
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            first = await _publish_stage(
+                s, org_id=org_id, definition_key=definition.key, story_id=story_id,
+                stage="draft", requester_id=owner_id,
+            )
+            assert first.get("deduplicated") is not True
+
+            second = await _publish_stage(
+                s, org_id=org_id, definition_key=definition.key, story_id=story_id,
+                stage="draft", requester_id=owner_id,
+            )
+            assert second["deduplicated"] is True
+            assert second["conversation_id"] == first["conversation_id"]
+            assert second["message_id"] == first["message_id"]
+
+            from sqlalchemy import func, select
+            from app.models.conversation import Conversation, ConversationMessage
+
+            count = (await s.execute(
+                select(func.count()).select_from(ConversationMessage)
+                .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+                .where(
+                    Conversation.org_id == org_id,
+                    ConversationMessage.msg_metadata["event"]["event_key"].astext == definition.key,
+                )
+            )).scalar_one()
+            assert count == 1, "중복 클릭이 메시지를 2건 만들었다(AC7 실패)"
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_ac7_concurrent_double_click_still_creates_only_one_message():
+    """두 탭 동시 클릭 — pg_advisory_xact_lock 없이는 두 트랜잭션 모두 '없음'을 보고 둘 다
+    발행해버린다(체크-후-삽입 TOCTOU). 서로 다른 세션(별 커넥션) 2개로 진짜 동시성을 낸다 —
+    같은 세션 재사용은 커넥션당 순차 실행이 강제돼 경합을 재현하지 못한다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+        async with Session() as s1, Session() as s2:
+            results = await asyncio.gather(
+                _publish_stage(s1, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id),
+                _publish_stage(s2, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id),
+            )
+        deduplicated_flags = sorted(bool(r.get("deduplicated")) for r in results)
+        assert deduplicated_flags == [False, True], f"둘 다 새로 발행되거나 둘 다 dedup됨(경합 미방어): {results}"
+
+        async with Session() as s:
+            from sqlalchemy import func, select
+            from app.models.conversation import Conversation, ConversationMessage
+
+            count = (await s.execute(
+                select(func.count()).select_from(ConversationMessage)
+                .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+                .where(
+                    Conversation.org_id == org_id,
+                    ConversationMessage.msg_metadata["event"]["event_key"].astext == definition.key,
+                )
+            )).scalar_one()
+            assert count == 1, "동시 두 탭 클릭이 메시지를 2건 만들었다(AC7 실패)"
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_non_first_stage_republish_not_deduplicated():
+    """게이트 없는 non-first stage(예: review 재작업 요청)는 정당한 재발행 경로라 dedup 대상이
+    아니다 — #4076 조사 그라운딩과 동형(디렉터 재작업 요청류를 삼키면 안 됨)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id)
+            first_review = await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="review", requester_id=owner_id)
+            second_review = await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="review", requester_id=owner_id)
+
+            assert first_review.get("deduplicated") is not True
+            assert second_review.get("deduplicated") is not True
+            assert second_review["message_id"] != first_review["message_id"]
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_different_work_items_not_cross_deduplicated():
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story1_id = await _seed_story(s, org_id, project_id, title="S1")
+            story2_id = await _seed_story(s, org_id, project_id, title="S2")
+
+            r1 = await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story1_id, stage="draft", requester_id=owner_id)
+            r2 = await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story2_id, stage="draft", requester_id=owner_id)
+
+            assert r1.get("deduplicated") is not True
+            assert r2.get("deduplicated") is not True
+            assert r1["message_id"] != r2["message_id"]
+    finally:
+        await engine.dispose()
+
+
+# ─── GET /definitions/start-candidates (AC1/AC6) ──────────────────────────
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_start_candidates_empty_when_nothing_applied():
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            resp = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            assert resp.candidates == []
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_start_candidates_role_unassigned_when_only_non_first_stage_bound():
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_role_binding(
+                s, org_id=org_id, project_id=project_id, definition_key=definition.key,
+                stage="review", agent_id=agent_id,
+            )
+
+            resp = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            assert len(resp.candidates) == 1
+            c = resp.candidates[0]
+            assert c.role_bound is False
+            assert c.started is False
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_start_candidates_active_and_started_reflects_publish_history():
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_role_binding(
+                s, org_id=org_id, project_id=project_id, definition_key=definition.key,
+                stage="draft", agent_id=agent_id,
+            )
+
+            resp = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            assert len(resp.candidates) == 1
+            c = resp.candidates[0]
+            assert c.role_bound is True
+            assert c.started is False
+            assert c.first_stage == "draft"
+
+            published = await _publish_stage(
+                s, org_id=org_id, definition_key=definition.key, story_id=story_id,
+                stage="draft", requester_id=owner_id,
+            )
+
+            resp2 = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            c2 = resp2.candidates[0]
+            assert c2.started is True
+            assert c2.conversation_id == published["conversation_id"]
+            assert c2.message_id == published["message_id"]
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_start_candidates_org_wide_binding_counts_as_applied():
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            definition = await _seed_cyclic_definition(s, org_id=org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            # project_id=None — org 전역 바인딩(apply 시 project 미지정).
+            await _seed_role_binding(
+                s, org_id=org_id, project_id=None, definition_key=definition.key,
+                stage="draft", agent_id=agent_id,
+            )
+
+            resp = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            assert len(resp.candidates) == 1
+            assert resp.candidates[0].role_bound is True
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_start_candidates_two_applied_recipes_both_listed():
+    """Pedro 확定 — 적용 레시피 2개 이상이면 FE가 고르게 한다. BE는 그 선택지를 그대로
+    나열만(정렬·필터 안 함) — 신규 우선순위 로직 발명 금지."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            d1 = await _seed_cyclic_definition(s, org_id=org_id, key="org.e4075.recipe_a")
+            d2 = await _seed_cyclic_definition(s, org_id=org_id, key="org.e4075.recipe_b")
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_role_binding(s, org_id=org_id, project_id=project_id, definition_key=d1.key, stage="draft", agent_id=agent_id)
+            await _seed_role_binding(s, org_id=org_id, project_id=project_id, definition_key=d2.key, stage="draft", agent_id=agent_id)
+
+            resp = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            keys = sorted(c.key for c in resp.candidates)
+            assert keys == [d1.key, d2.key]
+            assert all(c.role_bound for c in resp.candidates)
+    finally:
+        await engine.dispose()
