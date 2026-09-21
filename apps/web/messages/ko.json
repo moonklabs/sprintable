@@ -1168,6 +1168,7 @@
     "recipeNextStageLabel": "다음 단계",
     "recipeNoNextStage": "마지막 단계",
     "recipeLastPublishedLabel": "마지막 발행",
+    "recipeStagePositionFallback": "단계 {position}/{total}",
     "dispatch": "이벤트 전달",
     "dispatching": "전달 중…",
     "dispatchTooltip": "선택한 에이전트에 이벤트를 주입해 즉시 작업을 시작해요",

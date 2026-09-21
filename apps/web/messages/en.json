@@ -1168,6 +1168,7 @@
     "recipeNextStageLabel": "Next step",
     "recipeNoNextStage": "Final step",
     "recipeLastPublishedLabel": "Last published",
+    "recipeStagePositionFallback": "Step {position}/{total}",
     "dispatch": "Dispatch",
     "dispatching": "Dispatching…",
     "dispatchTooltip": "Inject an event into the selected agent to start work immediately",

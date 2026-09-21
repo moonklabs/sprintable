@@ -15,6 +15,7 @@ import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { channelLabel } from '@/lib/channel-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -671,6 +672,9 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   // HostedSite/Wordpress 등)는 content ns에 산다(content/[draftId]/page.tsx 기존
   // 소비처와 동일 배선) — cage ns의 이 컴포넌트가 별도로 바인딩한다.
   const tContent = useTranslations('content');
+  // story #4082(유나 design CHANGES 2026-09-21) — approvals-queue.tsx·gates/[id]/page.tsx와
+  // 동일 SSOT(organization 네임스페이스)로 stage 낱말을 통일(raw slug 노출 0).
+  const tOrg = useTranslations('organization');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [expanded, setExpanded] = useState(false);
@@ -777,7 +781,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.stage ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalStageLabel')} · </span>
-          <span className="text-foreground">{facts.stage}</span>
+          <span className="text-foreground">{recipeStageLabel(facts.stage, tOrg)}</span>
         </p>
       ) : null}
       {facts.workItemRef ? (

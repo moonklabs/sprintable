@@ -3186,6 +3186,12 @@ class RecipeStartCandidate(BaseModel):
     next_stage: str | None = None
     next_role: str | None = None
     last_published_at: datetime | None = None
+    # story #4082(유나 design CHANGES 2026-09-21) — current_stage가 recipe-stage-label.ts의
+    # 고정 테이블에 없는(미등재) slug일 때 FE가 raw 값을 그대로 못 띄우게(내부어 노출 0)
+    # «단계 n/9»류 자리표시로 대체할 수 있게, 이미 stage_enum.index()로 구한 위치를
+    # 1-indexed로 얹는다(새 조회 0 — next_stage 계산과 같은 자리에서 파생).
+    current_stage_position: int | None = None
+    total_stages: int | None = None
 
 
 class RecipeStartCandidatesResponse(BaseModel):
@@ -3266,6 +3272,7 @@ async def get_recipe_start_candidates(
         # message_content(위)의 "다음 단계" 계산과 동일 SSOT(payload_schema.stage.enum
         # 순서 + stage_metadata) — 새 파생 로직 발명 안 함.
         current_stage = current_role = next_stage = next_role = None
+        current_stage_position = None
         last_published_at = None
         if existing_publish is not None:
             latest = await _find_latest_stage_publish(
@@ -3281,6 +3288,7 @@ async def get_recipe_start_candidates(
                     current_role = (definition.stage_metadata.get(stage_value) or {}).get("role")
                     if stage_value in stage_enum:
                         idx = stage_enum.index(stage_value)
+                        current_stage_position = idx + 1
                         if idx + 1 < len(stage_enum):
                             next_stage = stage_enum[idx + 1]
                             next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
@@ -3299,6 +3307,8 @@ async def get_recipe_start_candidates(
             next_stage=next_stage,
             next_role=next_role,
             last_published_at=last_published_at,
+            current_stage_position=current_stage_position,
+            total_stages=len(stage_enum) if current_stage is not None else None,
         ))
 
     return RecipeStartCandidatesResponse(candidates=candidates)

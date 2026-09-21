@@ -300,31 +300,33 @@ describe('ApprovalsQueue', () => {
 
   // story #4082([E-RECIPE-1] 진행 위치 표시) AC2 — recipe_gate_hooks.py::
   // maybe_create_stage_gate가 denorm한 neutral_facts.stage(+stage_role).
-  it('neutral_facts.stage_role이 있으면 「단계: X (역할)」을 표시한다', async () => {
+  it('neutral_facts.stage_role이 있으면 「단계: X (역할)」을 한글 낱말표로 표시한다(유나 design CHANGES, 내부어 노출 0)', async () => {
     mockFetches(
       [gate({
         id: 'g-stage', can_approve: true, requires_human: true,
-        neutral_facts: { stage: 'review', stage_role: '검토자' },
+        neutral_facts: { stage: 'concept_confirmed', stage_role: 'Director' },
       })],
       [],
     );
     await mount();
     const text = container.textContent ?? '';
-    expect(text).toContain(`${koMessages.cage.gateStageLabel}: review (검토자)`);
+    expect(text).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정 (디렉터)`);
+    expect(text).not.toContain('concept_confirmed');
+    expect(text).not.toContain('Director');
   });
 
   it('neutral_facts.stage만 있고 stage_role이 없으면 역할 괄호 없이 단계만 표시한다', async () => {
     mockFetches(
       [gate({
         id: 'g-stage-no-role', can_approve: true, requires_human: true,
-        neutral_facts: { stage: 'review' },
+        neutral_facts: { stage: 'concept_confirmed' },
       })],
       [],
     );
     await mount();
     const text = container.textContent ?? '';
-    expect(text).toContain(`${koMessages.cage.gateStageLabel}: review`);
-    expect(text).not.toContain('(검토자)');
+    expect(text).toContain(`${koMessages.cage.gateStageLabel}: 컨셉 확정`);
+    expect(text).not.toContain('(디렉터)');
   });
 
   it('비레시피 게이트(neutral_facts.stage 없음)는 단계 줄 자체가 안 뜬다(회귀 0)', async () => {

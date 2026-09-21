@@ -9,7 +9,23 @@ import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { stageRoleLabel } from '@/lib/stage-role';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
+
+// story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts에 미등재된 slug는
+// raw 노출 대신 「단계 n/9」로 자리표시한다(recipeStageLabel 자신의 기존 pass-through
+// 계약은 detail/gallery용으로 그대로 두고, 여기 3표면만 이 wrapper로 좁힌다 — 새 기전
+// 발명이 아니라 기존 두 SSOT(recipeStageLabel·stageRoleLabel)를 조합만 한다).
+function displayStageLabel(
+  stage: string, position: number | null, total: number | null, tOrg: (key: string) => string,
+  t: (key: string, values?: Record<string, string | number | Date>) => string,
+): string {
+  const label = recipeStageLabel(stage, tOrg);
+  if (label !== stage) return label;
+  if (position !== null && total !== null) return t('recipeStagePositionFallback', { position, total });
+  return label;
+}
 
 interface RecipeStartSectionProps {
   storyId: string;
@@ -24,6 +40,9 @@ interface RecipeStartSectionProps {
 // (2개 이상이면 고르게, 페드루 확定).
 export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionProps) {
   const t = useTranslations('board');
+  // story #4082(유나 design CHANGES) — role/stage 정본 낱말표는 organization 네임스페이스
+  // (recipe-detail-view.tsx가 이미 쓰는 그 SSOT, 적용 다이얼로그와 화면 간 낱말 통일).
+  const tOrg = useTranslations('organization');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const { candidates, loading, error: loadError, refresh } = useRecipeStartCandidates(projectId, 'story', storyId);
@@ -129,13 +148,17 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           <div className="flex flex-col gap-1">
             {selected.current_stage && (
               <p className="text-xs font-medium text-foreground">
-                {t('recipeCurrentStageLabel')}: {selected.current_stage}
-                {selected.current_role ? ` (${selected.current_role})` : ''}
+                {t('recipeCurrentStageLabel')}: {displayStageLabel(selected.current_stage, selected.current_stage_position, selected.total_stages, tOrg, t)}
+                {selected.current_role ? ` (${stageRoleLabel(selected.current_role, tOrg)})` : ''}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
               {selected.next_stage
-                ? `${t('recipeNextStageLabel')}: ${selected.next_stage}${selected.next_role ? ` (${selected.next_role})` : ''}`
+                ? `${t('recipeNextStageLabel')}: ${displayStageLabel(
+                    selected.next_stage,
+                    selected.current_stage_position !== null ? selected.current_stage_position + 1 : null,
+                    selected.total_stages, tOrg, t,
+                  )}${selected.next_role ? ` (${stageRoleLabel(selected.next_role, tOrg)})` : ''}`
                 : t('recipeNoNextStage')}
             </p>
             {selected.last_published_at && (

@@ -186,6 +186,8 @@ async def test_ac1_not_started_progress_fields_are_none():
             assert c.next_stage is None
             assert c.next_role is None
             assert c.last_published_at is None
+            assert c.current_stage_position is None
+            assert c.total_stages is None
     finally:
         await engine.dispose()
 
@@ -213,6 +215,8 @@ async def test_ac1_started_at_first_stage_shows_current_and_next():
             assert c.next_stage == "stage2"
             assert c.next_role == "Role2"
             assert c.last_published_at is not None
+            assert c.current_stage_position == 1
+            assert c.total_stages == 9
     finally:
         await engine.dispose()
 
@@ -242,6 +246,8 @@ async def test_ac3_nine_stage_definition_published_to_stage3_reports_current_nex
             assert c.current_role == "Role3"
             assert c.next_stage == "stage4"
             assert c.next_role == "Role4"
+            assert c.current_stage_position == 3
+            assert c.total_stages == 9
 
             from sqlalchemy import select
             from app.models.conversation import ConversationMessage
@@ -276,6 +282,8 @@ async def test_ac1_last_stage_reports_no_next_stage():
             assert c.current_stage == "stage9"
             assert c.next_stage is None
             assert c.next_role is None
+            assert c.current_stage_position == 9
+            assert c.total_stages == 9
     finally:
         await engine.dispose()
 
