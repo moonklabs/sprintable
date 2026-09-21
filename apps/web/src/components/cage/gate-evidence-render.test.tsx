@@ -456,12 +456,13 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     });
 
     it('scoped(초안 자체) 게이트(scope_key≠"")에는 카드 자체가 안 뜬다', async () => {
-      // 실 scoped external_publish 게이트 형상(submit_channel_post_draft가 채우는 sealed_
-      // content_* — State B 렌더 진입 조건, «근거 데이터 없음»으로 조기 return되면 이 케이스
-      // 자체가 공허해진다) 그대로 재현 — destination/draft_id만으로는 recipeApprovalFacts의
-      // hasAny가 안 걸려 State A로 빠지므로 이 카드 분기 자체를 안 탄다(뮤테이션 실측으로 확認).
+      // 까디르 QA 렌즈(b)(PR #4475 리뷰, 2026-09-21) — 이전 픽스처는 neutral_facts에 stage가
+      // 없어 recipeFacts?.stage 자체가 falsy였다(scope_key 절과 무관하게 카드 미렌더) —
+      // «scope_key 절 제거 → RED»가 실측과 달라 그 절 단독 검증이 안 됐다(까디르 뮤테이션
+      // 재현: scope_key 절만 빼도 63/63 그대로 GREEN). stage(+triggered_by_event, BE 가드와
+      // 같은 전제)를 실어 recipeFacts?.stage를 참으로 만들고 scope_key만으로 막히는지 pin.
       const gate = recipeApprovalGate(
-        { destination: 'sandbox', draft_id: 'x' },
+        { stage: 'pending_approval', channel: 'sandbox', triggered_by_event: 'recipe.stage.approved' },
         {
           scope_key: 'some-connection-id', linked_channel_draft: null, linked_channel_draft_pending: false,
           sealed_content_body: '실 초안 본문', sealed_content_version: 1,
