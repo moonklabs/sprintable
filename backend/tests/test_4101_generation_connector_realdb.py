@@ -366,12 +366,55 @@ async def test_create_generation_connector_admin_succeeds_and_response_has_no_cr
             )
             assert resp.provider_key == "vertex_gemini"
             assert resp.status == "active"
+            # story #4117 — created_at·revoked_at 노출(모델엔 이미 있었다, DTO만 빠뜨렸었다) —
+            # 설정 화면 «등록 시각» 행이 이 필드를 그려야 한다.
+            assert resp.created_at is not None
+            assert resp.revoked_at is None
             # write-only 이중 방어 — 응답 모델 자체에 필드가 없고, 직렬화 전문에도 평문/암호문 0.
             assert not hasattr(resp, "credentials")
             assert not hasattr(resp, "encrypted_credentials")
             dumped = resp.model_dump_json()
             assert "sk-live-abcdef123456" not in dumped
             assert "credentials" not in dumped
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_generation_connector_duplicate_label_returns_409():
+    """story #4117(라이브 실사고 그라운딩, 2026-09-21) — uq_org_generation_connectors_
+    org_label 위반이 그동안 FastAPI 미처리 IntegrityError → 제네릭 500(INTERNAL_ERROR)
+    으로 떨어져 「같은 이름의 커넥터가 이미 있어요」 문구를 화면이 못 냈다. 서비스가
+    constraint 이름을 확인해 이 위반만 409로 변환(다른 IntegrityError는 재raise —
+    #3808 교훈, 뮤테이션으로 그 포착 자체를 제거하면 이 테스트가 500으로 RED)."""
+    from app.routers.org_generation_connectors import (
+        GenerationConnectorCreateRequest, create_generation_connector_endpoint,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org_project(s)
+            _admin_id, admin_user_id = await _seed_org_member(s, org_id, role="admin")
+
+            await create_generation_connector_endpoint(
+                org_id,
+                GenerationConnectorCreateRequest(
+                    provider_key="vertex_gemini", label="중복 라벨", credentials="sk-first",
+                ),
+                db=s, auth=_auth(admin_user_id, org_id), verified_org_id=org_id,
+            )
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_generation_connector_endpoint(
+                    org_id,
+                    GenerationConnectorCreateRequest(
+                        provider_key="vertex_gemini", label="중복 라벨", credentials="sk-second",
+                    ),
+                    db=s, auth=_auth(admin_user_id, org_id), verified_org_id=org_id,
+                )
+            assert exc_info.value.status_code == 409
+            assert exc_info.value.detail == {"code": "GENERATION_CONNECTOR_LABEL_DUPLICATE"}
     finally:
         await engine.dispose()
 

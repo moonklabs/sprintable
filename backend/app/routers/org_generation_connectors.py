@@ -14,6 +14,7 @@ channel_connections.py처럼 목록은 human이면 누구나, 자격을 실제�
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -28,6 +29,7 @@ from app.models.org_generation_connector import (
 from app.services.member_resolver import resolve_member
 from app.services.org_generation_connector import (
     GenerationConnectorInvalidProviderError,
+    GenerationConnectorLabelDuplicateError,
     GenerationConnectorNotFoundError,
     create_org_generation_connector,
     list_org_generation_connectors,
@@ -85,7 +87,11 @@ class GenerationConnectorCreateRequest(BaseModel):
 
 class GenerationConnectorResponse(BaseModel):
     """⛔credentials/encrypted_credentials 필드를 절대 추가하지 않는다 — write-only 계약의
-    정본은 이 클래스에 그 필드가 없다는 사실 자체."""
+    정본은 이 클래스에 그 필드가 없다는 사실 자체.
+
+    story #4117 — created_at·revoked_at 노출(모델엔 이미 있었다, TimestampMixin·
+    org_generation_connector.py 58행 — DTO만 빠뜨렸었다). 설정 화면 «등록 시각»/
+    «해지 시각» 행(#4112 시안 프레임①)이 이 두 필드가 있어야 그려진다."""
     model_config = {"protected_namespaces": ()}
 
     id: uuid.UUID
@@ -94,12 +100,15 @@ class GenerationConnectorResponse(BaseModel):
     model_config_json: dict
     status: str
     created_by: uuid.UUID | None = None
+    created_at: datetime
+    revoked_at: datetime | None = None
 
 
 def _to_response(row: OrgGenerationConnector) -> GenerationConnectorResponse:
     return GenerationConnectorResponse(
         id=row.id, provider_key=row.provider_key, label=row.label,
         model_config_json=row.model_config_json, status=row.status, created_by=row.created_by,
+        created_at=row.created_at, revoked_at=row.revoked_at,
     )
 
 
@@ -133,6 +142,10 @@ async def create_generation_connector_endpoint(
         )
     except GenerationConnectorInvalidProviderError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except GenerationConnectorLabelDuplicateError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "GENERATION_CONNECTOR_LABEL_DUPLICATE"},
+        ) from exc
     return _to_response(row)
 
 

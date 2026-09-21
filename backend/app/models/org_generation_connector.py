@@ -32,11 +32,17 @@ GENERATION_CONNECTOR_PROVIDER_KEYS: frozenset[str] = frozenset({"vertex_gemini"}
 
 GENERATION_CONNECTOR_STATUSES: frozenset[str] = frozenset({"active", "revoked"})
 
+# story #4117 — channel_publication.py::UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME과
+# 동형 관례(story #3808 교훈: 제약 이름을 서비스 쪽에 따로 하드코딩하면 나중에 이
+# 제약이 바뀔 때 그 비교문만 옛 이름에 멈춰 판정이 항상 raise로 떨어진다) — 모델의
+# 상수 하나를 서비스가 import해서 IntegrityError의 constraint_name과 비교한다.
+UQ_ORG_LABEL_CONSTRAINT_NAME = "uq_org_generation_connectors_org_label"
+
 
 class OrgGenerationConnector(Base, TimestampMixin, OrgScopedMixin):
     __tablename__ = "org_generation_connectors"
     __table_args__ = (
-        UniqueConstraint("org_id", "label", name="uq_org_generation_connectors_org_label"),
+        UniqueConstraint("org_id", "label", name=UQ_ORG_LABEL_CONSTRAINT_NAME),
         CheckConstraint(
             "status IN ('active', 'revoked')",
             name="ck_org_generation_connectors_status",
