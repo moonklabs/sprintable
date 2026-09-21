@@ -50,8 +50,11 @@ describe('findTintTextPairs (story #2420 AC7)', () => {
   });
 
   it('flags each family independently when multiple pairs coexist in one literal', () => {
+    // story #4123 AC2 — 두 계열이 같은 리터럴에 다 있으면 same-family 2건 + cross-family
+    // 2건(text-success on bg-info-tint · text-info on bg-success/10)까지 4건이 정직하다
+    // (예전엔 cross-family 축이 status 4색엔 없어 2건만 잡혔다 — 이 확장이 고친 바로 그 축).
     const hits = findTintTextPairs('bg-success/10 text-success bg-info-tint text-info');
-    expect(hits.map((h) => h.family).sort()).toEqual(['info', 'success']);
+    expect(hits.map((h) => h.family).sort()).toEqual(['info', 'info', 'success', 'success']);
   });
 
   // ── story #4102(#4100 유나 定 A안) — brand·primary 텍스트 축, cross-family(자기 bg
@@ -74,6 +77,35 @@ describe('findTintTextPairs (story #2420 AC7)', () => {
   it('existing same-family axis (destructive/info/success/warning) is unaffected by the extra-text-color addition', () => {
     const hits = findTintTextPairs('bg-destructive-tint text-destructive');
     expect(hits).toEqual([{ family: 'destructive', literal: 'bg-destructive-tint text-destructive' }]);
+  });
+
+  // ── story #4123 AC2(대비 가드 잔여 2, 페드루 PO 지시 2026-09-21) — 상태색 4종도 brand·
+  // primary와 같은 cross-family 축을 탄다. #4123 그라운딩이 token-math 층에서 실측한
+  // AA(4.5:1) 미달 6쌍을 그대로 양성대조로 pin(usage 실측은 0건이었지만 «가드가 이 조합을
+  // 잡는가»는 별개 — 픽스처로 못 틀리는 대조). ──
+  it('flags text-warning + bg-info-tint (cross-family, #4123 실측 light 4.24)', () => {
+    const hits = findTintTextPairs('bg-info-tint text-warning text-xs');
+    expect(hits).toEqual([{ family: 'warning', literal: 'bg-info-tint text-warning text-xs' }]);
+  });
+  it('flags text-warning + bg-destructive-bg (cross-family, #4123 실측 light 4.29)', () => {
+    const hits = findTintTextPairs('bg-destructive-bg text-warning');
+    expect(hits).toEqual([{ family: 'warning', literal: 'bg-destructive-bg text-warning' }]);
+  });
+  it('flags text-warning + bg-success-tint (cross-family, #4123 실측 light 4.33)', () => {
+    const hits = findTintTextPairs('bg-success-tint text-warning');
+    expect(hits).toEqual([{ family: 'warning', literal: 'bg-success-tint text-warning' }]);
+  });
+  it('flags text-destructive + bg-info-tint (cross-family, #4123 실측 light 4.45)', () => {
+    const hits = findTintTextPairs('bg-info-tint text-destructive');
+    expect(hits).toEqual([{ family: 'destructive', literal: 'bg-info-tint text-destructive' }]);
+  });
+  it('flags text-success + bg-info-bg (cross-family, #4123 실측 light 4.46)', () => {
+    const hits = findTintTextPairs('bg-info-bg text-success');
+    expect(hits).toEqual([{ family: 'success', literal: 'bg-info-bg text-success' }]);
+  });
+  it('does NOT flag same-family twice when cross-family loop runs alongside it (destructive on its own bg stays a single hit)', () => {
+    const hits = findTintTextPairs('bg-destructive-tint text-destructive text-xs');
+    expect(hits).toHaveLength(1);
   });
 });
 
