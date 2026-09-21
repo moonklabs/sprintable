@@ -3694,34 +3694,42 @@ async def get_my_generation_connector(
     첫 실제 호출처(#4101이 write-only로 지어둔 뒤 콜러 0이었던 것을 #4109 그라운딩이
     확認 — 이 카드가 그 첫 독자).
 
-    판정 순서(전부 되돌리면 RED, #4110 AC1/AC2):
+    판정 순서(전부 되돌리면 RED, #4110 AC1/AC2 + #4124 AC1):
     1. 호출자가 agent 아니면(human) 403 — 자격 노출은 에이전트 실행 경로만
        (org_generation_connectors.py의 사람용 BFF는 애초에 credentials를 안 돌려주는
        것과 대칭 축, 여기는 "누가 부르는지"로 가른다).
     2. work_item → project를 못 찾으면(work item 자체가 없음) 404.
-    3. 그 project(+ org 전역)에 바인딩된 레시피 중 **이 work_item에 실제로 시작된**
+    3. ⛔story #4124(PO 실측, 2026-09-21) — 이 project(+ org 전역)에 **적용된**(바인딩이
+       하나라도 있는) 모든 event_definition_key에 걸쳐, 호출 에이전트가 그 어느 키에도
+       `RecipeRoleBinding.agent_member_id`로 안 묶여 있으면 여기서 바로 403(그 다음
+       검사 0 — stage 매칭도 안 돈다). #4110 CHANGES-1이 crew 판정을 바인딩/커넥터
+       조회보다 앞으로 옮겼지만 그 판정 자체가 아래 4번(stage 매칭 루프, matched_key
+       필요) **뒤**에 있었다 — 완전히 crew 밖인 호출자(라이브 실측: 이 project/org
+       어느 적용에도 전혀 안 묶인 에이전트)도 그 루프가 먼저 돌아 "지금 활성
+       generation_connector stage가 없다"(stage-mismatch, 4번)는 사실을 crew 판정보다
+       먼저 알 수 있었다. 이 넓은 사전 관문이 그 구멍을 막는다.
+    4. 그 project(+ org 전역)에 바인딩된 레시피 중 **이 work_item에 실제로 시작된**
        것(`get_recipe_start_candidates`와 동일 SSOT — `_find_existing_stage_publish`로
        "시작됐는가", `_find_latest_stage_publish`로 "지금 어느 stage인가")을 찾아, 그
        현재 stage 중 `capability.target=="generation_connector"`인 게 하나도 없으면
        403(stage 불일치 — "지금 이 도구를 쓸 차례가 아니다"). 여러 레시피가 동시에
        걸려도 새 판정을 안 짓는다 — target이 맞는 stage가 하나라도 나오면 그것을 쓴다.
-    4. 호출 에이전트가 crew(#4109 PO 결정 — 같은 org·[project 특이 ∪ org 전역]·
-       event_definition_key의 `RecipeRoleBinding.agent_member_id` 집합) 밖이면 403.
-       `resolve_member().id` 직접비교는 휴먼 JWT caller에서 축이 어긋날 수 있다는
-       기존 경고(S19, 위 734행)가 있으나 그건 human 축 얘기 — 1번에서 이미 agent만
-       통과시켰고 `agent_member_id` 자체가 agent 전용 컬럼(TeamMember.id 공간)이라
-       여기선 axis-safe. ⛔story #4110 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — 바인딩·
-       커넥터 조회보다 **먼저** 돈다: 원래 순서(바인딩→커넥터→crew)면 crew 밖
-       에이전트도 404/409로 "이 stage에 커넥터가 묶였는지·revoked인지"를 알 수
-       있었다 — 자격 인접 엔드포인트는 최소 정보 노출 순서(누가 봐도 되는지부터).
-    5. 그 stage에 바인딩된 `generation_connector_id`가 없으면 404(project 특이 우선,
+    5. 호출 에이전트가 이 특정 matched_key의 crew(#4109 PO 결정 — 같은 org·[project
+       특이 ∪ org 전역]·event_definition_key의 `RecipeRoleBinding.agent_member_id`
+       집합) 밖이면 403 — 3번(넓은 사전 관문)을 통과했어도(다른 키의 crew일 뿐) 이
+       좁은 최종 판정은 그대로 지킨다(다른 적용의 crew가 이 stage를 요청하는 경계
+       사례를 여전히 정확히 막는다). `resolve_member().id` 직접비교는 휴먼 JWT
+       caller에서 축이 어긋날 수 있다는 기존 경고(S19, 위 734행)가 있으나 그건 human
+       축 얘기 — 1번에서 이미 agent만 통과시켰고 `agent_member_id` 자체가 agent 전용
+       컬럼(TeamMember.id 공간)이라 여기선 axis-safe.
+    6. 그 stage에 바인딩된 `generation_connector_id`가 없으면 404(project 특이 우선,
        org 전역 폴백 — `_resolve_recipe_role_binding`과 동일 우선순위).
-    6. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면 409.
-    7. 감사 로그 1행 — `logger.info`(구조화, 자격값 절대 미포함). 신규 DB 테이블/마이그
+    7. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면 409.
+    8. 감사 로그 1행 — `logger.info`(구조화, 자격값 절대 미포함). 신규 DB 테이블/마이그
        0: `permission_audit_logs`는 `action` 닫힌 CHECK(member_added/member_removed/
        role_changed, baseline/schema.sql 1541행 실측)라 이 목적에 안 맞아 재사용하지
        않는다 — 새 테이블을 여는 대신(스코프 밖) 기존 로그 축에 싣는다.
-    8. `{provider_key, label, model_config_json, credentials}` 평문 1회 반환.
+    9. `{provider_key, label, model_config_json, credentials}` 평문 1회 반환.
     """
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
@@ -3750,6 +3758,32 @@ async def get_my_generation_connector(
         )
     )).all()
     applied_keys = sorted({k for (k,) in binding_rows})
+
+    # story #4124(PO 실측, 2026-09-21) — #4110 CHANGES-1이 crew 판정을 바인딩/커넥터
+    # 조회보다 앞으로 옮겼지만, 그 판정 자체가 여전히 stage-매칭 루프(아래, matched_key
+    # 필요) **뒤**에 있었다 — 호출자가 이 project/org의 어느 적용에도 전혀 안 묶인
+    # 완전한 crew 밖(라이브 실측: PO 에이전트 키)이어도, 루프가 먼저 돌아 "지금 활성
+    # generation_connector stage가 없다"는 사실(STAGE_MISMATCH)을 crew 판정보다 먼저
+    # 알려줬다 — 자격 인접 엔드포인트가 "누가 봐도 되는지"보다 "무엇이 있는지"를 먼저
+    # 답한 것(CHANGES-1이 막으려던 것과 같은 클래스, 범위만 넓음). 이 적용(applied_keys)
+    # 전체에 걸친 넓은 crew 집합(어느 키에든 바인딩된 적 있는 에이전트)으로 최소 자격을
+    # 여기서 먼저 거른다 — 통과 못 하면 그 다음 검사(stage 매칭·바인딩·revoked) 전부
+    # 0. 통과한 뒤에도 아래(3802행 부근) matched_key 한정 좁은 crew 판정은 그대로 둔다
+    # (다른 키의 crew가 이 키의 stage를 요청하는 경계 사례를 여전히 정확히 막는다 —
+    # 이 카드는 «완전 crew 밖»만 더 일찍 거르는 것이지 기존 좁은 판정을 대체하지 않는다).
+    if applied_keys:
+        broad_crew_ids = set((await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.event_definition_key.in_(applied_keys),
+                RecipeRoleBinding.agent_member_id.is_not(None),
+                or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+            )
+        )).scalars().all())
+    else:
+        broad_crew_ids = set()
+    if caller.id not in broad_crew_ids:
+        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_CREW_ONLY"})
 
     matched_key: str | None = None
     matched_stage: str | None = None

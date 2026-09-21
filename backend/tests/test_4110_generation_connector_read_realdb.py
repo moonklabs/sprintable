@@ -326,6 +326,81 @@ async def test_agent_outside_crew_with_revoked_connector_still_403_not_409():
 
 
 @pytest.mark.anyio
+async def test_zero_binding_agent_gets_crew_only_not_stage_mismatch():
+    """story #4124(PO 실측, 2026-09-21) — 이 project/org 어느 적용에도 전혀 안 묶인
+    (바인딩 0건) 에이전트가 아직 live_generation에 도달 안 한 스토리를 조회하면,
+    stage-매칭 루프가 먼저 돌아 STAGE_MISMATCH를 주던 게 구멍이었다. 넓은 crew
+    사전 관문이 stage 매칭보다 먼저 막아야 한다(그 다음 검사 0)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_definition(s, org_id=org_id)
+            drafter_id = await _seed_agent(s, org_id, project_id, name="drafter")
+            outsider_id = await _seed_agent(s, org_id, project_id, name="outsider")
+            story_id = await _seed_story(s, org_id, project_id)
+            connector_id = await _seed_generation_connector(s, org_id)
+            await _seed_agent_binding(s, org_id=org_id, project_id=project_id, stage="draft", agent_id=drafter_id)
+            await _seed_connector_binding(
+                s, org_id=org_id, project_id=project_id, stage="live_generation", connector_id=connector_id,
+            )
+            await _publish_stage(s, org_id=org_id, story_id=story_id, stage="draft", requester_id=drafter_id)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await _call_endpoint(s, org_id=org_id, work_item_id=story_id, caller_id=outsider_id)
+            assert exc_info.value.status_code == 403
+            assert exc_info.value.detail == {"code": "GENERATION_CONNECTOR_CREW_ONLY"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_zero_binding_agent_gets_crew_only_not_binding_not_found():
+    """story #4124 — 바인딩 0건 에이전트가 live_generation까지 진행됐지만 그 stage에
+    커넥터 바인딩 자체가 없는 스토리를 조회해도, 그 사실(BINDING_NOT_FOUND)을 알기
+    前에 CREW_ONLY로 먼저 막혀야 한다."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_definition(s, org_id=org_id)
+            drafter_id = await _seed_agent(s, org_id, project_id, name="drafter")
+            outsider_id = await _seed_agent(s, org_id, project_id, name="outsider")
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_agent_binding(s, org_id=org_id, project_id=project_id, stage="draft", agent_id=drafter_id)
+            # live_generation 바인딩 자체를 만들지 않음.
+            await _advance_to_live_generation(s, org_id=org_id, project_id=project_id, story_id=story_id, drafter_id=drafter_id)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await _call_endpoint(s, org_id=org_id, work_item_id=story_id, caller_id=outsider_id)
+            assert exc_info.value.status_code == 403
+            assert exc_info.value.detail == {"code": "GENERATION_CONNECTOR_CREW_ONLY"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_no_applied_recipes_at_all_gets_crew_only():
+    """story #4124 경계 — 이 project/org에 적용된 레시피 자체가 0건(binding_rows
+    빈 집합)이면 넓은 crew 집합도 빈 집합이라, 어느 에이전트든 CREW_ONLY(빈 집합
+    분기 `else: broad_crew_ids = set()`가 안 죽는지 직접 고정)."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            # 정의도 바인딩도 아예 만들지 않음.
+            outsider_id = await _seed_agent(s, org_id, project_id, name="outsider")
+            story_id = await _seed_story(s, org_id, project_id)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await _call_endpoint(s, org_id=org_id, work_item_id=story_id, caller_id=outsider_id)
+            assert exc_info.value.status_code == 403
+            assert exc_info.value.detail == {"code": "GENERATION_CONNECTOR_CREW_ONLY"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_stage_mismatch_403_when_not_yet_at_generation_connector_stage():
     """draft까지만 발행(시작은 됐지만 아직 live_generation이 아님) — «지금 이 도구를
     쓸 차례가 아니다»."""
