@@ -257,6 +257,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Next action: publish the next stage event for this definition: "
         "publish_event({example})",
     },
+    # story #4085(리허설 1호 실측, PO 확定 2026-09-21) — gate_type={gate_type} 게이트를
+    # 여는 stage 발행에 봉인 필드가 빠졌을 때의 422 메시지(recipe_gate_hooks.py::
+    # MissingGateSealedFieldError, events.py 라우터가 그대로 옮겨 담는다). 해요체 규칙.
+    "events.gate_sealed_field_missing": {
+        "ko": "gate_type={gate_type} 게이트를 열려면 다음 필드가 필요해요: {fields}.",
+        "en": "Opening a gate_type={gate_type} gate requires the following field(s): {fields}.",
+    },
     # story #3614 갭(BE, 페드루 PO 確定 2026-09-11) — 폐기(withdrawn, 종결)된 초안
     # submit 거부(409). 새 한글 사용자 문장이라 3796(insight_snapshots.py)과 같은
     # 형으로 처음부터 카탈로그에 등재(BE 한글 사용자 문장 가드 신규 위반 대응).

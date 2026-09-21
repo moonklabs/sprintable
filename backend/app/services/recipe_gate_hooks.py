@@ -48,6 +48,37 @@ class UnknownApproverRoleError(ValueError):
     클래스 아님 — 조용히 넘기면 게이트가 승인자 없이 붕 떠버리므로 발행 시점에 명시 거부)."""
 
 
+# story #4085(리허설 1호 실측, PO 확定 2026-09-21) — gate_type별 "이 게이트가 봉인에 쓰는
+# payload 필드"의 단일 SSOT. 실사고: generation_budget 게이트가 estimated_cost_minor
+# 없이 열려(사전 하드체크는 "미설정이면 통과"가 맞는 규약 — #4044) 결재 카드에 예상 비용이
+# 0/null로 비어 있었다. 레시피 키·stage 하드코딩 없이 gate_type 하나로만 갈라 다음 레시피
+# 에도 그대로 적용된다(새 gate_type이 봉인 필드를 쓰려면 여기 한 줄만 추가). events.py의
+# 자기설명 렌더러(story #4085 AC1, #4458 rebase 뒤 착수)도 이 SSOT를 그대로 읽어 예시
+# payload에 실을 필드 목록을 구성한다 — 새 목록 발명 0.
+_GATE_TYPE_SEALED_FIELDS: dict[str, tuple[str, ...]] = {
+    _GENERATION_BUDGET_GATE_TYPE: ("estimated_cost_minor",),
+}
+
+
+class MissingGateSealedFieldError(ValueError):
+    """story #4085 AC2 — gate_decl["type"]이 _GATE_TYPE_SEALED_FIELDS에 선언한 필드 중
+    하나라도 payload에 없거나(또는 잘못된 타입이면) 게이트를 만들지 않고 여기서 막는다.
+    #4044의 "estimated_cost_minor 미설정이면 예산 검사를 스킵한다"는 예산 *한도 비교*의
+    규약이지 예산 *게이트*가 숫자 없이 열려도 된다는 뜻이 아니다(PO 확定 — "숫자 없는
+    예산 게이트는 게이트가 아니다") — 그래서 이 검사는 check_generation_budget_or_raise
+    호출 前, create_gate 호출 前에 온다(부분 봉인 상태로 게이트가 만들어지는 경로 0)."""
+
+    def __init__(self, *, gate_type: str, missing_fields: list[str]):
+        self.gate_type = gate_type
+        self.missing_fields = missing_fields
+        # 이 메시지는 사용자에게 안 닿는다(내부 진단용 — 실 사용자 문장은 events.py의
+        # 라우터가 i18n_catalog `events.gate_sealed_field_missing`으로 별도 조립한다,
+        # #3779 가드 대상 밖) — 영문 고정.
+        super().__init__(
+            f"gate_type={gate_type!r} publish is missing required sealed field(s): {missing_fields}"
+        )
+
+
 async def _resolve_org_owner(db: AsyncSession, *, org_id: uuid.UUID) -> uuid.UUID:
     member_id = (await db.execute(
         select(OrgMember.id)
@@ -261,6 +292,19 @@ async def maybe_create_stage_gate(
     if not gate_decl:
         return
 
+    # story #4085 AC2 — 이 stage의 gate_decl["type"]이 봉인 필드를 요구하는데(_GATE_TYPE_
+    # SEALED_FIELDS) payload에 없으면(또는 타입이 틀리면) 게이트를 아예 만들지 않고 여기서
+    # 막는다 — 승인자 해소·neutral_facts 조립·budget 하드체크보다 먼저(부분 부수효과 0).
+    # bool은 int의 서브클래스라 isinstance(v, int)만으로는 True/False가 새므로 명시 제외
+    # (기존 estimated_cost_minor 봉인 코드의 동일 방어와 동형, 새 방어 0).
+    _required_sealed_fields = _GATE_TYPE_SEALED_FIELDS.get(gate_decl["type"], ())
+    _missing_sealed_fields = [
+        f for f in _required_sealed_fields
+        if not isinstance(payload.get(f), int) or isinstance(payload.get(f), bool)
+    ]
+    if _missing_sealed_fields:
+        raise MissingGateSealedFieldError(gate_type=gate_decl["type"], missing_fields=_missing_sealed_fields)
+
     work_item_id = _parse_work_item_uuid(work_item_id_raw)
     if work_item_id is None:
         return
@@ -295,11 +339,13 @@ async def maybe_create_stage_gate(
 
     # story #4044 — gate_type="generation_budget"은 create_gate() 호출 *전*에 하드체크한다
     # (channel_posts.py/site_posts.py의 submit-시점 422와 동일 판정 지점 — 반쪽 봉인 없이
-    # 잔량 초과면 게이트 자체를 만들지 않는다). estimated_cost_minor는 payload의 선택
-    # 필드(정의 저자가 이 stage의 payload_schema에 열어야 발행 시 실릴 수 있다) — 없으면
-    # check_generation_budget_or_raise 자신의 기존 규약대로 검사를 스킵한다(AC2 "미설정이면
-    # 통과"). 통과분은 neutral_facts에 실어 결재 카드가 "편당 예상 비용"·잔여 예산을
-    # 실물로 보여준다(story #3312 처방 3, "가서 보라" 금지와 동형).
+    # 잔량 초과면 게이트 자체를 만들지 않는다). story #4085 — estimated_cost_minor는 위
+    # _GATE_TYPE_SEALED_FIELDS 검사가 이미 필수로 강제해 이 시점엔 항상 유효한 int다(그
+    # 검사를 통과 못 하면 이 줄까지 안 옴) — 아래 isinstance 가드는 그 사실을 다시 요구하지
+    # 않고, 미래에 이 gate_type의 봉인 필드 집합이 늘어나 "일부만 필수"가 될 가능성에 대비한
+    # 방어 그대로 남긴다(지금은 죽지 않는 코드). 통과분은 neutral_facts에 실어 결재 카드가
+    # "편당 예상 비용"·잔여 예산을 실물로 보여준다(story #3312 처방 3, "가서 보라" 금지와
+    # 동형).
     if gate_decl["type"] == _GENERATION_BUDGET_GATE_TYPE:
         estimated_cost_minor = payload.get("estimated_cost_minor")
         if isinstance(estimated_cost_minor, int) and not isinstance(estimated_cost_minor, bool):

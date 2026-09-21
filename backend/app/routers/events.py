@@ -2067,7 +2067,7 @@ async def _publish_registry_event_core(
     # 먼저 정착시킨다(routing_resolver 호출과 동일 컴포지션 스타일 — 인라인 분기 아님).
     # definition에 이 stage의 gate 선언이 없으면 완전 no-op(AC3 회귀 0).
     from app.services.generation_budget import GenerationBudgetExceededError
-    from app.services.recipe_gate_hooks import maybe_create_stage_gate
+    from app.services.recipe_gate_hooks import MissingGateSealedFieldError, maybe_create_stage_gate
 
     try:
         await maybe_create_stage_gate(
@@ -2082,6 +2082,22 @@ async def _publish_registry_event_core(
                 "code": "GENERATION_BUDGET_EXCEEDED",
                 "limit_minor": e.limit_minor, "spent_minor": e.spent_minor,
                 "estimated_cost_minor": e.estimated_cost_minor, "remaining_minor": e.remaining_minor,
+            },
+        ) from e
+    except MissingGateSealedFieldError as e:
+        # story #4085(리허설 1호 실측, PO 확定) — "숫자 없는 예산 게이트는 게이트가
+        # 아니다": 봉인 필드가 빠지면 게이트를 만들지 않고 어떤 필드가 빠졌는지 명시한다
+        # (에이전트가 같은 발행을 그 필드만 채워 재시도할 수 있게).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GATE_SEALED_FIELD_MISSING",
+                "gate_type": e.gate_type,
+                "missing_fields": e.missing_fields,
+                "message": t(
+                    "events.gate_sealed_field_missing", resolved_locale,
+                    gate_type=e.gate_type, fields=", ".join(e.missing_fields),
+                ),
             },
         ) from e
 
