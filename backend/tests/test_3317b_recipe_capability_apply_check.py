@@ -283,6 +283,10 @@ async def test_apply_connector_key_specified_missing_required_config_warns():
             assert len(resp.warnings) == 1
             for required_field in ("create.senderEmail", "create.senderName", "create.listId"):
                 assert required_field in resp.warnings[0]
+            # story #4108 CHANGES(페드루 PO 리뷰, 2026-09-21) — missing(list[str])이 파이썬
+            # list repr(대괄호·따옴표)로 안 새는지 고정 — join된 사람말 목록이어야 한다.
+            assert "[" not in resp.warnings[0]
+            assert "'" not in resp.warnings[0]
     finally:
         await engine.dispose()
 
@@ -425,3 +429,135 @@ async def test_apply_agent_tool_hint_kind_yields_no_warning_even_with_zero_conne
             assert resp.warnings == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_warning_translates_registered_role_to_korean_label():
+    """story #4108 design CHANGES(유나·페드루 PO, 2026-09-21) — role="Publisher"는
+    FE stage-role.ts 정본 17종에 있어 한글 라벨 "발행자 단계"로 뜬다(원어 "Publisher"도
+    원래 stage 키도 문장에 안 남는다) — 준비 경고 문장에 영어 role enum이 그대로
+    새는(story #4460류) 재발을 막는다."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="b4108c")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            agent_id = await _seed_agent(s, org_id, project_id, name="worker")
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.b4108c.recipe_cap",
+                stage_metadata={
+                    "published": {
+                        "role": "Publisher", "action": "발행",
+                        "capability": {"kind": "publish"},
+                    },
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"published": str(agent_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert len(resp.warnings) == 1
+            assert "발행자 단계" in resp.warnings[0]
+            assert "Publisher" not in resp.warnings[0]
+            assert "published" not in resp.warnings[0]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_warning_uses_stage_role_label_not_raw_stage_key():
+    """story #4108(페드루 PO 確定, 2026-09-21) — 미등재(조직 커스텀) role은 FE
+    stageRoleLabel과 동형 원칙으로 raw pass-through — 이미 사람말인 커스텀 role
+    "발행 담당자"는 그대로 "발행 담당자 단계"로 뜬다. 원래 stage 키("publish_video")도
+    파이썬 repr 토큰(`stage='...'`)도 문장에 안 남는다."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="b4108a")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            agent_id = await _seed_agent(s, org_id, project_id, name="worker")
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.b4108a.recipe_cap",
+                stage_metadata={
+                    "publish_video": {
+                        "role": "발행 담당자", "action": "발행",
+                        "capability": {"kind": "publish"},
+                    },
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"publish_video": str(agent_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert len(resp.warnings) == 1
+            assert "발행 담당자 단계" in resp.warnings[0]
+            assert "publish_video" not in resp.warnings[0]
+            assert "='" not in resp.warnings[0]
+            assert "stage=" not in resp.warnings[0]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_warning_falls_back_to_stage_key_when_role_missing():
+    """story #4108 — role이 없는 stage_metadata(등록 API는 항상 role을 요구하지만,
+    이 realdb 테스트는 _seed_definition으로 그 검증을 우회해 방어적 폴백 경로를
+    직접 겨냥한다)는 라벨 없이 stage 키 그대로("editing_stage") 노출한다 — "단계"
+    접미사도 안 붙는다(있는 라벨을 사람말로 쓰는 것과 «지어내는» 것은 다르다)."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="b4108b")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            agent_id = await _seed_agent(s, org_id, project_id, name="worker")
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.b4108b.recipe_cap",
+                stage_metadata={
+                    "editing_stage": {"capability": {"kind": "publish"}},
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"editing_stage": str(agent_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert len(resp.warnings) == 1
+            assert "editing_stage" in resp.warnings[0]
+            assert "editing_stage 단계" not in resp.warnings[0]
+    finally:
+        await engine.dispose()
+
+
+def test_stage_role_label_keys_match_fe_stage_role_ts_pin():
+    """story #4108 design CHANGES(페드루 PO 지시, 2026-09-21) — 카디르 QA 대칭 테스트
+    관례(FE `RECIPE_STAGE_LABEL_SLUGS`/`STAGE_ROLE_PRESET_VALUES` export와 동형)를 BE
+    쪽에 적용. FE 정본은 `apps/web/src/lib/stage-role.ts`의 `STAGE_ROLE_PRESET_VALUES`
+    (story #3773, 유나 定) — 이 파일을 읽지 않고(교차언어 파일 읽기 대신 상수 목록 고정
+    pin) 그 17종을 여기 하드코딩해 BE `_STAGE_ROLE_LABEL_KEYS`와 대조한다. 어느 한쪽만
+    새 role을 추가하면(등재≠배선 함정) 이 테스트가 RED — FE에 새 role이 추가되면 이
+    목록도, i18n_catalog.py의 `events.stage_role.<Role>` 키도 함께 늘릴 것."""
+    from app.routers.events import _STAGE_ROLE_LABEL_KEYS
+    from app.services.i18n_catalog import _CATALOG
+
+    # FE apps/web/src/lib/stage-role.ts::STAGE_ROLE_PRESET_VALUES 고정 pin(2026-09-21 기준).
+    fe_stage_role_preset_values = frozenset({
+        "Agent", "Any", "Approver", "Compute", "Creator", "Dev", "Director", "Executor",
+        "Human", "Lead", "Maker", "Member", "PO", "Publisher", "QA", "Reviewer", "Worker",
+    })
+    assert _STAGE_ROLE_LABEL_KEYS == fe_stage_role_preset_values
+    # BE 카탈로그에도 그 17종 전부가 events.stage_role.<Role> 키로 등재돼 있는지(등재만
+    # 되고 배선 안 되는 것도 막는다 — 위 assert가 집합만 맞추고 실제 카탈로그 키 존재는
+    # 안 볼 수 있어 이중으로 확認).
+    for role in fe_stage_role_preset_values:
+        assert f"events.stage_role.{role}" in _CATALOG
