@@ -22,8 +22,8 @@ capability.kind == 'publish'`로 채널-대상 여부를 가르려 했으나, �
 이 필드만 본다(kind와 완전 독립). 이 마이그가 레시피 1호 `published` stage에만
 `target: "channel_connection"`을 얹는다 — 그 외 정의는 무변(기본값이 오늘 계약 그대로).
 
-Revision ID: 0385
-Revises: 0384
+Revision ID: 0387
+Revises: 0386
 Create Date: 2026-09-21
 """
 from __future__ import annotations
@@ -34,8 +34,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = "0385"
-down_revision = "0384"
+revision = "0387"
+down_revision = "0386"
 branch_labels = None
 depends_on = None
 
