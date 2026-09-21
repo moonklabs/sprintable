@@ -678,6 +678,24 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
  * vs 기존 text-muted-foreground 5.1~5.9:1(AA 4.5:1은 이미 통과하던 값이라 접근성 위반은
  * 아니었으나, 값과 라벨의 시각적 위계가 안 갈렸다 — #2420과 동형 근거로 값을 승격).
  */
+// story #4090 AC3 정정(story #3779 BE 한글 사용자 문장 가드, 2026-09-21) — BE
+// gate.publish_outcome은 닫힌 어휘 코드(no_channel_binding|no_submitted_draft|
+// no_resolver|published|scheduled|publish_failed:*)를 저장한다(한글 완성 문장 아님,
+// channel_posts.py 주석과 동일 규율) — 이 함수가 코드→locale 문구로 번역한다.
+function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>): string {
+  if (code === 'published') return t('publishOutcomePublished');
+  if (code === 'scheduled') return t('publishOutcomeScheduled');
+  if (code === 'no_channel_binding') return t('publishOutcomeNoChannel');
+  if (code === 'no_submitted_draft') return t('publishOutcomeNoDraft');
+  if (code === 'no_resolver') return t('publishOutcomeNoResolver');
+  if (code.startsWith('publish_failed:')) {
+    return t('publishOutcomeFailed', { detail: code.slice('publish_failed:'.length) });
+  }
+  // 미지 코드(구버전 응답 등) — 지어내지 않고 원문 코드 그대로(사람이 읽기엔 어색해도
+  // 침묵보다 낫다, «모른다≠다르다» 규율).
+  return code;
+}
+
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const t = useTranslations('cage');
   // story #3367(유나 CHANGES 2026-09-10) — channelLabel()의 표시명 키(channelLabel
@@ -802,7 +820,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.publishOutcome ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalPublishOutcomeLabel')} · </span>
-          <span className="text-foreground">{facts.publishOutcome}</span>
+          <span className="text-foreground">{publishOutcomeLabel(facts.publishOutcome, t)}</span>
         </p>
       ) : null}
       {facts.workItemRef ? (

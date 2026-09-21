@@ -262,6 +262,26 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 채널 포스트 초안을 만들어 제출하면 승인이 자동으로 발행까지 이어져요.",
         "en": "Next action: create and submit a channel post draft — approval will auto-publish it.",
     },
+    # story #4090 AC3 정정(story #3779 가드, 2026-09-21) — gate.publish_outcome은 닫힌
+    # 어휘 코드(no_channel_binding|no_submitted_draft|no_resolver|publish_failed:*)라
+    # skipped 안내문의 {reason} 자리에 코드→문구 번역이 필요해졌다(4갈래 세분).
+    "events.gate_verdict_recipe_auto_publish_reason_no_channel": {
+        "ko": "발행 채널이 아직 지정되지 않았어요 — 레시피 적용 화면에서 발행 채널을 먼저 지정해 주세요.",
+        "en": "No publish channel is bound yet — bind one from the recipe apply screen first.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_no_draft": {
+        "ko": "제출된 채널 포스트 초안이 없어 발행을 건너뛰었어요 — 채널 포스트 초안을 만들어 제출한 뒤 "
+        "다시 승인해 주세요.",
+        "en": "No submitted channel post draft — create and submit one, then re-approve.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_no_resolver": {
+        "ko": "승인자를 확인할 수 없어 발행을 건너뛰었어요.",
+        "en": "Skipped — could not resolve an approver.",
+    },
+    "events.gate_verdict_recipe_auto_publish_reason_failed": {
+        "ko": "자동 발행이 실패했어요({detail}) — 채널 연결 상태를 확인한 뒤 다시 승인해 주세요.",
+        "en": "Auto-publish failed ({detail}) — check the channel connection and re-approve.",
+    },
     # story #4076 CI 정정(2026-09-21, 페드루 PO 지적) — 아래 두 키는 원래 events.py에
     # f-string 리터럴로 있었으나(라벨+발행 예시 JSON을 한 문자열로), 사이클 렌더러와
     # verdict 렌더러가 JSON 빌더 헬퍼(`_next_stage_publish_payload_json`)를 공유하도록

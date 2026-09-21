@@ -338,7 +338,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     root = createRoot(container);
     await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
-    expect(container.textContent).toContain('published');
+    expect(container.textContent).toContain(koMessages.cage.publishOutcomePublished);
   });
 
   it('story #4090 — publish_outcome이 null(레시피 무관 게이트)이면 그 줄 자체가 렌더되지 않는다', async () => {

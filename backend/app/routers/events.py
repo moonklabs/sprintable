@@ -1656,8 +1656,26 @@ async def _render_gate_verdict_message(
                         elif _outcome == "scheduled":
                             _example_line = f"- {t('events.gate_verdict_recipe_auto_publish_scheduled', resolved_locale)}"
                         elif _outcome:
+                            # story #3779 정정 — gate.publish_outcome은 닫힌 어휘 코드(한글
+                            # 완성 문장 아님, channel_posts.py 주석 참고). 여기서 코드→
+                            # locale 문구로 번역한다(3표면 중 이 자리만 코드→문구 변환이
+                            # 필요 — FE facts 블록은 자체 ko/en.json 매핑, 승인 응답은
+                            # 원 코드값 그대로 노출해도 무방).
+                            _reason_key_map = {
+                                "no_channel_binding": "events.gate_verdict_recipe_auto_publish_reason_no_channel",
+                                "no_submitted_draft": "events.gate_verdict_recipe_auto_publish_reason_no_draft",
+                                "no_resolver": "events.gate_verdict_recipe_auto_publish_reason_no_resolver",
+                            }
+                            _reason_key = _reason_key_map.get(_outcome)
+                            _reason_text = (
+                                t(_reason_key, resolved_locale) if _reason_key
+                                else t(
+                                    "events.gate_verdict_recipe_auto_publish_reason_failed", resolved_locale,
+                                    detail=_outcome,
+                                )
+                            )
                             _example_line = (
-                                f"- {t('events.gate_verdict_recipe_auto_publish_skipped', resolved_locale, reason=_outcome)}"
+                                f"- {t('events.gate_verdict_recipe_auto_publish_skipped', resolved_locale, reason=_reason_text)}"
                             )
                         else:
                             _example_line = f"- {t('events.gate_verdict_recipe_auto_publish_pending', resolved_locale)}"

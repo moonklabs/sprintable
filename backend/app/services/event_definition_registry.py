@@ -480,9 +480,13 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             # (7건 기존 픽스처가 "kind=publish + agent 바인딩"을 pin하고 있어, kind 값
             # 자체로 판별하면 그 계약을 조용히 깬다).
             if "target" in capability and capability["target"] not in _CAPABILITY_TARGETS:
+                # story #3779 BE 한글 사용자 문장 가드(story #3924 "baseline은 줄기만") —
+                # 이 정의 등록 검증 에러는 내부 개발자/설정 대상(에이전트가 event
+                # definition을 신설할 때 hits)이라 sibling raise들(위)과 달리 새로 여기
+                # 한글을 더하지 않고 영문으로 남긴다.
                 raise InvalidStageMetadataError(
-                    f"stage_metadata[{slug!r}].capability.target은 {sorted(_CAPABILITY_TARGETS)} "
-                    f"중 하나여야 합니다 — {capability.get('target')!r}은 닫힌 어휘 밖입니다."
+                    f"stage_metadata[{slug!r}].capability.target must be one of "
+                    f"{sorted(_CAPABILITY_TARGETS)} — got {capability.get('target')!r}."
                 )
 
 

@@ -2306,17 +2306,15 @@ async def publish_channel_post_draft(
 
 
 # story #4090([E-RECIPE-1] Publisher 슬롯) AC2 — 자동발행 스킵-사유 3표면(승인 응답·게이트
-# 상세 facts 블록·verdict 안내문)의 유일한 소스는 `gate.publish_outcome`(migration 0388) —
-# 세 표면이 각자 문자열을 짓지 않고 전부 이 값만 읽는다(드리프트 금지, 페드루 PO 確定
-# 2026-09-21 — resolution_note는 승인자 본인 문장 전용이라 여기 못 쓴다).
-_RECIPE_AUTO_PUBLISH_NO_CHANNEL_NOTE = (
-    "발행 채널이 아직 지정되지 않았어요 — 레시피 적용 화면에서 발행 채널을 먼저 지정해 주세요."
-)
-_RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE = (
-    "제출된 채널 포스트 초안이 없어 발행을 건너뛰었어요 — 채널 포스트 초안을 만들어 제출한 뒤 "
-    "다시 승인해 주세요."
-)
-_RECIPE_AUTO_PUBLISH_NO_RESOLVER_NOTE = "승인자를 확인할 수 없어 발행을 건너뛰었어요."
+# 상세 facts 블록·verdict 안내문)의 유일한 소스는 `gate.publish_outcome`(migration 0388).
+# ⛔닫힌 어휘 **코드**로만 저장한다(한글 완성 문장 아님) — 각 표면이 자기 locale로 번역해
+# 렌더한다(BE i18n_catalog.py의 events.gate_verdict_recipe_auto_publish_* 키·FE ko/en.json
+# 매핑). 최초 구현은 여기 한글 완성 문장을 직접 저장했다가 story #3779 BE 한글 사용자
+# 문장 가드(verify_no_new_korean_user_strings.py)에 걸려 정정(2026-09-21, "baseline은
+# 줄기만 허용" story #3924 — grandfather 등재로 우회 불가, 정공법으로 코드화).
+_RECIPE_AUTO_PUBLISH_NO_CHANNEL_NOTE = "no_channel_binding"
+_RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE = "no_submitted_draft"
+_RECIPE_AUTO_PUBLISH_NO_RESOLVER_NOTE = "no_resolver"
 
 
 async def _resolve_recipe_channel_connection_binding(
@@ -2527,7 +2525,10 @@ async def publish_recipe_approved_draft(
             "recipe auto-publish: 실제 발행 실패(gate=%s draft=%s) — 승인/제출 자체는 되돌리지 않는다",
             gate.id, target_draft.id, exc_info=True,
         )
-        gate.publish_outcome = f"발행 실패 — {type(exc).__name__}: {exc}"
+        # 닫힌 어휘 코드 + 영문 예외 클래스명만(사람이 읽는 문구는 렌더 표면의 몫,
+        # 원문 예외 메시지는 로그에만 — 한글 문장 가드 회피 목적이 아니라 사람이
+        # 읽는 문구가 지역화 없이 예외 원문 그대로 새는 것 자체가 다른 결함 클래스).
+        gate.publish_outcome = f"publish_failed:{type(exc).__name__}"
         await db.commit()
         return
 

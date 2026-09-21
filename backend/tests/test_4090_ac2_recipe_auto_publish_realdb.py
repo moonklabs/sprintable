@@ -352,7 +352,7 @@ async def test_ac2_order_a_approve_then_submit_auto_publishes_without_manual_cli
             )
             assert r.status_code == 200, r.text
             assert r.json().get("publish_outcome") is not None, "승인 응답에 publish_outcome이 안 실렸다"
-            assert "초안" in r.json()["publish_outcome"], "draft 없음 사유가 승인 응답에 안 실렸다"
+            assert r.json()["publish_outcome"] == "no_submitted_draft", "draft 없음 사유 코드가 승인 응답에 안 실렸다"
 
         # draft 제출 — 훅A가 승계-승인 + AC2 자동발행까지 잇는다(별도 /publish 호출 0).
         _setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
@@ -510,12 +510,12 @@ async def test_ac2_no_submitted_draft_skips_with_machine_owned_outcome_not_resol
             )
             assert r.status_code == 200, r.text
             assert r.json()["resolution_note"] == "승인자의 본인 코멘트", "AC2 훅이 승인자 note를 건드렸다"
-            assert "초안" in (r.json().get("publish_outcome") or ""), "no-draft 사유가 승인 응답에 안 실렸다"
+            assert r.json().get("publish_outcome") == "no_submitted_draft", "no-draft 사유 코드가 승인 응답에 안 실렸다"
 
         async with Session() as s:
             gate_d = await s.get(Gate, gate_d_id)
             assert gate_d.resolution_note == "승인자의 본인 코멘트"
-            assert gate_d.publish_outcome is not None and "초안" in gate_d.publish_outcome
+            assert gate_d.publish_outcome == "no_submitted_draft"
 
             no_publication = (await s.execute(select(ChannelPublication.id))).first()
             assert no_publication is None, "draft 없이도 ChannelPublication이 생겼다 — 생성 0 계약 위반"
