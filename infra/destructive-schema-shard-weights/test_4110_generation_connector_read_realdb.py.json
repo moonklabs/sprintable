@@ -1,0 +1,1 @@
+{"file": "tests/test_4110_generation_connector_read_realdb.py", "sec": 13.8, "source": "story-4110(2026-09-21, 신규 파일 — 12건, lint_destructive_schema_weights_registered.py 가드가 미등재로 잡으며 출력한 평균 폴백값(13.8s) 그대로 등재 — test_3379 등재 선례와 동일 방법론. 로컬 raw pytest 전체 wall time 실측(13.50s, throwaway pgvector:pg16)도 같은 자리라 잠정값으로 채택. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}
