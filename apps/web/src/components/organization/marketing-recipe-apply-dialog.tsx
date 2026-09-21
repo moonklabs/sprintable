@@ -48,6 +48,16 @@ interface ChannelConnectionOption {
   status: string;
 }
 
+// story #4114 — GET .../generation-connectors 응답의 부분집합(recipe-role-mapping-fields.tsx
+// ::GenerationConnectorOption과 동형 필드, 이 파일은 ChannelConnectionOption처럼 로컬
+// 정의를 관례로 따른다).
+interface GenerationConnectorOption {
+  id: string;
+  provider_key: string;
+  label: string;
+  status: string;
+}
+
 export function MarketingRecipeApplyDialog({
   recipe, open, onOpenChange, creatorRoleLabel, projects, orgId, onSubmit,
 }: MarketingRecipeApplyDialogProps) {
@@ -67,6 +77,10 @@ export function MarketingRecipeApplyDialog({
   // !ok 또는 네트워크 reject).
   const [channelConnectionsStatus, setChannelConnectionsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [publisherConnectionId, setPublisherConnectionId] = useState('');
+  // story #4114 — 연산 슬롯(publisherConnectionId/channelConnections와 동형 3값 패턴).
+  const [generationConnectors, setGenerationConnectors] = useState<GenerationConnectorOption[]>([]);
+  const [generationConnectorsStatus, setGenerationConnectorsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const [computeConnectorId, setComputeConnectorId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // story #4107 — apply-recipe-dialog.tsx(137~143행)와 동형. 경고가 있으면 다이얼로그는
@@ -92,16 +106,37 @@ export function MarketingRecipeApplyDialog({
     })();
   }, [orgId]);
 
+  // story #4114 — loadChannelConnections와 동형(apply-recipe-dialog.tsx의
+  // active_only=true 쿼리 재사용, revoked는 BE가 이미 걸러줌).
+  const loadGenerationConnectors = useCallback(() => {
+    if (!orgId) { setGenerationConnectorsStatus('loaded'); return; }
+    setGenerationConnectorsStatus('loading');
+    void (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=true`);
+        if (!res.ok) { setGenerationConnectorsStatus('failed'); return; }
+        const json = await res.json() as { data?: { connectors?: GenerationConnectorOption[] } };
+        setGenerationConnectors(json.data?.connectors ?? []);
+        setGenerationConnectorsStatus('loaded');
+      } catch {
+        setGenerationConnectorsStatus('failed');
+      }
+    })();
+  }, [orgId]);
+
   useEffect(() => {
     if (!open) return;
     setProjectId('');
     setCreatorAgentId('');
     setPublisherConnectionId('');
     setChannelConnections([]);
+    setComputeConnectorId('');
+    setGenerationConnectors([]);
     setError(null);
     setWarnings([]);
     loadChannelConnections();
-  }, [open, orgId, loadChannelConnections]);
+    loadGenerationConnectors();
+  }, [open, orgId, loadChannelConnections, loadGenerationConnectors]);
 
   // 페드루 QA 지적(#4424 qa:changes, 2026-09-19) — 프로젝트 전환 시 이전 선택이 그대로
   // 남아 있으면(agentOptions가 새 프로젝트 것으로 바뀌어도 creatorAgentId state는 그대로)
@@ -129,6 +164,15 @@ export function MarketingRecipeApplyDialog({
     .map(([stage]) => stage);
   const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
   const publisherRequired = publisherStages.length > 0;
+  // story #4114 — 같은 SSOT 축(capability.target, #4090 0387), generation_connector
+  // 대상 stage. publisherStages와 달리 «선언했는데 비우면 제출 가능»(#4110 crew 폴백이
+  // 있어 필수 아님) — computeRequired는 슬롯 표시 여부에만 쓰고, submit 방어선(아래
+  // disabled 조건)에는 안 들어간다.
+  const computeStages = Object.entries(recipe.stage_metadata)
+    .filter(([, meta]) => meta?.capability?.target === 'generation_connector')
+    .map(([stage]) => stage);
+  const activeGenerationConnectors = generationConnectors.filter((c) => c.status === 'active');
+  const computeRequired = computeStages.length > 0;
 
   const submit = async () => {
     if (!projectId || !creatorAgentId) return;
@@ -152,6 +196,13 @@ export function MarketingRecipeApplyDialog({
       // RecipeRoleMappingFields onChange와 동형 계약 — stage→값 그대로).
       if (publisherRequired) {
         for (const stage of publisherStages) roleMapping[stage] = publisherConnectionId;
+      }
+      // story #4114 — computeConnectorId가 비면 그 stage를 roleMapping에서 아예 뺀다
+      // (빈 문자열을 실으면 BE apply_recipe_role_bindings의 uuid.UUID(v) 파싱이
+      // ValueError로 죽는다 — «선언했는데 비우면 제출 가능»은 "그 stage를 안 보낸다"로
+      // 구현해야 #4110 crew 폴백이 정상 동작한다).
+      if (computeRequired && computeConnectorId) {
+        for (const stage of computeStages) roleMapping[stage] = computeConnectorId;
       }
       // 카디르 P1 재현(#4426, 2026-09-19) — creatorRoleLabel이 이 레시피의 실제
       // stage_metadata.role 키와 하나도 안 맞으면(예: 표시라벨 vs seed 실제 role 키 불일치
@@ -246,18 +297,47 @@ export function MarketingRecipeApplyDialog({
             </select>
           </div>
 
-          {/* 연산 — 이 카드 범위 밖(generation_budget, 미르코와 인터페이스 확認 필요) */}
-          <div className="flex items-center gap-3 rounded-md border border-dashed border-input p-3 opacity-70" data-testid="slot-compute">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                {t('recipeApplyV2ComputeRole')} <Badge variant="secondary">{t('recipeApplyV2ComputeBadge')}</Badge>
+          {/* 연산 — story #4114(#4101 픽커 배선). 정의가 generation_connector-target
+              stage를 선언하지 않으면 슬롯 자체를 숨긴다(publisherRequired와 동형 SSOT
+              축이지만, 표시 여부만 같고 필수 여부는 다르다 — 아래 참고). */}
+          {computeRequired ? (
+            <div className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-compute">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  {t('recipeApplyV2ComputeRole')} <Badge variant="secondary">{t('recipeApplyV2ComputeBadge')}</Badge>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2ComputeDesc')}</p>
+                {/* story #4114 — publisherConnectionId 블록과 동형 3값 우선순위(failed >
+                    loaded+0건 > 없음). 연산은 필수가 아니므로(#4110 crew 폴백) 이 안내
+                    문구는 항상 함께 보여 "비워도 되는" 이유를 설명한다. */}
+                {generationConnectorsStatus === 'failed' ? (
+                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-generation-connectors-load-error">
+                    <span>{t('eventApplyGenerationConnectorsLoadError')}</span>
+                    <Button variant="outline" size="sm" onClick={loadGenerationConnectors}>{t('eventApplyAgentsRetry')}</Button>
+                  </div>
+                ) : generationConnectorsStatus === 'loaded' && activeGenerationConnectors.length === 0 ? (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-generation-connectors-empty">
+                    {t('eventApplyGenerationConnectorsEmpty')}
+                  </p>
+                ) : null}
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2ComputeEmptyFallbackHint')}</p>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2ComputeDesc')}</p>
+              <select
+                className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                value={computeConnectorId}
+                onChange={(e) => setComputeConnectorId(e.target.value)}
+                disabled={generationConnectorsStatus !== 'loaded'}
+                data-testid="compute-connector-select"
+              >
+                {/* 유나 문구 확定(2026-09-21 15:11Z) — «모델 세트 선택…» 대신 #4479
+                    eventApplyGenerationConnectorPlaceholder와 통일(별도 키 비유지). */}
+                <option value="">{t('eventApplyGenerationConnectorPlaceholder')}</option>
+                {activeGenerationConnectors.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label || c.provider_key}</option>
+                ))}
+              </select>
             </div>
-            <select className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-muted-foreground" disabled>
-              <option>{t('recipeApplyV2ModelSetPlaceholder')}</option>
-            </select>
-          </div>
+          ) : null}
 
           {/* 발행자 — story #4103(#4090 AC1 잔여) — org 채널 연결(active) 실 배선. */}
           <div className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-publisher">
