@@ -79,13 +79,21 @@ function isSmallText(cls: string): boolean {
 function classStringsFromExpr(e: ts.Expression): string[] {
   if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return [e.text];
   if (ts.isTemplateExpression(e)) {
-    const parts = [e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)];
-    return [parts.join(' ')];
+    // story #4126(PO 실측, 2026-09-21) — 정적 literal 조각만 잇고 `${…}` 표현식(삼항·중첩
+    // cn() 등)은 버려서 `` `bg-success-tint ${dense ? 'text-muted-foreground' : '…'}` ``
+    // 같은 자리를 못 봤다. 각 span의 `.expression`도 같은 함수로 재귀해 literal 조각과
+    // 함께 한 문자열로 합친다 — 이 가드의 판정(paleBgsIn/textFamiliesIn)은 부분문자열
+    // 존재 검사라, 어느 삼항 branch가 실제로 적용될지 가르지 않고 "나올 수 있는 조각
+    // 전부"를 한 문자열에 모아도 검출 정확도는 그대로다(아래 cn()과 동일 근거).
+    const exprParts = e.templateSpans.flatMap((sp) => classStringsFromExpr(sp.expression));
+    const literalParts = [e.head.text, ...e.templateSpans.map((sp) => sp.literal.text)];
+    return [[...literalParts, ...exprParts].join(' ')];
   }
   if (ts.isCallExpression(e) && /(?:^|\.)cn$/.test(e.expression.getText())) {
-    return e.arguments.flatMap((a) =>
-      ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a) ? [a.text] : [],
-    );
+    // story #4126 — 리터럴/무치환 템플릿 인자만 받고 삼항·치환 템플릿·중첩 cn() 인자는
+    // 버렸다. 각 인자를 같은 함수로 재귀하면 삼항(ConditionalExpression 갈래)·템플릿
+    // (위 갈래, 이제 ${} 재귀 포함)·중첩 cn() 호출(이 갈래 재귀)까지 전부 자연히 커버된다.
+    return e.arguments.flatMap((a) => classStringsFromExpr(a));
   }
   if (ts.isConditionalExpression(e)) {
     return [...classStringsFromExpr(e.whenTrue), ...classStringsFromExpr(e.whenFalse)];
@@ -110,6 +118,14 @@ export interface Violation { file: string; line: number; family: TextColor; clas
 export function violationKey(v: Pick<Violation, 'file' | 'family' | 'className'>): string {
   return `${v.file}::${v.family}::${v.className}`;
 }
+
+// story #4126 CHANGES(PO 확定, 2026-09-21) — doc-status-rail.tsx의 아이콘이 중립
+// 불투명 원(bg-background) 위에 있어 조상 pale-bg(bg-warning-tint 등)와 실제로
+// 안 겹치는데(§4 의도적 패턴, #2955/#2534/#2420 인용) walk()가 그 사실을 몰라
+// 거짓 위반을 냈다 — 이 5개(명시, 넓히지 않기)만 "자기 불투명 배경이 조상 pale을
+// 리셋한다"로 인코딩한다. `/N` opacity 접미사가 붙으면(반투명) 매치 안 됨 — 불투명
+// 배경만 리셋 자격이 있다.
+const NEUTRAL_OPAQUE_BG_RE = /(?<![\w-])bg-(?:background|card|popover|proof-panel|proof-bg)(?![\w/-])/;
 
 function suppressWindows(content: string): { withReason: Set<number>; noReason: Set<number> } {
   const withReason = new Set<number>();
@@ -163,7 +179,11 @@ export function scanContent(content: string, file: string): Violation[] {
           }
         }
       }
-      if (children) for (const c of children) walk(c, ancestors.concat(selfPale));
+      // story #4126 CHANGES — 이 요소 자신이 명시 5종 중립 불투명 배경이면, 그 아래
+      // 서브트리는 조상 pale-bg와 무관하다(불투명 배경이 시각적으로 그 조상을 완전히
+      // 가린다) — 상속된 ancestors까지 포함해 [](완전 리셋)로 넘긴다.
+      const nextAncestors = NEUTRAL_OPAQUE_BG_RE.test(cls) ? [] : ancestors.concat(selfPale);
+      if (children) for (const c of children) walk(c, nextAncestors);
       return;
     }
     node.forEachChild((c) => walk(c, ancestors));
