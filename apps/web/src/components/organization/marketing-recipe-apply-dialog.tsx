@@ -31,16 +31,31 @@ export interface MarketingRecipeApplyDialogProps {
   onOpenChange: (open: boolean) => void;
   creatorRoleLabel: string;
   projects: { id: string; name: string }[];
+  // story #4103(#4090 AC1 잔여, 페드루 PO 실측 2026-09-21) — 발행자 슬롯(채널 연결)
+  // 목록을 org 스코프로 불러오는 데 필요(apply-recipe-dialog.tsx와 동형).
+  orgId?: string;
   onSubmit: (args: { recipeId: string; projectId: string; roleMapping: Record<string, string> }) => Promise<{ ok: boolean; error?: string; bindingsUpserted?: number }>;
 }
 
+interface ChannelConnectionOption {
+  id: string;
+  channel: string;
+  account_label: string | null;
+  account_id: string;
+  status: string;
+}
+
 export function MarketingRecipeApplyDialog({
-  recipe, open, onOpenChange, creatorRoleLabel, projects, onSubmit,
+  recipe, open, onOpenChange, creatorRoleLabel, projects, orgId, onSubmit,
 }: MarketingRecipeApplyDialogProps) {
   const t = useTranslations('organization');
   const tc = useTranslations('common');
   const [projectId, setProjectId] = useState('');
   const [creatorAgentId, setCreatorAgentId] = useState('');
+  // story #4103 — apply-recipe-dialog.tsx와 동형(org 스코프, project 무관, 다이얼로그
+  // open 시 1회).
+  const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
+  const [publisherConnectionId, setPublisherConnectionId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,8 +66,16 @@ export function MarketingRecipeApplyDialog({
     if (!open) return;
     setProjectId('');
     setCreatorAgentId('');
+    setPublisherConnectionId('');
     setError(null);
-  }, [open]);
+    if (!orgId) return;
+    void (async () => {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections`);
+      if (!res.ok) return;
+      const json = await res.json() as { data?: ChannelConnectionOption[] } | ChannelConnectionOption[];
+      setChannelConnections(Array.isArray(json) ? json : (json.data ?? []));
+    })();
+  }, [open, orgId]);
 
   // 페드루 QA 지적(#4424 qa:changes, 2026-09-19) — 프로젝트 전환 시 이전 선택이 그대로
   // 남아 있으면(agentOptions가 새 프로젝트 것으로 바뀌어도 creatorAgentId state는 그대로)
@@ -72,9 +95,18 @@ export function MarketingRecipeApplyDialog({
   // SSOT로 사람 낱말화한 뒤 dedupe(라벨 기준 — 서로 다른 raw 키가 같은 미지정 문구로
   // 떨어지는 경우까지 한 줄로 접는다).
   const gateApprovers = Array.from(new Set(gates.map((g) => gateApproverLabel(t, g.gate.approver))));
+  // story #4103 — capability.target(닫힌 어휘, #4090 0387)으로 발행자 대상 stage를
+  // 판별한다(role 라벨 문자열 매칭 아님 — RecipeRoleMappingFields·apply-recipe-dialog.tsx
+  // 와 같은 SSOT 축). 보통 1개(published)지만 정의가 여럿을 선언할 가능성을 배제 안 한다.
+  const publisherStages = Object.entries(recipe.stage_metadata)
+    .filter(([, meta]) => meta?.capability?.target === 'channel_connection')
+    .map(([stage]) => stage);
+  const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
+  const publisherRequired = publisherStages.length > 0;
 
   const submit = async () => {
     if (!projectId || !creatorAgentId) return;
+    if (publisherRequired && !publisherConnectionId) return;
     // 페드루 QA 지적(#4424 qa:changes) — 위 useEffect가 전환 시 선택을 비우지만, 그
     // 방어 하나에만 기대지 않고 제출 시점에도 소속(멤버십)을 다시 확認한다(fetch race 등
     // 어떤 경로로든 project와 어긋난 agentId가 실리지 않게 하는 마지막 문).
@@ -88,6 +120,12 @@ export function MarketingRecipeApplyDialog({
       const roleMapping = expandRoleSlotBindings(recipe.stage_metadata, [creatorRoleLabel], {
         [creatorRoleLabel]: creatorAgentId,
       });
+      // story #4103 — 발행자(채널 연결)는 role 라벨 그룹 확장 축이 아니라 capability.
+      // target=channel_connection stage에 직접 꽂는다(apply-recipe-dialog.tsx의
+      // RecipeRoleMappingFields onChange와 동형 계약 — stage→값 그대로).
+      if (publisherRequired) {
+        for (const stage of publisherStages) roleMapping[stage] = publisherConnectionId;
+      }
       // 카디르 P1 재현(#4426, 2026-09-19) — creatorRoleLabel이 이 레시피의 실제
       // stage_metadata.role 키와 하나도 안 맞으면(예: 표시라벨 vs seed 실제 role 키 불일치
       // 재발) expandRoleSlotBindings가 빈 매핑을 낸다 — 그 상태로 서버까지 보내지 않고
@@ -186,16 +224,30 @@ export function MarketingRecipeApplyDialog({
             </select>
           </div>
 
-          {/* 발행자 — 이 카드 범위 밖(채널 커넥션, 미르코와 인터페이스 확認 필요) */}
-          <div className="flex items-center gap-3 rounded-md border border-dashed border-input p-3 opacity-70" data-testid="slot-publisher">
+          {/* 발행자 — story #4103(#4090 AC1 잔여) — org 채널 연결(active) 실 배선. */}
+          <div className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-publisher">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 {t('recipeApplyV2PublisherRole')} <Badge variant="secondary">{t('recipeApplyV2PublisherBadge')}</Badge>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2PublisherDesc')}</p>
+              {publisherRequired && activeChannelConnections.length === 0 ? (
+                <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-empty">
+                  {t('eventApplyChannelsEmpty')}
+                </p>
+              ) : null}
             </div>
-            <select className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-muted-foreground" disabled>
-              <option>{t('recipeApplyV2ChannelPlaceholder')}</option>
+            <select
+              className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              value={publisherConnectionId}
+              onChange={(e) => setPublisherConnectionId(e.target.value)}
+              disabled={!publisherRequired}
+              data-testid="publisher-connection-select"
+            >
+              <option value="">{t('eventApplyChannelPlaceholder')}</option>
+              {activeChannelConnections.map((c) => (
+                <option key={c.id} value={c.id}>{c.account_label || `${c.channel}(${c.account_id})`}</option>
+              ))}
             </select>
           </div>
 
@@ -212,7 +264,7 @@ export function MarketingRecipeApplyDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>{tc('cancel')}</Button>
-          <Button onClick={() => void submit()} disabled={submitting || !projectId || !creatorAgentId}>
+          <Button onClick={() => void submit()} disabled={submitting || !projectId || !creatorAgentId || (publisherRequired && !publisherConnectionId)}>
             {submitting ? t('eventApplySubmitting') : t('eventApplySubmit')}
           </Button>
         </DialogFooter>
