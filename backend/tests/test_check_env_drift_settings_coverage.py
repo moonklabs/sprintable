@@ -263,7 +263,12 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 신규 필드를 설계대로 잡은 것(파서 결함 아님, 이 assert만 stale이었다).
     assert "YOUTUBE_QUOTA_DAILY_LIMIT_UNITS" in keys and "YOUTUBE_QUOTA_COST_INSERT_UNITS" in keys
     assert "YOUTUBE_QUOTA_COST_LIST_UNITS" in keys and "YOUTUBE_API_AUDIT_INCOMPLETE" in keys
-    assert len(keys) == 125
+    # story #4101(#4095 그라운딩 doc c65ce586 §3-4, 2026-09-21): generation_connector_
+    # credential_encryption_key 1필드 신설(org_generation_connectors.credentials
+    # MultiFernet 암호화 키, channel_credential_encryption_key와 동형 패턴·독립 시크릿)로
+    # 125→126. 가드가 신규 필드를 설계대로 잡은 것(파서 결함 아님, 이 assert만 stale).
+    assert "GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY" in keys
+    assert len(keys) == 126
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():
