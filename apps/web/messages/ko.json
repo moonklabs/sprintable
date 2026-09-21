@@ -707,6 +707,7 @@
     "recipeApplyV2PersonPlaceholder": "사람 선택…",
     "recipeApplyV2ModelSetPlaceholder": "모델 세트 선택…",
     "recipeApplyV2ContractNote": "네 슬롯은 각자 제 메커니즘에 꽂혀요 — 크리에이터=역할 바인딩(에이전트)·디렉터=승인 주체(조직 구성원)·연산=모델·예산 설정·발행자=발행 채널. 하나의 역할 배정으로 안 넓혀요.",
+    "recipeApplyV2WarningsAppliedHeading": "적용됐어요 — 아래 내용을 확인해 주세요.",
     "recipeApplyV2NotConfiguredNote": "이 자리는 아직 연결할 수 없어요 — 후속 카드에서 배선돼요.",
     "recipeDetailSummary": "단계 {stageCount} · 게이트 {gateCount} · 역할 {roleCount}",
     "recipeDetailIrreversibleNote": "불가역 커밋(유료 생성·발행) 앞엔 반드시 사람 승인이 필요해요.",

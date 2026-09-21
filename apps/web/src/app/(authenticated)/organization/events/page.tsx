@@ -99,6 +99,12 @@ export default function OrganizationEventsPage() {
   const [marketingApplyTarget, setMarketingApplyTarget] = useState<(EventDefinitionResponse & { id: string }) | null>(null);
   const [marketingDetailTarget, setMarketingDetailTarget] = useState<EventDefinitionResponse | null>(null);
   const [marketingProjects, setMarketingProjects] = useState<{ id: string; name: string }[]>([]);
+  // story #4107 CHANGES(페드루 PO 리뷰, 2026-09-21) — apply 응답에 warnings가 있으면
+  // 저장은 이미 끝났지만(bindingsUpserted > 0) 사용자가 경고를 확認할 때까지 성공 처리
+  // (토스트+상세 뷰)를 «버리지 않고 미룬다». 다이얼로그가 그 상태에선 「확認」 단일
+  // 버튼만 보여주므로(marketing-recipe-apply-dialog.tsx), onOpenChange(false)가 오는
+  // 시점 = 사용자가 경고를 읽고 확認한 시점 — 그때 이 값을 소비해 성공 경로를 이어간다.
+  const [marketingApplyPendingDetailTarget, setMarketingApplyPendingDetailTarget] = useState<EventDefinitionResponse | null>(null);
 
   useEffect(() => {
     if (!marketingApplyTarget) return;
@@ -331,7 +337,19 @@ export default function OrganizationEventsPage() {
       <MarketingRecipeApplyDialog
         recipe={marketingApplyTarget}
         open={marketingApplyTarget !== null}
-        onOpenChange={(open) => { if (!open) setMarketingApplyTarget(null); }}
+        onOpenChange={(open) => {
+          if (open) return;
+          setMarketingApplyTarget(null);
+          // story #4107 CHANGES(페드루 PO 리뷰) — warnings가 있었으면 다이얼로그는 오직
+          // 「확認」 버튼(단일)으로만 닫힌다(marketing-recipe-apply-dialog.tsx) — 그러므로
+          // 여기 도달 = 사용자가 경고를 확認한 시점. 그때서야 보류해 둔 성공 처리(토스트+
+          // 상세 뷰)를 태운다(성공을 버린 게 아니라 닫힐 때까지 미룬 것).
+          if (marketingApplyPendingDetailTarget) {
+            addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
+            setMarketingDetailTarget(marketingApplyPendingDetailTarget);
+            setMarketingApplyPendingDetailTarget(null);
+          }
+        }}
         creatorRoleLabel={MARKETING_CREATOR_ROLE_KEY}
         projects={marketingProjects}
         orgId={orgId}
@@ -344,9 +362,16 @@ export default function OrganizationEventsPage() {
           // 토스트+상세이동을 같이 태우면 "성공"과 "no-op 오류"가 한 화면에 공존하는
           // [두문장 다른세계] — 실 배정이 1건이라도 있을 때만 성공 경로를 태운다.
           if (result.ok && (result.bindingsUpserted ?? 0) > 0) {
-            addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
-            // 적용 성공 → 그 자리서 상세 뷰로 이어간다(AC2 "적용→상세 도달").
-            setMarketingDetailTarget(marketingApplyTarget);
+            if ((result.warnings ?? []).length === 0) {
+              addToast({ type: 'success', title: t('eventApplySuccessToast', { count: 1 }) });
+              // 적용 성공 → 그 자리서 상세 뷰로 이어간다(AC2 "적용→상세 도달").
+              setMarketingDetailTarget(marketingApplyTarget);
+            } else {
+              // story #4107 CHANGES — warnings가 있으면 다이얼로그가 스스로 안 닫는다
+              // (marketing-recipe-apply-dialog.tsx submit()) — 성공 처리는 버리지 않고
+              // 다이얼로그가 닫힐 때(위 onOpenChange, 사용자의 「확認」 클릭)까지 미룬다.
+              setMarketingApplyPendingDetailTarget(marketingApplyTarget);
+            }
           }
           return result;
         }}
