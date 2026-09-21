@@ -21,6 +21,11 @@ import { cn } from '@/lib/utils';
  * 승인자 픽커는 approval-request-card.tsx::DelegateApprovalControl과 동일 소스
  * (/api/org-members/eligible-approvers + buildApproverPickerOptions + OperatorDropdownSelect,
  * story #3040 v3 단일 소스 원칙 재사용 — 새 픽커 로직 발명 0).
+ *
+ * story #4083 — recipe_gate_default_approver_member_id 필드 1칸 추가(merge 칸과 완전
+ * 동형 — 같은 eligible-approvers 목록·같은 저장 흐름·같은 human-only 422 문구 표시).
+ * "org_owner 하드코딩" 실사고 처방(org owner≠마케팅 담당인 org에서 레시피 사람 게이트가
+ * 전부 owner 결재함으로만 가던 것).
  */
 
 type Posture = 'conservative' | 'balanced' | 'permissive';
@@ -36,6 +41,7 @@ interface OrgGatePolicyResponse {
   org_id: string;
   posture: string;
   merge_gate_default_approver_member_id: string | null;
+  recipe_gate_default_approver_member_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +64,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   const [loading, setLoading] = useState(true);
   const [posture, setPosture] = useState<Posture>('balanced');
   const [approverId, setApproverId] = useState<string>(''); // '' = 미지정(현행)
+  const [recipeApproverId, setRecipeApproverId] = useState<string>(''); // '' = 미지정(현행, org owner)
   const [approverOptions, setApproverOptions] = useState<SelectOption[]>([]);
   const [loadingApprovers, setLoadingApprovers] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,6 +83,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
           if (policy) {
             if ((POSTURES as string[]).includes(policy.posture)) setPosture(policy.posture as Posture);
             setApproverId(policy.merge_gate_default_approver_member_id ?? '');
+            setRecipeApproverId(policy.recipe_gate_default_approver_member_id ?? '');
           }
         } else {
           setMessage({ type: 'error', text: t('loadFailed') });
@@ -128,13 +136,16 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
         body: JSON.stringify({
           posture,
           merge_gate_default_approver_member_id: approverId || null,
+          recipe_gate_default_approver_member_id: recipeApproverId || null,
         }),
       });
       if (res.ok) {
         setMessage({ type: 'success', text: t('saved') });
       } else {
-        // story e0c1b24c AC — 에이전트 멤버 지정 시 422 문구가 화면에 그대로 나와야 한다
-        // (backend/app/routers/hitl_config.py의 human-only 검증 메시지, HTTPException.detail).
+        // story e0c1b24c AC — 승인자 검증 422 문구가 화면에 그대로 나와야 한다(backend/
+        // app/routers/hitl_config.py의 human-only 검증 메시지, HTTPException.detail).
+        // merge·레시피 필드 둘 다 이 관례 그대로 — 문구 자체가 사람 문장이어야 하는 책임은
+        // 이 컴포넌트가 아니라 BE 카탈로그(i18n_catalog.py, story #4083 정정) 쪽에 있다.
         const body = (await res.json().catch(() => null)) as { detail?: string; error?: { message?: string } } | null;
         setMessage({ type: 'error', text: body?.detail ?? body?.error?.message ?? t('saveFailed') });
       }
@@ -148,6 +159,9 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   const approverSelectOptions: SelectOption[] = [{ value: '', label: t('approverUnset') }, ...approverOptions];
   const currentApproverLabel = approverId
     ? (approverOptions.find((o) => o.value === approverId)?.label ?? approverId)
+    : t('approverUnset');
+  const currentRecipeApproverLabel = recipeApproverId
+    ? (approverOptions.find((o) => o.value === recipeApproverId)?.label ?? recipeApproverId)
     : t('approverUnset');
 
   return (
@@ -217,6 +231,21 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">{currentApproverLabel}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">{t('recipeApproverLabel')}</p>
+              {canEdit ? (
+                <OperatorDropdownSelect
+                  value={recipeApproverId}
+                  onValueChange={setRecipeApproverId}
+                  options={approverSelectOptions}
+                  placeholder={loadingApprovers ? t('approverLoading') : t('approverPickPlaceholder')}
+                  disabled={loadingApprovers || saving}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
               )}
             </div>
 

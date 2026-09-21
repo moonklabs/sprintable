@@ -78,6 +78,15 @@ class OrgGatePolicy(Base):
     merge_gate_default_approver_member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True,
     )
+    # story #4083(E-RECIPE-1, PO 확定 2026-09-21) — merge_gate_default_approver_member_id와
+    # 동일 패턴·동일 검증(routers/hitl_config.py::_is_eligible_gate_default_approver_member
+    # 재사용). 레시피 stage 게이트(recipe_gate_hooks.py::_resolve_org_owner)가 이 값이
+    # 있으면 그 멤버를 designated_approver로, 없으면 기존 org owner 그대로(회귀 0) —
+    # "org_owner 하드코딩" 실사고 처방(org owner≠마케팅 담당인 org에서 사람 게이트가
+    # 항상 owner 결재함으로만 가던 것).
+    recipe_gate_default_approver_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

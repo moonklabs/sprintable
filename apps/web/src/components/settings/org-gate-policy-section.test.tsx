@@ -113,6 +113,24 @@ describe('OrgGatePolicySection — 조회(story e0c1b24c)', () => {
     );
     expect(triggerBtn).toBeDefined();
   });
+
+  it('⭐story #4083 — 레시피 게이트 기본 승인자 라벨·값이 머지 필드와 독립적으로 표시된다', async () => {
+    stubFetch({
+      id: 'p1', org_id: 'o1', posture: 'balanced',
+      merge_gate_default_approver_member_id: null,
+      recipe_gate_default_approver_member_id: 'member-1',
+      created_at: '2026-09-02T00:00:00Z', updated_at: '2026-09-02T00:00:00Z',
+    });
+    await act(async () => {
+      root.render(wrap(<OrgGatePolicySection canEdit={false} />));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(koMessages.orgGatePolicy.recipeApproverLabel);
+    expect(container.textContent).toContain('송윤재 (iamyoonjae@moonklabs.com)');
+    // 머지 필드는 미지정 그대로 — 두 필드가 서로 안 섞임.
+    expect(container.textContent).toContain(koMessages.orgGatePolicy.approverUnset);
+  });
 });
 
 describe('OrgGatePolicySection — 저장(story e0c1b24c)', () => {
@@ -158,8 +176,68 @@ describe('OrgGatePolicySection — 저장(story e0c1b24c)', () => {
     });
     await flush();
 
-    expect(putBody).toEqual({ posture: 'permissive', merge_gate_default_approver_member_id: null });
+    expect(putBody).toEqual({
+      posture: 'permissive',
+      merge_gate_default_approver_member_id: null,
+      recipe_gate_default_approver_member_id: null,
+    });
     expect(container.textContent).toContain(koMessages.orgGatePolicy.saved);
+  });
+
+  it('⭐story #4083 — 기존 레시피 승인자 지정값이 변경 없이 저장해도 PUT body에 그대로 유지된다', async () => {
+    stubFetch({
+      id: 'p1', org_id: 'o1', posture: 'balanced',
+      merge_gate_default_approver_member_id: null,
+      recipe_gate_default_approver_member_id: 'member-1',
+      created_at: '2026-09-02T00:00:00Z', updated_at: '2026-09-02T00:00:00Z',
+    });
+    let putBody: unknown;
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/gate-config/policy' && init?.method === 'PUT') {
+          putBody = JSON.parse(String(init.body));
+          return { ok: true, status: 200, json: async () => ({ data: { posture: 'balanced' }, error: null, meta: null }) };
+        }
+        if (url === '/api/gate-config/policy') {
+          return {
+            ok: true, status: 200,
+            json: async () => ({
+              data: {
+                id: 'p1', org_id: 'o1', posture: 'balanced',
+                merge_gate_default_approver_member_id: null,
+                recipe_gate_default_approver_member_id: 'member-1',
+                created_at: '2026-09-02T00:00:00Z', updated_at: '2026-09-02T00:00:00Z',
+              },
+              error: null, meta: null,
+            }),
+          };
+        }
+        if (url === '/api/org-members/eligible-approvers') {
+          return { ok: true, status: 200, json: async () => ELIGIBLE_APPROVERS };
+        }
+        throw new Error('unexpected fetch: ' + url);
+      },
+    );
+    await act(async () => {
+      root.render(wrap(<OrgGatePolicySection canEdit />));
+    });
+    await flush();
+
+    const saveBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.orgGatePolicy.save,
+    );
+    expect(saveBtn).toBeDefined();
+    await act(async () => {
+      saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(putBody).toEqual({
+      posture: 'balanced',
+      merge_gate_default_approver_member_id: null,
+      recipe_gate_default_approver_member_id: 'member-1',
+    });
   });
 
   it('⭐422(에이전트 멤버 지정 등) — 백엔드 detail 문구가 화면에 그대로 나온다(지어내지 않음)', async () => {
@@ -195,5 +273,47 @@ describe('OrgGatePolicySection — 저장(story e0c1b24c)', () => {
     await flush();
 
     expect(container.textContent).toContain(detailMsg);
+  });
+
+  // story #4083(페드루 PO 리뷰, 2026-09-21) — merge 쪽(위 테스트)과 같은 raw passthrough
+  // 관례(story e0c1b24c) 그대로 유지한다. 최초 처방은 이 필드만 FE 문자열 마커로 잡아
+  // 별도 i18n 키로 치환했으나(반창고 — API/MCP 등 다른 클라이언트엔 여전히 내부어 문장이
+  // 새고, FE는 문자열 마커에 매달림), 페드루 PO 재정정으로 뿌리(BE i18n_catalog.py의
+  // 카탈로그 문구 자체)를 사람 문장으로 고쳤다 — FE는 다시 raw passthrough, 이 테스트는
+  // 그 카탈로그 문구가 실제로 화면에 그대로(가공 없이) 뜨고 내부어가 안 섞였는지를 고정.
+  it('⭐422(레시피 필드, 에이전트 멤버 지정) — BE 카탈로그 문구(사람 문장)가 raw로 그대로 뜬다(필드명·영문 내부 속성어 미노출)', async () => {
+    stubFetch(null);
+    const rawDetail = '레시피 게이트 기본 승인자는 이 조직의 소유자 또는 관리자(사람)만 지정할 수 있어요.';
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/gate-config/policy' && init?.method === 'PUT') {
+          return { ok: false, status: 422, json: async () => ({ detail: rawDetail }) };
+        }
+        if (url === '/api/gate-config/policy') {
+          return { ok: true, status: 200, json: async () => ({ data: null, error: null, meta: null }) };
+        }
+        if (url === '/api/org-members/eligible-approvers') {
+          return { ok: true, status: 200, json: async () => ELIGIBLE_APPROVERS };
+        }
+        throw new Error('unexpected fetch: ' + url);
+      },
+    );
+    await act(async () => {
+      root.render(wrap(<OrgGatePolicySection canEdit />));
+    });
+    await flush();
+
+    const saveBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.orgGatePolicy.save,
+    );
+    await act(async () => {
+      saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain(rawDetail);
+    expect(container.textContent).not.toContain('recipe_gate_default_approver_member_id');
+    expect(container.textContent).not.toContain('requires_human');
   });
 });
