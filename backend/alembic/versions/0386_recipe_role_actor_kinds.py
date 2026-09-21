@@ -19,12 +19,12 @@ action_auth와 같은 형제 nullable 컬럼, story #4092 §b). 선언 없는 �
    (역할별 유도 — PO 확定: "그 stage의 role(담당)이 사람인가 에이전트인가"이지 stage별
    손 매핑이 아니다. 0381/0382 role 값 4종 전수와 정확히 일치.)
 
-Revision ID: 0387
-Revises: 0386
+Revision ID: 0386
+Revises: 0385
 Create Date: 2026-09-21
 
-번호 조율(페드루 PO, 2026-09-21 07:08Z) — 디디군 #4090(1/2)이 0386을 먼저 씀 → 이 카드는
-0387로, down_revision=0386. 착지 순서가 어긋나면(#4092가 먼저 착지) 그때 다시 조율.
+번호 조율(페드루 PO, 2026-09-21 07:10Z) — 준비된 쪽이 먼저 씀 원칙: #4092가 먼저 준비돼
+0386/down_revision=0385로 확定. 디디군 #4090(1/2)은 PO가 0387/down 0386으로 조정.
 """
 from __future__ import annotations
 
@@ -33,8 +33,8 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0387"
-down_revision = "0386"
+revision = "0386"
+down_revision = "0385"
 branch_labels = None
 depends_on = None
 
