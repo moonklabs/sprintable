@@ -401,6 +401,32 @@ _CATALOG: dict[str, dict[str, str]] = {
     # story #4108 — "단계" 접미사 자체가 새 한글 사용자 문장이라(BE 한글 가드 story #3779가
     # 잡음) 이 조각도 events.py의 raw f-string이 아니라 카탈로그 항목으로 뽑는다. role이
     # 없으면(방어적 폴백) events.py가 이 키를 아예 안 부르고 stage 키를 그대로 쓴다.
+    #
+    # story #4108 design CHANGES(유나·페드루 PO, 2026-09-21) — 첫 push는
+    # `stage_metadata[stage].role`을 그대로 사람말이라 가정했지만, 실 정의는 그 자리에
+    # 영어 enum(Publisher/Creator/Compute/Director 등, story #4049/#3773 정본)을 쓴다 —
+    # 고치기 전이면 "Publisher 단계: …"로 원어가 그대로 샜을 것(story #4460류 재발).
+    # FE `apps/web/src/lib/stage-role.ts`(story #3773, 유나 定)가 이미 이 17종의
+    # 한글 라벨 정본이라 그 집합과 1:1로 여기 옮긴다(새 어휘 발명 0) — events.py가
+    # role → 이 카탈로그 라벨(미등재 role은 원시값 그대로 pass-through, FE와 동형
+    # 원칙) → 아래 apply_stage_role_label로 "{role} 단계" 조립.
+    "events.stage_role.Agent": {"ko": "에이전트", "en": "Agent"},
+    "events.stage_role.Any": {"ko": "누구나", "en": "Any"},
+    "events.stage_role.Approver": {"ko": "승인자", "en": "Approver"},
+    "events.stage_role.Compute": {"ko": "연산", "en": "Compute"},
+    "events.stage_role.Creator": {"ko": "크리에이터", "en": "Creator"},
+    "events.stage_role.Dev": {"ko": "개발자", "en": "Dev"},
+    "events.stage_role.Director": {"ko": "디렉터", "en": "Director"},
+    "events.stage_role.Executor": {"ko": "실행자", "en": "Executor"},
+    "events.stage_role.Human": {"ko": "사람", "en": "Human"},
+    "events.stage_role.Lead": {"ko": "리드", "en": "Lead"},
+    "events.stage_role.Maker": {"ko": "제작자", "en": "Maker"},
+    "events.stage_role.Member": {"ko": "구성원", "en": "Member"},
+    "events.stage_role.PO": {"ko": "PO", "en": "PO"},
+    "events.stage_role.Publisher": {"ko": "발행자", "en": "Publisher"},
+    "events.stage_role.QA": {"ko": "QA", "en": "QA"},
+    "events.stage_role.Reviewer": {"ko": "검토자", "en": "Reviewer"},
+    "events.stage_role.Worker": {"ko": "작업자", "en": "Worker"},
     "events.apply_stage_role_label": {
         "ko": "{role} 단계",
         "en": "{role} stage",

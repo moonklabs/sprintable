@@ -108,13 +108,14 @@ async def test_unmapped_alias_states_missing_mapping_not_registered():
             # 노출도 같이 제거) — 이 어서션은 그 새 문구를 고정.
             assert "연결이 없어요" in resp.warnings[0]
             assert "등록돼 있지" not in resp.warnings[0]
-            # story #4108(페드루 PO 確定, 2026-09-21) — stage/channel 값에 파이썬 repr
-            # 토큰(따옴표·`key=값` 꼴)이 더는 안 실린다. 이 정의의 "publish" stage는
-            # role="Agent"라 라벨이 "Agent 단계:"로 뜬다(원래 stage 키 "publish"는
-            # 문장에 그대로 안 남는다).
+            # story #4108(페드루 PO 確定 · design CHANGES, 2026-09-21) — stage/channel
+            # 값에 파이썬 repr 토큰(따옴표·`key=값` 꼴)이 더는 안 실린다. role="Agent"는
+            # FE stage-role.ts 정본 17종에 있어 한글 라벨("에이전트 단계:")로 번역된다
+            # (영어 role 원어·원래 stage 키 "publish" 둘 다 문장에 그대로 안 남는다).
             assert "='" not in resp.warnings[0]
             assert "channel=" not in resp.warnings[0]
-            assert "Agent 단계" in resp.warnings[0]
+            assert "에이전트 단계" in resp.warnings[0]
+            assert "Agent 단계" not in resp.warnings[0]
             assert "publish" not in resp.warnings[0]
     finally:
         await engine.dispose()

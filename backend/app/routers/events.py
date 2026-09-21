@@ -1722,6 +1722,15 @@ _CAPABILITY_KIND_HINTS: dict[str, str] = {
 # 새 원천 아님).
 _AGENT_TOOL_CAPABILITY_KINDS = _CAPABILITY_KIND_HINTS
 
+# story #4108 design CHANGES(유나·페드루 PO, 2026-09-21) — stage_metadata[stage].role은
+# 사람말이 아니라 영어 enum(FE 정본 `apps/web/src/lib/stage-role.ts`, story #3773 유나
+# 定)이다. 그 17종 집합과 1:1(값은 i18n_catalog.py의 `events.stage_role.<Role>` 키) —
+# 미등재 role(조직 커스텀 데이터)은 FE `stageRoleLabel`과 동형 원칙으로 raw pass-through.
+_STAGE_ROLE_LABEL_KEYS = frozenset({
+    "Agent", "Any", "Approver", "Compute", "Creator", "Dev", "Director", "Executor",
+    "Human", "Lead", "Maker", "Member", "PO", "Publisher", "QA", "Reviewer", "Worker",
+})
+
 
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
@@ -3277,15 +3286,18 @@ async def apply_recipe_role_bindings(
         if not capability:
             continue
         kind = capability["kind"]
-        # story #4108(페드루 PO 確定, 2026-09-21) — 준비 경고 문장에 내부 식별자를 그대로
-        # 싣지 않는다(#4104가 해요체·목적지 문장으로 바꿨지만 stage 자체는 여전히 repr
-        # 토큰이었다). stage_metadata[stage].role은 정의 저자가 붙인 사람말 라벨(등록
-        # 시점 필수 필드, event_definition_registry.py 참고)이라 카탈로그
-        # events.apply_stage_role_label로 "{role} 단계" 문장을 짓는다(BE 한글 가드 —
-        # story #3779 — 대상이라 raw f-string이 아니라 카탈로그 경유) — role이 비어
-        # 있는 방어적 경우에만(이론상 도달 불가) stage 키로 폴백.
+        # story #4108(페드루 PO 確定, 2026-09-21 · design CHANGES) — 준비 경고 문장에
+        # 내부 식별자를 그대로 싣지 않는다(#4104가 해요체·목적지 문장으로 바꿨지만 stage
+        # 자체는 여전히 repr 토큰이었다). stage_metadata[stage].role은 사람말이 아니라
+        # 영어 enum(FE 정본 stage-role.ts 17종) — 그 집합에 있으면 카탈로그 한글 라벨로,
+        # 미등재(조직 커스텀) role은 raw pass-through(FE stageRoleLabel과 동형 원칙),
+        # role 자체가 비어 있는 방어적 경우(이론상 도달 불가)에만 stage 키로 폴백.
         role = stage_meta.get("role")
-        stage_label = t("events.apply_stage_role_label", "ko", role=role) if role else stage
+        if role:
+            role_label = t(f"events.stage_role.{role}", "ko") if role in _STAGE_ROLE_LABEL_KEYS else role
+            stage_label = t("events.apply_stage_role_label", "ko", role=role_label)
+        else:
+            stage_label = stage
         # story #4104(페드루 PO 라이브 실측·판단, 2026-09-21) — 준비 경고는 «org 커넥터로
         # 채워지는 kind»만 대상이다. target 필드(#4090)로는 못 가른다 — collect/publish
         # 같은 커넥터-백드 kind도 target 기본값이 "agent"라 attach_video/generate(에이전트
