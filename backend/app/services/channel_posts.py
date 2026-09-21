@@ -2560,21 +2560,113 @@ async def publish_recipe_approved_draft(
         await db.commit()
         return
 
+    await emit_recipe_published_stage_event(
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        definition_key=definition.key, next_stage=next_stage,
+    )
+
+
+async def resolve_recipe_context_for_scheduled_publication(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str, connection_id: uuid.UUID,
+) -> tuple[Gate, str, str] | None:
+    """story #4093(#4090 지름길 해소, 페드루 PO 確定 2026-09-21) — 예약 발행 워커가
+    발행 성공 시점에 "이 draft가 레시피 Publisher 슬롯에 바인딩된 채널로 나간 것인지"
+    판별한다. `publish_recipe_approved_draft`의 판별 로직(triggered_by_event→definition
+    →next_stage→capability.target)을 그대로 재사용하되 방향이 반대다(거긴 게이트→
+    채널, 이건 draft/connection→게이트) — #4090이 만든 `_resolve_recipe_channel_
+    connection_binding` 자체는 신규 축 0으로 그대로 재사용.
+
+    바인딩 재확인(안전장치) — 지금 이 connection_id가 여전히 그 stage의 RecipeRoleBinding
+    값과 같은지까지 본다. 예약 대기 中에 사람이 Publisher 슬롯을 다른 채널로 재지정했으면
+    이 connection_id는 더는 유효한 바인딩이 아니다 — 옛 draft의 뒤늦은 발행을 새 채널
+    바인딩의 사건인 것처럼 이벤트를 잘못 내지 않는다(None 반환, 지어내지 않는다).
+
+    반환 None — 레시피 무관 일반 예약 발행(이 work_item에 unscoped external_publish
+    게이트 자체가 없음)이거나, 다음 stage가 채널 자동발행 대상이 아니거나, 바인딩이
+    그새 바뀌어 이 connection_id가 더는 유효하지 않다는 뜻(셋 다 "할 일 없음", 에러 아님)."""
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+    from app.routers.events import _next_recipe_stage
+
+    gate = (await db.execute(
+        select(Gate).where(
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.work_item_type == work_item_type,
+            Gate.gate_type == _EXTERNAL_PUBLISH_GATE_TYPE, Gate.scope_key == "",
+        )
+    )).scalar_one_or_none()
+    if gate is None:
+        return None
+
+    facts = gate.neutral_facts or {}
+    triggered_by_event_key = facts.get("triggered_by_event")
+    gate_stage = facts.get("stage")
+    if not triggered_by_event_key or not gate_stage:
+        return None
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == triggered_by_event_key, EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalars().first()
+    if definition is None:
+        return None
+
+    next_stage = _next_recipe_stage(definition, gate_stage)
+    if next_stage is None:
+        return None
+    next_meta = (definition.stage_metadata or {}).get(next_stage) or {}
+    if (next_meta.get("capability") or {}).get("target") != "channel_connection":
+        return None
+
+    bound_connection_id = await _resolve_recipe_channel_connection_binding(
+        db, org_id=org_id, work_item_id=work_item_id, event_definition_key=definition.key, stage=next_stage,
+    )
+    if bound_connection_id != connection_id:
+        return None
+
+    return gate, definition.key, next_stage
+
+
+async def emit_recipe_published_stage_event(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+    definition_key: str, next_stage: str,
+) -> None:
+    """story #4090 AC2 + story #4093(공통 훅으로 추출, 페드루 PO 確定 2026-09-21) —
+    즉시-발행 경로(`publish_recipe_approved_draft`)·예약-발행 워커 경로(publication_
+    command.py::_process_one_command)가 공유하는 레시피 published stage 이벤트
+    발행부. `_get_or_create_system_publisher`+`_publish_registry_event_core` 재사용
+    (recipe_repeat_scheduler.py 선례 그대로, 새 로직 0).
+
+    **멱등**(story #4093 AC3 "중복 발행 0") — 이 work_item에 이 stage가 이미 발행돼
+    있으면(재시도·겹친 tick 등) 스킵한다. `_find_existing_stage_publish`(story #4075,
+    publish-history와 같은 SSOT)를 그대로 재사용 — 새 중복방지 축 발명 안 함."""
+    from app.routers.events import (
+        _find_existing_stage_publish, _get_or_create_system_publisher, _publish_registry_event_core,
+    )
+
+    already = await _find_existing_stage_publish(
+        db, org_id=org_id, definition_key=definition_key, work_item_type=work_item_type,
+        work_item_id=str(work_item_id), stage=next_stage,
+    )
+    if already is not None:
+        return
+
     from fastapi import BackgroundTasks
 
     from app.dependencies.auth import AuthContext
-    from app.routers.events import _get_or_create_system_publisher, _publish_registry_event_core
 
-    system_member = await _get_or_create_system_publisher(db, gate.org_id)
+    system_member = await _get_or_create_system_publisher(db, org_id)
     auth = AuthContext(
         user_id=str(system_member.id), email=None,
-        claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(gate.org_id),
+        claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
     )
     background_tasks = BackgroundTasks()
     try:
         await _publish_registry_event_core(
-            db, gate.org_id, auth, definition.key,
-            {"stage": next_stage, "work_item_type": gate.work_item_type, "work_item_id": str(gate.work_item_id)},
+            db, org_id, auth, definition_key,
+            {"stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
             background_tasks,
         )
         await background_tasks()
@@ -2582,8 +2674,8 @@ async def publish_recipe_approved_draft(
         # story #3337 선례(recipe_repeat_scheduler.py) — «발행 자체는 이미 성공했다»를
         # 「published stage 알림」 실패가 되돌리면 안 된다(side-channel 실패 격리).
         logger.warning(
-            "recipe auto-publish: published stage 이벤트 발행 실패(gate=%s draft=%s)",
-            gate.id, target_draft.id, exc_info=True,
+            "recipe published stage 이벤트 발행 실패(work_item=%s stage=%s)",
+            work_item_id, next_stage, exc_info=True,
         )
 
 

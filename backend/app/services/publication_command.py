@@ -339,6 +339,10 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     last_error: str | None = None
     retry_after_seconds: int | None = None
     attempt_started_at = now
+    # story #4093 — 실패 분기(아래 except 전부)가 draft를 못 구했을 수도 있다(예: draft
+    # 자체가 없음, version_row 조회 실패) — 실패 경로에서 레시피 publish_outcome을
+    # 남기려면 draft가 있을 때만 시도해야 하므로 None으로 먼저 초기화한다.
+    draft: ChannelPostDraft | None = None
     try:
         version_row = (await db.execute(
             select(ChannelPostVersion).where(ChannelPostVersion.id == command.approved_version)
@@ -377,6 +381,37 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+
+        # story #4093(#4090 지름길 해소, 페드루 PO 確定 2026-09-21) — 즉시-발행 경로는
+        # `publish_recipe_approved_draft`가 발행 직후 레시피 published stage 이벤트를
+        # 잇지만, 예약 발행(이 워커)은 그 훅을 안 거쳐(`_maybe_create_scheduled_
+        # publication_command`가 세운 command를 여기서 곧장 처리) 아무도 그 이벤트를
+        # 안 냈다 — 같은 함수(`emit_recipe_published_stage_event`)로 격차 처방. 이
+        # 블록 실패가 방금 확정된 "completed"(실제 발행 성공)를 되돌리면 안 되므로
+        # 별도 try/except로 격리(side-channel, recipe_repeat_scheduler.py 선례 동형).
+        try:
+            from app.services.channel_posts import (
+                emit_recipe_published_stage_event, resolve_recipe_context_for_scheduled_publication,
+            )
+
+            recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
+                db, org_id=command.org_id, work_item_id=draft.work_item_id, work_item_type="story",
+                connection_id=draft.connection_id,
+            )
+            if recipe_ctx is not None:
+                recipe_gate, definition_key, next_stage = recipe_ctx
+                recipe_gate.publish_outcome = "published"
+                await emit_recipe_published_stage_event(
+                    db, org_id=command.org_id, work_item_type="story", work_item_id=draft.work_item_id,
+                    definition_key=definition_key, next_stage=next_stage,
+                )
+                await db.commit()
+        except Exception:
+            logger.warning(
+                "publication command 예약 발행 완료 뒤 레시피 published 이벤트 연결 실패 "
+                "command_id=%s draft_id=%s — 발행 자체는 이미 성공했다(되돌리지 않음)",
+                command.id, draft.id, exc_info=True,
+            )
         return
     except ChannelImageContainerFailedError as exc:
         error_code, last_error = "CHANNEL_IMAGE_CONTAINER_FAILED", str(exc)
@@ -488,6 +523,33 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         adapter_called=error_code not in (None, "CHANNEL_POST_DRAFT_NOT_FOUND"),
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
+    # story #4093 AC2(음성 대조, 페드루 PO 確定 2026-09-21) — 워커 발행 실패 시 published
+    # 이벤트는 0건(emit 자체를 안 부른다), 대신 레시피 게이트의 publish_outcome(기계
+    # 소유 필드)에 실패 사유를 남긴다 — 승인자 resolution_note는 절대 안 건드린다
+    # (#4090과 동일 규율). draft를 못 구한 경우(위 DRAFT_NOT_FOUND 등)는 레시피 문맥
+    # 자체를 못 찾으므로 조용히 스킵(지어내지 않는다).
+    if draft is not None:
+        try:
+            from app.services.channel_posts import resolve_recipe_context_for_scheduled_publication
+
+            recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
+                db, org_id=command.org_id, work_item_id=draft.work_item_id, work_item_type="story",
+                connection_id=draft.connection_id,
+            )
+            if recipe_ctx is not None:
+                recipe_gate, _definition_key, _next_stage = recipe_ctx
+                # 닫힌 어휘 코드만(channel_posts.py::publish_recipe_approved_draft의
+                # publish_failed 코드화와 동형, story #3779 가드) — 사람이 읽는 문구는
+                # 렌더 표면의 몫, 원문 사유는 last_error(이미 command.last_error로 별도
+                # 기록됨, publication_command.py의 record_publication_attempt/apply_
+                # command_failure)에만.
+                recipe_gate.publish_outcome = f"publish_failed:{error_code}"
+                await db.commit()
+        except Exception:
+            logger.warning(
+                "publication command 예약 발행 실패 뒤 레시피 publish_outcome 갱신 실패 "
+                "command_id=%s draft_id=%s", command.id, draft.id, exc_info=True,
+            )
     await apply_command_failure(
         db, command, error_code=error_code, last_error=last_error, now=now,
         retry_after_seconds=retry_after_seconds,
