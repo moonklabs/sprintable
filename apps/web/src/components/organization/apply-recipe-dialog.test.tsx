@@ -8,9 +8,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { NextIntlClientProvider } from 'next-intl';
+import { NextIntlClientProvider, createTranslator } from 'next-intl';
 import { ApplyRecipeDialog } from './apply-recipe-dialog';
 import koMessages from '../../../messages/ko.json';
+
+// story #4118 — 토스트 count 값이 실제로 문장에 interpolate됐는지 검증하려면 t가
+// row-action-aria-labels.test.ts 선례처럼 진짜 번역기여야 한다(다른 테스트들의
+// `t={(k) => k}` 항등 mock은 값을 문장에 못 박는다).
+type LooseTranslator = (key: string, vars?: Record<string, unknown>) => string;
+const realT = createTranslator({
+  locale: 'ko', messages: koMessages, namespace: 'organization',
+} as Parameters<typeof createTranslator>[0]) as unknown as LooseTranslator;
 
 // story #4106 — 채널/연산 leg(org 스코프 fetch)를 재현하려면 orgId가 필요한데
 // ApplyRecipeDialog는 useDashboardContext()에서 그 값을 직접 읽는다(props 아님).
@@ -150,6 +158,90 @@ describe('ApplyRecipeDialog', () => {
     await flush();
 
     expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { step_1: 'agent-1' } });
+  });
+
+  // story #4118(라이브 실사고 그라운딩, 2026-09-21) — 토스트 count가 서버 실 값(리터럴
+  // 1 고정 아님)을 반영하는지 진짜 번역기로 문장 자체를 고정한다.
+  it('apply 성공 토스트 count가 실제 bindings_upserted(5)를 반영한다(리터럴 1 고정 아님)', async () => {
+    const capture = { body: null as unknown };
+    stubFetch({ ok: true, bindings_upserted: 5, warnings: [] }, capture);
+    const addToast = vi.fn();
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET}
+          open
+          onOpenChange={() => {}}
+          t={realT as never}
+          tc={((k: string) => k) as never}
+          addToast={addToast}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const selects = [...document.body.querySelectorAll('select')];
+    const roleSelect = selects[1] as HTMLSelectElement;
+    await act(async () => {
+      roleSelect.value = 'agent-1';
+      roleSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(addToast).toHaveBeenCalledWith({ type: 'success', title: '배정 5건 저장 완료' });
+  });
+
+  it('bindings_upserted=0이면(재제출 등 무변경) «배정 0건» 대신 무변경 문구로 분기한다', async () => {
+    const capture = { body: null as unknown };
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, capture);
+    const addToast = vi.fn();
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={TARGET}
+          open
+          onOpenChange={() => {}}
+          t={realT as never}
+          tc={((k: string) => k) as never}
+          addToast={addToast}
+        />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const selects = [...document.body.querySelectorAll('select')];
+    const roleSelect = selects[1] as HTMLSelectElement;
+    await act(async () => {
+      roleSelect.value = 'agent-1';
+      roleSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(addToast).toHaveBeenCalledWith({ type: 'success', title: '이미 적용돼 있어요 — 새로 바뀐 배정이 없어요.' });
   });
 
   // story #3519(§16-7 2부, PO 確定 2026-09-05) — memberRes/bindingsRes 둘 다 부수인데

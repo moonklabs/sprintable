@@ -17,6 +17,16 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #4118 — page.tsx는 <ToastProvider> 밖에서 mount되므로 useToast()가 테스트 환경
+// 로컬 useState 폴백으로 빠져(toast.tsx 자체 설계) 어디에도 안 그려진다 — DOM에서 토스트
+// 문구를 못 읽는다. addToast 호출 자체를 가로채 검증한다(useDashboardContextMock과 동형
+// 관례, importOriginal로 ToastProvider/ToastContainer 등 다른 export는 그대로 보존).
+const { addToastMock } = vi.hoisted(() => ({ addToastMock: vi.fn() }));
+vi.mock('@/components/ui/toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/toast')>();
+  return { ...actual, useToast: () => ({ addToast: addToastMock, dismissToast: vi.fn(), toasts: [] }) };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -36,6 +46,7 @@ beforeEach(() => {
     projectMemberships: [],
     currentTeamMemberId: 'member-me-1',
   });
+  addToastMock.mockClear();
 });
 
 afterEach(async () => {
@@ -293,5 +304,90 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="recipe-stepper"]')).not.toBeNull();
     expect(document.body.textContent).toContain('영상 제작 (릴스·쇼츠)');
+  });
+
+  // story #4118(라이브 실사고 그라운딩, 2026-09-21) — 토스트 count가 리터럴 1로 고정돼
+  // 있었다(서버가 bindings_upserted:5를 줘도 화면은 «배정 1건»). warnings 없는 즉시-성공
+  // 경로(위 AC2 흐름 테스트와 동형 상호작용, count만 5로 교체).
+  it('경고 없는 즉시-성공 경로 — 토스트 count가 bindings_upserted(5)를 반영한다(리터럴 1 고정 아님)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [MARKETING_RECIPE] };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: '9월 영상 캠페인' }] }) };
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 5, warnings: [] }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    await switchToMarketingTab();
+
+    const applyBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용');
+    await act(async () => { applyBtn!.click(); });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    expect(addToastMock).toHaveBeenCalledWith({ type: 'success', title: '배정 5건 저장 완료' });
+  });
+
+  // story #4118 — 경고 확認 후 이어지는 «보류된» 성공 토스트(onOpenChange 자리, page.tsx
+  // 348행)도 같은 결함을 안고 있었다(리터럴 1). 위 "경고 확認 후..." 흐름 테스트와 동형
+  // 상호작용 + count(3)만 다르게 해 그 자리를 직접 겨냥한다.
+  it('경고 확認 후 보류됐던 성공 토스트도 count가 bindings_upserted(3)를 반영한다(리터럴 1 고정 아님)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [MARKETING_RECIPE] };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: '9월 영상 캠페인' }] }) };
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+      }
+      if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true, bindings_upserted: 3,
+            warnings: ["stage='published': connector_key='x' 커넥터가 아직 등록돼 있지 않아요"],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    await switchToMarketingTab();
+
+    const applyBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용');
+    await act(async () => { applyBtn!.click(); });
+    await flush();
+
+    const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
+    await act(async () => { projectSelect.value = 'proj-1'; projectSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+
+    const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
+    await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    await act(async () => { submitBtn.click(); });
+    await flush();
+
+    // 경고 확認 전엔 성공 토스트가 아직 안 뜬다(보류 — 위 흐름 테스트와 동일 전제).
+    expect(addToastMock).not.toHaveBeenCalled();
+
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="marketing-apply-warnings-confirm"]')!;
+    await act(async () => { confirmBtn.click(); });
+    await flush();
+
+    expect(addToastMock).toHaveBeenCalledWith({ type: 'success', title: '배정 3건 저장 완료' });
   });
 });

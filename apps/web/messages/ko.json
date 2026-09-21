@@ -646,6 +646,7 @@
     "eventApplySubmit": "적용하기",
     "eventApplySubmitting": "적용 중…",
     "eventApplySuccessToast": "배정 {count}건 저장 완료",
+    "eventApplySuccessNoChangeToast": "이미 적용돼 있어요 — 새로 바뀐 배정이 없어요.",
     "eventApplyErrorGeneric": "적용 실패",
     "eventApplyWarningsHeading": "주의",
     "eventStageMetaLabel": "단계",
