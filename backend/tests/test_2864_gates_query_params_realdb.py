@@ -2,7 +2,11 @@
 FastAPI 시그니처에 아예 등재하지 않아 조용히 무시했다(#2863 zod dead-code와 동일 결함
 클래스 — 「있다≠지금 쓰는 것」). 이 파일은 세 파라미터가 실제로 배선됐음을 값으로 실측한다:
   ① gate_type이 실제로 필터한다(다른 gate_type 섞어 심고 한쪽만 필터링돼 나오는지 값 대조).
-  ② 미지 gate_type은 422(침묵 무시 대신 명시 거부) — GATE_TYPES SSOT 재사용 확認.
+  ② 형식은 맞지만 미지인 gate_type은 200+빈 배열(침묵 무시는 아니지만 거부도 아님 — story
+     #4080 PO 方向정정으로 GATE_TYPES 소속 검사를 걷었다: 실사고로 그 SSOT가 generation_
+     budget류·org 자작 recipe gate.type을 원천적으로 못 담는다는 게 드러났다. 형식 위반
+     (패턴 밖)만 여전히 422 — 그 케이스는 test_4080_gate_list_type_filter_open_vocab.py가
+     담당).
   ③ limit이 실제로 절단한다(N건 심고 limit<N 요청 시 정확히 limit건).
   ④ offset이 실제로 건너뛴다(limit+offset 조합으로 페이지 2가 페이지 1과 겹치지 않음).
 
@@ -130,10 +134,13 @@ async def test_gate_type_filters_to_matching_type_only():
         await eng.dispose()
 
 
-# ───────────────────────── ② 미지 gate_type = 422 ─────────────────────────
+# ───────────────────── ② 형식은 맞지만 미지인 gate_type = 200+빈 배열 ─────────────────────
 
 @pytest.mark.anyio
-async def test_unknown_gate_type_rejected_422():
+async def test_unknown_but_well_formed_gate_type_returns_empty_not_422():
+    """story #4080 — GATE_TYPES 소속 밖이어도 형식(lower_snake_case)만 맞으면 거부하지
+    않는다(정직한 «필터된 결과», #2864가 막은 "파라미터 자체가 조용히 무시됨"과는 다른
+    결 — 이 파라미터는 실제로 적용됐고, 매칭이 0건일 뿐)."""
     from app.routers.gates import list_gates
     eng, Session = await _engine()
     try:
@@ -141,9 +148,27 @@ async def test_unknown_gate_type_rejected_422():
             await _seed(s, n_merge=1, n_qa=1)
 
         async with Session() as s:
+            listed = await list_gates(
+                work_item_id=None, work_item_type=None, status=None, gate_type="bogus_type_xyz",
+                sort=None, assigned_to_me=False, limit=100, offset=0,
+                session=s, org_id=ORG, auth=_auth_human(OWNER_USER),
+            )
+        assert listed == []
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_format_violating_gate_type_still_rejected_422():
+    """형식 위반(대문자·공백 등 패턴 밖)은 여전히 422 — #2864 원 취지(명백한 오입력은
+    침묵하지 않는다)는 그대로 산다."""
+    from app.routers.gates import list_gates
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
                 await list_gates(
-                    work_item_id=None, work_item_type=None, status=None, gate_type="bogus_type_xyz",
+                    work_item_id=None, work_item_type=None, status=None, gate_type="Bogus Type!",
                     sort=None, assigned_to_me=False, limit=100, offset=0,
                     session=s, org_id=ORG, auth=_auth_human(OWNER_USER),
                 )

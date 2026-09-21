@@ -1,5 +1,6 @@
 """E-CAGE-REFEREE P3: HITL Gate CRUD + 전이 엔드포인트."""
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
@@ -82,6 +83,14 @@ logger = logging.getLogger(__name__)
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
 
 router = APIRouter(prefix="/api/v2/gates", tags=["gates", "Trust"])
+
+
+# story #4080 — `list_gates`의 gate_type 조회 필터가 검증하는 형식(소속이 아니라 모양만,
+# 아래 list_gates 본문 주석 참조). 실존 gate_type 전수(GATE_TYPES + generation_budget +
+# support_escalation_review + org 자작 recipe gate.type)가 전부 lower_snake_case라 그
+# 관례를 패턴화한다 — 새 gate_type이 이 패턴 밖(대문자·공백·기호 등)이면 그게 오히려
+# 이례적이라 422로 잡는 편이 맞다.
+_GATE_TYPE_FILTER_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class GateCreateRequest(BaseModel):
@@ -783,12 +792,22 @@ async def list_gates(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
 ) -> list[GateResponse]:
-    # gate_type은 GATE_TYPES(GateCreateRequest.validate_gate_type과 동일 SSOT)로 검증 —
-    # 미지 값은 422(침묵 무시 대신 명시 거부).
-    if gate_type is not None:
-        from app.models.hitl_config import GATE_TYPES
-        if gate_type not in GATE_TYPES:
-            raise HTTPException(status_code=422, detail=f"gate_type must be one of {sorted(GATE_TYPES)}")
+    # story #4080(PO 方向정정) — gate_type 조회 필터는 GATE_TYPES(생성 관문 허용 세트,
+    # "무엇을 만들 수 있는지")를 조회 값 SSOT로 재사용하지 않는다: create_gate()를 전용
+    # 서비스코드가 직접 호출해(generic POST 밖에서) 만드는 gate_type(예: generation_
+    # budget)도, org가 recipe stage_metadata에 직접 짓는 완전 개방 gate.type도 실 데이터로
+    # 존재해 닫힌 소속 검사로는 원천적으로 못 덮는다(둘 다 실사고/그라운딩으로 확認, 카드
+    # 본문 참조). 형식만 검증한다 — 소속 밖 값은 거부가 아니라 빈 결과(정직한 필터,
+    # #2864가 막은 "파라미터 자체가 무시됨"과는 다른 결). 형식 위반(패턴 밖·길이초과)만
+    # 여전히 422(#2864 원 취지 — 명백한 오입력은 침묵하지 않는다).
+    if gate_type is not None and not _GATE_TYPE_FILTER_PATTERN.fullmatch(gate_type):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "gate_type must match ^[a-z][a-z0-9_]{0,63}$ "
+                f"(got {gate_type!r}, length {len(gate_type)})"
+            ),
+        )
 
     # story #5ace2e84 — ids 배치 앵커 조회 파싱(stories.py list_stories와 동형: comma-separated·
     # invalid UUID=422·과대 IN 방어). ids가 오면 아래 work_item_id/status/gate_type 등 나머지
