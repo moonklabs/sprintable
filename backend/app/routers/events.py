@@ -1731,6 +1731,16 @@ _STAGE_ROLE_LABEL_KEYS = frozenset({
     "Human", "Lead", "Maker", "Member", "PO", "Publisher", "QA", "Reviewer", "Worker",
 })
 
+# story #4119(페드루 PO 確定, 2026-09-21) — 준비 경고 문장의 {kind} 자리가 여전히 영어
+# 식별자(publish/collect)를 그대로 실었다(#4108이 stage는 한글 라벨로 바꿨지만 kind는
+# 남겼음, 유나 #4115 앵커 비차단 지적). capability.kind는 event_definition_registry.py가
+# 명시하듯 열린 값이라(판별 기준으로 못 씀) 새 kind가 늘어도 이 닫힌 라벨 집합만 갱신하면
+# 되고, 미등재 kind는 _STAGE_ROLE_LABEL_KEYS와 동형 원칙으로 raw pass-through한다(값은
+# i18n_catalog.py의 `events.capability_kind.<kind>` 키). 이 경고 루프에 실제로 도달하는
+# kind는 org 커넥터로 채워지는 kind뿐(_AGENT_TOOL_CAPABILITY_KINDS는 그 앞에서 continue로
+# 걸러짐) — 현재 그 값은 publish/collect 둘뿐(test_3317b 등 기존 realdb 픽스처 기준).
+_CAPABILITY_KIND_LABEL_KEYS = frozenset({"publish", "collect"})
+
 
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
@@ -3375,11 +3385,15 @@ async def apply_recipe_role_bindings(
                 # 위반이라 별건이 아니라 스코프 안. 쉼표로 이어 붙인 사람말 목록으로.
                 warnings.append(t("events.apply_connector_config_incomplete", "ko", stage_label=stage_label, connector_key=connector_key, missing=", ".join(missing)))
         else:
+            # story #4119 — 경고 문장의 {kind} 자리는 org 커넥터 조회용 원시 kind(위
+            # find_org_connectors_by_kind 호출)가 아니라 사람말 라벨을 받는다. 등재
+            # 안 된 kind는 raw pass-through(#4108 role 규칙과 동형).
+            kind_label = t(f"events.capability_kind.{kind}", "ko") if kind in _CAPABILITY_KIND_LABEL_KEYS else kind
             candidates = await find_org_connectors_by_kind(db, org_id=org_id, kind=kind)
             if not candidates:
-                warnings.append(t("events.apply_kind_connector_not_registered", "ko", stage_label=stage_label, kind=kind))
+                warnings.append(t("events.apply_kind_connector_not_registered", "ko", stage_label=stage_label, kind=kind_label))
             elif not any(not missing_required_org_config(c) for c in candidates):
-                warnings.append(t("events.apply_kind_connector_config_incomplete", "ko", stage_label=stage_label, kind=kind))
+                warnings.append(t("events.apply_kind_connector_config_incomplete", "ko", stage_label=stage_label, kind=kind_label))
 
     actor_id: uuid.UUID | None = None
     try:
