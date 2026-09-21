@@ -365,6 +365,13 @@ class Settings(BaseSettings):
     # OAuth state(CSRF+org 바인딩+PKCE verifier+nonce+TTL) 서명 키 — github_app_state_secret과
     # 동형(별도 시크릿, auth.py의 로그인용 OAuth state 키와 분리·그라운딩 §9 "기본=분리" 확定).
     channel_oauth_state_secret: str = ""
+
+    # story #4101(#4095 그라운딩 doc c65ce586 §3-4·PO Q②병렬 확定, 2026-09-21) —
+    # org_generation_connectors.credentials(고객 소유 생성 모델 provider 자격) 암호화 키.
+    # channel_credential_encryption_key와 완전히 독립된 시크릿(도메인 분리 원칙 — 발행 채널
+    # 토큰 회전이 생성 커넥터 자격에 영향을 주지 않고 그 반대도 마찬가지). 같은 MultiFernet
+    # 회전 패턴(콤마구분 다건).
+    generation_connector_credential_encryption_key: str = ""
     # Threads(Meta) 서버 OAuth의 앱 id/secret은 env var가 **아니다**(페드루 PO 정정
     # 2026-09-03 08:40Z, 블루프린트 §8) — 조직별 자격은 channel_app_credentials 테이블,
     # SaaS 기본 공용 앱 자격은 platform_settings.threads_platform_app_id/

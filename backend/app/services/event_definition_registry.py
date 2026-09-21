@@ -49,7 +49,11 @@ ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent"})
 # capability.kind(열린 값)와 섞지 않는다 — kind='publish'는 이미 "에이전트가 쓸 커넥터
 # 종류"라는 기존 계약을 여러 정의가 쓰고 있어(#3317 PR B), kind로 target을 유도하면 그
 # 계약을 조용히 바꾼다. "agent"가 기본(capability.target 생략 시)이라 기존 정의 전부 무변.
-_CAPABILITY_TARGETS = frozenset({"agent", "channel_connection"})
+# story #4101(alembic 0391·#4095 그라운딩 doc c65ce586 §3-1 후보A·PO Q③닫힌집합 確定,
+# 2026-09-21) — 세 번째 값. Compute 슬롯(live_generation류) stage는 "알릴 사람"도
+# "발행할 채널"도 아니라 "org의 생성 모델 커넥터"를 가리켜야 한다 — 같은 XOR 판별축에
+# 세 번째 값만 더한다(kind='generate'는 #3317 기존 계약 그대로 무변, target만 추가).
+_CAPABILITY_TARGETS = frozenset({"agent", "channel_connection", "generation_connector"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —

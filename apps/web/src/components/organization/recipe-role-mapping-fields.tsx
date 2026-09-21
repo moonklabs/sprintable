@@ -17,6 +17,15 @@ export interface ChannelConnectionOption {
   status: string;
 }
 
+// story #4101 — GET .../generation-connectors 응답의 부분집합(select 렌더에 필요한
+// 필드만 — credentials는 그 응답 자체에 없다, write-only 계약).
+export interface GenerationConnectorOption {
+  id: string;
+  provider_key: string;
+  label: string;
+  status: string;
+}
+
 // story #3316 — workflow-template-gallery-section.tsx(구, 프로젝트 설정 화면)의 인라인
 // role→agent <select> 루프를 추출한 공용 컴포넌트. organization/events 카탈로그의 신규
 // "프로젝트에 적용" 다이얼로그와 gallery 둘 다 이걸 쓴다 — role_mapping 입력 UI가 두 곳에서
@@ -32,35 +41,41 @@ export function RecipeRoleMappingFields({
   stageMetadata,
   agents,
   channelConnections,
+  generationConnectors,
   roleMapping,
   onChange,
   agentPlaceholder,
   channelPlaceholder,
+  generationConnectorPlaceholder,
 }: {
   stages: string[];
   stageMetadata: EventDefinitionResponse['stage_metadata'];
   agents: AgentOption[];
   channelConnections: ChannelConnectionOption[];
+  generationConnectors: GenerationConnectorOption[];
   roleMapping: Record<string, string>;
   onChange: (stage: string, value: string) => void;
   agentPlaceholder: string;
   channelPlaceholder: string;
+  generationConnectorPlaceholder: string;
 }) {
   // sandbox 포함 — status로 걸러 disconnected 등은 아예 안 보인다(잘못 고를 표면 자체를
   // 없앤다, "고른 뒤 실패"보다 "애초에 못 고름"이 싸다).
   const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
+  // story #4101 — 같은 원칙, revoked 커넥터는 애초에 선택지에 안 나온다.
+  const activeGenerationConnectors = generationConnectors.filter((c) => c.status === 'active');
 
   return (
     <>
       {stages.map((stage) => {
         const meta = stageMetadata[stage];
-        const isChannelStage = meta?.capability?.target === 'channel_connection';
+        const target = meta?.capability?.target;
         return (
           <div key={stage} className="flex items-center gap-3">
             <span className="w-32 shrink-0 text-xs font-medium text-foreground">
               {meta?.role ?? stage}
             </span>
-            {isChannelStage ? (
+            {target === 'channel_connection' ? (
               <select
                 className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 value={roleMapping[stage] ?? ''}
@@ -69,6 +84,17 @@ export function RecipeRoleMappingFields({
                 <option value="">{channelPlaceholder}</option>
                 {activeChannelConnections.map((c) => (
                   <option key={c.id} value={c.id}>{c.account_label || `${c.channel}(${c.account_id})`}</option>
+                ))}
+              </select>
+            ) : target === 'generation_connector' ? (
+              <select
+                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                value={roleMapping[stage] ?? ''}
+                onChange={(e) => onChange(stage, e.target.value)}
+              >
+                <option value="">{generationConnectorPlaceholder}</option>
+                {activeGenerationConnectors.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
                 ))}
               </select>
             ) : (

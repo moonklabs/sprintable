@@ -3196,6 +3196,7 @@ async def apply_recipe_role_bindings(
     """
     from app.models.channel_connection import ChannelConnection
     from app.models.event_definition import EventDefinition
+    from app.models.org_generation_connector import OrgGenerationConnector
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.models.team import TeamMember
     from app.services.project_auth import require_project_access
@@ -3231,12 +3232,18 @@ async def apply_recipe_role_bindings(
     # 쓰고 있다(회귀 7건이 그 계약을 pin) — target은 그 kind와 독립된 별도 닫힌 어휘
     # 필드(event_definition_registry.py::_CAPABILITY_TARGETS, 명시 선언 없으면 기본
     # "agent" = 오늘 계약 그대로).
-    def _is_channel_stage(stage: str) -> bool:
+    # story #4101(alembic 0391) — 두 값 판별을 세 값으로 확장. "agent"가 기본(무선언 stage
+    # 회귀 0)은 그대로.
+    def _stage_target(stage: str) -> str:
         capability = (definition.stage_metadata.get(stage) or {}).get("capability")
-        return bool(capability) and capability.get("target") == "channel_connection"
+        target = (capability or {}).get("target")
+        return target if target in ("channel_connection", "generation_connector") else "agent"
 
-    channel_stage_values = {s: v for s, v in body.role_mapping.items() if _is_channel_stage(s)}
-    agent_stage_values = {s: v for s, v in body.role_mapping.items() if not _is_channel_stage(s)}
+    channel_stage_values = {s: v for s, v in body.role_mapping.items() if _stage_target(s) == "channel_connection"}
+    generation_stage_values = {
+        s: v for s, v in body.role_mapping.items() if _stage_target(s) == "generation_connector"
+    }
+    agent_stage_values = {s: v for s, v in body.role_mapping.items() if _stage_target(s) == "agent"}
 
     agent_ids = {uuid.UUID(v) for v in agent_stage_values.values()}
     valid_agents = set((await db.execute(
@@ -3260,6 +3267,25 @@ async def apply_recipe_role_bindings(
         raise HTTPException(
             status_code=422,
             detail=f"channel connection(s) not found in this org: {missing_connections}",
+        )
+
+    # story #4101 — generation_connector target도 org 경계 안 존재 검증 + revoke된 커넥터는
+    # 바인딩 대상 불가(status='active'만 유효, 스토리 판별 조건 "revoke 뒤 바인딩 대상 불가").
+    generation_connector_ids = {uuid.UUID(v) for v in generation_stage_values.values()}
+    valid_generation_connectors = set((await db.execute(
+        select(OrgGenerationConnector.id).where(
+            OrgGenerationConnector.id.in_(generation_connector_ids),
+            OrgGenerationConnector.org_id == org_id,
+            OrgGenerationConnector.status == "active",
+        )
+    )).scalars().all()) if generation_connector_ids else set()
+    missing_generation_connectors = [
+        v for v in generation_stage_values.values() if uuid.UUID(v) not in valid_generation_connectors
+    ]
+    if missing_generation_connectors:
+        raise HTTPException(
+            status_code=422,
+            detail=f"generation connector(s) not found or not active in this org: {missing_generation_connectors}",
         )
 
     # story #3317 PR B — capability(publish:<channel> 등) 요구 stage의 커넥터 준비 상태를
@@ -3327,7 +3353,10 @@ async def apply_recipe_role_bindings(
     upserted = 0
     for stage, value_str in body.role_mapping.items():
         value_id = uuid.UUID(value_str)
-        is_channel = stage in channel_stage_values
+        target = _stage_target(stage)
+        col_agent = value_id if target == "agent" else None
+        col_channel = value_id if target == "channel_connection" else None
+        col_generation = value_id if target == "generation_connector" else None
         existing = (await db.execute(
             select(RecipeRoleBinding).where(
                 RecipeRoleBinding.org_id == org_id,
@@ -3337,18 +3366,20 @@ async def apply_recipe_role_bindings(
             )
         )).scalar_one_or_none()
         if existing is not None:
-            # story #4090 — 재-apply가 같은 stage를 다른 target kind로 바꿀 수도 있다(예: 정의
-            # 개정으로 capability가 붙거나 빠짐) — 두 컬럼 다 명시로 재설정해야 CHECK
-            # (ck_recipe_role_bindings_exactly_one_target)가 안 걸린다(한쪽만 setattr하면
-            # 구 값이 다른 컬럼에 남아 XOR 위반).
-            existing.agent_member_id = None if is_channel else value_id
-            existing.channel_connection_id = value_id if is_channel else None
+            # story #4090/#4101 — 재-apply가 같은 stage를 다른 target kind로 바꿀 수도 있다
+            # (예: 정의 개정으로 capability가 붙거나 빠짐) — 세 컬럼 다 명시로 재설정해야
+            # CHECK(ck_recipe_role_bindings_exactly_one_target)가 안 걸린다(한쪽만
+            # setattr하면 구 값이 다른 컬럼에 남아 XOR 위반).
+            existing.agent_member_id = col_agent
+            existing.channel_connection_id = col_channel
+            existing.generation_connector_id = col_generation
         else:
             db.add(RecipeRoleBinding(
                 org_id=org_id, project_id=body.project_id, event_definition_key=definition.key,
                 stage=stage,
-                agent_member_id=None if is_channel else value_id,
-                channel_connection_id=value_id if is_channel else None,
+                agent_member_id=col_agent,
+                channel_connection_id=col_channel,
+                generation_connector_id=col_generation,
                 created_by=actor_id,
             ))
         upserted += 1
@@ -3394,12 +3425,16 @@ async def get_recipe_role_bindings(
     if definition is None:
         raise HTTPException(status_code=404, detail="event definition not found")
 
-    # story #4090 — 두 target 중 정확히 하나만 채워지므로(DB CHECK) coalesce로 하나의
-    # 문자열 값만 반환한다(agent_member_id/channel_connection_id 어느 쪽이든 호출부
-    # 입장에선 "이 stage의 role_mapping 값"으로 동형 — apply 요청 바디와 왕복 대칭).
-    # org 전역(project_id IS NULL) 먼저 채우고, project 특이성으로 덮어써 우선순위를
-    # 정확히 반영(project_scope_clause와 동형 우선순위, resolver의 실 조회 순서와 일치).
-    binding_value = func.coalesce(RecipeRoleBinding.agent_member_id, RecipeRoleBinding.channel_connection_id)
+    # story #4090/#4101 — 셋 중 정확히 하나만 채워지므로(DB CHECK) coalesce로 하나의
+    # 문자열 값만 반환한다(agent_member_id/channel_connection_id/generation_connector_id
+    # 어느 쪽이든 호출부 입장에선 "이 stage의 role_mapping 값"으로 동형 — apply 요청
+    # 바디와 왕복 대칭). org 전역(project_id IS NULL) 먼저 채우고, project 특이성으로
+    # 덮어써 우선순위를 정확히 반영(project_scope_clause와 동형 우선순위, resolver의
+    # 실 조회 순서와 일치).
+    binding_value = func.coalesce(
+        RecipeRoleBinding.agent_member_id, RecipeRoleBinding.channel_connection_id,
+        RecipeRoleBinding.generation_connector_id,
+    )
     org_wide = (await db.execute(
         select(RecipeRoleBinding.stage, binding_value).where(
             RecipeRoleBinding.org_id == org_id,
