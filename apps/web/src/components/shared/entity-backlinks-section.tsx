@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
+import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -90,6 +91,18 @@ interface BacklinksMeta {
 const EXCLUDE_LABEL_KEYS: Record<string, string> = {
   pr_sid_text_convention: 'backlinksExcludePrSid',
   evidence_free_text_reference: 'backlinksExcludeEvidenceFreeText',
+};
+
+// story #4096(리허설 1호 실측, 2026-09-21) — collection_scope.source_types 코드(BE
+// app/services/backlinks.py::BACKLINKS_ALLOWED_SOURCE_TYPES, 4종 고정)가 EXCLUDE_LABEL_KEYS
+// 와 달리 사람 낱말 매핑 없이 원문 그대로(«source=chat_message» 등) 화면에 샜다 — 같은
+// 패턴(코드→i18n 키 조회 테이블)으로 처방. 매핑에 없는 코드(향후 BE가 늘릴 경우)는 excludes와
+// 동일 원칙으로 원문 코드 그대로(번역 키 오조회 대신 "정상 경로").
+const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
+  chat_message: 'backlinksSourceChatMessage',
+  doc: 'backlinksSourceDoc',
+  meeting: 'backlinksSourceMeeting',
+  story: 'backlinksSourceStory',
 };
 
 /** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
@@ -189,12 +202,24 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
       {mentionItems.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {scope
-            ? t('backlinksEmptyScoped', {
-                sources: scope.source_types.join('·'),
-                // 매핑에 없는 코드(향후 BE가 excludes를 늘릴 경우)는 원문 코드 그대로 — 번역
-                // 키 오조회 대신 "정상 경로"로 보여준다(#2263 ㉢와 같은 원칙).
-                excludes: scope.excludes.map((k) => (EXCLUDE_LABEL_KEYS[k] ? t(EXCLUDE_LABEL_KEYS[k]!) : k)).join('·'),
-              })
+            ? (() => {
+                // story #4096 — excludes 목록(마지막 항목 기준)에 맞는 「은/는」을 렌더
+                // 시점에 결정적으로 고른다(korean-particle.ts, more/page.tsx::moreTabHint와
+                // 동일 패턴) — 조사를 메시지 문자열에 고정하지 않는다.
+                const excludesText = scope.excludes
+                  .map((k) => (EXCLUDE_LABEL_KEYS[k] ? t(EXCLUDE_LABEL_KEYS[k]!) : k))
+                  .join('·');
+                return t('backlinksEmptyScoped', {
+                  // 매핑에 없는 코드(향후 BE가 source_types를 늘릴 경우)는 원문 코드
+                  // 그대로 — 번역 키 오조회 대신 "정상 경로"로 보여준다(#2263 ㉢와 같은
+                  // 원칙, excludes와 동형).
+                  sources: scope.source_types
+                    .map((k) => (SOURCE_TYPE_LABEL_KEYS[k] ? t(SOURCE_TYPE_LABEL_KEYS[k]!) : k))
+                    .join('·'),
+                  excludes: excludesText,
+                  particle: pickEunNeunJosa(excludesText),
+                });
+              })()
             : t('backlinksEmptyFallback')}
         </p>
       ) : (
