@@ -1653,6 +1653,14 @@ jobs:
       - name: "Verify no date toLocaleString across apps/web/src (story #3493 regression guard)"
         run: pnpm --filter web verify:no-date-tolocalestring
 
+      # story #4079(까디르 #4077 스캔 §4-4 처방, 2026-09-21) 회귀가드 — 하드코드 절대
+      # 일시 리터럴(ISO 문자열·`new Date(2026, ...)` 생성자)이 실 `Date.now()`류와
+      # 부딪혀 특정 달력일에 결과가 뒤집히는 「시한폭탄」 클래스(#4453 실사고, PR #4453)를
+      # 막는다. BE 자매 가드(lint_no_hardcoded_iso_timestamp.py)와 달리 apps/web엔
+      # 이 클래스를 막는 verify:* 가 하나도 없었다(#4077 문서 §4-2 실측).
+      - name: "Verify no hardcoded absolute datetime literal across apps/web/src (story #4079 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-absolute-datetime
+
       # story #3808(페드루 PO 지적 2026-09-12 23:50Z) — 채널 사용량 줄(used_units/limit_units/
       # remaining_units, BFF 계약 {used_units, limit_units, remaining_units, reset_at, scope})
       # 이 콤마 없이 나가던 결함(같은 화면 금액은 이미 formatMinorCurrency로 콤마가 있어 두

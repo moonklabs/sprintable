@@ -26,6 +26,7 @@
     "verify:frontend-docker-import-context": "tsx scripts/verify-frontend-docker-import-context.ts",
     "verify:no-direct-backend-v2-call": "tsx scripts/verify-no-direct-backend-v2-call.ts",
     "verify:no-date-tolocalestring": "tsx scripts/verify-no-date-tolocalestring.ts",
+    "verify:no-hardcoded-absolute-datetime": "tsx scripts/verify-no-hardcoded-absolute-datetime.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
