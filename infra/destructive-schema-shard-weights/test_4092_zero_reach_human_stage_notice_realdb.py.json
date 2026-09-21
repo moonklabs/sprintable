@@ -1,0 +1,1 @@
+{"file": "tests/test_4092_zero_reach_human_stage_notice_realdb.py", "sec": 5.0, "source": "story-4092(2026-09-21) — 로컬 실측(throwaway pgvector/pgvector:pg15 컨테이너, 전용 DB sprintable_test_mirko_4092, 이 파일만 단독 `pytest` 실행, 4 passed in 5.01s). CI 값은 달라질 수 있어 잠정값."}
