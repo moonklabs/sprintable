@@ -14,13 +14,12 @@ video` MCP 도구, 플러그인 0.9.14)을 자기설명 멘션이 안내하지 �
 capability.kind=="generate"·pending_approval.gate.type=="external_publish")에서 그대로
 유도 — 이 마이그가 새로 건드릴 데이터가 없다(events.py 코드만).
 
-Revision ID: 0387
-Revises: 0386
+Revision ID: 0388
+Revises: 0387
 Create Date: 2026-09-21
 
-⚠️번호 주의 — 이 브랜치 작성 시점 develop head는 0385(#4086). #4092(0386, PR #4467)가
-review 후반부라 먼저 착지할 것으로 보여 0387로 잡았다 — 순서가 어긋나면 재-넘버링
-(이 세션 #4081↔#4083/#4086↔#4092 선례와 동형 절차).
+번호 조율(페드루 PO, 2026-09-21 07:33Z) — 0387은 디디군 #4090(1/2, 발행 축 임계 경로) 선점.
+착지 순서: #4467(#4092)→디디군 #4090 1/2→이 카드(0388) rebase·push.
 """
 from __future__ import annotations
 
@@ -29,8 +28,8 @@ import json
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0387"
-down_revision = "0386"
+revision = "0388"
+down_revision = "0387"
 branch_labels = None
 depends_on = None
 
