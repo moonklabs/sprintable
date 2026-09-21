@@ -33,6 +33,24 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _configure_generation_connector_secret(monkeypatch):
+    """test_4101_generation_connector_realdb.py의 crypto 시크릿 격리 관례 그대로 미러 —
+    이 파일의 마지막 테스트(generation_connector-target 양성대조)가 커넥터를 암호화해
+    등록해야 해서 필요."""
+    import importlib
+    from cryptography.fernet import Fernet
+
+    import app.core.config as config_module
+    monkeypatch.setattr(
+        config_module.settings, "generation_connector_credential_encryption_key", Fernet.generate_key().decode(),
+    )
+    import app.services.generation_connector_credential_crypto as crypto_module
+    importlib.reload(crypto_module)
+    yield
+    importlib.reload(crypto_module)
+
+
 async def _seed_channel_connection(session, org_id, *, channel="instagram", account_id="acct-sandbox", status="active"):
     from app.models.channel_connection import ChannelConnection
 
@@ -43,6 +61,21 @@ async def _seed_channel_connection(session, org_id, *, channel="instagram", acco
     session.add(conn)
     await session.commit()
     return conn.id
+
+
+async def _seed_generation_connector(session, org_id, *, status="active", label="v1"):
+    from app.models.org_generation_connector import OrgGenerationConnector
+    from app.services.generation_connector_credential_crypto import encrypt_generation_connector_credential
+
+    c = OrgGenerationConnector(
+        id=uuid.uuid4(), org_id=org_id, provider_key="vertex_gemini", label=label,
+        model_config_json={"image": "gemini-2.5-flash-image"},
+        encrypted_credentials=encrypt_generation_connector_credential("super-secret-api-key"),
+        status=status,
+    )
+    session.add(c)
+    await session.commit()
+    return c.id
 
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
@@ -178,5 +211,43 @@ async def test_remaining_warning_tails_point_to_publisher_agent_not_org_settings
             assert "담당 발행 에이전트" in resp.warnings[0]
             assert "채널을 먼저 연결하세요" not in resp.warnings[0]
             assert "조직 설정" not in resp.warnings[0]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+async def test_generation_connector_target_stage_with_non_agent_tool_kind_yields_no_warning():
+    """story #4115 CHANGES(페드루 PO 리뷰, 2026-09-21) — 스킵을 channel_connection뿐
+    아니라 generation_connector-target까지 넓힌 것의 양성대조. kind="publish"는
+    _AGENT_TOOL_CAPABILITY_KINDS(attach_video/generate) **밖**이라 기존 kind 기반
+    스킵으로는 안 걸린다 — target 기반 스킵이 이 카드에서 새로 추가되기 前엔 이
+    케이스가 org_connectors(채널) 레지스트리를 오검사해 경고 1건을 냈을 것(넓히기
+    前 RED가 이 양성대조의 핵심). 넓힌 뒤에는 target 자체로 걸러져 경고 0."""
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, apply_recipe_role_bindings
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="c4115e")
+            caller_id = await _seed_agent(s, org_id, project_id, name="caller")
+            connector_id = await _seed_generation_connector(s, org_id)
+            # org_connectors(채널 레지스트리)는 0건 — generation_connector-target은
+            # 애초에 그 레지스트리와 무관해야 한다(준비 판정은 apply 본문 422가 이미 함).
+
+            definition = await _seed_definition(
+                s, org_id=org_id, key="org.c4115e.recipe_cap",
+                stage_metadata={
+                    "compute": {
+                        "role": "Compute", "action": "생성 실행",
+                        "capability": {"kind": "publish", "target": "generation_connector"},
+                    },
+                },
+            )
+            resp = await apply_recipe_role_bindings(
+                definition.id,
+                ApplyRecipeRoleBindingsRequest(project_id=None, role_mapping={"compute": str(connector_id)}),
+                db=s, auth=_auth(caller_id, org_id), org_id=org_id,
+            )
+            assert resp.warnings == []
     finally:
         await engine.dispose()
