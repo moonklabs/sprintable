@@ -1138,6 +1138,54 @@ async def _maybe_create_scheduled_publication_command(
     )
 
 
+async def find_sole_pending_scoped_external_publish_gate(
+    session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
+) -> Gate | None:
+    """story #4069/#4139 공유 SSOT — "이 work_item에 지금 pending인 draft-scoped
+    (scope_key≠"") external_publish 게이트가 정확히 1개(=단일 목적지)뿐인가"의 유일한
+    판정 지점. 정확히 1개일 때만 그 게이트를 반환(0개·2개 이상은 None — #3478 멀티목적지는
+    각자 사람 승인을 그대로 요구한다). 양방향 소비처:
+    - `transition_gate`(아래, 레시피 unscoped 게이트가 approved/rejected로 전이되는 순간 —
+      이 하나뿐인 scoped 게이트를 같이 승계 전이하는 캐스케이드 방향).
+    - `_enrich_deferred_to_gate_id`(gates.py, story #4139 — scoped 게이트 자신의 응답에
+      "이 게이트는 레시피 게이트가 대신 결재한다"는 계산 필드를 싣는 역방향).
+
+    두 소비처가 각자 이 쿼리를 재구현하면 조용히 갈릴 수 있다(캐스케이드는 승인하는데
+    "대신 결재돼요" 표시는 안 뜨거나 그 반대) — 그래서 한 곳에서만 계산한다."""
+    _scoped_pending = (await session.execute(
+        select(Gate).where(
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+            Gate.work_item_type == work_item_type,
+            Gate.gate_type == "external_publish", Gate.scope_key != "",
+            Gate.status == "pending",
+        )
+    )).scalars().all()
+    return _scoped_pending[0] if len(_scoped_pending) == 1 else None
+
+
+async def find_pending_recipe_external_publish_gate(
+    session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
+) -> Gate | None:
+    """story #4139 — 이 work_item의 「레시피 unscoped external_publish 게이트」
+    (scope_key=""·neutral_facts.triggered_by_event+stage 실림 — `publish_recipe_
+    approved_draft`/`_enrich_linked_channel_draft`의 첫 분기와 정확히 같은 조건, 새 판별
+    발명 0)가 지금 pending이면 그 게이트를 반환. 없거나 이미 결정됐으면 None."""
+    gate = (await session.execute(
+        select(Gate).where(
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+            Gate.work_item_type == work_item_type,
+            Gate.gate_type == "external_publish", Gate.scope_key == "",
+            Gate.status == "pending",
+        )
+    )).scalar_one_or_none()
+    if gate is None:
+        return None
+    facts = gate.neutral_facts or {}
+    if not facts.get("triggered_by_event") or not facts.get("stage"):
+        return None
+    return gate
+
+
 async def transition_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -1210,16 +1258,10 @@ async def transition_gate(
         # 구멍이었다(story #4089와 같은 "지목 경로만 막는 fix" 클래스). 라우터 쪽
         # 코드는 삭제(중복 제거, 이 한 곳이 유일한 소유자).
         if gate.gate_type == "external_publish" and (gate.scope_key or "") == "":
-            _scoped_pending = (await session.execute(
-                select(Gate).where(
-                    Gate.org_id == org_id, Gate.work_item_id == gate.work_item_id,
-                    Gate.work_item_type == gate.work_item_type,
-                    Gate.gate_type == "external_publish", Gate.scope_key != "",
-                    Gate.status == "pending",
-                )
-            )).scalars().all()
-            if len(_scoped_pending) == 1:
-                _scoped_gate = _scoped_pending[0]
+            _scoped_gate = await find_sole_pending_scoped_external_publish_gate(
+                session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+            )
+            if _scoped_gate is not None:
                 set_gate_status(_scoped_gate, "approved", now=datetime.now(timezone.utc))
                 _scoped_gate.requires_human = False
                 _scoped_gate.resolver_id = gate.resolver_id
@@ -1236,6 +1278,27 @@ async def transition_gate(
         from app.services.channel_posts import publish_recipe_approved_draft
 
         await publish_recipe_approved_draft(session, gate=gate, resolver_id=resolver_id)
+
+    # story #4139(AC2 반려 동행, 페드루 PO 確定 2026-09-22) — 위 승인 캐스케이드(훅B, #4069)
+    # 의 반려 대칭. 레시피 unscoped 게이트가 rejected로 전이되는 순간, 같은 work_item의
+    # 단일-목적지 pending scoped 게이트도 같은 승인자·시각·사유로 같이 반려한다(사람이
+    # 결재함에서 안 보는 그 게이트가 레시피 반려 뒤에도 영원히 pending으로 남는 걸 막는다
+    # — #4139 AC1이 인박스에서 숨긴 대가로 이 카드가 반드시 갚아야 하는 책임). 승인
+    # 캐스케이드와 동일하게 단일 목적지일 때만(2개 이상은 #3478류 각자 판단 유지) —
+    # find_sole_pending_scoped_external_publish_gate 재사용(새 판정 발명 0).
+    elif new_status == "rejected":
+        if gate.gate_type == "external_publish" and (gate.scope_key or "") == "":
+            _scoped_gate = await find_sole_pending_scoped_external_publish_gate(
+                session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+            )
+            if _scoped_gate is not None:
+                set_gate_status(_scoped_gate, "rejected", now=datetime.now(timezone.utc))
+                _scoped_gate.requires_human = False
+                _scoped_gate.resolver_id = gate.resolver_id
+                _scoped_gate.resolved_at = gate.resolved_at
+                _scoped_gate.resolution_note = (
+                    "auto_rejected_by_recipe_external_publish_gate: single destination (story #4139)"
+                )
 
     # story #2631(PO 판정 ①, 2026-08-15): 게이트 해소 계열 액션(approve/reject/undo/
     # discuss-request)을 ActivityLog(immutable)에 처음으로 구조화 기록 — 지금까지 gate 행

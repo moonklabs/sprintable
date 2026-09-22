@@ -225,6 +225,29 @@ describe('GateDetailPage — «제작 산출물» 칸 + 비결재자 이름 표�
   });
 });
 
+// story #4139([E-RECIPE-1] Phase3 폴리시, 페드루 PO 確定 2026-09-22) — deferred_to_gate_id가
+// 있으면(레시피 게이트가 대신 결재) can_approve=true여도 액션 버튼을 숨기고 「레시피 게이트에서
+// 함께 결재돼요」+링크를 보인다. unauthorizedExtra(무권한 문구)와 절대 안 섞는다 — 별개 사실.
+describe('GateDetailPage — deferred_to_gate_id(레시피 게이트 대신 결재, story #4139)', () => {
+  it('deferred_to_gate_id가 있으면 can_approve=true여도 승인/반려 버튼이 없고 대신 결재 문구+링크가 뜬다', async () => {
+    await mount(gate({ can_approve: true, deferred_to_gate_id: 'gate-recipe-1' }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
+    expect(container.textContent).toContain(koMessages.cage.gateDeferredToRecipeGate);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyNotAuthorized);
+    const link = container.querySelector('a[href="/gates/gate-recipe-1"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toBe(koMessages.cage.gateDeferredToRecipeGateLink);
+  });
+
+  it('deferred_to_gate_id가 없으면(일반 게이트, 회귀 0) 대신 결재 문구가 안 뜨고 기존 동작 그대로', async () => {
+    await mount(gate({ can_approve: false, deferred_to_gate_id: null }));
+    expect(container.textContent).not.toContain(koMessages.cage.gateDeferredToRecipeGate);
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+  });
+});
+
 // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
 // 「발송」이 같은 승인 버튼을 공유하면 두 다른 행위가 같은 낱말("승인")로 뭉개진다.
 describe('GateDetailPage — 뉴스레터 승인 버튼 낱말 분리 (story #3813 PR4)', () => {

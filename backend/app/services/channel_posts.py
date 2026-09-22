@@ -2401,9 +2401,17 @@ async def find_ready_recipe_channel_drafts(
     킬 대상 — 선택 규칙을 갈라놓으면 두 표면이 다른 draft를 가리키는 RED가 나야 한다).
 
     반환 (ready 목록[최신순, 0번째=target]·still_pending) — still_pending은 scoped
-    게이트가 아직 pending(#4069 자동충족 대기 中)인 draft가 하나라도 있었다는 신호,
-    ready가 비어 있어도 그 이유가 "제출된 게 없음"인지 "승인 대기 中"인지 caller가
-    가른다."""
+    게이트가 아직 pending인데 **단일 목적지가 아니라**(#3478 멀티목적지, 각자 사람 승인
+    필요) 자동충족 대상이 아닌 draft가 하나라도 있었다는 신호, ready가 비어 있어도 그
+    이유가 "제출된 게 없음"인지 "승인 대기 中"인지 caller가 가른다.
+
+    story #4139(페드루 PO 確定 2026-09-22) — pending인데 이 work_item의 **단일**(유일한)
+    pending scoped 게이트면(=#4069/#4139 캐스케이드가 레시피 게이트 승인 즉시 승계-승인할
+    대상, find_sole_pending_scoped_external_publish_gate와 동일 판정 재사용) ready에 포함
+    한다(scoped_gate_status="pending"으로 — LinkedChannelDraft docstring이 이미 이 값을
+    "#4069 자동충족 대기 中"으로 문서화해 뒀다). 레시피 게이트 카드가 승인 前에도 영상·
+    본문을 미리 보여줘야(#4139 AC3) «승인해도 발행되지 않아요»라는 거짓 경고를 없앨 수
+    있다 — 멀티목적지 pending만 여전히 still_pending 경로(그 경고가 정직한 경우)."""
     drafts = (await db.execute(
         select(ChannelPostDraft).where(
             ChannelPostDraft.org_id == org_id, ChannelPostDraft.work_item_id == work_item_id,
@@ -2413,7 +2421,14 @@ async def find_ready_recipe_channel_drafts(
     if not drafts:
         return [], False
 
-    from app.services.gate_service import find_gate_slot_with_pr_fallback
+    from app.services.gate_service import (
+        find_gate_slot_with_pr_fallback,
+        find_sole_pending_scoped_external_publish_gate,
+    )
+
+    sole_pending = await find_sole_pending_scoped_external_publish_gate(
+        db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+    )
 
     ready: list[tuple[ChannelPostDraft, Gate, ChannelPostVersion]] = []
     still_pending = False
@@ -2426,7 +2441,13 @@ async def find_ready_recipe_channel_drafts(
         if scoped_gate is None:
             continue
         if scoped_gate.status == "pending":
-            still_pending = True
+            if sole_pending is not None and sole_pending.id == scoped_gate.id:
+                versions = await list_channel_post_draft_versions(db, draft_id=draft.id)
+                if not versions:
+                    continue
+                ready.append((draft, scoped_gate, versions[-1]))
+            else:
+                still_pending = True
             continue
         if scoped_gate.status != "approved":
             continue
