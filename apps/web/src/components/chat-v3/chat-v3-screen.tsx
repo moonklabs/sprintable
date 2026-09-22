@@ -272,7 +272,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   const agentName = otherParticipant?.name ?? t('unknownParticipant');
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-muted/20" data-testid="chat-v3-screen">
+    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-muted/20" data-testid="chat-v3-screen">
       <div className="flex min-h-0 flex-1">
         <NavV3Sidebar flags={flags} activeKey="chats" />
         <div className="flex min-w-0 flex-1">
@@ -300,7 +300,10 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
             <>
               {/* story #4006 AC4 §4 — lg 미만은 레일↔대화 단일 페인(기본=레일). lg↑는
                   이 상태 무관하게 항상 같이 보인다(현행 3열 무변, AC7). */}
-              <div className={cn('min-w-0 lg:flex', narrowDetailOpen ? 'hidden' : 'flex w-full')}>
+              {/* PO CHANGES-1 ①(2026-09-22) — w-full에 lg: 접두가 없어 1440에서도 레일이
+                  전폭으로 늘어나 메시지 열을 0px로 밀어냈다(실측 scrollWidth 1780). lg
+                  이상은 w-auto로 풀어 ChatV3ThreadRail 자신의 lg:w-[320px]가 실 폭을 정하게. */}
+              <div className={cn('min-w-0 lg:flex lg:w-auto', narrowDetailOpen ? 'hidden' : 'flex w-full')}>
                 <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={handleSelectThread} />
               </div>
               {selectedId === null ? (

@@ -87,7 +87,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
   const distinctAgentCount = new Set(snapshot.agentProgress.map((a) => a.agentName)).size;
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-muted/20" data-testid="today-v3-screen">
+    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-muted/20" data-testid="today-v3-screen">
       <div className="flex min-h-0 flex-1">
         <NavV3Sidebar flags={flags} activeKey="today" todayBadgeCount={snapshot.needsMeCount} />
         <div className="flex min-w-0 flex-1 flex-col">

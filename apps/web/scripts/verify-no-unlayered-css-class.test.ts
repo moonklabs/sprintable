@@ -70,14 +70,17 @@ describe('findUnlayeredClassRules (story #4125/#4127 — Cascade Layers 회귀�
   });
 });
 
-describe('ALLOWLIST — story #4125/#4127 정본(47종 고유 selector — 48건 중 `.ProseMirror .scrollbar-visible pre`가 별개 규칙 2개로 같은 문자열이라 Set에선 1종, 각 이유 실측 확認)', () => {
-  it('has exactly 47 entries (수 자체가 회귀가드 — 조용히 늘면 걸림)', () => {
-    expect(ALLOWLIST.size).toBe(47);
+describe('ALLOWLIST — story #4125/#4127 정본(46종 고유 selector — 47건 중 `.ProseMirror .scrollbar-visible pre`가 별개 규칙 2개로 같은 문자열이라 Set에선 1종, 각 이유 실측 확認)', () => {
+  it('has exactly 46 entries (수 자체가 회귀가드 — 조용히 늘면 걸림)', () => {
+    expect(ALLOWLIST.size).toBe(46);
   });
 
-  it('contains the 2 theme-switch entries carried over from #4125', () => {
+  it('contains the theme-switch entry carried over from #4125', () => {
     expect(ALLOWLIST.has('.dark')).toBe(true);
-    expect(ALLOWLIST.has('.dashboard-shell-root')).toBe(true);
+  });
+
+  it('does NOT contain the migrated dashboard-shell-root rule (story #4006 AC8 PO CHANGES-1 ③ — .v3-shell-root와 나란히 @layer components로 이관 완료)', () => {
+    expect(ALLOWLIST.has('.dashboard-shell-root')).toBe(false);
   });
 
   it('contains the 7 story #2229 ProseMirror scrollbar entries (이관 절대 금지)', () => {
@@ -103,11 +106,11 @@ describe('ALLOWLIST — story #4125/#4127 정본(47종 고유 selector — 48건
   });
 });
 
-describe('실 globals.css 스캔 — story #4127 AC1(48건 판정 완료) 확認', () => {
-  it('found 48건(원문 규칙 수) 중 고유 selector 문자열이 ALLOWLIST(47종)와 정확히 일치한다', () => {
+describe('실 globals.css 스캔 — story #4127 AC1(47건 판정 완료) 확認', () => {
+  it('found 47건(원문 규칙 수) 중 고유 selector 문자열이 ALLOWLIST(46종)와 정확히 일치한다', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const found = findUnlayeredClassRules(css);
-    expect(found.length, '원문 규칙 수(중복 selector 포함) — 48건 고정').toBe(48);
+    expect(found.length, '원문 규칙 수(중복 selector 포함) — 47건 고정(story #4006 AC8이 .dashboard-shell-root를 @layer로 이관해 48→47)').toBe(47);
     const selectors = [...new Set(found.map((r) => r.selector))].sort();
     expect(selectors).toEqual([...ALLOWLIST].sort());
   });

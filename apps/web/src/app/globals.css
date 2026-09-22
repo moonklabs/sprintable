@@ -1022,15 +1022,28 @@
    형태로만 참조한다(숫자 재추측 금지).
    --mobile-tab-bar-h는 탭 바 자기 자신의 실 높이(`h-[var(--mobile-tab-bar-h)]`,
    mobile-tab-bar.tsx)와 같은 값을 가리키는 단일 토큰 — 탭 바 높이가 바뀌면 이
-   한 줄만 고치면 인셋도 함께 맞다(두 벌 상수 금지). */
-.dashboard-shell-root {
-  --mobile-tab-bar-h: 4rem;
-  --bottom-dock-inset: env(safe-area-inset-bottom);
-}
+   한 줄만 고치면 인셋도 함께 맞다(두 벌 상수 금지).
+   story #4006(critical, 5pt) AC8(PO CHANGES-1 ③) — v3 3화면(오늘·대화·연결·규칙)은
+   `(authenticated)` 밖 별도 라우트 그룹이라 `.dashboard-shell-root` 조상이 없어
+   이 변수가 undefined였다(MobileTabBar 자기 높이가 auto로 무너짐). `.v3-shell-root`
+   (각 v3 화면의 최상위 div, data-testid="*-v3-screen"과 같은 자리)를 같은 선언에
+   더해 값은 그대로 공유(두 벌 상수 금지 원칙 유지 — 리터럴 재선언 0, 선택자만 추가).
+   `@layer components` 안에 두는 이유(story #4131 페드루 PO 선례 그대로) — story
+   #4125/#4127 트립와이어 ALLOWLIST는 "이유 있는 기존 비레이어"만 남기는 자리라 새로
+   손댄 규칙은 늘리지 않는다. 커스텀 프로퍼티만 선언해 유틸리티와 다툴 실제 CSS
+   프로퍼티가 0이라 @layer 안에 있어도 결과는 완전히 같다. */
+@layer components {
+  .dashboard-shell-root,
+  .v3-shell-root {
+    --mobile-tab-bar-h: 4rem;
+    --bottom-dock-inset: env(safe-area-inset-bottom);
+  }
 
-@media (max-width: 1023px) {
-  .dashboard-shell-root {
-    --bottom-dock-inset: calc(var(--mobile-tab-bar-h) + env(safe-area-inset-bottom));
+  @media (max-width: 1023px) {
+    .dashboard-shell-root,
+    .v3-shell-root {
+      --bottom-dock-inset: calc(var(--mobile-tab-bar-h) + env(safe-area-inset-bottom));
+    }
   }
 }
 

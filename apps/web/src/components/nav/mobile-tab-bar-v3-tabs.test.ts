@@ -57,10 +57,7 @@ describe('V3_TABS — 4탭 구성(오늘·대화·일감·더보기, 승인 탭 
 
   it('href 필드는 전부 destHref(...) 파생 — 목적지 문자열 리터럴 직접 박기 0(AC1 동형 규율)', () => {
     // TABS의 no-literal-destination 가드(#4016 AC1)와 같은 정신 — V3_TABS도 리터럴 href 금지.
-    const source = require('node:fs').readFileSync(
-      require('node:path').join(__dirname, 'mobile-tab-bar.tsx'),
-      'utf8',
-    ) as string;
+    const source = readFileSync(path.join(__dirname, 'mobile-tab-bar.tsx'), 'utf8');
     const start = source.indexOf('export const V3_TABS = [');
     const end = source.indexOf('] as const;', start);
     const block = source.slice(start, end);

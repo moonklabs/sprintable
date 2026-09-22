@@ -25,20 +25,19 @@
  * 그대로 매칭하면 포매팅이 바뀔 때마다 ALLOWLIST가 깨지기 때문(story #4127 실측 —
  * `.tiptap-content .tiptap ul,`/`.tiptap-content .tiptap ol`이 정확히 이 꼴).
  *
- * ALLOWLIST(47종 고유 selector — 스캔은 48건 원문 규칙을 찾지만 `.ProseMirror .scrollbar-visible
+ * ALLOWLIST(46종 고유 selector — 스캔은 47건 원문 규칙을 찾지만 `.ProseMirror .scrollbar-visible
  * pre`가 별개 규칙 2개로 같은 선택자 문자열이라 Set에서는 1종으로 합쳐진다, 그룹별 이유) —
  *
- *   [테마 스위치 — 유틸리티가 경쟁할 실제 CSS 프로퍼티가 없음, 2건]
+ *   [테마 스위치 — 유틸리티가 경쟁할 실제 CSS 프로퍼티가 없음, 1건]
  *   - `.dark` — :root의 다크 변형. 본문이 전부 `--var: value;`뿐, 실제 CSS 프로퍼티 0.
- *   - `.dashboard-shell-root` — `--mobile-tab-bar-h`/`--bottom-dock-inset` 커스텀
- *     프로퍼티만 선언(story #3756). 실제 CSS 프로퍼티 0.
  *
  * story #4131 — `--shell-chrome-h`(`.dashboard-shell-root`/`[data-topbar-hidden]`/미디어
  * 쿼리 3벌)는 ALLOWLIST에 안 넣는다. 이유 있는 «기존» 비레이어만 여기 남기는 것이 정본
  * (페드루 PO, 2026-09-22) — 새 규칙은 커스텀 프로퍼티만이라 유틸리티와 다툴 속성이 없어도
  * `@layer components`로 이관한다(결과는 같음·D1 sidebar 예방 이관과 같은 길). globals.css
- * 본문 참고.
- *
+ * 본문 참고. story #4006(critical, 5pt) AC8 PO CHANGES-1 ③ — `.dashboard-shell-root`
+ * 자신도 `.v3-shell-root`와 나란히 같은 길로 @layer components 이관(그 전까지 여기
+ * ALLOWLIST에 있던 항목 제거).
  *   [story #2229 기존 문서화 — third-party(prosemirror-view) unlayered 런타임 주입 스타일을
  *    이기기 위해 의도적으로 레이어 밖에 남겨진 것, 7건 — 이관 절대 금지, #2214 재발 유발]
  *   - `.ProseMirror .scrollbar-visible`
@@ -88,7 +87,6 @@ export interface UnlayeredClassRule {
  * 선택자 문자열은 소스 공백을 단일 스페이스로 정규화한 형태(아래 findUnlayeredClassRules 참고). */
 export const ALLOWLIST = new Set<string>([
   '.dark',
-  '.dashboard-shell-root',
   '.ProseMirror .scrollbar-visible',
   '.ProseMirror .scrollbar-visible pre',
   '.ProseMirror .scrollbar-visible pre::-webkit-scrollbar',
