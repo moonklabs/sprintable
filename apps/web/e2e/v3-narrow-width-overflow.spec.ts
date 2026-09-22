@@ -2,7 +2,7 @@
  * story #4006(critical, 5pt) AC3 — 390·768·1440 세 폭에서 v3 화면 가로 넘침 0을
  * document.documentElement.scrollWidth <= innerWidth로 자동 단언한다(3998 결함③의
  * 근거 재현·재발 방지). 「가설」(story #3989, PR #4383)이 develop에 착지해(2026-09-22)
- * 7화면 전부 단언한다.
+ * 6화면(오늘·대화·연결·규칙·일감·가설·결과) 전부 단언한다.
  *
  * 이 spec은 TODAY_V3_ENABLED/CHAT_V3_ENABLED/CONNECT_RULES_V3_ENABLED=true 전제라
  * ci.yml의 전용 스텝(v3-narrow-width-e2e job, 이 스텝만 독립 pnpm dev 재기동)에서만
