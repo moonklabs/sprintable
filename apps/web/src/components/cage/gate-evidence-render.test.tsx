@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { GateEvidence, GateActivityHistory } from './gate-evidence';
+import { GateEvidence, GateActivityHistory, GateLinkedEvidenceSection } from './gate-evidence';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
 import koMessages from '../../../messages/ko.json';
@@ -1256,5 +1256,120 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" refreshKey={1} />)); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsSpendRefreshRequested);
+  });
+});
+
+// story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 라이브 실측(2호 게이트
+// 1, PO 세션, 2026-09-22 00:40Z)에서 지정 결재자가 아니면 이 칸에 안내 문장 한 줄만
+// 보이고 linked_evidence[]/draft_doc_reference_token이 있어도 카드 어디에도 링크가 안
+// 보였다 — canAct/needsAction과 무관하게 항상 렌더되는지, 실 API 응답 shape(id·kind·
+// reference_token)로 실제 DOM에 칩이 나타나는지를 마운트로 검증한다.
+describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)', () => {
+  it('⭐linked_evidence[] 항목이 클릭 가능한 칩으로 실제 DOM에 나타난다(있음 케이스)', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' },
+        { id: 'ev-2', kind: 'storyboard', ref: 'storyboard-ref-2', reference_token: '[컨셉 보드](entity:artifact:44444444-4444-4444-4444-444444444444)' },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+    expect(container.textContent).toContain('컨셉 브리프');
+    expect(container.textContent).toContain('컨셉 보드');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBeGreaterThan(0);
+  });
+
+  it('draft_doc_reference_token만 있어도(linked_evidence[] 미착지, #4135 前 상태) 칩으로 나타난다', async () => {
+    const gate = realApiShapedGate({
+      neutral_facts: { draft_doc_reference_token: '[2호 시트](entity:doc:55555555-5555-5555-5555-555555555555)' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain('2호 시트');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+  });
+
+  it('linked_evidence[]와 draft_doc_reference_token이 같은 doc을 가리키면 중복 칩을 안 낸다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[2호 시트](entity:doc:55555555-5555-5555-5555-555555555555)' },
+      ],
+      neutral_facts: { draft_doc_reference_token: '[2호 시트](entity:doc:55555555-5555-5555-5555-555555555555)' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    const chipCount = container.querySelectorAll('[role="button"], a, button').length;
+    expect(chipCount).toBe(1);
+  });
+
+  // 미르코군 1:1 정정(2026-09-22 01:14Z) — reference_token은 nullable. evidence는 있는데
+  // doc/artifact로 못 풀리면(payload 형식 불일치 등) null이지만 항목 자체는 남는다("확定
+  // 대상은 맞는데 실물을 아직 못 찾음"이라는 정직한 신호 — 조용히 빼면 "그 산출물이 아예
+  // 없다"로 오독). FE는 그 항목을 클릭 불가한 kind 배지로 보여준다(EntityChip 아님 — 진짜로
+  // 갈 곳이 없다).
+  it('⭐reference_token이 null인 항목은 클릭 불가한 kind 배지로 나타나고(빠지지 않는다), 없음 문구도 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'verification_sheet', ref: 'vs-ref-1', reference_token: null },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain('verification_sheet');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    // 클릭 가능한 요소(EntityChip)가 아니라 순수 배지여야 한다 — 갈 곳이 없다.
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBe(0);
+  });
+
+  it('resolved 항목과 unresolved(null) 항목이 섞여 있으면 둘 다 같이 나타난다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'concept_brief', ref: 'ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' },
+        { id: 'ev-2', kind: 'animatic', ref: 'ref-2', reference_token: null },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain('컨셉 브리프');
+    expect(container.textContent).toContain('animatic');
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBe(1);
+  });
+
+  it('⭐산출물이 0건이면 «이 게이트에 등록된 산출물이 없어요»가 실제 DOM에 나타난다(조용한 null 금지, 없음 케이스)', async () => {
+    const gate = realApiShapedGate({ linked_evidence: [], neutral_facts: null });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.querySelectorAll('[role="button"], a, button').length).toBe(0);
+  });
+
+  it('linked_evidence 필드 자체가 undefined(구버전 응답, #4135 착지 前)여도 크래시 없이 빈 문구로 graceful', async () => {
+    const gate = realApiShapedGate({ linked_evidence: undefined, neutral_facts: null });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceEmpty);
   });
 });
