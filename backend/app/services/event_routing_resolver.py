@@ -187,6 +187,39 @@ async def _resolve_work_item_project_id(
     return None
 
 
+async def resolve_broad_crew_member_ids(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None,
+) -> set[uuid.UUID]:
+    """story #4147(페드루 PO 確定 2026-09-22) — `events.py::_resolve_crew_scoped_recipe_
+    binding`(#4132 CHANGES-1)의 3번 판정("이 project(+org 전역)에 적용된 모든 event_
+    definition_key에 걸쳐 agent_member_id로 묶인 «넓은 crew» 집합")을 그 함수에서 뽑아
+    여기로 옮긴 것 — 새 판정 로직 0, SQL 그대로 이동(추출 직후 events.py 쪽 실측: 기존
+    test_4110_generation_connector_read_realdb.py·test_4132_channel_connection_status_
+    realdb.py 전부 그린 유지). channel_posts.py(#4147, draft 미디어 업로드 참여 판정)가
+    두 번째 소비자가 되면서 events.py 라우터 안에 갇혀 있던 걸 서비스 계층(다른 라우터도
+    import 가능한 자리)으로 끌어냈다."""
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    binding_rows = (await db.execute(
+        select(RecipeRoleBinding.event_definition_key).where(
+            RecipeRoleBinding.org_id == org_id,
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).all()
+    applied_keys = sorted({k for (k,) in binding_rows})
+    if not applied_keys:
+        return set()
+
+    return set((await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key.in_(applied_keys),
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).scalars().all())
+
+
 async def _resolve_recipe_role_binding(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
 ) -> set[uuid.UUID]:

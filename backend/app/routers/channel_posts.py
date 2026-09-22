@@ -706,6 +706,62 @@ async def post_channel_post_draft_version(
     )
 
 
+async def _require_draft_media_participant(
+    db: AsyncSession, *, org_id: uuid.UUID, draft: "ChannelPostDraft", auth: AuthContext,
+    media_kind: str, step: str,
+):
+    """story #4147(페드루 PO 確定 2026-09-22, #4146 그라운딩 후속) — 채널 초안 미디어
+    업로드 URL 발급·확認은 org_id 일치만 봤다(같은 org의 아무 에이전트 키나 남의
+    초안에 영상·이미지를 편입할 수 있었던 갭). 사람 멤버는 무변(기존 org-scope 그대로).
+    에이전트는 (a) 이 초안의 origin author(withdraw_channel_post_draft·
+    archive_channel_post_draft와 동일 SSOT — `versions[0].author_member_id`, 새 "작성자"
+    판정 발명 0) 또는 (b) 그 work_item(work_item_type="story", channel_posts.py 전역
+    관례)에 적용된 레시피의 "넓은 crew"(events.py::_resolve_crew_scoped_recipe_binding이
+    쓰는 것과 같은 집합 — `event_routing_resolver.resolve_broad_crew_member_ids`로
+    공용화, #4147 판정 로직 0) 중 하나여야 통과. 둘 다 아니면 403 NOT_DRAFT_PARTICIPANT.
+
+    감사 로그 1행(기존 ActivityLogService 관례, publish_channel_post_draft 등과 동형) —
+    통과한 호출만 기록(거부된 시도는 403 자체가 이미 감사 신호라 별도 기록 0, 기존
+    다른 게이트들과 동일 관례)."""
+    resolved = await resolve_member_db_verified(auth, org_id, db)
+    if resolved.type == "agent":
+        versions = await list_channel_post_draft_versions(db, draft_id=draft.id)
+        origin_author_member_id = versions[0].author_member_id if versions else None
+        is_author = origin_author_member_id is not None and str(origin_author_member_id) == str(resolved.id)
+        if not is_author:
+            from app.services.event_routing_resolver import (
+                _resolve_work_item_project_id,
+                resolve_broad_crew_member_ids,
+            )
+
+            project_id = await _resolve_work_item_project_id(
+                db, org_id=org_id,
+                payload={"work_item_type": "story", "work_item_id": str(draft.work_item_id)},
+            )
+            crew_ids = await resolve_broad_crew_member_ids(db, org_id=org_id, project_id=project_id)
+            if resolved.id not in crew_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail=human_error(
+                        "NOT_DRAFT_PARTICIPANT",
+                        "이 초안에 참여(작성자 또는 배정된 크루)한 에이전트만 미디어를 올릴 수 있어요.",
+                        user_message="이 초안에 참여(작성자 또는 배정된 크루)한 에이전트만 미디어를 올릴 수 있어요.",
+                    ),
+                )
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="channel_post_draft_media_access", actor_type="platform", actor_id=None,
+        entity_type="channel_post_draft", entity_id=draft.id,
+        context={
+            "member_id": str(resolved.id), "member_kind": resolved.type,
+            "media_kind": media_kind, "step": step,
+        },
+    )
+    return resolved
+
+
 def _image_response(version, image_row) -> ChannelPostImageResponse:
     return ChannelPostImageResponse(
         image_id=image_row.id,
@@ -738,6 +794,9 @@ async def post_channel_post_image_upload_url(
     draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+    await _require_draft_media_participant(
+        db, org_id=org_id, draft=draft, auth=auth, media_kind="image", step="upload_url",
+    )
 
     try:
         result = await create_channel_post_image_upload_url(
@@ -795,6 +854,9 @@ async def post_channel_post_video_upload_url(
     draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
     if draft is None:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+    await _require_draft_media_participant(
+        db, org_id=org_id, draft=draft, auth=auth, media_kind="video", step="upload_url",
+    )
 
     try:
         result = await create_channel_post_video_upload_url(
@@ -838,7 +900,12 @@ async def post_channel_post_video_confirm(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
-    resolved = await resolve_member_db_verified(auth, org_id, db)
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+    resolved = await _require_draft_media_participant(
+        db, org_id=org_id, draft=draft, auth=auth, media_kind="video", step="confirm",
+    )
     member_id, actor_type = resolved.id, resolved.type
 
     try:
@@ -1014,7 +1081,12 @@ async def post_channel_post_image_confirm(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
-    resolved = await resolve_member_db_verified(auth, org_id, db)
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+    resolved = await _require_draft_media_participant(
+        db, org_id=org_id, draft=draft, auth=auth, media_kind="image", step="confirm",
+    )
     member_id, actor_type = resolved.id, resolved.type
 
     version, image_row = await _confirm_image_upload_or_raise(
