@@ -22,6 +22,8 @@ import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 // story #4018 — usePathname/useSearchParams 추가(주소 쿼리 `conversation` 딥링크).
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  // story #4006 AC8 — 이 화면에 새로 물린 MobileTabBar도 usePathname()을 쓴다(app router
+  // 미마운트 테스트 환경 방어, mobile-tab-bar-badge.test.tsx와 동일 관례).
   usePathname: () => '/chat',
   useSearchParams: () => new URLSearchParams(),
 }));

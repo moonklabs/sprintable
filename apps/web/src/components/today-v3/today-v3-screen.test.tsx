@@ -9,6 +9,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
+// story #4006 AC8 — 이 화면에 새로 물린 MobileTabBar가 usePathname()을 쓴다(app router
+// 미마운트 테스트 환경 방어, mobile-tab-bar-badge.test.tsx와 동일 관례).
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/today',
+}));
+
 const fetchMock = vi.fn();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

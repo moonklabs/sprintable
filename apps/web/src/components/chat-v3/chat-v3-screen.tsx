@@ -4,15 +4,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { ChevronLeft, PanelRight } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
 import { useMe, type Me } from './use-me';
 import { ChatV3ThreadRail, type ChatV3Thread } from './chat-v3-thread-rail';
 import { ChatV3Messages, type ChatV3MessagesHandle } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 
@@ -58,6 +62,14 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   const [threads, setThreads] = useState<ChatV3Thread[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // story #4006 AC3/AC4(§4, doc 5bc82986) — lg 미만은 레일↔대화 단일 페인. selectedId는
+  // 첫 로드 때 자동으로 list[0]을 골라(위 loadConversations) 항상 non-null이 되므로 이
+  // 값 자체로는 "레일이 기본인지 상세가 기본인지"를 못 가른다 — 사람이 스레드를 직접
+  // 탭했는지를 별도 불리언으로 추적한다.
+  const [narrowDetailOpen, setNarrowDetailOpen] = useState(false);
+  // story #4006 AC4 §4 — 맥락 패널은 lg 미만에서 Sheet(우측 드로어)로. lg↑는 이 상태
+  // 무관하게 항상 인라인 3열째로 보인다(work-list-shell.tsx의 기존 Sheet 관례 재사용).
+  const [narrowContextOpen, setNarrowContextOpen] = useState(false);
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
   // story #3990 — 「근거」·「이력」 절이 스코프할 일(work item). chat-v3-messages.tsx가
   // openArtifactId와 같은 파생 루프에서 같이 뽑아 올린다.
@@ -170,6 +182,11 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
       // 내비게이션 완료를 안 기다리고) 반영해야 클릭 응답이 매끄러워 렌더 시점 파생으로 못 바꾼다.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedId(conversationParam);
+      // story #4006 AC4 + #4018 상호작용 — 딥링크(?conversation=)로 직접 들어오면
+      // "이 사람이 이미 특정 대화를 지목했다"는 뜻이라 lg 미만에서도 레일이 아니라
+      // 그 상세를 바로 보여준다(수동 클릭과 같은 결).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNarrowDetailOpen(true);
       return;
     }
     if (didDefaultSelectRef.current) return;
@@ -181,8 +198,11 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
 
   // story #4018 AC3 — 사람이 직접 고르면 주소를 push(뒤로가기 = 이전 대화). 기본
   // 선택(위 effect)과 달리 이건 항상 새 기록을 쌓는다 — 그게 사용자 의도적 이동이므로.
+  // story #4006 AC4 — 같은 탭에서 lg 미만은 레일→상세로 넘어간다(자동 첫 선택은 이
+  // 함수를 안 타므로 레일이 아예 안 보이는 회귀 없음).
   const handleSelectThread = useCallback((id: string) => {
     setSelectedId(id);
+    setNarrowDetailOpen(true);
     router.push(`${pathname}?conversation=${id}`);
   }, [pathname, router]);
 
@@ -243,88 +263,136 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
 
   // story #4018 CHANGES 1 — 30건 목록에 없으면 단건 조회 결과(directConversation)로 폴백.
   const selectedThread = threads?.find((th) => th.id === selectedId) ?? directConversation;
+
+  // story #4006 AC8 — 좁은 폭 하단 탭 배지. useChatUnreadTotal()은 자기 useChatSse를
+  // 따로 열어 이 화면의 단일 SSE 구독 불변식(#4008 CHANGES 2, EventSource 1개만)을
+  // 깬다 — 이 화면이 이미 들고 있는 threads(이 사람이 보는 대화 전부, 실시간
+  // 갱신까지 handleThreadMessage/handleThreadRead가 이미 반영)에서 그대로 합산한다
+  // (새 훅·새 콜·새 구독 0).
+  const chatUnreadTotal = threads?.reduce((sum, th) => sum + (th.unread_count ?? 0), 0) ?? 0;
   const otherParticipant = selectedThread?.participants.find((p) => p.member_id !== me?.id) ?? selectedThread?.participants[0];
   const agentName = otherParticipant?.name ?? t('unknownParticipant');
 
   return (
-    <div className="flex h-screen min-h-0 bg-muted/20" data-testid="chat-v3-screen">
-      <NavV3Sidebar flags={flags} activeKey="chats" />
-      <div className="flex min-w-0 flex-1">
-        {loadError || meError ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3">
-            <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
-            <Button size="sm" variant="outline" onClick={retryLoad} data-testid="chat-v3-retry">{tc('retry')}</Button>
-          </div>
-        ) : !threads || !me ? (
-          <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-loading" aria-hidden="true">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
-        ) : threads.length === 0 && !selectedId ? (
-          // 까디르군 QA CHANGES-2 ① — 목록이 비어도(threads.length===0) 딥링크
-          // (?conversation=<id>, 30건 캡 밖이라 목록에 없는 대화)가 있으면 이 자리에서
-          // 바로 「빈 목록」으로 단정하지 않고 레일+상세 분기로 넘긴다(단건 조회
-          // 결과가 가려지던 결함). 진짜로 selectedId도 없는 경우(신규 유저·딥링크
-          // 0)만 이 전면 빈 상태를 쓴다.
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
-          </div>
-        ) : (
-          <>
-            <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={handleSelectThread} />
-            {selectedId === null ? (
-              // story #4018 — 기본 선택 effect가 아직 안 돈 찰나(같은 커밋 안에서 곧
-              // 해소됨). threads.length>0이 이미 보장돼 있어 이 상태는 일시적이다.
-              <div className="flex flex-1 items-center justify-center">
-                <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
+    <div className="flex h-screen min-h-0 flex-col bg-muted/20" data-testid="chat-v3-screen">
+      <div className="flex min-h-0 flex-1">
+        <NavV3Sidebar flags={flags} activeKey="chats" />
+        <div className="flex min-w-0 flex-1">
+          {loadError || meError ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+              <Button size="sm" variant="outline" onClick={retryLoad} data-testid="chat-v3-retry">{tc('retry')}</Button>
+            </div>
+          ) : !threads || !me ? (
+            <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-loading" aria-hidden="true">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ) : threads.length === 0 && !selectedId ? (
+            // 까디르군 QA CHANGES-2 ① — 목록이 비어도(threads.length===0) 딥링크
+            // (?conversation=<id>, 30건 캡 밖이라 목록에 없는 대화)가 있으면 이 자리에서
+            // 바로 「빈 목록」으로 단정하지 않고 레일+상세 분기로 넘긴다(단건 조회
+            // 결과가 가려지던 결함). 진짜로 selectedId도 없는 경우(신규 유저·딥링크
+            // 0)만 이 전면 빈 상태를 쓴다.
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
+            </div>
+          ) : (
+            <>
+              {/* story #4006 AC4 §4 — lg 미만은 레일↔대화 단일 페인(기본=레일). lg↑는
+                  이 상태 무관하게 항상 같이 보인다(현행 3열 무변, AC7). */}
+              <div className={cn('min-w-0 lg:flex', narrowDetailOpen ? 'hidden' : 'flex w-full')}>
+                <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={handleSelectThread} />
               </div>
-            ) : selectedThread ? (
-              <>
-                <ChatV3Messages
-                  ref={messagesRef}
-                  threadId={selectedThread.id}
-                  meId={me.id}
-                  agentName={agentName}
-                  locale={locale}
-                  needsMe={needsMe}
-                  todayV3Enabled={todayV3Enabled}
-                  todayHref={todayHref}
-                  onOpenArtifactChange={setOpenArtifactId}
-                  onWorkItemRefChange={setWorkItemRef}
-                />
-                <ChatV3ContextPanel
-                  conversationId={selectedThread.id}
-                  openArtifactId={openArtifactId}
-                  workItemRef={workItemRef}
-                  needsMe={needsMe}
-                  todayV3Enabled={todayV3Enabled}
-                  todayHref={todayHref}
-                />
-              </>
-            ) : directConversationStatus === 'error' ? (
-              // story #4018 CHANGES 1 — 단건 조회 자체가 실패(5xx·네트워크)한 경우는
-              // "없는 대화"로 단정하지 않는다(PO 지시) — 일반 로드 오류로 갈라 재시도 제공.
-              <div className="flex flex-1 flex-col items-center justify-center gap-3">
-                <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
-                <Button size="sm" variant="outline" onClick={retryDirectConversation} data-testid="chat-v3-conversation-retry">{tc('retry')}</Button>
-              </div>
-            ) : directConversationStatus === 'unavailable' ? (
-              // story #4018 AC2(유나 시안 703ed02d §4018) — 없는/권한 없는 대화 id.
-              // 존재 여부를 안 가른다(같은 문장) · 목록(레일)은 그대로 · 계열색 0.
-              <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center" data-testid="chat-v3-conversation-unavailable">
-                <p className="text-sm font-medium text-foreground">{t('conversationUnavailableTitle')}</p>
-                <p className="text-sm text-muted-foreground">{t('conversationUnavailableDescription')}</p>
-              </div>
-            ) : (
-              // 'idle'/'loading' — 30건 밖 id의 단건 조회가 아직 진행 中(찰나~짧은 로딩).
-              <div className="flex flex-1 flex-col gap-3 p-5" data-testid="chat-v3-conversation-checking" aria-hidden="true">
-                <Skeleton className="h-12 w-full" />
-              </div>
-            )}
-          </>
-        )}
+              {selectedId === null ? (
+                // story #4018 — 기본 선택 effect가 아직 안 돈 찰나(같은 커밋 안에서 곧
+                // 해소됨). threads.length>0이 이미 보장돼 있어 이 상태는 일시적이다.
+                <div className={cn('flex-1 items-center justify-center lg:flex', narrowDetailOpen ? 'flex' : 'hidden')}>
+                  <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
+                </div>
+              ) : selectedThread ? (
+                <div className={cn('min-w-0 flex-1 lg:flex', narrowDetailOpen ? 'flex' : 'hidden')}>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    {/* story #4006 AC4 §4 — 「← 대화 목록」 뒤로·「맥락」 열기 둘 다
+                        lg 미만 전용(lg↑는 레일·맥락 패널이 항상 인라인이라 불요). */}
+                    <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-border px-3 lg:hidden">
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setNarrowDetailOpen(false)} className="gap-1 px-2">
+                        <ChevronLeft className="size-4" aria-hidden="true" />
+                        {t('threadRailTitle')}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setNarrowContextOpen(true)}
+                        aria-label={t('contextPanelTitle')}
+                        data-testid="chat-v3-context-open-narrow"
+                      >
+                        <PanelRight className="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                    <ChatV3Messages
+                      ref={messagesRef}
+                      threadId={selectedThread.id}
+                      meId={me.id}
+                      agentName={agentName}
+                      locale={locale}
+                      needsMe={needsMe}
+                      todayV3Enabled={todayV3Enabled}
+                      todayHref={todayHref}
+                      onOpenArtifactChange={setOpenArtifactId}
+                      onWorkItemRefChange={setWorkItemRef}
+                    />
+                  </div>
+                  <div className="hidden lg:flex">
+                    <ChatV3ContextPanel
+                      conversationId={selectedThread.id}
+                      openArtifactId={openArtifactId}
+                      workItemRef={workItemRef}
+                      needsMe={needsMe}
+                      todayV3Enabled={todayV3Enabled}
+                      todayHref={todayHref}
+                    />
+                  </div>
+                  <Sheet open={narrowContextOpen} onOpenChange={setNarrowContextOpen}>
+                    <SheetContent side="right" className="w-full p-0 sm:max-w-sm">
+                      <ChatV3ContextPanel
+                        conversationId={selectedThread.id}
+                        openArtifactId={openArtifactId}
+                        workItemRef={workItemRef}
+                        needsMe={needsMe}
+                        todayV3Enabled={todayV3Enabled}
+                        todayHref={todayHref}
+                      />
+                    </SheetContent>
+                  </Sheet>
+                </div>
+              ) : directConversationStatus === 'error' ? (
+                // story #4018 CHANGES 1 — 단건 조회 자체가 실패(5xx·네트워크)한 경우는
+                // "없는 대화"로 단정하지 않는다(PO 지시) — 일반 로드 오류로 갈라 재시도 제공.
+                <div className={cn('flex-1 flex-col items-center justify-center gap-3 lg:flex', narrowDetailOpen ? 'flex' : 'hidden')}>
+                  <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+                  <Button size="sm" variant="outline" onClick={retryDirectConversation} data-testid="chat-v3-conversation-retry">{tc('retry')}</Button>
+                </div>
+              ) : directConversationStatus === 'unavailable' ? (
+                // story #4018 AC2(유나 시안 703ed02d §4018) — 없는/권한 없는 대화 id.
+                // 존재 여부를 안 가른다(같은 문장) · 목록(레일)은 그대로 · 계열색 0.
+                <div className={cn('flex-1 flex-col items-center justify-center gap-1 p-5 text-center lg:flex', narrowDetailOpen ? 'flex' : 'hidden')} data-testid="chat-v3-conversation-unavailable">
+                  <p className="text-sm font-medium text-foreground">{t('conversationUnavailableTitle')}</p>
+                  <p className="text-sm text-muted-foreground">{t('conversationUnavailableDescription')}</p>
+                </div>
+              ) : (
+                // 'idle'/'loading' — 30건 밖 id의 단건 조회가 아직 진행 中(찰나~짧은 로딩).
+                <div className={cn('flex-1 flex-col gap-3 p-5 lg:flex', narrowDetailOpen ? 'flex' : 'hidden')} data-testid="chat-v3-conversation-checking" aria-hidden="true">
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} navV3Flags={flags} />
     </div>
   );
 }

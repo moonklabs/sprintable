@@ -36,7 +36,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
   const t = useTranslations('chatV3');
 
   return (
-    <section className="flex w-[320px] shrink-0 flex-col border-r border-border bg-card" data-testid="chat-v3-thread-rail">
+    <section className="flex w-full shrink-0 flex-col border-r border-border bg-card lg:w-[320px]" data-testid="chat-v3-thread-rail">
       <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
         <h1 className="text-[15px] font-bold text-foreground">{t('threadRailTitle')}</h1>
       </div>

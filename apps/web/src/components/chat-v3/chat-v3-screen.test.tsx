@@ -20,6 +20,8 @@ const { pushMock, replaceMock, searchParamsRef } = vi.hoisted(() => ({
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: replaceMock }),
+  // story #4006 AC8 — 이 화면에 새로 물린 MobileTabBar도 usePathname()을 쓴다(app router
+  // 미마운트 테스트 환경 방어, mobile-tab-bar-badge.test.tsx와 동일 관례).
   usePathname: () => '/chat',
   useSearchParams: () => searchParamsRef.current,
 }));
