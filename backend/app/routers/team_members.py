@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
-from app.dependencies.ownership import _is_org_admin, assert_agent_owner
+from app.dependencies.ownership import _is_org_admin, assert_agent_owner_mutable
 from app.models.member import AgentProjectProfile
 from app.models.pm import Story
 from app.models.project import OrgMember
@@ -581,7 +581,7 @@ async def update_team_member(
         raise HTTPException(status_code=404, detail="Team member not found")
     data = body.model_dump(exclude_unset=True)
     if member.type == "agent":
-        await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+        await assert_agent_owner_mutable(id, session, org_id, uuid.UUID(auth.user_id))
     else:
         await _assert_can_manage_human(member, session, org_id, auth, data=data)
     # AC3-4 2-2: team_members 뷰 — 필드를 앵커 테이블로 라우팅(anchor-only). expire 후 뷰 재조회로 갱신값 반영.
@@ -597,10 +597,11 @@ async def _assert_can_edit_avatar(
 ) -> None:
     """story #2887 — avatar_url PATCH와 정확히 동일한 권한 질문("이 caller가 이 member의
     avatar_url을 바꿀 수 있는가")이라 기존 게이트를 그대로 재사용한다. 에이전트=owner/admin
-    (assert_agent_owner), 휴먼=self(프로필 필드 한정)/admin(_assert_can_manage_human) — 새
-    권한 개념을 만들지 않는다(페드루 AC 확定)."""
+    (story #3999부터 assert_agent_owner_mutable — owner/admin + 예약 멤버 변이 거부 조합),
+    휴먼=self(프로필 필드 한정)/admin(_assert_can_manage_human) — 새 권한 개념을 만들지
+    않는다(페드루 AC 확定)."""
     if member.type == "agent":
-        await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+        await assert_agent_owner_mutable(id, session, org_id, uuid.UUID(auth.user_id))
     else:
         await _assert_can_manage_human(member, session, org_id, auth, data={"avatar_url": None})
 
@@ -933,7 +934,7 @@ async def deactivate_team_member(
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     if member.type == "agent":
-        await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+        await assert_agent_owner_mutable(id, session, org_id, uuid.UUID(auth.user_id))
     else:
         await _assert_can_manage_human(member, session, org_id, auth)
     ok = await repo.deactivate(id)

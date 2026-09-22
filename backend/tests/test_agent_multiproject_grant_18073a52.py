@@ -135,16 +135,18 @@ async def test_create_agent_not_found_400():
 
 @pytest.mark.anyio
 async def test_create_agent_duplicate_409():
-    # agent 검증 OK(1) → existing 존재(record)
+    # agent 검증 OK(1) → story #3999 시스템 발행 예약 거부 조회(None=일반 에이전트) →
+    # existing 존재(record)
     with pytest.raises(Exception) as ei:
-        await _call_create({"member_id": AGENT}, [_scalar(1), _scalar(MagicMock())])
+        await _call_create({"member_id": AGENT}, [_scalar(1), _scalar(None), _scalar(MagicMock())])
     assert getattr(ei.value, "status_code", None) == 409
 
 
 @pytest.mark.anyio
 async def test_create_agent_success_sets_member_id_only():
-    # agent 검증 OK(1) → existing 없음(None) → record 생성
-    _, session = await _call_create({"member_id": AGENT}, [_scalar(1), _scalar(None)])
+    # agent 검증 OK(1) → story #3999 시스템 발행 예약 거부 조회(None=일반 에이전트) →
+    # existing 없음(None) → record 생성
+    _, session = await _call_create({"member_id": AGENT}, [_scalar(1), _scalar(None), _scalar(None)])
     session.add.assert_called_once()
     rec = session.add.call_args[0][0]
     assert rec.member_id == AGENT

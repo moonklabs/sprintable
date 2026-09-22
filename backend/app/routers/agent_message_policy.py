@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.dependencies.ownership import assert_agent_owner
+from app.dependencies.ownership import assert_agent_owner, assert_agent_owner_mutable
 from app.models.member import Member
 from app.models.team import AgentMessageAllowlist
 from app.schemas.org_member import OrgMemberResponse
@@ -132,7 +132,7 @@ async def update_message_policy(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MessagePolicyResponse:
-    await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    await assert_agent_owner_mutable(agent_id, session, org_id, uuid.UUID(auth.user_id))
     # team_members는 뷰 → canonical members.id에 UPDATE (뷰가 투영).
     await session.execute(
         update(Member).where(Member.id == agent_id).values(message_policy_mode=body.mode)
@@ -152,7 +152,7 @@ async def add_allowlist_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MessagePolicyResponse:
-    agent = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    agent = await assert_agent_owner_mutable(agent_id, session, org_id, uuid.UUID(auth.user_id))
     # 대상이 같은 org의 멤버인지 검증(grant-only 휴먼 포함).
     target = await resolve_member_identity(body.member_id, org_id, session)
     if target is None:
@@ -179,7 +179,7 @@ async def remove_allowlist_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> MessagePolicyResponse:
-    agent = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    agent = await assert_agent_owner_mutable(agent_id, session, org_id, uuid.UUID(auth.user_id))
     await session.execute(
         sa_delete(AgentMessageAllowlist).where(
             AgentMessageAllowlist.agent_member_id == agent_id,

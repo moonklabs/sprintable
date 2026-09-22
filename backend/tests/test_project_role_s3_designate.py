@@ -48,6 +48,14 @@ def _select_result(record):
     return r
 
 
+def _guard_result(runtime_type=None):
+    """story #3999 — set_project_role이 update 전에 예약 멤버(시스템 발행) 조회를
+    한 번 더 한다(assert_member_id_not_system_publisher). 기본값 None=일반 멤버."""
+    r = MagicMock()
+    r.scalar_one_or_none.return_value = runtime_type
+    return r
+
+
 def _session(side_effect):
     s = MagicMock()
     s.execute = AsyncMock(side_effect=side_effect)
@@ -114,7 +122,7 @@ async def test_project_owner_can_set_role():
     from app.routers import project_access as pa
 
     body = pa.SetProjectRoleRequest(role="admin")
-    session = _session([_org_row(), _update_result(1), _select_result(_record("admin"))])
+    session = _session([_org_row(), _guard_result(), _update_result(1), _select_result(_record("admin"))])
     p1, p2 = _patch_authz(proj_role="owner", is_org_admin=False)
     with p1, p2:
         out = await pa.set_project_role(uuid.uuid4(), uuid.uuid4(), body, auth=_auth(), session=session)
@@ -128,7 +136,7 @@ async def test_org_admin_can_set_role():
     from app.routers import project_access as pa
 
     body = pa.SetProjectRoleRequest(role="owner")
-    session = _session([_org_row(), _update_result(1), _select_result(_record("owner"))])
+    session = _session([_org_row(), _guard_result(), _update_result(1), _select_result(_record("owner"))])
     p1, p2 = _patch_authz(proj_role="member", is_org_admin=True)
     with p1, p2:
         out = await pa.set_project_role(uuid.uuid4(), uuid.uuid4(), body, auth=_auth(), session=session)
@@ -142,7 +150,7 @@ async def test_member_not_in_project_404():
     from app.routers import project_access as pa
 
     body = pa.SetProjectRoleRequest(role="admin")
-    session = _session([_org_row(), _update_result(0)])  # rowcount 0 = 대상 행 없음
+    session = _session([_org_row(), _guard_result(), _update_result(0)])  # rowcount 0 = 대상 행 없음
     p1, p2 = _patch_authz(proj_role="owner", is_org_admin=False)
     with p1, p2, pytest.raises(HTTPException) as ei:
         await pa.set_project_role(uuid.uuid4(), uuid.uuid4(), body, auth=_auth(), session=session)

@@ -12,6 +12,7 @@ from app.dependencies.database import get_db
 from app.models.project_access import ProjectAccess
 from app.repositories.organization import OrganizationRepository
 from app.schemas.org_member import OrgMemberResponse
+from app.services.system_publisher_guard import assert_member_id_not_system_publisher
 
 router = APIRouter(prefix="/api/v2/projects", tags=["project-access", "Organization"])
 
@@ -175,6 +176,9 @@ async def create_project_access(
             raise HTTPException(
                 status_code=400, detail="member_id must be an active agent in the project's org"
             )
+        # story #3999 — 예약 멤버(「시스템 발행」) 대상 grant 생성을 원자적으로 거부(§3994/§3997
+        # FE 진입점은 이미 막았으나, 직접 API 호출 우회 방어는 서버가 정본).
+        await assert_member_id_not_system_publisher(session, body.member_id)
         existing = await session.execute(
             select(ProjectAccess).where(
                 ProjectAccess.project_id == project_id,
@@ -260,6 +264,13 @@ async def delete_project_access(
     if record is None:
         raise HTTPException(status_code=404, detail="Access record not found")
 
+    # story #3999 — 예약 멤버(「시스템 발행」)의 project_access 회수를 원자적으로 거부.
+    # `_get_or_create_system_publisher`(events.py)의 주석 그대로 — team_members 뷰(3번째
+    # UNION 브랜치)에 투영되려면 project_access grant가 최소 1건 필요하다. 전량 회수하면
+    # 그 예약 멤버가 뷰에서 사라져 자동 발행 provisioning 재조회 경로까지 어그러질 수 있다.
+    if record.member_id is not None:
+        await assert_member_id_not_system_publisher(session, record.member_id)
+
     # S4: 에이전트 grant 회수 시 per-project 런타임 행(agent_project_profiles)도 제거 — 안 하면
     # team_members 뷰 branch2(profile join)가 회수된 에이전트를 계속 노출(grant↔뷰 불일치·한쪽만
     # 전환 트랩). 에이전트 grant = org_member_id NULL + member_id set. 휴먼이면 매칭 profile 0행이라
@@ -331,6 +342,10 @@ async def set_project_role(
         raise HTTPException(
             status_code=403, detail="project owner or org owner/admin required"
         )
+
+    # story #3999 — 예약 멤버(「시스템 발행」) 대상 프로젝트 역할 변경을 원자적으로 거부.
+    # 휴먼 org_member_id는 이 조회에서 애초에 매치되지 않아(Member.id 축) 무해 통과.
+    await assert_member_id_not_system_publisher(session, member_id)
 
     # 대상 project_access 행 role 갱신 — 휴먼(member_id|org_member_id)·에이전트(member_id) 모두 매칭.
     result = await session.execute(

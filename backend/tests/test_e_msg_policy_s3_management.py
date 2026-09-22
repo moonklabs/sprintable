@@ -12,10 +12,15 @@ _P = "app.routers.agent_message_policy"
 def _owner(monkeypatch, agent=None):
     # default mock agent carries a valid message_policy_mode — POST/DELETE allowlist responses
     # now echo it (B1 fix), and a bare MagicMock attr would not be a valid mode literal.
-    monkeypatch.setattr(
-        f"{_P}.assert_agent_owner",
-        AsyncMock(return_value=agent or MagicMock(message_policy_mode="creator_only")),
-    )
+    #
+    # story #3999 — PUT mode/POST allowlist/DELETE allowlist(쓰기 경로)는 이제
+    # assert_agent_owner_mutable을 쓴다(assert_agent_owner + 시스템 발행 예약 거부
+    # 조합). 이 헬퍼는 읽기(GET mode/candidates)·쓰기 테스트 둘 다에서 재사용되므로
+    # 두 이름 다 patch — 안 그러면 쓰기 엔드포인트가 실제 assert_agent_owner_mutable을
+    # mock_session(가짜 세션)에 대고 그대로 실행해 403/AttributeError로 샌다.
+    result = AsyncMock(return_value=agent or MagicMock(message_policy_mode="creator_only"))
+    monkeypatch.setattr(f"{_P}.assert_agent_owner", result)
+    monkeypatch.setattr(f"{_P}.assert_agent_owner_mutable", result)
 
 
 def _allowlist_result(ids):
