@@ -1318,7 +1318,10 @@ describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)'
   // 대상은 맞는데 실물을 아직 못 찾음"이라는 정직한 신호 — 조용히 빼면 "그 산출물이 아예
   // 없다"로 오독). FE는 그 항목을 클릭 불가한 kind 배지로 보여준다(EntityChip 아님 — 진짜로
   // 갈 곳이 없다).
-  it('⭐reference_token이 null인 항목은 클릭 불가한 kind 배지로 나타나고(빠지지 않는다), 없음 문구도 안 뜬다', async () => {
+  // CHANGES-2(유나 design-pass, 2026-09-22 01:56Z) — raw snake_case enum이 고객 대면 배지에
+  // 그대로 새던 결함(issuecomment-5770100618). kind→라벨 t() 맵으로 한글화하고, raw enum
+  // 문자열이 DOM에 안 나타나는지까지 pin(양성대조).
+  it('⭐reference_token이 null인 항목은 클릭 불가한 kind **라벨**(한글, raw enum 아님)로 나타나고, 없음 문구도 안 뜬다', async () => {
     const gate = realApiShapedGate({
       linked_evidence: [
         { id: 'ev-1', kind: 'verification_sheet', ref: 'vs-ref-1', reference_token: null },
@@ -1329,13 +1332,14 @@ describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)'
     root = createRoot(container);
     await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
 
-    expect(container.textContent).toContain('verification_sheet');
+    expect(container.textContent).toContain('검증 시트');
+    expect(container.textContent).not.toContain('verification_sheet');
     expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
     // 클릭 가능한 요소(EntityChip)가 아니라 순수 배지여야 한다 — 갈 곳이 없다.
     expect(container.querySelectorAll('[role="button"], a, button').length).toBe(0);
   });
 
-  it('resolved 항목과 unresolved(null) 항목이 섞여 있으면 둘 다 같이 나타난다', async () => {
+  it('resolved 항목과 unresolved(null) 항목이 섞여 있으면 둘 다 같이 나타난다(unresolved도 한글 라벨)', async () => {
     const gate = realApiShapedGate({
       linked_evidence: [
         { id: 'ev-1', kind: 'concept_brief', ref: 'ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' },
@@ -1348,8 +1352,24 @@ describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)'
     await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
 
     expect(container.textContent).toContain('컨셉 브리프');
-    expect(container.textContent).toContain('animatic');
+    expect(container.textContent).toContain('애니매틱');
+    expect(container.textContent).not.toContain('animatic');
     expect(container.querySelectorAll('[role="button"], a, button').length).toBe(1);
+  });
+
+  it('미지의 kind(5종 밖)는 raw를 안 내고 중립 «산출물»로 폴백한다(enum이 UI에 안 닿는다)', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: [
+        { id: 'ev-1', kind: 'some_future_kind_not_yet_known', ref: 'ref-1', reference_token: null },
+      ],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceKindUnknown);
+    expect(container.textContent).not.toContain('some_future_kind_not_yet_known');
   });
 
   // story #4136 CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"(BE가 [] 로 명시 답)과

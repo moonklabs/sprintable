@@ -17,6 +17,7 @@ import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -1218,13 +1219,30 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
  * **아예 안 그려진다**(과거 이 칸이 없던 것과 동형, #4135 배포 순서와 무관하게 안전).
  *
  * shape는 미르코군과 1:1 합의(2026-09-22 01:14Z) — kanban/types.ts GateItem.linked_evidence
- * 주석 참고. 핵심: linked_evidence[].kind는 doc/artifact 판별자가 아니라 evidence.payload.
- * kind(예: "concept_brief", 사람이 읽는 산출물 종류 라벨)다 — doc/artifact 판별은
- * reference_token을 parseReferenceToken()으로 파싱한 entityType에서 나온다. reference_token
- * 은 nullable — null이면 "이 evidence는 확定 대상이지만 실물 참조를 아직 못 찾음"이라는
- * 정직한 신호라 항목 자체는 유지하되(조용히 빼면 "산출물이 아예 없다"로 오독) 클릭 불가한
- * kind 배지로만 표시한다(EntityChip이 아니라 Badge — 진짜로 갈 곳이 없다).
+ * 주석 참고. 핵심: linked_evidence[].kind는 doc/artifact 판별자가 아니라 evidence.payload.kind
+ * (예: "concept_brief") — doc/artifact 판별은 reference_token을 parseReferenceToken()으로
+ * 파싱한 entityType에서 나온다. reference_token은 nullable — null이면 "이 evidence는 확定
+ * 대상이지만 실물 참조를 아직 못 찾음"이라는 정직한 신호라 항목 자체는 유지하되(조용히 빼면
+ * "산출물이 아예 없다"로 오독) 클릭 불가한 kind 배지로만 표시한다(EntityChip이 아니라
+ * Badge — 진짜로 갈 곳이 없다).
+ *
+ * ⚠️CHANGES-2(유나 design-pass, 2026-09-22 01:56Z, PR#4511 issuecomment-5770100618) — kind는
+ * evidence.payload.kind **원문 snake_case enum**이지("concept_brief"가 사람이 읽는 한글 라벨
+ * 이라는 위 문단의 원래 설명은 유나군 정정으로 틀렸다 확認 — 그건 enum이지 라벨이 아니다),
+ * 그대로 배지에 찍으면 고객 대면 화면에 내부어가 샌다(더구나 resolved 칩은 토큰 라벨이
+ * 한글인데 unresolved 배지만 영어 enum — 같은 종류가 표기가 갈림). KIND_LABEL_KEY(아래)로
+ * t() 라벨화 — production-workbench-evidence.tsx의 KIND_TITLE_KEY와 다른 어휘(유나군이 이
+ * 화면 전용으로 명시한 5개 문구, "컨셉 브리프" 등 — 그 파일의 "컨셉" 같은 축약형이 아니다)라
+ * 새 map을 둔다. 미지 kind(#4042 서버 방어선 밖의 5종 이외)는 raw를 그대로 안 내고 중립
+ * «산출물»로 폴백(enum이 UI에 안 닿는다). 배지 형태·클릭불가·honest 의미는 그대로.
  */
+const KIND_LABEL_KEY: Record<ProductionWorkbenchKind, string> = {
+  material_collection_sheet: 'gateLinkedEvidenceKindMaterialCollectionSheet',
+  concept_brief: 'gateLinkedEvidenceKindConceptBrief',
+  storyboard: 'gateLinkedEvidenceKindStoryboard',
+  animatic: 'gateLinkedEvidenceKindAnimatic',
+  verification_sheet: 'gateLinkedEvidenceKindVerificationSheet',
+};
 export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
   const t = useTranslations('cage');
   const seen = new Set<string>();
@@ -1289,7 +1307,9 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
             />
           ))}
           {unresolvedKinds.map((u) => (
-            <Badge key={u.key} variant="outline" className="shrink-0">{u.kind}</Badge>
+            <Badge key={u.key} variant="outline" className="shrink-0">
+              {isProductionWorkbenchKind(u.kind) ? t(KIND_LABEL_KEY[u.kind]) : t('gateLinkedEvidenceKindUnknown')}
+            </Badge>
           ))}
         </div>
       )}
