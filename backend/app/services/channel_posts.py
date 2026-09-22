@@ -2551,9 +2551,44 @@ async def publish_recipe_approved_draft(
             await db.commit()
             return
 
+        # story #4142(페드루 PO 처방, 2026-09-22) — 즉시-발행 라우터(publish_channel_
+        # post_draft_endpoint)와 동일 순서: 3중 재검증 뒤·adapter 호출 前에 command를
+        # pending으로 upsert한다(멱등 — 같은 gate_id+destination+approved_version
+        # 재요청은 새 행을 안 만든다). 이게 없으면 비동기 미디어(REELS 등)가
+        # container_created로 돌아왔을 때 아무 command도 안 남아 어떤 워커 tick도 이
+        # 컨테이너를 이어 폴링하지 않는다(이 스토리의 근본원인 그 자체).
+        from app.services.publication_command import create_or_get_publication_command
+
+        command, _ = await create_or_get_publication_command(
+            db, org_id=gate.org_id, gate_id=target_gate.id, destination=target_draft.connection_id,
+            approved_version=_target_latest.id, requested_by_member_id=publisher_member_id,
+            scheduled_at=None,
+        )
+
         publication = await publish_channel_post_draft(
             db, org_id=gate.org_id, draft_id=target_draft.id, published_by_member_id=publisher_member_id,
         )
+
+        if publication.status != "published":
+            # story #4142 AC1 — 비동기 컨테이너(container_created)가 아직 안 끝났다.
+            # 즉시-발행 라우터(channel_posts.py:2303-2316)와 동형: command를 pending
+            # (다음 tick +30s)으로 남기고, gate.publish_outcome은 닫힌 어휘의 비최종값
+            # ("publishing")으로 — «발행됨»이라고 아직 말하지 않는다. published stage
+            # 이벤트도 여기선 안 낸다 — 실제 완료는 워커(#4093 경로,
+            # resolve_recipe_context_for_scheduled_publication이 이 command가 어느
+            # 레시피에 속하는지 draft.connection_id로 다시 찾아 그 시점에 낸다).
+            _now = datetime.now(timezone.utc)
+            command.status = "pending"
+            command.next_attempt_at = _now + timedelta(seconds=30)
+            command.last_error = None
+            command.failure_kind = None
+            gate.publish_outcome = "publishing"
+            await db.commit()
+            return
+
+        command.status = "completed"
+        command.last_error = None
+        command.failure_kind = None
         gate.publish_outcome = "published"
 
         from app.services.activity_log import ActivityLogService

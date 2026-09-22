@@ -269,6 +269,14 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 예약 시각에 자동 발행돼요.",
         "en": "Next action: nothing — this will auto-publish at the scheduled time.",
     },
+    # story #4142(페드루 PO 처방, 2026-09-22) — 비동기 컨테이너(REELS 등)가 아직
+    # 완결 안 된 비최종 상태. "이미 발행됐어요"(published 키)와 명확히 갈라야 한다 —
+    # 이 카드가 발행 완료를 거짓으로 알리던 실사고의 직접 처방.
+    "events.gate_verdict_recipe_auto_publish_processing": {
+        "ko": "다음 행동: 할 일 없음 — 지정 채널로 발행 진행 중이에요, 잠시 후 완료돼요.",
+        "en": "Next action: nothing — publishing to the bound channel is in progress, it "
+        "will finish shortly.",
+    },
     "events.gate_verdict_recipe_auto_publish_skipped": {
         "ko": "다음 행동: {reason}",
         "en": "Next action: {reason}",

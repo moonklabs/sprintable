@@ -1,0 +1,1 @@
+{"file": "tests/test_4142_recipe_async_video_publish_command_realdb.py", "sec": 12.0, "source": "story #4142(2026-09-22) 신규 추가 — 로컬 실측(throwaway pgvector/pgvector:pg16 컨테이너, uv run pytest -q, 4건, ASGI 클라이언트+워커 tick 포함) x 로컬/CI ~3배 비율(measure_destructive_durations_local.py 주석, story #3383) 추정. CI 실측 전 잠정값 — 다음 전수 재측정(story #3558 절차)에서 실 CI 값으로 교체 권장."}
