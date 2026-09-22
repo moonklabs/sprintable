@@ -47,6 +47,7 @@ from app.models.site_post import SitePost
 from app.models.ads_boost_run import AdsBoostRun
 from app.models.site_post_draft import SitePostDraft
 from app.services.ads_spend_snapshots import organic_snapshots_only, paid_snapshots_only
+from app.services.today_service import resolve_published_in_window
 from app.services.insight_snapshots import (
     NORMALIZED_KEYS,
     assemble_channel_post_asset_evidence,
@@ -212,6 +213,36 @@ async def _count_hidden_by_archive(
     excluded_count = (await db.execute(select(func.count()).select_from(excluded_cte))).scalar_one()
     included_count = (await db.execute(select(func.count()).select_from(included_cte))).scalar_one()
     return max(0, included_count - excluded_count)
+
+
+async def _resolve_views_in_window(
+    db: AsyncSession, *, org_id: uuid.UUID, since: datetime, channel: str | None, include_deleted: bool,
+) -> dict[str, Any] | None:
+    """story #3978 CHANGES(페드루 PO 추가 AC, 2026-09-17) — "조회" 요약 카드용
+    페이지 무관 전체 집계. `rows[]`는 limit+cursor 페이지네이션이라 FE가 그 위에서
+    합을 내면 "한 페이지 합"이 된다(디디 3979 확認 요청 발단) — `_count_hidden_
+    by_archive`와 동형으로 별도 unpaginated CTE를 다시 세워, 창 안 전체 publication의
+    D+7 organic views만 합산한다(`organic_snapshots_only` — paid와 안 섞음, story
+    #3806/#3809 원칙 재사용. status="captured"만 — 미측정 스냅샷은 0으로 안 지어낸다).
+    captured_rows==0(창 안에 D+7 organic 캡처가 하나도 없음)이면 null."""
+    rows_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=include_deleted)
+    total_rows = (await db.execute(select(func.count()).select_from(rows_cte))).scalar_one()
+
+    views_col = cast(InsightSnapshot.normalized["views"].astext, Integer)
+    captured_query = organic_snapshots_only(
+        select(func.count(), func.sum(views_col))
+        .select_from(rows_cte)
+        .join(
+            InsightSnapshot,
+            (InsightSnapshot.publication_id == rows_cte.c.publication_id)
+            & (InsightSnapshot.due_at == rows_cte.c.published_at + timedelta(days=_SNAPSHOT_OFFSET_DAYS["d7"]))
+            & (InsightSnapshot.status == "captured"),
+        )
+    )
+    captured_rows, total_views = (await db.execute(captured_query)).one()
+    if not captured_rows:
+        return None
+    return {"sum": int(total_views or 0), "captured_rows": captured_rows, "total_rows": total_rows}
 
 
 async def list_insights_board(
@@ -587,9 +618,18 @@ async def list_insights_board(
     )).scalar_one_or_none()
     ga4_connection_status = _derive_board_ga4_connection_status(ga4_connection)
 
+    # story #3978(「결과」 §7 갭 #1 처방) — 「오늘」과 같은 판정 함수(resolve_published_
+    # since)를 이 화면의 window 경계(같은 `since`)로 호출. 채널 연결 0이면 null(자체가
+    # 없음)·있으면 발행 0건도 실 0(미측정 아님).
+    published_in_window = await resolve_published_in_window(db, org_id, since)
+    views_in_window = await _resolve_views_in_window(
+        db, org_id=org_id, since=since, channel=channel, include_deleted=include_deleted,
+    )
+
     return {
         "rows": rows_out, "has_more": has_more, "next_cursor": next_cursor, "hidden_count": hidden_count,
-        "ga4_connection_status": ga4_connection_status,
+        "ga4_connection_status": ga4_connection_status, "published_in_window": published_in_window,
+        "views_in_window": views_in_window,
     }
 
 
