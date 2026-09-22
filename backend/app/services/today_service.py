@@ -36,10 +36,11 @@ from app.services.org_time import org_midnight_utc
 # #3821 카드) — 지어내지 않고 이 목록에 없는 채널은 usage.platform에서 빠진다.
 _QUOTA_CHANNELS = frozenset({"youtube", "youtube_sandbox"})
 
-# story #3821 그라운딩 — AgentRun.status(agent_runs.py::_AGENT_RUN_STATUS_VALUES
-# SSOT: queued|held|running|hitl_pending|completed|failed|abandoned)의 "진행 中"
-# 부분집합 = 아직 끝나지 않은 전부(completed/failed/abandoned만 종결).
-_AGENT_RUN_IN_PROGRESS_STATUSES = frozenset({"queued", "held", "running", "hitl_pending"})
+# story #3821 그라운딩(story #3961이 cancel_requested 추가) — AgentRun.status(agent_runs.py::
+# _AGENT_RUN_STATUS_VALUES SSOT)의 "진행 中" 부분집합 = 아직 끝나지 않은 전부. cancel_requested는
+# 아직 종결이 아니다(ack/타임아웃 대기 中 — 중단 요청 자체가 "진행을 멈춘다"는 사실은 아니다,
+# 그래서 agent_progress에 계속 보이되 cancel 필드로 그 사실을 얹는다).
+_AGENT_RUN_IN_PROGRESS_STATUSES = frozenset({"queued", "held", "running", "hitl_pending", "cancel_requested"})
 
 # story #3833 — agent_runs.py::_TERMINAL_STATUSES와 같은 값(SSOT는 그 파일).
 # "오늘 끝난 위임"의 「끝남」 = 이 세 상태로의 전이(그 라우터가 finished_at을
@@ -316,9 +317,24 @@ async def _resolve_agent_progress(
         )).all()
         current_steps = {rid: tool for rid, tool in last_call_rows}
 
+    # story #3961 — cancel 상태는 순수 읽기 시점 계산(agent_runs.py::_effective_cancel_outcome
+    # 과 동일 판정 기준 공유, 새 쿼리 0 — 이미 위에서 가져온 run 행 그대로 씀·N+1 0). 이미
+    # 만료됐는데 아직 DB가 안 (lazy) 확定됐으면(단건 엔드포인트가 아직 안 읽힘) 여기 목록에서는
+    # "진행 中"이 아니라고 표시한다(정직 — 다음 단건 GET/PATCH가 그 DB 확定을 마무리한다).
+    from app.routers.agent_runs import _effective_cancel_outcome
+
     items: list[dict[str, Any]] = []
     for run, story_id, story_title in rows:
         agent = agents.get(run.agent_id)
+        _outcome = _effective_cancel_outcome(run.status, run.cancel_requested_at)
+        if _outcome == "unacknowledged":
+            continue  # 실질 종결(lazy 확定 대기 中) — "진행 中" 목록에서 뺀다.
+        cancel = None
+        if run.status == "cancel_requested":
+            cancel = {
+                "requested_at": run.cancel_requested_at, "reason": run.cancel_reason,
+                "state": _outcome or "requested",
+            }
         items.append({
             "run_id": run.id,
             "agent": {"id": run.agent_id, "name": agent.name if agent and agent.name else ""},
@@ -334,6 +350,7 @@ async def _resolve_agent_progress(
             # 0374). 캐폴러가 그 대화의 실제 참여자일 때만 노출(위 참여 검증) —
             # 연결 자체가 없거나 캐폴러가 참여자가 아니면 null(지어내지 않는다).
             "conversation_id": run.conversation_id if run.conversation_id in participant_conv_ids else None,
+            "cancel": cancel,
         })
     return items
 
