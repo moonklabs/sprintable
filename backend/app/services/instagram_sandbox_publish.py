@@ -69,12 +69,12 @@ async def create_container(
         )
     if _MARKER_REVOKED in text:
         raise ThreadsPublishError(
-            "SANDBOX_INSTAGRAM_CONNECTION_REVOKED", "sandbox: [sandbox:revoked] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_INSTAGRAM_CONNECTION_REVOKED", "sandbox: [sandbox:revoked] marker simulated", status_code=401,
             provider_error_code=190, provider_error_subcode=490, provider_error_type="OAuthException",
         )
     if _MARKER_PAGE_UNLINKED in text:
         raise ThreadsPublishError(
-            "SANDBOX_INSTAGRAM_PAGE_UNLINKED", "sandbox: [sandbox:page-unlinked] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_INSTAGRAM_PAGE_UNLINKED", "sandbox: [sandbox:page-unlinked] marker simulated", status_code=401,
             provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
         )
     if _MARKER_APP_INACTIVE in text:
@@ -86,7 +86,7 @@ async def create_container(
         # 문장)가 영영 안 뜬다(②·③과 같은 문장으로 뭉개짐, AC3 라이브 관측의
         # 「④만 다른 문장」을 검증 불가하게 만드는 결함).
         raise ThreadsPublishError(
-            "SANDBOX_INSTAGRAM_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_INSTAGRAM_APP_INACTIVE", "sandbox: [sandbox:app-inactive] marker simulated", status_code=401,
             provider_error_code=190, provider_error_subcode=None, provider_error_type="OAuthException",
         )
     if image_url is None:

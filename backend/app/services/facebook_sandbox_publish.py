@@ -53,12 +53,12 @@ async def create_container(
         )
     if _MARKER_REVOKED in text:
         raise ThreadsPublishError(
-            "SANDBOX_FACEBOOK_CONNECTION_REVOKED", "sandbox: [sandbox:revoked] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_FACEBOOK_CONNECTION_REVOKED", "sandbox: [sandbox:revoked] marker simulated", status_code=401,
             provider_error_code=190, provider_error_subcode=490, provider_error_type="OAuthException",
         )
     if _MARKER_PAGE_UNLINKED in text:
         raise ThreadsPublishError(
-            "SANDBOX_FACEBOOK_PAGE_UNLINKED", "sandbox: [sandbox:page-unlinked] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_FACEBOOK_PAGE_UNLINKED", "sandbox: [sandbox:page-unlinked] marker simulated", status_code=401,
             provider_error_code=190, provider_error_subcode=458, provider_error_type="OAuthException",
         )
     if _MARKER_APP_INACTIVE in text:
@@ -66,7 +66,7 @@ async def create_container(
         # publish.py와 동형 처방(앱 비활성 전용 subcode가 Meta에 없다는 그라운딩대로
         # subcode=None → classify_graph_error_code가 "error"로 떨어지게).
         raise ThreadsPublishError(
-            "SANDBOX_FACEBOOK_APP_INACTIVE", "sandbox: [sandbox:app-inactive] 마커 시뮬레이션", status_code=401,
+            "SANDBOX_FACEBOOK_APP_INACTIVE", "sandbox: [sandbox:app-inactive] marker simulated", status_code=401,
             provider_error_code=190, provider_error_subcode=None, provider_error_type="OAuthException",
         )
     if _MARKER_EXPIRE_AFTER_PUBLISH in text:
