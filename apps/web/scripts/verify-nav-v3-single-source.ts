@@ -79,6 +79,14 @@ export const DEST_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<DestLitera
     reason: 'NAV_GROUPS/CHAT_CENTER_ITEM의 레거시 baseline 값 — resolveNavGroups/resolveChatCenterItem(같은 파일)이 이 baseline 위에 플래그를 얹는다(목적지 모듈이 소비하는 원본, 목적지 모듈 자신이 아닐 뿐).',
     counts: { '/org-briefing': 1, '/chats': 1 },
   },
+  // story #4012(prod 승격 준비, PO 確定 2026-09-17, PR#4394 — v3 스택과 독립 develop
+  // 착지) — Apple 공증 전 desktop 다운로드 화면을 끄는 리다이렉트 폴백. 판정축은
+  // DESKTOP_DOWNLOAD_ENABLED(v3 3플래그와 전혀 무관)이고, 목적지도 "지금 v3 today
+  // 플래그가 뭔지" 전혀 안 묻는 고정 폴백일 뿐이라 이 모듈이 결정할 대상이 아님.
+  'src/app/(authenticated)/desktop/page.tsx': {
+    reason: 'DESKTOP_DOWNLOAD_ENABLED(v3와 무관한 별도 게이트) 폴백 리다이렉트 — v3 플래그 판정 없이 고정 목적지, 이 모듈의 결정 대상이 아님.',
+    counts: { '/org-briefing': 1 },
+  },
 };
 
 export const ENV_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<EnvName>> = {};
