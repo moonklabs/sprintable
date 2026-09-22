@@ -95,6 +95,11 @@ class TeamMemberResponse(BaseModel):
     # FE는 type='agent'에서만 이 필드를 읽는다, 소비 규약). agent_ids 목록에 없거나(빈
     # 목록 등) 함수가 아직 안 도는 단건 경로에서만 None.
     verified: bool | None = None
+    # story #4129 — router `_inject_active_stories()`가 조직 내 plugin_version MAX 대비
+    # 배치 주입(computed_field로는 다른 멤버 데이터에 못 닿아 이 방식). plugin_version이
+    # 없는(None) 에이전트나 단건 조회 경로(주입 미실행)는 None — "낮음"이 아니라 "판단
+    # 불가"로 정직하게 구분(휴리스틱 배지 금지, PO 확定).
+    needs_restart: bool | None = None
 
     # S2-3: computed presence_status — 조회 시점 실시간 계산
     @computed_field
@@ -116,3 +121,33 @@ class TeamMemberResponse(BaseModel):
         if self.active_story_id is not None:
             return "idle"
         return "offline"
+
+    # story #4129 — agent_config.runtime_identity(app/services/agent_anchor_sync.py
+    # sync_agent_profile_presence가 씀)에서 뽑는 순수 파생값. 새 컬럼 없음(마이그레이션 0).
+    def _runtime_identity_field(self, key: str) -> str | None:
+        cfg = self.agent_config or {}
+        runtime_identity = cfg.get("runtime_identity")
+        if not isinstance(runtime_identity, dict):
+            return None
+        value = runtime_identity.get(key)
+        return value if isinstance(value, str) else None
+
+    @computed_field
+    @property
+    def client_name(self) -> str | None:
+        return self._runtime_identity_field("client_name")
+
+    @computed_field
+    @property
+    def client_version(self) -> str | None:
+        return self._runtime_identity_field("client_version")
+
+    @computed_field
+    @property
+    def plugin_version(self) -> str | None:
+        return self._runtime_identity_field("plugin_version")
+
+    @computed_field
+    @property
+    def session_started_at(self) -> str | None:
+        return self._runtime_identity_field("session_started_at")

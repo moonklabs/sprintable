@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
@@ -63,6 +65,13 @@ interface AgentMember {
   // 지울지는 그걸 센 뒤에 정한다.
   fakechat_port: number | null;
   runtime_type: string | null;
+  // story #4129 — MCP clientInfo·(있으면)plugin 버전·세션 시작. BE computed_field(agent-
+  // management-tab.tsx의 OrgAgent와 동형 필드, formatAgentRuntimeLine 공유).
+  client_name?: string | null;
+  client_version?: string | null;
+  plugin_version?: string | null;
+  session_started_at?: string | null;
+  needs_restart?: boolean | null;
 }
 
 interface WebhookConfig {
@@ -99,8 +108,11 @@ function isWebhookUrlAllowed(url: string): boolean {
 
 export default function AgentDetailPage() {
   const t = useTranslations('settings');
+  const ta = useTranslations('agents');
   const tc = useTranslations('common');
   const to = useTranslations('organization');
+  const locale = useLocale();
+  const displayTimezone = resolveDisplayTimezone().tz;
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { addToast } = useToast();
@@ -424,7 +436,16 @@ export default function AgentDetailPage() {
                     {runtimeLabel(agent.runtime_type) ? (
                       <Badge variant="chip">{t('connectorLabel')}: {runtimeLabel(agent.runtime_type)}</Badge>
                     ) : null}
+                    {agent.needs_restart ? (
+                      <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
+                    ) : null}
                   </div>
+                  {(() => {
+                    const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
+                    return runtimeLine ? (
+                      <p className="mt-1 truncate text-xs text-muted-foreground">{runtimeLine}</p>
+                    ) : null;
+                  })()}
                 </div>
                 {canEdit && (
                 <button

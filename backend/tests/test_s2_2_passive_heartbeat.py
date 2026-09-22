@@ -214,8 +214,11 @@ async def test_flat_wrapper_creates_heartbeat_task():
         coro.close()  # 실제 실행 없이 정리
         return MagicMock()
 
+    # story #4129: wrapper가 ctx(Context)를 keyword-only로 요구(mcp SDK가 실 호출 시 항상
+    # 주입 — Tool.run()의 context_kwarg 처리). 이 테스트는 task 생성 자체만 보므로 ctx
+    # 내부 접근은 없어(coro.close()로 미실행) MagicMock으로 충분.
     with patch("sprintable_mcp.server.asyncio.create_task", side_effect=fake_create_task):
-        await wrapped()
+        await wrapped(ctx=MagicMock())
 
     assert len(tasks_created) == 1
 
@@ -241,7 +244,7 @@ async def test_heartbeat_failure_does_not_affect_tool():
 
     with patch("sprintable_mcp.server._heartbeat_fire_forget", side_effect=failing_heartbeat):
         with patch("sprintable_mcp.server.asyncio.create_task"):
-            result = await wrapped()
+            result = await wrapped(ctx=MagicMock())
 
     assert result is sentinel
 
@@ -261,7 +264,7 @@ async def test_ping_creates_heartbeat_task():
         return MagicMock()
 
     with patch.object(srv.asyncio, "create_task", side_effect=fake_create_task):
-        await srv.ping()
+        await srv.ping(ctx=MagicMock())
 
     assert len(tasks_created) == 1
 

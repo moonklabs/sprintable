@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # 스파이크(2026-08-19) 실 2.0.0 소스 대조 확認: private 내부(fn_metadata.arg_model·_tool_manager·
 # add_tool 반환값 None·구성시점 핸들러 바인딩) 전부 등가 재현 가능 — 이 파일의 로직 자체는 무변경,
 # import 경로만 이동.
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
 from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
@@ -159,11 +159,41 @@ from .tools.webhooks import (
 )
 
 
-async def _heartbeat_fire_forget() -> None:
-    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음."""
+async def _heartbeat_fire_forget(ctx: Context | None = None) -> None:
+    """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음.
+
+    story #4129: ctx가 있으면 MCP clientInfo(name/version)·plugin-version 헤더(HTTP 전송만)를
+    실어 워크포스 "재기동 필요" 판단 근거를 team-members로 흘린다. 둘 다 best-effort(개별
+    실패해도 나머지·heartbeat 본체엔 영향 0) — presence_status 시맨틱(last_seen_at/
+    agent_status)은 무변, 순수 additive.
+
+    session_started_at은 여기서 안 보낸다(story #4129 CHANGES-1, PO 리뷰 PR#4507) — 처음엔
+    "이 서버 프로세스가 ctx.session 객체를 처음 본 시각"으로 계산했으나, 호스팅 MCP가
+    재배포될 때마다(세션 객체가 전부 새로 생김) 모든 에이전트의 값이 리셋되는 오정보였다.
+    "재기동"의 진짜 신호는 신원(client_name/version/plugin_version) 변경이나 idle 문턱
+    넘는 공백이지 서버 쪽 세션 객체 교체가 아니다 — 그 판정은 BE(sync_agent_profile_
+    presence, 이전 저장값과 비교 가능한 유일한 지점)가 전담한다.
+    """
     try:
-        if client.member_id:
-            await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat")
+        if not client.member_id:
+            return
+        body: dict = {}
+        if ctx is not None:
+            try:
+                client_params = ctx.session.client_params
+            except Exception:
+                client_params = None
+            if client_params is not None and client_params.client_info is not None:
+                body["client_name"] = client_params.client_info.name
+                body["client_version"] = client_params.client_info.version
+            try:
+                headers = ctx.headers  # None on stdio(문서화된 계약) — HTTP 전송만 값 有
+                plugin_version = headers.get("x-sprintable-plugin-version") if headers else None
+            except Exception:
+                plugin_version = None
+            if plugin_version:
+                body["plugin_version"] = plugin_version
+        await client.patch(f"/api/v2/team-members/{client.member_id}/heartbeat", json=body or None)
     except Exception as exc:
         logger.warning("heartbeat failed (ignored): %s", exc)
 
@@ -259,7 +289,27 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     # 파라미터를 앞으로 안정 정렬(MCP 는 keyword 호출이라 순서 변경 무해).
     params.sort(key=lambda p: p.default is not inspect.Parameter.empty)
 
-    async def wrapper(**kwargs):
+    async def wrapper(*, ctx: Context | None = None, **kwargs):
+        # story #4129: Context 타입 파라미터는 mcp SDK가 find_context_parameter()(typing
+        # 어노테이션 기반, __signature__ 오버라이드와 무관하게 __annotations__를 직접 읽음)로
+        # 자동감지→공개 스키마에서 자동제외→호출 시 자동주입한다(공식 지원 패턴, SDK
+        # tools/base.py Tool.run()의 context_kwarg 처리 실측 확認 — `Context | None` 유니온도
+        # context_injection.py::find_context_parameter가 get_args()로 명시 지원하는 형태라
+        # Optional화가 이 자동감지 자체를 깨지 않음, SDK 소스 재확認). 아래 wrapper.__signature__는
+        # 여전히 input_cls 필드만으로 만든다 — ctx는 실제 파이썬 함수 파라미터(호출 시 진짜
+        # 바인딩)일 뿐 그 시그니처엔 안 실어, 118개 도구 공개 스키마에 ctx가 새는 걸 원천 차단.
+        #
+        # story #4129 CI RED(PO 리뷰, 2026-09-22, run 35671061008 까디르 진단) — ctx를
+        # 필수(기본값 없음)로 뒀더니 test_3722_mcp_tool_run_id_headers.py::test_flat_wrapper_
+        # sets_and_resets_tool_name_override(SDK를 거치지 않고 `await w(x=1)`로 wrapper를
+        # 직접 부르는, "SDK 우회 직접 호출" 계약 — 이 파일이 전제하는 실 호출자 클래스가
+        # MCP 프로토콜 경유 하나뿐이 아님을 증명하는 기존 테스트)가 TypeError로 깨졌다.
+        # 처방은 증상(그 테스트만 고침)이 아니라 계약으로 — ctx가 없어도 wrapper는 도구를
+        # 그대로 통과시킨다(런타임 신원 기록만 생략, _heartbeat_fire_forget(None)이 이미
+        # 그 경로를 지원 — ctx=None이면 client_name/session_started_at/plugin_version을
+        # 안 싣고 presence-only heartbeat만 보냄). tool_name override set/reset(바로 아래
+        # set_tool_name_override/reset_tool_name_override)은 ctx 유무와 무관하게 항상 돈다
+        # — 이 테스트가 실제로 검증하는 계약은 그쪽이지 ctx 주입이 아니다.
         # E-MCP S2: call-time enforcement — 키 허용 밖 도구는 호출 차단(403-shape).
         # E-MCP-HTTP S1: effective 키(http=per-request bearer override·stdio=env 단일키)별 scope 로드
         # (per-key bounded 캐시). 멀티테넌트서 키마다 다른 scope 정확 적용.
@@ -280,7 +330,7 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         finally:
             reset_project_override(_tok)
             reset_tool_name_override(_tool_tok)
-        asyncio.create_task(_heartbeat_fire_forget())
+        asyncio.create_task(_heartbeat_fire_forget(ctx))
         return result
 
     wrapper.__name__ = name
@@ -439,9 +489,13 @@ mcp = SprintableMCPServer(
 
 
 @mcp.tool()
-async def ping() -> list[TextContent]:
-    """서버 생존 확인용 smoke tool."""
-    asyncio.create_task(_heartbeat_fire_forget())
+async def ping(ctx: Context | None = None) -> list[TextContent]:
+    """서버 생존 확인용 smoke tool.
+
+    story #4129 CI RED(PO 리뷰, 2026-09-22) — `_flat()` wrapper와 같은 이유로 ctx를
+    Optional화(SDK 우회 직접 호출자와의 계약 — ctx 없이도 이 도구는 정상 동작, 런타임
+    신원 기록만 생략)."""
+    asyncio.create_task(_heartbeat_fire_forget(ctx))
     return ok({"status": "pong"})
 
 
