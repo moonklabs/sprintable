@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { getEntityHref } from '@/components/chat/embed-card';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 import { parseCursorMeta } from '@/lib/pagination';
 import type { BacklinkItem } from './entity-backlinks-section';
 import { deriveStoryOrigin } from './derive-story-origin';
@@ -36,7 +37,9 @@ function sourceIcon(sourceType: BacklinkItem['source_type']) {
 function sourceLabel(item: BacklinkItem): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
-    case 'chat_message': return item.message?.content_snippet;
+    // story #3949 CHANGES2(유나 design, 2026-09-16) — entity-backlinks-section.tsx의
+    // backlinkLabel()과 byte-동일 누출(같은 content_snippet 필드, 다른 소비처).
+    case 'chat_message': return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
     case 'evidence': case 'artifact': return undefined;

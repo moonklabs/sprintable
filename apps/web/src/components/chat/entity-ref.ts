@@ -30,3 +30,26 @@ export function parseEntityRef(href: string | null | undefined): ParsedEntityRef
 export function unescapeReferenceLabel(label: string): string {
   return label.replace(/\\(.)/g, '$1');
 }
+
+/**
+ * story #3949(E-UX-OVERHAUL·customer-zero·§①) — 3888(대화 목록 미리보기 raw 키)·
+ * 3903/3940(알림 요약 raw 키)과 같은 「본문 렌더러는 고쳤는데 요약 소비처는 원문」
+ * 클래스의 3번째: 마크다운 링크/entity 참조 토큰이 든 «보통» 메시지가 미리보기·요약
+ * 자리(본문 렌더러를 안 거치는 곳)에서 원문 그대로 샌다.
+ *
+ * 마크다운 링크 `[라벨](href)` 전부(entity: 스킴이든 일반 URL이든 — href 값은 미리보기
+ * 자리에서 어차피 안 쓰인다) → 라벨만 남긴다. entity 참조 토큰도 결국 이 문법의 한
+ * 사례라 별도 분기가 필요 없다 — `unescapeReferenceLabel`(story #3328 SSOT)로 라벨
+ * 안의 `\[`/`\]` 이스케이프까지 원복한다. 본문 칩 렌더(EntityChip·parseEntityRef)는
+ * 무변 — 이 함수는 "칩을 못 그리는" 평문 전용 자리에만 쓴다(no-fiction: 원문 라벨
+ * 그대로, 문법 기호만 벗김·리라이트 0).
+ *
+ * PO CHANGES 1회차(2026-09-16 11:42Z) C1 — 마크다운 이미지 `![alt](url)`도 같은 클래스
+ * (문법 기호가 평문 자리에 샘)라 선행 `!` 1글자까지 같이 벗긴다(`!?` — 있으면 소비,
+ * 없으면 기존 링크 동작 그대로).
+ */
+export function toPlainPreview(content: string): string {
+  return content
+    .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
+    .trim();
+}

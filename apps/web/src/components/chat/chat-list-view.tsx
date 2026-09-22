@@ -23,6 +23,7 @@ import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-conte
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine } from './event-block-card';
+import { toPlainPreview } from './entity-ref';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 interface Participant {
@@ -166,7 +167,11 @@ function ConversationRow({
     { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
     conv.latest_message?.event?.refs,
   );
-  const preview = eventPreview ?? conv.latest_message?.content ?? t('noMessages');
+  // story #3949 — 이벤트 조립이 없으면(위 null 폴백) 남는 건 «보통» 메시지 원문 —
+  // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview)한다.
+  const preview = eventPreview
+    ?? (conv.latest_message?.content ? toPlainPreview(conv.latest_message.content) : null)
+    ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 

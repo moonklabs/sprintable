@@ -10,6 +10,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -82,8 +83,13 @@ function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event']
 function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
+    // story #3949 — content_snippet은 메시지 원문 조각이라 마크다운 링크/entity 참조
+    // 토큰이 그대로 실릴 수 있다(본문 칩 렌더러를 거치지 않는 자리라 평문화 필요) —
+    // #4091의 event 구조화 렌더 분기는 그대로 두고, 그 분기가 아닐 때(raw
+    // content_snippet 폴백)만 평문화를 적용한다.
     case 'chat_message':
-      return item.message?.event ? eventBacklinkLabel(item.message.event, tOrg) : item.message?.content_snippet;
+      if (item.message?.event) return eventBacklinkLabel(item.message.event, tOrg);
+      return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
     case 'evidence': return item.evidence?.title;

@@ -332,4 +332,29 @@ describe('EntityBacklinksSection', () => {
       expect(container.textContent).toContain('문서를 가리킨 메시지');
     });
   });
+
+  // story #3949(E-UX-OVERHAUL·customer-zero·§①) — content_snippet이 메시지 원문 조각이라
+  // 마크다운 링크/entity 참조 토큰이 그대로 실릴 수 있다(본문 칩 렌더러를 안 거치는 자리).
+  // 실 레코드 fixture = PO 라이브 실측(b676dc29·대화 6a584f3e) 원문 형태 재현.
+  describe('story #3949 — chat_message content_snippet 평문화', () => {
+    it('⭐entity 참조 토큰이 든 스니펫은 라벨만 뜬다(원문 대괄호·href 노출 0)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        data: [{
+          id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
+          created_at: '2026-09-16T11:10:00Z', still_exists: true, doc: null,
+          message: {
+            id: 'm1', conversation_id: 'c1',
+            content_snippet: '[PO 픽스처 2·삭제예정] 같은 org 산출물 참조 [\\[PO 픽스처 산출물…\\]]'
+              + '(entity:artifact:c92d9614-1111-2222-3333-444455556666)',
+            sender: null,
+          },
+        }],
+        meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
+      }))));
+      await render('story', 's1');
+      expect(container.textContent).toContain('[PO 픽스처 산출물…]');
+      expect(container.textContent).not.toContain('entity:artifact:');
+      expect(container.textContent).not.toContain('](');
+    });
+  });
 });
