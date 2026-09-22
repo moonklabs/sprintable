@@ -1,8 +1,8 @@
 /**
  * story #4006(critical, 5pt) AC3 — 390·768·1440 세 폭에서 v3 화면 가로 넘침 0을
  * document.documentElement.scrollWidth <= innerWidth로 자동 단언한다(3998 결함③의
- * 근거 재현·재발 방지). 「가설」(story #3989, PR #4383)은 이 브랜치가 갈라진 시점의
- * develop에 아직 없어(미착지) 6화면만 여기서 단언 — #4383 착지 뒤 별도로 추가.
+ * 근거 재현·재발 방지). 「가설」(story #3989, PR #4383)이 develop에 착지해(2026-09-22)
+ * 7화면 전부 단언한다.
  *
  * 이 spec은 TODAY_V3_ENABLED/CHAT_V3_ENABLED/CONNECT_RULES_V3_ENABLED=true 전제라
  * ci.yml의 전용 스텝(v3-narrow-width-e2e job, 이 스텝만 독립 pnpm dev 재기동)에서만
@@ -16,15 +16,16 @@ test.use({ storageState: 'playwright/.auth/owner.json' });
 const WIDTHS = [390, 768, 1440] as const;
 
 // bare 경로 — /today·/chat·/connect-rules는 v3 화면 자체가 (authenticated) 밖 독립
-// 라우트 그룹(플래그 ON 전제, 이 spec의 존재 이유). /work-list는 proxy.ts의
+// 라우트 그룹(플래그 ON 전제, 이 spec의 존재 이유). /work-list·/hypotheses는 proxy.ts의
 // MIGRATED_RESOURCES bare-path 301 안전망이 실 {ws}/{proj}로 보정(레포 기존 관례,
-// card-surface-guard.spec.ts와 동형). /organization/insights-board는 이미 org-scope
-// 최상위 라우트라 그대로.
+// card-surface-guard.spec.ts와 동형, legacy-resource-tables.ts에 둘 다 등재 확認).
+// /organization/insights-board는 이미 org-scope 최상위 라우트라 그대로.
 const SCREENS: Array<{ path: string; label: string }> = [
   { path: '/today', label: '오늘' },
   { path: '/chat', label: '대화' },
   { path: '/connect-rules', label: '연결·규칙' },
   { path: '/work-list', label: '일감' },
+  { path: '/hypotheses', label: '가설' },
   { path: '/organization/insights-board', label: '결과' },
 ];
 

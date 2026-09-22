@@ -112,4 +112,16 @@ describe('resolveTabHref — V3_TABS 탭도 목적지 모듈 그대로 반영', 
     const workTab = V3_TABS.find((t) => t.key === 'work')!;
     expect(resolveTabHref(workTab, resolveNavV3Destinations(ALL_ON))).toBe('/work-list');
   });
+
+  // story #4006 AC8 PO CHANGES-1 follow-up(2026-09-22) — v3 4탭(오늘/대화/일감/더보기)엔
+  // 「결과」·「연결·규칙」 전용 슬롯이 없다. 그 둘이 조용히 사라지지 않고 「더보기」 탭
+  // 뒤(/more)에서 실제로 꺼내진다는 것을 두 파일 경계에 걸쳐 핀 — href 축은 여기서,
+  // /more가 실제로 그 두 섹션을 렌더하는지는 app/(authenticated)/more/page.test.tsx의
+  // 「섹션(h2) 순서가 확定대로다(오늘/결과/연결·규칙/...)」(기존, NAV_GROUPS SSOT 소비라
+  // v3 플래그와 무관하게 항상 참)가 이미 고정 — 두 핀이 합쳐야 AC8의 "두 진입점"이 성립.
+  it('「더보기」 탭 href는 항상 /more(flags 무관) — 결과·연결·규칙은 이 안에서 나온다', () => {
+    const moreTab = V3_TABS.find((t) => t.key === 'more')!;
+    expect(resolveTabHref(moreTab, resolveNavV3Destinations(ALL_ON))).toBe('/more');
+    expect(resolveTabHref(moreTab, resolveNavV3Destinations(ONLY_TODAY))).toBe('/more');
+  });
 });
