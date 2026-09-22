@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronLeft, PanelRight } from 'lucide-react';
@@ -185,7 +184,6 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
       // story #4006 AC4 + #4018 상호작용 — 딥링크(?conversation=)로 직접 들어오면
       // "이 사람이 이미 특정 대화를 지목했다"는 뜻이라 lg 미만에서도 레일이 아니라
       // 그 상세를 바로 보여준다(수동 클릭과 같은 결).
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNarrowDetailOpen(true);
       return;
     }
