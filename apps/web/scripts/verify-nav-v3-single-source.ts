@@ -87,6 +87,35 @@ export const DEST_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<DestLitera
     reason: 'DESKTOP_DOWNLOAD_ENABLED(v3와 무관한 별도 게이트) 폴백 리다이렉트 — v3 플래그 판정 없이 고정 목적지, 이 모듈의 결정 대상이 아님.',
     counts: { '/org-briefing': 1 },
   },
+  // story #4017 rebase 시점 실측(2026-09-22) — v3 3화면(today-v3/chat-v3) 자신과
+  // 그 셸 layout.tsx는 아직 로컬 리터럴을 그대로 쓴다(런북·이 파일 상단 docstring이
+  // 이미 예고한 3/N 스코프, story #4004 — v3 PR 스택 전체 착지 뒤 착수). #4017의
+  // 스코프는 "본문 CTA·리다이렉트"(레거시 화면들)뿐이라 이 화면들 자체의 로컬 배열
+  // 교체는 여기서 손 안 댄다 — #4004가 이 예외 항목들을 지우는 게 그 카드의 AC.
+  'src/app/chat/layout.tsx': {
+    reason: 'x-pathname 헤더 미존재 시 자기 라우트 폴백(자기참조, 목적지 "결정" 아님) — story #4004가 셸 재작성 시 같이 정리.',
+    counts: { '/chat': 1 },
+  },
+  'src/app/today/layout.tsx': {
+    reason: '위와 동형 — /today 자기 경로 폴백.',
+    counts: { '/today': 1 },
+  },
+  'src/components/chat-v3/chat-v3-context-panel.tsx': {
+    reason: '「오늘」 딥링크 로컬 리터럴 — story #4004(공유 목적지 모듈 소비 전환) 전까지 잔존.',
+    counts: { '/today': 1 },
+  },
+  'src/components/chat-v3/chat-v3-event-card.tsx': {
+    reason: '위와 동형 — 서명 완료 CTA의 「오늘」 딥링크.',
+    counts: { '/today': 1 },
+  },
+  'src/components/chat-v3/chat-v3-screen.tsx': {
+    reason: '헤더 「오늘」 링크(flag ON: /today · OFF: /org-briefing) 로컬 분기 — story #4004 전까지 잔존.',
+    counts: { '/today': 1, '/org-briefing': 1 },
+  },
+  'src/components/today-v3/today-v3-screen.tsx': {
+    reason: '자체 NAV_ITEMS 로컬 배열(오늘·대화 2항목) — story #4004가 공유 nav 항목 컴포넌트로 교체 예정.',
+    counts: { '/today': 1, '/chats': 1 },
+  },
 };
 
 export const ENV_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<EnvName>> = {};
