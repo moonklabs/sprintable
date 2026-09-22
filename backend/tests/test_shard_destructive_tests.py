@@ -523,6 +523,183 @@ def test_parse_changed_files_strips_blank_lines():
     assert mod.parse_changed_files("tests/a.py\n\n  \ntests/b.py\n") == frozenset({"tests/a.py", "tests/b.py"})
 
 
+# ── story #4163 — __ALL__ 모드 RED 범위 축소(import-그래프 narrowing) ──────────────
+def test_changed_app_files_to_modules_basic_path():
+    mod = _load()
+    assert mod.changed_app_files_to_modules(frozenset({"app/routers/other.py"})) == frozenset({"app.routers.other"})
+
+
+def test_changed_app_files_to_modules_init_py_maps_to_package():
+    mod = _load()
+    assert mod.changed_app_files_to_modules(frozenset({"app/services/__init__.py"})) == frozenset({"app.services"})
+
+
+def test_changed_app_files_to_modules_multiple_and_non_py_ignored():
+    mod = _load()
+    result = mod.changed_app_files_to_modules(frozenset({"app/a/b.py", "app/c.py", "README.md"}))
+    assert result == frozenset({"app.a.b", "app.c"})
+
+
+def test_files_depending_on_modules_direct_import(tmp_path: Path):
+    """⭐AC1 정탐① — `import app.x.y`(직접 import)를 잡는다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    t1 = tmp_path / "tests" / "test_direct.py"
+    t1.write_text("import app.x.y\n\ndef test_a():\n    assert True\n")
+    t2 = tmp_path / "tests" / "test_unrelated.py"
+    t2.write_text("import app.other\n\ndef test_b():\n    assert True\n")
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.x.y"}), ["tests/test_direct.py", "tests/test_unrelated.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_direct.py"]
+
+
+def test_files_depending_on_modules_from_import(tmp_path: Path):
+    """⭐AC1 정탐② — `from app.x.y import Z`(from-import)도 잡는다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_from.py").write_text(
+        "from app.x.y import Z\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.x.y"}), ["tests/test_from.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_from.py"]
+
+
+def test_files_depending_on_modules_member_of_package_import(tmp_path: Path):
+    """⭐AC1 정탐③ — `from app.services import approval_delivery`(부모 패키지에서
+    멤버로 import, 이 레포 실측 관례상 가장 흔한 형태)도 잡는다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_member.py").write_text(
+        "from app.services import approval_delivery\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_member.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_member.py"]
+
+
+def test_files_depending_on_modules_unrelated_file_not_matched(tmp_path: Path):
+    """음성대조 — 변경 모듈을 전혀 참조하지 않는 파일은 안 잡힌다(오늘 PR#4527
+    실사고 — test_3373/test_3415/test_3523/test_3806는 approval_delivery.py를 안
+    건드림)."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_unrelated.py").write_text(
+        "from app.services.other_thing import Foo\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_unrelated.py"], backend_dir=tmp_path,
+    )
+    assert result == []
+
+
+def test_files_depending_on_modules_leaf_word_boundary_no_false_positive(tmp_path: Path):
+    """⭐«못 틀리는 대조» 방지 — leaf 이름이 다른 식별자의 부분문자열로 우연히
+    나타나도(예: `approval_delivery_v2`) 단어경계(\\b)로 오탐 안 한다."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_similar_name.py").write_text(
+        "from app.services import approval_delivery_v2\n\ndef test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_similar_name.py"], backend_dir=tmp_path,
+    )
+    assert result == []
+
+
+def test_files_depending_on_modules_no_dotall_leak_across_later_lines(tmp_path: Path):
+    """⭐최초 구현 함정(실측으로 발견) — DOTALL을 쓰면 `from app.services import X` 뒤
+    파일 어딘가에 우연히 leaf 단어가 또 나타나도 매치돼 버린다. MULTILINE(줄 경계
+    고정)으로 그 오탐을 막았는지 직접 재현해 고정."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_no_leak.py").write_text(
+        "from app.services import other_thing\n\n"
+        "# approval_delivery라는 단어가 여기 우연히 있다(주석, import 문과 무관)\n"
+        "def test_a():\n    assert True\n"
+    )
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.services.approval_delivery"}), ["tests/test_no_leak.py"], backend_dir=tmp_path,
+    )
+    assert result == []
+
+
+def test_files_depending_on_modules_empty_modules_returns_empty_list():
+    mod = _load()
+    assert mod.test_files_depending_on_modules(frozenset(), ["tests/test_a.py"]) == []
+
+
+def test_files_depending_on_modules_multiple_files_sorted(tmp_path: Path):
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_z.py").write_text("import app.x\n")
+    (tmp_path / "tests" / "test_a.py").write_text("import app.x\n")
+    result = mod.test_files_depending_on_modules(
+        frozenset({"app.x"}), ["tests/test_z.py", "tests/test_a.py"], backend_dir=tmp_path,
+    )
+    assert result == ["tests/test_a.py", "tests/test_z.py"]
+
+
+def test_ac1_e2e_module_dependent_red_unrelated_warn(tmp_path: Path):
+    """⭐AC1 핵심 — PO 지정 합성 케이스: app 모듈 X 변경 + T1(X를 import)·T2(무관)
+    둘 다 절대 임계 초과 → T1 RED·T2 WARN(exit 0에 해당하는 slow_files_absolute
+    반환값 — narrowed changed_files가 실제로 red/warn 갈림을 만든다는 파이프라인
+    전체 증거, test_files_depending_on_modules의 출력을 그대로 slow_files_absolute의
+    changed_files 인자에 먹인다)."""
+    mod = _load()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_t1_depends.py").write_text("from app.x import Y\n")
+    (tmp_path / "tests" / "test_t2_unrelated.py").write_text("from app.other import Z\n")
+
+    narrowed = mod.test_files_depending_on_modules(
+        mod.changed_app_files_to_modules(frozenset({"app/x.py"})),
+        ["tests/test_t1_depends.py", "tests/test_t2_unrelated.py"],
+        backend_dir=tmp_path,
+    )
+    assert narrowed == ["tests/test_t1_depends.py"]
+
+    weights = {"tests/test_t1_depends.py": 30.0, "tests/test_t2_unrelated.py": 30.0}
+    elapsed = {"tests/test_t1_depends.py": 100.0, "tests/test_t2_unrelated.py": 100.0}  # 둘 다 threshold(75.0) 초과
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=frozenset(narrowed))
+    assert red == ["tests/test_t1_depends.py"]
+    assert warn == ["tests/test_t2_unrelated.py"]
+
+
+def test_ac1_test_file_direct_change_stays_red_even_if_unrelated_to_app_module(tmp_path: Path):
+    """AC1 — "테스트 파일 직접 변경은 RED 유지": narrowed 목록은 app-모듈-의존
+    테스트뿐 아니라 PR이 직접 바꾼 테스트 파일도 포함해야 한다(호출부 책임 —
+    ci.yml은 backend_test_files_changed가 __ALL__이 아닐 때의 기존 경로를 그대로
+    쓰므로 이 축은 무변경이지만, __ALL__+app-narrowing 경로에서도 "이 PR이 신설/
+    수정한 테스트 파일 자신"은 기존 classify 스크립트의 줄1 로직이 __ALL__로
+    뭉개므로, T3(무관·비변경)까지만 이 테스트로 고정하고 직접변경 케이스는
+    narrowed 목록에 수동으로 합쳐도 RED가 유지됨을 보인다(합집합 계약 자체는
+    ci.yml이 아니라 호출부/향후 확장 몫 — 여기선 slow_files_absolute가 그 합집합을
+    올바로 RED 처리한다는 것만 고정)."""
+    mod = _load()
+    weights = {"tests/test_t1_depends.py": 30.0, "tests/test_directly_changed.py": 30.0}
+    elapsed = {"tests/test_t1_depends.py": 100.0, "tests/test_directly_changed.py": 100.0}
+    narrowed = frozenset({"tests/test_t1_depends.py"}) | frozenset({"tests/test_directly_changed.py"})
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=narrowed)
+    assert set(red) == {"tests/test_t1_depends.py", "tests/test_directly_changed.py"}
+    assert warn == []
+
+
+def test_ac1_mutation_without_narrowing_unrelated_file_also_red():
+    """뮤테이션 — narrowing을 걷어내면(changed_files=None, #4163 처방 前 동작) 무관
+    파일(T2)도 RED로 되돌아간다 — narrowing이 실제로 이 값을 갈랐음을 고정(#4152의
+    기존 뮤테이션 관례와 동형)."""
+    mod = _load()
+    weights = {"tests/test_t1_depends.py": 30.0, "tests/test_t2_unrelated.py": 30.0}
+    elapsed = {"tests/test_t1_depends.py": 100.0, "tests/test_t2_unrelated.py": 100.0}
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=None)
+    assert set(red) == {"tests/test_t1_depends.py", "tests/test_t2_unrelated.py"}, (
+        f"narrowing 없이는(구현 걷어냄) 무관 파일도 RED로 재현돼야: {red}"
+    )
+
+
 def test_incident4152a_unrelated_file_over_absolute_threshold_is_warn_not_red():
     """⭐AC1/AC2 — PR#4351 실사고: test_3502(261s, weight 70.0 → 절대 임계 175.0s 초과)
     이지만 이 PR의 changed_files 밖(FE h1 파일 9개뿐)이라 RED 아니라 WARN — 잡 초록."""

@@ -383,6 +383,73 @@ def parse_changed_files(text: str) -> frozenset[str]:
     return frozenset(line.strip() for line in text.splitlines() if line.strip())
 
 
+# story #4163 — classify_backend_test_diff_scope.sh가 줄1=__ALL__일 때 줄2로 내는
+# "변경된 backend/app/**.py" 목록을 dotted 모듈 경로로 바꾸고, 그 모듈을 정적으로
+# import하는 destructive_schema 테스트 파일을 찾는다. 오늘(2026-09-22) PR#4527(app
+# 코드 1파일 변경)이 러너 부하 시간대에 무관 테스트 4개를 RED로 죽인 실사고 — __ALL__
+# 폴백 자체(코드 변경이 있으면 안전측으로 전부 RED 후보)는 유지하되, "전부"를 "PR이
+# 바꾼 테스트 + 그 app 변경을 실제로 참조하는 테스트"로 좁힌다. 나머지 초과는 기존
+# WARN 축(slow_files_absolute)으로 그대로 흡수 — 새 판정 로직 발명 0, 여기서 하는
+# 일은 오직 changed_files 인자에 넣을 "narrowed 목록"을 만드는 것뿐이다.
+def changed_app_files_to_modules(changed_app_files: frozenset[str]) -> frozenset[str]:
+    """`app/routers/other.py` → `app.routers.other`, `app/services/__init__.py` →
+    `app.services`(패키지 자신). `.py` 아닌 항목은 무시(방어적 — 호출부가 이미
+    `.py`만 넘기지만 이중 안전)."""
+    modules: set[str] = set()
+    for f in changed_app_files:
+        if not f.endswith(".py"):
+            continue
+        parts = f[: -len(".py")].split("/")
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts:
+            modules.add(".".join(parts))
+    return frozenset(modules)
+
+
+def _module_import_patterns(module: str) -> list[re.Pattern[str]]:
+    """`module` 하나에 대한 "이 테스트가 이 모듈을 참조하는가" 정적 패턴 2종:
+    ①직접(`import app.x.y` / `from app.x.y import ...`) ②부모 패키지에서 멤버로
+    (`from app.x import y` — `y.py`가 `app/x/`에 있는 흔한 이 레포 관례).
+    ⚠️ 못 잡는 것(정적 대조 한계, #3948 AC㉠-㉤ 관례 그대로 문서화): 멀티라인
+    괄호 import(`from app.x import (\\n    y,\\n)`)는 ②축에서 한 줄 안에 leaf가
+    있어야 매치 — 이 레포 실측 관례(단일 줄 import 압도 다수)상 영향 미미."""
+    escaped = re.escape(module)
+    patterns = [
+        re.compile(rf"\bimport\s+{escaped}\b"),
+        re.compile(rf"\bfrom\s+{escaped}\s+import\b"),
+    ]
+    if "." in module:
+        parent, leaf = module.rsplit(".", 1)
+        # 한 줄 안에서만 매치(MULTILINE의 `.`가 줄바꿈을 안 건너뛰므로 안전 —
+        # DOTALL을 쓰면 이 import 문 뒤 파일 전체에서 leaf 단어가 우연히 또 나타나도
+        # 오탐한다, 최초 구현에서 이 함정을 실측으로 발견해 정정).
+        patterns.append(
+            re.compile(rf"^\s*from\s+{re.escape(parent)}\s+import\s+.*\b{re.escape(leaf)}\b", re.MULTILINE)
+        )
+    return patterns
+
+
+def test_files_depending_on_modules(
+    modules: frozenset[str], test_files: list[str], backend_dir: Path = BACKEND_DIR,
+) -> list[str]:
+    """`test_files`(discover_files() 산출 상대경로, `tests/...`) 중 `modules`(dotted
+    app 경로 집합) 어느 하나라도 정적으로 참조하는 파일만 골라 정렬 반환. `modules`가
+    비면 빈 목록(narrowing할 재료가 없다는 뜻 — 호출부가 폴백 여부를 판단)."""
+    if not modules:
+        return []
+    all_patterns = [p for m in modules for p in _module_import_patterns(m)]
+    depends: list[str] = []
+    for f in test_files:
+        try:
+            source = (backend_dir / f).read_text()
+        except OSError:
+            continue
+        if any(p.search(source) for p in all_patterns):
+            depends.append(f)
+    return sorted(depends)
+
+
 def slow_files_absolute(
     elapsed_by_file: dict[str, float],
     weights: dict[str, float],
@@ -810,7 +877,22 @@ def main() -> int:
              "WARN(잡 초록 유지). 생략하면 diff 정보 없음으로 간주해 전부 RED 후보(회귀 0, "
              "예전 동작 그대로).",
     )
+    ap.add_argument(
+        "--resolve-app-module-dependents", type=str, default=None, metavar="APP_FILES",
+        help="story #4163 — classify_backend_test_diff_scope.sh 줄2(공백 구분 "
+             "backend/app/**.py 목록)를 그대로 받아, discover_files()(SSOT) 중 그 모듈을 "
+             "정적으로 참조하는 테스트 파일을 한 줄에 하나씩 stdout으로 낸다. ci.yml이 이 "
+             "출력을 --changed-files 입력 파일로 그대로 저장해 --check-elapsed에 넘긴다 "
+             "(__ALL__ 모드 RED 범위를 «변경 app 모듈을 참조하는 테스트»로 좁히는 용도 — "
+             "그 밖 파일의 절대 임계 초과는 기존 WARN 축이 그대로 흡수).",
+    )
     args = ap.parse_args()
+
+    if args.resolve_app_module_dependents is not None:
+        modules = changed_app_files_to_modules(frozenset(args.resolve_app_module_dependents.split()))
+        for f in test_files_depending_on_modules(modules, discover_files()):
+            print(f)
+        return 0
 
     if args.check_elapsed is not None:
         return _check_elapsed_mode(args.check_elapsed, changed_files_path=args.changed_files)

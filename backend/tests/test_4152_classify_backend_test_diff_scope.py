@@ -57,13 +57,34 @@ def _run(repo, base_sha, head_sha="HEAD"):
     )
 
 
+def _line1(proc) -> str:
+    """story #4163 — 줄1(기존 __ALL__/좁힌 테스트 목록 계약)만 뽑는다. 줄2 신설(변경
+    app 모듈 목록) 뒤에도 기존 단언이 그대로 유효하도록 `.strip()` 단일값 비교를
+    이걸로 교체."""
+    lines = proc.stdout.splitlines()
+    return lines[0] if lines else ""
+
+
+def _line2(proc) -> str:
+    """story #4163 신규 — 변경된 backend/app/**.py 모듈 목록 줄(공백 구분, 0건이면 빈 문자열)."""
+    lines = proc.stdout.splitlines()
+    return lines[1] if len(lines) > 1 else ""
+
+
+def _line3(proc) -> str:
+    """story #4163 신규 — __ALL__ 사유와 함께 변경된 backend/tests/*.py(혼합 변경 축)."""
+    lines = proc.stdout.splitlines()
+    return lines[2] if len(lines) > 2 else ""
+
+
 def test_no_base_sha_push_context_returns_all():
     """push 이벤트 등 diff 정보 없음 — 안전측 폴백."""
     proc = subprocess.run(
         ["bash", _SCRIPT], capture_output=True, text=True, cwd=os.path.dirname(_SCRIPTS_DIR),
     )
     assert proc.returncode == 0
-    assert proc.stdout.strip() == "__ALL__"
+    assert _line1(proc) == "__ALL__"
+    assert _line2(proc) == ""  # story #4163 — diff 정보 자체가 없어 app 목록도 판단 불가
 
 
 def test_app_only_change_returns_all(tmp_path):
@@ -75,7 +96,10 @@ def test_app_only_change_returns_all(tmp_path):
     _git(repo, "commit", "-q", "-m", "app change")
     proc = _run(repo, base_sha)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "__ALL__"
+    assert _line1(proc) == "__ALL__"
+    # story #4163 — 줄2에 변경 app 모듈이 실린다(narrowing이 먹을 재료).
+    assert _line2(proc) == "app/routers/other.py"
+    assert _line3(proc) == ""  # 같이 바뀐 테스트 파일 없음(순수 app-only)
 
 
 def test_tests_only_change_returns_narrowed_list(tmp_path):
@@ -86,7 +110,8 @@ def test_tests_only_change_returns_narrowed_list(tmp_path):
     _git(repo, "commit", "-q", "-m", "test-only change")
     proc = _run(repo, base_sha)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "tests/test_fake_new.py"
+    assert _line1(proc) == "tests/test_fake_new.py"
+    assert _line2(proc) == ""  # __ALL__ 아닐 땐 줄2 의미 없음(빈 값)
 
 
 def test_fe_only_change_returns_empty_narrowed_list(tmp_path):
@@ -98,7 +123,7 @@ def test_fe_only_change_returns_empty_narrowed_list(tmp_path):
     _git(repo, "commit", "-q", "-m", "fe-only change")
     proc = _run(repo, base_sha)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == ""
+    assert _line1(proc) == ""
 
 
 def test_mixed_app_and_test_change_returns_all(tmp_path):
@@ -111,7 +136,11 @@ def test_mixed_app_and_test_change_returns_all(tmp_path):
     _git(repo, "commit", "-q", "-m", "mixed change")
     proc = _run(repo, base_sha)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "__ALL__"
+    assert _line1(proc) == "__ALL__"
+    assert _line2(proc) == "app/routers/other.py"
+    # story #4163 — 줄3: 같은 PR이 직접 건드린 테스트 파일도 실려야 narrowing이
+    # "이 PR이 신설한 테스트 자신"을 WARN으로 흘려보내지 않는다(AC1).
+    assert _line3(proc) == "tests/test_fake_new.py"
 
 
 def test_alembic_migration_change_returns_all(tmp_path):
@@ -123,7 +152,10 @@ def test_alembic_migration_change_returns_all(tmp_path):
     _git(repo, "commit", "-q", "-m", "migration change")
     proc = _run(repo, base_sha)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "__ALL__"
+    assert _line1(proc) == "__ALL__"
+    # story #4163 — alembic은 app/**.py 밖이라 줄2엔 안 실린다(import-그래프 narrowing
+    # 대상이 아님 — 테스트가 마이그레이션 파일을 import하지 않는다).
+    assert _line2(proc) == ""
 
 
 def test_multiple_test_files_joined_with_space(tmp_path):
@@ -134,5 +166,32 @@ def test_multiple_test_files_joined_with_space(tmp_path):
     _git(repo, "commit", "-q", "-m", "two new tests")
     proc = _run(repo, base_sha)
     assert proc.returncode == 0, proc.stderr
-    files = set(proc.stdout.strip().split())
+    files = set(_line1(proc).split())
     assert files == {"tests/test_fake_a.py", "tests/test_fake_b.py"}
+
+
+# ── story #4163 — 줄2(변경 app 모듈 목록) 회귀가드 ──────────────────────────────
+def test_multiple_app_files_changed_joined_with_space_on_line2(tmp_path):
+    repo, base_sha = _init_repo(tmp_path)
+    _write(repo, "backend/app/routers/other.py", "x = 4\n")
+    _write(repo, "backend/app/services/new_service.py", "y = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "two app files changed")
+    proc = _run(repo, base_sha)
+    assert proc.returncode == 0, proc.stderr
+    assert _line1(proc) == "__ALL__"
+    modules = set(_line2(proc).split())
+    assert modules == {"app/routers/other.py", "app/services/new_service.py"}
+
+
+def test_app_file_deleted_counts_as_changed_on_line2(tmp_path):
+    """삭제도 «app 모듈 변경»이다(그 모듈을 import하던 테스트가 여전히 영향권 —
+    git diff --name-only는 삭제도 잡는다, add/delete 구분 없이 경로만 본다)."""
+    repo, base_sha = _init_repo(tmp_path)
+    (repo / "backend" / "app" / "routers" / "other.py").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "delete app file")
+    proc = _run(repo, base_sha)
+    assert proc.returncode == 0, proc.stderr
+    assert _line1(proc) == "__ALL__"
+    assert _line2(proc) == "app/routers/other.py"
