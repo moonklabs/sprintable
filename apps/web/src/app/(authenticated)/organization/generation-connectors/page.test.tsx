@@ -345,6 +345,8 @@ describe('OrganizationGenerationConnectorsPage — 리전 변경 행 액션(#416
     // revoked 행은 여전히 읽기전용 칩.
     expect(document.body.querySelector('[data-testid="gc-location-select-gen-2"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="gc-location-chip"]')).toBeTruthy();
+    // story #4166 CHANGES-1 — 등록 폼의 gcLocationHint를 목록 행에서도 재사용(AC3).
+    expect(document.body.textContent).toContain(koMessages.organization.gcLocationHint);
   });
 
   it('일반 멤버 — active 행에도 select 없이 읽기전용 칩만 보인다', async () => {
@@ -410,5 +412,73 @@ describe('OrganizationGenerationConnectorsPage — 리전 변경 행 액션(#416
 
     expect(document.body.textContent).toContain(koMessages.organization.gcLocationChangeError);
     expect(reloadCount).toBeGreaterThan(initialReloadCount); // 실패해도 목록을 다시 불러 실제 상태를 보여준다.
+  });
+
+  // story #4166 CHANGES-1(페드루 PO 리뷰) — catch 경로(네트워크 예외, PATCH 요청 자체가
+  // 던짐)에서 load()가 빠져 있던 실사고를 고정. non-ok 응답(위 테스트)과 별개 경로라
+  // 따로 표본을 둔다.
+  it('⭐PATCH 네트워크 예외(throw) — 에러 문구가 뜨고 목록을 다시 불러온다(non-ok와 별개 경로)', async () => {
+    let reloadCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        throw new Error('network down');
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        reloadCount += 1;
+        return { ok: true, json: async () => ({ data: { connectors: [CONNECTOR_ACTIVE] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+    const initialReloadCount = reloadCount;
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcLocationChangeError);
+    expect(reloadCount).toBeGreaterThan(initialReloadCount);
+  });
+
+  // story #4166 CHANGES-1 — controlled select가 c.location(서버값)만 직접 참조하면
+  // 사용자가 고른 값이 PATCH 응답 전에는 화면에 안 보인다(낙관적 draft 없이는 "선택 즉시
+  // 반영"이 아니라 "응답 뒤에야 반영"). 응답이 늦게 오는(pending) 상황을 실측해 draft가
+  // 그 사이 select 값을 유지하는지 고정.
+  it('⭐PATCH 응답 대기 中에도 select가 방금 고른 값을 낙관적으로 보여준다(draft)', async () => {
+    let resolvePatch: (() => void) | undefined;
+    const patchPending = new Promise<void>((resolve) => { resolvePatch = resolve; });
+    let patched = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        await patchPending;
+        patched = true;
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { connectors: [{ ...CONNECTOR_ACTIVE, location: patched ? 'asia-northeast3' : 'global' }] },
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    // PATCH가 아직 안 끝난 시점 — select는 서버값(global)이 아니라 방금 고른 값을 보여줘야 한다.
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
+
+    await act(async () => { resolvePatch?.(); });
+    await flush();
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
   });
 });

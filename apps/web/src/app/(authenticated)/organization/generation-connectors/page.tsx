@@ -77,22 +77,25 @@ export default function OrganizationGenerationConnectorsPage() {
   const [revoking, setRevoking] = useState(false);
   const [locationPatchTargetId, setLocationPatchTargetId] = useState<string | null>(null);
   const [locationPatchError, setLocationPatchError] = useState<string | null>(null);
+  // story #4166 CHANGES-1(페드루 PO 리뷰) — controlled select가 c.location(서버값)만
+  // 직접 참조하면 PATCH 응답이 오기 전에 이전 값으로 그대로 남아 있다가(리렌더 트리거가
+  // 없어 "튐"으로 보이는 게 아니라, 사용자가 고른 값이 화면에 전혀 안 보이고 응답 뒤에야
+  // 한 번에 바뀐다) — 낙관적 draft를 별도로 들고 select 값을 draft 우선으로 읽는다.
+  const [locationDraft, setLocationDraft] = useState<Record<string, string>>({});
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     if (!orgId) { setStatus('loaded'); return; }
     setStatus('loading');
-    void (async () => {
-      try {
-        // active_only=false — 목록 화면은 해지된 것도 보여준다(시안 프레임①, revoked 칩).
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=false`);
-        if (!res.ok) { setStatus('failed'); return; }
-        const json = await res.json() as { data?: { connectors?: GenerationConnector[] } };
-        setConnectors(json.data?.connectors ?? []);
-        setStatus('loaded');
-      } catch {
-        setStatus('failed');
-      }
-    })();
+    try {
+      // active_only=false — 목록 화면은 해지된 것도 보여준다(시안 프레임①, revoked 칩).
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=false`);
+      if (!res.ok) { setStatus('failed'); return; }
+      const json = await res.json() as { data?: { connectors?: GenerationConnector[] } };
+      setConnectors(json.data?.connectors ?? []);
+      setStatus('loaded');
+    } catch {
+      setStatus('failed');
+    }
   }, [orgId]);
 
   useEffect(() => { load(); }, [load]);
@@ -116,6 +119,7 @@ export default function OrganizationGenerationConnectorsPage() {
     if (!orgId) return;
     setLocationPatchTargetId(connectorId);
     setLocationPatchError(null);
+    setLocationDraft((prev) => ({ ...prev, [connectorId]: location }));
     try {
       const res = await fetchWithAuth(
         `/api/organizations/${orgId}/generation-connectors/${connectorId}`,
@@ -125,19 +129,26 @@ export default function OrganizationGenerationConnectorsPage() {
           body: JSON.stringify({ location }),
         },
       );
-      if (res.ok) {
-        load();
-      } else {
-        // story #4166 — 다른 탭이 먼저 해지한 경합(409)까지 코드별로 나누지 않는다
-        // (select 값 자체가 허용 목록이라 422는 정상 흐름에서 안 남 — 남는 경우는
-        // 전부 "그 사이 상태가 바뀜" 부류라 reload로 실제 상태를 보여주는 편이 정확).
-        setLocationPatchError(t('gcLocationChangeError'));
-        load();
-      }
+      // story #4166 — 다른 탭이 먼저 해지한 경합(409)까지 코드별로 나누지 않는다(select
+      // 값 자체가 허용 목록이라 422는 정상 흐름에서 안 남 — 남는 경우는 전부 "그 사이
+      // 상태가 바뀜" 부류라 reload로 실제 상태를 보여주는 편이 정확). 네트워크 예외(catch)도
+      // 동형 — 실패 사유 무관하게 실제 서버 상태를 다시 읽어야 한다(CHANGES-1: 이전엔
+      // catch 경로에서 load()를 빠뜨려 요청이 실제로 갔는데 실패만 표시하고 화면은 그대로
+      // "성공한 척"으로 남는 자리가 있었다).
+      if (!res.ok) setLocationPatchError(t('gcLocationChangeError'));
     } catch {
       setLocationPatchError(t('gcLocationChangeError'));
     } finally {
+      // draft는 load()가 실 서버값을 connectors에 반영한 뒤에만 지운다 — 먼저 지우면
+      // select가 옛 c.location으로 한 프레임 되돌아갔다 다시 바뀌는 튐이 재발한다.
+      await load();
       setLocationPatchTargetId(null);
+      setLocationDraft((prev) => {
+        if (!(connectorId in prev)) return prev;
+        const next = { ...prev };
+        delete next[connectorId];
+        return next;
+      });
     }
   };
 
@@ -217,7 +228,7 @@ export default function OrganizationGenerationConnectorsPage() {
                         aria-label={t('gcLocationChangeAriaLabel', { n: index + 1, label: c.label })}
                         data-testid={`gc-location-select-${c.id}`}
                         className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground disabled:opacity-60"
-                        value={c.location}
+                        value={locationDraft[c.id] ?? c.location}
                         disabled={locationPatchTargetId === c.id}
                         onChange={(e) => void handleLocationChange(c.id, e.target.value)}
                       >
@@ -254,6 +265,12 @@ export default function OrganizationGenerationConnectorsPage() {
                       ? ` · ${t('gcRevokedAt', { time: formatRelativeTime(c.revoked_at, locale, displayTimezone) })}`
                       : null}
                   </p>
+                  {/* story #4166 CHANGES-1(페드루 PO 리뷰) — 등록 폼의 gcLocationHint를
+                      재사용(AC3 문구: "gcLocationHint 재사용") — 새 문구 발명 0, select가
+                      뜨는 행에서만(등록 폼과 동일 노출 조건: owner/admin·active). */}
+                  {isOwnerOrAdmin && c.status === 'active' ? (
+                    <p className="mt-0.5 text-[10.5px] text-muted-foreground">{t('gcLocationHint')}</p>
+                  ) : null}
                 </div>
                 {isOwnerOrAdmin && c.status === 'active' ? (
                   <Button

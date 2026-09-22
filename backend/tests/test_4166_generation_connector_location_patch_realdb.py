@@ -319,6 +319,11 @@ async def test_patch_records_activity_log_row():
                 )
             )).scalars().all()
             assert len(logs) == 1
+            # story #4166 CHANGES-1(페드루 PO 리뷰) — actor_id는 member id여야 한다(활동
+            # 피드가 user_id로는 아무에게도 못 붙는다, services/activity_log.py:83 관례).
+            # 이 단언이 없어 라우터의 auth.user_id 오전달을 못 잡고 통과시켰던 게 실사고 원인
+            # — 이번엔 양성대조로 고정.
+            assert logs[0].actor_id == admin_id
             assert logs[0].context["from_location"] == "asia-northeast3"
             assert logs[0].context["to_location"] == "global"
     finally:

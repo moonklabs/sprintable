@@ -66,13 +66,21 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     return resolved
 
 
-async def _require_org_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID) -> None:
+async def _require_org_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
     """등록·revoke — 자격을 실제로 쓰거나 폐기하는 축만 owner/admin으로 좁힌다
     (channel_connections.py::_require_owner_or_admin과 동형 폭, credentials가
-    실제로 오가는 쓰기 엔드포인트만)."""
+    실제로 오가는 쓰기 엔드포인트만).
+
+    story #4166 CHANGES-1(페드루 PO 리뷰) — resolved member를 호출부에 돌려준다.
+    activity_logs.actor_id는 member id다(services/activity_log.py:83 —
+    record_created_activity가 resolve_member(...).id를 쓰는 것과 동일 관례).
+    PATCH 엔드포인트가 이 반환값 대신 auth.user_id(JWT 휴먼 계정 id)를 그대로
+    실었더니 피드에서 아무 member에게도 안 붙는 실사고(member-id lint +
+    test_3370 RED로 발견) — 여기서 이미 조회한 member를 재사용해 재조회 0."""
     resolved = await _require_human(db, auth, org_id)
     if resolved.role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_OWNER_OR_ADMIN_ONLY"})
+    return resolved
 
 
 class GenerationConnectorCreateRequest(BaseModel):
@@ -221,11 +229,11 @@ async def patch_generation_connector_location_endpoint(
     동일 write-only 계약). active 커넥터만(409) — 바인딩이 revoked 커넥터를 가리킬
     일이 없으므로(#4101) 바꿔 봐야 쓸모가 없다."""
     _require_org_match(org_id, verified_org_id)
-    await _require_org_admin(db, auth, org_id)
+    resolved = await _require_org_admin(db, auth, org_id)
     try:
         row = await update_org_generation_connector_location(
             db, org_id=org_id, connector_id=connector_id, location=body.location,
-            actor_id=uuid.UUID(auth.user_id),
+            actor_id=resolved.id,
         )
     except GenerationConnectorInvalidLocationError as exc:
         raise HTTPException(
