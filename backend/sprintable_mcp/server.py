@@ -6,9 +6,7 @@ import inspect
 import json
 import logging
 import time
-import weakref
 from collections import OrderedDict
-from datetime import datetime, timezone
 from typing import get_type_hints
 
 from mcp.server.transport_security import TransportSecuritySettings
@@ -161,37 +159,20 @@ from .tools.webhooks import (
 )
 
 
-# story #4129 — 세션 시작 시각을 ctx.session 객체 자체에 매다는 weakref 맵. id()로 키를 잡으면
-# GC 후 재사용된 id가 다른 세션과 뒤섞이는 위험이 있어(정수 재사용 클래스 버그), 객체를 직접
-# 약한참조 키로 쓴다 — 세션이 죽으면 엔트리도 자동 회수(누수 0), 별도 evict 로직 불요.
-_SESSION_STARTED_AT: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
-
-
-def _session_started_at(session: object) -> datetime:
-    """이 서버 프로세스가 이 session 객체를 처음 본 시각(=세션 시작으로 간주).
-
-    stdio(Claude Code 플릿 다수): 프로세스 수명=이 session 객체 수명이라, 재기동(새 프로세스)
-    마다 새 session 객체가 생겨 신뢰 가능한 "재기동 시각" 신호가 된다.
-    stateless HTTP(grok·codex, __main__.py `stateless_http=True`): mcp SDK가 요청마다 session을
-    새로 합성해 `ctx.session_id`조차 None(story #4129 그라운딩, mcp/server/context.py
-    docstring 확認) — 이 필드가 매 호출 "지금"으로 나올 수 있는 알려진 한계. 그쪽은
-    plugin_version 헤더가 주 신호(있을 때만 배지 판단에 사용, PO 확定 — 세션나이만으론
-    휴리스틱 배지 만들지 않기).
-    """
-    started = _SESSION_STARTED_AT.get(session)
-    if started is None:
-        started = datetime.now(timezone.utc)
-        _SESSION_STARTED_AT[session] = started
-    return started
-
-
 async def _heartbeat_fire_forget(ctx: Context | None = None) -> None:
     """AC3/4: tool 호출 완료 후 fire-and-forget. 실패해도 tool 결과에 영향 없음.
 
-    story #4129: ctx가 있으면 MCP clientInfo(name/version)·세션 시작 시각·plugin-version
-    헤더(HTTP 전송만)를 실어 워크포스 "재기동 필요" 판단 근거를 team-members로 흘린다.
-    셋 다 best-effort(개별 실패해도 나머지·heartbeat 본체엔 영향 0) — presence_status
-    시맨틱(last_seen_at/agent_status)은 무변, 순수 additive.
+    story #4129: ctx가 있으면 MCP clientInfo(name/version)·plugin-version 헤더(HTTP 전송만)를
+    실어 워크포스 "재기동 필요" 판단 근거를 team-members로 흘린다. 둘 다 best-effort(개별
+    실패해도 나머지·heartbeat 본체엔 영향 0) — presence_status 시맨틱(last_seen_at/
+    agent_status)은 무변, 순수 additive.
+
+    session_started_at은 여기서 안 보낸다(story #4129 CHANGES-1, PO 리뷰 PR#4507) — 처음엔
+    "이 서버 프로세스가 ctx.session 객체를 처음 본 시각"으로 계산했으나, 호스팅 MCP가
+    재배포될 때마다(세션 객체가 전부 새로 생김) 모든 에이전트의 값이 리셋되는 오정보였다.
+    "재기동"의 진짜 신호는 신원(client_name/version/plugin_version) 변경이나 idle 문턱
+    넘는 공백이지 서버 쪽 세션 객체 교체가 아니다 — 그 판정은 BE(sync_agent_profile_
+    presence, 이전 저장값과 비교 가능한 유일한 지점)가 전담한다.
     """
     try:
         if not client.member_id:
@@ -205,10 +186,6 @@ async def _heartbeat_fire_forget(ctx: Context | None = None) -> None:
             if client_params is not None and client_params.client_info is not None:
                 body["client_name"] = client_params.client_info.name
                 body["client_version"] = client_params.client_info.version
-            try:
-                body["session_started_at"] = _session_started_at(ctx.session).isoformat()
-            except Exception:
-                pass
             try:
                 headers = ctx.headers  # None on stdio(문서화된 계약) — HTTP 전송만 값 有
                 plugin_version = headers.get("x-sprintable-plugin-version") if headers else None

@@ -687,11 +687,16 @@ async def delete_avatar_endpoint(
 
 
 class HeartbeatRuntimeIdentity(BaseModel):
-    """story #4129 AC2 — MCP clientInfo·세션 시작·(있으면) plugin 버전. 전부 optional(무값=null)."""
+    """story #4129 AC2 — MCP clientInfo·(있으면) plugin 버전. 전부 optional(무값=null).
+
+    session_started_at은 이 모델에 없다(CHANGES-1, PO 리뷰 PR#4507) — 호출자가 실어 보내는
+    값이 아니라 BE(sync_agent_profile_presence)가 이전 저장값과 신원·idle 공백을 비교해
+    직접 계산하는 출력 필드. 호출자가 자기 세션 시작 시각을 주장하게 두면 호스팅 MCP
+    재배포 등 서버측 사정이 그 값을 오염시킨 실사고(WeakKeyDictionary 세션-객체 계산)가
+    그대로 재현된다."""
     client_name: str | None = None
     client_version: str | None = None
     plugin_version: str | None = None
-    session_started_at: str | None = None
 
 
 @router.patch("/{id}/heartbeat")
@@ -713,9 +718,11 @@ async def heartbeat(
     assert_caller_is_member(agent=id 직접비교·human=user_id 비교)로 axis-safe하게 교체.
 
     story #4129: body(런타임 신원)는 optional·순수 additive — 미전송(None)이면 기존
-    presence-only 동작과 완전 동일(agent_config 무변경). 전송되면 4필드 전부를
-    agent_config.runtime_identity에 스냅샷으로 반영(이 호출이 안 실은 필드는 null —
-    "이전 값 보존"이 아니라 "이 순간의 실측"을 정직하게 반영, AC2 계약).
+    presence-only 동작과 완전 동일(agent_config 무변경). 전송되면 client_name/client_version/
+    plugin_version을 agent_config.runtime_identity에 반영(이 호출이 안 실은 필드는 null —
+    "이전 값 보존"이 아니라 "이 순간의 실측"을 정직하게 반영, AC2 계약). session_started_at은
+    여기서 안 보낸다 — sync_agent_profile_presence가 이 신원·idle 공백 비교로 직접 계산한다
+    (CHANGES-1).
     """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
@@ -733,7 +740,6 @@ async def heartbeat(
             "client_name": body.client_name,
             "client_version": body.client_version,
             "plugin_version": body.plugin_version,
-            "session_started_at": body.session_started_at,
         }
     await sync_agent_profile_presence(session, id, last_seen_at=now, agent_status="online", **extra)
     return {"ok": True, "last_seen_at": now.isoformat()}

@@ -1,12 +1,18 @@
 """story #4129([E-RECIPE-1 Phase 3] 에이전트 런타임 신원 heartbeat) realdb 검증.
 
-AC2: heartbeat가 client_name/client_version/plugin_version/session_started_at을
+AC2: heartbeat가 client_name/client_version/plugin_version을
 agent_project_profiles.agent_config.runtime_identity(신규 컬럼 0, 마이그레이션 0)에 기록한다.
-- 헤더/필드 없음 → null 유지(이전 값 보존 아님 — 이 호출의 정직한 스냅샷)
+- 필드 없음 → null 유지(이전 값 보존 아님 — 이 호출의 정직한 스냅샷)
 - 있음 → 저장
 - 기존 agent_config의 다른 top-level 키는 무변(caller-set 임의 설정 보존)
-- 재기동(새 session) → session_started_at 갱신 — 이 파일은 sync_agent_profile_presence의
-  agent_config 쓰기만 검증(session 객체 생명주기 자체는 sprintable_mcp 쪽 별도 유닛테스트).
+
+CHANGES-1(PO 리뷰, PR#4507) — session_started_at은 호출자가 실어 보내는 값이 아니라
+sync_agent_profile_presence가 이전 저장값과 비교해 직접 계산한다: 신원(client_name·
+client_version·plugin_version)이 이전과 같고 이전 last_seen_at이 idle 문턱(30분, S2-3
+presence_status와 공유하는 _IDLE_THRESHOLD) 안이면 이전 session_started_at을 유지, 그
+밖(신원 변경 또는 30분 넘는 공백)이면 이 호출 시각으로 교체한다. "MCP 서버 프로세스가
+언제 이 세션 객체를 처음 봤나"가 아니다 — 호스팅 MCP 재배포마다(세션 객체 전부 리셋)
+모든 에이전트의 값이 초기화되는 첫 구현의 오정보를 이 계약이 고친다.
 
 「재기동 필요」 배지 판단 — app.routers.team_members._org_max_plugin_version /
 _plugin_version_sort_key가 조직 전체 agent 기준 최댓값을 정확히 뽑는지.
@@ -15,6 +21,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -65,7 +72,7 @@ async def _seed_org_project(session):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, agent_config: dict | None = None):
+async def _seed_agent(session, org_id, project_id, agent_config: dict | None = None, last_seen_at=None):
     from app.models.member import AgentProjectProfile, Member
 
     member_id = uuid.uuid4()
@@ -73,6 +80,7 @@ async def _seed_agent(session, org_id, project_id, agent_config: dict | None = N
     await session.commit()
     session.add(AgentProjectProfile(
         id=uuid.uuid4(), member_id=member_id, project_id=project_id, agent_config=agent_config,
+        last_seen_at=last_seen_at,
     ))
     await session.commit()
     return member_id
@@ -91,7 +99,9 @@ async def _get_agent_config(session, member_id) -> dict | None:
 
 @pytest.mark.anyio
 async def test_runtime_identity_written_and_preserves_other_agent_config_keys():
-    """AC2 — 4필드 기록 + 기존 agent_config의 무관 키(예: user-set llm_model) 보존."""
+    """AC2 — 3필드 기록(+ BE가 계산한 session_started_at) + 기존 agent_config의 무관 키
+    (예: user-set llm_model) 보존. 최초 heartbeat라 이전 신원이 없으니 session_started_at은
+    이 호출 시각(now)으로 새로 채워진다."""
     from app.services.agent_anchor_sync import sync_agent_profile_presence
 
     engine, Session = await _session_factory()
@@ -100,31 +110,30 @@ async def test_runtime_identity_written_and_preserves_other_agent_config_keys():
             org_id, project_id = await _seed_org_project(s)
             member_id = await _seed_agent(s, org_id, project_id, agent_config={"llm_model": "opus"})
 
+            now = datetime.now(timezone.utc)
             await sync_agent_profile_presence(
                 s, member_id,
-                last_seen_at=None, agent_status=None,
+                last_seen_at=now, agent_status="online",
                 client_name="claude-code", client_version="2.1.0",
-                plugin_version="0.1.4", session_started_at="2026-09-21T23:00:00+00:00",
+                plugin_version="0.1.4",
             )
             await s.commit()
 
             cfg = await _get_agent_config(s, member_id)
             assert cfg["llm_model"] == "opus"  # 무관 top-level 키 보존
-            assert cfg["runtime_identity"] == {
-                "client_name": "claude-code",
-                "client_version": "2.1.0",
-                "plugin_version": "0.1.4",
-                "session_started_at": "2026-09-21T23:00:00+00:00",
-            }
+            identity = cfg["runtime_identity"]
+            assert identity["client_name"] == "claude-code"
+            assert identity["client_version"] == "2.1.0"
+            assert identity["plugin_version"] == "0.1.4"
+            assert identity["session_started_at"] == now.isoformat()
     finally:
         await engine.dispose()
 
 
 @pytest.mark.anyio
 async def test_presence_only_call_leaves_agent_config_untouched():
-    """다른 콜사이트(agent_gateway.py 등)처럼 4필드 kwarg 자체를 안 보내면 agent_config 무변."""
+    """다른 콜사이트(agent_gateway.py 등)처럼 신원 kwarg 자체를 안 보내면 agent_config 무변."""
     from app.services.agent_anchor_sync import sync_agent_profile_presence
-    from datetime import datetime, timezone
 
     engine, Session = await _session_factory()
     try:
@@ -159,22 +168,125 @@ async def test_runtime_identity_snapshot_replaces_not_partial_merges():
             member_id = await _seed_agent(s, org_id, project_id)
 
             await sync_agent_profile_presence(
-                s, member_id, last_seen_at=None, agent_status=None,
-                client_name="claude-code", client_version="2.1.0",
-                plugin_version="0.1.4", session_started_at="2026-09-21T23:00:00+00:00",
+                s, member_id, last_seen_at=datetime.now(timezone.utc), agent_status="online",
+                client_name="claude-code", client_version="2.1.0", plugin_version="0.1.4",
             )
             await s.commit()
 
             # 두 번째 호출(예: stdio 재호출) — plugin_version 없음(헤더 없는 전송)
             await sync_agent_profile_presence(
-                s, member_id, last_seen_at=None, agent_status=None,
-                client_name="claude-code", client_version="2.1.0",
-                plugin_version=None, session_started_at="2026-09-21T23:00:00+00:00",
+                s, member_id, last_seen_at=datetime.now(timezone.utc), agent_status="online",
+                client_name="claude-code", client_version="2.1.0", plugin_version=None,
             )
             await s.commit()
 
             cfg = await _get_agent_config(s, member_id)
             assert cfg["runtime_identity"]["plugin_version"] is None
+    finally:
+        await engine.dispose()
+
+
+# ─── CHANGES-1(PO 리뷰, PR#4507) — session_started_at "재기동" 판정 3건 ───────────
+
+@pytest.mark.anyio
+async def test_consecutive_heartbeat_same_identity_keeps_session_started_at():
+    """연속 heartbeat + 새 세션 객체(MCP 서버 재배포 등)여도 신원 동일·idle 문턱 안이면
+    이전 session_started_at을 그대로 유지한다 — 재배포마다 세션이 리셋되는 오정보 재발 방지 핵심 pin."""
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            member_id = await _seed_agent(s, org_id, project_id)
+
+            first_call_at = datetime.now(timezone.utc)
+            await sync_agent_profile_presence(
+                s, member_id, last_seen_at=first_call_at, agent_status="online",
+                client_name="claude-code", client_version="2.1.0", plugin_version="0.1.4",
+            )
+            await s.commit()
+            first_started_at = (await _get_agent_config(s, member_id))["runtime_identity"]["session_started_at"]
+
+            # 5분 뒤 재호출(idle 30분 문턱 안), 동일 신원 — MCP 서버가 그새 재배포돼 ctx.session이
+            # 새 객체가 됐더라도(story #4129 BE는 그 신호를 아예 안 받는다) 영향 없어야 한다.
+            second_call_at = first_call_at + timedelta(minutes=5)
+            await sync_agent_profile_presence(
+                s, member_id, last_seen_at=second_call_at, agent_status="online",
+                client_name="claude-code", client_version="2.1.0", plugin_version="0.1.4",
+            )
+            await s.commit()
+
+            cfg = await _get_agent_config(s, member_id)
+            assert cfg["runtime_identity"]["session_started_at"] == first_started_at
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_31_minute_gap_replaces_session_started_at():
+    """idle 문턱(30분)을 넘는 공백 뒤 돌아오면 session_started_at을 이 호출 시각으로 교체한다
+    — «끊겼다가 돌아옴»이 진짜 재기동 신호(신원은 동일해도)."""
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            stale_last_seen = datetime.now(timezone.utc) - timedelta(minutes=31)
+            member_id = await _seed_agent(
+                s, org_id, project_id,
+                agent_config={"runtime_identity": {
+                    "client_name": "claude-code", "client_version": "2.1.0", "plugin_version": "0.1.4",
+                    "session_started_at": stale_last_seen.isoformat(),
+                }},
+                last_seen_at=stale_last_seen,
+            )
+
+            now = datetime.now(timezone.utc)
+            await sync_agent_profile_presence(
+                s, member_id, last_seen_at=now, agent_status="online",
+                client_name="claude-code", client_version="2.1.0", plugin_version="0.1.4",
+            )
+            await s.commit()
+
+            cfg = await _get_agent_config(s, member_id)
+            assert cfg["runtime_identity"]["session_started_at"] == now.isoformat()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_identity_change_replaces_session_started_at_even_within_idle():
+    """idle 문턱 안(연속 heartbeat)이라도 client_version만 바뀌면(플러그인 업데이트 후 재기동
+    등) session_started_at을 교체한다 — 신원 변경 자체가 재기동 신호."""
+    from app.services.agent_anchor_sync import sync_agent_profile_presence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+
+            first_call_at = datetime.now(timezone.utc)
+            member_id = await _seed_agent(s, org_id, project_id)
+            await sync_agent_profile_presence(
+                s, member_id, last_seen_at=first_call_at, agent_status="online",
+                client_name="claude-code", client_version="2.1.0", plugin_version="0.1.4",
+            )
+            await s.commit()
+            first_started_at = (await _get_agent_config(s, member_id))["runtime_identity"]["session_started_at"]
+
+            # 1분 뒤(idle 문턱 한참 안), client_version만 바뀜
+            second_call_at = first_call_at + timedelta(minutes=1)
+            await sync_agent_profile_presence(
+                s, member_id, last_seen_at=second_call_at, agent_status="online",
+                client_name="claude-code", client_version="2.2.0", plugin_version="0.1.4",
+            )
+            await s.commit()
+
+            cfg = await _get_agent_config(s, member_id)
+            assert cfg["runtime_identity"]["session_started_at"] != first_started_at
+            assert cfg["runtime_identity"]["session_started_at"] == second_call_at.isoformat()
     finally:
         await engine.dispose()
 
