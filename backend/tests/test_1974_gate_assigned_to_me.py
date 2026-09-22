@@ -139,8 +139,18 @@ async def test_non_doc_approvable_project_id_none_org_member_false():
 
 
 def _resp(g):
-    return SimpleNamespace(
-        id=g.id, work_item_type=g.work_item_type, work_item_id=g.work_item_id,
+    # story #4139(까디르 QA 실측, 페드루 PO 지시 2026-09-22) — SimpleNamespace는 GateResponse에
+    # 새 필드(이번엔 deferred_to_gate_id)가 늘 때마다 AttributeError로 재발하는 클래스(위
+    # _doc_gate/_story_gate가 이미 겪어 make_gate()로 옮긴 것과 동일 사고). 패치 대상 자체
+    # (`GateResponse.model_validate`)가 돌려주는 값이니 진짜 GateResponse여야 한다 —
+    # `model_construct()`(검증은 건너뛰되 미지정 필드는 모델 기본값으로 채움)로 만들면
+    # 다음 필드가 늘어도 이 테스트가 안 깨진다(반창고로 getattr 방어를 프로덕션에 넣는
+    # 대신, 목 객체를 실 모양으로 맞추는 게 근본 — 페드루 PO 지시).
+    from app.routers.gates import GateResponse
+
+    return GateResponse.model_construct(
+        id=g.id, org_id=g.org_id, work_item_type=g.work_item_type, work_item_id=g.work_item_id,
+        gate_type=g.gate_type, status=g.status, created_at=g.created_at, updated_at=g.updated_at,
         work_item_summary=None, can_approve=False,
     )
 
