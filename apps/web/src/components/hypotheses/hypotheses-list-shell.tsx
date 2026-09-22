@@ -86,19 +86,20 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
       <WorkspaceFrameTabs active="hypothesis" />
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           aria-pressed={statusFilter === null}
           onClick={() => setStatusFilter(null)}
           className={cn(
-            'rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
+            'h-auto min-h-0 min-w-0 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
             statusFilter === null
-              ? 'border-primary/40 bg-primary/10 text-primary'
+              ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10'
               : 'border-border text-muted-foreground hover:bg-muted/50',
           )}
         >
           {t('hypothesesFilterAll')}
-        </button>
+        </Button>
         {HYPOTHESIS_STATUSES.map((status) => {
           const statusLabelKey = `status${status.charAt(0).toUpperCase()}${status.slice(1)}` as 'statusProposed';
           const statusLabel = tHypotheses(statusLabelKey);
@@ -107,19 +108,20 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
           // 합쳐 하나의 값으로 넘긴다(historyFieldChanged류와 동형 처리).
           const statusLabelWithJosa = locale === 'ko' ? `${statusLabel}${pickEuroJosa(statusLabel)}` : statusLabel;
           return (
-            <button
+            <Button
               key={status}
               type="button"
+              variant="ghost"
               aria-pressed={statusFilter === status}
               aria-label={t('hypothesesStatusFilterAriaLabel', { label: statusLabelWithJosa })}
               onClick={() => setStatusFilter(statusFilter === status ? null : status)}
               className={cn(
-                'rounded-lg transition-opacity',
+                'h-auto min-h-0 min-w-0 rounded-lg p-0 transition-opacity hover:bg-transparent',
                 statusFilter !== null && statusFilter !== status && 'opacity-50 hover:opacity-100',
               )}
             >
               <HypothesisStatusBadge status={status} />
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -145,14 +147,15 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
           <div className="space-y-2">
             {filtered.map((h, index) => (
               <Card key={h.id} className="space-y-1.5 p-3">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => goToDetail(h.id)}
                   aria-label={t('hypothesesGoToDetailAriaLabel', { n: index + 1, label: h.statement })}
-                  className="block w-full text-left text-sm font-medium text-foreground hover:underline"
+                  className="h-auto min-h-0 w-full min-w-0 justify-start rounded-none p-0 text-left text-sm font-medium text-foreground hover:bg-transparent hover:underline"
                 >
                   {h.statement}
-                </button>
+                </Button>
                 <div className="flex items-center justify-between gap-2">
                   <HypothesisStatusBadge status={h.status} />
                   {h.story_ids.length > 0 ? (
