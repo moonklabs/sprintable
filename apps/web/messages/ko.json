@@ -5314,6 +5314,7 @@
     "linkedChannelDraftImageAlt": "첨부 이미지",
     "linkedChannelDraftOpenLink": "초안 열기",
     "publishOutcomePublished": "발행됨",
+    "publishOutcomePublishing": "발행 진행 중 — 잠시 후 완료돼요",
     "publishOutcomeScheduled": "예약됨 — 예약 시각에 자동 발행돼요",
     "publishOutcomeNoChannel": "발행 채널이 아직 지정되지 않았어요",
     "publishOutcomeNoDraft": "제출된 채널 포스트 초안이 없어요",

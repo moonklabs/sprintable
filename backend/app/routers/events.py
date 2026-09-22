@@ -1390,6 +1390,51 @@ def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: 
     return json.dumps({"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False)
 
 
+# story #4090/#4093/#4142 공유 — gate.publish_outcome(닫힌 어휘 코드)을 "다음 행동" 한
+# 줄로 번역한다. `_render_gate_verdict_message`의 두 표면이 같은 변환을 쓴다: ① 다음
+# stage가 채널 자동발행 대상인 게이트의 승인 안내(#4090 AC3) ② scoped channel_post
+# 게이트 자신의 승인 안내(#4142 AC3 — «발행은 휴먼이 화면에서 해요»가 실제로는 자동
+# 발행되는 채널에도 잘못 뜨던 결함). 지어내지 않는다 원칙 — 실제 publish_outcome 값
+# 그대로만 반영.
+def _recipe_auto_publish_outcome_line(outcome: str | None, resolved_locale: str) -> str:
+    if outcome == "published":
+        return t("events.gate_verdict_recipe_auto_published", resolved_locale)
+    # story #4142(페드루 PO 처방, 2026-09-22) — 비동기 컨테이너(REELS 등)가 아직 완결
+    # 안 된 비최종 상태. "이미 발행됐어요"라고 지어내지 않는다.
+    if outcome == "publishing":
+        return t("events.gate_verdict_recipe_auto_publish_processing", resolved_locale)
+    if outcome == "scheduled":
+        return t("events.gate_verdict_recipe_auto_publish_scheduled", resolved_locale)
+    if outcome:
+        # story #3779 정정 — gate.publish_outcome은 닫힌 어휘 코드(한글 완성 문장
+        # 아님). 여기서 코드→locale 문구로 번역한다.
+        _reason_key_map = {
+            "no_channel_binding": "events.gate_verdict_recipe_auto_publish_reason_no_channel",
+            "no_submitted_draft": "events.gate_verdict_recipe_auto_publish_reason_no_draft",
+            "no_resolver": "events.gate_verdict_recipe_auto_publish_reason_no_resolver",
+        }
+        # story #4090/#4093 정정 — "publish_failed:<code>"의 <code>도 닫힌 어휘라 그
+        # 코드도 별도 키로 번역한다(커넥터 원문 미노출, 미지 코드는 제네릭 폴백).
+        _failure_reason_key_map = {
+            "connector_error": "events.gate_verdict_recipe_auto_publish_reason_connector_error",
+            "rate_limited": "events.gate_verdict_recipe_auto_publish_reason_rate_limited",
+            "auth_expired": "events.gate_verdict_recipe_auto_publish_reason_auth_expired",
+        }
+        if outcome in _reason_key_map:
+            _reason_text = t(_reason_key_map[outcome], resolved_locale)
+        elif outcome.startswith("publish_failed:"):
+            _failure_code = outcome[len("publish_failed:"):]
+            _failure_key = _failure_reason_key_map.get(_failure_code)
+            _reason_text = (
+                t(_failure_key, resolved_locale) if _failure_key
+                else t("events.gate_verdict_recipe_auto_publish_reason_unknown_failure", resolved_locale)
+            )
+        else:
+            _reason_text = t("events.gate_verdict_recipe_auto_publish_reason_unknown_failure", resolved_locale)
+        return t("events.gate_verdict_recipe_auto_publish_skipped", resolved_locale, reason=_reason_text)
+    return t("events.gate_verdict_recipe_auto_publish_pending", resolved_locale)
+
+
 async def _render_gate_verdict_message(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict, resolved_locale: str = "ko",
 ) -> str:
@@ -1573,7 +1618,41 @@ async def _render_gate_verdict_message(
                 site_post_command_exists = (await db.execute(
                     select(PublicationCommand.id).where(PublicationCommand.gate_id == gate_row.id)
                 )).first() is not None
-            if is_site_post and site_post_command_exists:
+            # story #4142(페드루 PO 처방, 2026-09-22) — «발행은 휴먼이 화면에서 해요»가
+            # 레시피 자동발행 대상 channel_post 게이트(scope_key=connection_id, #4090
+            # AC2가 사람 클릭 0으로 처리)에도 잘못 뜨던 결함. 이 gate_row 자신이 scoped
+            # external_publish 게이트일 때만, 그 연결을 트리거한 unscoped 게이트를
+            # 거꾸로 찾아(#4093 리졸버 재사용 — 새 판별 로직 발명 0) 실제
+            # publish_outcome을 그대로 반영한다. 못 찾으면(레시피 무관 수동 channel_post)
+            # 기존 human_only 그대로 — 정말 사람이 눌러야 하는 경우까지 잘못 바꾸지
+            # 않는다.
+            # ⛔페드루 PO CHANGES-1(PR #4518 리뷰) — 실 Gate 행에선 scope_key/work_item_id
+            # 둘 다 NOT NULL 컬럼(gate.py 62-85행)이라 getattr 방어는 프로덕션 코드에
+            # 쓸 반창고가 아니라 mock 테스트더블(_FakeGateRow)을 살리려는 우회였다 —
+            # 직접 접근으로 되돌리고, 테스트더블 쪽을 실 모양으로 채운다(4514에서 같은
+            # 이유로 SimpleNamespace 목을 GateResponse.model_construct로 바꾼 선례와
+            # 동형 원칙: 목을 실물에 맞추지, 실물을 목에 맞추지 않는다).
+            _recipe_auto_publish_line: str | None = None
+            if not is_site_post and gate_row is not None and gate_row.scope_key:
+                try:
+                    _scope_connection_id = uuid.UUID(gate_row.scope_key)
+                except (ValueError, TypeError, AttributeError):
+                    _scope_connection_id = None
+                if _scope_connection_id is not None:
+                    from app.services.channel_posts import resolve_recipe_context_for_scheduled_publication
+
+                    _recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
+                        db, org_id=org_id, work_item_id=gate_row.work_item_id,
+                        connection_id=_scope_connection_id,
+                    )
+                    if _recipe_ctx is not None:
+                        _recipe_gate, _recipe_def_key, _recipe_next_stage = _recipe_ctx
+                        _recipe_auto_publish_line = _recipe_auto_publish_outcome_line(
+                            _recipe_gate.publish_outcome, resolved_locale,
+                        )
+            if _recipe_auto_publish_line is not None:
+                lines.append(f"- {_recipe_auto_publish_line}")
+            elif is_site_post and site_post_command_exists:
                 lines.append(f"- {t('events.gate_verdict_next_action_publish_command_created', resolved_locale)}")
             else:
                 lines.append(f"- {t('events.gate_verdict_next_action_publish_human_only', resolved_locale)}")
@@ -1651,47 +1730,7 @@ async def _render_gate_verdict_message(
                     # 실제 결과를 그대로 반영(지어내지 않는다, PO 확定 반복 원칙).
                     if (_next_meta.get("capability") or {}).get("target") == "channel_connection":
                         _outcome = gate_row.publish_outcome if gate_row is not None else None
-                        if _outcome == "published":
-                            _example_line = f"- {t('events.gate_verdict_recipe_auto_published', resolved_locale)}"
-                        elif _outcome == "scheduled":
-                            _example_line = f"- {t('events.gate_verdict_recipe_auto_publish_scheduled', resolved_locale)}"
-                        elif _outcome:
-                            # story #3779 정정 — gate.publish_outcome은 닫힌 어휘 코드(한글
-                            # 완성 문장 아님, channel_posts.py 주석 참고). 여기서 코드→
-                            # locale 문구로 번역한다(3표면 중 이 자리만 코드→문구 변환이
-                            # 필요 — FE facts 블록은 자체 ko/en.json 매핑, 승인 응답은
-                            # 원 코드값 그대로 노출해도 무방).
-                            _reason_key_map = {
-                                "no_channel_binding": "events.gate_verdict_recipe_auto_publish_reason_no_channel",
-                                "no_submitted_draft": "events.gate_verdict_recipe_auto_publish_reason_no_draft",
-                                "no_resolver": "events.gate_verdict_recipe_auto_publish_reason_no_resolver",
-                            }
-                            # story #4090/#4093 정정(페드루 PO 지적 2026-09-21) —
-                            # "publish_failed:<code>"의 <code>도 닫힌 어휘(connector_error|
-                            # rate_limited|auth_expired, channel_posts.py::classify_publish_
-                            # failure_outcome)라 그 코드도 별도 키로 번역한다 — 미지 코드가
-                            # 와도(구버전 등) 지어내지 않고 제네릭 실패 문구로 폴백.
-                            _failure_reason_key_map = {
-                                "connector_error": "events.gate_verdict_recipe_auto_publish_reason_connector_error",
-                                "rate_limited": "events.gate_verdict_recipe_auto_publish_reason_rate_limited",
-                                "auth_expired": "events.gate_verdict_recipe_auto_publish_reason_auth_expired",
-                            }
-                            if _outcome in _reason_key_map:
-                                _reason_text = t(_reason_key_map[_outcome], resolved_locale)
-                            elif _outcome.startswith("publish_failed:"):
-                                _failure_code = _outcome[len("publish_failed:"):]
-                                _failure_key = _failure_reason_key_map.get(_failure_code)
-                                _reason_text = (
-                                    t(_failure_key, resolved_locale) if _failure_key
-                                    else t("events.gate_verdict_recipe_auto_publish_reason_unknown_failure", resolved_locale)
-                                )
-                            else:
-                                _reason_text = t("events.gate_verdict_recipe_auto_publish_reason_unknown_failure", resolved_locale)
-                            _example_line = (
-                                f"- {t('events.gate_verdict_recipe_auto_publish_skipped', resolved_locale, reason=_reason_text)}"
-                            )
-                        else:
-                            _example_line = f"- {t('events.gate_verdict_recipe_auto_publish_pending', resolved_locale)}"
+                        _example_line = f"- {_recipe_auto_publish_outcome_line(_outcome, resolved_locale)}"
                     else:
                         _example_line = (
                             f"- {t('events.gate_verdict_next_action_publish_example', resolved_locale, example=_example_json)}"

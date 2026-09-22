@@ -5314,6 +5314,7 @@
     "linkedChannelDraftImageAlt": "Attached image",
     "linkedChannelDraftOpenLink": "Open draft",
     "publishOutcomePublished": "Published",
+    "publishOutcomePublishing": "Publishing in progress — will finish shortly",
     "publishOutcomeScheduled": "Scheduled — will auto-publish at the scheduled time",
     "publishOutcomeNoChannel": "No publish channel bound yet",
     "publishOutcomeNoDraft": "No submitted channel post draft",

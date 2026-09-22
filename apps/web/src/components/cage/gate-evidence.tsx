@@ -685,6 +685,10 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
 // channel_posts.py 주석과 동일 규율) — 이 함수가 코드→locale 문구로 번역한다.
 function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>): string {
   if (code === 'published') return t('publishOutcomePublished');
+  // story #4142(페드루 PO 처방, 2026-09-22) — 비동기 컨테이너(REELS 등)가 아직 완결
+  // 안 됐을 때의 비최종 상태. "발행됨"과 명확히 갈라야 한다(이 카드가 «발행됨»을
+  // 거짓으로 보여주던 실사고의 직접 처방).
+  if (code === 'publishing') return t('publishOutcomePublishing');
   if (code === 'scheduled') return t('publishOutcomeScheduled');
   if (code === 'no_channel_binding') return t('publishOutcomeNoChannel');
   if (code === 'no_submitted_draft') return t('publishOutcomeNoDraft');

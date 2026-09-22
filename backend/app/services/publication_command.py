@@ -898,6 +898,66 @@ async def apply_command_failure(
     )
 
 
+# story #4142 AC5(페드루 PO CHANGES-1, 2026-09-22) — 이 여유(5분)는 정상 진행 中인
+# 컨테이너(30초 폴링 간격, story 620beefc B3)와 겹칠 일이 없을 만큼 크게 잡는다 —
+# 정상 경로(즉시-발행 라우터·#4142 AC1 수정 레시피 경로 둘 다)는 컨테이너 생성과
+# 같은 커밋에서 command를 남기므로, 5분 뒤에도 command가 없다는 것 자체가 "그
+# 커밋 경로가 어떤 이유로든 명령을 안 남겼다"는 신호다.
+_STUCK_CONTAINER_SWEEP_THRESHOLD_MINUTES = 5
+
+
+async def _sweep_stuck_container_created_publications(db: AsyncSession, *, now: datetime) -> int:
+    """story #4142 AC5(페드루 PO CHANGES-1) — 클래스 처방. `container_created`인데
+    `PublicationCommand`가 하나도 없는(pending·completed 등 상태 불문 전무) 발행물을
+    훑어 같은 헬퍼(`create_or_get_publication_command`)로 pending 1건을 뒤늦게
+    큐잉한다 — 이미 Cloud Scheduler로 도는 이 워커 tick 자체가 매번 스스로 고치므로,
+    특정 사람이 스크립트/Job을 손으로 돌릴 필요가 0이다(2호 초안 9e879c8a도 배포
+    뒤 다음 tick부터 저절로 완주).
+
+    새로 큐잉한 command는 이 tick 안에서 곧바로 처리하지 않는다(`next_attempt_at`=
+    +30s, 컨테이너 폴링 30초 관례 그대로) — 방금 만들어진 정상 컨테이너와 똑같은
+    대기를 거친다(같은 tick 즉시완료 특혜 0), 다음 tick이 실제로 이어 폴링한다."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+
+    threshold = now - timedelta(minutes=_STUCK_CONTAINER_SWEEP_THRESHOLD_MINUTES)
+    stuck_rows = (await db.execute(
+        select(ChannelPublication).where(
+            ChannelPublication.status == "container_created",
+            ChannelPublication.created_at < threshold,
+        )
+    )).scalars().all()
+
+    queued = 0
+    for pub in stuck_rows:
+        already_has_command = (await db.execute(
+            select(PublicationCommand.id).where(
+                PublicationCommand.org_id == pub.org_id, PublicationCommand.destination == pub.connection_id,
+                PublicationCommand.approved_version == pub.version_id, PublicationCommand.operation == "publish",
+                PublicationCommand.toggle_seq == 0,
+            )
+        )).first()
+        if already_has_command is not None:
+            continue
+
+        gate = await db.get(Gate, pub.gate_id)
+        if gate is None or gate.resolver_id is None:
+            # 승인자를 알 수 없으면(비정상 상태) 조용히 스킵 — 지어내지 않는다.
+            # 사람이 다시 승인하면 정상 경로가 이어받는다.
+            continue
+
+        command, _created = await create_or_get_publication_command(
+            db, org_id=pub.org_id, gate_id=pub.gate_id, destination=pub.connection_id,
+            approved_version=pub.version_id, requested_by_member_id=gate.resolver_id,
+            scheduled_at=None,
+        )
+        command.next_attempt_at = now + timedelta(seconds=30)
+        queued += 1
+    if queued:
+        await db.commit()
+    return queued
+
+
 async def process_due_publication_commands(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3414 AC3 — cron 워커의 유일한 진입점. `scheduled_at`(예약 시각, null=즉시라
     이미 동기 경로가 처리했어야 함 — 여기 남아 있다면 그 동기 경로가 중간에 죽은
@@ -917,6 +977,10 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     개별 트랜잭션(커밋 경계)으로 처리 — 한 건의 실패(또는 진짜 미분류 버그)가 배치의
     나머지 org·command를 막지 않는다(AC4 격리, 이 축은 원래 구조 그대로)."""
     now = now or datetime.now(timezone.utc)
+    # story #4142 AC5 — 이 tick이 실제 due-command를 집기 前에 self-heal 스윕부터.
+    # 방금 큐잉된 command는 next_attempt_at=+30s라 아래 SELECT엔 안 걸린다(같은
+    # tick 즉시완료 특혜 0 — 다음 tick이 잇는다).
+    await _sweep_stuck_container_created_publications(db, now=now)
     rows = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.status == "pending",
