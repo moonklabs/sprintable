@@ -116,7 +116,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
               aria-label={t('hypothesesStatusFilterAriaLabel', { label: statusLabelWithJosa })}
               onClick={() => setStatusFilter(statusFilter === status ? null : status)}
               className={cn(
-                'h-auto min-h-0 min-w-0 rounded-lg p-0 transition-opacity hover:bg-transparent',
+                'h-auto min-h-0 min-w-0 rounded-lg p-0 transition-opacity hover:bg-transparent hover:text-inherit',
                 statusFilter !== null && statusFilter !== status && 'opacity-50 hover:opacity-100',
               )}
             >
@@ -152,7 +152,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
                   variant="ghost"
                   onClick={() => goToDetail(h.id)}
                   aria-label={t('hypothesesGoToDetailAriaLabel', { n: index + 1, label: h.statement })}
-                  className="h-auto min-h-0 w-full min-w-0 justify-start rounded-none p-0 text-left text-sm font-medium text-foreground hover:bg-transparent hover:underline"
+                  className="h-auto min-h-0 w-full min-w-0 items-start justify-start whitespace-normal rounded-none p-0 text-left text-sm font-medium text-foreground hover:bg-transparent hover:text-foreground hover:underline"
                 >
                   {h.statement}
                 </Button>
