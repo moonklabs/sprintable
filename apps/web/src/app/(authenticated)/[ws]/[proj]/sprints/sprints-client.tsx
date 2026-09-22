@@ -747,8 +747,13 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           내부 스크롤)이 더 이상 페이지의 유일한 콘텐츠가 아니게 됐다 — 바깥을 세로 스크롤
           컬럼으로 바꾸고(retro/page.tsx·docs 등 다른 [ws]/[proj] 페이지가 이미 쓰는
           flex-1 overflow-y-auto 관례), split 자체는 고정 최소높이(shrink-0)로 내부
-          스크롤을 유지한 채 그 안 콘텐츠 조각이 된다. */}
-      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
+          스크롤을 유지한 채 그 안 콘텐츠 조각이 된다.
+          story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          이 바깥 스크롤 컬럼이 자기 높이를 잃어 안의 split(각자 독립 overflow-y-auto)도
+          같이 풀린다 — 여기서 직접 앵커(h-[calc(100svh-3rem)], 3rem=셸 TopBar h-12,
+          WorkspaceFrameTabs 자체 높이는 반영 안 함 — 그만큼 여유가 남거나 페이지가 살짝
+          스크롤되는 수준, 기능 파손 아님). */}
+      <div className="focus-inset flex h-[calc(100svh-3rem)] min-h-0 flex-col overflow-y-auto">
       <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>

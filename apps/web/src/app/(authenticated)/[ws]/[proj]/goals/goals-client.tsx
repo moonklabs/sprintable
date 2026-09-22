@@ -1281,8 +1281,13 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
         showContextChip
       />
 
-      {/* Desktop layout: list + slide-in detail panel */}
-      <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
+      {/* Desktop layout: list + slide-in detail panel.
+          story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 게이트
+          상세 sticky 픽스) 이 2열 split(리스트+상세, 각자 독립 overflow-y-auto)이 뷰포트
+          기준 고정 높이를 잃는다 — 여기서 직접 앵커(h-[calc(100svh-3rem)], 3rem=셸 TopBar
+          h-12). ActivationChecklistBanner 표시 시엔 그만큼 못 미침(페이지 스크롤로 보정,
+          기능 파손 아님) — PO 라이브 확認 요청. */}
+      <div className="hidden h-[calc(100svh-3rem)] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
         <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
           {listPanel}
         </div>
@@ -1300,8 +1305,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       {/* Mobile layout */}
       {/* min-h-0 필수 — 없으면 flex item 기본 min-height:auto가 content 높이만큼 커져
           이 wrapper의 overflow-hidden이 하단 콘텐츠를 스크롤 불가하게 clip한다(desktop
-          분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정). */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:hidden">
+          분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정).
+          story #4130 — 같은 이유로 h-[calc(100svh-3rem)] 앵커 추가(위 desktop 분기와 동형). */}
+      <div className="flex h-[calc(100svh-3rem)] min-h-0 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
           <div className="min-h-0 flex-1">{listPanel}</div>
         ) : (

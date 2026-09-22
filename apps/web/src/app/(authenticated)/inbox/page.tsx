@@ -482,7 +482,10 @@ export default function InboxPage() {
         showContextChip
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
+          이 탭 콘텐츠 영역(알림 탭은 리스트+상세 split, 각자 독립 overflow-y-auto)이 자기
+          높이를 잃는다 — 여기서 직접 앵커(h-[calc(100svh-3rem)], 3rem=셸 TopBar h-12). */}
+      <div className="flex h-[calc(100svh-3rem)] min-h-0 flex-col overflow-hidden">
         {/* 탭 — 오늘(Attention Queue) / 알림 / 결재함(게이트). AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
         <div className="flex shrink-0 border-b border-border/80 px-4">
           {INBOX_TABS.map(({ key, label }) => (

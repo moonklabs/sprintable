@@ -81,7 +81,11 @@ export default function MorePage() {
   }, [hubGroups, normalizedQuery, t]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+    // story #4130 — 이 페이지엔 스크롤 영역 위에 고정해 둘 별도 툴바가 없다(TopBarSlot은
+    // 포털이라 로컬 공간을 안 씀) — 로컬 min-h-0/flex-1/overflow-y-auto 경계를 걷어내고
+    // 셸의 단일 스크롤러(:199)가 그대로 스크롤하게 둔다(gates/[id]/page.tsx와 동형 처리,
+    // #4121 픽스가 기대하는 «콘텐츠 높이로 자란다» 그 자체).
+    <div className="flex flex-col p-4">
       {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — 이 4탭 루트는 TopBarSlot을 아예 안 써서
           allowlist(showContextChip)로 켤 자리가 없었다. "슬롯 없으면 자동 켬"은 fail-open이라
           금지(유나양) — 슬롯을 명시적으로 쓰게 해서 켠다.
