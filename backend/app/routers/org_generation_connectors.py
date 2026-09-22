@@ -32,11 +32,13 @@ from app.services.org_generation_connector import (
     GenerationConnectorInvalidLocationError,
     GenerationConnectorInvalidProviderError,
     GenerationConnectorLabelDuplicateError,
+    GenerationConnectorNotActiveError,
     GenerationConnectorNotFoundError,
     create_org_generation_connector,
     list_org_generation_connectors,
     resolve_generation_connector_location,
     revoke_org_generation_connector,
+    update_org_generation_connector_location,
 )
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["generation-connectors"])
@@ -126,6 +128,12 @@ class GenerationConnectorListResponse(BaseModel):
     connectors: list[GenerationConnectorResponse]
 
 
+class GenerationConnectorLocationPatchRequest(BaseModel):
+    """story #4166 — 자격 무접촉. `location`만 받는다(다른 필드는 이 엔드포인트의
+    스코프 밖 — 있어도 무시가 아니라 애초에 스키마에 없어 422)."""
+    location: str
+
+
 @router.post(
     "/{org_id}/generation-connectors", response_model=GenerationConnectorResponse, status_code=201,
 )
@@ -195,4 +203,40 @@ async def revoke_generation_connector_endpoint(
         row = await revoke_org_generation_connector(db, org_id=org_id, connector_id=connector_id)
     except GenerationConnectorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="generation connector not found") from exc
+    return _to_response(row)
+
+
+@router.patch(
+    "/{org_id}/generation-connectors/{connector_id}", response_model=GenerationConnectorResponse,
+)
+async def patch_generation_connector_location_endpoint(
+    org_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    body: GenerationConnectorLocationPatchRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> GenerationConnectorResponse:
+    """story #4166 — 리전만 바꾼다(자격 무접촉·응답에 credentials 0, 등록/revoke와
+    동일 write-only 계약). active 커넥터만(409) — 바인딩이 revoked 커넥터를 가리킬
+    일이 없으므로(#4101) 바꿔 봐야 쓸모가 없다."""
+    _require_org_match(org_id, verified_org_id)
+    await _require_org_admin(db, auth, org_id)
+    try:
+        row = await update_org_generation_connector_location(
+            db, org_id=org_id, connector_id=connector_id, location=body.location,
+            actor_id=uuid.UUID(auth.user_id),
+        )
+    except GenerationConnectorInvalidLocationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported location {exc.location!r} — must be one of "
+                   f"{sorted(GENERATION_CONNECTOR_LOCATIONS)}",
+        ) from exc
+    except GenerationConnectorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="generation connector not found") from exc
+    except GenerationConnectorNotActiveError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "GENERATION_CONNECTOR_NOT_ACTIVE"},
+        ) from exc
     return _to_response(row)

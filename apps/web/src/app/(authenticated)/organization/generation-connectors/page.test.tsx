@@ -59,12 +59,12 @@ async function flush() {
 
 const CONNECTOR_ACTIVE = {
   id: 'gen-1', provider_key: 'vertex_gemini', label: '메인 연산 커넥터',
-  model_config_json: { image: 'imagen-3', video: 'veo-2' }, status: 'active', created_by: 'm1',
+  model_config_json: { image: 'imagen-3', video: 'veo-2' }, location: 'global', status: 'active', created_by: 'm1',
   created_at: '2026-09-01T00:00:00Z', revoked_at: null,
 };
 const CONNECTOR_REVOKED = {
   id: 'gen-2', provider_key: 'vertex_gemini', label: '지난 캠페인 커넥터',
-  model_config_json: {}, status: 'revoked', created_by: 'm1',
+  model_config_json: {}, location: 'global', status: 'revoked', created_by: 'm1',
   created_at: '2026-08-01T00:00:00Z', revoked_at: '2026-09-02T00:00:00Z',
 };
 
@@ -330,5 +330,85 @@ describe('OrganizationGenerationConnectorsPage — 해지 확認(AC2)', () => {
     expect(revoked).toBe(true);
     expect(document.body.querySelector('[data-status-chip="revoked"]')).toBeTruthy();
     expect(document.body.querySelector('[data-testid="gc-revoke-gen-1"]')).toBeNull();
+  });
+});
+
+// story #4166(3호 실측, 2026-09-22) — 리전 변경 행 액션(AC4·AC5). owner/admin·
+// active 커넥터에만 select가 뜨고, 값을 바꾸면 즉시 PATCH가 나간다(등록 폼처럼
+// 별도 저장 버튼 없이 값 자체가 액션).
+describe('OrganizationGenerationConnectorsPage — 리전 변경 행 액션(#4166)', () => {
+  it('owner/admin·active — select가 보이고, 일반 멤버·revoked 행엔 기존 읽기전용 칩만 보인다', async () => {
+    stubList([CONNECTOR_ACTIVE, CONNECTOR_REVOKED]);
+    await mount();
+
+    expect(document.body.querySelector('[data-testid="gc-location-select-gen-1"]')).toBeTruthy();
+    // revoked 행은 여전히 읽기전용 칩.
+    expect(document.body.querySelector('[data-testid="gc-location-select-gen-2"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gc-location-chip"]')).toBeTruthy();
+  });
+
+  it('일반 멤버 — active 행에도 select 없이 읽기전용 칩만 보인다', async () => {
+    asRole('member');
+    stubList([CONNECTOR_ACTIVE]);
+    await mount();
+
+    expect(document.body.querySelector('[data-testid="gc-location-select-gen-1"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gc-location-chip"]')).toBeTruthy();
+  });
+
+  it('select 값을 바꾸면 PATCH가 나가고 목록이 갱신된다', async () => {
+    let patchedBody: unknown;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        patchedBody = JSON.parse(init.body as string);
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: { connectors: [{ ...CONNECTOR_ACTIVE, location: patchedBody ? 'asia-northeast3' : 'global' }] },
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(patchedBody).toEqual({ location: 'asia-northeast3' });
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
+  });
+
+  it('PATCH 실패 — 에러 문구가 뜨고 목록을 다시 불러온다', async () => {
+    let reloadCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === `/api/organizations/${ORG_ID}/generation-connectors/gen-1` && init?.method === 'PATCH') {
+        return { ok: false, status: 409, json: async () => ({ detail: { code: 'GENERATION_CONNECTOR_NOT_ACTIVE' } }) };
+      }
+      if (url.startsWith(`/api/organizations/${ORG_ID}/generation-connectors`)) {
+        reloadCount += 1;
+        return { ok: true, json: async () => ({ data: { connectors: [CONNECTOR_ACTIVE] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mount();
+    const initialReloadCount = reloadCount;
+
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')!;
+    await act(async () => {
+      select.value = 'asia-northeast3';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain(koMessages.organization.gcLocationChangeError);
+    expect(reloadCount).toBeGreaterThan(initialReloadCount); // 실패해도 목록을 다시 불러 실제 상태를 보여준다.
   });
 });

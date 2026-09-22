@@ -13,7 +13,10 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { pickEulReulJosa } from '@/lib/korean-particle';
-import { GenerationConnectorRegisterForm } from '@/components/organization/generation-connector-register-form';
+import {
+  GenerationConnectorRegisterForm,
+  GENERATION_CONNECTOR_LOCATIONS,
+} from '@/components/organization/generation-connector-register-form';
 
 /**
  * story #4116(#4112 유나 시안 55a04e8d 승인본, PO 승인 2026-09-21 15:05Z) — 연산
@@ -25,6 +28,11 @@ import { GenerationConnectorRegisterForm } from '@/components/organization/gener
  *
  * BFF는 #4101에 이미 있다(GET 목록·POST 등록·POST revoke) — 이 PR은 BE/BFF 무변,
  * 있는 것만 소비한다.
+ *
+ * story #4166(3호 실측, 2026-09-22) — 리전만 바꾸는 행 액션. 이전엔 자격 재발급·
+ * 재등록·재바인딩·구 커넥터 해지 4단계가 필요했다. select를 바로 PATCH에 걸어
+ * 즉시 반영(등록 폼의 별도 «저장» 버튼과 다르게, 행 안에서 값 자체가 액션) —
+ * active 커넥터에만 보인다(revoked는 BE가 409로 거부, #4166 서비스 계층).
  *
  * story #4117 FE 라이더(#4116 화면 위, PR #4492가 이미 착지시킨 BE DTO의
  * created_at/revoked_at 소비) — #4116 최초 구현 당시엔 응답 DTO에 그 두 필드가
@@ -67,6 +75,8 @@ export default function OrganizationGenerationConnectorsPage() {
   const [registering, setRegistering] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; label: string } | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [locationPatchTargetId, setLocationPatchTargetId] = useState<string | null>(null);
+  const [locationPatchError, setLocationPatchError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!orgId) { setStatus('loaded'); return; }
@@ -102,6 +112,35 @@ export default function OrganizationGenerationConnectorsPage() {
     }
   };
 
+  const handleLocationChange = async (connectorId: string, location: string) => {
+    if (!orgId) return;
+    setLocationPatchTargetId(connectorId);
+    setLocationPatchError(null);
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/generation-connectors/${connectorId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location }),
+        },
+      );
+      if (res.ok) {
+        load();
+      } else {
+        // story #4166 — 다른 탭이 먼저 해지한 경합(409)까지 코드별로 나누지 않는다
+        // (select 값 자체가 허용 목록이라 422는 정상 흐름에서 안 남 — 남는 경우는
+        // 전부 "그 사이 상태가 바뀜" 부류라 reload로 실제 상태를 보여주는 편이 정확).
+        setLocationPatchError(t('gcLocationChangeError'));
+        load();
+      }
+    } catch {
+      setLocationPatchError(t('gcLocationChangeError'));
+    } finally {
+      setLocationPatchTargetId(null);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
       <PageHeader
@@ -129,6 +168,12 @@ export default function OrganizationGenerationConnectorsPage() {
           tc={tc}
           tChannel={tChannel}
         />
+      ) : null}
+
+      {locationPatchError ? (
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+          <AlertDescription>{locationPatchError}</AlertDescription>
+        </Alert>
       ) : null}
 
       {status === 'failed' ? (
@@ -163,13 +208,31 @@ export default function OrganizationGenerationConnectorsPage() {
                     <span className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                       {c.provider_key}
                     </span>
-                    {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출). */}
-                    <span
-                      data-testid="gc-location-chip"
-                      className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-                    >
-                      {c.location}
-                    </span>
+                    {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출).
+                        story #4166 — owner/admin·active 커넥터는 칩 대신 select(값
+                        자체가 즉시-적용 행 액션, 자격 무접촉). 그 외는 기존 읽기전용
+                        칩 그대로. */}
+                    {isOwnerOrAdmin && c.status === 'active' ? (
+                      <select
+                        aria-label={t('gcLocationChangeAriaLabel', { n: index + 1, label: c.label })}
+                        data-testid={`gc-location-select-${c.id}`}
+                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground disabled:opacity-60"
+                        value={c.location}
+                        disabled={locationPatchTargetId === c.id}
+                        onChange={(e) => void handleLocationChange(c.id, e.target.value)}
+                      >
+                        {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        data-testid="gc-location-chip"
+                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      >
+                        {c.location}
+                      </span>
+                    )}
                     <span
                       data-status-chip={c.status}
                       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}
