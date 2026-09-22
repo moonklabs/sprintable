@@ -345,6 +345,47 @@ const SPRINTS_TOOLBAR_INSIDE = `
   if (!pass) allPass = false;
 }
 
+// (I) P0 핫픽스(선생님 실사용 2026-09-22 03:24Z, 페드루 PO 라이브 사슬 실측) —
+// chats/layout.tsx 루트가 #4130 착지 前엔 `flex-1`(부모 캡 의존)만 썼는데, #4130이
+// 부모(dashboard-shell 콘텐츠 열)의 min-h-0를 뺀 뒤로 그 캡을 잃어 chat-view.tsx의
+// 내부 스크롤러(`relative min-h-0 flex-1 overflow-y-auto`, 실 소스 그대로)가 내용
+// 높이로 자라 무한 backfill(맨 위 sentinel이 스크롤러 뷰포트 안에 항상 들어옴)로
+// 이어졌다. docs류(E)와 동형 처방(조상에 h-[calc(100svh-var(--shell-chrome-h))]
+// 앵커) — chat-view 자신은 무변경으로 bounded 복원되는지 검증한다.
+const CHATS_LIKE = `
+  <div class="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden">
+    <div data-testid="chat-rail" class="hidden lg:flex min-h-0 w-[270px] shrink-0 flex-col overflow-hidden border-r">rail</div>
+    <div data-testid="chat-outlet" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div style="flex-shrink:0;border-bottom:1px solid #ccc;padding:8px 16px">채팅 헤더(고정)</div>
+      <div data-testid="chat-scroller" class="relative min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div class="flex flex-col gap-4">
+          <div data-testid="sentinel" class="h-px w-full"></div>
+          ${manyItems(80, '#eef')}
+        </div>
+      </div>
+    </div>
+  </div>
+`;
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
+  await page.setContent(shellHtml(CHATS_LIKE, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME }));
+  const chatScroller = page.getByTestId('chat-scroller');
+  const scroller = page.locator('#scroller');
+
+  const chatClientH = await chatScroller.evaluate((el) => el.clientHeight);
+  const chatScrollH = await chatScroller.evaluate((el) => el.scrollHeight);
+  const scrollerClientH = await scroller.evaluate((el) => el.clientHeight);
+  const scrollerScrollH = await scroller.evaluate((el) => el.scrollHeight);
+  await page.close();
+
+  console.log(`(I) chats/[id](P0 핫픽스) — chat-view 내부 스크롤러 clientH=${chatClientH}/scrollH=${chatScrollH} · 바깥 #scroller clientH=${scrollerClientH}/scrollH=${scrollerScrollH}`);
+  const chatBounded = chatClientH < chatScrollH - 2; // 내부 스크롤러가 콘텐츠를 다 못 보여줘야(진짜 스크롤 가능) — 무한로드의 반대 증거
+  const outerNotGrown = scrollerScrollH <= scrollerClientH + 2; // 바깥 셸 스크롤러가 안 자람(내부로 흡수 안 됨)
+  const pass = chatBounded && outerNotGrown;
+  console.log(`    chat-view 내부 스크롤러 bounded(무한로드 0)? ${chatBounded} · 바깥 #scroller 안 자람(라이브 증상 재현 0)? ${outerNotGrown} : ${pass ? 'PASS(조상 앵커만으로 chat-view 무변경 복원 — docs류 E와 동형)' : 'FAIL — #4130 회귀급 재발'}`);
+  if (!pass) allPass = false;
+}
+
 await browser.close();
 console.log(allPass ? '\nOK — 전부 기대대로' : '\nFAIL — 위 판정 참고');
 process.exit(allPass ? 0 : 1);

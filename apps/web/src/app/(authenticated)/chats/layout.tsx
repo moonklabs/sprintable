@@ -79,7 +79,17 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
     : '';
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
+    // P0 핫픽스(선생님 실사용 2026-09-22 03:24Z, 페드루 PO 라이브 사슬 실측) — #4130이
+    // dashboard-shell 콘텐츠 열에서 min-h-0를 빼 그 열이 내용 높이로 자라게 했는데, 이
+    // 루트가 `flex-1`(부모 캡에 기대는 방식)만 쓰고 있어 그 캡을 잃었다 → 아래 chat-view
+    // 내부 스크롤러(min-h-0 flex-1 overflow-y-auto)가 내용 높이로 자라 내부 스크롤이 안
+    // 생기고, 맨 위 sentinel이 IntersectionObserver root(그 스크롤러) 박스 안에 항상
+    // 들어있어 handleLoadMore가 hasMore 꺼질 때까지 연속 발화 → 무한 backfill+바깥 셸
+    // 스크롤러가 계속 자람(짧은 방은 안 튀어 #4130 감사 20파일에서 빠졌다). #4130/#4131이
+    // docs·goals·settings·inbox에 이미 쓴 것과 같은 처방 — 부모 캡 의존(`flex-1`) 대신
+    // 명시 높이 앵커(`h-[calc(100svh-var(--shell-chrome-h))]`, TopBar+모바일 탭바 SSOT
+    // 변수)로 이 열 자신이 뷰포트 상한을 스스로 갖는다(부모 사슬이 흔들려도 무관).
+    <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden">
       {/* story #2921 S6 — collapsed 상태에서 backdrop 클릭으로 오버레이를 다시 접는다(overlay일
           때만 존재, 데스크톱 전용이라 모바일 기존 동작과 안 겹침). 장식용 click-catcher일 뿐
           실제 콘텐츠(rail 자신)가 role="dialog"를 지므로 접근성 트리에서 뺀다(aria-hidden). */}
