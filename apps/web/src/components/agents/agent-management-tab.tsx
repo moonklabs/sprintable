@@ -30,18 +30,24 @@ export function formatAgentRuntimeLine(
   agent: Pick<OrgAgent, 'client_version' | 'plugin_version' | 'session_started_at'>,
   locale: string,
   displayTimezone: string,
-  t: (key: string, values?: Record<string, string>) => string,
+  // story #4129 CI RED(check-i18n-keys.js) — 이 파라미터가 `t`였을 때, 이 파일의
+  // `const t = useTranslations('settings')`(scripts/check-i18n-keys.js는 스코프를
+  // 모르는 파일 단위 정적 매칭이라 함수 파라미터의 섀도잉을 못 본다)로 오귀속돼
+  // agentRuntimeSegment류를 실제 호출부 네임스페이스(agents, 아래 `ta` 인자)가 아니라
+  // settings 네임스페이스에서 찾다 missing 처리했다. 파라미터명을 `t`와 겹치지 않게
+  // 바꿔 그 정적 매칭 오귀속 자체를 원천 차단(페드루 PO 리뷰).
+  translate: (key: string, values?: Record<string, string>) => string,
 ): string | null {
   const segments: string[] = [];
   if (agent.client_version) {
-    segments.push(t('agentRuntimeSegment', { version: agent.client_version }));
+    segments.push(translate('agentRuntimeSegment', { version: agent.client_version }));
   }
   if (agent.plugin_version) {
-    segments.push(t('agentRuntimePluginSegment', { version: agent.plugin_version }));
+    segments.push(translate('agentRuntimePluginSegment', { version: agent.plugin_version }));
   }
   if (agent.session_started_at) {
     const relative = formatRelativeTime(agent.session_started_at, locale, displayTimezone);
-    if (relative) segments.push(t('agentRuntimeSessionSegment', { relative }));
+    if (relative) segments.push(translate('agentRuntimeSessionSegment', { relative }));
   }
   if (segments.length === 0) return null;
   return segments.join(' · ');
