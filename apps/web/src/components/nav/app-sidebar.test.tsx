@@ -89,10 +89,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(userName?: string) {
+async function mount(userName?: string, navV3Flags?: { todayV3Enabled: boolean; chatV3Enabled: boolean; connectRulesV3Enabled: boolean }) {
   await act(async () => {
     root.render(withProviders(
-      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} />,
+      <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} navV3Flags={navV3Flags} />,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -126,6 +126,9 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
 // 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다. 5항목(챗 center 제외 4 + 챗 center 1,
 // 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다.
+// story #4003 — flag OFF(이 스위트의 기본 렌더 조건, navV3Flags 미전달)에서 5항목
+// 전부 지금 develop과 바이트 동일(회귀 0). 「일감」의 flag-aware work-list 전환은
+// 별도 describe(하단 "v3 nav 단일 소스" 스위트)가 ON 케이스로 검증.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
   '일감': '/flow',
@@ -508,5 +511,45 @@ describe('AppSidebar — story #3775 셸 결함(userName 빈 값이어도 Profil
       (el) => el.textContent === koMessages.accountSwitcher.setName,
     );
     expect(setNameItem).toBeFalsy();
+  });
+});
+
+// story #4003(E-UX-OVERHAUL·셸 통합 2/N) — navV3Flags prop이 실제로 렌더된 href까지
+// 전파되는지(nav-config.ts::resolveNavGroups/resolveChatCenterItem 소비 배선 확認).
+// 결정 로직 자체(플래그 8조합 표)는 nav-v3-destinations.test.ts·nav-config-v3-flags
+// .test.ts가 전담 — 여기선 "prop을 실제로 넘기면 화면이 바뀌는가"만.
+describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', () => {
+  it('⭐navV3Flags 미전달(OFF 기본값) — 지금 develop과 바이트 동일 href', async () => {
+    expandAllGroups();
+    await mount();
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink?.getAttribute('href')).toBe('/org-briefing');
+  });
+
+  it('todayV3Enabled — 「오늘」 href가 /today로 바뀐다', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    expect(todayLink?.getAttribute('href')).toBe('/today');
+  });
+
+  it('connectRulesV3Enabled — 연결·규칙 그룹에 통합 항목이 앞에 추가되고 옛 2항목도 그대로 보인다(옛 진입점 유지)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    const links = [...container.querySelectorAll('a')];
+    const v3Link = links.find((a) => a.getAttribute('href') === '/connect-rules');
+    expect(v3Link).toBeDefined();
+    expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(true);
+    expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(true);
+  });
+
+  // CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」은 어느 단일 플래그에도 안 걸려있어
+  // 셋 중 하나만 켜도(여기선 connectRulesV3Enabled) work-list로 전환되는지 확認 —
+  // 반대로 셋 다 OFF면 위 「navV3Flags 미전달」 테스트와 동형으로 /flow 그대로.
+  it('임의 플래그 하나(connectRulesV3Enabled)만 ON이어도 「일감」이 work-list로 바뀐다(단일 플래그 의존 0)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
+    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
+    expect(workLink?.getAttribute('href')).toBe('/work-list');
   });
 });

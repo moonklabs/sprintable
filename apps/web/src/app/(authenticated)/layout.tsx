@@ -7,6 +7,7 @@ import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 import { AuUsageBanner } from '@/ee/components/billing/au-usage-banner';
+import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 
 interface MemberContext {
   id: string;
@@ -137,6 +138,17 @@ export default async function AuthenticatedLayout({
   // 폴백하지 않도록 `projectName` prop 자체를 pathProjectId 미스매치 시 넘기지 않는다 —
   // 틀린 이름을 보여주느니 이름을 비워 칩이 org만 보여주게 한다(유나양 §1-1: 모르면
   // 단정하지 않는다).
+  // story #4003(E-UX-OVERHAUL·셸 통합 2/N) — v3 3화면(오늘·대화·연결·규칙) 자신의
+  // `isTodayV3Enabled()` 등(today-v3.ts 등)과 동일한 env 게이트를 여기서도 직접 읽는다
+  // (그 파일들은 아직 develop에 없다 — 미착지 PR 4365/4370/4376에만 존재, 착지 뒤
+  // 3/N에서 이 직접 읽기를 그 헬퍼 import로 교체 예정). 레거시 sidebar(client
+  // component)는 process.env를 못 읽어(non-NEXT_PUBLIC_) 이 서버 레이아웃이 유일한
+  // 읽기 지점 — DashboardShell→AppSidebar로 값만 내려보낸다.
+  const navV3Flags: NavV3Flags = {
+    todayV3Enabled: process.env['TODAY_V3_ENABLED'] === 'true',
+    chatV3Enabled: process.env['CHAT_V3_ENABLED'] === 'true',
+    connectRulesV3Enabled: process.env['CONNECT_RULES_V3_ENABLED'] === 'true',
+  };
   const projectNameForDisplay = (!pathProjectId || pathProjectId === me?.project_id)
     ? (me?.project_name ?? undefined)
     : undefined;
@@ -169,6 +181,7 @@ export default async function AuthenticatedLayout({
       orgMemberships={orgMemberships}
       pathOrgId={pathOrgId}
       pathProjectId={pathProjectId}
+      navV3Flags={navV3Flags}
     >
       <StorageCapacityToastProvider>
         <CrossProjectToastProvider>
