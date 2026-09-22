@@ -53,4 +53,17 @@ describe('DesktopPage — story #4012 서버 게이트', () => {
     DesktopPage();
     expect(redirectMock).toHaveBeenCalledWith('/org-briefing');
   });
+
+  // story #4017 CHANGES 1(페드루 PO 지적, 2026-09-22) — 리다이렉트 목적지는 하드코딩
+  // '/org-briefing'이 아니라 resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path
+  // (proxy.ts와 동일 소스) — TODAY_V3_ENABLED=true면 /today로 따라간다.
+  it('TODAY_V3_ENABLED=true면 목적지가 /org-briefing이 아니라 /today로(단일소스 추종)', async () => {
+    process.env.DESKTOP_DOWNLOAD_ENABLED = 'false';
+    process.env.TODAY_V3_ENABLED = 'true';
+    vi.resetModules();
+    const { default: DesktopPage } = await import('./page');
+    DesktopPage();
+    expect(redirectMock).toHaveBeenCalledWith('/today');
+    delete process.env.TODAY_V3_ENABLED;
+  });
 });
