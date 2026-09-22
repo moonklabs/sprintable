@@ -1,0 +1,1 @@
+{"file": "tests/test_3953_external_publish_pause.py", "sec": 50.0, "provisional": true, "source": "story-3953-external-publish-pause(디디, 2026-09-17) — 로컬 raw pytest 9건 8.38s 실측치를 CI 배율(~6x, story #3383 관례) 보수적으로 반영한 잠정값, 실 CI 샤드 로그로 재확認 필요 — provisional:true(story #4152 관례, 이전 등재 누락분 정정)"}

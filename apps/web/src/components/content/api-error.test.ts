@@ -289,6 +289,18 @@ describe('parseSitePostApiError (story #3368, doc phase0-post-manager-screen-des
       expect(parseSitePostApiError({ error: { code: 'SITE_POST_REAPPROVAL_REQUIRED', message: '…' } }).kind).toBe('reapproval_required');
     });
 
+    // story #3953(블루프린트 §1-5) — EXTERNAL_PUBLISH_PAUSED(423, 조직 전체 킬스위치).
+    // BE 메시지에는 reason이 실려도(str(exc)) FE는 정적 labelKey로 덮는다(reason은
+    // /organization/channels 스위치 카드가 별도로 보여준다, 이 자리는 "지금 왜
+    // 안 되는지" 1줄이면 충분 — 다른 KNOWN_ERRORS 엔트리와 동형).
+    test('⭐EXTERNAL_PUBLISH_PAUSED — kind=external_publish_paused·정적 labelKey(reason 무보간)', () => {
+      const result = parseSitePostApiError({
+        error: { code: 'EXTERNAL_PUBLISH_PAUSED', message: '조직이 외부 발행을 일시 중지했습니다(사유: 점검)' },
+      });
+      expect(result.kind).toBe('external_publish_paused');
+      expect(result.humanMessageKey).toBe('errorExternalPublishPaused');
+    });
+
     test('CHANNEL_PUBLISH_PROVIDER_ERROR — kind=provider_error', () => {
       const result = parseSitePostApiError({ error: { code: 'CHANNEL_PUBLISH_PROVIDER_ERROR', message: 'provider 원문' } });
       expect(result.kind).toBe('provider_error');

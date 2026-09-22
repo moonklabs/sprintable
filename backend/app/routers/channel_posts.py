@@ -20,6 +20,7 @@ from app.models.channel_post_image import ChannelPostImage
 from app.models.channel_post_version import ChannelPostVersion
 from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
+from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.project_auth import require_project_access
 from app.services.channel_posts import (
@@ -2054,7 +2055,10 @@ async def publish_channel_post_draft_endpoint(
     resolved = await _require_human(db, auth, org_id)
 
     from app.services.channel_posts import resolve_command_target
-    from app.services.publication_command import record_publication_attempt, apply_command_failure, create_or_get_publication_command
+    from app.services.publication_command import (
+        record_publication_attempt, apply_command_failure, create_or_get_publication_command,
+        FAILURE_KIND_PAUSED,
+    )
 
     try:
         draft, latest, gate = await resolve_command_target(db, org_id=org_id, draft_id=draft_id)
@@ -2162,6 +2166,27 @@ async def publish_channel_post_draft_endpoint(
         raise HTTPException(
             status_code=403,
             detail=_with_command_state({"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)}),
+        ) from exc
+    except ExternalPublishPausedError as exc:
+        # story #3953(블루프린트 §1-5) — 조직 owner가 외부 발행을 일시 중지했다.
+        # apply_command_failure로 안 보낸다(needs_check→dead_letter 백오프는 "재시도해도
+        # 안 되는" 부류인데 pause는 "지금은 안 되지만 owner가 풀면 자동 재개"라 그
+        # 정책과 안 맞는다 — external_publish_pause.py::set_external_publish_pause의
+        # 해제 재큐가 이 값(failure_kind=paused)만 골라 되살린다). conversations.py의
+        # circuit_breaker_open과 같은 결(일시 차단·423)로 상태코드를 맞춘다.
+        await _record_this_attempt(approval_check="paused", adapter_called=False, result_code=None)
+        command.status = "blocked"
+        command.failure_kind = FAILURE_KIND_PAUSED
+        command.last_error = str(exc)[:2000]
+        await db.commit()
+        # §3779(페드루 PO 정정) — BE는 사람 문장을 싣지 않는다: FE(api-error.ts
+        # EXTERNAL_PUBLISH_PAUSED 엔트리, "reason 표시 0" 명시 주석)가 이 message를
+        # 안 쓰고 정적 labelKey만 렌더한다 — str(exc)는 중립 코드꼴
+        # (external_publish_pause.py, Korean 0)이라 그대로 실어도 안전
+        # (publication_command.py 워커 경로의 last_error와 동형).
+        raise HTTPException(
+            status_code=423,
+            detail=_with_command_state({"code": "EXTERNAL_PUBLISH_PAUSED", "message": str(exc)}),
         ) from exc
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — 위 EXTERNAL_PUBLISH_APPROVAL_REQUIRED와 동형 처리(adapter
