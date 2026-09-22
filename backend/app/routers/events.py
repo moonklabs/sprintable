@@ -3663,93 +3663,71 @@ async def get_recipe_start_candidates(
     return RecipeStartCandidatesResponse(candidates=candidates)
 
 
-class GenerationConnectorReadResponse(BaseModel):
-    """story #4110(#4109 PO 결정, 2026-09-21) — 바인딩 crew 에이전트 전용 읽기 응답.
-    org_generation_connectors.py::GenerationConnectorResponse(사람용 BFF)와 달리
-    credentials 필드가 **있다** — 그쪽은 write-only 계약(사람 화면엔 절대 노출 안 함)이고
-    이 경로는 애초에 에이전트가 그 값으로 provider를 직접 호출하라고 짓는 자리라 반환이
-    곧 계약이다(#4095 Q①(b) — 제품이 아니라 에이전트가 자기 실행)."""
-    model_config = {"protected_namespaces": ()}
+async def _resolve_crew_scoped_recipe_binding(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+    auth: AuthContext, capability_target: str, code_prefix: str, binding_id_column,
+) -> tuple[uuid.UUID, str, object]:
+    """story #4132 CHANGES-1(페드루 PO 리뷰, 2026-09-22) — `get_my_generation_connector`
+    (#4110/#4109 PO 결정)와 `get_my_channel_connection_status`(#4132)가 판정 1~6단계를
+    ~150줄 그대로 복사하고 있었다: target 문자열·바인딩 id 컬럼·에러 코드 접두만 달랐다.
+    두 엔드포인트 docstring이 스스로 "순서 자체가 계약"이라 썼는데 계약이 두 벌이면
+    다음 #4124류 수정(넓은 crew 사전 관문이 그 예)을 두 번 해야 하고, 한 벌만 고쳐지면
+    그날부터 두 엔드포인트가 다른 판정을 한다 — 이 함수로 공용화해 그 위험을 구조로
+    없앤다. 7단계(호출부별 커넥터/연결 조회 + 그 결과에 따른 응답 형태)와 응답 조립은
+    각 엔드포인트에 남는다(이 함수는 "바인딩 id 하나를 안전하게 해소"까지만 책임).
 
-    provider_key: str
-    label: str
-    model_config_json: dict
-    credentials: str
-
-
-@router.get(
-    "/work-items/{work_item_type}/{work_item_id}/generation-connector",
-    response_model=GenerationConnectorReadResponse,
-)
-async def get_my_generation_connector(
-    work_item_type: str,
-    work_item_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-) -> GenerationConnectorReadResponse:
-    """story #4110(#4109 그라운딩 doc 733459ac «PO 결정», 2026-09-21) — 바인딩 crew
-    에이전트가 자기 레시피 적용의 generation_connector-target stage에 바인딩된 org
-    연산 커넥터 config·자격을 읽는다. `decrypt_generation_connector_credential()`의
-    첫 실제 호출처(#4101이 write-only로 지어둔 뒤 콜러 0이었던 것을 #4109 그라운딩이
-    확認 — 이 카드가 그 첫 독자).
-
-    판정 순서(전부 되돌리면 RED, #4110 AC1/AC2 + #4124 AC1):
-    1. 호출자가 agent 아니면(human) 403 — 자격 노출은 에이전트 실행 경로만
-       (org_generation_connectors.py의 사람용 BFF는 애초에 credentials를 안 돌려주는
-       것과 대칭 축, 여기는 "누가 부르는지"로 가른다).
+    판정 순서(전부 되돌리면 RED — 이 함수 하나를 두 스위트(`test_4110_generation_
+    connector_read_realdb.py`·`test_4132_channel_connection_status_realdb.py`)가
+    공유하므로, 순서를 깨는 변경은 두 스위트 모두에서 RED가 난다 — 뮤테이션으로 직접
+    확認, PR#4509 CHANGES-1):
+    1. 호출자가 agent 아니면(human) 403 — 자격 인접 엔드포인트는 "누가 부르는지"로
+       먼저 가른다(사람용 BFF들의 반대축).
     2. work_item → project를 못 찾으면(work item 자체가 없음) 404.
     3. ⛔story #4124(PO 실측, 2026-09-21) — 이 project(+ org 전역)에 **적용된**(바인딩이
        하나라도 있는) 모든 event_definition_key에 걸쳐, 호출 에이전트가 그 어느 키에도
        `RecipeRoleBinding.agent_member_id`로 안 묶여 있으면 여기서 바로 403(그 다음
-       검사 0 — stage 매칭도 안 돈다). #4110 CHANGES-1이 crew 판정을 바인딩/커넥터
+       검사 0 — stage 매칭도 안 돈다). #4110 CHANGES-1이 crew 판정을 바인딩/자격
        조회보다 앞으로 옮겼지만 그 판정 자체가 아래 4번(stage 매칭 루프, matched_key
        필요) **뒤**에 있었다 — 완전히 crew 밖인 호출자(라이브 실측: 이 project/org
-       어느 적용에도 전혀 안 묶인 에이전트)도 그 루프가 먼저 돌아 "지금 활성
-       generation_connector stage가 없다"(stage-mismatch, 4번)는 사실을 crew 판정보다
-       먼저 알 수 있었다. 이 넓은 사전 관문이 그 구멍을 막는다.
+       어느 적용에도 전혀 안 묶인 에이전트)도 그 루프가 먼저 돌아 "지금 활성 target
+       stage가 없다"(stage-mismatch, 4번)는 사실을 crew 판정보다 먼저 알 수 있었다.
+       이 넓은 사전 관문이 그 구멍을 막는다.
     4. 그 project(+ org 전역)에 바인딩된 레시피 중 **이 work_item에 실제로 시작된**
        것(`get_recipe_start_candidates`와 동일 SSOT — `_find_existing_stage_publish`로
        "시작됐는가", `_find_latest_stage_publish`로 "지금 어느 stage인가")을 찾아, 그
-       현재 stage 중 `capability.target=="generation_connector"`인 게 하나도 없으면
-       403(stage 불일치 — "지금 이 도구를 쓸 차례가 아니다"). 여러 레시피가 동시에
-       걸려도 새 판정을 안 짓는다 — target이 맞는 stage가 하나라도 나오면 그것을 쓴다.
+       현재 stage 중 `capability.target==capability_target`인 게 하나도 없으면 403
+       (stage 불일치 — "지금 이 도구를 쓸 차례가 아니다"). 여러 레시피가 동시에 걸려도
+       새 판정을 안 짓는다 — target이 맞는 stage가 하나라도 나오면 그것을 쓴다.
     5. 호출 에이전트가 이 특정 matched_key의 crew(#4109 PO 결정 — 같은 org·[project
        특이 ∪ org 전역]·event_definition_key의 `RecipeRoleBinding.agent_member_id`
        집합) 밖이면 403 — 3번(넓은 사전 관문)을 통과했어도(다른 키의 crew일 뿐) 이
        좁은 최종 판정은 그대로 지킨다(다른 적용의 crew가 이 stage를 요청하는 경계
        사례를 여전히 정확히 막는다). `resolve_member().id` 직접비교는 휴먼 JWT
-       caller에서 축이 어긋날 수 있다는 기존 경고(S19, 위 734행)가 있으나 그건 human
-       축 얘기 — 1번에서 이미 agent만 통과시켰고 `agent_member_id` 자체가 agent 전용
-       컬럼(TeamMember.id 공간)이라 여기선 axis-safe.
-    6. 그 stage에 바인딩된 `generation_connector_id`가 없으면 404(project 특이 우선,
-       org 전역 폴백 — `_resolve_recipe_role_binding`과 동일 우선순위).
-    7. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면 409.
-    8. 감사 로그 1행 — `logger.info`(구조화, 자격값 절대 미포함). 신규 DB 테이블/마이그
-       0: `permission_audit_logs`는 `action` 닫힌 CHECK(member_added/member_removed/
-       role_changed, baseline/schema.sql 1541행 실측)라 이 목적에 안 맞아 재사용하지
-       않는다 — 새 테이블을 여는 대신(스코프 밖) 기존 로그 축에 싣는다.
-    9. `{provider_key, label, model_config_json, credentials}` 평문 1회 반환.
+       caller에서 축이 어긋날 수 있다는 기존 경고(S19)가 있으나 그건 human 축 얘기 —
+       1번에서 이미 agent만 통과시켰고 `agent_member_id` 자체가 agent 전용 컬럼
+       (TeamMember.id 공간)이라 여기선 axis-safe.
+    6. 그 stage에 바인딩된 `binding_id_column`(호출부가 넘기는 `RecipeRoleBinding.
+       generation_connector_id`|`.channel_connection_id`) 값이 없으면 404(project
+       특이 우선, org 전역 폴백 — `_resolve_recipe_role_binding`과 동일 우선순위).
+
+    반환: `(caller.id, matched_stage, binding_id)` — 호출부가 7단계(자기 자원 조회 +
+    응답 조립)를 이어서 한다.
     """
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.services.event_routing_resolver import _resolve_work_item_project_id
-    from app.services.generation_connector_credential_crypto import (
-        decrypt_generation_connector_credential,
-    )
     from app.services.member_resolver import resolve_member
-    from app.services.org_generation_connector import get_org_generation_connector
 
     caller = await resolve_member(auth, org_id, db)
     if caller.type != "agent":
-        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_READ_AGENT_ONLY"})
+        raise HTTPException(status_code=403, detail={"code": f"{code_prefix}_READ_AGENT_ONLY"})
 
     project_id = await _resolve_work_item_project_id(
         db, org_id=org_id,
         payload={"work_item_type": work_item_type, "work_item_id": str(work_item_id)},
     )
     if project_id is None:
-        raise HTTPException(status_code=404, detail={"code": "GENERATION_CONNECTOR_WORK_ITEM_NOT_FOUND"})
+        raise HTTPException(status_code=404, detail={"code": f"{code_prefix}_WORK_ITEM_NOT_FOUND"})
 
     binding_rows = (await db.execute(
         select(RecipeRoleBinding.event_definition_key).where(
@@ -3759,18 +3737,6 @@ async def get_my_generation_connector(
     )).all()
     applied_keys = sorted({k for (k,) in binding_rows})
 
-    # story #4124(PO 실측, 2026-09-21) — #4110 CHANGES-1이 crew 판정을 바인딩/커넥터
-    # 조회보다 앞으로 옮겼지만, 그 판정 자체가 여전히 stage-매칭 루프(아래, matched_key
-    # 필요) **뒤**에 있었다 — 호출자가 이 project/org의 어느 적용에도 전혀 안 묶인
-    # 완전한 crew 밖(라이브 실측: PO 에이전트 키)이어도, 루프가 먼저 돌아 "지금 활성
-    # generation_connector stage가 없다"는 사실(STAGE_MISMATCH)을 crew 판정보다 먼저
-    # 알려줬다 — 자격 인접 엔드포인트가 "누가 봐도 되는지"보다 "무엇이 있는지"를 먼저
-    # 답한 것(CHANGES-1이 막으려던 것과 같은 클래스, 범위만 넓음). 이 적용(applied_keys)
-    # 전체에 걸친 넓은 crew 집합(어느 키에든 바인딩된 적 있는 에이전트)으로 최소 자격을
-    # 여기서 먼저 거른다 — 통과 못 하면 그 다음 검사(stage 매칭·바인딩·revoked) 전부
-    # 0. 통과한 뒤에도 아래(3802행 부근) matched_key 한정 좁은 crew 판정은 그대로 둔다
-    # (다른 키의 crew가 이 키의 stage를 요청하는 경계 사례를 여전히 정확히 막는다 —
-    # 이 카드는 «완전 crew 밖»만 더 일찍 거르는 것이지 기존 좁은 판정을 대체하지 않는다).
     if applied_keys:
         broad_crew_ids = set((await db.execute(
             select(RecipeRoleBinding.agent_member_id).where(
@@ -3783,7 +3749,7 @@ async def get_my_generation_connector(
     else:
         broad_crew_ids = set()
     if caller.id not in broad_crew_ids:
-        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_CREW_ONLY"})
+        raise HTTPException(status_code=403, detail={"code": f"{code_prefix}_CREW_ONLY"})
 
     matched_key: str | None = None
     matched_stage: str | None = None
@@ -3826,18 +3792,13 @@ async def get_my_generation_connector(
             if not isinstance(stage_value, str):
                 continue
             capability = (definition.stage_metadata.get(stage_value) or {}).get("capability") or {}
-            if capability.get("target") == "generation_connector":
+            if capability.get("target") == capability_target:
                 matched_key, matched_stage = key, stage_value
                 break
 
     if matched_stage is None or matched_key is None:
-        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_STAGE_MISMATCH"})
+        raise HTTPException(status_code=403, detail={"code": f"{code_prefix}_STAGE_MISMATCH"})
 
-    # story #4110 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — crew 판정을 바인딩·커넥터 조회
-    # **앞**으로. 원래 순서(바인딩→커넥터→crew)면 crew 밖 에이전트도 404/409 응답으로
-    # "이 stage에 커넥터가 묶였는지·revoked인지"를 알 수 있었다 — 자격 인접 엔드포인트는
-    # 그 정보 자체도 최소로(누가 봐도 되는 걸 먼저 걸러야, 그 뒤에야 "무엇이 있는지"를
-    # 답한다).
     crew_ids = set((await db.execute(
         select(RecipeRoleBinding.agent_member_id).where(
             RecipeRoleBinding.org_id == org_id,
@@ -3847,27 +3808,85 @@ async def get_my_generation_connector(
         )
     )).scalars().all())
     if caller.id not in crew_ids:
-        raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_CREW_ONLY"})
+        raise HTTPException(status_code=403, detail={"code": f"{code_prefix}_CREW_ONLY"})
 
-    generation_connector_id = (await db.execute(
-        select(RecipeRoleBinding.generation_connector_id).where(
+    binding_id = (await db.execute(
+        select(binding_id_column).where(
             RecipeRoleBinding.org_id == org_id,
             RecipeRoleBinding.project_id == project_id,
             RecipeRoleBinding.event_definition_key == matched_key,
             RecipeRoleBinding.stage == matched_stage,
         )
     )).scalar_one_or_none()
-    if generation_connector_id is None:
-        generation_connector_id = (await db.execute(
-            select(RecipeRoleBinding.generation_connector_id).where(
+    if binding_id is None:
+        binding_id = (await db.execute(
+            select(binding_id_column).where(
                 RecipeRoleBinding.org_id == org_id,
                 RecipeRoleBinding.project_id.is_(None),
                 RecipeRoleBinding.event_definition_key == matched_key,
                 RecipeRoleBinding.stage == matched_stage,
             )
         )).scalar_one_or_none()
-    if generation_connector_id is None:
-        raise HTTPException(status_code=404, detail={"code": "GENERATION_CONNECTOR_BINDING_NOT_FOUND"})
+    if binding_id is None:
+        raise HTTPException(status_code=404, detail={"code": f"{code_prefix}_BINDING_NOT_FOUND"})
+
+    return caller.id, matched_stage, binding_id
+
+
+class GenerationConnectorReadResponse(BaseModel):
+    """story #4110(#4109 PO 결정, 2026-09-21) — 바인딩 crew 에이전트 전용 읽기 응답.
+    org_generation_connectors.py::GenerationConnectorResponse(사람용 BFF)와 달리
+    credentials 필드가 **있다** — 그쪽은 write-only 계약(사람 화면엔 절대 노출 안 함)이고
+    이 경로는 애초에 에이전트가 그 값으로 provider를 직접 호출하라고 짓는 자리라 반환이
+    곧 계약이다(#4095 Q①(b) — 제품이 아니라 에이전트가 자기 실행)."""
+    model_config = {"protected_namespaces": ()}
+
+    provider_key: str
+    label: str
+    model_config_json: dict
+    credentials: str
+
+
+@router.get(
+    "/work-items/{work_item_type}/{work_item_id}/generation-connector",
+    response_model=GenerationConnectorReadResponse,
+)
+async def get_my_generation_connector(
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> GenerationConnectorReadResponse:
+    """story #4110(#4109 그라운딩 doc 733459ac «PO 결정», 2026-09-21) — 바인딩 crew
+    에이전트가 자기 레시피 적용의 generation_connector-target stage에 바인딩된 org
+    연산 커넥터 config·자격을 읽는다. `decrypt_generation_connector_credential()`의
+    첫 실제 호출처(#4101이 write-only로 지어둔 뒤 콜러 0이었던 것을 #4109 그라운딩이
+    확認 — 이 카드가 그 첫 독자).
+
+    판정 1~6단계는 `_resolve_crew_scoped_recipe_binding`(story #4132 CHANGES-1로
+    `get_my_channel_connection_status`와 공유 — 순서 자체가 계약이라 계약을 한 벌로
+    합쳤다) 위임. 여기 남는 건 7단계뿐:
+    7. 그 커넥터가 이 org 소속이 아니거나 존재하지 않으면 404, `status != "active"`면
+       409(자격 인접 엔드포인트라 "재인증 필요"를 200으로 알려주지 않는다 —
+       `get_my_channel_connection_status`와 의도적으로 다른 지점).
+    8. 감사 로그 1행 — `logger.info`(구조화, 자격값 절대 미포함). 신규 DB 테이블/마이그
+       0: `permission_audit_logs`는 `action` 닫힌 CHECK(member_added/member_removed/
+       role_changed, baseline/schema.sql 1541행 실측)라 이 목적에 안 맞아 재사용하지
+       않는다 — 새 테이블을 여는 대신(스코프 밖) 기존 로그 축에 싣는다.
+    9. `{provider_key, label, model_config_json, credentials}` 평문 1회 반환.
+    """
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.generation_connector_credential_crypto import (
+        decrypt_generation_connector_credential,
+    )
+    from app.services.org_generation_connector import get_org_generation_connector
+
+    caller_id, matched_stage, generation_connector_id = await _resolve_crew_scoped_recipe_binding(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, auth=auth,
+        capability_target="generation_connector", code_prefix="GENERATION_CONNECTOR",
+        binding_id_column=RecipeRoleBinding.generation_connector_id,
+    )
 
     connector = await get_org_generation_connector(db, org_id=org_id, connector_id=generation_connector_id)
     if connector is None:
@@ -3877,7 +3896,7 @@ async def get_my_generation_connector(
 
     logger.info(
         "generation_connector_read: actor=%s org=%s connector=%s work_item=%s:%s stage=%s",
-        caller.id, org_id, connector.id, work_item_type, work_item_id, matched_stage,
+        caller_id, org_id, connector.id, work_item_type, work_item_id, matched_stage,
     )
 
     return GenerationConnectorReadResponse(
@@ -3885,6 +3904,81 @@ async def get_my_generation_connector(
         label=connector.label,
         model_config_json=connector.model_config_json,
         credentials=decrypt_generation_connector_credential(connector.encrypted_credentials),
+    )
+
+
+class ChannelConnectionStatusReadResponse(BaseModel):
+    """story #4132 — 바인딩 crew 에이전트 전용 상태 읽기. 자격/토큰/계정 식별자 0 —
+    `channel_connections.py::ChannelConnectionResponse`(사람용 BFF)는 account_id까지
+    노출하지만 이 응답은 발행 전 "쓸 수 있는지"만 답하는 게 계약이라 그보다도 더 좁다."""
+    connection_id: uuid.UUID
+    provider: str
+    status: str
+    needs_reauth: bool
+    # story #4132 CHANGES-1(PO 리뷰) — 이 값은 `ChannelConnection.last_refreshed_at`을
+    # 크루 친화적 이름으로 노출한 것뿐(같은 컬럼, 별도 "동작 확認" 이벤트가 실제로
+    # 있어 찍히는 타임스탬프가 아니다) — 이름만 보고 "방금 provider를 호출해 확認한
+    # 시각"으로 과신하지 말 것(last_refreshed_at은 토큰 갱신 성공 시각).
+    last_verified_at: str | None
+    display_name: str | None
+
+
+@router.get(
+    "/work-items/{work_item_type}/{work_item_id}/channel-connection",
+    response_model=ChannelConnectionStatusReadResponse,
+)
+async def get_my_channel_connection_status(
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ChannelConnectionStatusReadResponse:
+    """story #4132(민 실측 2026-09-21 20:21Z, PO 실측 23:40Z) — 발행(published) 단계를
+    맡은 crew 에이전트가 자기 바인딩된 채널 연결이 살아 있는지(재인증 필요 여부)를
+    발행 시점 전에 미리 안다. `channel-connections`(사람 전용 BFF, 403)의 자격 인접
+    대안.
+
+    판정 1~6단계는 `_resolve_crew_scoped_recipe_binding`(#4110/#4124와 공유, CHANGES-1
+    — target 문자열만 "generation_connector"→"channel_connection") 위임. 여기 남는
+    건 7단계뿐:
+    7. 그 연결이 이 org 소속이 아니거나 존재하지 않으면 404. **generation-connector와
+       달리 status!="active"여도 409를 안 던진다** — "재인증이 필요하다"는 사실 자체가
+       이 엔드포인트가 답해야 하는 정보라, revoked/expired/error도 200으로 status·
+       needs_reauth에 실어 보고한다(AC1 명시 — "연결 revoked/disconnected면 그 상태를
+       200으로 보고").
+    8. 감사 로그 1행 — `logger.info`(자격값 0, generation-connector와 동일 관례).
+    9. `{connection_id, provider, status, needs_reauth, last_verified_at, display_name}`
+       반환. `needs_reauth = status != "active"` — FE
+       `components/channel-connect/connection-status.ts::deriveChannelConnectionStatus`가
+       이미 이 판별(serverStatus가 expired/revoked/error면 reauth_required)을 쓰는
+       SSOT라 새 규칙을 여기서 발명하지 않는다.
+    """
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.channel_connection import get_channel_connection
+
+    caller_id, matched_stage, channel_connection_id = await _resolve_crew_scoped_recipe_binding(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, auth=auth,
+        capability_target="channel_connection", code_prefix="CHANNEL_CONNECTION",
+        binding_id_column=RecipeRoleBinding.channel_connection_id,
+    )
+
+    connection = await get_channel_connection(db, org_id=org_id, connection_id=channel_connection_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_CONNECTION_BINDING_NOT_FOUND"})
+
+    logger.info(
+        "channel_connection_status_read: actor=%s org=%s connection=%s work_item=%s:%s stage=%s",
+        caller_id, org_id, connection.id, work_item_type, work_item_id, matched_stage,
+    )
+
+    return ChannelConnectionStatusReadResponse(
+        connection_id=connection.id,
+        provider=connection.channel,
+        status=connection.status,
+        needs_reauth=connection.status != "active",
+        last_verified_at=connection.last_refreshed_at.isoformat() if connection.last_refreshed_at else None,
+        display_name=connection.account_label,
     )
 
 
