@@ -3784,7 +3784,7 @@ async def _resolve_crew_scoped_recipe_binding(
     """
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
-    from app.services.event_routing_resolver import _resolve_work_item_project_id
+    from app.services.event_routing_resolver import _resolve_work_item_project_id, resolve_broad_crew_member_ids
     from app.services.member_resolver import resolve_member
 
     caller = await resolve_member(auth, org_id, db)
@@ -3798,6 +3798,12 @@ async def _resolve_crew_scoped_recipe_binding(
     if project_id is None:
         raise HTTPException(status_code=404, detail={"code": f"{code_prefix}_WORK_ITEM_NOT_FOUND"})
 
+    # story #4147 — 넓은 crew 집합 계산은 event_routing_resolver.py::resolve_broad_crew_
+    # member_ids로 뽑혀나갔다(SQL 그대로 이동, 새 판정 0) — channel_posts.py(#4147 draft
+    # 미디어 참여 판정)도 이제 같은 함수를 쓴다. applied_keys 자체는 아래 stage-매칭
+    # 루프가 그대로 필요해 여기 남긴다(그 함수 내부에서 한 번 더 계산되지만 이 판정
+    # 순서·결과는 원래 인라인 코드와 동일 — 쿼리 중복 1회는 두 관심사(누가 crew인지 vs
+    # 어느 stage가 지금 활성인지)를 억지로 한 값에 묶지 않기 위한 트레이드오프).
     binding_rows = (await db.execute(
         select(RecipeRoleBinding.event_definition_key).where(
             RecipeRoleBinding.org_id == org_id,
@@ -3806,17 +3812,7 @@ async def _resolve_crew_scoped_recipe_binding(
     )).all()
     applied_keys = sorted({k for (k,) in binding_rows})
 
-    if applied_keys:
-        broad_crew_ids = set((await db.execute(
-            select(RecipeRoleBinding.agent_member_id).where(
-                RecipeRoleBinding.org_id == org_id,
-                RecipeRoleBinding.event_definition_key.in_(applied_keys),
-                RecipeRoleBinding.agent_member_id.is_not(None),
-                or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
-            )
-        )).scalars().all())
-    else:
-        broad_crew_ids = set()
+    broad_crew_ids = await resolve_broad_crew_member_ids(db, org_id=org_id, project_id=project_id)
     if caller.id not in broad_crew_ids:
         raise HTTPException(status_code=403, detail={"code": f"{code_prefix}_CREW_ONLY"})
 
