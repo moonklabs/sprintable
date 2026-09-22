@@ -24,7 +24,7 @@ function wrap(locale: 'ko' | 'en') {
   const messages = locale === 'ko' ? koMessages : enMessages;
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-      <OnboardingForm />
+      <OnboardingForm todayHref="/today" chatsHref="/chats" />
     </NextIntlClientProvider>
   );
 }

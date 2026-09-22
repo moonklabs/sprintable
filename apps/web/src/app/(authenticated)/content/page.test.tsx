@@ -19,6 +19,9 @@ const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock:
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4017 — OFF 상태 테스트라 레거시 값 그대로(실 훅의 navV3Flags undefined 분기와 동형).
+  useChatsHref: () => '/chats',
+  useConnectRulesHref: (fallback: string) => fallback,
 }));
 
 // story #3744 — ⋯ 행 메뉴의 「승인 요청 보기」가 useRouter().push()로 이동한다(insights-

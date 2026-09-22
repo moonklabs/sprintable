@@ -628,6 +628,25 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/org-briefing?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
   });
 
+  // story #4017(PO 확定 2026-09-17) AC3 — 플래그 ON 도착 주소 단언(딥링크 next= 보존 포함).
+  it('⭐TODAY_V3_ENABLED=true — 같은 상황에서 /today?next=...로 302(딥링크 next는 그대로 보존)', async () => {
+    process.env['TODAY_V3_ENABLED'] = 'true';
+    try {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) {
+          return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+      const response = await middleware(makeRequest('/docs/my-doc', { sp_at: token }));
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('https://app.example.com/today?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
+    } finally {
+      delete process.env['TODAY_V3_ENABLED'];
+    }
+  });
+
   it('org/project는 확定됐는데 BE 단건 조회만 실패(예: 삭제됨)해도 404 대신 /org-briefing?next=<원경로+되돌이방지마커>로 302(story #2212)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     mockFetch.mockImplementation((url: string) => {

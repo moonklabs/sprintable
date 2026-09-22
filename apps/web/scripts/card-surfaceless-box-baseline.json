@@ -21,7 +21,7 @@
     "app/(authenticated)/rewards/page.tsx": 2,
     "app/forgot-password/page.tsx": 1,
     "app/login/page.tsx": 3,
-    "app/mfa/page.tsx": 1,
+    "app/mfa/mfa-client.tsx": 1,
     "app/onboarding/connect-step.tsx": 1,
     "app/onboarding/onboarding-form.tsx": 1,
     "app/register/page.tsx": 2,

@@ -39,8 +39,8 @@ function setNativeValue(el: HTMLInputElement, value: string) {
 }
 
 async function mountAndSubmit() {
-  const { default: MfaPage } = await import('./page');
-  await act(async () => { root.render(<MfaPage />); });
+  const { MfaClient } = await import('./mfa-client');
+  await act(async () => { root.render(<MfaClient chatsHref="/chats" />); });
   const codeInput = container.querySelector('input[type="text"]') as HTMLInputElement;
   await act(async () => { setNativeValue(codeInput, '123456'); });
   const verifyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Verify');
@@ -50,7 +50,7 @@ async function mountAndSubmit() {
   });
 }
 
-describe('MfaPage — error.code 분기 (story #2484)', () => {
+describe('MfaClient — error.code 분기 (story #2484)', () => {
   it('INVALID_TOTP — raw 영문 대신 자체 카피', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false,

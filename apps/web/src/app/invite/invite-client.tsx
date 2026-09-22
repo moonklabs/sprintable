@@ -1,0 +1,381 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import { Loader2 } from 'lucide-react';
+import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { cn } from '@/lib/utils';
+import { InviteError, inviteErrorMessage } from '@/lib/invite-error-message';
+import { fetchWithAuth } from '@/lib/db/client';
+import { orgRoleLabel } from '@/lib/org-member-role';
+
+// d3619e80: invite_accept canonical InvitePreviewResponse 정합(org_name·role·status·expires_at·email).
+// inviter_name/email은 canonical 미제공(optional·미제공 시 generic 안내로 graceful degrade).
+interface InvitePreview {
+  org_name: string;
+  inviter_name?: string;
+  inviter_email?: string;
+  role: 'admin' | 'member';
+  status?: string;
+  expires_at: string;
+  email: string;
+}
+
+type AuthMode = 'signup' | 'login';
+type PageState = 'preview-loading' | 'preview-error' | 'auth' | 'accepting' | 'success';
+
+interface InviteClientProps {
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
+  // client라 process.env를 못 읽는다. 부모 page.tsx(서버)가
+  // resolveChatsHref(readNavV3FlagsFromEnv())로 구해 prop으로 내려준다. 필수로 둬서
+  // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
+  // 이걸로 사라진다.
+  chatsHref: string;
+}
+
+export function InviteClient({ chatsHref }: InviteClientProps) {
+  const t = useTranslations('invite');
+  const t2 = useTranslations('login');
+  const t3 = useTranslations('register');
+  const ts = useTranslations('settings');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const token = searchParams.get('token');
+
+  const [pageState, setPageState] = useState<PageState>('preview-loading');
+  const [preview, setPreview] = useState<InvitePreview | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string>('');
+
+  const [authMode, setAuthMode] = useState<AuthMode>('signup');
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [tosAccepted, setTosAccepted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!token) {
+      setPageState('preview-error');
+      setErrorMsg(t('invalidToken'));
+      return;
+    }
+    // d3619e80: invite_accept canonical(GET /api/v2/invites/{token}·InvitePreviewResponse).
+    fetchWithAuth(`/api/invites/${encodeURIComponent(token)}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+          // story #2484 — 미리보기 실패는 사실상 NOT_FOUND뿐이지만(backend
+          // invite_accept.py get_invite_preview), 코드 기반 분기를 그대로 적용.
+          throw new InviteError(json?.error?.code);
+        }
+        const json = await res.json() as { data: InvitePreview };
+        setPreview(json.data);
+        if (json.data.email) setEmail(json.data.email);
+        const meRes = await fetchWithAuth('/api/me');
+        if (meRes.ok) {
+          void acceptInvite(token);
+        } else {
+          setPageState('auth');
+        }
+      })
+      .catch((err: InviteError) => {
+        setPageState('preview-error');
+        setErrorMsg(inviteErrorMessage(t, err.code, 'invalidToken'));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const acceptInvite = async (inviteToken: string) => {
+    setPageState('accepting');
+    // d3619e80: invite_accept canonical(POST /api/invites/{token}/accept).
+    const res = await fetch(`/api/invites/${encodeURIComponent(inviteToken)}/accept`, {
+      method: 'POST',
+    });
+    if (res.ok) {
+      setPageState('success');
+      setTimeout(() => router.push(chatsHref), 1500); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 — 목적지 모듈 경유.
+    } else {
+      const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+      setPageState('preview-error');
+      setErrorMsg(inviteErrorMessage(t, json?.error?.code, 'acceptFailed'));
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!token || submitting) return;
+    if (authMode === 'signup') {
+      if (!displayName.trim() || !email.trim() || !password.trim() || !tosAccepted) return;
+    } else {
+      if (!email.trim() || !password.trim()) return;
+    }
+    setSubmitting(true);
+    setErrorMsg('');
+    try {
+      const endpoint = authMode === 'signup' ? '/api/auth/register' : '/api/auth/login';
+      const body = authMode === 'signup'
+        ? {
+            email: email.trim(),
+            password,
+            display_name: displayName.trim(),
+            tos_accepted: true,
+            invite_token: token,
+          }
+        : { email: email.trim(), password };
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+      if (!res.ok) {
+        // story #2484 — code로 분기. authMode에 따라 register/login 각자의 안정 코드 재사용
+        // (신규 키 대신 register/login 페이지와 같은 키 — 2벌 번역 갈림 방지).
+        const code = json?.error?.code;
+        if (authMode === 'signup' && code === 'EMAIL_TAKEN') {
+          setErrorMsg(t3('registerEmailTaken'));
+        } else if (authMode === 'login' && code === 'INVALID_CREDENTIALS') {
+          setErrorMsg(t2('loginInvalidCredentials'));
+        } else if (authMode === 'login' && code === 'ACCOUNT_LOCKED') {
+          setErrorMsg(t2('loginAccountLocked'));
+        } else {
+          setErrorMsg(t('authFailed'));
+        }
+        return;
+      }
+      if (authMode === 'signup') {
+        setPageState('success');
+        setTimeout(() => router.push(chatsHref), 1500); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 — 목적지 모듈 경유.
+      } else {
+        await acceptInvite(token);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (pageState === 'preview-loading') {
+    return (
+      <Frame>
+        <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <p className="text-sm">{t('loading')}</p>
+        </div>
+      </Frame>
+    );
+  }
+
+  if (pageState === 'preview-error') {
+    return (
+      <Frame>
+        {/* story #2105 2차 — 'preview-loading'에서 비동기로 전이되는 결과다(reset-password의
+            정적 초기렌더 invalidLink와 달리 마운트 후 상태변화라 aria-live 대상). */}
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-3 py-8 text-center">
+          <div className="text-3xl">✕</div>
+          <p className="text-sm text-destructive">{errorMsg}</p>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
+          <a href="/login" className="text-sm font-medium text-brand hover:text-brand/80">
+            {t('backToLogin')}
+          </a>
+        </div>
+      </Frame>
+    );
+  }
+
+  if (pageState === 'accepting' || pageState === 'success') {
+    return (
+      <Frame>
+        <div className="space-y-3 py-8 text-center animate-in fade-in duration-500">
+          <Loader2 className={cn(
+            'mx-auto h-6 w-6',
+            pageState === 'accepting' && 'animate-spin text-muted-foreground',
+            pageState === 'success' && 'text-success',
+          )} />
+          {pageState === 'success' && preview ? (
+            // story #2105 2차 — 성공 결과(가입 완료)도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
+            <div role="status" aria-live="polite" aria-atomic="true">
+              <p className="text-lg font-semibold tracking-tight text-foreground">
+                {t('joinedOrg', { org: preview.org_name })}
+              </p>
+              <p className="text-sm text-muted-foreground">{t('redirecting')}</p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('accepting')}</p>
+          )}
+        </div>
+      </Frame>
+    );
+  }
+
+  return (
+    <Frame>
+      {preview && (
+        <div className="space-y-6">
+          <div className="space-y-3 text-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-100 fill-mode-backwards">
+            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
+              {t.rich('joinHeading', {
+                org: preview.org_name,
+                b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
+              })}
+            </h1>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-200 fill-mode-backwards">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                {preview.inviter_name ? (
+                  <>
+                    <div className="truncate font-medium text-foreground">
+                      {t('invitedByPerson', { name: preview.inviter_name })}
+                    </div>
+                    {preview.inviter_email && (
+                      <div className="truncate text-xs text-muted-foreground">{preview.inviter_email}</div>
+                    )}
+                  </>
+                ) : (
+                  <div className="truncate font-medium text-foreground">
+                    {t('invitedByOrgFallback', { org: preview.org_name })}
+                  </div>
+                )}
+              </div>
+              <span className="shrink-0 rounded-md border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                {orgRoleLabel(preview.role, ts)}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500 delay-300 fill-mode-backwards">
+            <div className="flex gap-1 border-b border-border">
+              {(['signup', 'login'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => { setAuthMode(mode); setErrorMsg(''); }}
+                  className={cn(
+                    'relative -mb-px px-3 py-2 text-sm font-medium transition-colors',
+                    authMode === mode
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:text-foreground/80',
+                  )}
+                >
+                  {mode === 'signup' ? t2('signUp') : t2('signIn')}
+                  {authMode === mode && (
+                    <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-3">
+              {authMode === 'signup' && (
+                <input
+                  type="text"
+                  placeholder={t('namePlaceholder')}
+                  autoComplete="name"
+                  className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  disabled={submitting}
+                />
+              )}
+              <input
+                type="email"
+                placeholder={t2('email')}
+                autoComplete="email"
+                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={submitting}
+              />
+              <input
+                type="password"
+                placeholder={t2('password')}
+                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void handleSubmit()}
+                disabled={submitting}
+              />
+              {authMode === 'signup' && (
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={tosAccepted}
+                    onChange={(e) => setTosAccepted(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-brand"
+                    disabled={submitting}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {t('tosAgreement')}
+                  </span>
+                </label>
+              )}
+            </div>
+
+            {errorMsg && (
+              // story #2105 2차 — handleSubmit이 재시도 전 setErrorMsg('')를 먼저 호출해(위 정의)
+              // 매 시도마다 언마운트→리마운트된다.
+              <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{errorMsg}</p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || (authMode === 'signup'
+                ? (!displayName.trim() || !email.trim() || !password.trim() || !tosAccepted)
+                : (!email.trim() || !password.trim()))}
+              className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {submitting ? t('joining') : t('submit')}
+            </button>
+          </div>
+
+          <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500 delay-400 fill-mode-backwards">
+            <div className="relative flex items-center">
+              <div className="flex-grow border-t border-border/50" />
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t2('orContinueWith')}</span>
+              <div className="flex-grow border-t border-border/50" />
+            </div>
+            <a
+              href={`/auth/login?provider=google&invite_token=${encodeURIComponent(token!)}&tos_accepted=true`}
+              className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50"
+            >
+              <GoogleIcon />
+              {t2('google')}
+            </a>
+          </div>
+        </div>
+      )}
+    </Frame>
+  );
+}
+
+function Frame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,_var(--brand)_/_0.08,_transparent_60%)]"
+      />
+      <div className="relative w-full max-w-md space-y-8 rounded-2xl border border-border bg-background/95 p-6 shadow-xl shadow-foreground/[0.02] backdrop-blur sm:p-8">
+        <div className="flex justify-center animate-in fade-in duration-500">
+          <SprintableLogo variant="stacked" className="text-foreground" markClassName="h-10" wordmarkClassName="h-4" />
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    </svg>
+  );
+}

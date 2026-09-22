@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -486,6 +486,8 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
 
 export default function ChannelPostEditPage() {
   const { orgId, role } = useDashboardContext();
+  // story #4017(PO 확定 2026-09-17) — 아래 4곳의 「연결 화면」 링크를 목적지 모듈로.
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
@@ -2777,7 +2779,7 @@ export default function ChannelPostEditPage() {
         {draft.command_status === 'blocked' || (canPublish && blockedByCommandInFlight) ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-command-inflight-reason">
             {t.rich(commandInFlightReasonKey, {
-              link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+              link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
             })}
           </p>
         ) : null}
@@ -2803,7 +2805,7 @@ export default function ChannelPostEditPage() {
                 owner에게 요청하라는 안내라 이 화면 안에 갈 곳이 없다(링크 없음 그대로). */}
             {role === 'owner'
               ? t.rich('channelPostsUnpublishScopeInsufficientOwner', {
-                link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+                link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
               })
               : t('channelPostsUnpublishScopeInsufficientNonOwner')}
           </p>
@@ -2813,7 +2815,7 @@ export default function ChannelPostEditPage() {
           // 하나뿐인데 전역 내비를 뒤지게 하지 않는다).
           <p className="text-xs text-muted-foreground" data-testid="channel-post-unpublish-disabled-reason" data-unpublish-reason="connection_not_active">
             {t.rich('channelPostsUnpublishConnectionNotActive', {
-              link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+              link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
             })}
           </p>
         ) : showUnpublish && canUnpublish && unpublishGate === undefined ? (
@@ -3563,7 +3565,7 @@ export default function ChannelPostEditPage() {
       {!isOverLimit && !hasBlockingViolations && blockedByCommandInFlight ? (
         <p className="text-xs text-muted-foreground" data-testid="channel-post-schedule-submit-command-inflight-reason">
           {t.rich(commandInFlightReasonKey, {
-            link: (chunks) => <Link href="/organization/channels" className="underline">{chunks}</Link>,
+            link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
           })}
         </p>
       ) : null}

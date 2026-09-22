@@ -34,7 +34,7 @@ let root: Root;
 function wrap() {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <OnboardingForm />
+      <OnboardingForm todayHref="/today" chatsHref="/chats" />
     </NextIntlClientProvider>
   );
 }

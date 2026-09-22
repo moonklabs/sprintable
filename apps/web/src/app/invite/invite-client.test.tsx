@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import InvitePage from './page';
+import { InviteClient } from './invite-client';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
@@ -63,10 +63,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe('InvitePage — joinHeading t.rich() 렌더 (story #2084)', () => {
+describe('InviteClient — joinHeading t.rich() 렌더 (story #2084)', () => {
   it('ko: 조직명이 <b> 리터럴 없이 강조 span으로 렌더되고 문장이 정확하다', async () => {
     stubSuccessFlow();
-    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const h1 = container.querySelector('h1');
@@ -79,7 +79,7 @@ describe('InvitePage — joinHeading t.rich() 렌더 (story #2084)', () => {
 
   it('en: 조직명이 <b> 리터럴 없이 강조 span으로 렌더되고 문장이 정확하다', async () => {
     stubSuccessFlow();
-    await act(async () => { root.render(wrap('en', <InvitePage />)); });
+    await act(async () => { root.render(wrap('en', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const h1 = container.querySelector('h1');
@@ -93,7 +93,7 @@ describe('InvitePage — joinHeading t.rich() 렌더 (story #2084)', () => {
 // story #2105 2차 — 초대 프리뷰 실패/가입 성공 결과가 role/aria-live로 스크린리더에 낭독되는지.
 // 'preview-loading'/'accepting'에서 비동기로 전이되는 상태라(reset-password의 정적 초기렌더
 // invalidLink와 달리) aria-live 대상이다.
-describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
+describe('InviteClient — 결과 피드백 접근성(story #2105 2차)', () => {
   it('프리뷰 로드 실패 시 role="alert" aria-live="assertive"로 사유가 렌더된다', async () => {
     // story #2484 — 이 preview 엔드포인트가 실제로 낼 수 있는 유일한 코드는 NOT_FOUND지만,
     // 여기선 code 기반 분기 자체가 동작하는지(raw message 대신 번역 문구)가 핵심이라 임의
@@ -104,7 +104,7 @@ describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const alertEl = container.querySelector('[role="alert"]');
@@ -125,7 +125,7 @@ describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
@@ -155,7 +155,7 @@ describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
 
 // story #2484 — acceptInvite·handleSubmit 둘 다 error.code 분기 없이 raw message를 쓰던
 // 자리. code별 번역 문구가 뜨고, 알려지지 않은 code는 안전 폴백만 뜬다(raw 미노출).
-describe('InvitePage — error.code 분기 (story #2484)', () => {
+describe('InviteClient — error.code 분기 (story #2484)', () => {
   it('초대 수락 실패 CONFLICT — raw 영문 대신 번역 문구(로그인 경로에서 acceptInvite 호출)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: RequestInit) => {
       if (url.includes('/api/invites/tok-1') && !url.includes('accept')) {
@@ -170,7 +170,7 @@ describe('InvitePage — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
@@ -207,7 +207,7 @@ describe('InvitePage — error.code 분기 (story #2484)', () => {
       }
       throw new Error('unexpected fetch: ' + url);
     }));
-    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { root.render(wrap('ko', <InviteClient chatsHref="/chats" />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;

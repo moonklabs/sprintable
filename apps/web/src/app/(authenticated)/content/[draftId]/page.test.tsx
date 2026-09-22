@@ -16,6 +16,9 @@ const { routerPushMock } = vi.hoisted(() => ({ routerPushMock: vi.fn() }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4017 — OFF 상태 테스트라 레거시 값 그대로(실 훅의 navV3Flags undefined 분기와 동형).
+  useChatsHref: () => '/chats',
+  useConnectRulesHref: (fallback: string) => fallback,
 }));
 vi.mock('next/navigation', () => ({
   useParams: () => useParamsMock(),

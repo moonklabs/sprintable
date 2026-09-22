@@ -2146,6 +2146,12 @@ jobs:
       - name: "Verify no hardcoded app domain (story #3905 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-app-domain
 
+      # story #4017 CHANGES 2(페드루 PO 지적, "여러 곳에서 목적지를 결정" 재발 방지) —
+      # TODAY_V3_ENABLED 등 3개 env 이름은 nav-v3-flags-server.ts 한 곳, '/today'·
+      # '/chats' 등 목적지 리터럴은 nav-v3-destinations.ts 한 곳에서만.
+      - name: "Verify nav-v3 single source (story #4017 CHANGES 2 regression guard)"
+        run: pnpm --filter web verify:nav-v3-single-source
+
       # story #3592(§22-18 정본) 회귀가드("유나의 자") — 목록 안 반복 행 액션 버튼이
       # 순번 없이 같은 접근 이름을 공유하면(스크린리더가 항목을 못 가름) 새로 늘 때만
       # FAIL(baseline-freeze — verify-no-new-raw-button.ts와 동형 관례, 기존 잔존은

@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
 import {
   fetchResolve,
@@ -298,9 +300,15 @@ function isSafeInternalPath(value: string): boolean {
   return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
 }
 
+// story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
+// readNavV3FlagsFromEnv() 한 곳(nav-v3-flags-server.ts)으로, 목적지 문자열은
+// resolveNavV3Destinations() 한 곳(nav-v3-destinations.ts)으로만 — 여기서 '/today'·
+// '/org-briefing' 리터럴을 다시 조립하지 않는다. 북마크 등으로 `/org-briefing`을 직접
+// 방문하는 경우는 이 리다이렉트를 안 거치므로 레거시 그대로(#4017 AC 스코프 — 적기만,
+// 이 카드에서 안 고침).
 function redirectToProjectPicker(request: NextRequest, originalPathname: string): NextResponse {
   const url = request.nextUrl.clone();
-  url.pathname = '/org-briefing';
+  url.pathname = resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path;
   const targetSearch = new URLSearchParams(request.nextUrl.search);
   targetSearch.set(RESOLVE_RETRY_PARAM, '1');
   const targetQuery = targetSearch.toString();

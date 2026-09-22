@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeNextPath } from '@/lib/auth/session-redirect';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
 
@@ -210,8 +212,14 @@ async function handleCallback(request: Request, provider: string, code: string |
 
   // AC3: 세션 만료로 OAuth 재로그인한 경우 작업 경로 복귀(safeNextPath 가드)·없으면 홈(chat).
   // story #3179(S3c) 후속(추가 실측 발견) — /dashboard 폐합, 홈=chat 재조준.
+  // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
+  // readNavV3FlagsFromEnv() 한 곳으로, 목적지 문자열은 resolveNavV3Destinations() 한
+  // 곳으로만 — 여기서 '/chat'·'/chats' 리터럴을 다시 조립하지 않는다.
+  const navV3FlagsForCallback = readNavV3FlagsFromEnv();
   const destinationUrl = new URL(
-    inviteToken ? `${origin}/chats` : `${origin}${safeNextPath(nextCookie)}`,
+    inviteToken
+      ? `${origin}${resolveNavV3Destinations(navV3FlagsForCallback).chats.path}`
+      : `${origin}${safeNextPath(nextCookie, navV3FlagsForCallback)}`,
   );
   // story #3204 — register/page.tsx(email 경로)와 동일 파라미터로 발화 지점을 하나로
   // 모은다(google-analytics.tsx route-change effect가 소비). is_new_user=false(로그인)면
