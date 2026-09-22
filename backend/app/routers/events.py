@@ -1626,23 +1626,23 @@ async def _render_gate_verdict_message(
             # publish_outcome을 그대로 반영한다. 못 찾으면(레시피 무관 수동 channel_post)
             # 기존 human_only 그대로 — 정말 사람이 눌러야 하는 경우까지 잘못 바꾸지
             # 않는다.
-            # getattr 방어 — test_3387류 mock _FakeGateRow는 neutral_facts·id만 갖는
-            # 좁은 테스트 더블이라(scope_key/work_item_id 없음) 직접 속성접근은
-            # AttributeError로 샌다. 실 Gate ORM 행은 두 컬럼 다 NOT NULL이라 프로덕션
-            # 경로에서 이 getattr 기본값(""/None)에 걸릴 일이 없다.
+            # ⛔페드루 PO CHANGES-1(PR #4518 리뷰) — 실 Gate 행에선 scope_key/work_item_id
+            # 둘 다 NOT NULL 컬럼(gate.py 62-85행)이라 getattr 방어는 프로덕션 코드에
+            # 쓸 반창고가 아니라 mock 테스트더블(_FakeGateRow)을 살리려는 우회였다 —
+            # 직접 접근으로 되돌리고, 테스트더블 쪽을 실 모양으로 채운다(4514에서 같은
+            # 이유로 SimpleNamespace 목을 GateResponse.model_construct로 바꾼 선례와
+            # 동형 원칙: 목을 실물에 맞추지, 실물을 목에 맞추지 않는다).
             _recipe_auto_publish_line: str | None = None
-            _gate_row_scope_key = getattr(gate_row, "scope_key", None) if gate_row is not None else None
-            if not is_site_post and _gate_row_scope_key:
+            if not is_site_post and gate_row is not None and gate_row.scope_key:
                 try:
-                    _scope_connection_id = uuid.UUID(_gate_row_scope_key)
+                    _scope_connection_id = uuid.UUID(gate_row.scope_key)
                 except (ValueError, TypeError, AttributeError):
                     _scope_connection_id = None
-                _gate_row_work_item_id = getattr(gate_row, "work_item_id", None)
-                if _scope_connection_id is not None and _gate_row_work_item_id is not None:
+                if _scope_connection_id is not None:
                     from app.services.channel_posts import resolve_recipe_context_for_scheduled_publication
 
                     _recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
-                        db, org_id=org_id, work_item_id=_gate_row_work_item_id,
+                        db, org_id=org_id, work_item_id=gate_row.work_item_id,
                         connection_id=_scope_connection_id,
                     )
                     if _recipe_ctx is not None:

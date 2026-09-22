@@ -24,9 +24,17 @@ def anyio_backend():
 
 
 class _FakeGateRow:
-    def __init__(self, neutral_facts: dict | None, *, id_=None):
+    """story #4142(페드루 PO CHANGES-1, 2026-09-22) — `scope_key`/`work_item_id`는
+    실 Gate 행에선 NOT NULL(gate.py 65·85행)이라 이 목도 실 모양으로 채운다(값 없는
+    getattr 방어를 프로덕션 코드에 남기는 대신 — 4514의 SimpleNamespace→model_
+    construct 선례와 동형). 기본값 `scope_key=""`은 이 파일이 검증하는 unscoped
+    site_post/일반 channel_post 게이트와 그대로 일치(레시피 scoped 분기는 안 탐,
+    회귀 0)."""
+    def __init__(self, neutral_facts: dict | None, *, id_=None, scope_key: str = "", work_item_id=None):
         self.neutral_facts = neutral_facts
         self.id = id_ or uuid.uuid4()
+        self.scope_key = scope_key
+        self.work_item_id = work_item_id or uuid.uuid4()
 
 
 class _FakeResult:

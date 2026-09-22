@@ -17,7 +17,13 @@ scheduled_publication`)가 이어받게 한다 — 새 로직 발명 0, #4093이
 세팅 헬퍼는 test_4090_ac2_recipe_auto_publish_realdb.py·test_4093_scheduled_publish_
 event_realdb.py의 하네스를 그대로 미러(발명 0) — 채널만 REELS 지원 가능한
 "instagram_sandbox"로 바꾸고, 제출된 버전에 영상 마스터를 직접 seed한다(업로드
-멀티파트 왕복은 test_3554의 스코프 — 이 파일은 그 경로를 재검증하지 않는다)."""
+멀티파트 왕복은 test_3554의 스코프 — 이 파일은 그 경로를 재검증하지 않는다).
+
+AC5(페드루 PO CHANGES-1, 2026-09-22) — 초안 «화면 클릭 0으로 완주» 처방은 스크립트가
+아니라 워커 tick(`publication_command.py::process_due_publication_commands`) 자체의
+self-heal 스윕(`_sweep_stuck_container_created_publications`)이다 — 사람이 gcloud로
+oneoff Job을 돌릴 필요 0, 이미 Cloud Scheduler로 도는 이 함수가 다음 실행부터
+스스로 고친다(`test_ac5e_...`가 그 스윕 1틱→2틱 전체 루프를 잰다)."""
 from __future__ import annotations
 
 import os
@@ -700,6 +706,118 @@ async def test_ac4d_text_only_draft_still_completes_synchronously_with_completed
                 work_item_id=str(story_id), stage="published",
             )
             assert published_event is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac5e_self_heal_sweep_queues_and_worker_completes_stuck_publication():
+    """AC5(페드루 PO CHANGES-1, 2026-09-22) — 클래스 처방. 스크립트/Job을 사람이
+    손으로 돌릴 필요 0 — 이미 Cloud Scheduler로 도는 워커 tick 자체가 `container_
+    created`+command 0건인 발행물을 스스로 훑어 고친다.
+
+    "stuck" 상태는 `publish_channel_post_draft()`를 직접 호출해(AC1이 고친
+    `publish_recipe_approved_draft`를 우회) 재현한다 — 이게 정확히 옛 버그가 만들던
+    DB 모양(컨테이너만 있고 command 0건)이고, AC1 수정 後엔 정상 경로로는 더 이상
+    이 모양이 안 나오므로(그게 이 스토리의 요점) 직접 재현이 유일한 방법이다.
+
+    1틱: 스윕이 pending command를 큐잉(next_attempt_at=+30s, 이 틱 안에서 곧바로
+    처리 안 함) — publication은 여전히 container_created·stage 이벤트 0.
+    2틱(+30s 이상 경과): 그 command를 실제로 처리 — published·permalink·stage
+    이벤트 정확히 1회."""
+    from app.main import app
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+    from app.models.publication_command import PublicationCommand
+    from app.routers.events import _find_existing_stage_publish
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select, update
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id, owner_user_id = await _seed_org_with_owner(s, slug="4142e")
+            await _seed_default_role(s, org_id)
+            await _seed_system_publisher_teammember_shim(s, org_id, project_id)
+            creator_id = await _seed_agent(s, org_id, project_id, name="댄")
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+            connection_id = await _seed_reels_connection(s, org_id)
+            await _seed_recipe_channel_binding(s, org_id, connection_id)
+
+        gate_d_id, scoped_gate_id, draft_id = await _create_and_submit_video_draft(
+            Session, app, org_id=org_id, story_id=story_id, creator_id=creator_id,
+            owner_member_id=owner_member_id, connection_id=connection_id,
+        )
+
+        # 옛 버그 재현 — publish_recipe_approved_draft(AC1 수정) 우회, 스코프 게이트만
+        # 직접 approved로 만들고 publish_channel_post_draft를 바로 호출한다.
+        async with Session() as s:
+            scoped_gate = await s.get(Gate, scoped_gate_id)
+            scoped_gate.status = "approved"
+            scoped_gate.resolver_id = owner_member_id
+            await s.commit()
+
+        async with Session() as s:
+            from app.services.channel_posts import publish_channel_post_draft
+
+            pub = await publish_channel_post_draft(
+                s, org_id=org_id, draft_id=draft_id, published_by_member_id=owner_member_id,
+            )
+            assert pub.status == "container_created", "옛 버그 재현 자체가 실패(전제 무효)"
+            pub_id = pub.id
+
+            no_command_yet = (await s.execute(select(PublicationCommand.id))).first()
+            assert no_command_yet is None, "재현 단계에서 이미 command가 있으면 스윕 테스트가 무의미"
+
+            # 5분 임계 통과 — created_at을 과거로 백데이트(옛 버그가 실제로 방치했던
+            # 시간 경과를 흉내낸다, server_default=now()를 직접 UPDATE로 덮어씀).
+            await s.execute(
+                update(ChannelPublication).where(ChannelPublication.id == pub_id)
+                .values(created_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+            )
+            await s.commit()
+
+        base_now = datetime.now(timezone.utc) + timedelta(minutes=20)
+
+        # 1틱 — 스윕이 pending command를 큐잉만(이 틱 안 즉시완료 0).
+        async with Session() as s:
+            counts = await process_due_publication_commands(s, now=base_now)
+            assert counts["completed"] == 0, f"스윕 직후 같은 틱에서 완료되면 안 됨: {counts}"
+
+        async with Session() as s:
+            command = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == scoped_gate_id)
+            )).scalar_one_or_none()
+            assert command is not None, "AC5 self-heal 스윕이 pending command를 안 큐잉했다"
+            assert command.status == "pending"
+            assert command.next_attempt_at is not None and command.next_attempt_at > base_now
+
+            pub_after_tick1 = await s.get(ChannelPublication, pub_id)
+            assert pub_after_tick1.status == "container_created", "1틱 만에 완료되면 30초 폴링 관례 위반"
+
+            no_event_yet = await _find_existing_stage_publish(
+                s, org_id=org_id, definition_key=_KEY, work_item_type="story",
+                work_item_id=str(story_id), stage="published",
+            )
+            assert no_event_yet is None, "1틱만에 published stage 이벤트가 났다(너무 이르다)"
+
+        # 2틱(+30초 이상 경과) — 이제 그 command가 due 상태라 실제로 완결.
+        async with Session() as s:
+            counts = await process_due_publication_commands(s, now=base_now + timedelta(seconds=31))
+            assert counts["completed"] == 1, f"2틱에서 완료 안 됨: {counts}"
+
+        async with Session() as s:
+            pub_final = await s.get(ChannelPublication, pub_id)
+            assert pub_final.status == "published"
+            assert (pub_final.permalink or "").startswith("https://sandbox.invalid/instagram/")
+
+            published_event = await _find_existing_stage_publish(
+                s, org_id=org_id, definition_key=_KEY, work_item_type="story",
+                work_item_id=str(story_id), stage="published",
+            )
+            assert published_event is not None, "2틱 완결 뒤에도 레시피 published stage 이벤트가 안 났다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
