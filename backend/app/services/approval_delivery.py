@@ -313,11 +313,53 @@ async def dispatch_approval_request_cards(
                     await db.flush()
                     await _dispatch_conversation_event(db, conv, msg, org_id, requester)
             delivered_count += 1
-        except Exception:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
-            logger.warning(
-                "approval-request 카드 배달 실패 %s=%s approver=%s",
-                work_item_type, work_item_id, approver_id, exc_info=True,
+        except Exception as exc:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
+            # story #4156(2026-09-22, 페드루 PO 確定) — #4153이 닫은 것은 FK 위반 1종(승인자
+            # members 앵커 부재)뿐, 이 except 자체(대화 생성 실패·권한·DB 일시 오류 등 FK
+            # 밖의 모든 배달 실패)는 WARNING 한 줄로 계속 삼켜지고 있었다 — 게이트는 생기고
+            # 승인자에게 카드는 안 갔는데 아무 데도 안 남았다(며칠 숨어 있던 클래스). ERROR로
+            # 승격(예외 종류·gate id·approver id 포함) + activity_logs(기존 감사 로그 관례
+            # 재사용, 새 테이블·마이그 0)에 닫힌 코드로 남긴다 — SAVEPOINT(위 db.begin_nested)
+            # 가 이 승인자의 실패를 이미 롤백해 뒀으므로 이 쓰기는 외부(게이트 생성) 트랜잭션을
+            # poison하지 않는다. 발행 자체(게이트 생성·다음 단계)는 그대로 성공 유지(AC2) —
+            # 이 카드는 관측 축만, 재시도/알림 UI는 스코프 밖.
+            logger.error(
+                "approval-request 카드 배달 실패 %s=%s approver=%s gate=%s exc_type=%s",
+                work_item_type, work_item_id, approver_id, gate_id, type(exc).__name__, exc_info=True,
             )
+            try:
+                from app.services.activity_log import ActivityLogService
+
+                # PR#4527 CHANGES-1(까디르 QA 지적, 페드루 PO 確定 2026-09-22) — 위
+                # db.begin_nested()는 "배달 시도"만 감쌌다. `record()`가 내부에서
+                # `await self._db.flush()`를 하므로(activity_log.py) 이 호출 자체가
+                # 실 DB 왕복이다 — 이걸 SAVEPOINT 밖에서 하면, DB 레벨 실패(제약 위반·
+                # 일시 오류) 시 파이썬 예외는 이 try/except가 삼켜도 PostgreSQL
+                # 커넥션은 aborted 트랜잭션 상태로 남아 바깥(게이트 생성) 트랜잭션의
+                # 최종 commit이 깨진다 — "배달 1차 실패 + 기록 2차 실패"가 겹치면 AC2
+                # (발행은 그대로 성공)가 이 신규 코드 경로에서 새로 깨지는 리스크였다.
+                # 새 SAVEPOINT 한 겹으로 기록 실패도 격리한다(마이그·신규 테이블 0).
+                async with db.begin_nested():
+                    await ActivityLogService(db).record(
+                        org_id=org_id,
+                        action="approval_card_delivery_failed",
+                        actor_type="platform",
+                        project_id=project_id,
+                        entity_type="gate",
+                        entity_id=gate_id,
+                        context={
+                            "work_item_type": work_item_type,
+                            "work_item_id": str(work_item_id),
+                            "approver_id": str(approver_id),
+                            "requester_id": str(requester_id),
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
+            except Exception:  # noqa: BLE001 — 관측 자체의 실패가 상신을 막으면 안 된다.
+                logger.warning(
+                    "approval-request 카드 배달 실패의 activity_log 기록도 실패 %s=%s approver=%s",
+                    work_item_type, work_item_id, approver_id, exc_info=True,
+                )
 
     if delivered_count == 0:
         # ⚠️AC③ — 성공(delivered_count>0)과 전멸(모든 approver가 예외로 빠짐)이 지금까지
