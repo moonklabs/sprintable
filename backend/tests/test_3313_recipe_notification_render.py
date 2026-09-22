@@ -87,14 +87,14 @@ async def _seed_org_project_with_owner(session, *, slug="e3313"):
     실사고 원인이었다(2026-09-22 PR#4523 shard4 로그). 제품 정상 경로(organizations.py
     OSS bootstrap 등)와 동형으로 앵커를 호출 — 시드만 고쳐서 통과시키는 게 아니라
     `_resolve_org_owner` 자체도 같은 이유로 방어적 self-heal을 얻었다(recipe_gate_
-    hooks.py, 같은 카드). `TeamMember` 행도 같이 심는다 — prod의 `team_members`는
-    `members`⋈`project_access` VIEW지만 이 realdb 하네스는 `Base.metadata.create_all()`
-    (마이그 미경유)이라 뷰 대신 별도 실 테이블이 생겨(story #4152 세션에서도 동일 하네스
-    한계 확認) `ensure_human_member`의 `members` 쓰기만으론 이 하네스의 FK가 안 풀린다
-    (`_seed_agent`의 기존 TeamMember 패턴과 동형 — 발명 0)."""
+    hooks.py, 같은 카드).
+
+    story #4157 — 위 FK 위반은 애초에 하네스 허상이었다(`conversation_participants.
+    member_id`의 team_members FK 자체가 실 DB엔 0092부터 없다). ORM 선언을 실 스키마에
+    맞춘 뒤로는 `ensure_human_member`의 `members` 쓰기만으로 이 하네스의 참여자 INSERT가
+    통과한다 — `TeamMember` 손시드(FK 워크어라운드)는 제거."""
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
-    from app.models.team import TeamMember
     from app.services.agent_anchor_sync import ensure_human_member
 
     org = Organization(id=uuid.uuid4(), name="Org3313", slug=slug)
@@ -106,10 +106,6 @@ async def _seed_org_project_with_owner(session, *, slug="e3313"):
     session.add(owner_member)
     await session.commit()
     await ensure_human_member(session, owner_member.id)
-    session.add(TeamMember(
-        id=owner_member.id, org_id=org.id, project_id=project.id, type="human",
-        name="org owner", is_active=True,
-    ))
     await session.commit()
     return org.id, project.id
 

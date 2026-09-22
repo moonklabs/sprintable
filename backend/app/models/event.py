@@ -71,12 +71,10 @@ class Event(Base, OrgScopedMixin):
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     source_entity_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    sender_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
-    )
-    recipient_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("team_members.id", ondelete="CASCADE"), nullable=False
-    )
+    # story #4157 — 0092가 team_members FK를 DROP(canonical members.id로 정규화, FK 재추가
+    # 없음 — team_members는 뷰라 FK 대상 불가). FK 선언 없이 순수 UUID.
+    sender_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    recipient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     recipient_type: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(Text, nullable=False, default=EventStatus.pending.value)
