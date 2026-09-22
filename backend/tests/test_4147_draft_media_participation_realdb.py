@@ -1,11 +1,14 @@
 """story #4147([E-RECIPE-1·Phase 3 폴리시] 채널 초안 영상 업로드 URL 발급·확認이 같은
 org의 아무 에이전트 키에 열려 있음, 미르코 #4146 그라운딩 후속 · 페드루 PO 確定
-2026-09-22) — 이미지·영상 업로드 URL 발급·확認 4개 라우트(grep 전수: `/assets/upload-url`·
-`/assets/confirm`·`/assets/video/upload-url`·`/assets/video/confirm`)가 org_id 일치만
-봤다(같은 org의 아무 에이전트 키나 남의 초안에 미디어를 편입할 수 있었던 갭). 이 스토리는
-draft 참여(origin author 또는 그 work_item에 적용된 레시피의 «넓은 crew») 판정을 추가한다
-(`channel_posts.py::_require_draft_media_participant`, 판정 로직 자체는
-`event_routing_resolver.resolve_broad_crew_member_ids`로 #4132와 공용화 — 새 판정 0).
+2026-09-22) — 이미지·영상 업로드 URL 발급·확認 4라우트(grep 전수: `/assets/upload-url`·
+`/assets/confirm`·`/assets/video/upload-url`·`/assets/video/confirm`) + CHANGES-1
+(페드루 PO 確定 2026-09-22, PR #4522 리뷰) `/assets/import-image`(#3666, MCP/플러그인
+에이전트 전용 base64 원콜 입구 — "에이전트가 실제로 타는 길") 총 5라우트가 org_id
+일치만 봤다(같은 org의 아무 에이전트 키나 남의 초안에 미디어를 편입할 수 있었던 갭).
+이 스토리는 draft 참여(origin author 또는 그 work_item에 적용된 레시피의 «넓은
+crew») 판정을 추가한다(`channel_posts.py::_require_draft_media_participant`, 판정
+로직 자체는 `event_routing_resolver.resolve_broad_crew_member_ids`로 #4132와 공용화
+— 새 판정 0).
 
 세팅 헬퍼는 두 기존 파일을 그대로 재사용(새 헬퍼 발명 0): draft 생성·업로드/확認 호출·
 로컬 스토리지 픽스처는 `test_620beefc_channel_post_image_upload.py`, agent/RecipeRoleBinding
@@ -16,6 +19,7 @@ draft 참여(origin author 또는 그 work_item에 적용된 레시피의 «넓�
 세팅은 이 스토리에 불요)."""
 from __future__ import annotations
 
+import base64
 import os
 import uuid
 
@@ -230,21 +234,31 @@ async def test_human_caller_unaffected():
         await engine.dispose()
 
 
-# ─── AC1 — 4개 라우트 전수 배선 확認(비참여 403이 upload-url 하나만이 아니라 실제로
-# 모든 발급·확認 라우트에 걸려 있는지 — "컴포넌트 존재≠배선" 클래스 회귀 방지) ─────
+# ─── AC1 — 5개 라우트 전수 배선 확認(비참여 403이 upload-url 하나만이 아니라 실제로
+# 모든 발급·확認·import 라우트에 걸려 있는지 — "컴포넌트 존재≠배선" 클래스 회귀 방지) ──
+
+
+def _import_image_body() -> dict:
+    """story #4147 CHANGES-1 — import-image는 base64 원콜이라, 게이트가 이 라우트
+    내부에서 `validate_image_bytes`(§IMAGE_CORRUPT) *뒤*에 위치한다(image_import
+    docstring §3753 순서 그대로) — 다른 3라우트처럼 아무 문자열이나 넣으면 게이트
+    도달 前에 다른 코드(400/422)로 먼저 끊겨 이 파라미터라이즈의 전제(모든 갈래가
+    NOT_DRAFT_PARTICIPANT로 수렴)가 깨진다. 그래서 이 케이스만 실 JPEG 바이트를 넣는다."""
+    return {"content_type": "image/jpeg", "image_base64": base64.b64encode(_jpeg_bytes(400, 400)).decode()}
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    "path_suffix,json_body",
+    "path_suffix,json_body_factory",
     [
-        ("assets/upload-url", {"content_type": "image/jpeg"}),
-        ("assets/confirm", {"object_path": "channel-media/does-not-matter.jpg"}),
-        ("assets/video/upload-url", {"content_type": "video/mp4"}),
-        ("assets/video/confirm", {"object_path": "channel-media/does-not-matter.mp4"}),
+        ("assets/upload-url", lambda: {"content_type": "image/jpeg"}),
+        ("assets/confirm", lambda: {"object_path": "channel-media/does-not-matter.jpg"}),
+        ("assets/video/upload-url", lambda: {"content_type": "video/mp4"}),
+        ("assets/video/confirm", lambda: {"object_path": "channel-media/does-not-matter.mp4"}),
+        ("assets/import-image", _import_image_body),
     ],
 )
-async def test_non_participant_403_across_all_four_routes(path_suffix, json_body):
+async def test_non_participant_403_across_all_five_routes(path_suffix, json_body_factory):
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -264,7 +278,7 @@ async def test_non_participant_403_across_all_four_routes(path_suffix, json_body
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/{path_suffix}",
-                json=json_body,
+                json=json_body_factory(),
             )
         assert r.status_code == 403, r.text
         error = r.json().get("error") or r.json()

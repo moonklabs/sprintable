@@ -1143,7 +1143,15 @@ async def post_channel_post_image_import(
         ) from exc
 
     # story #3370(페드루 지적 2026-09-10 — 같은 클래스, post_channel_post_draft_version과 동형).
-    resolved = await resolve_member_db_verified(auth, org_id, db)
+    # story #4147 CHANGES-1(페드루 PO 確定 2026-09-22) — 이 라우트가 «MCP/플러그인
+    # 에이전트가 실제로 타는 길»이라 발급·확認 4라우트만 막으면 반쪽(클래스는 남고
+    # 지목 경로만 막힘) — image confirm/video confirm과 동형(draft 404 → 판정 → 처리).
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+    resolved = await _require_draft_media_participant(
+        db, org_id=org_id, draft=draft, auth=auth, media_kind="image", step="import",
+    )
     member_id, actor_type = resolved.id, resolved.type
 
     version, image_row = await _confirm_image_upload_or_raise(
