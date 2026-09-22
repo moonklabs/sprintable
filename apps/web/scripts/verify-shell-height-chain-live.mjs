@@ -53,14 +53,19 @@ if (!CURRENT_CLASSNAME || !CURRENT_CONTENT_CLASSNAME) {
 const BEFORE_CLASSNAME = 'min-h-0 flex-1';
 const BEFORE_CONTENT_CLASSNAME = 'flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1';
 
-function shellHtml(innerContent, { className, contentClassName }) {
+// story #4131 AC4 — topbarHidden(showTopBar=false, /settings와 같은 라우트)이면 TopBar
+// div 자체가 안 그려지고(실 dashboard-shell.tsx:200 `{showTopBar && (...)}`와 동형)
+// SidebarProvider(.dashboard-shell-root)에 `data-topbar-hidden`이 실려 --shell-chrome-h가
+// 0으로 떨어진다. viewportWidth로 lg(1024px) 위/아래를 호출부가 골라 모바일 탭바 분기를
+// 재현한다(뷰포트 폭 자체가 CSS 미디어쿼리를 트리거 — 별도 JS 분기 불요).
+function shellHtml(innerContent, { className, contentClassName, topbarHidden = false }) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0}${findCompiledCss()}</style></head>
 <body>
-  <div class="h-svh dashboard-shell-root flex w-full">
+  <div class="h-svh dashboard-shell-root flex w-full" ${topbarHidden ? 'data-topbar-hidden' : ''}>
     <main class="relative flex w-full flex-1 flex-col overflow-hidden">
       <div id="scroller" class="flex flex-1 min-h-0 flex-col overflow-y-auto">
-        <div class="flex h-12 shrink-0 items-center gap-2 border-b px-4">TopBar(48px)</div>
+        ${topbarHidden ? '' : '<div class="flex h-12 shrink-0 items-center gap-2 border-b px-4">TopBar(48px)</div>'}
         <div class="grid gap-4 grid-cols-1 ${className}">
           <div class="${contentClassName}">
             ${innerContent}
@@ -176,12 +181,12 @@ const RETRO_UNFIXED = `
   await page.close();
 }
 
-// (C) retro류(#4130 픽스 後) — h-[calc(100svh-3rem)]로 직접 앵커(flex-1 없이! flex-1의
+// (C) retro류(#4130/#4131 픽스 後) — h-[calc(100svh-var(--shell-chrome-h))]로 직접 앵커(flex-1 없이! flex-1의
 //     flex-basis:0%가 explicit height를 덮어써 무력화시키는 함정을 실측으로 잡아 수정 — 아래
 //     참고). 내부 스크롤러가 bounded 유지되고 바깥은 안 자라야 한다.
 const RETRO_FIXED = `
   <div class="px-6 pt-3" style="flex-shrink:0">고정 툴바(WorkspaceFrameTabs류)</div>
-  <div data-testid="inner-scroller" class="focus-inset flex h-[calc(100svh-3rem)] min-h-0 flex-col gap-0 overflow-y-auto">
+  <div data-testid="inner-scroller" class="focus-inset flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col gap-0 overflow-y-auto">
     ${manyItems(60, '#dde')}
   </div>
 `;
@@ -195,9 +200,9 @@ const RETRO_FIXED = `
   const scrollerClientHeight = await scroller.evaluate((el) => el.clientHeight);
   const scrollerScrollHeight = await scroller.evaluate((el) => el.scrollHeight);
 
-  console.log(`(C) retro류(픽스 後, h-[calc(100svh-3rem)]) — inner clientHeight=${innerClientHeight}, inner scrollHeight=${innerScrollHeight}, outer clientHeight=${scrollerClientHeight}, outer scrollHeight=${scrollerScrollHeight}`);
+  console.log(`(C) retro류(픽스 後, h-[calc(100svh-var(--shell-chrome-h))]) — inner clientHeight=${innerClientHeight}, inner scrollHeight=${innerScrollHeight}, outer clientHeight=${scrollerClientHeight}, outer scrollHeight=${scrollerScrollHeight}`);
   const innerStillBounded = innerClientHeight < innerScrollHeight;
-  // h-[calc(100svh-3rem)]는 TopBar(48px)만 빼고 "고정 툴바"(WorkspaceFrameTabs류) 자신의
+  // h-[calc(100svh-var(--shell-chrome-h))]는 TopBar/모바일탭바는 정확히 반영하지만(F/G 참고) "고정 툴바"(WorkspaceFrameTabs류) 자신의
   // 높이는 안 뺀다(실제 파일들에서도 명시적으로 이렇게 주석 남김·PO 라이브 확認 요청 대상) —
   // 그 툴바 높이만큼(수십 px) #scroller가 살짝 더 스크롤될 여지를 허용하되, (B)처럼 «내부
   // 리스트 전체가 그대로 다 보여버리는» 수준의 붕괴(수천 px)와는 명확히 구분한다.
@@ -237,12 +242,12 @@ const RETRO_STICKY_TOOLBAR = `
   await page.close();
 }
 
-// (E) docs-client-layout류(#4130 픽스 後) — 바깥 split 래퍼에 h-[calc(100svh-3rem)] 앵커.
+// (E) docs-client-layout류(#4130/#4131 픽스 後) — 바깥 split 래퍼에 h-[calc(100svh-var(--shell-chrome-h))] 앵커.
 //     aside(자기 overflow-y-auto)와 section 안 doc-content(h-full overflow-y-auto, 로컬
 //     무변경 — 조상이 다시 bounded되면 h-full 체인이 저절로 복원되는지 검증)가 각각
 //     bounded 유지돼야 한다.
 const DOCS_LIKE = `
-  <div class="flex h-[calc(100svh-3rem)] min-h-0 overflow-hidden">
+  <div class="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden">
     <aside data-testid="aside" class="relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r lg:flex" style="display:flex">
       ${manyItems(60, '#eef')}
     </aside>
@@ -275,6 +280,69 @@ const DOCS_LIKE = `
   console.log(`    aside bounded? ${asideBounded} · doc-content(h-full 체인) bounded? ${docContentBounded} · 바깥 안 자람? ${outerNotGrown} : ${pass ? 'PASS(조상 앵커만으로 h-full 체인 자동 복원 — doc-content 자체는 무변경으로 충분)' : 'FAIL(doc-content도 직접 손대야 함)'}`);
   if (!pass) allPass = false;
   await page.close();
+}
+
+// (F) story #4131 AC4 — var(--shell-chrome-h) 앵커가 TopBar 숨김 라우트(/settings류,
+// showTopBar=false)에서 하드코딩 3rem과 달리 0을 정확히 반영하는지. 앵커 clientHeight가
+// 뷰포트(560) − 0 = 560(±1px)이어야 한다 — 하드코딩 3rem이었다면 512로 48px 못 미쳤을 것.
+const ANCHOR_FIXTURE = `<div data-testid="anchor" class="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden" style="background:#eee">${manyItems(20, '#eee')}</div>`;
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
+  await page.setContent(shellHtml(ANCHOR_FIXTURE, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME, topbarHidden: true }));
+  const anchor = page.getByTestId('anchor');
+  const anchorClientH = await anchor.evaluate((el) => el.clientHeight);
+  await page.close();
+
+  console.log(`(F) TopBar 숨김(showTopBar=false) — 앵커 clientHeight=${anchorClientH}(기대: 뷰포트 560 그대로, --shell-chrome-h=0)`);
+  const pass = Math.abs(anchorClientH - 560) <= 1;
+  console.log(`    ${pass ? 'PASS(TopBar 몫 0 정확 반영 — #4130 하드코딩 3rem이었다면 512로 48px 못 미쳤을 자리)' : 'FAIL'}`);
+  if (!pass) allPass = false;
+}
+
+// (G) story #4131 AC4 — <lg(1024px 미만)에서 하단 고정 탭바(--mobile-tab-bar-h=4rem=64px)
+// 몫까지 앵커가 정확히 반영하는지. TopBar 표시 상태(showTopBar=true)에서 앵커
+// clientHeight = 뷰포트(560) − 3rem(48) − 4rem(64) = 448(±1px).
+{
+  const page = await browser.newPage({ viewport: { width: 800, height: 560 } });
+  await page.setContent(shellHtml(ANCHOR_FIXTURE, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME, topbarHidden: false }));
+  const anchor = page.getByTestId('anchor');
+  const anchorClientH = await anchor.evaluate((el) => el.clientHeight);
+  await page.close();
+
+  console.log(`(G) 모바일(<1024px)+TopBar 표시 — 앵커 clientHeight=${anchorClientH}(기대: 560−48−64=448)`);
+  const pass = Math.abs(anchorClientH - 448) <= 1;
+  console.log(`    ${pass ? 'PASS(TopBar+모바일 탭바 몫 둘 다 정확 반영 — #4130 하드코딩 3rem이었다면 512로 탭바 64px만큼 뷰포트를 넘쳤을 자리)' : 'FAIL'}`);
+  if (!pass) allPass = false;
+}
+
+// (H) story #4131 AC3 — sprints-client.tsx류(자기 페이지 툴바 WorkspaceFrameTabs가 앵커
+// 밖에 별도로 있던 유일한 실 파일)를 sticky 흐름으로 앵커 「안」에 끌어들인 실제 수정과
+// 동형 구조 — 외곽 #scroller가 툴바 높이만큼도 안 자라야 한다(슬랙 0 수치 확認).
+const SPRINTS_TOOLBAR_INSIDE = `
+  <div data-testid="sprints-anchor" class="focus-inset flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-y-auto">
+    <div data-testid="sprints-toolbar" class="sticky top-0 z-10 shrink-0 bg-background px-6 pt-3" style="border-bottom:1px solid #ccc">WorkspaceFrameTabs</div>
+    <div>${manyItems(60, '#dde')}</div>
+  </div>
+`;
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
+  await page.setContent(shellHtml(SPRINTS_TOOLBAR_INSIDE, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME }));
+  const scroller = page.locator('#scroller');
+  const toolbar = page.getByTestId('sprints-toolbar');
+  const scrollerScrollH = await scroller.evaluate((el) => el.scrollHeight);
+  const scrollerClientH = await scroller.evaluate((el) => el.clientHeight);
+  const topBefore = await toolbar.evaluate((el) => el.getBoundingClientRect().top);
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(100);
+  const topAfter = await toolbar.evaluate((el) => el.getBoundingClientRect().top);
+  const scrollerScrollTop = await scroller.evaluate((el) => el.scrollTop);
+  await page.close();
+
+  const outerSlack = scrollerScrollH - scrollerClientH;
+  console.log(`(H) sprints-client.tsx류(툴바를 앵커 안 sticky로) — 바깥 슬랙=${outerSlack}px(기대 0) · 툴바 top ${topBefore.toFixed(1)}→${topAfter.toFixed(1)}(스크롤 300px 뒤) · #scroller.scrollTop=${scrollerScrollTop}(기대 0, 앵커 자체가 스크롤 흡수)`);
+  const pass = outerSlack === 0 && Math.abs(topAfter - topBefore) < 1 && scrollerScrollTop === 0;
+  console.log(`    ${pass ? 'PASS(WorkspaceFrameTabs 자체 높이 슬랙 0 — #4130의 36px 슬랙 해소 확認)' : 'FAIL — 슬랙 재발'}`);
+  if (!pass) allPass = false;
 }
 
 await browser.close();

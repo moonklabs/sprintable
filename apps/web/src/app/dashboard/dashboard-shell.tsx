@@ -218,11 +218,15 @@ function ScrollShell({
             이것이었다(라이브 실측: 컨테이너 박스 496px·scrollHeight 1422px). `min-h-0`+
             `flex-1`은 "이 박스 자신이 내부 스크롤러가 되는" 패턴인데 여기는 이미 바깥
             스크롤러 안이므로 열이 내용 높이로 그냥 자라야 한다(flex-1 기본 min-height:auto로
-            충분). 2xl 인라인 프레즌스 패널의 `2xl:sticky 2xl:top-0 2xl:h-svh`(위 renderPanel)
-            은 그리드 행이 이제 내용 높이로 자라면서 오히려 정상 동작한다(실측 확認). */}
+            충분). 2xl 인라인 프레즌스 패널의 `2xl:sticky 2xl:top-0`(위 renderPanel)은 그리드
+            행이 이제 내용 높이로 자라면서 오히려 정상 동작한다(실측 확認).
+            story #4131(유나 design-pass 조건, 2026-09-22) — 이 패널의 `2xl:h-svh`도 같은
+            문제였다: 뷰포트 전체 높이를 잡지만 실제로 sticky top:0에서 보이는 영역은 TopBar
+            (h-12) 몫만큼 작다 — 하단이 48px 초과해 넘쳤다. `--shell-chrome-h`(story #4131
+            SSOT, TopBar 표시 여부+모바일 탭바를 CSS만으로 합성)로 교체해 해소한다. */}
         <ContextualPanelLayout
           renderPanel={({ mode, closePanel }) => (
-            <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>
+            <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-[calc(100svh-var(--shell-chrome-h))] 2xl:p-2' : 'h-full'}>
               <TeamPresencePanel
                 items={items}
                 authFailureByMember={authFailureByMember}

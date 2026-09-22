@@ -711,8 +711,11 @@ export default function SettingsPage() {
     <>
       {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스) LNB+
           콘텐츠 split(각자 독립 overflow-y-auto)이 자기 높이를 잃는다 — 여기서 직접 앵커
-          (h-[calc(100svh-3rem)], 3rem=셸 TopBar h-12). */}
-      <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-3rem)] min-h-0 gap-0">
+          (h-[calc(100svh-var(--shell-chrome-h))] — story #4131, --shell-chrome-h가 TopBar
+          표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT. /settings는 showTopBar=false라
+          이 값이 0으로 떨어져 TopBar 몫을 안 뺀다 — #4130의 하드코딩 3rem이 여기서
+          48px를 과다 차감하던 것도 같이 해소). */}
+      <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 gap-0">
         {/* Left nav: desktop/tablet(≥md)=always visible, mobile(<md)=toggle via lnbOpen */}
         <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} md:flex`}>
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
