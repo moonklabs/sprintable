@@ -2,6 +2,7 @@
 
 import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 import { notifySessionChanged } from '@/lib/native-shell-bridge';
+import { collectRefreshDiagnostics } from '@/lib/auth/refresh-diagnostics';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -54,7 +55,13 @@ export async function logoutUser(refreshToken?: string): Promise<void> {
 }
 
 export async function refreshAuthTokens(): Promise<AuthResult> {
-  return callAuthRoute('/api/auth/refresh', {});
+  // story #2449 AC1 — 실패 시 BFF(route.ts)가 로깅할 진단 3종(visibility_state·idle_ms·
+  // tab_count). collectRefreshDiagnostics는 완전 동기(refresh 호출에 지연을 보태지 않는다
+  // — 파일 상단 설계 제약 주석 참고). 서버(SSR)에는 window/document/BroadcastChannel이
+  // 없어 그 함수 자체가 typeof 가드로 안전 폴백하지만, 이 함수는 'use client' 모듈이라
+  // 브라우저에서만 호출된다 — 방어적으로 유지.
+  const diagnostics = typeof window !== 'undefined' ? collectRefreshDiagnostics() : null;
+  return callAuthRoute('/api/auth/refresh', diagnostics ? { diagnostics } : {});
 }
 
 // ─── 401 인터셉터 fetch 래퍼 ─────────────────────────────────────────────────
