@@ -198,6 +198,28 @@ def entries_missing_source(entries: list[dict]) -> list[str]:
     return [e["file"] for e in entries if not str(e.get("source", "")).strip()]
 
 
+# story #4159 — 396건 중 332건이 source에 이 자유문 표현을 쓰면서도 구조화 `provisional`
+# 키가 없어 #4152 AC4(provisional_files_in, 구조화 필드만 신뢰)의 절대-가드 제외가 안 걸린
+# 실사고(test_4101, PR 4381 shard 10 — sec:10.0 잠정값인데 RED). 자유문 텍스트 자체를
+# 신뢰하진 않는다(#4152의 "구조화 필드만" 원칙 그대로 유지 — provisional 판정 자체는
+# 여전히 `provisional_files_in()`만 본다) — 이 목록은 오직 "이 문구를 쓰면서 그 구조화
+# 표시를 빠뜨렸는가"라는 **등재 규율** 축이다(source 필수화·23bf1913 unweighted 가드와
+# 동형 존재-체크, 값의 진위는 검증 안 함).
+_TENTATIVE_SOURCE_MARKERS: tuple[str, ...] = ("잠정", "추정", "실측 전")
+
+
+def entries_missing_provisional_flag(entries: list[dict]) -> list[str]:
+    """story #4159 — source에 `_TENTATIVE_SOURCE_MARKERS` 중 하나라도 있는데
+    `provisional: true`가 없는 항목의 file 목록. `provisional: true`가 이미 있으면
+    (구조화 표시 존재) 그 source에 같은 단어가 남아 있어도(예: "이전 잠정값을 대체" 같은
+    과거형 서술) 무해 — 검사 축은 오직 "새로 이 문구를 쓰면서 표시를 빠뜨렸는가"뿐이다."""
+    return [
+        e["file"] for e in entries
+        if e.get("provisional") is not True
+        and any(marker in str(e.get("source", "")) for marker in _TENTATIVE_SOURCE_MARKERS)
+    ]
+
+
 def check_staleness(
     discovered_count: int, weights_dir: Path = WEIGHTS_DIR, *, unweighted_count: int = 0,
 ) -> str | None:
