@@ -514,6 +514,8 @@
     "threadRailTitle": "Chats",
     "threadRailEmpty": "No conversations yet",
     "threadRowAriaLabel": "{label}, {n} in list",
+    "conversationUnavailableTitle": "Can't open this conversation",
+    "conversationUnavailableDescription": "It doesn't exist, or you don't have access. Pick another conversation from the list.",
     "unknownParticipant": "Unknown",
     "roleTagAgent": "Agent",
     "meLabel": "Me",
