@@ -491,6 +491,115 @@ def test_heavy_file_own_weight_cap_still_fails_past_3x_boundary():
     assert slow == ["tests/test_2813_gate_github_check_realdb.py"]
 
 
+# ── story #4152(CI·결정성, 페드루 PO 確定 2026-09-22) — «같은 run 상대» 정규화(#3396)
+# 이 러너 부하 노이즈에 취약함을 드러낸 실사고 2건(오늘, 2026-09-22)의 실측값을 그대로
+# 픽스처로 고정한다. PR#4351 run 35696793719 shard(2): test_3502_insights_board.py
+# 261s(그 run의 정규화 판정선 187.7s 초과) — 이 PR은 FE h1 파일 9개뿐(백엔드 파일 0,
+# 즉 test_3502는 diff 밖 무관 파일). PR#4355 run 35697222669 shard(6): 자기 신규 테스트
+# test_3804_prod_promotion_bridge_0354a.py 80s(판정선 71.2s 초과) — 등재 weight
+# 25.0(잠정값, 로컬 추정치)의 첫 CI run.
+
+_INCIDENT4152A_WEIGHT = 70.0  # test_3502_insights_board.py 실 등재값(story-3911)
+_INCIDENT4152B_WEIGHT = 25.0  # test_3804_...py 실 등재값(provisional=true)
+
+
+def test_absolute_threshold_is_own_weight_times_multiplier_floored_at_60():
+    mod = _load()
+    assert mod.absolute_slow_threshold_sec(70.0) == pytest.approx(175.0)  # 70*2.5
+    assert mod.absolute_slow_threshold_sec(1.0) == 60.0  # AC3 — 60초 절대 최저선 무변
+
+
+def test_provisional_files_in_requires_structured_flag_not_free_text():
+    mod = _load()
+    entries = [
+        {"file": "tests/a.py", "sec": 5.0, "source": "잠정값 — 아직 안 채움"},  # 자유문뿐, 구조화 X
+        {"file": "tests/b.py", "sec": 5.0, "provisional": True, "source": "x"},
+    ]
+    assert mod.provisional_files_in(entries) == frozenset({"tests/b.py"})
+
+
+def test_parse_changed_files_strips_blank_lines():
+    mod = _load()
+    assert mod.parse_changed_files("tests/a.py\n\n  \ntests/b.py\n") == frozenset({"tests/a.py", "tests/b.py"})
+
+
+def test_incident4152a_unrelated_file_over_absolute_threshold_is_warn_not_red():
+    """⭐AC1/AC2 — PR#4351 실사고: test_3502(261s, weight 70.0 → 절대 임계 175.0s 초과)
+    이지만 이 PR의 changed_files 밖(FE h1 파일 9개뿐)이라 RED 아니라 WARN — 잡 초록."""
+    mod = _load()
+    elapsed = {"tests/test_3502_insights_board.py": 261.0}
+    weights = {"tests/test_3502_insights_board.py": _INCIDENT4152A_WEIGHT}
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, changed_files=frozenset({"apps/web/src/app/h1-unrelated.tsx"}),
+    )
+    assert red == [], f"무관 파일인데도 RED: {red}"
+    assert warn == ["tests/test_3502_insights_board.py"]
+
+
+def test_incident4152b_own_provisional_weight_file_is_excluded_not_red():
+    """⭐AC4 — PR#4355 실사고: test_3804(80s, weight 25.0 provisional)는 이 PR 자신의
+    신설 테스트(changed_files 안)라 AC2로는 못 구한다 — provisional 제외(AC4)로 red도
+    warn도 0(등재값 자체를 못 믿는 축이라 이 게이트가 no-op, #3558 별도 경고는 무변)."""
+    mod = _load()
+    elapsed = {"tests/test_3804_prod_promotion_bridge_0354a.py": 80.0}
+    weights = {"tests/test_3804_prod_promotion_bridge_0354a.py": _INCIDENT4152B_WEIGHT}
+    provisional = frozenset({"tests/test_3804_prod_promotion_bridge_0354a.py"})
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, provisional_files=provisional,
+        changed_files=frozenset({"tests/test_3804_prod_promotion_bridge_0354a.py"}),
+    )
+    assert red == [], f"provisional인데도 RED: {red}"
+    assert warn == [], f"provisional은 WARN도 0이어야 함(등재값 자체를 못 믿음): {warn}"
+
+
+def test_incident4152b_mutation_without_provisional_exclusion_would_be_red():
+    """뮤테이션(AC4) — provisional_files를 안 주면(구현을 걷어내면) 같은 표본이 RED로
+    되돌아가야 한다 — AC4의 provisional 제외가 실제로 이 값을 살리고 있음을 고정."""
+    mod = _load()
+    elapsed = {"tests/test_3804_prod_promotion_bridge_0354a.py": 80.0}
+    weights = {"tests/test_3804_prod_promotion_bridge_0354a.py": _INCIDENT4152B_WEIGHT}
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, changed_files=frozenset({"tests/test_3804_prod_promotion_bridge_0354a.py"}),
+    )
+    assert red == ["tests/test_3804_prod_promotion_bridge_0354a.py"], (
+        f"provisional 제외 없이는 RED가 재현돼야 하는데: {red}"
+    )
+
+
+def test_changed_files_none_treats_everything_as_changed_regression_zero():
+    """회귀 0 — changed_files=None(호출측이 diff 정보를 안 줬을 때)이면 예전처럼 전부
+    RED 후보(안전측 폴백) — AC2의 WARN 완화가 새 인자를 안 쓰는 기존 소비처까지 조용히
+    관대해지게 만들면 안 된다."""
+    mod = _load()
+    elapsed = {"tests/test_3502_insights_board.py": 261.0}
+    weights = {"tests/test_3502_insights_board.py": _INCIDENT4152A_WEIGHT}
+    red, warn = mod.slow_files_absolute(elapsed, weights, changed_files=None)
+    assert red == ["tests/test_3502_insights_board.py"]
+    assert warn == []
+
+
+def test_ac3_mutation_changed_file_over_absolute_threshold_stays_red():
+    """AC3 — 진짜 폭주는 여전히 잡힌다: 변경 파일(diff 안)이 자기 weight×2.5를 넘으면
+    provisional이 아닌 한 RED 유지(«전부 다 봐주는» 가드로 변질되면 안 된다, #3396의
+    AC5와 동형 회귀 원칙)."""
+    mod = _load()
+    elapsed = {"tests/genuinely_slow.py": 100.0}
+    weights = {"tests/genuinely_slow.py": 5.0}  # threshold = max(5*2.5, 60) = 60, 100 > 60
+    red, warn = mod.slow_files_absolute(
+        elapsed, weights, changed_files=frozenset({"tests/genuinely_slow.py"}),
+    )
+    assert red == ["tests/genuinely_slow.py"]
+    assert warn == []
+
+
+def test_unweighted_files_are_not_touched_by_absolute_gate():
+    """회귀 0 — unweighted 파일은 이 게이트의 대상이 아니다(#3392가 전담, 무변)."""
+    mod = _load()
+    elapsed = {"tests/brand_new_unweighted.py": 999.0}
+    red, warn = mod.slow_files_absolute(elapsed, {}, changed_files=frozenset())
+    assert red == [] and warn == []
+
+
 def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monkeypatch):
     """_check_elapsed_mode()를 통째로 돌려 오늘 실사고 표본이 exit 0(정상 판정)이
     되는지 e2e로 확인한다(파일 파싱·가중치 로딩·판정 전체 경로). 이 픽스처는 PR
@@ -498,7 +607,38 @@ def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monke
     재현하는 것이 목적이라 **그 시점 값을 고정**해야 한다 — 실 weights.json을 그대로
     읽으면(story #3558, 2026-09-06 전수 재측정으로 값이 갱신된 뒤) 이 역사적 시나리오
     재현이 매번 지금 시점의 등재값에 따라 값이 달라져 깨진다(실측 fix 자체가 이
-    회귀를 노출시킴 — load_weights를 monkeypatch해 고정)."""
+    회귀를 노출시킴 — load_weights를 monkeypatch해 고정).
+
+    story #4152 이관 — `_check_elapsed_mode`는 이제 run-relative 정규화(#3396) 대신
+    diff-scoping(AC2)으로 판정한다. 이 25개 파일은 실측 근거(`git show 4bfa823b4
+    --stat`, PR#3753 실 diff)로 확認된 «PR#3753과 무관한 파일들»이다(그 PR이 실제로
+    건드린 테스트는 test_3666_channel_post_image_import.py·test_3753_*.py 셋뿐 —
+    test_3373_channel_connections.py는 없다). `--changed-files`로 그 사실을 알리면
+    WARN(exit 0)만 — 옛 run-relative 값(중앙값 5.91배)은 더 이상 판정에 안 쓰인다."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: _RUN_33773872963_SHARD0_WEIGHTS)
+    elapsed_path = tmp_path / "elapsed.tsv"
+    elapsed_path.write_text(
+        "\n".join(f"{f}\t{s}" for f, s in _RUN_33773872963_SHARD0_ELAPSED.items())
+    )
+    changed_files_path = tmp_path / "changed.txt"
+    changed_files_path.write_text(
+        "tests/test_3666_channel_post_image_import.py\n"
+        "tests/test_3753_image_integrity_validator.py\n"
+        "tests/test_3753_mcp_import_image_path.py\n"
+    )
+    exit_code = mod._check_elapsed_mode(elapsed_path, changed_files_path=changed_files_path)
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "OK" in captured.err
+    assert "::warning::" in captured.out  # AC2 — 무관 파일 초과는 경고로 남는다(가시성)
+
+
+def test_check_elapsed_mode_without_changed_files_arg_is_conservative_red(tmp_path, capsys, monkeypatch):
+    """story #4152 회귀 0 — `--changed-files` 생략(옛 호출부와 동형)이면 diff 정보가
+    없다는 뜻이라 전부 changed 취급, 위와 같은 표본이라도 절대 임계(weight×2.5)를
+    넘는 파일은 그대로 RED다(안전측 폴백, 새 인자를 안 넘기는 기존 소비처가 조용히
+    더 관대해지는 회귀를 막는다)."""
     mod = _load()
     monkeypatch.setattr(mod, "load_weights", lambda: _RUN_33773872963_SHARD0_WEIGHTS)
     elapsed_path = tmp_path / "elapsed.tsv"
@@ -506,9 +646,9 @@ def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monke
         "\n".join(f"{f}\t{s}" for f, s in _RUN_33773872963_SHARD0_ELAPSED.items())
     )
     exit_code = mod._check_elapsed_mode(elapsed_path)
-    assert exit_code == 0
+    assert exit_code == 1
     captured = capsys.readouterr()
-    assert "OK" in captured.err
+    assert "::error::" in captured.out
 
 
 def test_check_elapsed_mode_returns_1_and_prints_error_when_genuinely_slow(tmp_path, capsys, monkeypatch):
