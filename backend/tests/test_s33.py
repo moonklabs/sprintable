@@ -223,6 +223,9 @@ async def test_members_list_200():
         member_mock.type = "human"
         member_mock.role = "admin"
         member_mock.is_active = True
+        # story #3997 계약 — MemberResponse.runtime_type(str | None). 휴먼 행은 항상
+        # None(members.py:28 주석 — TeamMember.runtime_type이 에이전트 전용 컬럼).
+        member_mock.runtime_type = None
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [member_mock]
