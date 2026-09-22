@@ -633,14 +633,16 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
               <div ref={verifyPromptFailedPanelRef} className="space-y-1">
                 <div className="flex items-start justify-between gap-2">
                   <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={dismissCopyVerifyPromptFailed}
                     aria-label={tc('close')}
                     className="shrink-0 text-muted-foreground hover:text-foreground"
                   >
                     ✕
-                  </button>
+                  </Button>
                 </div>
                 <input
                   readOnly

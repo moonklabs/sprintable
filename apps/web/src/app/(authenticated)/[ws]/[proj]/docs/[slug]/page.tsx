@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 import { useDocsLayout } from '../docs-context';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
@@ -340,14 +341,16 @@ export default function DocSlugPage() {
           <div ref={mdCopyFailedPanelRef} className="absolute right-0 top-full z-50 mt-1 w-72 space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
             <div className="flex items-start justify-between gap-2">
               <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setMdCopyFailedRaw(null)}
                 aria-label={tc('close')}
                 className="shrink-0 text-muted-foreground hover:text-foreground"
               >
                 ✕
-              </button>
+              </Button>
             </div>
             <textarea
               readOnly
