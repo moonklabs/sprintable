@@ -172,17 +172,21 @@ org로 그대로 새는 IDOR이었다(row 자체를 숨기는 게 아니라, row
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import and_, false as sa_false, func, or_, select, tuple_
+from sqlalchemy import and_, case, false as sa_false, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.pagination import decode_cursor, encode_cursor
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
 from app.models.event_definition import EventDefinition
+from app.models.evidence import Evidence
 from app.models.meeting import Meeting
 from app.models.pm import Story
 from app.models.reference import Reference
@@ -337,7 +341,13 @@ BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story", "artifact", "gate", 
 # WHERE 절의 4-way OR 분기(doc·chat_message·meeting·story)가 실제로 authz를 아는 유일한
 # source_type 4종이라 이 집합과 정확히 동형이다 — 다른 값을 허용하면 필터가 "0건"을 "이 타입
 # 없음"으로 거짓 보고한다(그 타입 자체가 애초에 쿼리에서 안 만들어지니까).
-BACKLINKS_ALLOWED_SOURCE_TYPES = frozenset({"doc", "chat_message", "meeting", "story"})
+# story #4141(페드루 PO 確定 2026-09-22 03:08Z) — evidence·artifact 추가. 이 둘은
+# `_SIMPLE_SOURCE_TYPE_SPECS`(아래) 테이블에 등록돼 doc/meeting/story와 같은 predicate
+# 모양(project_access_valid_correlated)으로 자동 합류한다 — 이 allowlist는 그 표에 실제로
+# 등록된 키 + chat_message(구조상 표 밖 특수분기, 아래 클래스 참조)의 정확한 합집합이어야
+# 한다(§3852 정신 그대로: "이 타입은 실제로 authz를 안다"는 사실 하나가 이 집합의 유일한
+# 존재 근거).
+BACKLINKS_ALLOWED_SOURCE_TYPES = frozenset({"doc", "chat_message", "meeting", "story", "evidence", "artifact"})
 
 
 class UnsupportedBacklinkTargetTypeError(ValueError):
@@ -422,6 +432,109 @@ async def count_entity_references_total(session: AsyncSession, org_id: uuid.UUID
     if org_id is not None:
         stmt = stmt.where(Reference.org_id == org_id)
     return (await session.execute(stmt)).scalar_one()
+
+
+# story #4141(페드루 PO 確定 2026-09-22 03:08Z) — doc/meeting/story/evidence/artifact 5종의
+# SOURCE authz predicate는 전부 `project_access_valid_correlated(project_id_expr, ...)` 하나로
+# 표현된다(evidence만 project_id 컬럼이 없어 story/task 폴리모픽을 통해 간접 해소한 CASE
+# 표현식이지만, predicate 자체는 같은 함수). 이 표가 **유일한 등록처**다 — 6번째 project-scoped
+# source_type이 오면 이 dict에 항목 하나만 추가하면 되고, `list_entity_backlinks` 본체(JOIN
+# 조립·WHERE OR-분기·SELECT 컬럼·응답 dict 빌드 네 곳 전부)는 그 타입 이름을 한 글자도 안
+# 담고 루프로만 돈다(«하드코딩 분기 추가 0», AC2). `chat_message`는 이 표에 없다 —
+# Conversation JOIN + admin-bypass(project_admin_valid_correlated/org_admin_valid_correlated)
+# + `conversation_readable_predicate`라는, project_access_valid_correlated 하나로 안 끝나는
+# 구조적으로 다른 predicate 모양이라(§6회차 산티아고 리뷰가 공들여 correlated로 고정해 둔
+# 그 특수 로직) 표로 못 묶는다 — 기존 chat-source 분기를 그대로 별도 유지한다.
+@dataclass(frozen=True)
+class _SimpleSourceTypeSpec:
+    model: type
+    org_col: InstrumentedAttribute | None  # Model.org_id — JOIN ON절 org 스코프(모델에 없으면 None)
+    project_id_col: ColumnElement  # project_access_valid_correlated에 그대로 넘기는 표현식
+    title_col: InstrumentedAttribute  # 응답 sub-object의 "title"(evidence는 ref로 대체)
+    deleted_at_col: InstrumentedAttribute | None  # None=하드삭제 모델(soft-delete 컬럼 자체가 없음)
+    response_key: str  # 응답 item dict의 sub-object 키("doc"|"meeting"|"story"|"evidence"|"artifact")
+    # story #4141 — 이 source_type의 write-path가 reconcile_entity_references에 넘기는
+    # source_field 실값(doc/story="body", evidence="ref", artifact="content" — 소스마다
+    # "본문"에 해당하는 필드 이름이 다르다). 아래 `or_(...)` WHERE 필터(§2679 origin='auto'
+    # 제외와 나란한 기존 규율 — "이 참조가 그 소스의 의도된 콘텐츠 축에서 왔는가")가 문자열
+    # "body" 하나만 인가하던 걸 이 컬럼 기준으로 되돌려, evidence/artifact처럼 body가 아닌
+    # 다른 필드에서 파생된 참조도 정당하게 통과한다(누락되면 그 source_type의 backlinks가
+    # 조용히 0건으로 보인다 — 이 카드가 처음 실측으로 잡은 그 결함).
+    write_source_field: str
+
+
+def _evidence_project_id_expr() -> ColumnElement:
+    """story #4141(페드루 PO 지시, 조건②) — `reference_registry._project_id_of_evidence`와
+    **같은 두 분기**(work_item_type이 story면 Story.project_id, task면 Story.project_id를
+    Task 경유로)를 SQL 표현식으로 재현한다 — 새 predicate를 손으로 짜지 않고 그 함수가 이미
+    세운 분기 로직만 SQL로 옮긴다(로직 twin-system 갭 방지, 값은 최종적으로 같은 project_id
+    를 내야 한다는 계약도 realdb 테스트가 story/task 양쪽 다 pin한다). 이 값이
+    `project_access_valid_correlated`의 `project_id_col` 인자로 들어가면 그 함수 안에서
+    `EXISTS(... Project.id == project_id_col ...)`로 correlate되므로 스칼라 서브쿼리를 바로
+    embed해도 TOCTOU-by-construction 불변식이 깨지지 않는다(project_id_col이 "어떻게 구했는지"
+    는 project_access_valid_correlated 입장에서 불투명 — 컬럼이든 서브쿼리든 컴파일된 SQL
+    표현식이기만 하면 된다)."""
+    from app.models.pm import Task
+
+    return case(
+        (
+            Reference.source_type == "evidence",
+            case(
+                (
+                    Evidence.work_item_type == "story",
+                    select(Story.project_id)
+                    .where(Story.id == Evidence.work_item_id, Story.org_id == Reference.org_id)
+                    .correlate(Evidence, Reference)
+                    .scalar_subquery(),
+                ),
+                (
+                    Evidence.work_item_type == "task",
+                    select(Story.project_id)
+                    .join(Task, Task.story_id == Story.id)
+                    .where(Task.id == Evidence.work_item_id, Task.org_id == Reference.org_id)
+                    .correlate(Evidence, Reference)
+                    .scalar_subquery(),
+                ),
+                else_=None,
+            ),
+        ),
+        else_=None,
+    )
+
+
+_SIMPLE_SOURCE_TYPE_SPECS: dict[str, _SimpleSourceTypeSpec] = {
+    "doc": _SimpleSourceTypeSpec(
+        model=Doc, org_col=Doc.org_id, project_id_col=Doc.project_id,
+        title_col=Doc.title, deleted_at_col=Doc.deleted_at, response_key="doc",
+        write_source_field="body",
+    ),
+    "meeting": _SimpleSourceTypeSpec(
+        # Meeting엔 org_id 컬럼이 없다(project 경유로만 org 스코프 — 기존 4-way 분기 주석과
+        # 동일 사실, project_access_valid_correlated가 project→org 소속을 이미 확認한다).
+        model=Meeting, org_col=None, project_id_col=Meeting.project_id,
+        title_col=Meeting.title, deleted_at_col=Meeting.deleted_at, response_key="meeting",
+        write_source_field="body",
+    ),
+    "story": _SimpleSourceTypeSpec(
+        model=Story, org_col=Story.org_id, project_id_col=Story.project_id,
+        title_col=Story.title, deleted_at_col=Story.deleted_at, response_key="story",
+        write_source_field="body",
+    ),
+    "evidence": _SimpleSourceTypeSpec(
+        # Evidence는 title이 없다 — ref(자유문자열, evidence 자신의 표시 라벨)로 대체. 하드
+        # 삭제 모델(deleted_at 컬럼 자체가 없다 — routers/evidence.py::delete_evidence가
+        # session.delete()로 행을 실제로 지운다)이라 deleted_at_col=None — still_exists는
+        # "행이 매치됐는가"(id NOT NULL)로 판정한다(아래 응답 루프).
+        model=Evidence, org_col=Evidence.org_id, project_id_col=_evidence_project_id_expr(),
+        title_col=Evidence.ref, deleted_at_col=None, response_key="evidence",
+        write_source_field="ref",
+    ),
+    "artifact": _SimpleSourceTypeSpec(
+        model=VisualArtifact, org_col=VisualArtifact.org_id, project_id_col=VisualArtifact.project_id,
+        title_col=VisualArtifact.title, deleted_at_col=VisualArtifact.deleted_at, response_key="artifact",
+        write_source_field="content",
+    ),
+}
 
 
 async def list_entity_backlinks(
@@ -557,53 +670,59 @@ async def list_entity_backlinks(
     # Blocker 1(org-scope 누락) fix — Doc JOIN의 `Doc.org_id == org_id`와 동형. §8③ 요구대로
     # 인가 predicate(doc: accessible_pids 멤버십, chat: conversation_readable_predicate)를
     # WHERE 절에 직접 embed한다(별도 SELECT로 먼저 집합을 만들지 않음 — TOCTOU-by-construction).
+    # story #4141 — doc/meeting/story/evidence/artifact 5종의 SELECT 라벨·JOIN·WHERE-authz
+    # 분기를 `_SIMPLE_SOURCE_TYPE_SPECS`(위) 루프 하나로 조립한다(신규 타입은 그 표에 항목
+    # 1개만 추가 — 이 루프는 손 안 댐, AC2 "하드코딩 분기 추가 0"). chat_message는 표 밖의
+    # 구조적 특수분기(Conversation JOIN·admin-bypass·conversation_readable_predicate)로
+    # 그대로 남는다(위 표 docstring 참조).
+    simple_select_cols: list[ColumnElement] = []
+    simple_joins: list[tuple[type, ColumnElement]] = []
+    simple_authz_branches = []
+    for st_key, spec in _SIMPLE_SOURCE_TYPE_SPECS.items():
+        simple_select_cols.append(spec.title_col.label(f"{st_key}_title"))
+        if spec.deleted_at_col is not None:
+            simple_select_cols.append(spec.deleted_at_col.label(f"{st_key}_deleted_at"))
+        # story #2299(E-CONNECT, PO 판정 2026-07-29)와 동일 규율(doc 분기 원 설계) — JOIN
+        # ON절엔 deleted_at 조건을 절대 안 넣는다(soft-delete된 source도 매치돼야 project_id
+        # 기반 authz가 정상 평가된다 — 지웠다고 접근권 검사가 사라지면 안 된다). org 스코프는
+        # 모델에 org_col이 있을 때만(doc/story/evidence/artifact) ON절에 건다 — meeting은
+        # project 경유로만(project_access_valid_correlated가 project→org 소속을 이미 확認).
+        join_on = [spec.model.id == Reference.source_id, Reference.source_type == st_key]
+        if spec.org_col is not None:
+            join_on.append(spec.org_col == org_id)
+        simple_joins.append((spec.model, and_(*join_on)))
+        simple_authz_branches.append(
+            and_(
+                Reference.source_type == st_key,
+                # §5회차 Blocker 1과 동일 규율 — 사전 IN-list가 아니라 correlated EXISTS(같은
+                # statement·같은 스냅샷).
+                project_access_valid_correlated(spec.project_id_col, caller_id=uid, org_id=org_id),
+            )
+        )
+
     stmt = (
         select(
             Reference,
-            Doc.project_id.label("doc_project_id"),
-            Doc.title.label("doc_title"),
-            # ⛔story #2299(E-CONNECT, PO 판정 2026-07-29): 여기 있던 `Doc.deleted_at.is_(None)`이
-            # JOIN ON절에서 soft-deleted source doc을 "매치 실패"로 만들어 project_id가 NULL이
-            # 되고, 그 결과 아래 WHERE의 authz 체크(project_access_valid_correlated)가 NULL
-            # project에 대해 무조건 거짓이 되어 행 자체가 결과에서 «조용히» 빠졌다(`test_soft_
-            # deleted_source_doc_excluded`가 그걸 "정답"으로 고정하고 있었다 — PO가 그 자체를
-            # 버그로 재판정: "목록에서 빼면 그게 바로 조용히 사라지는 것"). deleted_at 조건을
-            # JOIN에서 빼 soft-deleted 문서도 매치되게 하고(그래야 project_id가 살아서 authz가
-            # 원래 프로젝트 기준으로 정상 평가된다 — 삭제됐다고 접근권 검사가 사라지면 안 된다),
-            # 대신 deleted_at 자체를 별도 컬럼으로 select해 still_exists 판정에 쓴다.
-            Doc.deleted_at.label("doc_deleted_at"),
+            *simple_select_cols,
             ConversationMessage.conversation_id.label("msg_conversation_id"),
             ConversationMessage.content.label("msg_content"),
             ConversationMessage.sender_id.label("msg_sender_id"),
-            # story #2319: chat_message도 이제 soft-delete(tombstone)될 수 있다 — doc/meeting/
-            # story와 동형으로 deleted_at을 별도 컬럼으로 select(JOIN ON절엔 안 넣는다 — #2299
-            # 교훈 그대로, 넣으면 conversation_id가 NULL이 되어 authz가 깨진다).
-            ConversationMessage.deleted_at.label("msg_deleted_at"),
             # story #4091(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §c) — 이벤트 발행 메시지(story
             # #2637 AC 0-a, msg_metadata['event']={event_key,payload,refs})인지 판별하는 축.
             # #4458(story #4081)가 이미 쓰는 그 필드 — 새 컬럼 0, 신규 인덱스 0(스캔은 이미
             # page-limit LIMIT 이후 행 소수에만 적용).
             ConversationMessage.msg_metadata.label("msg_metadata"),
-            # story #2267(C-9): meeting·story도 source가 될 수 있다(창조-출처, relation=
-            # 'created_from') — Doc과 동형(직접 project_id 보유·soft-delete)이라 같은 패턴.
-            # #2299 교훈 그대로: deleted_at은 JOIN ON절에 안 넣는다(soft-delete돼도 project_id는
-            # 살아야 authz가 정상 평가된다).
-            Meeting.project_id.label("meeting_project_id"),
-            Meeting.title.label("meeting_title"),
-            Meeting.deleted_at.label("meeting_deleted_at"),
-            Story.project_id.label("story_source_project_id"),
-            Story.title.label("story_source_title"),
-            Story.deleted_at.label("story_source_deleted_at"),
+            # story #2319: chat_message도 이제 soft-delete(tombstone)될 수 있다 — doc/meeting/
+            # story와 동형으로 deleted_at을 별도 컬럼으로 select(JOIN ON절엔 안 넣는다 — #2299
+            # 교훈 그대로, 넣으면 conversation_id가 NULL이 되어 authz가 깨진다).
+            ConversationMessage.deleted_at.label("msg_deleted_at"),
         )
         .select_from(Reference)
-        .outerjoin(
-            Doc,
-            and_(
-                Doc.id == Reference.source_id,
-                Reference.source_type == "doc",
-                Doc.org_id == org_id,
-            ),
-        )
+    )
+    for join_model, join_on_clause in simple_joins:
+        stmt = stmt.outerjoin(join_model, join_on_clause)
+    stmt = (
+        stmt
         .outerjoin(
             ConversationMessage,
             and_(
@@ -618,23 +737,6 @@ async def list_entity_backlinks(
                 Conversation.org_id == org_id,  # ⭐ Blocker 1(4회차): org 경계 명시 검증
             ),
         )
-        .outerjoin(
-            Meeting,
-            and_(
-                Meeting.id == Reference.source_id,
-                Reference.source_type == "meeting",
-                # Meeting엔 org_id 컬럼이 없다(project 경유로만 org 스코프) — project_access_
-                # valid_correlated가 project→org 소속을 확認하므로 여기선 project_id로만 매치.
-            ),
-        )
-        .outerjoin(
-            Story,
-            and_(
-                Story.id == Reference.source_id,
-                Reference.source_type == "story",
-                Story.org_id == org_id,
-            ),
-        )
         .where(
             Reference.org_id == org_id,
             # story #2679(BE): origin='auto'(caller 의도 확인 없이 서버가 승격한 참조 —
@@ -643,32 +745,29 @@ async def list_entity_backlinks(
             # 것이 이 스토리(#2679)의 원 결함이다. 렌더(채팅 버블 본문 표시)는 이 쿼리를 안
             # 거치므로(promote_bare_story_refs가 이미 content에 토큰을 심어 둠) 영향 없다.
             Reference.origin == "explicit",
-            or_(Reference.relation == "created_from", Reference.source_field == "body"),
+            # story #4141 — "body" 하나만 인가하던 걸 소스별 실제 write source_field
+            # (_SIMPLE_SOURCE_TYPE_SPECS.write_source_field, chat_message는 위와 동일하게
+            # "body")로 되돌렸다 — 안 그러면 evidence(source_field="ref")·artifact
+            # ("content") 참조가 이 필터 단계에서 전부 탈락해 backlinks가 조용히 0건으로
+            # 보인다(이 카드가 실측으로 처음 잡은 결함).
+            or_(
+                Reference.relation == "created_from",
+                *[
+                    and_(Reference.source_type == st_key, Reference.source_field == spec.write_source_field)
+                    for st_key, spec in _SIMPLE_SOURCE_TYPE_SPECS.items()
+                ],
+                and_(Reference.source_type == "chat_message", Reference.source_field == "body"),
+            ),
             Reference.target_type == target_type,
             Reference.target_id == target_id,
             or_(
-                and_(
-                    Reference.source_type == "doc",
-                    # §5회차 Blocker 1 fix: 사전 IN-list가 아니라 correlated EXISTS(같은 statement
-                    # ·같은 스냅샷 — 위 chat-source project_access_valid와 동일 SSOT 호출).
-                    project_access_valid_correlated(Doc.project_id, caller_id=uid, org_id=org_id),
-                ),
+                *simple_authz_branches,
                 and_(
                     Reference.source_type == "chat_message",
                     # org join이 매치 실패하면(다른 org 소속 conversation) Conversation.id가
                     # NULL — 이 가드가 그 행을 admin-bypass 포함 어떤 경로로도 확실히 탈락시킨다.
                     Conversation.id.isnot(None),
                     chat_predicate,
-                ),
-                and_(
-                    # story #2267(C-9): meeting source — Doc과 동일 패턴(project_id 직접보유).
-                    Reference.source_type == "meeting",
-                    project_access_valid_correlated(Meeting.project_id, caller_id=uid, org_id=org_id),
-                ),
-                and_(
-                    # story #2267(C-9): story source(㉢분할·복제 출처) — Doc과 동일 패턴.
-                    Reference.source_type == "story",
-                    project_access_valid_correlated(Story.project_id, caller_id=uid, org_id=org_id),
                 ),
             ),
         )
@@ -739,19 +838,17 @@ async def list_entity_backlinks(
             # 만들어졌다 — "출처"). ⛔컨테이너(epic/sprint/meeting_id)와 이 값을 화면에서
             # 섞지 않는다(스토리 AC4) — 이 필드가 있어야 FE가 "출처"만 따로 표시할 수 있다.
             "relation": m.relation,
-            "doc": None,
             "message": None,
-            "meeting": None,
-            "story": None,
+            # story #4141 — 표에 등록된 5종(doc/meeting/story/evidence/artifact)의 sub-object
+            # 키를 표에서 그대로 파생한다(하드코딩 dict literal 0 — 6번째 타입이 표에 추가되면
+            # 이 초기화도 자동으로 그 키를 안다).
+            **{spec.response_key: None for spec in _SIMPLE_SOURCE_TYPE_SPECS.values()},
             # story #2299 AC⑤: 「끊어짐」은 색/경고가 아니라 사실 필드다 — 렌더(색·문구)는 FE
-            # 몫. 넷 다 아래서 각 source_type의 실제 판정으로 덮어쓴다(기본값 True는 그 사이
-            # 매치 실패한 source_type 없음 방어일 뿐 — 이 함수가 아는 네 타입은 전부 판정됨).
+            # 몫. 아래서 매치된 source_type의 실제 판정으로 덮어쓴다(기본값 True는 그 사이
+            # 매치 실패한 source_type 없음 방어일 뿐 — 이 함수가 아는 타입은 전부 판정됨).
             "still_exists": True,
         }
-        if m.source_type == "doc":
-            item["doc"] = {"id": str(m.source_id), "title": r.doc_title}
-            item["still_exists"] = r.doc_deleted_at is None
-        elif m.source_type == "chat_message":
+        if m.source_type == "chat_message":
             sender = member_map.get(r.msg_sender_id) if r.msg_sender_id is not None else None
             item["message"] = {
                 "id": str(m.source_id),
@@ -772,12 +869,18 @@ async def list_entity_backlinks(
             # 제네릭 렌더(entity-backlinks-section.tsx, "대상이 없습니다" 무채색 배지)를 그대로
             # 태운다 — content_snippet이 빈 문자열이라도 별도 분기 불필요.
             item["still_exists"] = r.msg_deleted_at is None
-        elif m.source_type == "meeting":
-            item["meeting"] = {"id": str(m.source_id), "title": r.meeting_title}
-            item["still_exists"] = r.meeting_deleted_at is None
-        elif m.source_type == "story":
-            item["story"] = {"id": str(m.source_id), "title": r.story_source_title}
-            item["still_exists"] = r.story_source_deleted_at is None
+        elif m.source_type in _SIMPLE_SOURCE_TYPE_SPECS:
+            spec = _SIMPLE_SOURCE_TYPE_SPECS[m.source_type]
+            title = getattr(r, f"{m.source_type}_title")
+            item[spec.response_key] = {"id": str(m.source_id), "title": title}
+            if spec.deleted_at_col is not None:
+                deleted_at = getattr(r, f"{m.source_type}_deleted_at")
+                item["still_exists"] = deleted_at is None
+            else:
+                # story #4141 — evidence는 하드삭제 모델(deleted_at 컬럼 자체가 없다). 존재
+                # 여부는 JOIN이 실제로 매치됐는가(title이 NULL이면 매치 실패 — outerjoin이라
+                # 삭제된/존재 안 하는 evidence는 NULL로 온다)로만 판정한다.
+                item["still_exists"] = title is not None
         data.append(item)
 
     next_cursor = None
@@ -789,13 +892,14 @@ async def list_entity_backlinks(
     # 무엇을 셌는지를 구조화된 사실로 함께 낸다(문안 렌더는 FE 몫 — 여기선 FE가 틀리지 않게
     # 근거 사실만 준다). ⛔이 쿼리는 `Reference.form`을 필터링하지 않는다(mention/embed/proof
     # 전부 포함 — 위 stmt에 form 조건이 없다) — 그래서 "mention/embed만"이라고 쓰면 거짓이다.
-    # source_type은 이 함수가 아는 네 값(chat_message·doc·meeting·story, story #2267 C-9가
-    # meeting·story를 추가)뿐 — PR "[SID:XXX]" 텍스트 관례·evidence 자유텍스트 참조는
-    # entity_references에 전혀 안 쌓이므로(구조화 전) 이 카운트에 없다.
+    # source_type은 이 함수가 실제로 아는 값(chat_message + `_SIMPLE_SOURCE_TYPE_SPECS`
+    # 등록 타입 전부)뿐 — story #4141 이후 evidence/artifact 스스로가 entity_references에
+    # 쌓이면(#4141 write-path) 이 카운트가 그 둘도 포함한다. PR "[SID:XXX]" 텍스트 관례는
+    # 여전히 구조화 전이라 이 카운트에 없다.
     collection_scope = {
-        "source_types": ["chat_message", "doc", "meeting", "story"],
+        "source_types": ["chat_message", *_SIMPLE_SOURCE_TYPE_SPECS.keys()],
         "forms": "all",
-        "excludes": ["pr_sid_text_convention", "evidence_free_text_reference"],
+        "excludes": ["pr_sid_text_convention"],
     }
 
     return {

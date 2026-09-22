@@ -190,6 +190,14 @@ async def create_artifact(
         nodes.append(node)
     await session.flush()
 
+    # story #4141(페드루 PO 確定 2026-09-22) — v1 생성 시점 reconcile(known_new=True, insert-
+    # only — 새로 생긴 artifact.id라 기존 참조가 있을 수 없다, 채팅 write-path와 동일 근거).
+    await _reconcile_artifact_entity_references(
+        session, org_id=org_id, artifact=artifact,
+        node_descriptions=[n.description for n in nodes],
+        created_by=created_by, known_new=True,
+    )
+
     await _notify_artifact_created(session, artifact, org_id=org_id, project_id=project_id, creator_id=created_by)
 
     node_outs = [ArtifactNodeOut.model_validate(n) for n in nodes]
@@ -1341,7 +1349,55 @@ async def _apply_artifact_edit(
     artifact.latest_version_number = new_version_number
     artifact.canvas_bounds = new_canvas_bounds
     await session.flush()
+
+    # story #4141(페드루 PO 確定 2026-09-22) — 새 버전의 node description도 reconcile
+    # 대상(story_id/epic_id/doc_id는 매 편집 동일 값을 다시 넘겨도 diff가 자연히 no-op —
+    # #2301 코어의 "diff-against-current" 계약 그대로 재사용, 새 판정 0).
+    await _reconcile_artifact_entity_references(
+        session, org_id=artifact.org_id, artifact=artifact,
+        node_descriptions=[data["description"] for data in working.values()],
+        created_by=actor_id, known_new=False,
+    )
     return new_version
+
+
+async def _reconcile_artifact_entity_references(
+    session: AsyncSession, *, org_id: uuid.UUID, artifact: "VisualArtifact",
+    node_descriptions: list[str | None], created_by: uuid.UUID | None, known_new: bool,
+) -> None:
+    """story #4141 — artifact가 entity_references에 source_type="artifact" 행을 남긴다
+    (이 write-path 신설 前엔 0건). 대상 2종, 전부 이미 있는 신호 재사용(새 파서 0):
+      ① `story_id`/`epic_id`/`doc_id`(VisualArtifact 자신의 구조화 FK 3종, 폴리모픽
+         reconcile 토큰 파싱이 필요 없다 — 컬럼값을 그대로 target으로 싣는다).
+      ② 노드 `description` 안의 `[Label](entity:type:uuid)` 토큰 — doc write-path
+         (`reconcile_doc_mentions`)가 이미 쓰는 `extract_chat_entity_mentions`(마크다운
+         브라켓 문법, 채팅과 완전히 같은 문법이라 새 정규식을 안 짓는다) 재사용.
+
+    `known_new=True`(생성 시 v1)면 insert-only 고속 경로, `known_new=False`(새 버전
+    편집)면 diff(현재 node 집합에 없는 예전 토큰의 참조는 삭제) — #2301 코어의 계약
+    그대로, 이 함수는 그 스위치만 넘긴다."""
+    from app.services.mention_parser import extract_chat_entity_mentions, reconcile_entity_references
+    from app.services.reference_registry import WRITE_TARGET_TYPES_WITH_TARGET_ONLY
+
+    extracted_refs: list[tuple[str, uuid.UUID, str, str]] = []
+    if artifact.story_id is not None:
+        extracted_refs.append(("story", artifact.story_id, "mention", "explicit"))
+    if artifact.epic_id is not None:
+        extracted_refs.append(("epic", artifact.epic_id, "mention", "explicit"))
+    if artifact.doc_id is not None:
+        extracted_refs.append(("doc", artifact.doc_id, "mention", "explicit"))
+
+    for description in node_descriptions:
+        if not description:
+            continue
+        for target_type, target_id in extract_chat_entity_mentions(description):
+            extracted_refs.append((target_type, target_id, "mention", "explicit"))
+
+    await reconcile_entity_references(
+        session, org_id=org_id, source_type="artifact", source_field="content", source_id=artifact.id,
+        extracted_refs=extracted_refs, created_by=created_by,
+        target_types=WRITE_TARGET_TYPES_WITH_TARGET_ONLY, known_new=known_new,
+    )
 
 
 async def _notify_artifact_updated(
