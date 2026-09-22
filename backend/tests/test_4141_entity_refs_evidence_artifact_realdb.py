@@ -553,15 +553,16 @@ async def test_mutation_kill_spec_table_is_sole_registration_point():
 
 
 @pytest.mark.anyio
-async def test_backfill_dry_run_writes_nothing_apply_writes_and_is_idempotent():
-    """AC4 — 백필 스크립트(app/services/evidence_artifact_reference_backfill.py)가 write-
-    path 신설 前 생성된 "구버전" evidence(직접 INSERT, router를 안 거침 — reconcile 호출
-    0인 상태를 흉내)를 dry-run에선 0건 쓰고, --apply에선 실제로 채우고, 두 번째 apply도
-    안전(멱등 — 재실행 에러 0·backlinks 결과 안 바뀜)한지 pin한다."""
+async def test_cron_sweep_seed_tick1_backfills_tick2_is_noop():
+    """AC4(정정 라운드, 페드루 PO 지적 2026-09-22 04:50Z) — evidence_artifact_reference_
+    backfill.py의 cron 피기백 스윕(publication_commands_tick이 매 tick 부르는 그 함수)이
+    write-path 신설 前 생성된 "구버전" evidence(직접 INSERT, router 안 거침 — reconcile
+    호출 0 상태를 흉내)를 tick1에서 잡아 참조를 채우고, tick2는 (이미 채워졌으므로) 0건
+    스캔·0건 처리로 수렴하는지 pin한다("seed → tick1 생성 → tick2 증가 0")."""
     from app.dependencies.auth import AuthContext
     from app.models.evidence import Evidence
     from app.services.backlinks import list_entity_backlinks
-    from app.services.evidence_artifact_reference_backfill import backfill_evidence_references
+    from app.services.evidence_artifact_reference_backfill import sweep_evidence_references
 
     engine, Session = await _session_factory()
     try:
@@ -572,9 +573,6 @@ async def test_backfill_dry_run_writes_nothing_apply_writes_and_is_idempotent():
             story = await _make_story(s, org.id, project.id)
             doc = await _make_doc(s, org.id, project.id, title="백필 대상 문서")
             doc_id = doc.id
-            # write-path(routers/evidence.py::_create_evidence)를 안 거치고 직접 INSERT —
-            # 이 write-path 신설 前 생성된 옛 행을 흉내(reconcile 호출 0, entity_references
-            # 참조 없는 상태).
             evidence = Evidence(
                 id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
                 type="report", ref="옛 컨셉 브리프", created_by=member_id,
@@ -586,23 +584,12 @@ async def test_backfill_dry_run_writes_nothing_apply_writes_and_is_idempotent():
 
         auth = AuthContext(user_id=str(user_id), email="h@test", claims={"app_metadata": {"org_id": str(org.id)}})
 
-        # dry-run: 카운트는 잡히지만 DB엔 아무것도 안 쓴다.
+        # tick1 — 참조 0건 신호-有 행을 스캔해 채운다.
         async with Session() as s:
-            totals = await backfill_evidence_references(s, apply=False, org_id=org.id)
-            assert totals.evidence_scanned == 1
-            assert totals.evidence_with_refs_extracted == 1
-
-        async with Session() as s:
-            rows = await _fetch_reference_target_ids(
-                s, org_id=org.id, source_type="evidence", source_id=evidence_id, target_type="doc",
-            )
-            assert rows == [], "dry-run인데 실제로 썼다"
-
-        # --apply: 실제로 쓴다.
-        async with Session() as s:
-            totals = await backfill_evidence_references(s, apply=True, org_id=org.id)
-            assert totals.evidence_with_refs_extracted == 1
-            assert totals.errors == []
+            tick1 = await sweep_evidence_references(s, batch_size=50)
+            assert tick1.scanned == 1
+            assert tick1.processed == 1
+            assert tick1.errors == []
 
         async with Session() as s:
             rows = await _fetch_reference_target_ids(
@@ -618,15 +605,108 @@ async def test_backfill_dry_run_writes_nothing_apply_writes_and_is_idempotent():
                 for item in result["data"]
             )
 
-        # 재실행 멱등 — 에러 0·행 수 불변(ON CONFLICT DO NOTHING, mention_parser.py 기저 불변식).
+        # tick2 — 이미 채워졌으므로(NOT EXISTS가 더는 안 걸림) 스캔·처리 둘 다 0. 재실행해도
+        # 참조 행 수가 안 늘어난다(멱등).
         async with Session() as s:
-            totals2 = await backfill_evidence_references(s, apply=True, org_id=org.id)
-            assert totals2.errors == []
+            tick2 = await sweep_evidence_references(s, batch_size=50)
+            assert tick2.scanned == 0
+            assert tick2.processed == 0
 
         async with Session() as s:
             rows = await _fetch_reference_target_ids(
                 s, org_id=org.id, source_type="evidence", source_id=evidence_id, target_type="doc",
             )
-            assert rows == [("doc", doc_id)], "재실행이 중복을 만들었다"
+            assert rows == [("doc", doc_id)], "tick2가 중복을 만들었다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_sweep_skips_no_signal_evidence_starvation_guard():
+    """뮤테이션 관련 pin — 모듈 docstring의 starvation 방지 근거를 직접 실증한다: 신호가
+    아예 없는(payload 無·artifact_version_id 無) evidence는 영원히 참조가 안 생겨 SQL
+    "신호 있음" 필터가 없으면 매 tick 큐 앞자리(created_at ASC)를 영구 점유한다. 이 필터가
+    빠지면(`or_(...)` 조건들을 지우면) 이 테스트가 scanned==1로 RED가 된다 — 지금은
+    filter가 있어 scanned==0."""
+    from app.models.evidence import Evidence
+    from app.services.evidence_artifact_reference_backfill import sweep_evidence_references
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            member_id, _user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id)
+            evidence = Evidence(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                type="url", ref="https://example.com/report", created_by=member_id,
+                payload=None,
+            )
+            s.add(evidence)
+            await s.commit()
+
+        async with Session() as s:
+            tick = await sweep_evidence_references(s, batch_size=50)
+            assert tick.scanned == 0, "신호 없는 evidence가 스윕 후보에 들어갔다(starvation 위험)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cron_sweep_artifact_seed_tick1_backfills_tick2_is_noop():
+    """AC4 — artifact 쪽도 같은 계약(seed → tick1 생성 → tick2 증가 0)을 pin한다.
+    story_id FK만 있는(문서 토큰 없음) 최소 케이스."""
+    from app.models.visual_artifact import ArtifactVersion, VisualArtifact
+    from app.services.backlinks import list_entity_backlinks
+    from app.services.evidence_artifact_reference_backfill import sweep_artifact_references
+    from app.dependencies.auth import AuthContext
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id)
+            # write-path(routers/visual_artifacts.py::create_artifact)를 안 거치고 직접
+            # INSERT — write-path 신설 前 생성된 옛 행을 흉내.
+            artifact = VisualArtifact(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="옛 컨셉 보드",
+                story_id=story.id, latest_version_number=1, created_by=member_id,
+            )
+            s.add(artifact)
+            await s.flush()
+            version = ArtifactVersion(id=uuid.uuid4(), artifact_id=artifact.id, version_number=1)
+            s.add(version)
+            await s.commit()
+            artifact_id = artifact.id
+
+        auth = AuthContext(user_id=str(user_id), email="h@test", claims={"app_metadata": {"org_id": str(org.id)}})
+
+        async with Session() as s:
+            tick1 = await sweep_artifact_references(s, batch_size=50)
+            assert tick1.scanned == 1
+            assert tick1.processed == 1
+            assert tick1.errors == []
+
+        async with Session() as s:
+            rows = await _fetch_reference_target_ids(
+                s, org_id=org.id, source_type="artifact", source_id=artifact_id, target_type="story",
+            )
+            assert rows == [("story", story.id)]
+
+            result = await list_entity_backlinks(
+                s, org_id=org.id, target_type="story", target_id=story.id, auth=auth, limit=30, cursor=None,
+            )
+            assert any(
+                item["source_type"] == "artifact" and item["source_id"] == str(artifact_id)
+                for item in result["data"]
+            )
+
+        async with Session() as s:
+            tick2 = await sweep_artifact_references(s, batch_size=50)
+            assert tick2.scanned == 0
+            assert tick2.processed == 0
     finally:
         await engine.dispose()

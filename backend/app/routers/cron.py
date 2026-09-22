@@ -1396,6 +1396,26 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("newsletter-sends tick error: %s", exc)
             counts["newsletter_sends"] = {"error": "unhandled"}
+        # story #4141(PO 지적, 2026-09-22 04:50Z) — evidence/artifact entity_references
+        # 백필(신설 write-path 前 생성분)을 독립 scripts/jobs CLI 대신 이 tick에 피기백
+        # (위 축들과 같은 "새 Cloud Scheduler 잡 0" 사상 — CLI는 gcloud로 돌릴 사람이
+        # 있어야 실행되는데 dev 실행 주체가 0이라 탈락). bounded·idempotent(evidence_
+        # artifact_reference_backfill.py 모듈 docstring 참조) — 독립 try로 이 축의
+        # 미분류 버그가 이미 커밋된 다른 축 결과를 500으로 덮지 않는다.
+        try:
+            from app.services.evidence_artifact_reference_backfill import (
+                sweep_artifact_references,
+                sweep_evidence_references,
+            )
+            evidence_result = await sweep_evidence_references(session)
+            artifact_result = await sweep_artifact_references(session)
+            counts["entity_references_backfill"] = {
+                "evidence": evidence_result.as_dict(),
+                "artifact": artifact_result.as_dict(),
+            }
+        except Exception as exc:
+            logger.exception("entity-references-backfill sweep tick error: %s", exc)
+            counts["entity_references_backfill"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)
