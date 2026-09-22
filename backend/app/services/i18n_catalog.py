@@ -254,10 +254,24 @@ _CATALOG: dict[str, dict[str, str]] = {
     # maybe_create_stage_gate — routing 직후·메시지 발송 전에 "지금 발행되는 그 stage"의
     # 게이트를 만든다, events.py:1845-1854).
     "events.stage_gate_already_open": {
-        "ko": "지금 사람 승인 게이트가 열려 있어요(승인자 역할: {approver}) — 승인 알림"
+        "ko": "지금 사람 승인 게이트가 열려 있어요({approver_clause}) — 승인 알림"
         "(preset.gate.verdict) 뒤 다음 단계를 발행해 주세요.",
-        "en": "A human approval gate is already open (approver role: {approver}) — publish "
+        "en": "A human approval gate is already open ({approver_clause}) — publish "
         "the next stage after you receive the approval notification (preset.gate.verdict).",
+    },
+    # story #4149(리허설 2호 실측, 페드루 PO 確定 2026-09-22) — 위 events.stage_gate_
+    # already_open의 {approver_clause} 두 갈래. #4083 OrgGatePolicy.recipe_gate_default_
+    # approver_member_id가 설정돼 있으면(정책 지정) 그 멤버 표시명을 그대로 싣고, 미설정
+    # (기본값, recipe_gate_hooks.py::_resolve_org_owner의 org owner 폴백 그대로)이면 역할
+    # 문구만 — "org_owner"(내부 role 참조 슬러그) 리터럴이 문장에 그대로 새던 실사고
+    # (댄 보고 원문, #4145 스모크) 처방.
+    "events.stage_gate_approver_clause_policy": {
+        "ko": "승인자: {name}(정책 지정)",
+        "en": "approver: {name} (policy-designated)",
+    },
+    "events.stage_gate_approver_clause_default": {
+        "ko": "승인자 역할: org 소유자",
+        "en": "approver role: org owner",
     },
     "events.stage_gate_opens_on_publish": {
         "ko": "이 발행을 하면 사람 승인 게이트가 열려요 — 승인 알림(preset.gate.verdict) "

@@ -1659,7 +1659,23 @@ async def _render_gate_verdict_message(
             # 이유로 SimpleNamespace 목을 GateResponse.model_construct로 바꾼 선례와
             # 동형 원칙: 목을 실물에 맞추지, 실물을 목에 맞추지 않는다).
             _recipe_auto_publish_line: str | None = None
-            if not is_site_post and gate_row is not None and gate_row.scope_key:
+            # story #4149(리허설 2호 실측, 페드루 PO 確定 2026-09-22) — 위 #4142 분기는
+            # gate_row 자신이 "scoped" channel_post 게이트(scope_key=connection_id)일
+            # 때만 역방향 조회로 publish_outcome을 찾았다. 실측: 리허설 2호 게이트
+            # 952fb0fd는 그 반대 축 — gate_row 자신이 unscoped 레시피 external_publish
+            # 게이트(scope_key="")였고, gate.py publish_outcome 필드 자신의 계약("external_
+            # publish 게이트(scope_key="", 레시피 unscoped 게이트)에서만 채워진다",
+            # gate_service.py:1280 publish_recipe_approved_draft가 같은 트랜잭션에서 이미
+            # 채워 둔다)대로 gate_row.publish_outcome을 새 조회 없이 그대로 읽으면 된다 —
+            # 역방향 조회(resolve_recipe_context_for_scheduled_publication)는 애초에 이
+            # 축(scope_key="") 전용이 아니다. 비레시피 external_publish 게이트(scope_key=""
+            # 이지만 레시피 무관)는 publish_outcome이 계약대로 항상 None이라 이 분기가
+            # 조용히 안 타고 기존 human_only로 그대로 폴백한다(회귀 0).
+            if not is_site_post and gate_row is not None and not gate_row.scope_key and gate_row.publish_outcome:
+                _recipe_auto_publish_line = _recipe_auto_publish_outcome_line(
+                    gate_row.publish_outcome, resolved_locale,
+                )
+            elif not is_site_post and gate_row is not None and gate_row.scope_key:
                 try:
                     _scope_connection_id = uuid.UUID(gate_row.scope_key)
                 except (ValueError, TypeError, AttributeError):
@@ -1821,6 +1837,37 @@ _STAGE_ROLE_LABEL_KEYS = frozenset({
 _CAPABILITY_KIND_LABEL_KEYS = frozenset({"publish", "collect"})
 
 
+async def _resolve_stage_gate_approver_clause(
+    db: AsyncSession, *, org_id: uuid.UUID, resolved_locale: str,
+) -> str:
+    """story #4149(리허설 2호 실측, 페드루 PO 確定 2026-09-22) — stage 진입 멘션의
+    «승인자» 절. stage_metadata[stage].gate.approver는 역할참조 슬러그(현재 유일값
+    "org_owner")일 뿐 실제 지정 승인자가 아니다 — #4083(recipe_gate_hooks.py::
+    _resolve_org_owner)이 OrgGatePolicy.recipe_gate_default_approver_member_id를
+    org_owner role보다 우선시키는데, 이 멘션 템플릿만 그 우선순위를 몰라 role 슬러그
+    리터럴("org_owner")을 문장에 그대로 꽂고 있었다(실사고, 댄 보고 원문). 새 판정
+    로직 0 — _resolve_org_owner와 똑같은 순서(정책 먼저, 없으면 org owner)로 "정책이
+    설정돼 있는가"만 다시 묻는다(그 결과로 실제 approver_id를 또 계산하지 않는다 —
+    이 함수의 관심사는 "그 값이 정책에서 왔는지" 뿐, 실 게이트의 designated_approver_id
+    재조회는 불요)."""
+    from app.models.hitl_config import OrgGatePolicy
+
+    policy_member_id = (await db.execute(
+        select(OrgGatePolicy.recipe_gate_default_approver_member_id).where(OrgGatePolicy.org_id == org_id)
+    )).scalar_one_or_none()
+    if policy_member_id is None:
+        return t("events.stage_gate_approver_clause_default", resolved_locale)
+
+    from app.services.member_resolver import UNNAMED_MEMBER_LABEL, lookup_members_by_ids
+
+    _members = await lookup_members_by_ids({policy_member_id}, db)
+    _resolved = _members.get(policy_member_id)
+    _name = (_resolved.name if _resolved else None) or (
+        UNNAMED_MEMBER_LABEL if resolved_locale == "ko" else "unnamed member"
+    )
+    return t("events.stage_gate_approver_clause_policy", resolved_locale, name=_name)
+
+
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
 ) -> str:
@@ -1904,8 +1951,11 @@ async def _render_event_message_content(
     #     방법 자체를 모르게 됨, 페드루 PO 지적) 그 결과를 안내하는 문장만 덧붙인다.
     current_gate = stage_meta.get("gate")
     if current_gate is not None:
+        _approver_clause = await _resolve_stage_gate_approver_clause(
+            db, org_id=org_id, resolved_locale=resolved_locale,
+        )
         lines.append(
-            f"- {t('events.stage_gate_already_open', resolved_locale, approver=current_gate.get('approver') or '')}"
+            f"- {t('events.stage_gate_already_open', resolved_locale, approver_clause=_approver_clause)}"
         )
         if next_stage is not None:
             next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
