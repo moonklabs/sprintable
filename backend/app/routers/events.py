@@ -3888,6 +3888,206 @@ async def get_my_generation_connector(
     )
 
 
+class ChannelConnectionStatusReadResponse(BaseModel):
+    """story #4132 — 바인딩 crew 에이전트 전용 상태 읽기. 자격/토큰/계정 식별자 0 —
+    `channel_connections.py::ChannelConnectionResponse`(사람용 BFF)는 account_id까지
+    노출하지만 이 응답은 발행 전 "쓸 수 있는지"만 답하는 게 계약이라 그보다도 더 좁다."""
+    connection_id: uuid.UUID
+    provider: str
+    status: str
+    needs_reauth: bool
+    last_verified_at: str | None
+    display_name: str | None
+
+
+@router.get(
+    "/work-items/{work_item_type}/{work_item_id}/channel-connection",
+    response_model=ChannelConnectionStatusReadResponse,
+)
+async def get_my_channel_connection_status(
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ChannelConnectionStatusReadResponse:
+    """story #4132(민 실측 2026-09-21 20:21Z, PO 실측 23:40Z) — 발행(published) 단계를
+    맡은 crew 에이전트가 자기 바인딩된 채널 연결이 살아 있는지(재인증 필요 여부)를
+    발행 시점 전에 미리 안다. `channel-connections`(사람 전용 BFF, 403)의 자격 인접
+    대안 — `get_my_generation_connector`(#4110/#4124)와 완전히 동형 판정 순서를
+    쓴다(target 문자열만 "generation_connector"→"channel_connection", 아래 참조).
+
+    판정 순서(전부 되돌리면 RED — #4110/#4124와 같은 이유로 순서 자체가 계약):
+    1. 호출자가 agent 아니면(human) 403 — `channel-connections`가 사람 전용인 것과
+       대칭축(그쪽은 "누가 부르는지"로 이미 사람만 허용, 여긴 반대로 에이전트만).
+    2. work_item → project를 못 찾으면 404(`_resolve_work_item_project_id` — Story
+       전용으로 좁히지 않는다, generation-connector와 같은 일반 리졸버).
+    3. 이 project(+ org 전역)에 **적용된** 모든 event_definition_key에 걸친 넓은 crew
+       (그 어느 키에도 안 묶여 있으면) 403 CREW_ONLY — #4124가 generation-connector에
+       고친 것과 같은 이유(완전 crew 밖 호출자가 stage-mismatch를 crew 판정보다 먼저
+       알게 되는 구멍을 막는다).
+    4. 그 project(+ org 전역)에 바인딩된 레시피 중 이 work_item에 실제로 시작된 stage
+       중 `capability.target=="channel_connection"`(발행 단계 — `_CAPABILITY_TARGETS`
+       3종 중 하나, `channel_posts.py`가 같은 문자열로 이미 소비하는 "발행 계열"
+       판별자)가 하나도 없으면 403 STAGE_MISMATCH.
+    5. 호출 에이전트가 이 matched_key의 crew 밖이면(3번을 통과했어도 다른 키의
+       crew일 뿐인 경계 사례) 403 CREW_ONLY.
+    6. 그 stage에 바인딩된 `channel_connection_id`가 없으면 404(project 특이 우선,
+       org 전역 폴백 — `channel_posts.py::_resolve_recipe_channel_connection_binding`과
+       같은 우선순위이나 그 헬퍼는 work_item_id→project_id를 Story 전용으로 다시
+       도출해 이 엔드포인트의 일반 work_item_type과 어긋날 수 있어, 이미 2번에서
+       해소한 project_id를 그대로 재사용하는 인라인 쿼리로 직접 짠다).
+    7. 그 연결이 이 org 소속이 아니거나 존재하지 않으면 404. **generation-connector와
+       달리 status!="active"여도 409를 안 던진다** — "재인증이 필요하다"는 사실 자체가
+       이 엔드포인트가 답해야 하는 정보라, revoked/expired/error도 200으로 status·
+       needs_reauth에 실어 보고한다(AC1 명시 — "연결 revoked/disconnected면 그 상태를
+       200으로 보고").
+    8. 감사 로그 1행 — `logger.info`(자격값 0, generation-connector와 동일 관례).
+    9. `{connection_id, provider, status, needs_reauth, last_verified_at, display_name}`
+       반환. `needs_reauth = status != "active"` — FE
+       `components/channel-connect/connection-status.ts::deriveChannelConnectionStatus`가
+       이미 이 판별(serverStatus가 expired/revoked/error면 reauth_required)을 쓰는
+       SSOT라 새 규칙을 여기서 발명하지 않는다. `last_verified_at`은
+       `ChannelConnection.last_refreshed_at`을 크루 친화적 이름으로 노출(같은 값,
+       "마지막으로 이 연결이 실제로 동작을 확인한 시각"이 에이전트에게 더 직관적).
+    """
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.channel_connection import get_channel_connection
+    from app.services.event_routing_resolver import _resolve_work_item_project_id
+    from app.services.member_resolver import resolve_member
+
+    caller = await resolve_member(auth, org_id, db)
+    if caller.type != "agent":
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_CONNECTION_READ_AGENT_ONLY"})
+
+    project_id = await _resolve_work_item_project_id(
+        db, org_id=org_id,
+        payload={"work_item_type": work_item_type, "work_item_id": str(work_item_id)},
+    )
+    if project_id is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_CONNECTION_WORK_ITEM_NOT_FOUND"})
+
+    binding_rows = (await db.execute(
+        select(RecipeRoleBinding.event_definition_key).where(
+            RecipeRoleBinding.org_id == org_id,
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).all()
+    applied_keys = sorted({k for (k,) in binding_rows})
+
+    if applied_keys:
+        broad_crew_ids = set((await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.event_definition_key.in_(applied_keys),
+                RecipeRoleBinding.agent_member_id.is_not(None),
+                or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+            )
+        )).scalars().all())
+    else:
+        broad_crew_ids = set()
+    if caller.id not in broad_crew_ids:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_CONNECTION_CREW_ONLY"})
+
+    matched_key: str | None = None
+    matched_stage: str | None = None
+    if applied_keys:
+        definitions = (await db.execute(
+            select(EventDefinition)
+            .where(
+                EventDefinition.key.in_(applied_keys),
+                EventDefinition.enabled.is_(True),
+                or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+            )
+            .order_by(EventDefinition.org_id.is_(None))
+        )).scalars().all()
+        by_key: dict[str, EventDefinition] = {}
+        for d in definitions:
+            by_key.setdefault(d.key, d)
+
+        for key in applied_keys:
+            definition = by_key.get(key)
+            if definition is None:
+                continue
+            stage_enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum")
+            if not isinstance(stage_enum, list) or not stage_enum:
+                continue
+            first_stage = stage_enum[0]
+            existing_publish = await _find_existing_stage_publish(
+                db, org_id=org_id, definition_key=key,
+                work_item_type=work_item_type, work_item_id=str(work_item_id), stage=str(first_stage),
+            )
+            if existing_publish is None:
+                continue
+            latest = await _find_latest_stage_publish(
+                db, org_id=org_id, definition_key=key,
+                work_item_type=work_item_type, work_item_id=str(work_item_id),
+            )
+            if latest is None:
+                continue
+            event_payload = ((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}
+            stage_value = event_payload.get("stage")
+            if not isinstance(stage_value, str):
+                continue
+            capability = (definition.stage_metadata.get(stage_value) or {}).get("capability") or {}
+            if capability.get("target") == "channel_connection":
+                matched_key, matched_stage = key, stage_value
+                break
+
+    if matched_stage is None or matched_key is None:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_CONNECTION_STAGE_MISMATCH"})
+
+    crew_ids = set((await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key == matched_key,
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None)),
+        )
+    )).scalars().all())
+    if caller.id not in crew_ids:
+        raise HTTPException(status_code=403, detail={"code": "CHANNEL_CONNECTION_CREW_ONLY"})
+
+    channel_connection_id = (await db.execute(
+        select(RecipeRoleBinding.channel_connection_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id == project_id,
+            RecipeRoleBinding.event_definition_key == matched_key,
+            RecipeRoleBinding.stage == matched_stage,
+        )
+    )).scalar_one_or_none()
+    if channel_connection_id is None:
+        channel_connection_id = (await db.execute(
+            select(RecipeRoleBinding.channel_connection_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id.is_(None),
+                RecipeRoleBinding.event_definition_key == matched_key,
+                RecipeRoleBinding.stage == matched_stage,
+            )
+        )).scalar_one_or_none()
+    if channel_connection_id is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_CONNECTION_BINDING_NOT_FOUND"})
+
+    connection = await get_channel_connection(db, org_id=org_id, connection_id=channel_connection_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail={"code": "CHANNEL_CONNECTION_BINDING_NOT_FOUND"})
+
+    logger.info(
+        "channel_connection_status_read: actor=%s org=%s connection=%s work_item=%s:%s stage=%s",
+        caller.id, org_id, connection.id, work_item_type, work_item_id, matched_stage,
+    )
+
+    return ChannelConnectionStatusReadResponse(
+        connection_id=connection.id,
+        provider=connection.channel,
+        status=connection.status,
+        needs_reauth=connection.status != "active",
+        last_verified_at=connection.last_refreshed_at.isoformat() if connection.last_refreshed_at else None,
+        display_name=connection.account_label,
+    )
+
+
 class EventPublishHistoryItem(BaseModel):
     id: str
     conversation_id: str
