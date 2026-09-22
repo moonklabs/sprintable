@@ -737,11 +737,6 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         }
         showContextChip
       />
-      {/* story #2930(P0-G) I3 — flow 쪽과 짝(WorkspaceFrameTabs 컴포넌트 주석 참고). nav에서
-          sprints 1차 메뉴가 빠진 자리를 메우는 얕은 프레임. */}
-      <div className="px-6 pt-3">
-        <WorkspaceFrameTabs active="sprints" />
-      </div>
       {/* story #3845(§① 2026-09-14) — 「하루 체크인」 절을 이 페이지에 추가하며 리스트/상세
           split(원래 flex-1로 남은 세로 공간 전부를 차지·각 컬럼이 자체 overflow-y-auto로
           내부 스크롤)이 더 이상 페이지의 유일한 콘텐츠가 아니게 됐다 — 바깥을 세로 스크롤
@@ -750,10 +745,17 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           스크롤을 유지한 채 그 안 콘텐츠 조각이 된다.
           story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
           이 바깥 스크롤 컬럼이 자기 높이를 잃어 안의 split(각자 독립 overflow-y-auto)도
-          같이 풀린다 — 여기서 직접 앵커(h-[calc(100svh-3rem)], 3rem=셸 TopBar h-12,
-          WorkspaceFrameTabs 자체 높이는 반영 안 함 — 그만큼 여유가 남거나 페이지가 살짝
-          스크롤되는 수준, 기능 파손 아님). */}
-      <div className="focus-inset flex h-[calc(100svh-3rem)] min-h-0 flex-col overflow-y-auto">
+          같이 풀린다 — 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))] — story #4131,
+          --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT).
+          story #4131 AC3 — WorkspaceFrameTabs를 이 앵커 밖(위)에 별도로 두면 그 툴바 자체
+          높이만큼 앵커 계산이 슬랙을 남긴다 — 앵커 「안」으로 끌어들이고 sticky top-0로
+          고정해(#4125 sticky 메커니즘 재사용) 슬랙을 0으로 만든다. */}
+      <div className="focus-inset flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-y-auto">
+      {/* story #2930(P0-G) I3 — flow 쪽과 짝(WorkspaceFrameTabs 컴포넌트 주석 참고). nav에서
+          sprints 1차 메뉴가 빠진 자리를 메우는 얕은 프레임. */}
+      <div className="sticky top-0 z-10 shrink-0 bg-background px-6 pt-3">
+        <WorkspaceFrameTabs active="sprints" />
+      </div>
       <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>

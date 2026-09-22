@@ -475,8 +475,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           아래 목록의 로컬 min-h-0/flex-1/overflow-y-auto 경계를 걷어냈다 — 그 대신 이
           헤더 블록들(두 분기 다)을 sticky top-0로 고정해 이전과 같이 스크롤해도 항상
           보이게 한다(#4125가 이미 증명한 sticky 메커니즘 재사용 — embedded 분기는 가장
-          가까운 스크롤 조상이 sprints-client.tsx의 자기 h-[calc(100svh-3rem)] 래퍼가
-          되므로 sticky가 그 기준으로 자연히 맞는다). */}
+          가까운 스크롤 조상이 sprints-client.tsx의 자기 h-[calc(100svh-var(--shell-chrome-h))]
+          래퍼(story #4131)가 되므로 sticky가 그 기준으로 자연히 맞는다). */}
       {embedded ? (
         // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
         // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이

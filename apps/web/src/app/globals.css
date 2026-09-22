@@ -1033,3 +1033,35 @@
     --bottom-dock-inset: calc(var(--mobile-tab-bar-h) + env(safe-area-inset-bottom));
   }
 }
+
+/* story #4131 — #4130이 split-pane 5곳(goals·sprints·settings·inbox·docs 레이아웃)의 로컬
+   뷰포트 앵커에 `h-[calc(100svh-3rem)]`를 하드코딩했다. `3rem`은 TopBar(h-12) 높이뿐이라
+   ① TopBar가 안 그려지는 라우트(`/settings`, dashboard-shell.tsx의 showTopBar=false)에서는
+   그만큼 콘텐츠 영역이 작게 잡히고(붕괴는 아님·하단 48px 낭비) ② lg 미만(<1024px)에서는
+   하단 고정 탭바(`--mobile-tab-bar-h`, 위에서 이미 SSOT) 높이만큼 앵커가 뷰포트를 넘친다.
+   이 변수가 그 둘을 한 곳에서 합성한다 — 앵커는 전부 `h-[calc(100svh-var(--shell-chrome-h))]`
+   로 이 변수만 참조(각자 3rem·탭바 높이를 다시 계산하지 않는다).
+   TopBar 표시 여부는 JS 불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — dashboard-
+   shell.tsx가 SidebarProvider(=.dashboard-shell-root)에 `data-topbar-hidden`을 얹어
+   다리를 놓는다(JS는 그 data 속성 하나만 설정, 실제 높이 계산은 전부 CSS).
+   `@layer components` 안에 두는 이유(페드루 PO, 2026-09-22) — story #4125/#4127 트립와이어
+   ALLOWLIST는 "이유 있는 기존 비레이어"만 남기는 자리라 새 규칙을 늘리지 않는다. 이 3벌은
+   커스텀 프로퍼티만 세워 유틸리티와 다툴 실제 CSS 프로퍼티가 0이므로(위 `.dashboard-shell-
+   root` 기존 블록과 같은 이유) @layer 안에 있어도 결과는 완전히 같다 — #4127 그룹 D
+   (`[data-sidebar="menu-button"][data-popup-open]` 예방적 이관)와 같은 길을 그대로 따른다. */
+@layer components {
+  .dashboard-shell-root {
+    --shell-chrome-h: 3rem;
+  }
+  .dashboard-shell-root[data-topbar-hidden] {
+    --shell-chrome-h: 0rem;
+  }
+  @media (max-width: 1023px) {
+    .dashboard-shell-root {
+      --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h));
+    }
+    .dashboard-shell-root[data-topbar-hidden] {
+      --shell-chrome-h: var(--mobile-tab-bar-h);
+    }
+  }
+}

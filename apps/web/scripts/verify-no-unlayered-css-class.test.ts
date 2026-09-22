@@ -129,4 +129,12 @@ describe('실 globals.css 스캔 — story #4127 AC1(48건 판정 완료) 확認
     const selectors = new Set(found.map((r) => r.selector));
     expect(selectors.has('[data-sidebar="menu-button"][data-popup-open]')).toBe(false);
   });
+
+  it('⭐story #4131의 --shell-chrome-h 선언(.dashboard-shell-root[data-topbar-hidden])은 @layer components 안이라 최상위에 없다(ALLOWLIST 확장 대신 이관 — 페드루 PO 2026-09-22)', () => {
+    const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+    const found = findUnlayeredClassRules(css);
+    const selectors = new Set(found.map((r) => r.selector));
+    expect(selectors.has('.dashboard-shell-root[data-topbar-hidden]')).toBe(false);
+    expect(ALLOWLIST.has('.dashboard-shell-root[data-topbar-hidden]')).toBe(false);
+  });
 });

@@ -33,6 +33,7 @@
     "verify:nontext-icon-contrast": "tsx scripts/verify-nontext-icon-contrast.ts",
     "verify:accent-color-contrast": "tsx scripts/verify-accent-color-contrast.ts",
     "verify:no-unlayered-css-class": "tsx scripts/verify-no-unlayered-css-class.ts",
+    "verify:no-hardcoded-shell-chrome-anchor": "tsx scripts/verify-no-hardcoded-shell-chrome-anchor.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
     "verify:no-subtle-alpha-bg": "tsx scripts/verify-no-subtle-alpha-bg.ts",
     "verify:no-new-alpha-text-foreground": "tsx scripts/verify-no-new-alpha-text-foreground.ts",

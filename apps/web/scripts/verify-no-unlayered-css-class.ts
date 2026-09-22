@@ -33,6 +33,12 @@
  *   - `.dashboard-shell-root` — `--mobile-tab-bar-h`/`--bottom-dock-inset` 커스텀
  *     프로퍼티만 선언(story #3756). 실제 CSS 프로퍼티 0.
  *
+ * story #4131 — `--shell-chrome-h`(`.dashboard-shell-root`/`[data-topbar-hidden]`/미디어
+ * 쿼리 3벌)는 ALLOWLIST에 안 넣는다. 이유 있는 «기존» 비레이어만 여기 남기는 것이 정본
+ * (페드루 PO, 2026-09-22) — 새 규칙은 커스텀 프로퍼티만이라 유틸리티와 다툴 속성이 없어도
+ * `@layer components`로 이관한다(결과는 같음·D1 sidebar 예방 이관과 같은 길). globals.css
+ * 본문 참고.
+ *
  *   [story #2229 기존 문서화 — third-party(prosemirror-view) unlayered 런타임 주입 스타일을
  *    이기기 위해 의도적으로 레이어 밖에 남겨진 것, 7건 — 이관 절대 금지, #2214 재발 유발]
  *   - `.ProseMirror .scrollbar-visible`
