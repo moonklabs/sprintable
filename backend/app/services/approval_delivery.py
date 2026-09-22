@@ -330,21 +330,31 @@ async def dispatch_approval_request_cards(
             try:
                 from app.services.activity_log import ActivityLogService
 
-                await ActivityLogService(db).record(
-                    org_id=org_id,
-                    action="approval_card_delivery_failed",
-                    actor_type="platform",
-                    project_id=project_id,
-                    entity_type="gate",
-                    entity_id=gate_id,
-                    context={
-                        "work_item_type": work_item_type,
-                        "work_item_id": str(work_item_id),
-                        "approver_id": str(approver_id),
-                        "requester_id": str(requester_id),
-                        "exception_type": type(exc).__name__,
-                    },
-                )
+                # PR#4527 CHANGES-1(까디르 QA 지적, 페드루 PO 確定 2026-09-22) — 위
+                # db.begin_nested()는 "배달 시도"만 감쌌다. `record()`가 내부에서
+                # `await self._db.flush()`를 하므로(activity_log.py) 이 호출 자체가
+                # 실 DB 왕복이다 — 이걸 SAVEPOINT 밖에서 하면, DB 레벨 실패(제약 위반·
+                # 일시 오류) 시 파이썬 예외는 이 try/except가 삼켜도 PostgreSQL
+                # 커넥션은 aborted 트랜잭션 상태로 남아 바깥(게이트 생성) 트랜잭션의
+                # 최종 commit이 깨진다 — "배달 1차 실패 + 기록 2차 실패"가 겹치면 AC2
+                # (발행은 그대로 성공)가 이 신규 코드 경로에서 새로 깨지는 리스크였다.
+                # 새 SAVEPOINT 한 겹으로 기록 실패도 격리한다(마이그·신규 테이블 0).
+                async with db.begin_nested():
+                    await ActivityLogService(db).record(
+                        org_id=org_id,
+                        action="approval_card_delivery_failed",
+                        actor_type="platform",
+                        project_id=project_id,
+                        entity_type="gate",
+                        entity_id=gate_id,
+                        context={
+                            "work_item_type": work_item_type,
+                            "work_item_id": str(work_item_id),
+                            "approver_id": str(approver_id),
+                            "requester_id": str(requester_id),
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
             except Exception:  # noqa: BLE001 — 관측 자체의 실패가 상신을 막으면 안 된다.
                 logger.warning(
                     "approval-request 카드 배달 실패의 activity_log 기록도 실패 %s=%s approver=%s",

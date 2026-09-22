@@ -209,3 +209,83 @@ async def test_publish_still_succeeds_when_card_delivery_fails():
             await s.commit()
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_delivery_and_activity_log_both_fail_gate_creation_still_commits(caplog, monkeypatch):
+    """⭐PR#4527 CHANGES-1(까디르 QA 지적, 페드루 PO 確定 2026-09-22) — 배달 자체 실패
+    (FK 위반) **+** activity_log 기록까지 실패(SAVEPOINT 안에서 진짜 DB 예외, `SELECT
+    1/0`)가 겹쳐도, 바깥(게이트 생성) 트랜잭션의 commit은 그대로 성공하고 「기록도
+    실패」 WARNING만 남는다. 처방 前에는 `ActivityLogService.record()`의 내부
+    `flush()`가 SAVEPOINT 밖에서 실패해 커넥션이 aborted 상태로 남아 이 s.commit()
+    자체가 깨졌다(신규 리스크 — 이 PR이 새로 만든 코드 경로)."""
+    import logging
+
+    import app.services.activity_log as activity_log_module
+    from sqlalchemy import text
+
+    from app.services.approval_delivery import dispatch_approval_request_cards, logger as _logger
+
+    original_record = activity_log_module.ActivityLogService.record
+
+    async def _record_hits_real_db_error(self, **kwargs):
+        await self._db.execute(text("SELECT 1/0"))
+        return await original_record(self, **kwargs)  # pragma: no cover — 위에서 항상 먼저 raise
+
+    monkeypatch.setattr(activity_log_module.ActivityLogService, "record", _record_hits_real_db_error)
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug="4156d")
+            requester_id = await _seed_human(s, org_id, project_id)
+            doc = await _seed_doc(s, org_id, project_id)
+            nonexistent_approver = uuid.uuid4()
+            gate_id = uuid.uuid4()
+
+            with caplog.at_level(logging.WARNING, logger=_logger.name):
+                # 배달(FK 위반) + 기록(SELECT 1/0)이 둘 다 실패해도 이 await 자체는
+                # 새지 않아야 한다(best-effort 계약 — AC2가 이 겹침에서도 유지됨).
+                await dispatch_approval_request_cards(
+                    s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
+                    project_id=doc.project_id, title=doc.title, gate_id=gate_id,
+                    gate_type="doc_approval",
+                    requester_id=requester_id, approver_ids=[nonexistent_approver],
+                )
+            # ⚠️PostgreSQL은 aborted 트랜잭션에 COMMIT을 보내면 예외 없이 **조용히
+            # ROLLBACK**한다(클라이언트에 에러가 안 보인다) — 이 세션에 새로 flush할
+            # 게 없는 채로 그냥 commit만 하면 "커밋이 안 터졌다"가 "실제로 커밋됐다"의
+            # 증거가 못 된다(처방 前 코드로 최초 작성했을 때 이 구멍으로 뮤테이션이
+            # 안 죽는 걸 실측으로 발견). 호출부(예: gates.py)가 게이트 생성 자체를
+            # 같은 트랜잭션에서 하는 것과 동형으로, 여기서도 새 행 하나를 심어 그
+            # INSERT가 flush 시점에 실제로 시도되게 한다 — aborted 상태였다면 바로
+            # 이 지점에서 InFailedSQLTransactionError가 터진다(test_2604의 Sentinel
+            # 기법과 동형, 발명 0).
+            from app.models.organization import Organization
+
+            sentinel_org_id = uuid.uuid4()
+            s.add(Organization(id=sentinel_org_id, name="Sentinel4527c1", slug=f"sentinel-{uuid.uuid4().hex[:8]}"))
+            await s.commit()
+
+            warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+            assert any("activity_log 기록도 실패" in r.message for r in warning_records), (
+                f"기록 실패 WARNING이 안 남: {[r.message for r in caplog.records]}"
+            )
+            # 기록 자체가 실패했으니 activity_logs 행은 안 남는다(정직 — 지어내지 않는다).
+            logs = await _delivery_failure_logs(s, org_id=org_id, gate_id=gate_id)
+            assert logs == [], f"기록이 실패했는데 행이 남음(SAVEPOINT 롤백 미작동): {logs}"
+
+        # 같은 세션이 아니라 fresh 세션으로 재조회 — commit이 "조용한 rollback"이
+        # 아니라 진짜 커밋이었는지 끝단(#4156 세션의 «끝단 영속검증» 관례)까지 확인.
+        from app.models.organization import Organization as OrgModel
+        from sqlalchemy import select as sa_select
+
+        async with Session() as s2:
+            still_there = (await s2.execute(
+                sa_select(OrgModel.id).where(OrgModel.id == sentinel_org_id)
+            )).scalar_one_or_none()
+            assert still_there is not None, (
+                "sentinel org가 fresh 세션에서 안 보임 — commit이 실제로는 조용한 rollback이었을 수 있음"
+            )
+    finally:
+        await engine.dispose()
