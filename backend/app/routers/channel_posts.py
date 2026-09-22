@@ -740,13 +740,17 @@ async def _require_draft_media_participant(
             )
             crew_ids = await resolve_broad_crew_member_ids(db, org_id=org_id, project_id=project_id)
             if resolved.id not in crew_ids:
+                # story #4147 CHANGES-2(페드루 PO 지적, PR #4522 CI — #3779 BE 한글
+                # 사용자 문장 가드) — 이 403의 호출자는 항상 에이전트뿐(사람은 위에서
+                # 이미 분기 통과)이라 human_error()의 한글 user_message 축(사람 FE 번역
+                # 표 경유)이 애초에 안 맞는다 — events.py::_resolve_crew_scoped_recipe_
+                # binding의 CREW_ONLY류와 같은 코드 축(영문 한 줄, FE 등재 0)으로 맞춘다.
                 raise HTTPException(
                     status_code=403,
-                    detail=human_error(
-                        "NOT_DRAFT_PARTICIPANT",
-                        "이 초안에 참여(작성자 또는 배정된 크루)한 에이전트만 미디어를 올릴 수 있어요.",
-                        user_message="이 초안에 참여(작성자 또는 배정된 크루)한 에이전트만 미디어를 올릴 수 있어요.",
-                    ),
+                    detail={
+                        "code": "NOT_DRAFT_PARTICIPANT",
+                        "message": "only the draft author or an assigned crew agent may upload media",
+                    },
                 )
 
     from app.services.activity_log import ActivityLogService
