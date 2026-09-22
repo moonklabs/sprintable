@@ -477,6 +477,11 @@ async def list_site_post_drafts_endpoint(
         description="story #3734 — true면 보관된(deleted_at not null) 초안도 목록에 "
         "포함한다(「보관됨 보기」 필터). 기본은 제외.",
     ),
+    work_item_id: uuid.UUID | None = Query(
+        default=None,
+        description="story #3988 — drafts linked to this work item only (worklist detail "
+        "Publications tab). Omitted: response identical to before (no regression).",
+    ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -492,8 +497,11 @@ async def list_site_post_drafts_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
-    rows = await list_site_post_drafts(db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted)
-    total = await count_site_post_drafts(db, org_id=org_id, include_deleted=include_deleted)
+    rows = await list_site_post_drafts(
+        db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted,
+        work_item_id=work_item_id,
+    )
+    total = await count_site_post_drafts(db, org_id=org_id, include_deleted=include_deleted, work_item_id=work_item_id)
     response.headers["X-Total-Count"] = str(total)
     return [
         _to_site_post_draft_list_item(

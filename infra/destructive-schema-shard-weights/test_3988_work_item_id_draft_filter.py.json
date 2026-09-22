@@ -1,0 +1,1 @@
+{"file": "tests/test_3988_work_item_id_draft_filter.py", "sec": 4.5, "source": "story-3988-local-run-2026-09-17(CHANGES-2 site 교차org 테스트 추가 후 uv run pytest 4건, throwaway Postgres, 실측 4.02s — 여유 반올림)"}

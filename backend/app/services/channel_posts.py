@@ -924,6 +924,7 @@ async def list_channel_post_drafts(
     source_content_item_id: uuid.UUID | None = None,
     include_withdrawn: bool = False,
     include_deleted: bool = False,
+    work_item_id: uuid.UUID | None = None,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -1110,6 +1111,10 @@ async def list_channel_post_drafts(
     # 재사용(단건 조회가 draft_id로 재사용하는 것과 동형 — 두 번째 조인 축을 새로 안 짠다).
     if source_content_item_id is not None:
         stmt = stmt.where(ChannelPostDraft.source_content_item_id == source_content_item_id)
+    # story #3988(E-UX-OVERHAUL·「일감」 흡수 2/N) — 일감 상세 「발행물」 탭이 그
+    # work_item_id에 이어진 초안만 보이게. NOT NULL 컬럼(FK 없는 관례, 기존 조인 무변경).
+    if work_item_id is not None:
+        stmt = stmt.where(ChannelPostDraft.work_item_id == work_item_id)
     page_rows = [(row[0], row[1], row[2]) for row in (await db.execute(stmt)).all()]
     if not page_rows:
         return []
@@ -1256,16 +1261,20 @@ async def list_channel_post_drafts(
 
 async def count_channel_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, include_withdrawn: bool = False, include_deleted: bool = False,
+    work_item_id: uuid.UUID | None = None,
 ) -> int:
     """story #3744 — list_channel_post_drafts와 같은 org_id/include_withdrawn/
     include_deleted 필터의 전체 개수(limit/offset·scheduled_from/to/unscheduled 무관 —
     목록 화면은 그 캘린더 전용 축을 안 쓴다). site_posts.py::count_site_post_drafts와
-    동형 관례."""
+    동형 관례. story #3988 — work_item_id도 같은 additive 축(X-Total-Count가 필터링된
+    결과와 어긋나지 않게 list와 같은 필터를 공유)."""
     stmt = select(func.count()).select_from(ChannelPostDraft).where(ChannelPostDraft.org_id == org_id)
     if not include_deleted:
         stmt = stmt.where(ChannelPostDraft.deleted_at.is_(None))
     if not include_withdrawn:
         stmt = stmt.where(ChannelPostDraft.status != "withdrawn")
+    if work_item_id is not None:
+        stmt = stmt.where(ChannelPostDraft.work_item_id == work_item_id)
     return (await db.execute(stmt)).scalar_one()
 
 
