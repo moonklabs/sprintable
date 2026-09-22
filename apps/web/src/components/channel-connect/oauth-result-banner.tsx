@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { connectErrorLabelKey } from '@/components/channel-connect/connect-error';
-import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
+import { useChannelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
 
 /**
  * story #4019(PO 確定 2026-09-17) — OAuth 콜백이 쿼리로 돌려주는 결과(connected·
@@ -53,6 +53,7 @@ export function OAuthResultBanner({
   isOwnerStrict: boolean;
 }) {
   const t = useTranslations('channelConnect');
+  const channelLabel = useChannelLabel();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -106,14 +107,14 @@ export function OAuthResultBanner({
         <Alert variant="info" role="status" aria-live="polite" aria-atomic="true" data-testid="channel-reauth-mismatch-note">
           <AlertDescription>
             {t('channelReauthMismatchNote', {
-              updated: channelConnectionIdentityLabel({ ...mismatchUpdatedConn, account_label: mismatchUpdatedConn.account_label ?? null }, t),
-              intended: channelConnectionIdentityLabel({ ...mismatchTargetConn, account_label: mismatchTargetConn.account_label ?? null }, t),
+              updated: channelConnectionIdentityLabel({ ...mismatchUpdatedConn, account_label: mismatchUpdatedConn.account_label ?? null }, channelLabel),
+              intended: channelConnectionIdentityLabel({ ...mismatchTargetConn, account_label: mismatchTargetConn.account_label ?? null }, channelLabel),
             })}
           </AlertDescription>
         </Alert>
       ) : connected && !isMismatchCase ? (
         <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
-          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected, t) })}</AlertDescription>
+          <AlertDescription>{t('channelConnectSuccess', { channel: channelLabel(connected) })}</AlertDescription>
         </Alert>
       ) : null}
       {connectError ? (
