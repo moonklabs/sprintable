@@ -2328,8 +2328,16 @@ export default function ChannelPostEditPage() {
             channelPostsAwaitingContainerNotice 알림과 문장이 겹친다(알림이 배지 문구를
             글자 그대로 포함 + 「다음 발」까지 지님). 목록(page.tsx:427)엔 이 알림이 없어
             배지가 유일한 신호라 그대로 두고, 상세는 알림이 대신하므로 이 상태에서만
-            배지를 안 그린다. */}
-        {failureAction && failureAction.kind !== 'processing' ? (
+            배지를 안 그린다.
+
+            story #4015(PO CHANGES 2) — processing_kind==='awaiting_container'면 위 상태
+            알림 IIFE가 컨테이너 대기 알림을 «먼저» 세운다(command_status 무관). 서버는
+            명령이 blocked/dead_letter로 가면 processing_kind를 null로 되돌리므로(위 컨테이너
+            대기 분기 주석) awaiting_container는 pending에서만 온다 — 즉 dead_letter+awaiting_
+            container 같은 조합은 «서버상 도달 불가»다. 도달 가능한 상태에선 kind!=='processing'
+            억제와 동작이 같고, 이 넓힌 조건은 그 도달 불가 조합에 대한 «방어»다(전수 곱
+            테스트가 그 조합까지 돌려도 실패 신호가 1개로 유지되게 한다). */}
+        {failureAction && draft.processing_kind !== 'awaiting_container' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
             // story #3402 갭 후속(페드루 PO, 2026-09-10 ②) — 이 화면(상세)엔 아래
@@ -2615,9 +2623,40 @@ export default function ChannelPostEditPage() {
           );
         }
         if (view.publicationFailed) {
+          // story #4015(§③ 색↔사람 할 일) — 실패 신호는 종류(kind)마다 「사람 할 일」이
+          // 달라 FailureActionBadge(위 :2331)가 이미 kind별로 색·액션까지 맞게 낸다.
+          // 옛 blanket destructive+「이 시도는 다음 발행에서 이어서 처리돼요」는 auto_retry
+          // 조합엔 과경보(자동 복구인데 빨강)·dead_letter/blocked엔 거짓 안내(자동 멈춰
+          // 사람이 눌러야 하는데 「자동 이어서」)였고, 같은 화면 배지 「자동 재시도를
+          // 멈췄어요」와 정면 모순이었다. 이제 두 규율:
+          //   ① failureAction이 서는 조합 = 배지가 유일한 신호(이 알림 안 그린다).
+          //   ② 배지가 못 그리는 조합(deriveFailureAction=undefined: command_status가
+          //      null·completed·cancelled, 또는 pending/in_progress에 failure_kind 없음)
+          //      에서만, 자동을 약속하지 않는 「참인 사실 문장」 하나를 중립(role=status)
+          //      으로 낸다. command_status별 문장(§③ doc d6a885cb §5 조합 표):
+          //      - cancelled: 실패+취소 사실 유지  - pending: 자동 재시도 예정
+          //        (process_due_publication_commands가 pending을 집는다·prod는 승격
+          //        스케줄러 등록 뒤 참)  - in_progress: 지금 재발행 중  - null(command
+          //        없음)+canPublish: 「다시 발행」 안내(버튼 활성) / 아니면 사실만(버튼
+          //        약속 0)  - completed: 도달 불가(all-published라야 completed) → 폴백.
+          if (failureAction !== undefined) return null;
+          // #4015 CHANGES 2 — 「다시 발행」이라는 없는 버튼을 지어내지 않는다. 안내에
+          // 끼우는 이름은 실제 발행 버튼과 «같은 키»(view.isRepublish ? publishRepublishCta
+          // : publishCta — 아래 발행 버튼 라벨과 동일)로 보간해 늘 버튼 텍스트와 일치시킨다.
+          const republishActionLabel = t(view.isRepublish ? 'publishRepublishCta' : 'publishCta');
+          const failedNotice =
+            draft.command_status === 'cancelled'
+              ? t('channelPostsPublicationFailedCancelledNotice')
+              : draft.command_status === 'pending'
+                ? t('channelPostsPublicationFailedPendingRetryNotice')
+                : draft.command_status === 'in_progress'
+                  ? t('channelPostsPublicationFailedInProgressNotice')
+                  : !draft.command_status && canPublish
+                    ? t('channelPostsPublicationFailedRepublishNotice', { action: republishActionLabel })
+                    : t('channelPostsPublicationFailedNotice');
           return (
-            <Alert variant="destructive" role="alert" data-testid="channel-post-publication-failed-notice">
-              <AlertDescription>{t('channelPostsPublicationFailedNotice')}</AlertDescription>
+            <Alert role="status" data-testid="channel-post-publication-failed-notice">
+              <AlertDescription>{failedNotice}</AlertDescription>
             </Alert>
           );
         }
