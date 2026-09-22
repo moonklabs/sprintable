@@ -25,9 +25,13 @@ import { fetchWithAuth } from '@/lib/db/client';
  * — 추측 0 원칙으로 이 세션에서 실제 확認된 2개뿐, org_generation_connector.py 모델
  * 주석 참조). 힌트 문구는 가용성을 단정하지 않는다(PO 처방 원문 그대로 — "모델별 가용
  * 리전은 Vertex 문서 기준이에요 — global이 가장 넓어요").
+ *
+ * story #4166 — 아래 두 상수를 export한다. «리전 변경» 행 액션(page.tsx)이 이
+ * 허용 목록·기본값을 재사용한다(새 목록을 또 만들지 않는다 — BE
+ * GENERATION_CONNECTOR_LOCATIONS와 동일 폭, 추측 0).
  */
-const GENERATION_CONNECTOR_LOCATIONS = ['global', 'asia-northeast3'] as const;
-const DEFAULT_GENERATION_CONNECTOR_LOCATION: (typeof GENERATION_CONNECTOR_LOCATIONS)[number] = 'global';
+export const GENERATION_CONNECTOR_LOCATIONS = ['global', 'asia-northeast3'] as const;
+export const DEFAULT_GENERATION_CONNECTOR_LOCATION: (typeof GENERATION_CONNECTOR_LOCATIONS)[number] = 'global';
 
 export function GenerationConnectorRegisterForm({
   orgId, onRegistered, onCancel, t, tc, tChannel,

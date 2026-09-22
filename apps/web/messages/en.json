@@ -761,6 +761,8 @@
     "gcModelCountSummary": "{count} model(s)",
     "gcRegisteredAt": "Registered {time}",
     "gcRevokedAt": "Revoked {time}",
+    "gcLocationChangeAriaLabel": "Change region for generation connector {n}: {label}",
+    "gcLocationChangeError": "Couldn't change the region — please try again.",
     "eventApplySelectProjectHint": "Select a project to apply this recipe to.",
     "eventApplyRoleMappingHint": "Connect each stage to a project agent. Existing assignments are prefilled below.",
     "eventApplyLoadingBindings": "Loading assignments…",

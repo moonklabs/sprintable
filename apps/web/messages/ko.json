@@ -761,6 +761,8 @@
     "gcModelCountSummary": "모델 {count}종",
     "gcRegisteredAt": "등록 시각 {time}",
     "gcRevokedAt": "해지 시각 {time}",
+    "gcLocationChangeAriaLabel": "{n}번째 커넥터 {label} 리전 변경",
+    "gcLocationChangeError": "리전 변경에 실패했어요 — 다시 시도해 주세요.",
     "eventApplySelectProjectHint": "적용할 프로젝트를 먼저 선택하세요.",
     "eventApplyRoleMappingHint": "각 단계에 프로젝트 에이전트를 연결하세요. 기존 배정이 있으면 아래에 표시돼요.",
     "eventApplyLoadingBindings": "배정 정보를 불러오는 중…",

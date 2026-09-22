@@ -27,6 +27,14 @@ class GenerationConnectorNotFoundError(Exception):
     pass
 
 
+class GenerationConnectorNotActiveError(Exception):
+    """story #4166 — revoked 커넥터의 리전을 바꿔 봐야 크루가 다시 쓸 방법이 없다
+    (바인딩은 active 커넥터만 가리킨다, #4101). 조용히 받아 주지 않고 409로 거부."""
+    def __init__(self, connector_id: uuid.UUID) -> None:
+        self.connector_id = connector_id
+        super().__init__(f"generation connector not active: {connector_id}")
+
+
 class GenerationConnectorInvalidProviderError(Exception):
     def __init__(self, provider_key: str) -> None:
         self.provider_key = provider_key
@@ -126,6 +134,46 @@ async def revoke_org_generation_connector(
         raise GenerationConnectorNotFoundError(str(connector_id))
     row.status = "revoked"
     row.revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def update_org_generation_connector_location(
+    session: AsyncSession, *, org_id: uuid.UUID, connector_id: uuid.UUID, location: str,
+    actor_id: uuid.UUID,
+) -> OrgGenerationConnector:
+    """story #4166(3호 실측, 2026-09-22 — 리전만 바꾸려면 자격 재발급·재등록·재바인딩·
+    구 커넥터 해지 4단계가 필요했다) — 자격 무접촉으로 `model_config_json.location`만
+    갱신. `create_org_generation_connector`와 동일 허용 목록 검증(GENERATION_
+    CONNECTOR_INVALID_LOCATION 재사용, 새 판정 0). 딕셔너리를 **재할당**(in-place
+    mutate 아님) — SQLAlchemy가 JSONB 컬럼의 in-place 변경을 감지 못하는 클래스
+    (#2832 교훈, 이 세션의 approval_delivery.py existing_root.msg_metadata 처방과
+    동형)를 여기서도 피한다.
+
+    감사 로그: 이 커넥터 패밀리(create/revoke) 자체엔 등록 시점 감사 로그가 아직 없다
+    (그라운딩 실측 — `channel_connections.py`도 동형, 이 모듈이 미러하는 그 원본에도
+    없음) — «등록과 동일 관례»를 그대로 재현할 기존 자리는 없었으므로, 제품 전반의
+    기존 `ActivityLogService`(신규 테이블·마이그 0, #4156 등에서 이미 쓰는 그 관례)를
+    이 쓰기 축에 새로 배선한다(발명이 아니라 일반 감사 관례의 첫 적용)."""
+    if location not in GENERATION_CONNECTOR_LOCATIONS:
+        raise GenerationConnectorInvalidLocationError(location)
+    row = await get_org_generation_connector(session, org_id=org_id, connector_id=connector_id)
+    if row is None:
+        raise GenerationConnectorNotFoundError(str(connector_id))
+    if row.status != "active":
+        raise GenerationConnectorNotActiveError(connector_id)
+
+    old_location = resolve_generation_connector_location(row.model_config_json)
+    row.model_config_json = {**row.model_config_json, "location": location}
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id, action="generation_connector_location_changed", actor_type="human",
+        actor_id=actor_id, entity_type="generation_connector", entity_id=connector_id,
+        context={"from_location": old_location, "to_location": location},
+    )
     await session.commit()
     await session.refresh(row)
     return row

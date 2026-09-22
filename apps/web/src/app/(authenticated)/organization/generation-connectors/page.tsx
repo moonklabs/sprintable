@@ -13,7 +13,10 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { pickEulReulJosa } from '@/lib/korean-particle';
-import { GenerationConnectorRegisterForm } from '@/components/organization/generation-connector-register-form';
+import {
+  GenerationConnectorRegisterForm,
+  GENERATION_CONNECTOR_LOCATIONS,
+} from '@/components/organization/generation-connector-register-form';
 
 /**
  * story #4116(#4112 유나 시안 55a04e8d 승인본, PO 승인 2026-09-21 15:05Z) — 연산
@@ -25,6 +28,11 @@ import { GenerationConnectorRegisterForm } from '@/components/organization/gener
  *
  * BFF는 #4101에 이미 있다(GET 목록·POST 등록·POST revoke) — 이 PR은 BE/BFF 무변,
  * 있는 것만 소비한다.
+ *
+ * story #4166(3호 실측, 2026-09-22) — 리전만 바꾸는 행 액션. 이전엔 자격 재발급·
+ * 재등록·재바인딩·구 커넥터 해지 4단계가 필요했다. select를 바로 PATCH에 걸어
+ * 즉시 반영(등록 폼의 별도 «저장» 버튼과 다르게, 행 안에서 값 자체가 액션) —
+ * active 커넥터에만 보인다(revoked는 BE가 409로 거부, #4166 서비스 계층).
  *
  * story #4117 FE 라이더(#4116 화면 위, PR #4492가 이미 착지시킨 BE DTO의
  * created_at/revoked_at 소비) — #4116 최초 구현 당시엔 응답 DTO에 그 두 필드가
@@ -67,22 +75,27 @@ export default function OrganizationGenerationConnectorsPage() {
   const [registering, setRegistering] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; label: string } | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [locationPatchTargetId, setLocationPatchTargetId] = useState<string | null>(null);
+  const [locationPatchError, setLocationPatchError] = useState<string | null>(null);
+  // story #4166 CHANGES-1(페드루 PO 리뷰) — controlled select가 c.location(서버값)만
+  // 직접 참조하면 PATCH 응답이 오기 전에 이전 값으로 그대로 남아 있다가(리렌더 트리거가
+  // 없어 "튐"으로 보이는 게 아니라, 사용자가 고른 값이 화면에 전혀 안 보이고 응답 뒤에야
+  // 한 번에 바뀐다) — 낙관적 draft를 별도로 들고 select 값을 draft 우선으로 읽는다.
+  const [locationDraft, setLocationDraft] = useState<Record<string, string>>({});
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     if (!orgId) { setStatus('loaded'); return; }
     setStatus('loading');
-    void (async () => {
-      try {
-        // active_only=false — 목록 화면은 해지된 것도 보여준다(시안 프레임①, revoked 칩).
-        const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=false`);
-        if (!res.ok) { setStatus('failed'); return; }
-        const json = await res.json() as { data?: { connectors?: GenerationConnector[] } };
-        setConnectors(json.data?.connectors ?? []);
-        setStatus('loaded');
-      } catch {
-        setStatus('failed');
-      }
-    })();
+    try {
+      // active_only=false — 목록 화면은 해지된 것도 보여준다(시안 프레임①, revoked 칩).
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/generation-connectors?active_only=false`);
+      if (!res.ok) { setStatus('failed'); return; }
+      const json = await res.json() as { data?: { connectors?: GenerationConnector[] } };
+      setConnectors(json.data?.connectors ?? []);
+      setStatus('loaded');
+    } catch {
+      setStatus('failed');
+    }
   }, [orgId]);
 
   useEffect(() => { load(); }, [load]);
@@ -99,6 +112,43 @@ export default function OrganizationGenerationConnectorsPage() {
     } finally {
       setRevoking(false);
       setRevokeTarget(null);
+    }
+  };
+
+  const handleLocationChange = async (connectorId: string, location: string) => {
+    if (!orgId) return;
+    setLocationPatchTargetId(connectorId);
+    setLocationPatchError(null);
+    setLocationDraft((prev) => ({ ...prev, [connectorId]: location }));
+    try {
+      const res = await fetchWithAuth(
+        `/api/organizations/${orgId}/generation-connectors/${connectorId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location }),
+        },
+      );
+      // story #4166 — 다른 탭이 먼저 해지한 경합(409)까지 코드별로 나누지 않는다(select
+      // 값 자체가 허용 목록이라 422는 정상 흐름에서 안 남 — 남는 경우는 전부 "그 사이
+      // 상태가 바뀜" 부류라 reload로 실제 상태를 보여주는 편이 정확). 네트워크 예외(catch)도
+      // 동형 — 실패 사유 무관하게 실제 서버 상태를 다시 읽어야 한다(CHANGES-1: 이전엔
+      // catch 경로에서 load()를 빠뜨려 요청이 실제로 갔는데 실패만 표시하고 화면은 그대로
+      // "성공한 척"으로 남는 자리가 있었다).
+      if (!res.ok) setLocationPatchError(t('gcLocationChangeError'));
+    } catch {
+      setLocationPatchError(t('gcLocationChangeError'));
+    } finally {
+      // draft는 load()가 실 서버값을 connectors에 반영한 뒤에만 지운다 — 먼저 지우면
+      // select가 옛 c.location으로 한 프레임 되돌아갔다 다시 바뀌는 튐이 재발한다.
+      await load();
+      setLocationPatchTargetId(null);
+      setLocationDraft((prev) => {
+        if (!(connectorId in prev)) return prev;
+        const next = { ...prev };
+        delete next[connectorId];
+        return next;
+      });
     }
   };
 
@@ -129,6 +179,12 @@ export default function OrganizationGenerationConnectorsPage() {
           tc={tc}
           tChannel={tChannel}
         />
+      ) : null}
+
+      {locationPatchError ? (
+        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
+          <AlertDescription>{locationPatchError}</AlertDescription>
+        </Alert>
       ) : null}
 
       {status === 'failed' ? (
@@ -163,13 +219,31 @@ export default function OrganizationGenerationConnectorsPage() {
                     <span className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                       {c.provider_key}
                     </span>
-                    {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출). */}
-                    <span
-                      data-testid="gc-location-chip"
-                      className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-                    >
-                      {c.location}
-                    </span>
+                    {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출).
+                        story #4166 — owner/admin·active 커넥터는 칩 대신 select(값
+                        자체가 즉시-적용 행 액션, 자격 무접촉). 그 외는 기존 읽기전용
+                        칩 그대로. */}
+                    {isOwnerOrAdmin && c.status === 'active' ? (
+                      <select
+                        aria-label={t('gcLocationChangeAriaLabel', { n: index + 1, label: c.label })}
+                        data-testid={`gc-location-select-${c.id}`}
+                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground disabled:opacity-60"
+                        value={locationDraft[c.id] ?? c.location}
+                        disabled={locationPatchTargetId === c.id}
+                        onChange={(e) => void handleLocationChange(c.id, e.target.value)}
+                      >
+                        {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        data-testid="gc-location-chip"
+                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      >
+                        {c.location}
+                      </span>
+                    )}
                     <span
                       data-status-chip={c.status}
                       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}
@@ -191,6 +265,12 @@ export default function OrganizationGenerationConnectorsPage() {
                       ? ` · ${t('gcRevokedAt', { time: formatRelativeTime(c.revoked_at, locale, displayTimezone) })}`
                       : null}
                   </p>
+                  {/* story #4166 CHANGES-1(페드루 PO 리뷰) — 등록 폼의 gcLocationHint를
+                      재사용(AC3 문구: "gcLocationHint 재사용") — 새 문구 발명 0, select가
+                      뜨는 행에서만(등록 폼과 동일 노출 조건: owner/admin·active). */}
+                  {isOwnerOrAdmin && c.status === 'active' ? (
+                    <p className="mt-0.5 text-[10.5px] text-muted-foreground">{t('gcLocationHint')}</p>
+                  ) : null}
                 </div>
                 {isOwnerOrAdmin && c.status === 'active' ? (
                   <Button

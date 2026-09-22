@@ -32,11 +32,13 @@ from app.services.org_generation_connector import (
     GenerationConnectorInvalidLocationError,
     GenerationConnectorInvalidProviderError,
     GenerationConnectorLabelDuplicateError,
+    GenerationConnectorNotActiveError,
     GenerationConnectorNotFoundError,
     create_org_generation_connector,
     list_org_generation_connectors,
     resolve_generation_connector_location,
     revoke_org_generation_connector,
+    update_org_generation_connector_location,
 )
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["generation-connectors"])
@@ -64,13 +66,21 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     return resolved
 
 
-async def _require_org_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID) -> None:
+async def _require_org_admin(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
     """등록·revoke — 자격을 실제로 쓰거나 폐기하는 축만 owner/admin으로 좁힌다
     (channel_connections.py::_require_owner_or_admin과 동형 폭, credentials가
-    실제로 오가는 쓰기 엔드포인트만)."""
+    실제로 오가는 쓰기 엔드포인트만).
+
+    story #4166 CHANGES-1(페드루 PO 리뷰) — resolved member를 호출부에 돌려준다.
+    activity_logs.actor_id는 member id다(services/activity_log.py:83 —
+    record_created_activity가 resolve_member(...).id를 쓰는 것과 동일 관례).
+    PATCH 엔드포인트가 이 반환값 대신 auth.user_id(JWT 휴먼 계정 id)를 그대로
+    실었더니 피드에서 아무 member에게도 안 붙는 실사고(member-id lint +
+    test_3370 RED로 발견) — 여기서 이미 조회한 member를 재사용해 재조회 0."""
     resolved = await _require_human(db, auth, org_id)
     if resolved.role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_OWNER_OR_ADMIN_ONLY"})
+    return resolved
 
 
 class GenerationConnectorCreateRequest(BaseModel):
@@ -124,6 +134,12 @@ def _to_response(row: OrgGenerationConnector) -> GenerationConnectorResponse:
 
 class GenerationConnectorListResponse(BaseModel):
     connectors: list[GenerationConnectorResponse]
+
+
+class GenerationConnectorLocationPatchRequest(BaseModel):
+    """story #4166 — 자격 무접촉. `location`만 받는다(다른 필드는 이 엔드포인트의
+    스코프 밖 — 있어도 무시가 아니라 애초에 스키마에 없어 422)."""
+    location: str
 
 
 @router.post(
@@ -195,4 +211,40 @@ async def revoke_generation_connector_endpoint(
         row = await revoke_org_generation_connector(db, org_id=org_id, connector_id=connector_id)
     except GenerationConnectorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="generation connector not found") from exc
+    return _to_response(row)
+
+
+@router.patch(
+    "/{org_id}/generation-connectors/{connector_id}", response_model=GenerationConnectorResponse,
+)
+async def patch_generation_connector_location_endpoint(
+    org_id: uuid.UUID,
+    connector_id: uuid.UUID,
+    body: GenerationConnectorLocationPatchRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    verified_org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> GenerationConnectorResponse:
+    """story #4166 — 리전만 바꾼다(자격 무접촉·응답에 credentials 0, 등록/revoke와
+    동일 write-only 계약). active 커넥터만(409) — 바인딩이 revoked 커넥터를 가리킬
+    일이 없으므로(#4101) 바꿔 봐야 쓸모가 없다."""
+    _require_org_match(org_id, verified_org_id)
+    resolved = await _require_org_admin(db, auth, org_id)
+    try:
+        row = await update_org_generation_connector_location(
+            db, org_id=org_id, connector_id=connector_id, location=body.location,
+            actor_id=resolved.id,
+        )
+    except GenerationConnectorInvalidLocationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported location {exc.location!r} — must be one of "
+                   f"{sorted(GENERATION_CONNECTOR_LOCATIONS)}",
+        ) from exc
+    except GenerationConnectorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="generation connector not found") from exc
+    except GenerationConnectorNotActiveError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "GENERATION_CONNECTOR_NOT_ACTIVE"},
+        ) from exc
     return _to_response(row)
