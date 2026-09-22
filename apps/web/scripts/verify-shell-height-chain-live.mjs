@@ -75,11 +75,18 @@ function shellHtml(innerContent, { className, contentClassName }) {
 // 실 gates/[id]/page.tsx:344 클래스 그대로(explicit height 없음 — min-h-full은 최소치일
 // 뿐 내용이 그보다 길면 자연히 더 자란다). 좌 열은 manyItems()로 진짜 스택형 콘텐츠(실
 // min-content 성장) — 인라인 height 트릭 안 씀(위 CHANGES-1 교훈).
+// story #4130 CHANGES-2(페드루 PO 재지적, 2026-09-22 00:17Z) — 빠진 조각: sticky는 포함
+// 블록 안에서 "움직일 거리"가 있어야 움직인다. 라이브는 액션 패널(512px) ≥ 캡된 컨테이너
+// (496px)라 그 거리가 0(패널이 컨테이너보다 크면 sticky는 자기 static 위치에 그대로 있다 —
+// 이것 자체가 "내용과 같이 밀리는" 것처럼 보인다). 원래 fixture는 액션 패널이 짧아(우 열
+// 텍스트 한 줄) 캡된 컨테이너 안에서도 움직일 거리가 남아 있었다 — 그래서 BEFORE에서도
+// sticky가 "작동하는 것처럼" 보였다. 액션 패널을 실측처럼 ≥512px로 채워 이 거리를 0으로
+// 만든다.
 function gatesLikeHtml() {
   return `
   <div data-testid="gate-detail-container" class="mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5 lg:max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
     <div>${manyItems(40, '#eee')}</div>
-    <div data-testid="action-column" class="proof-surface mt-3 space-y-3 border p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start" style="background:#fff">우 열(sticky)</div>
+    <div data-testid="action-column" class="proof-surface mt-3 space-y-3 border p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start" style="background:#fff">${manyItems(20, '#fff')}</div>
   </div>
 `;
 }
@@ -99,15 +106,17 @@ async function runGatesScenario(label, wrapperClasses) {
 
   const containerClientH = await container.evaluate((el) => el.clientHeight);
   const containerScrollH = await container.evaluate((el) => el.scrollHeight);
+  const actionOffsetH = await action.evaluate((el) => el.offsetHeight);
   const position = await action.evaluate((el) => getComputedStyle(el).position);
   const topBefore = await action.evaluate((el) => el.getBoundingClientRect().top);
-  await page.mouse.wheel(0, 400);
+  // story #4130 CHANGES-2 — Pedro의 정확한 재현(스크롤 200px)과 같은 거리로 잰다.
+  await page.mouse.wheel(0, 200);
   await page.waitForTimeout(100);
   const topAfter = await action.evaluate((el) => el.getBoundingClientRect().top);
   const scrollerScrollTop = await scroller.evaluate((el) => el.scrollTop);
   await page.close();
 
-  return { label, containerClientH, containerScrollH, position, topBefore, topAfter, scrollerScrollTop };
+  return { label, containerClientH, containerScrollH, actionOffsetH, position, topBefore, topAfter, scrollerScrollTop };
 }
 
 {
@@ -115,31 +124,28 @@ async function runGatesScenario(label, wrapperClasses) {
   const before = await runGatesScenario('BEFORE(#4130 착지 前 고정값)', { className: BEFORE_CLASSNAME, contentClassName: BEFORE_CONTENT_CLASSNAME });
 
   for (const r of [before, after]) {
-    console.log(`(A-${r.label}) container clientH=${r.containerClientH}/scrollH=${r.containerScrollH} · position=${r.position} · top ${r.topBefore.toFixed(1)}→${r.topAfter.toFixed(1)}(스크롤 400px 뒤) · #scroller.scrollTop=${r.scrollerScrollTop}`);
+    console.log(`(A-${r.label}) container clientH=${r.containerClientH}/scrollH=${r.containerScrollH} · action panel H=${r.actionOffsetH}(≥ 캡 높이일 때만 "움직일 거리 0" 재현) · position=${r.position} · top ${r.topBefore.toFixed(1)}→${r.topAfter.toFixed(1)}(스크롤 200px 뒤) · #scroller.scrollTop=${r.scrollerScrollTop}`);
   }
 
   // 핵심 기계적 주장(이 카드의 AC1) — AFTER: 컨테이너 박스가 내용 높이만큼 자란다
   // (clientH≈scrollH). BEFORE: 컨테이너가 스크롤러 가용폭에 캡된다(clientH<scrollH,
-  // Pedro 라이브 실측 496/1422와 같은 모양). 이 못 틀리는 대조는 이제 정확히 성립한다.
+  // Pedro 라이브 실측 496/1422와 같은 모양).
   const afterGrew = after.containerClientH >= after.containerScrollH - 2;
   const beforeCapped = before.containerClientH < before.containerScrollH - 2;
   const containerClaim = afterGrew && beforeCapped;
 
-  // ⚠️sticky 자체는 이 단순화 fixture(순수 <div> 좌 열, 실 ProofCapsule 아님)에서 BEFORE/
-  // AFTER 둘 다 "정상 추종"으로 관측됐다(both position=sticky, top 정착 48, scroller가
-  // 스크롤됨) — gate-detail-container가 overflow:visible이라(overflow-hidden/auto 없음)
-  // 컨테이너 자체 박스가 캡돼 있어도 sticky의 스크롤 컨텍스트 탐색이 그 캡을 무시하고
-  // #scroller까지 올라가 버리기 때문으로 보인다(CSS sticky 컨테이닝 블록 규칙 — overflow:
-  // visible 조상은 클리핑/스크롤 컨텍스트로 안 잡힘). 즉 라이브에서 Pedro가 관측한 "sticky가
-  // 실제로 안 움직인다"는 증상을 이 순수-<div> 모델만으로는 재현 못 했다 — 실 ProofCapsule
-  // 내부 구조나 실 콘텐츠 특성에 이 fixture가 놓친 요인이 있을 수 있다(Kadir/PO 라이브
-  // devtools 재검이 이 gap을 메워야 함, 아래 로그에 두 상태 나란히 남겨 참고용으로 제공).
-  const stickyBothWork = after.position === 'sticky' && after.topAfter < 60 && after.topAfter >= 40
-    && before.position === 'sticky' && before.topAfter < 60 && before.topAfter >= 40;
+  // story #4130 CHANGES-2(페드루 PO, 2026-09-22 00:17Z) — 빠졌던 조각: sticky는 포함 블록
+  // 안에서 "움직일 거리"가 있어야 움직인다. 액션 패널(actionOffsetH) ≥ 캡된 컨테이너
+  // (containerClientH)면 그 거리가 0 — sticky가 자기 static 위치에 그대로 있는 것 자체가
+  // "스크롤과 같이 밀리는" 라이브 증상과 같다(움직이는 게 아니라 애초에 안 움직인 것).
+  // BEFORE: top이 스크롤 거리(200px)만큼 그대로 줄어야(추종 0, 내용과 같이 밀림).
+  // AFTER: top이 48px에 고정돼야(포함 블록이 :scroller까지 자라 움직일 거리가 충분).
+  const beforePanelDominates = before.actionOffsetH >= before.containerClientH;
+  const beforeFollowsContent = Math.abs((before.topBefore - 200) - before.topAfter) < 3; // 스크롤량만큼 그대로 밀림
+  const afterSticks = after.position === 'sticky' && after.topAfter < 60 && after.topAfter >= 40;
 
-  const pass = containerClaim; // AC1의 기계적 주장만으로 판정 — sticky 자체는 참고 로그
-  console.log(`(A) 판정 — 컨테이너 성장 주장(AC1 핵심, 못 틀리는 대조) AFTER 자람? ${afterGrew} · BEFORE 캡? ${beforeCapped} : ${containerClaim ? 'PASS' : 'FAIL — CHANGES-1 재발'}`);
-  console.log(`    참고(gap) — 이 단순화 fixture에선 sticky 자체가 BEFORE/AFTER 둘 다 "정상 추종"으로 관측됨(${stickyBothWork}) — overflow:visible 조상은 sticky 스크롤 컨텍스트 탐색을 안 막기 때문으로 보임. 라이브에서 관측된 "sticky가 실제로 안 움직인다" 증상은 이 순수-<div> 모델로는 재현 못 함 — 실 ProofCapsule 구조 차이일 가능성, Kadir/PO 라이브 devtools 재검 요청.`);
+  const pass = containerClaim && beforePanelDominates && beforeFollowsContent && afterSticks;
+  console.log(`(A) 판정 — 컨테이너 성장(AC1) AFTER 자람? ${afterGrew} · BEFORE 캡? ${beforeCapped} · BEFORE 패널이 캡보다 큼(움직일거리 0 성립조건)? ${beforePanelDominates} · BEFORE 내용과 같이 밀림(추종 0, 라이브 증상 재현)? ${beforeFollowsContent} · AFTER 48px 고정(정상 추종)? ${afterSticks} : ${pass ? 'PASS(못 틀리는 대조 완성)' : 'FAIL — CHANGES-2 재발'}`);
   if (!pass) allPass = false;
 }
 
