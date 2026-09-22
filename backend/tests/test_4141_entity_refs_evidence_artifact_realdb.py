@@ -550,3 +550,83 @@ async def test_mutation_kill_spec_table_is_sole_registration_point():
             backlinks_module._SIMPLE_SOURCE_TYPE_SPECS = original
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_backfill_dry_run_writes_nothing_apply_writes_and_is_idempotent():
+    """AC4 — 백필 스크립트(app/services/evidence_artifact_reference_backfill.py)가 write-
+    path 신설 前 생성된 "구버전" evidence(직접 INSERT, router를 안 거침 — reconcile 호출
+    0인 상태를 흉내)를 dry-run에선 0건 쓰고, --apply에선 실제로 채우고, 두 번째 apply도
+    안전(멱등 — 재실행 에러 0·backlinks 결과 안 바뀜)한지 pin한다."""
+    from app.dependencies.auth import AuthContext
+    from app.models.evidence import Evidence
+    from app.services.backlinks import list_entity_backlinks
+    from app.services.evidence_artifact_reference_backfill import backfill_evidence_references
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id)
+            doc = await _make_doc(s, org.id, project.id, title="백필 대상 문서")
+            doc_id = doc.id
+            # write-path(routers/evidence.py::_create_evidence)를 안 거치고 직접 INSERT —
+            # 이 write-path 신설 前 생성된 옛 행을 흉내(reconcile 호출 0, entity_references
+            # 참조 없는 상태).
+            evidence = Evidence(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                type="report", ref="옛 컨셉 브리프", created_by=member_id,
+                payload={"kind": "concept_brief", "doc": f"entity:doc:{doc_id}"},
+            )
+            s.add(evidence)
+            await s.commit()
+            evidence_id = evidence.id
+
+        auth = AuthContext(user_id=str(user_id), email="h@test", claims={"app_metadata": {"org_id": str(org.id)}})
+
+        # dry-run: 카운트는 잡히지만 DB엔 아무것도 안 쓴다.
+        async with Session() as s:
+            totals = await backfill_evidence_references(s, apply=False, org_id=org.id)
+            assert totals.evidence_scanned == 1
+            assert totals.evidence_with_refs_extracted == 1
+
+        async with Session() as s:
+            rows = await _fetch_reference_target_ids(
+                s, org_id=org.id, source_type="evidence", source_id=evidence_id, target_type="doc",
+            )
+            assert rows == [], "dry-run인데 실제로 썼다"
+
+        # --apply: 실제로 쓴다.
+        async with Session() as s:
+            totals = await backfill_evidence_references(s, apply=True, org_id=org.id)
+            assert totals.evidence_with_refs_extracted == 1
+            assert totals.errors == []
+
+        async with Session() as s:
+            rows = await _fetch_reference_target_ids(
+                s, org_id=org.id, source_type="evidence", source_id=evidence_id, target_type="doc",
+            )
+            assert rows == [("doc", doc_id)]
+
+            result = await list_entity_backlinks(
+                s, org_id=org.id, target_type="doc", target_id=doc_id, auth=auth, limit=30, cursor=None,
+            )
+            assert any(
+                item["source_type"] == "evidence" and item["source_id"] == str(evidence_id)
+                for item in result["data"]
+            )
+
+        # 재실행 멱등 — 에러 0·행 수 불변(ON CONFLICT DO NOTHING, mention_parser.py 기저 불변식).
+        async with Session() as s:
+            totals2 = await backfill_evidence_references(s, apply=True, org_id=org.id)
+            assert totals2.errors == []
+
+        async with Session() as s:
+            rows = await _fetch_reference_target_ids(
+                s, org_id=org.id, source_type="evidence", source_id=evidence_id, target_type="doc",
+            )
+            assert rows == [("doc", doc_id)], "재실행이 중복을 만들었다"
+    finally:
+        await engine.dispose()

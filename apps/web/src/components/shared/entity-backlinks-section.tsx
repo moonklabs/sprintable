@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
+import { FileText, MessageSquare, Calendar, BookOpen, ClipboardCheck, Frame } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -18,8 +18,10 @@ interface BacklinkMember { id: string; name: string; type: string }
 export interface BacklinkItem {
   id: string;
   // story #2267(C-9): meeting·story도 source가 될 수 있다(backend/app/services/backlinks.py
-  // 동반 확장) — doc·chat_message 둘뿐이던 것에서 넓어짐.
-  source_type: 'chat_message' | 'doc' | 'meeting' | 'story';
+  // 동반 확장) — doc·chat_message 둘뿐이던 것에서 넓어짐. story #4141: evidence·artifact도
+  // source가 된다(entity_references 온보딩 — 이 전엔 이 체계가 evidence/artifact를 아예
+  // 못 셌다).
+  source_type: 'chat_message' | 'doc' | 'meeting' | 'story' | 'evidence' | 'artifact';
   source_id: string;
   created_by: BacklinkMember | null;
   created_at: string;
@@ -44,6 +46,14 @@ export interface BacklinkItem {
   } | null;
   meeting: { id: string; title: string } | null;
   story: { id: string; title: string } | null;
+  // story #4141 — evidence는 title이 없어(자유문자열 ref로 대체) BE가 title 자리에 ref를
+  // 싣는다(backend/app/services/backlinks.py::_SIMPLE_SOURCE_TYPE_SPECS의 evidence
+  // title_col=Evidence.ref 주석 참조). BE 응답은 이 두 키를 항상 싣지만(response_key
+  // 초기화 루프가 5종 전부 None으로 깐다), 옵셔널로 선언해 이 필드 신설 前에 쓰인 기존
+  // 픽스처(story-origin-section.test.tsx 등)를 건드리지 않는다 — 소비부는 항상 `?.`로
+  // 읽으므로 undefined/null 구분이 무해하다.
+  evidence?: { id: string; title: string } | null;
+  artifact?: { id: string; title: string } | null;
 }
 
 const SOURCE_TYPE_ICON = {
@@ -51,6 +61,8 @@ const SOURCE_TYPE_ICON = {
   chat_message: MessageSquare,
   meeting: Calendar,
   story: BookOpen,
+  evidence: ClipboardCheck,
+  artifact: Frame,
 } as const satisfies Record<BacklinkItem['source_type'], unknown>;
 
 /** story #4091(§c) — 이벤트 발행 메시지의 구조화 필드를 recipe-stage-label.ts/stage-role.ts/
@@ -74,6 +86,8 @@ function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): strin
       return item.message?.event ? eventBacklinkLabel(item.message.event, tOrg) : item.message?.content_snippet;
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
+    case 'evidence': return item.evidence?.title;
+    case 'artifact': return item.artifact?.title;
   }
 }
 
@@ -87,10 +101,12 @@ interface BacklinksMeta {
   collection_scope?: CollectionScope;
 }
 
-/** excludes 코드 → i18n 키. BE가 사실만 주고 문안은 FE 몫(collection_scope 주석 그대로). */
+/** excludes 코드 → i18n 키. BE가 사실만 주고 문안은 FE 몫(collection_scope 주석 그대로).
+ * story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
+ * 정식 source_type이라 이 exclude 사유 자체가 소멸 — backlinks.py::list_entity_backlinks
+ * 응답 참조). 소비처 0인 키를 죽은 채 남기지 않는다(i18n 키=소비처 1:1 규율). */
 const EXCLUDE_LABEL_KEYS: Record<string, string> = {
   pr_sid_text_convention: 'backlinksExcludePrSid',
-  evidence_free_text_reference: 'backlinksExcludeEvidenceFreeText',
 };
 
 // story #4096(리허설 1호 실측, 2026-09-21) — collection_scope.source_types 코드(BE
@@ -103,6 +119,8 @@ const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
   doc: 'backlinksSourceDoc',
   meeting: 'backlinksSourceMeeting',
   story: 'backlinksSourceStory',
+  evidence: 'backlinksSourceEvidence',
+  artifact: 'backlinksSourceArtifact',
 };
 
 /** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
