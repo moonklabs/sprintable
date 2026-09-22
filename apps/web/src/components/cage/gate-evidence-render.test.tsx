@@ -1352,7 +1352,11 @@ describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)'
     expect(container.querySelectorAll('[role="button"], a, button').length).toBe(1);
   });
 
-  it('⭐산출물이 0건이면 «이 게이트에 등록된 산출물이 없어요»가 실제 DOM에 나타난다(조용한 null 금지, 없음 케이스)', async () => {
+  // story #4136 CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"(BE가 [] 로 명시 답)과
+  // "모름"(BE가 필드 자체를 아직 안 보냄, #4135 미배포)을 가른다. 라이브 2호 게이트 1처럼
+  // evidence·doc·artifact가 실재하는데 "없어요"라고 말하면 거짓이 된다 — beAnswered=true일
+  // 때만(BE가 [] 든 항목이든 답을 한 때만) 그 claim을 한다.
+  it('⭐linked_evidence가 BE 응답에서 명시 []면(BE가 «답을 함») «이 게이트에 등록된 산출물이 없어요»가 나타난다(없음)', async () => {
     const gate = realApiShapedGate({ linked_evidence: [], neutral_facts: null });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -1363,13 +1367,30 @@ describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)'
     expect(container.querySelectorAll('[role="button"], a, button').length).toBe(0);
   });
 
-  it('linked_evidence 필드 자체가 undefined(구버전 응답, #4135 착지 前)여도 크래시 없이 빈 문구로 graceful', async () => {
+  it('⭐linked_evidence 필드 자체가 undefined(구버전 응답, #4135 착지 前)면 «없어요» 문구 없이 섹션 자체가 안 그려진다(모름 ≠ 없음, 거짓 참조 금지)', async () => {
     const gate = realApiShapedGate({ linked_evidence: undefined, neutral_facts: null });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
 
-    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+    expect(container.textContent).toBe('');
+  });
+
+  it('linked_evidence가 undefined여도 draft_doc_reference_token이 있으면(우리가 아는 것만) 섹션이 그 칩으로 나타난다', async () => {
+    const gate = realApiShapedGate({
+      linked_evidence: undefined,
+      neutral_facts: { draft_doc_reference_token: '[2호 시트](entity:doc:66666666-6666-6666-6666-666666666666)' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateLinkedEvidenceSection gate={gate} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+    expect(container.textContent).toContain('2호 시트');
+    expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
   });
 });

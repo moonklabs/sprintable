@@ -1209,6 +1209,14 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
  * (모든 열람자, 이 카드 AC1). 0건이면 명시적으로 «이 게이트에 등록된 산출물이 없어요»(거짓
  * 참조 0 — #3937 규율 그대로, 조용한 null 금지).
  *
+ * ⚠️CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"과 "모름"을 가른다. BE가
+ * linked_evidence 필드 자체를 아직 안 보내면(#4135 미배포·구버전 응답) "이 게이트에
+ * 산출물이 없다"를 말할 근거가 없다 — 라이브 2호 게이트 1처럼 evidence·doc·artifact가
+ * 실재하는데도 그 문장을 쓰면 거짓이 된다(#4055류와 같은 급의 "모르면 안다고 안 한다"
+ * 규율). `Array.isArray(gate.linked_evidence)`가 참일 때만(BE가 `[]`든 항목이든 "답을
+ * 한" 때만) 0건 claim 자격이 생긴다 — 배열 자체가 없고 draft_doc도 없으면 이 섹션은
+ * **아예 안 그려진다**(과거 이 칸이 없던 것과 동형, #4135 배포 순서와 무관하게 안전).
+ *
  * shape는 미르코군과 1:1 합의(2026-09-22 01:14Z) — kanban/types.ts GateItem.linked_evidence
  * 주석 참고. 핵심: linked_evidence[].kind는 doc/artifact 판별자가 아니라 evidence.payload.
  * kind(예: "concept_brief", 사람이 읽는 산출물 종류 라벨)다 — doc/artifact 판별은
@@ -1223,8 +1231,15 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
   const resolved: (ParsedReferenceToken & { key: string })[] = [];
   const unresolvedKinds: { key: string; kind: string }[] = [];
 
-  if (Array.isArray(gate.linked_evidence)) {
-    for (const ev of gate.linked_evidence) {
+  // story #4136 CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"과 "모름"을 가른다.
+  // BE가 linked_evidence 필드 자체를 아직 안 보내면(#4135 미배포·구버전 응답) 이 게이트에
+  // 정말 산출물이 없는지 우리는 **모른다** — 라이브 2호 게이트 1처럼 evidence·doc·artifact가
+  // 실재하는데도 «없어요»라고 말하면 거짓이 된다. `Array.isArray`가 참일 때만(BE가 `[]`든
+  // 항목이든 "답을 한" 때만) "없어요"를 말할 자격이 생긴다 — 배열 자체가 없으면 그 claim을
+  // 아예 안 한다("모르면 안다고 안 한다" 규율, story #4055류와 동형).
+  const beAnswered = Array.isArray(gate.linked_evidence);
+  if (beAnswered) {
+    for (const ev of gate.linked_evidence!) {
       const parsed = parseReferenceToken(ev.reference_token);
       if (parsed) {
         const key = `${parsed.entityType}:${parsed.entityId}`;
@@ -1239,7 +1254,8 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
     }
   }
   // draft_doc_reference_token이 linked_evidence[]와 같은 doc을 가리키면(#4135 착지 前엔
-  // 흔함 — 두 필드가 아직 같은 doc을 독립적으로 채우는 과도기) 중복 칩을 안 낸다.
+  // 흔함 — 두 필드가 아직 같은 doc을 독립적으로 채우는 과도기) 중복 칩을 안 낸다. 이 필드는
+  // linked_evidence와 무관하게 이미 있어 왔으므로(#3569) beAnswered와 상관없이 항상 본다.
   const draftDocRef = parseReferenceToken(gate.neutral_facts?.['draft_doc_reference_token']);
   if (draftDocRef) {
     const key = `${draftDocRef.entityType}:${draftDocRef.entityId}`;
@@ -1249,12 +1265,17 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
     }
   }
 
-  const isEmpty = resolved.length === 0 && unresolvedKinds.length === 0;
+  const totalCount = resolved.length + unresolvedKinds.length;
+  // beAnswered=false + 산출물 0(draft_doc도 없음) — "없다"고 말할 근거가 없으니 섹션 자체를
+  // 생략한다(과거 이 칸이 아예 없던 것과 동형 — #4135 미배포 구간엔 이 카드가 아무 것도
+  // 지어내지 않는다). beAnswered=true(BE가 [] 포함 명시 답)거나 draft_doc이라도 있으면
+  // 렌더한다.
+  if (!beAnswered && totalCount === 0) return null;
 
   return (
     <div className="space-y-1.5" data-testid="gate-linked-evidence">
       <p className="text-[11px] font-semibold text-muted-foreground">{t('gateLinkedEvidenceSectionTitle')}</p>
-      {isEmpty ? (
+      {totalCount === 0 ? (
         <p className="text-[11.5px] italic text-muted-foreground">{t('gateLinkedEvidenceEmpty')}</p>
       ) : (
         <div className="flex flex-wrap items-center gap-1.5">
