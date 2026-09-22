@@ -1484,6 +1484,14 @@ async def submit_channel_post_draft(
     gate.sealed_scheduled_at = scheduled_at
     gate.sealed_media_sha256 = target.image_sha256
     gate.sealed_estimated_cost_minor = estimated_cost_minor
+    # story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — site_posts.py::submit_site_
+    # post_draft(567/949행)는 상신 시점에 gate.sealed_destination_connection_id를 채우는데
+    # 이 함수(채널 초안 상신)는 처음부터 이 컬럼을 한 번도 안 채웠다(그라운딩 확認, origin/
+    # develop 313800da7). gates.py::to_gate_response의 sealed_destination_channel 배치
+    # enrich(1137-1150행)는 이 컬럼이 null이 아닐 때만 동작하므로, 이 한 줄이 빠지면
+    # FE가 "연결 id 없음"을 "호스팅 사이트 글"로 오추정한다(gate-evidence.tsx:1010 —
+    # site_posts 전용 게이트만 이 컬럼이 항상 null이라는 전제가 채널 게이트에도 새던 결함).
+    gate.sealed_destination_connection_id = draft.connection_id
     gate.reapproval_required = False
 
     if was_approved:

@@ -766,9 +766,17 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
   // story #3367(3자기점검, 페드루 지적 2026-09-10) — AC7("마지막 수정 주체·목적지").
   describe('마지막 수정 주체·목적지(story #3367 AC7)', () => {
-    it('⭐destination=null(hosted_site)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {
+    it('⭐destination="hosted_site"(BE SSOT)·latest_author_kind=human — 「마지막 수정 주체 · 휴먼」·「목적지 · 호스팅 블로그」가 뜬다', async () => {
+      // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 이 픽스처가 예전엔
+      // sealed_destination_connection_id===null을 "호스팅 블로그"의 근거로 썼다(그게
+      // 실은 채널 초안 게이트가 이 컬럼을 안 채우던 시절의 «우연한 동값»이었다는 게
+      // 이 카드의 발견). 이제는 neutral_facts.destination==="hosted_site"(site_posts.py/
+      // channel_posts.py 둘 다 상신 시점에 채우는 원문 목적지 코드)를 직접 대조한다 —
+      // sealed_destination_connection_id는 여전히 null로 둔다(hosted_site는 실제로도
+      // 커넥션이 없다, requires_connection=False adapter — 값 자체는 안 바뀜, «근거»만
+      // 정정).
       const gate = recipeApprovalGate(
-        { channel: 'hosted_site', stage: 'approve' },
+        { channel: 'hosted_site', stage: 'approve', destination: 'hosted_site' },
         {
           sealed_content_version: 3, sealed_content_sha256: 'abcdef0123456789',
           sealed_destination_connection_id: null, latest_author_kind: 'human',
@@ -855,6 +863,96 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
       expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationLabel);
       expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+    });
+
+    // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 라이브 실사고를 직접
+    // pin(뮤테이션 킬): sealed_destination_connection_id===null이 "호스팅 블로그"의
+    // 근거이던 시절, 채널 초안 게이트(#4098 前엔 이 컬럼을 아예 안 채움)가 이 조건에
+    // 우연히 걸려 인스타 sandbox 초안이 «호스팅 블로그»로 잘못 표시됐다. destination
+    // Connection Id===null "추정"을 되돌리면 이 테스트가 RED가 돼야 한다.
+    it('⭐라이브 실사고 재현: connectionId===null인데 destination이 "hosted_site"가 아니면(채널 초안 게이트, #4098 前 미봉인 흉내) 호스팅 블로그로 오추정하지 않는다', async () => {
+      const gate = recipeApprovalGate(
+        { channel: 'instagram_sandbox', stage: 'approve', destination: 'instagram_sandbox' },
+        {
+          sealed_content_version: 1, sealed_content_sha256: 'abc123',
+          // 라이브 실사고 그대로 — 채널 초안 게이트가 이 컬럼을 안 채워 null인 상태
+          // (이 카드의 BE 수정 前 상태를 흉내— write-path 수정 前 옛 게이트도 이 read-
+          // side fallback으로 정정돼야 하지만, 이 FE 테스트는 read-side 응답이 이미
+          // sealed_destination_channel까지 채워 온 경우를 가정 — BE realdb 테스트가
+          // write/read 양쪽 파생을 따로 검증한다).
+          sealed_destination_connection_id: null,
+          sealed_destination_channel: 'instagram_sandbox',
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
+      expect(container.textContent).toContain(koMessages.content.channelLabelInstagramSandbox);
+    });
+  });
+
+  // story #4143 AC2/AC3 — scoped 채널 초안 게이트(이 카드 자신이 그 초안을 쥔 게이트)의
+  // 상세·인박스 카드도 이제 초안 실물(영상·이미지)을 보여준다(LinkedChannelDraftCard를
+  // #4098과 공유 — isRecipeGate로 레시피 전용 빈-상태 문구만 가른다). 3상태: 영상 있음·
+  // 이미지만·미디어 0(텍스트만, hosted_site 아님이어도 미디어가 아예 없을 수 있다).
+  describe('scoped 채널 초안 게이트의 초안 실물 카드(story #4143 AC2)', () => {
+    function scopedChannelGate(linkedChannelDraft: GateItem['linked_channel_draft']) {
+      return recipeApprovalGate(
+        { channel: 'instagram_sandbox', stage: 'approve', destination: 'instagram_sandbox' },
+        {
+          scope_key: 'conn-1', status: 'pending',
+          sealed_content_version: 1, sealed_content_sha256: 'abc123',
+          sealed_destination_connection_id: 'conn-1', sealed_destination_channel: 'instagram_sandbox',
+          linked_channel_draft: linkedChannelDraft,
+        },
+      );
+    }
+
+    it('⭐영상 편입 — <video controls>가 실제 DOM에 나타난다(src=서명 URL)', async () => {
+      const gate = scopedChannelGate({
+        draft_id: 'draft-1', channel: 'instagram_sandbox', account_id: 'acct-1', account_label: '인스타 샌드박스',
+        text: '릴스 캡션', image_urls: [], video_url: 'https://storage.test/signed/video.mp4',
+        scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const video = container.querySelector('[data-testid="linked-channel-draft-video"]');
+      expect(video).not.toBeNull();
+      expect(video?.getAttribute('src')).toBe('https://storage.test/signed/video.mp4');
+      expect(container.querySelector('img')).toBeNull();
+    });
+
+    it('⭐이미지만 편입(영상 0) — 썸네일 <img>가 실제 DOM에 나타난다', async () => {
+      const gate = scopedChannelGate({
+        draft_id: 'draft-2', channel: 'instagram_sandbox', account_id: 'acct-1', account_label: null,
+        text: null, image_urls: ['https://storage.test/img1.png', 'https://storage.test/img2.png'], video_url: null,
+        scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const images = container.querySelectorAll('img');
+      expect(images.length).toBe(2);
+      expect(container.querySelector('[data-testid="linked-channel-draft-video"]')).toBeNull();
+    });
+
+    it('linked_channel_draft가 null(초안 정보를 못 찾음, 구버전 데이터 등) — 레시피 전용 "제출된 초안 없음" 문구를 빌리지 않고 조용히 생략한다', async () => {
+      const gate = scopedChannelGate(null);
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftPending);
     });
   });
 

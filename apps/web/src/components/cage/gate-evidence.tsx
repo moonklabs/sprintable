@@ -217,9 +217,16 @@ interface RecipeApprovalFacts {
   // story #3367(유나 CHANGES, 페드루 재검토 2026-09-10) — destinationConnectionId
   // 원문(uuid)을 승인자에게 그대로 보이면 확認 불가능한 값으로 서명을 요구하는
   // 결함이 된다. 그 연결의 channel(BE list_gates() 배치 enrich)을 channelLabel()
-  // (lib/channel-label.ts, 집안 정본)로 표시명을 낸다 — destinationConnectionId가
-  // null(hosted_site)이면 이 필드는 무의미(항상 null, 아래 렌더가 안 읽는다).
+  // (lib/channel-label.ts, 집안 정본)로 표시명을 낸다.
   destinationChannel: string | null;
+  // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — "호스팅 블로그"인지를
+  // destinationConnectionId===null로 *추정*하던 결함(채널 초안 게이트도 이 컬럼을
+  // 안 채우던 시절엔 연결 id가 null이라 우연히 같은 값이었지만, 그건 "site 게이트라서
+  // null"이 아니라 "이 write-path가 아예 안 채워서 null"이었다 — 두 세계가 우연히
+  // 같은 값을 내던 것뿐). neutral_facts.destination(BE site_posts.py/channel_posts.py
+  // 둘 다 상신 시점에 채우는 원문 목적지 채널 코드, "hosted_site"|실 채널명)이 이제
+  // «site 게이트인가»의 진짜 SSOT다 — 이 값과 직접 비교한다(추정 0).
+  destinationIsHostedSite: boolean;
   // story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — sealed_content_*/
   // sealed_doc_*와 동일 선례(다른 gate_type은 전부 null). 통화·기간·목표는 §1 표
   // 그대로(총예산은 adsBudgetMinor+adsCurrency 조합으로 formatMinorCurrency 재사용).
@@ -298,6 +305,7 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
       ? gate.latest_author_kind : null,
     destinationConnectionId: realString(gate.sealed_destination_connection_id) ?? null,
     destinationChannel: realString(gate.sealed_destination_channel) ?? null,
+    destinationIsHostedSite: f?.['destination'] === 'hosted_site',
     adsBudgetMinor: typeof gate.sealed_ads_budget_minor === 'number' ? gate.sealed_ads_budget_minor : null,
     adsCurrency: realString(gate.sealed_ads_currency),
     adsStartsAt: realString(gate.sealed_ads_starts_at),
@@ -715,12 +723,31 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * 가 non-null인 이상 항상 "approved"뿐이다(find_ready_recipe_channel_drafts가
  * "pending"인 scoped 게이트는 애초에 ready에 안 넣는다) — "pending" 분기는 죽은
  * 코드였다(제거, linkedChannelDraftScopedPending 키도 같이).
+ *
+ * story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 채널 초안의 scoped
+ * external_publish 게이트(이 카드가 쥔 그 초안 자신) 상세·인박스에서 영상 0건·
+ * 이미지 0건으로 보이던 결함. BE가 이제 scoped 게이트 응답에도 같은 `linked_
+ * channel_draft`(BE `_enrich_scoped_channel_draft_media`, #4098과 동일 직렬화
+ * 재사용)를 싣는다 — 이 컴포넌트를 scoped 게이트에도 그대로 재사용한다(두 번째
+ * 렌더러 0). 「제출 없음/초안 승인 대기」 두 문구(아래)는 **레시피 게이트 전용**
+ * (이 승인이 다른 게이트의 승계를 기다린다는 뜻)이라 scoped 게이트엔 의미가 안
+ * 맞는다 — scoped 게이트는 `isRecipeGate=false`로 그 분기를 건너뛴다(그 문구를
+ * 고치는 게 아니라 애초에 그 게이트 종류에 안 나오게 — 안 나오는 문장을 고치면
+ * 헛손질이라는 페드루 PO 지적 그대로).
  */
-function LinkedChannelDraftCard({ gate }: { gate: GateItem }) {
+function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
   const t = useTranslations('cage');
   const draft = gate.linked_channel_draft;
 
   if (!draft) {
+    if (!isRecipeGate) {
+      // scoped 게이트: 드물게 draft_id가 유실됐거나(구버전 데이터) 초안이 지워진
+      // 경우 — 지어낼 실물이 없다. 위 목적지 줄(RecipeApprovalFactsBlock)이 이미
+      // 텍스트 메타는 보여주므로 이 카드는 조용히 생략한다(«모른다≠다르다» — 없는
+      // 걸 있다고 안 하되, 레시피 전용 "승인해도 발행 안 됨" 문구를 억지로 빌리지도
+      // 않는다).
+      return null;
+    }
     // story #4105(#4098 잔여, 페드루 PO 실측 2026-09-21) — find_ready_recipe_channel_
     // drafts는 «scoped 승인 済·미발행» 초안만 ready에 담는다(#4090 자동발행 대상
     // 정의) — 이미 승인돼 발행이 끝난 게이트에서도 항상 빈 목록이라 linked_channel_
@@ -999,13 +1026,16 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       ) : null}
       {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7
           ("마지막 수정 주체·목적지를 확認할 수 있고"). 위 버전/해시 줄과 같은
-          site_posts 식별 조건(contentVersion/contentSha256)에 묶는다 — 다른
-          gate_type엔 이 축 자체가 없다(«모른다≠다르다», sealed_destination_
-          connection_id는 Gate 실 컬럼이라 항상 present라 이 조건 없이는 다른
-          gate_type에도 "호스팅 블로그"가 새 나갈 뻔했다). 목적지가 커넥션(WordPress/
-          webhook)이면 uuid 원문을 승인자에게 보이지 않고 channelLabel()(집안 정본)
-          로 표시명을 낸다 — 표시명을 지어내지 않는다는 원칙은 이 헬퍼 자신이 이미
-          지킨다(모르는 채널은 원문 그대로 폴백, uuid는 노출 안 함). */}
+          봉인 조건(contentVersion/contentSha256, site_posts·channel_posts 둘 다
+          이 축을 채운다 — story #4143 재확認)에 묶는다 — 다른 gate_type엔 이 축
+          자체가 없다(«모른다≠다르다»). 목적지가 커넥션(WordPress/webhook/채널
+          연결)이면 uuid 원문을 승인자에게 보이지 않고 channelLabel()(집안 정본)로
+          표시명을 낸다 — 표시명을 지어내지 않는다는 원칙은 이 헬퍼 자신이 이미
+          지킨다(모르는 채널은 원문 그대로 폴백, uuid는 노출 안 함).
+          ⛔story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — destination
+          ConnectionId===null을 "호스팅 블로그"로 *추정*하던 결함(채널 초안 게이트도
+          이 컬럼이 안 채워지던 시절엔 우연히 같은 값이었다). destinationIsHostedSite
+          (neutral_facts.destination==="hosted_site", BE SSOT 직접 대조)로 정정. */}
       {facts.contentVersion !== null || facts.contentSha256 ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
           <span>
@@ -1014,7 +1044,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           </span>
           <span>
             {t('recipeApprovalDestinationLabel')} ·{' '}
-            {facts.destinationConnectionId === null
+            {facts.destinationIsHostedSite
               ? t('recipeApprovalDestinationHostedSite')
               : facts.destinationChannel
                 ? channelLabel(facts.destinationChannel, tContent)
@@ -1193,9 +1223,15 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           다른 축으로도 non-null이 될 수 있다 — 뮤테이션 실측으로 확認) — 비레시피
           unscoped external_publish 게이트에도 "승인해도 발행되지 않아요" 카드가
           새 다른 세계의 문장이 붙는다. BE가 두 필드를 기본값(null/false)으로 둘
-          때 FE도 렌더 자체를 0으로. */}
+          때 FE도 렌더 자체를 0으로.
+          story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — scoped 채널 초안
+          게이트(scope_key≠"")도 이 카드를 탄다(BE가 이제 그쪽에도 linked_channel_
+          draft를 싣는다, AC2 "편입 영상은 <video controls>") — isRecipeGate로
+          레시피 전용 빈-상태 문구 분기만 가른다. */}
       {gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === '' && recipeFacts?.stage ? (
-        <LinkedChannelDraftCard gate={gate} />
+        <LinkedChannelDraftCard gate={gate} isRecipeGate />
+      ) : gate.gate_type === 'external_publish' && (gate.scope_key ?? '') !== '' ? (
+        <LinkedChannelDraftCard gate={gate} isRecipeGate={false} />
       ) : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>

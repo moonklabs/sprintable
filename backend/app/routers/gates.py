@@ -456,6 +456,7 @@ async def to_gate_response(
         posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(posture, gate.gate_type)
     await _enrich_linked_channel_draft(session, org_id, gate, resp)
+    await _enrich_scoped_channel_draft_media(session, org_id, gate, resp)
     await _enrich_linked_evidence(session, org_id, gate, resp)
     return resp
 
@@ -505,7 +506,21 @@ async def _enrich_linked_channel_draft(
         return
 
     draft, scoped_gate, latest = ready[0]
+    resp.linked_channel_draft = await _build_linked_channel_draft(
+        session, draft=draft, latest=latest,
+        scoped_gate_status=scoped_gate.status, sealed_scheduled_at=scoped_gate.sealed_scheduled_at,
+    )
 
+
+async def _build_linked_channel_draft(
+    session: AsyncSession, *, draft, latest, scoped_gate_status: str, sealed_scheduled_at,
+) -> "LinkedChannelDraft":
+    """story #4098이 원래 `_enrich_linked_channel_draft`(레시피 unscoped 게이트) 안에
+    인라인으로 갖고 있던 직렬화(draft+version+connection → LinkedChannelDraft) 그대로 —
+    story #4143(페드루 PO 確定 2026-09-22, AC1 "단일 경로, 두 번째 직렬화기 0")가
+    scoped 게이트 자신의 미디어 표시에도 같은 shape가 필요해지면서 재사용 가능한
+    조각으로 뺐다. 두 번째 직렬화기를 새로 짜면 두 표면이 "같은 draft인데 다른 필드
+    모양"으로 갈리는 twin-system 갭이 된다(이 코드베이스가 반복 경험한 그 클래스)."""
     from app.models.channel_connection import ChannelConnection
     from app.services.channel_post_images import list_channel_post_images_for_version, public_url_for_object_path
     from app.services.channel_post_videos import get_channel_post_video_for_version
@@ -518,13 +533,67 @@ async def _enrich_linked_channel_draft(
     video_row = await get_channel_post_video_for_version(session, version_id=latest.id)
     video_url = public_url_for_object_path(video_row.original_object_path) if video_row is not None else None
 
-    resp.linked_channel_draft = LinkedChannelDraft(
+    return LinkedChannelDraft(
         draft_id=draft.id, channel=draft.channel,
         account_id=connection.account_id if connection is not None else "",
         account_label=connection.account_label if connection is not None else None,
         text=latest.text, image_urls=image_urls, video_url=video_url,
-        scoped_gate_status=scoped_gate.status, sealed_scheduled_at=scoped_gate.sealed_scheduled_at,
+        scoped_gate_status=scoped_gate_status, sealed_scheduled_at=sealed_scheduled_at,
     )
+
+
+async def _enrich_scoped_channel_draft_media(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 채널 초안의 scoped
+    external_publish 게이트(이 게이트 자신이 그 초안이 쥔 게이트) 상세·인박스 카드가
+    초안 실물(영상·이미지·목적지 채널)을 하나도 안 보여주던 결함. `_enrich_linked_
+    channel_draft`(레시피 unscoped 게이트 전용, scope_key=="" 가드)와 정확히 대칭인
+    scope_key!="" 가드 — 같은 `_build_linked_channel_draft` 직렬화를 재사용해 두 번째
+    구현을 안 짠다(AC1).
+
+    좁은 가드가 먼저라 다른 gate_type·unscoped 게이트는 이 함수의 나머지 줄에 절대
+    안 들어간다(비용 0, `_enrich_linked_channel_draft`와 동일 관례)."""
+    if gate.gate_type != "external_publish" or (gate.scope_key or "") == "":
+        return
+    draft_id_raw = (gate.neutral_facts or {}).get("draft_id")
+    if not draft_id_raw:
+        return
+    try:
+        draft_id = uuid.UUID(str(draft_id_raw))
+    except (ValueError, AttributeError, TypeError):
+        return
+
+    from app.services.channel_posts import get_channel_post_draft, list_channel_post_draft_versions
+
+    draft = await get_channel_post_draft(session, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        return
+    versions = await list_channel_post_draft_versions(session, draft_id=draft_id)
+    if not versions:
+        return
+    latest = versions[-1]
+
+    resp.linked_channel_draft = await _build_linked_channel_draft(
+        session, draft=draft, latest=latest,
+        scoped_gate_status=gate.status, sealed_scheduled_at=gate.sealed_scheduled_at,
+    )
+
+    # story #4143 AC1 "기존 게이트(봉인 前 생성분)는 조회 시 초안에서 파생해 같은 모양으로
+    # 답한다" — channel_posts.py::submit_channel_post_draft가 이제 gate.sealed_
+    # destination_connection_id를 채우지만(신규 게이트), 이 컬럼이 아직 null인(그 write-path
+    # 배포 前에 생성된) 옛 게이트는 여기서 draft.connection_id로 파생해 응답 필드를 채운다
+    # (DB 컬럼 자체는 안 건드린다 — 응답 직렬화 시점 보정, 소급 UPDATE 0).
+    if resp.sealed_destination_connection_id is None:
+        resp.sealed_destination_connection_id = draft.connection_id
+
+    # sealed_destination_channel은 write-path(channel_posts.py) 어느 쪽도 채우지 않는
+    # Gate 컬럼(site_posts.py도 동형 — connection_id만 봉인)이라 신규/옛 게이트 가리지
+    # 않고 여기서 매번 채운다. draft.channel이 이미 그 값(ChannelConnection 재조회
+    # 불필요 — create_channel_post_draft_version이 connection.channel을 그대로 돌려준
+    # 값이 draft에 실려 있다).
+    if resp.sealed_destination_channel is None:
+        resp.sealed_destination_channel = draft.channel
 
 
 async def _enrich_linked_evidence(
