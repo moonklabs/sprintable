@@ -112,21 +112,12 @@ describe('TodayV3Screen — 렌더 3', () => {
   // 착지 前엔 자리만(비활성·클릭 0). 클릭해도 상태가 안 바뀌는 것(=API 호출 0)까지
   // 실증 — 「비활성이라 클릭 자체가 안 된다」는 jsdom에서 disabled 버튼의 click()이
   // 여전히 이벤트를 내지만 onClick이 없어 아무 일도 안 일어나는 것으로 고정.
-  it('⭐정지 버튼 — 비활성(disabled)이고 onClick이 없어 클릭해도 무변', async () => {
-    stubToday({
-      ...EMPTY_TODAY,
-      agent_progress: [
-        { run_id: 'r1', agent: { name: '담롱 온찬' }, work_item: { title: '블로그 글 초안' }, status: 'running', started_at: '2026-09-17T00:00:00Z', conversation_id: null },
-      ],
-    });
-    await mount();
-    const stopButton = container.querySelector('[data-testid="today-v3-stop-action"]') as HTMLButtonElement;
-    expect(stopButton).not.toBeNull();
-    expect(stopButton.disabled).toBe(true);
-    const putOrPostCallsBefore = fetchMock.mock.calls.length;
-    await act(async () => { stopButton.click(); });
-    expect(fetchMock.mock.calls.length).toBe(putOrPostCallsBefore);
-  });
+  // story #3970(E-UX-OVERHAUL·「오늘」 구현 5/N) — 위 "비활성·onClick 없음" pin은
+  // #3970이 「정지」에 실동작(cancel API)을 배선하며 전제가 소멸했다(rebase 시점
+  // 확認, 페드루 PO 런북 §2-3 처방 그대로). 정지 버튼의 활성/비활성·클릭 동작은
+  // today-v3-agent-progress.test.tsx(컴포넌트 전담 테스트, #3970이 신설)가 이미
+  // status별 3분기(running=활성·completed=비활성·cancel_requested=라벨 전환)로
+  // 더 정밀하게 커버한다 — 이 화면 레벨에서 같은 행동을 다시 단언하지 않는다(DRY).
 
   // story #3962 CHANGES-2(페드루 PO C2) — 위험 등급 태그(고위험=amber 배지)·저위험은
   // 개별 카드 대신 「저위험 N건」 한 줄로 묶인다. 「모아 승인」 실동작 검증은 story
