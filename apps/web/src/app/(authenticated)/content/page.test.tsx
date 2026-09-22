@@ -645,7 +645,10 @@ describe('ContentPostListPage (story #3368)', () => {
       });
       await flush();
 
-      const triggers = container.querySelectorAll('[data-testid="content-row-actions-trigger"]');
+      // story #4014 — ResponsiveDataTable은 표(≥1024)·카드(<1024) DOM을 항상 둘 다
+      // 그리고(CSS class로만 토글, AC5/6) jsdom은 CSS를 계산 안 하므로 testid가 2배로
+      // 잡힌다 — 표 쪽(<table> 안)만 스코프해 기존 단언(행당 1개)을 그대로 유지한다.
+      const triggers = container.querySelectorAll('table [data-testid="content-row-actions-trigger"]');
       expect(triggers).toHaveLength(2);
       const labels = [...triggers].map((b) => b.getAttribute('aria-label'));
       expect(labels[0]).not.toBeNull();
@@ -831,7 +834,8 @@ describe('ContentPostListPage (story #3368)', () => {
       await act(async () => { root.render(wrap(<ContentPostListPage />)); });
       await flush();
 
-      const buttons = [...container.querySelectorAll('button')].filter(
+      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
+      const buttons = [...container.querySelectorAll('table button')].filter(
         (el) => el.textContent === koMessages.content.approvalRequestViewCta,
       );
       expect(buttons).toHaveLength(2);

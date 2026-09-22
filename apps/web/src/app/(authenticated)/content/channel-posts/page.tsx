@@ -8,7 +8,6 @@ import { MoreHorizontal } from 'lucide-react';
 import { useChatsHref, useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/ui/page-header';
@@ -26,6 +25,7 @@ import { type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
+import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -285,6 +285,137 @@ export default function ChannelPostListPage() {
     </Button>
   );
 
+  // story #4014 — ResponsiveDataTable 열 정의(content/page.tsx와 동형 취지 — 셀 내용이
+  // 조건부 로직을 품어 renderCell 함수로 표·카드 둘 다 그린다).
+  type ChannelPostListRow = (typeof draftsWithStatus)[number];
+  const columns: ResponsiveDataTableColumn<ChannelPostListRow>[] = [
+    {
+      key: 'preview', header: t('channelPostsColumnPreview'), cardSlot: 'title',
+      cellClassName: 'max-w-xs px-3 py-2.5 font-medium text-foreground',
+      renderCell: ({ draft, view }) => {
+        const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
+        return (
+          <>
+            <Link href={`/content/channel-posts/${draft.draft_id}`} className="truncate hover:underline">
+              {hasTextPreview ? draft.text_preview : `${channelLabel(draft.channel)} · v${draft.current_version}`}
+            </Link>
+            {draft.origin_author_kind && draft.origin_author_kind !== draft.latest_author_kind ? (
+              <div className="mt-0.5" data-testid="channel-post-origin-author">
+                <AuthorKindBadge kind={draft.origin_author_kind} />
+              </div>
+            ) : null}
+            {view.partialSuccess ? (
+              <span
+                className="mt-1 inline-flex rounded-full bg-warning-tint px-1.5 py-0.5 text-xs text-foreground"
+                data-testid="channel-post-partial-success"
+              >
+                {t('channelPostsPartialSuccess')}
+              </span>
+            ) : null}
+            {draft.source_content_item_id && draft.source_title ? (
+              <p className="mt-0.5 truncate text-xs text-muted-foreground" data-testid="channel-post-source-link">
+                {t('channelPostsSourceLabel')}{' '}
+                <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+                  {t('channelPostsSourceLinkText', { title: draft.source_title })}
+                </Link>
+              </p>
+            ) : null}
+          </>
+        );
+      },
+    },
+    {
+      key: 'channel', header: t('channelPostsColumnChannel'), cardSlot: 'meta',
+      renderCell: ({ draft }) => (
+        <>
+          {channelLabel(draft.channel)}
+          {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
+        </>
+      ),
+    },
+    {
+      key: 'outgoingAt', header: t('channelPostsColumnOutgoingAt'), cardSlot: 'meta',
+      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      renderCell: ({ draft, failureAction }) => {
+        const scheduled = realStr(draft.scheduled_at);
+        return failureAction ? (
+          <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact />
+        ) : draft.published_at ? (
+          formatScheduledAt(draft.published_at, displayTimezone).display
+        ) : scheduled ? (
+          formatScheduledAt(scheduled, displayTimezone).display
+        ) : (
+          '—'
+        );
+      },
+    },
+    {
+      key: 'status', header: t('channelPostsColumnStatus'), cardSlot: 'meta',
+      renderCell: ({ draft, view }) => (
+        draft.is_deleted ? (
+          <span
+            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+            data-testid="channel-post-archived-badge"
+          >
+            {t('contentStatusArchived')}
+          </span>
+        ) : (
+          <StatusChip status={view.status} />
+        )
+      ),
+    },
+    {
+      key: 'actions',
+      header: <span className="sr-only">{t('columnActionsSrLabel')}</span>,
+      cardSlot: 'action',
+      renderCell: ({ draft, tab }, index) => (
+        <div className="flex items-center justify-end gap-1.5">
+          {tab === 'pending' ? (
+            <Button
+              variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
+              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
+            >
+              {t('approvalRequestViewCta')}
+            </Button>
+          ) : null}
+          {tab === 'published' && draft.permalink ? (
+            <Button
+              variant="outline" size="sm"
+              onClick={() => window.open(draft.permalink!, '_blank', 'noopener,noreferrer')}
+              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('commentsReplyExternalLinkCta') })}
+            >
+              {t('commentsReplyExternalLinkCta')}
+            </Button>
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              data-testid="channel-post-row-actions-trigger"
+              aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
+            >
+              <MoreHorizontal className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {draft.can_archive ? (
+                <DropdownMenuItem
+                  onClick={() => void handleArchiveToggle(draft)}
+                  disabled={archivingId === draft.draft_id}
+                  data-testid="channel-post-archive-action"
+                  aria-label={t('archiveRowAriaLabel', {
+                    n: index + 1,
+                    label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
+                  })}
+                >
+                  {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
       <PageHeader
@@ -369,162 +500,12 @@ export default function ChannelPostListPage() {
           )
         ) : null
       ) : (
-        <Card className="overflow-hidden p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnPreview')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnChannel')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnOutgoingAt')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('channelPostsColumnStatus')}</th>
-                {/* story #3736 ⑤-보강 — 액션 열 머리는 sr-only(content/page.tsx와 동형). */}
-                <th className="px-3 py-2 text-left font-medium">
-                  <span className="sr-only">{t('columnActionsSrLabel')}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {visibleRows.map(({ draft, view, failureAction, tab }, index) => {
-                const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
-                const scheduled = realStr(draft.scheduled_at);
-                return (
-                  <tr key={draft.draft_id} data-testid="channel-posts-list-row">
-                    <td className="max-w-xs px-3 py-2.5 font-medium text-foreground">
-                      <Link href={`/content/channel-posts/${draft.draft_id}`} className="truncate hover:underline">
-                        {hasTextPreview
-                          ? draft.text_preview
-                          : `${channelLabel(draft.channel)} · v${draft.current_version}`}
-                      </Link>
-                      {/* story #3744(페드루 CHANGES Ⓒ, 시안 v6) — 버전·글자 수 부제는
-                          시안에 없다("v1 · 12"처럼 분모 이름 없는 수는 오히려 읽는 사람을
-                          더 헷갈리게 한다는 실측 지적) — 상세 화면의 일이라 걷는다(삭제
-                          아님, 이 화면에서만 안 그린다). 시안 부제는 «작성자»뿐이라
-                          origin-author 배지만 남긴다. */}
-                      {draft.origin_author_kind && draft.origin_author_kind !== draft.latest_author_kind ? (
-                        <div className="mt-0.5" data-testid="channel-post-origin-author">
-                          <AuthorKindBadge kind={draft.origin_author_kind} />
-                        </div>
-                      ) : null}
-                      {view.partialSuccess ? (
-                        <span
-                          className="mt-1 inline-flex rounded-full bg-warning-tint px-1.5 py-0.5 text-xs text-foreground"
-                          data-testid="channel-post-partial-success"
-                        >
-                          {t('channelPostsPartialSuccess')}
-                        </span>
-                      ) : null}
-                      {draft.source_content_item_id && draft.source_title ? (
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground" data-testid="channel-post-source-link">
-                          {t('channelPostsSourceLabel')}{' '}
-                          <Link href={`/content/${draft.source_content_item_id}`} className="underline">
-                            {t('channelPostsSourceLinkText', { title: draft.source_title })}
-                          </Link>
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
-                        {channelLabel(draft.channel)}
-                        {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {/* story #3744(유나 픽셀 CHANGES①·PO 채택, 2026-09-09 12:33Z) —
-                          「나가는 시각」 칸이 「언제 나가나」의 답을 전부 쥔다. 기존
-                          `scheduled ? format : '—'` 한 줄이 세 뜻(예약 없음/발행됨/막힘)을
-                          「—」 하나로 뭉갰다 — 「—」는 이제 "아직 예약 없음" 한 뜻만.
-                          우선순위: 막힘(FailureActionBadge, 상시 답이 필요한 다음 발) >
-                          발행됨(published_at, 계약에 이미 있음) > 예약(scheduled_at) >
-                          「—」. compact — 재시도 버튼은 상세로(페드루 정정, 2026-09-09
-                          14:01Z 3746 — 「채널에서 확인했습니다」 체크+중복 경고가 2단계
-                          액션이라 목록 행에서 시작 못 한다). */}
-                      {failureAction ? (
-                        <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact />
-                      ) : draft.published_at ? (
-                        formatScheduledAt(draft.published_at, displayTimezone).display
-                      ) : scheduled ? (
-                        formatScheduledAt(scheduled, displayTimezone).display
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {draft.is_deleted ? (
-                        <span
-                          className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
-                          data-testid="channel-post-archived-badge"
-                        >
-                          {t('contentStatusArchived')}
-                        </span>
-                      ) : (
-                        <StatusChip status={view.status} />
-                      )}
-                      {/* story #3744(페드루 CHANGES Ⓒ, 시안 v6) — 상태 칩 밑 상대 시각
-                          부제는 시안에 없다. 걷는다(삭제 아님 — 상세 화면의 일). */}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {/* story #3744(페드루 CHANGES Ⓐ, 시안 v6) — content/page.tsx와
-                            동형(그 파일 주석 참조 — 「상태 딱지는 사람을 멈춰 세우고 다음
-                            발은 움직인다·숨긴 액션은 터치에선 없는 것」). ⋯ 메뉴엔 이제
-                            보관/보관 해제만 남는다(같은 동작을 두 자리에 안 둔다). */}
-                        {tab === 'pending' ? (
-                          <Button
-                            variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
-                            // story #3592(§22-18 "유나의 자") — 상시 노출 행 액션이라
-                            // archiveRowAriaLabel(순번+현재 라벨) 재사용, content/page.tsx와 동형.
-                            aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
-                          >
-                            {t('approvalRequestViewCta')}
-                          </Button>
-                        ) : null}
-                        {/* story #3744(PO 決, 시안 v4 14e399df) — 발행됨 행 다음 발
-                            「채널에서 보기」(content.commentsReplyExternalLinkCta 재사용
-                            — content/page.tsx의 「발행된 글 보기」와 다른 낱말, 블로그는
-                            자사 사이트·채널은 외부 플랫폼이라 구별). permalink는 기존
-                            계약 필드 재사용(신규 BE 0) — public_url과 동형 규율: 없으면
-                            버튼 자체를 안 그린다. */}
-                        {tab === 'published' && draft.permalink ? (
-                          <Button
-                            variant="outline" size="sm"
-                            onClick={() => window.open(draft.permalink!, '_blank', 'noopener,noreferrer')}
-                            aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('commentsReplyExternalLinkCta') })}
-                          >
-                            {t('commentsReplyExternalLinkCta')}
-                          </Button>
-                        ) : null}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                            data-testid="channel-post-row-actions-trigger"
-                            aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {draft.can_archive ? (
-                              <DropdownMenuItem
-                                onClick={() => void handleArchiveToggle(draft)}
-                                disabled={archivingId === draft.draft_id}
-                                data-testid="channel-post-archive-action"
-                                aria-label={t('archiveRowAriaLabel', {
-                                  n: index + 1,
-                                  label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
-                                })}
-                              >
-                                {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
-                              </DropdownMenuItem>
-                            ) : null}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </Card>
+        <ResponsiveDataTable
+          columns={columns}
+          rows={visibleRows}
+          rowKey={(row) => row.draft.draft_id}
+          rowTestId="channel-posts-list-row"
+        />
       )}
 
       {/* story #3744(유나 CHANGES·PO 채택) — content/page.tsx와 동형(그 파일 주석 참조 —

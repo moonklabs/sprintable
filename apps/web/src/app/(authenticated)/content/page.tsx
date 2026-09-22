@@ -8,7 +8,6 @@ import { MoreHorizontal } from 'lucide-react';
 import { useChatsHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/ui/page-header';
@@ -19,9 +18,10 @@ import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { deriveContentPostStatus, type ContentPostStatusInput } from '@/components/content/post-status';
+import { deriveContentPostStatus, type ContentPostStatus, type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
+import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 2번) —
@@ -78,6 +78,13 @@ function realStr(v: string | null | undefined): string | undefined {
 }
 
 type StatusTab = 'all' | 'draft' | 'pending' | 'approved' | 'published';
+
+// story #4014 — ResponsiveDataTable 행 타입(draftsWithStatus/visibleRows의 원소 shape).
+interface ContentListRow {
+  draft: SitePostDraftListItem;
+  status: ContentPostStatus | undefined;
+  tab: StatusTab;
+}
 
 // story #3744(유나 CHANGES·PO 채택, 2026-09-09) — 미르코의 최초 4탭 접기(승인됨→발행됨
 // 합침)를 정정: 「발행됨」 탭이 approved(=아직 사람이 「발행」을 안 누른 발행 가능 일감)를
@@ -226,6 +233,106 @@ export default function ContentPostListPage() {
     </Button>
   );
 
+  // story #4014 — ResponsiveDataTable 열 정의. 셀 내용이 조건부 로직(보관 배지·행별 버튼
+  // 노출)을 품어 순수 선언형 config로는 부족하므로 renderCell 함수로 표·카드 둘 다 그린다
+  // (카드 전용 renderCard 없음 — 표 셀 내용이 그대로 카드에서도 통함, title만 line-clamp-2
+  // 로 감싸는 건 ResponsiveDataTable 자신이 함).
+  const columns: ResponsiveDataTableColumn<ContentListRow>[] = [
+    {
+      key: 'title', header: t('columnTitle'), cardSlot: 'title',
+      cellClassName: 'px-3 py-2.5 font-medium text-foreground',
+      renderCell: ({ draft }) => (
+        <Link href={`/content/${draft.draft_id}`} className="hover:underline">
+          {draft.title}
+        </Link>
+      ),
+    },
+    {
+      key: 'status', header: t('columnStatus'), cardSlot: 'meta',
+      renderCell: ({ draft, status }) => (
+        draft.is_deleted ? (
+          <span
+            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+            data-testid="content-archived-badge"
+          >
+            {t('contentStatusArchived')}
+          </span>
+        ) : (
+          <StatusChip status={status} />
+        )
+      ),
+    },
+    {
+      key: 'lastModified', header: t('columnLastModified'), cardSlot: 'meta',
+      renderCell: ({ draft }) => (
+        <>
+          <span data-testid="content-current-version">
+            {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
+            <span className="ml-1 font-mono">· v{draft.current_version}</span>
+          </span>
+          <span className="inline-flex items-center gap-1" data-testid="content-latest-author">
+            <AuthorKindBadge kind={draft.latest_author_kind} />
+          </span>
+          {draft.origin_author_kind !== draft.latest_author_kind ? (
+            <span data-testid="content-origin-author" title={t('columnOriginAuthor')}>
+              <AuthorKindBadge kind={draft.origin_author_kind} />
+            </span>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: 'actions',
+      header: <span className="sr-only">{t('columnActionsSrLabel')}</span>,
+      cardSlot: 'action',
+      renderCell: ({ draft, tab }, index) => (
+        <div className="flex items-center justify-end gap-1.5">
+          {/* story #3744(페드루 CHANGES Ⓐ, 시안 v6) — 「상태 딱지는 사람을 멈춰 세우고
+              다음 발은 움직인다·숨긴 액션은 터치에선 없는 것」. ⋯ 메뉴 뒤에 숨기지 않고
+              상시 보이는 outline 버튼으로(상태 뒤·⋯ 앞). 같은 동작을 두 자리에 두지
+              않는다 — ⋯ 메뉴엔 이제 보관/보관 해제만 남는다. */}
+          {tab === 'pending' ? (
+            <Button
+              variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
+              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
+            >
+              {t('approvalRequestViewCta')}
+            </Button>
+          ) : null}
+          {tab === 'published' && draft.public_url ? (
+            <Button
+              variant="outline" size="sm"
+              onClick={() => window.open(draft.public_url!, '_blank', 'noopener,noreferrer')}
+              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('publishViewLink') })}
+            >
+              {t('publishViewLink')}
+            </Button>
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              data-testid="content-row-actions-trigger"
+              aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
+            >
+              <MoreHorizontal className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {draft.can_archive ? (
+                <DropdownMenuItem
+                  onClick={() => void handleArchiveToggle(draft)}
+                  disabled={archivingId === draft.draft_id}
+                  data-testid="content-archive-action"
+                >
+                  {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
       <PageHeader
@@ -289,127 +396,12 @@ export default function ContentPostListPage() {
           )
         ) : null
       ) : (
-        <Card className="overflow-hidden p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">{t('columnTitle')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnStatus')}</th>
-                <th className="px-3 py-2 text-left font-medium">{t('columnLastModified')}</th>
-                {/* story #3736 ⑤-보강 — 액션 열 머리는 빈 문자열(시각)이지만 sr-only로
-                    구조적 이름을 남긴다(스크린리더가 "이름 없는 열"로 읽지 않도록). */}
-                <th className="px-3 py-2 text-left font-medium">
-                  <span className="sr-only">{t('columnActionsSrLabel')}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {visibleRows.map(({ draft, status, tab }, index) => (
-                <tr key={draft.draft_id} data-testid="content-list-row">
-                  <td className="px-3 py-2.5 font-medium text-foreground">
-                    <Link href={`/content/${draft.draft_id}`} className="hover:underline">
-                      {draft.title}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {/* story #3734 — 보관된 행은 발행/게이트 파생 상태 대신 「보관됨」
-                        배지 하나(유나 §짝확認 — 「보관」 액션이 서면 상태 배지는
-                        「보관됨」이어야 한다). 파생 상태 자체는 무변(재보관 해제 시
-                        그대로 복귀). */}
-                    {draft.is_deleted ? (
-                      <span
-                        className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
-                        data-testid="content-archived-badge"
-                      >
-                        {t('contentStatusArchived')}
-                      </span>
-                    ) : (
-                      <StatusChip status={status} />
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {/* story #3368 자기점검(페드루 지적 2026-09-10) — #3744가 열을 줄이며
-                        「현재 버전」 v{n}을 통째로 빠뜨렸다(원작성 주체처럼 하위 칸으로
-                        강등된 게 아니라 흔적 자체가 사라짐 — 데이터(draft.current_version)
-                        는 그대로 fetch되고 있었다). origin_author_kind 강등과 같은 자리에
-                        같은 형(작은 mono 보조 문구)으로 복원한다. */}
-                    <p className="text-muted-foreground">
-                      {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
-                      <span className="ml-1 font-mono" data-testid="content-current-version">· v{draft.current_version}</span>
-                    </p>
-                    {/* story #3744 — 열 축소(§6-3-1의 원작성 주체 열 삭제 아님, 하위
-                        칸으로 강등). 원작성·최종수정이 갈리는 실제 케이스(에이전트가
-                        쓰고 사람이 고침)를 목록에서 계속 구별하려면 두 칩이 다 있어야
-                        한다 — origin_author_kind가 latest_author_kind와 같을 땐 반복
-                        정보라 origin 칩을 생략한다(같은 이름 두 번은 소음). */}
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1" data-testid="content-latest-author">
-                      <AuthorKindBadge kind={draft.latest_author_kind} />
-                    </div>
-                    {draft.origin_author_kind !== draft.latest_author_kind ? (
-                      <div className="mt-0.5 text-xs" data-testid="content-origin-author" title={t('columnOriginAuthor')}>
-                        <AuthorKindBadge kind={draft.origin_author_kind} />
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {/* story #3744(페드루 CHANGES Ⓐ, 시안 v6) — 「상태 딱지는 사람을
-                          멈춰 세우고 다음 발은 움직인다·숨긴 액션은 터치에선 없는 것」.
-                          ⋯ 메뉴 뒤에 숨기지 않고 상시 보이는 outline 버튼으로(상태 뒤·⋯
-                          앞). 같은 동작을 두 자리에 두지 않는다 — ⋯ 메뉴엔 이제 보관/
-                          보관 해제만 남는다. */}
-                      {tab === 'pending' ? (
-                        <Button
-                          variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
-                          // story #3592(§22-18 "유나의 자") — 이 버튼도 이제 상시 노출
-                          // 행 액션이라 archiveRowAriaLabel과 동형(순번+현재 라벨) 재사용.
-                          aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
-                        >
-                          {t('approvalRequestViewCta')}
-                        </Button>
-                      ) : null}
-                      {/* story #3744(PO 決) — public_url이 없으면(미발행 또는
-                          public_site_base_url 미설정) 버튼 자체를 안 그린다 — "—"도 안
-                          쓴다(비활성이 아니라 부재). */}
-                      {tab === 'published' && draft.public_url ? (
-                        <Button
-                          variant="outline" size="sm"
-                          onClick={() => window.open(draft.public_url!, '_blank', 'noopener,noreferrer')}
-                          aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('publishViewLink') })}
-                        >
-                          {t('publishViewLink')}
-                        </Button>
-                      ) : null}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                          data-testid="content-row-actions-trigger"
-                          // story #3592(§22-18 "유나의 자") — 행마다 다른 접근 이름(순번
-                          // 품음). 이 트리거는 정적 라벨(⋯)뿐이라 값이 갈리지 않으면 이
-                          // 가드의 관할 밖 클래스로 다시 샌다 — 미리 순번을 품는다.
-                          aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {draft.can_archive ? (
-                            <DropdownMenuItem
-                              onClick={() => void handleArchiveToggle(draft)}
-                              disabled={archivingId === draft.draft_id}
-                              data-testid="content-archive-action"
-                            >
-                              {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
-                            </DropdownMenuItem>
-                          ) : null}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+        <ResponsiveDataTable
+          columns={columns}
+          rows={visibleRows}
+          rowKey={(row) => row.draft.draft_id}
+          rowTestId="content-list-row"
+        />
       )}
 
       {/* story #3744 범위 ⑥ — 「N개 중 M개 표시 중」. totalCount가 null이면(헤더를
