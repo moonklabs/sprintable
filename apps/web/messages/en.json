@@ -3071,6 +3071,7 @@
     "engagementFilterChannelLabel": "Channel",
     "engagementAssigneeNone": "Unassigned",
     "engagementAssigneeLabel": "Assignee · {name}",
+    "engagementAssigneeLoadFailed": "Couldn't load the assignee list.",
     "engagementDeletedCommentPlaceholder": "Deleted comment",
     "engagementEmptyTitle": "No engagement yet.",
     "engagementEmptyDescription": "Comments on your posts will appear here.",
