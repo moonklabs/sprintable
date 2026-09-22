@@ -29,7 +29,31 @@ function manyItems(n, bg) {
   return Array.from({ length: n }, (_, i) => `<div style="padding:20px;border-bottom:1px solid #ccc;background:${bg}">item ${i}</div>`).join('');
 }
 
-function shellHtml(innerContent) {
+// story #4130 CHANGES-1(까디르군 렌즈 (b) 재현 실패 지적, 2026-09-22) — 원래 (A) 픽스처는
+// gate-detail-container에 인라인 `height:1400px`를 줘서, 셸 wrapper에 min-h-0를 되돌려도
+// sticky가 그대로 성립해버렸다(explicit height가 flex-basis를 직접 제공해 ancestor의
+// min-h-0 유무와 무관해짐 — "min-h-0 제거가 근본"이라는 이 PR의 핵심 주장을 못 틀리는
+// 대조로 증명 못 함). 고침: (1) gate-detail-container는 실 파일과 동일하게 explicit height
+// 0(내용이 스택형 아이템으로 자연스럽게 길어짐 — min-content 기반 성장, 인라인 height 아님)
+// (2) 셸 wrapper의 className/contentClassName을 실 dashboard-shell.tsx 소스에서 정규식으로
+// 그대로 추출(BEFORE_CLASSNAME/BEFORE_CONTENT_CLASSNAME은 git diff로 고정한 실측 이전 값) —
+// 소스를 되돌리면 이 스크립트의 "AFTER"도 자동으로 옛 값을 읽어 RED가 된다.
+const DASHBOARD_SHELL_SRC = readFileSync(
+  path.resolve(WEB_ROOT, 'src/app/dashboard/dashboard-shell.tsx'),
+  'utf-8',
+);
+const CURRENT_CLASSNAME = /className="(min-h-0 flex-1|flex-1)"\s*\n\s*inlineColumnsClassName/.exec(DASHBOARD_SHELL_SRC)?.[1];
+const CURRENT_CONTENT_CLASSNAME = /'(flex min-h-0 min-w-0 flex-col[^']*|flex min-w-0 flex-col[^']*)'/.exec(DASHBOARD_SHELL_SRC)?.[1];
+if (!CURRENT_CLASSNAME || !CURRENT_CONTENT_CLASSNAME) {
+  throw new Error('dashboard-shell.tsx에서 ContextualPanelLayout className/contentClassName을 못 찾음 — 정규식이 소스 변경을 못 따라간 것, 스크립트를 갱신할 자리.');
+}
+// story #4130 착지 前(git diff로 고정한 실측값, origin/develop f3036d10e 계열) — #4125까지
+// 착지된 상태의 실제 값. 이 파일이 이 스토리 착지 後 develop에 병합되면 이 두 상수는 "역사적
+// 음성대조 고정값"으로만 남는다(CURRENT_*가 이미 고쳐진 값을 읽으므로).
+const BEFORE_CLASSNAME = 'min-h-0 flex-1';
+const BEFORE_CONTENT_CLASSNAME = 'flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1';
+
+function shellHtml(innerContent, { className, contentClassName }) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0}${findCompiledCss()}</style></head>
 <body>
@@ -37,8 +61,8 @@ function shellHtml(innerContent) {
     <main class="relative flex w-full flex-1 flex-col overflow-hidden">
       <div id="scroller" class="flex flex-1 min-h-0 flex-col overflow-y-auto">
         <div class="flex h-12 shrink-0 items-center gap-2 border-b px-4">TopBar(48px)</div>
-        <div class="grid gap-4 grid-cols-1 flex-1">
-          <div class="flex min-w-0 flex-col">
+        <div class="grid gap-4 grid-cols-1 ${className}">
+          <div class="${contentClassName}">
             ${innerContent}
           </div>
         </div>
@@ -48,32 +72,75 @@ function shellHtml(innerContent) {
 </body></html>`;
 }
 
-const GATES_LIKE = `
+// 실 gates/[id]/page.tsx:344 클래스 그대로(explicit height 없음 — min-h-full은 최소치일
+// 뿐 내용이 그보다 길면 자연히 더 자란다). 좌 열은 manyItems()로 진짜 스택형 콘텐츠(실
+// min-content 성장) — 인라인 height 트릭 안 씀(위 CHANGES-1 교훈).
+function gatesLikeHtml() {
+  return `
   <div data-testid="gate-detail-container" class="mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5 lg:max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
-    <div style="height:1400px;background:#eee">좌 열(1400px 내용)</div>
+    <div>${manyItems(40, '#eee')}</div>
     <div data-testid="action-column" class="proof-surface mt-3 space-y-3 border p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start" style="background:#fff">우 열(sticky)</div>
   </div>
 `;
+}
 
 const browser = await chromium.launch();
 let allPass = true;
 
-// (A) gates/[id]류 — sticky가 :scroller를 포함 블록으로 잡아 스크롤 뒤에도 top 고정돼야 한다.
-{
+// (A) gates/[id]류 — sticky가 :scroller를 포함 블록으로 잡아 스크롤 뒤에도 top 고정돼야
+// 한다. AFTER(실 소스에서 읽은 현재 클래스)와 BEFORE(#4130 착지 前 고정값) 둘 다 돌려
+// 나란히 비교 — "min-h-0 제거가 근본"이라는 주장을 못 틀리는 대조로 증명한다.
+async function runGatesScenario(label, wrapperClasses) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
-  await page.setContent(shellHtml(GATES_LIKE));
+  await page.setContent(shellHtml(gatesLikeHtml(), wrapperClasses));
+  const container = page.getByTestId('gate-detail-container');
   const action = page.getByTestId('action-column');
+  const scroller = page.locator('#scroller');
+
+  const containerClientH = await container.evaluate((el) => el.clientHeight);
+  const containerScrollH = await container.evaluate((el) => el.scrollHeight);
   const position = await action.evaluate((el) => getComputedStyle(el).position);
   const topBefore = await action.evaluate((el) => el.getBoundingClientRect().top);
   await page.mouse.wheel(0, 400);
   await page.waitForTimeout(100);
   const topAfter = await action.evaluate((el) => el.getBoundingClientRect().top);
-  // sticky는 스크롤 시작 直後 top-12(48px)에 "정착"하는 게 정상(#4125 검증 로직과 동형) —
-  // topBefore(스크롤 전, mt-3 등으로 48보다 클 수 있음)와 무관하게 topAfter가 48 근처면 통과.
-  const pass = position === 'sticky' && topAfter < 60 && topAfter >= 40;
-  console.log(`(A) gates류 — position=${position}, top ${topBefore.toFixed(1)}→${topAfter.toFixed(1)}(스크롤 400px 뒤) : ${pass ? 'PASS(48px 근처 정착 — 추종함)' : 'FAIL(추종 안 함)'}`);
-  if (!pass) allPass = false;
+  const scrollerScrollTop = await scroller.evaluate((el) => el.scrollTop);
   await page.close();
+
+  return { label, containerClientH, containerScrollH, position, topBefore, topAfter, scrollerScrollTop };
+}
+
+{
+  const after = await runGatesScenario('AFTER(실 소스 현재값)', { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME });
+  const before = await runGatesScenario('BEFORE(#4130 착지 前 고정값)', { className: BEFORE_CLASSNAME, contentClassName: BEFORE_CONTENT_CLASSNAME });
+
+  for (const r of [before, after]) {
+    console.log(`(A-${r.label}) container clientH=${r.containerClientH}/scrollH=${r.containerScrollH} · position=${r.position} · top ${r.topBefore.toFixed(1)}→${r.topAfter.toFixed(1)}(스크롤 400px 뒤) · #scroller.scrollTop=${r.scrollerScrollTop}`);
+  }
+
+  // 핵심 기계적 주장(이 카드의 AC1) — AFTER: 컨테이너 박스가 내용 높이만큼 자란다
+  // (clientH≈scrollH). BEFORE: 컨테이너가 스크롤러 가용폭에 캡된다(clientH<scrollH,
+  // Pedro 라이브 실측 496/1422와 같은 모양). 이 못 틀리는 대조는 이제 정확히 성립한다.
+  const afterGrew = after.containerClientH >= after.containerScrollH - 2;
+  const beforeCapped = before.containerClientH < before.containerScrollH - 2;
+  const containerClaim = afterGrew && beforeCapped;
+
+  // ⚠️sticky 자체는 이 단순화 fixture(순수 <div> 좌 열, 실 ProofCapsule 아님)에서 BEFORE/
+  // AFTER 둘 다 "정상 추종"으로 관측됐다(both position=sticky, top 정착 48, scroller가
+  // 스크롤됨) — gate-detail-container가 overflow:visible이라(overflow-hidden/auto 없음)
+  // 컨테이너 자체 박스가 캡돼 있어도 sticky의 스크롤 컨텍스트 탐색이 그 캡을 무시하고
+  // #scroller까지 올라가 버리기 때문으로 보인다(CSS sticky 컨테이닝 블록 규칙 — overflow:
+  // visible 조상은 클리핑/스크롤 컨텍스트로 안 잡힘). 즉 라이브에서 Pedro가 관측한 "sticky가
+  // 실제로 안 움직인다"는 증상을 이 순수-<div> 모델만으로는 재현 못 했다 — 실 ProofCapsule
+  // 내부 구조나 실 콘텐츠 특성에 이 fixture가 놓친 요인이 있을 수 있다(Kadir/PO 라이브
+  // devtools 재검이 이 gap을 메워야 함, 아래 로그에 두 상태 나란히 남겨 참고용으로 제공).
+  const stickyBothWork = after.position === 'sticky' && after.topAfter < 60 && after.topAfter >= 40
+    && before.position === 'sticky' && before.topAfter < 60 && before.topAfter >= 40;
+
+  const pass = containerClaim; // AC1의 기계적 주장만으로 판정 — sticky 자체는 참고 로그
+  console.log(`(A) 판정 — 컨테이너 성장 주장(AC1 핵심, 못 틀리는 대조) AFTER 자람? ${afterGrew} · BEFORE 캡? ${beforeCapped} : ${containerClaim ? 'PASS' : 'FAIL — CHANGES-1 재발'}`);
+  console.log(`    참고(gap) — 이 단순화 fixture에선 sticky 자체가 BEFORE/AFTER 둘 다 "정상 추종"으로 관측됨(${stickyBothWork}) — overflow:visible 조상은 sticky 스크롤 컨텍스트 탐색을 안 막기 때문으로 보임. 라이브에서 관측된 "sticky가 실제로 안 움직인다" 증상은 이 순수-<div> 모델로는 재현 못 함 — 실 ProofCapsule 구조 차이일 가능성, Kadir/PO 라이브 devtools 재검 요청.`);
+  if (!pass) allPass = false;
 }
 
 // (B) retro류(#4130 픽스 前 — 음성대조) — 로컬 스크롤 경계(min-h-0 flex-1)만 있고 뷰포트
@@ -86,7 +153,7 @@ const RETRO_UNFIXED = `
 `;
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
-  await page.setContent(shellHtml(RETRO_UNFIXED));
+  await page.setContent(shellHtml(RETRO_UNFIXED, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME }));
   const inner = page.getByTestId('inner-scroller');
   const scroller = page.locator('#scroller');
   const innerClientHeight = await inner.evaluate((el) => el.clientHeight);
@@ -114,7 +181,7 @@ const RETRO_FIXED = `
 `;
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
-  await page.setContent(shellHtml(RETRO_FIXED));
+  await page.setContent(shellHtml(RETRO_FIXED, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME }));
   const inner = page.getByTestId('inner-scroller');
   const scroller = page.locator('#scroller');
   const innerClientHeight = await inner.evaluate((el) => el.clientHeight);
@@ -147,7 +214,7 @@ const RETRO_STICKY_TOOLBAR = `
 `;
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
-  await page.setContent(shellHtml(RETRO_STICKY_TOOLBAR));
+  await page.setContent(shellHtml(RETRO_STICKY_TOOLBAR, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME }));
   const toolbar = page.getByTestId('toolbar');
   const scroller = page.locator('#scroller');
   const topBefore = await toolbar.evaluate((el) => el.getBoundingClientRect().top);
@@ -182,7 +249,7 @@ const DOCS_LIKE = `
 `;
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 560 } });
-  await page.setContent(shellHtml(DOCS_LIKE));
+  await page.setContent(shellHtml(DOCS_LIKE, { className: CURRENT_CLASSNAME, contentClassName: CURRENT_CONTENT_CLASSNAME }));
   const aside = page.getByTestId('aside');
   const docContent = page.getByTestId('doc-content');
   const scroller = page.locator('#scroller');
