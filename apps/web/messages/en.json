@@ -4194,6 +4194,7 @@
     "agentRuntimePluginSegment": "(plugin v{version})",
     "agentRuntimeSessionSegment": "session started {relative}",
     "agentNeedsRestartBadge": "Restart needed",
+    "systemPublisherNeutralDescription": "This is the sender Sprintable uses for automatic notifications and records — no connection needed.",
     "accessTab": "Access",
     "matrixTitle": "Access matrix",
     "matrixDescription": "Click a cell to toggle grant/block instantly.",

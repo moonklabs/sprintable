@@ -243,6 +243,16 @@ describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금�
 // STEP4는 순수 함수로 안 빠져 있으므로 «소스 텍스트» 수준에서 잰다(verify-no-alpha-focus-ring.ts
 // 류의 정적 스캔과 같은 성질 — 렌더된 DOM이 아니라 「그 문자열이 소스에 있는가」). 이것으로
 // «렌더된다»까지 증명되진 않는다 — 그건 AC4가 요구하는 라이브 재확認의 몫이다.
+// story #3994(«거짓 경고» 클래스, PO 확定) — 기존 에이전트에 채용 역할을 붙이는
+// select는 「시스템 발행」을 골라도 의미가 없다(연결 대상이 아닌 내부 멤버) — 제외.
+describe('recruiter-client existingAgents — 시스템 발행 제외(story #3994) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('isSystemPublisher로 걸러낸 뒤에만 setExistingAgents에 넣는다', () => {
+    expect(source).toContain('!isSystemPublisher(m.runtime_type)');
+  });
+});
+
 describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가능성 링크) 소스 회귀가드', () => {
   const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
 

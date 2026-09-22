@@ -244,6 +244,46 @@ describe('ApplyRecipeDialog', () => {
     expect(addToast).toHaveBeenCalledWith({ type: 'success', title: '이미 적용돼 있어요 — 새로 바뀐 배정이 없어요.' });
   });
 
+  // story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」에 워크플로 역할을
+  // 매핑하는 것 자체가 의미 없다(연결 대상이 아닌 내부 멤버) — select에서 제외.
+  it('⭐team-members에 「시스템 발행」이 섞여 와도 역할매핑 select 옵션엔 안 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'sp1', name: '시스템 발행', runtime_type: 'system-publisher' },
+              { id: 'agent-1', name: '디디군', runtime_type: 'claude-code' },
+            ],
+          }),
+        };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog target={TARGET} open onOpenChange={() => {}} t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
+      ));
+    });
+    await flush();
+
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const roleSelect = [...document.body.querySelectorAll('select')][1] as HTMLSelectElement;
+    const optionLabels = [...roleSelect.querySelectorAll('option')].map((o) => o.textContent);
+    expect(optionLabels).not.toContain('시스템 발행');
+    expect(optionLabels).toContain('디디군');
+  });
+
   // story #3519(§16-7 2부, PO 確定 2026-09-05) — memberRes/bindingsRes 둘 다 부수인데
   // 격리 없이 같은 Promise.all에 있어, 하나가 네트워크단 reject하면 나머지도 조용히
   // 빈 값이 됐다("에이전트 없음"처럼 보이지만 실은 네트워크 실패).

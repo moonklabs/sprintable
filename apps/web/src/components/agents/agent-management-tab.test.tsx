@@ -32,7 +32,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function stubFetch(opts: { meReject?: boolean; agents?: { id: string; name: string; role: string; is_active: boolean }[] } = {}) {
+function stubFetch(opts: { meReject?: boolean; agents?: { id: string; name: string; role: string; is_active: boolean; verified?: boolean | null; runtime_type?: string | null }[] } = {}) {
   const agents = opts.agents ?? [{ id: 'a1', name: '에이전트 하나', role: 'member', is_active: true }];
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => null };
@@ -52,6 +52,28 @@ async function mount() {
   await act(async () => { root.render(wrap(<AgentManagementTab />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
+
+// story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」(runtime_type==='system-
+// publisher')은 verified가 항상 false지만 연결 대상이 아니다. 행은 남기되(선생님
+// 3107) 경고 배지·연결 설정 CTA는 뗀다. 일반 verified=false 에이전트는 회귀 0으로
+// 기존 경고를 그대로 유지해야 한다.
+describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story #3994)', () => {
+  it('⭐일반 에이전트 verified=false면 「연결 안 됨」 배지+「연결 설정 보기」 CTA가 그대로 뜬다(회귀 0)', async () => {
+    stubFetch({ agents: [{ id: 'a1', name: '일반 에이전트', role: 'member', is_active: true, verified: false, runtime_type: 'claude-code' }] });
+    await mount();
+    expect(container.textContent).toContain('연결 안 됨');
+    expect(container.textContent).toContain('연결 설정 보기');
+  });
+
+  it('⭐「시스템 발행」(runtime_type=system-publisher, verified=false)은 행은 뜨되 경고·CTA 0, 중립 설명 1줄', async () => {
+    stubFetch({ agents: [{ id: 'sp1', name: '시스템 발행', role: 'member', is_active: true, verified: false, runtime_type: 'system-publisher' }] });
+    await mount();
+    expect(container.textContent).toContain('시스템 발행');
+    expect(container.textContent).not.toContain('연결 안 됨');
+    expect(container.textContent).not.toContain('연결 설정 보기');
+    expect(container.textContent).toContain('Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요');
+  });
+});
 
 describe('AgentManagementTab — meRes/projectsRes 격리(story #3519)', () => {
   it('/api/me가 네트워크 reject해도 에이전트 목록(주 콘텐츠)은 그대로 뜬다(loadError로 승격 안 됨)', async () => {
