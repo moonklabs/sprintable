@@ -94,7 +94,91 @@ async def test_org_ads_cost_summary_zero_when_no_approved_boosts():
             "approved_boost_count": 0, "sealed_ads_currency": None,
             "sealed_budget_minor": 0, "captured_spend_minor": 0,
             "remaining_minor": 0, "cap_reached_count": 0,
+            "connection_status": "not_connected",
         }
+    finally:
+        await engine.dispose()
+
+
+# story #3987(2026-09-17, 페드루 PO 確定) — approved_boost_count==0만으로 「미측정」을
+# 판정하면 광고 계정이 이미 연결된 조직에도 「연결하러 가기」가 뜨는 결함의 처방.
+# connection_status 3값(not_connected 위 테스트가 이미 고정) + 여러 연결 혼재 +
+# 다른 org 연결 미포함까지 5건으로 마감.
+@pytest.mark.anyio
+async def test_org_ads_cost_summary_connection_status_connected_when_active_ads_connection():
+    """승인된 boost가 0건이어도 active ads 연결이 있으면 connected — 이 값 하나로
+    「미측정」과 「연결은 됐는데 승인만 없음」을 FE가 가른다(AC1 목적 그 자체)."""
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            await _seed_channel_connection(s, org_id, channel="meta_ads", status="active")
+
+        async with Session() as s:
+            summary = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert summary["approved_boost_count"] == 0
+        assert summary["connection_status"] == "connected"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_ads_cost_summary_connection_status_needs_reauth_when_all_expired():
+    """연결 행은 있는데 전부 expired/revoked/error면 needs_reauth(발행 불가 상태를
+    "미연결"로 뭉개지 않는다 — 사람이 할 일이 다르다, GA4 3값과 같은 구분)."""
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            await _seed_channel_connection(s, org_id, channel="meta_ads", status="expired")
+
+        async with Session() as s:
+            summary = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert summary["connection_status"] == "needs_reauth"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_ads_cost_summary_connection_status_connected_when_mixed_active_and_expired():
+    """여러 ads 연결 혼재 — 하나라도 active면 connected(가장 좋은 상태로 접는다,
+    org_cost_summary.py::_derive_ads_connection_status 문서화된 규칙 그대로)."""
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            await _seed_channel_connection(s, org_id, channel="meta_ads", status="expired")
+            await _seed_channel_connection(s, org_id, channel="ads_sandbox", status="active")
+
+        async with Session() as s:
+            summary = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert summary["connection_status"] == "connected"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_ads_cost_summary_connection_status_excludes_other_org_connections():
+    """다른 org의 active ads 연결이 이 org의 connection_status에 새지 않는다
+    (org_id 스코프 누락은 교차 조직 정보 유출 클래스 — #2596류 재발 방지)."""
+    from app.services.org_cost_summary import get_org_ads_cost_summary
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _ = await _seed_org(s)
+            other_org_id, _ = await _seed_org(s)
+            await _seed_channel_connection(s, other_org_id, channel="meta_ads", status="active")
+
+        async with Session() as s:
+            summary = await get_org_ads_cost_summary(s, org_id=org_id)
+        assert summary["connection_status"] == "not_connected"
     finally:
         await engine.dispose()
 
@@ -482,8 +566,12 @@ async def test_cost_summary_endpoint_returns_shape():
         assert set(body["ads"].keys()) == {
             "approved_boost_count", "sealed_ads_currency", "sealed_budget_minor",
             "captured_spend_minor", "remaining_minor", "cap_reached_count",
+            "connection_status",
         }
         assert body["ads"]["approved_boost_count"] == 1
+        # _setup_approved_gate가 active ads_sandbox 연결을 함께 심는다(gate 생성
+        # 자체가 그 연결을 필요로 함) — 이 엔드포인트 회귀는 connected여야 한다.
+        assert body["ads"]["connection_status"] == "connected"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
