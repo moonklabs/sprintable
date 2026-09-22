@@ -50,6 +50,7 @@
     "verify:scoped-i18n-honorific-tone": "tsx scripts/verify-scoped-i18n-honorific-tone.ts",
     "verify:i18n-keys-exist": "tsx scripts/verify-i18n-keys-exist.ts",
     "verify:i18n-namespace-referenced": "tsx scripts/verify-i18n-namespace-referenced.ts",
+    "verify:no-unused-i18n-keys": "tsx scripts/verify-no-unused-i18n-keys.ts",
     "verify:no-count-in-title-string": "tsx scripts/verify-no-count-in-title-string.ts",
     "verify:route-file-exports": "tsx scripts/verify-route-file-exports.ts",
     "verify:no-legacy-meta-total": "tsx scripts/verify-no-legacy-meta-total.ts",
