@@ -2,9 +2,10 @@
 agent_runs_status_check를 cancel_requested·cancelled·cancelled_unacknowledged
 포함하게 확장 + 감사 컬럼 5개 + preset.agent_run.cancel_requested 이벤트 정의 시드.
 
-Revision ID: 0379
-Revises: 0378
-Create Date: 2026-09-16
+Revision ID: 0392
+Revises: 0391
+Create Date: 2026-09-16 (rebase 시점 개명 2026-09-22, 미르코 — 페드루 PO 지시:
+parking/axis-b 착지순 사다리 재배정, 0381류 옛 번호는 09-17 기준이라 폐기)
 
 0207(agent_runs_status_check widen)과 동일 패턴(DROP+ADD CONSTRAINT) — 기존 행은 전부
 새 CHECK 안에 있어 백필 불필요.
@@ -19,8 +20,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 
-revision = "0379"
-down_revision = "0378"
+revision = "0392"
+down_revision = "0391"
 branch_labels = None
 depends_on = None
 

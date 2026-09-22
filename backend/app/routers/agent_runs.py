@@ -29,8 +29,9 @@ _TERMINAL_STATUSES = {"completed", "failed", "abandoned", "cancelled", "cancelle
 
 # story #3680 — list_agent_runs `status=` 필터의 유효값 집합. DB CHECK 제약
 # (agent_runs_status_check, alembic/versions/0207_agent_runs_status_check_widen.py·
-# 0379_agent_run_cancel_protocol.py가 3961의 cancel_requested/cancelled/
-# cancelled_unacknowledged로 확장)이 이미 정본으로 갖고 있는 10값 그대로(신규 정의 0) —
+# 0392_agent_run_cancel_protocol.py가 3961의 cancel_requested/cancelled/
+# cancelled_unacknowledged로 확장, rebase 개명 2026-09-22 前엔 0379)이 이미 정본으로
+# 갖고 있는 10값 그대로(신규 정의 0) —
 # Literal이라 FastAPI가 불명값을 자동 422(코드 발명 없이, 이 스토리의 「불명값 422」 AC를
 # 그대로 만족).
 _AGENT_RUN_STATUS_VALUES = Literal[
