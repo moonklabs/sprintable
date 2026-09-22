@@ -146,14 +146,15 @@ async def test_stage_gate_with_anchored_org_owner_delivers_card_end_to_end():
     생성·카드 배달이 실제로 conversation_participants 행을 남긴다(카드가 실제로 갔다는
     관측 가능한 증거) — WARNING 0.
 
-    ⚠️`team_members`는 prod에서 `members`⋈`project_access` VIEW지만 이 realdb 하네스는
-    `Base.metadata.create_all()`(마이그 미경유)라 뷰 대신 `TeamMember` 모델이 그 이름의
-    **별도 실 테이블**을 만든다(story #4152 세션에서도 동일 하네스 한계 확認, PR 본문
-    "적기만" 후속 후보 — ORM `ForeignKey("team_members.id")` 선언 자체가 0092 DROP과
-    드리프트). `ensure_human_member`는 prod의 실제 앵커 대상(`members`)에만 쓰므로,
-    이 하네스에서 대화 참여자 INSERT가 실제로 통과하려면 `TeamMember` 행도 같이 시딩해야
-    한다(다른 테스트의 `_seed_agent`와 동형 — 발명 0). self-heal 메커니즘 자체(members
-    앵커 보장)는 위 두 단위 테스트가 `Member` 테이블로 직접 검증한다."""
+    story #4157 — owner의 `TeamMember` 손시드는 순수 FK 워크어라운드였다(`conversation_
+    participants.member_id`의 team_members FK 자체가 실 DB엔 0092부터 없다) — 제거하고
+    `ensure_human_member`의 `members` 쓰기만으로 참여자 INSERT가 통과함을 실측 확認했다.
+    publisher(발행자, API키/에이전트 신원)의 `TeamMember`는 다른 이유로 남긴다 — FK가
+    아니라 `member_resolver.py::_resolve_member_legacy`가 API키 신원을 `select(TeamMember)
+    .where(TeamMember.id == auth.user_id)`로 직접 조회하는 **제품 코드 경로**(prod에선
+    `team_members` 뷰 쿼리)라, 이 행이 없으면 `publish_registry_event` 자체가 400으로
+    실패한다(실측: 제거 시도 시 "Team member not found"). #4157 AC3 "안 되면 사유 1줄"
+    해당 — 이건 FK 하네스 허상이 아니라 진짜 필요한 시드."""
     from app.models.conversation import ConversationParticipant
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.dependencies.auth import AuthContext
@@ -169,10 +170,6 @@ async def test_stage_gate_with_anchored_org_owner_delivers_card_end_to_end():
             assert await ensure_human_member(s, owner_member_id) is True
 
             from app.models.team import TeamMember
-            s.add(TeamMember(
-                id=owner_member_id, org_id=org_id, project_id=project_id, type="human",
-                name="org owner", is_active=True,
-            ))
             publisher = TeamMember(
                 id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent",
                 name="댄", is_active=True,

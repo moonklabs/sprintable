@@ -1,26 +1,42 @@
 """story #4156(E-RECIPE-1·Phase 3 폴리시, 페드루 PO 確定 2026-09-22) — #4153이 닫은
 것은 승인 카드 배달 실패의 FK 위반 1종(승인자 members 앵커 부재)뿐이다.
 `dispatch_approval_request_cards`의 per-approver `except Exception`(approval_
-delivery.py) 자체는 그 FK 종류를 포함해 어떤 배달 실패든 지금까지 WARNING 한 줄로
-삼켰다 — 게이트는 생기고 승인자에게 카드는 안 갔는데 아무 데도 안 남았다.
+delivery.py) 자체는 어떤 배달 실패든 지금까지 WARNING 한 줄로 삼켰다 — 게이트는
+생기고 승인자에게 카드는 안 갔는데 아무 데도 안 남았다.
+
+⚠️story #4157(2026-09-22, PO 確定) 정정 — 원래 이 파일의 실패 주입은
+`nonexistent_approver = uuid.uuid4()`가 `conversation_participants.member_id`
+FK 위반을 낸다는 전제(test_2604의 관례 재사용)였다. #4157의 실측으로 그 FK 자체가
+**prod엔 0092부터 없었다**는 사실이 드러났다 — `create_all()` 하네스에서만 ORM
+선언이 살아 있어 생긴 허상이었다. 즉 앵커 안 된(members에 없는) member_id를
+참여자로 INSERT해도 실 DB에선 **예외가 안 나고 조용히 성공**한다 — 이건 `except
+Exception` 축으로 절대 못 잡는 클래스다(예외 자체가 없으므로). 이 클래스의 유일한
+방어는 #4153의 org owner 앵커 self-heal(`ensure_human_member`, 사전 보장이지 사후
+관측이 아니다) — 이 카드(#4156)의 관측 메커니즘은 그 클래스를 커버하지 않는다는
+사실을 아래 AC4 표와 테스트에 정직하게 반영한다(닫힌 코드/발명 0 원칙상 새 방어를
+여기서 만들지 않는다 — 그건 #4153의 몫).
+
+테스트 자체는 #4157이 확立한 기법(`_create_conversation_record`를 SAVEPOINT
+안에서 진짜 DB 예외로 실패시키는 monkeypatch, test_2604_approval_request_cards.py
+선례)으로 교체 — "DB 일시 오류/제약 위반" 클래스(FK 아닌 다른 종류)가 여전히
+`except Exception`으로 관측됨을 실 DB 예외로 실증한다.
 
 ## AC4 그라운딩 — 배달 실패 종류별 관측 여부
 per-approver try 블록이 `_get_or_create_approval_dm`부터 `_dispatch_conversation_event`
-까지 통째로 감싸므로(approval_delivery.py:206-320), 그 구간 안에서 나는 **모든**
-`Exception` 서브클래스가 이 카드의 처방(ERROR 로그+activity_logs 기록)으로 관측된다 —
-아래 표는 "닫힌 코드/발명 0" 원칙상 특정 예외 타입별로 다른 처리를 새로 만들지 않고
-`except Exception` 단일 축으로 전부 커버함을 실측으로 고정한다.
+까지 통째로 감싸므로(approval_delivery.py:206-320), 그 구간 안에서 나는 **예외로
+나타나는** `Exception` 서브클래스는 전부 이 카드의 처방(ERROR 로그+activity_logs
+기록)으로 관측된다 — 아래 표는 "닫힌 코드/발명 0" 원칙상 특정 예외 타입별로 다른
+처리를 새로 만들지 않고 `except Exception` 단일 축으로 전부 커버함을 실측으로
+고정한다. 단, **예외 자체가 안 나는** 실패(맨 아래 행)는 이 축 밖이다.
 
 | 실패 종류 | 발생 위치 | 이 카드로 관측? |
 |---|---|---|
-| FK 위반(member_id not in team_members) | `_get_or_create_approval_dm`→INSERT | ✅ (본 파일 `test_fk_violation_...`) |
-| 대화 생성 실패(예: dm_pair_key UNIQUE 경합) | `_get_or_create_approval_dm` | ✅ (같은 except 축 — IntegrityError도 Exception) |
+| 대화 생성/배달 INSERT 중 실 DB 오류(제약·일시) | `_get_or_create_approval_dm`/`_create_conversation_record` | ✅ (본 파일 `test_delivery_insert_db_error_...`, SAVEPOINT 안 `SELECT 1/0` 실 DB 예외로 실증 — #4157 정정: `dm_pair_key` UNIQUE는 0111이 이미 DROP해 그 경합 시나리오는 죽었다, 이 행은 "실 DB 오류" 일반으로 재서술) |
 | 권한/제약(예: `msg_metadata` 스키마 CHECK 위반) | `ConversationMessage` INSERT | ✅ (같은 except 축) |
 | DB 일시 오류(커넥션 드롭 등) | try 블록 어디서든 | ✅ (같은 except 축 — 메시지 전송 큐잉 실패도 동일) |
-
-FK 위반 외 종류는 실 DB 레벨에서 결정적으로 재현하기 어려워(레이스·네트워크 의존) 이
-파일은 FK 위반 1종만 실측 주입하고, 위 표의 "동일 except 축" 논거로 나머지 종류의
-관측 여부를 코드 구조(단일 `except Exception` 블록)로 고정한다."""
+| activity_log 기록 자체의 DB 오류(PR#4527 CHANGES-1) | `ActivityLogService.record()`의 내부 `flush()` | ✅ (본 파일 `test_delivery_and_activity_log_both_fail_...`, 새 SAVEPOINT로 격리 — 기록 실패가 바깥 게이트 생성 commit을 안 깨뜨림을 실증) |
+| **앵커 안 된 member_id의 참여자 INSERT**(`conversation_participants.member_id`에 FK 없음, 0092부터 prod 실물 — #4157 실측) | `_create_conversation_record`의 `ConversationParticipant` INSERT | ❌ **예외가 안 나 조용히 성공** — 이 except 축으론 못 잡는다. 유일한 방어는 #4153의 org owner 앵커 self-heal(사전 보장). 이 카드는 이 클래스를 닫지 않는다(적기만, #4157 PR에서 발견). |
+"""
 from __future__ import annotations
 
 import os
@@ -109,11 +125,32 @@ async def _delivery_failure_logs(session, *, org_id, gate_id):
     )).scalars().all()
 
 
+def _break_create_conversation_record(monkeypatch, *, only_for_member_ids=None):
+    """story #4157 — test_2604_approval_request_cards.py의 동일 헬퍼와 동형(발명 0):
+    `_create_conversation_record`를 SAVEPOINT(`db.begin_nested()`) 안에서 진짜 DB
+    예외(`SELECT 1/0` → DataError)로 실패시킨다. `only_for_member_ids`가 주어지면
+    그 id가 `member_ids`에 있을 때만 실패."""
+    import app.routers.conversations as conversations_module
+    from sqlalchemy import text
+
+    original = conversations_module._create_conversation_record
+
+    async def _patched(db, *, org_id, project_id, member_ids, conv_type, title, created_by):
+        if only_for_member_ids is None or (only_for_member_ids & member_ids):
+            await db.execute(text("SELECT 1/0"))
+        return await original(
+            db, org_id=org_id, project_id=project_id, member_ids=member_ids,
+            conv_type=conv_type, title=title, created_by=created_by,
+        )
+
+    monkeypatch.setattr(conversations_module, "_create_conversation_record", _patched)
+
+
 @pytest.mark.anyio
-async def test_fk_violation_delivery_failure_is_observed_error_log_and_activity_row(caplog):
-    """⭐AC1 핵심 — FK 위반(test_2604의 nonexistent_approver 관례 재사용, 신규 실패유도
-    메커니즘 발명 0)이 나면 ERROR 로그 1 + activity_logs에 닫힌 코드
-    (action="approval_card_delivery_failed") 행이 남는다."""
+async def test_delivery_insert_db_error_is_observed_error_log_and_activity_row(caplog, monkeypatch):
+    """⭐AC1 핵심 — 대화 생성 중 실 DB 예외(SAVEPOINT 안 SELECT 1/0, #4157 정정 —
+    FK 위반이 아니다, 그 FK는 prod에 없다)가 나면 ERROR 로그 1 + activity_logs에
+    닫힌 코드(action="approval_card_delivery_failed") 행이 남는다."""
     import logging
 
     from app.services.approval_delivery import dispatch_approval_request_cards, logger as _logger
@@ -124,15 +161,16 @@ async def test_fk_violation_delivery_failure_is_observed_error_log_and_activity_
             org_id, project_id = await _seed_org_project(s, slug="4156a")
             requester_id = await _seed_human(s, org_id, project_id)
             doc = await _seed_doc(s, org_id, project_id)
-            nonexistent_approver = uuid.uuid4()
+            failing_approver = uuid.uuid4()
             gate_id = uuid.uuid4()
+            _break_create_conversation_record(monkeypatch, only_for_member_ids={failing_approver})
 
             with caplog.at_level(logging.ERROR, logger=_logger.name):
                 await dispatch_approval_request_cards(
                     s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                     project_id=doc.project_id, title=doc.title, gate_id=gate_id,
                     gate_type="doc_approval",
-                    requester_id=requester_id, approver_ids=[nonexistent_approver],
+                    requester_id=requester_id, approver_ids=[failing_approver],
                 )
             await s.commit()
 
@@ -144,7 +182,7 @@ async def test_fk_violation_delivery_failure_is_observed_error_log_and_activity_
             logs = await _delivery_failure_logs(s, org_id=org_id, gate_id=gate_id)
             assert len(logs) == 1, f"activity_logs 행이 정확히 1개여야: {logs}"
             assert logs[0].actor_type == "platform"
-            assert logs[0].context["approver_id"] == str(nonexistent_approver)
+            assert logs[0].context["approver_id"] == str(failing_approver)
             assert logs[0].context["exception_type"]  # 닫힌 코드 — 지어내지 않는다, 실측값 존재만 확인
     finally:
         await engine.dispose()
@@ -180,7 +218,7 @@ async def test_successful_delivery_does_not_create_failure_activity_row():
 
 
 @pytest.mark.anyio
-async def test_publish_still_succeeds_when_card_delivery_fails():
+async def test_publish_still_succeeds_when_card_delivery_fails(monkeypatch):
     """AC2 — 카드 배달 실패가 발행(호출부 트랜잭션) 자체를 되돌리지 않는다. dispatch_
     approval_request_cards는 예외를 밖으로 던지지 않고(best-effort) 정상 반환하며,
     호출부의 후속 write(여기서는 s.commit() 자체)가 그대로 성공해야 한다 — test_2604의
@@ -193,15 +231,16 @@ async def test_publish_still_succeeds_when_card_delivery_fails():
             org_id, project_id = await _seed_org_project(s, slug="4156c")
             requester_id = await _seed_human(s, org_id, project_id)
             doc = await _seed_doc(s, org_id, project_id)
-            nonexistent_approver = uuid.uuid4()
+            failing_approver = uuid.uuid4()
             gate_id = uuid.uuid4()
+            _break_create_conversation_record(monkeypatch, only_for_member_ids={failing_approver})
 
             # 예외가 밖으로 새면 이 await 자체가 여기서 실패한다 — 새지 않음이 AC2의 증거.
             await dispatch_approval_request_cards(
                 s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                 project_id=doc.project_id, title=doc.title, gate_id=gate_id,
                 gate_type="doc_approval",
-                requester_id=requester_id, approver_ids=[nonexistent_approver],
+                requester_id=requester_id, approver_ids=[failing_approver],
             )
             # 세션이 poison 안 됐음을 후속 write로 확인(#4156이 추가한 activity_log 기록
             # 자체가 실 INSERT이므로, 이미 위 호출 안에서 한 번 증명됐다 — 여기서는 호출부
@@ -214,11 +253,12 @@ async def test_publish_still_succeeds_when_card_delivery_fails():
 @pytest.mark.anyio
 async def test_delivery_and_activity_log_both_fail_gate_creation_still_commits(caplog, monkeypatch):
     """⭐PR#4527 CHANGES-1(까디르 QA 지적, 페드루 PO 確定 2026-09-22) — 배달 자체 실패
-    (FK 위반) **+** activity_log 기록까지 실패(SAVEPOINT 안에서 진짜 DB 예외, `SELECT
-    1/0`)가 겹쳐도, 바깥(게이트 생성) 트랜잭션의 commit은 그대로 성공하고 「기록도
-    실패」 WARNING만 남는다. 처방 前에는 `ActivityLogService.record()`의 내부
-    `flush()`가 SAVEPOINT 밖에서 실패해 커넥션이 aborted 상태로 남아 이 s.commit()
-    자체가 깨졌다(신규 리스크 — 이 PR이 새로 만든 코드 경로)."""
+    (대화 생성 중 실 DB 예외, #4157 정정 — FK 위반 아님) **+** activity_log 기록까지
+    실패(SAVEPOINT 안에서 진짜 DB 예외, `SELECT 1/0`)가 겹쳐도, 바깥(게이트 생성)
+    트랜잭션의 commit은 그대로 성공하고 「기록도 실패」 WARNING만 남는다. 처방 前에는
+    `ActivityLogService.record()`의 내부 `flush()`가 SAVEPOINT 밖에서 실패해 커넥션이
+    aborted 상태로 남아 이 s.commit() 자체가 깨졌다(신규 리스크 — 이 PR이 새로 만든
+    코드 경로)."""
     import logging
 
     import app.services.activity_log as activity_log_module
@@ -240,17 +280,19 @@ async def test_delivery_and_activity_log_both_fail_gate_creation_still_commits(c
             org_id, project_id = await _seed_org_project(s, slug="4156d")
             requester_id = await _seed_human(s, org_id, project_id)
             doc = await _seed_doc(s, org_id, project_id)
-            nonexistent_approver = uuid.uuid4()
+            failing_approver = uuid.uuid4()
             gate_id = uuid.uuid4()
+            _break_create_conversation_record(monkeypatch, only_for_member_ids={failing_approver})
 
             with caplog.at_level(logging.WARNING, logger=_logger.name):
-                # 배달(FK 위반) + 기록(SELECT 1/0)이 둘 다 실패해도 이 await 자체는
-                # 새지 않아야 한다(best-effort 계약 — AC2가 이 겹침에서도 유지됨).
+                # 배달(대화 생성 실 DB 예외) + 기록(SELECT 1/0)이 둘 다 실패해도 이
+                # await 자체는 새지 않아야 한다(best-effort 계약 — AC2가 이 겹침에서도
+                # 유지됨).
                 await dispatch_approval_request_cards(
                     s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
                     project_id=doc.project_id, title=doc.title, gate_id=gate_id,
                     gate_type="doc_approval",
-                    requester_id=requester_id, approver_ids=[nonexistent_approver],
+                    requester_id=requester_id, approver_ids=[failing_approver],
                 )
             # ⚠️PostgreSQL은 aborted 트랜잭션에 COMMIT을 보내면 예외 없이 **조용히
             # ROLLBACK**한다(클라이언트에 에러가 안 보인다) — 이 세션에 새로 flush할
