@@ -89,7 +89,7 @@ async function mountWithWorkItem(
   });
   await act(async () => {
     root.render(wrap(
-      <ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={workItemRef} needsMe={[]} todayV3Enabled />,
+      <ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={workItemRef} needsMe={[]} todayV3Enabled todayHref="/today" />,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
