@@ -270,6 +270,17 @@ class GateResponse(BaseModel):
     # evidence가 0건이면 항상 빈 리스트(None 아님 — "아직 안 봄"과 "0건 확認"을 같은 값으로
     # 안 섞는다).
     linked_evidence: list[LinkedEvidenceItem] = []
+    # story #4139([E-RECIPE-1] Phase3 폴리시, 페드루 PO 確定 2026-09-22) — 이 게이트 자신이
+    # draft-scoped(scope_key≠"") external_publish이고, 같은 work_item의 레시피 unscoped
+    # (scope_key="") external_publish 게이트가 아직 pending 中이며, 이 게이트가 그 work_item의
+    # 유일한 pending scoped 게이트(단일 목적지 — #4069/#3478 규칙과 동일 기준)면 그 레시피
+    # 게이트의 id를 싣는다. "이 게이트는 레시피 게이트가 대신 결재한다"는 **파생값**(저장
+    # 컬럼 0·마이그 0) — Gate ORM에 이 필드가 없다(work_item_summary/can_approve와 동일
+    # 선례, `_enrich_deferred_to_gate_id`가 매 응답마다 계산). None이면 이 게이트가 사람
+    # 결재함에 정상적으로 뜬다(레시피 무관·비-scoped·다중목적지·레시피 게이트 이미 결정됨
+    # 등 전부 여기 포함). FE는 이 값이 있으면 액션 버튼을 숨기고 「레시피 게이트에서 함께
+    # 결재돼요」+링크를 보인다(직접 transition 호출 자체는 안 막는다 — 멱등이라 위험 없음).
+    deferred_to_gate_id: uuid.UUID | None = None
     # story #3001(선생님 정책 확定 2026-08-24) — FE가 "이 카드 원 수신자==나인데 지금은 다른
     # 사람이 지정돼 있다"(위임됨)를 로컬 판단하는 데 필요. Gate ORM 컬럼과 이름 일치라
     # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
@@ -458,7 +469,34 @@ async def to_gate_response(
     await _enrich_linked_channel_draft(session, org_id, gate, resp)
     await _enrich_scoped_channel_draft_media(session, org_id, gate, resp)
     await _enrich_linked_evidence(session, org_id, gate, resp)
+    await _enrich_deferred_to_gate_id(session, org_id, gate, resp)
     return resp
+
+
+async def _enrich_deferred_to_gate_id(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4139 — 좁은 가드가 먼저(비용 0, `_enrich_linked_channel_draft`와 동일 관례):
+    draft-scoped(scope_key≠"") pending external_publish 게이트만 대상. 그 밖은 이 함수의
+    나머지 줄에 절대 안 들어간다."""
+    if gate.gate_type != "external_publish" or (gate.scope_key or "") == "" or gate.status != "pending":
+        return
+
+    from app.services.gate_service import (
+        find_pending_recipe_external_publish_gate,
+        find_sole_pending_scoped_external_publish_gate,
+    )
+
+    recipe_gate = await find_pending_recipe_external_publish_gate(
+        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if recipe_gate is None:
+        return
+    sole_pending = await find_sole_pending_scoped_external_publish_gate(
+        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if sole_pending is not None and sole_pending.id == gate.id:
+        resp.deferred_to_gate_id = recipe_gate.id
 
 
 async def _enrich_linked_channel_draft(
@@ -1430,6 +1468,13 @@ async def list_gates(
     # 된다 — 예전엔 그래서 `status=held&assigned_to_me=true` 가 항상 빈 배열이었다.
     filtered: list[GateResponse] = []
     for resp, g in zip(responses, gates):
+        # story #4139 AC1 — 레시피 게이트가 대신 결재하는 scoped external_publish는 사람
+        # 결재함(assigned_to_me=true)에 "추가로" 안 뜬다(deferred_to_gate_id는 위 responses
+        # 계산 단계에서 이미 채워졌다 — 새 쿼리 0). 그 게이트의 단건 조회(GET /{id})·
+        # work_item_id 필터 조회는 이 분기를 안 타 영향 없다(존재 자체가 사라지는 게
+        # 아니라 "내가 지금 봐야 할 목록"에서만 빠진다).
+        if resp.deferred_to_gate_id is not None:
+            continue
         if g.gate_type == "doc_approval":
             # story #1983(까심 #1960 QA 적출 회귀, story #2259 후속): doc_approval assigned_to_me
             # 도 WHO(승인 자격) 판정이지 STATE(pending/held) 판정이 아니다 — story #2259가 non-doc

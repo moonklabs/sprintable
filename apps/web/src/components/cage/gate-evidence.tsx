@@ -723,9 +723,8 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * `linked_channel_draft_pending`으로 이유를 가른다)만 읽는다 — FE가 값을 계산하지
  * 않는다(선택 규칙은 BE 한 곳, channel_posts.py::find_ready_recipe_channel_drafts).
  *
- * ⛔페드루 PO 지적(PR #4475 리뷰) — `draft.scoped_gate_status`는 `linked_channel_draft`
- * 가 non-null인 이상 항상 "approved"뿐이다(find_ready_recipe_channel_drafts가
- * "pending"인 scoped 게이트는 애초에 ready에 안 넣는다) — "pending" 분기는 죽은
+ * ⛔페드루 PO 지적(PR #4475 리뷰, 2026-09-21) — 그 시점엔 `draft.scoped_gate_status`가
+ * `linked_channel_draft` non-null인 이상 항상 "approved"뿐이라 "pending" 분기가 죽은
  * 코드였다(제거, linkedChannelDraftScopedPending 키도 같이).
  *
  * story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 채널 초안의 scoped
@@ -738,6 +737,14 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * 맞는다 — scoped 게이트는 `isRecipeGate=false`로 그 분기를 건너뛴다(그 문구를
  * 고치는 게 아니라 애초에 그 게이트 종류에 안 나오게 — 안 나오는 문장을 고치면
  * 헛손질이라는 페드루 PO 지적 그대로).
+ *
+ * ⚠️정정(story #4139, 페드루 PO 確定 2026-09-22) — find_ready_recipe_channel_drafts가
+ * 이제 단일-목적지 pending scoped 게이트도 ready에 넣는다(레시피 게이트 승인 즉시
+ * #4069/#4139 캐스케이드로 자동 승계-승인될 대상이라 승인자가 미리 실물을 볼 자격이
+ * 있다 — 「승인해도 발행되지 않아요」거짓 경고 제거). 그래서 `scoped_gate_status`가
+ * "pending"인 채로도 이 카드가 뜰 수 있다 — 이 컴포넌트는 그 값 자체를 안 읽으므로
+ * (draft가 non-null이면 무조건 미리보기 렌더) 새 분기가 불필요하다, 위 문단만 사실
+ * 정정용으로 남긴다.
  */
 function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
   const t = useTranslations('cage');

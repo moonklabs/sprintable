@@ -211,7 +211,12 @@ export default function GateDetailPage() {
   // §1-1). 서버가 준 gate.can_approve(BE per-caller 판정)를 근거로만 버튼을 열고 닫는다 — 화면이
   // 독자 판정으로 서버를 덮지 않는다(AC2). needsAction=true인데 can_approve=false면(권한 없는
   // 뷰어) 아래에서 읽기전용 사유 문구로 분기한다(무권한 상태에서 액션 버튼 자체를 렌더하지 않음).
-  const canAct = needsAction && gate?.can_approve === true;
+  // story #4139([E-RECIPE-1] Phase3 폴리시, 페드루 PO 確定 2026-09-22) — deferred_to_
+  // gate_id가 있으면(레시피 게이트가 대신 결재) can_approve=true여도 액션 버튼을 숨긴다.
+  // 직접 transition 호출 자체를 막는 건 아니다(BE는 멱등 — 훅B가 이미 승계했으면 no-op,
+  // 아직이면 정상 승인/반려되고 레시피 게이트 쪽이 나중에 캐스케이드 때 이미-결정된 걸
+  // 보고 스킵) — 이 화면이 그 액션을 "권하지" 않을 뿐이다.
+  const canAct = needsAction && gate?.can_approve === true && !gate?.deferred_to_gate_id;
   // story #4121(E-RECIPE-1 Phase 3 폴리시, 유나 #4056 v2 제안·PO 확定 2026-09-21) — 2열+sticky
   // 승인 패널은 우 열에 «액션»(GateSignatureApproval 또는 평문 승인/거부 버튼)이 실제로 있을
   // 때만 의미가 있다. needsAction&&canAct(아래 4갈래 분기의 c·d 갈래)만 참 — a(이미 해소)·
@@ -543,6 +548,20 @@ export default function GateDetailPage() {
               </p>
             );
 
+            // story #4139 — deferred_to_gate_id가 있으면(레시피 게이트가 대신 결재) 무권한
+            // 문구(unauthorizedExtra) 대신 이 문구 + 링크. can_approve 값과 무관 — "내가 못
+            // 누른다"가 아니라 "이 게이트는 다른 게이트가 대신 결정한다"는 별개 사실이라
+            // 문구도 별개(unauthorizedExtra와 절대 안 섞는다).
+            const deferredExtra = gate.deferred_to_gate_id ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t('gateDeferredToRecipeGate')}
+                {' · '}
+                <Link href={`/gates/${gate.deferred_to_gate_id}`} className="font-medium text-primary hover:underline">
+                  {t('gateDeferredToRecipeGateLink')}
+                </Link>
+              </p>
+            ) : null;
+
             // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
             // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
             // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
@@ -694,7 +713,7 @@ export default function GateDetailPage() {
                       ) : (
                         <div className="space-y-3">
                           {evidencePanels}
-                          {unauthorizedExtra}
+                          {gate.deferred_to_gate_id ? deferredExtra : unauthorizedExtra}
                         </div>
                       )}
                       {asideExtras}

@@ -371,7 +371,15 @@ async def test_ac1b_no_draft_leaves_field_null():
 
 
 @pytest.mark.anyio
-async def test_ac1b2_pending_scoped_gate_sets_pending_flag_not_content():
+async def test_ac1b2_single_destination_pending_scoped_gate_shows_preview_not_warning():
+    """⚠️정정(story #4139, 페드루 PO 確定 2026-09-22) — 원래 이름(...sets_pending_flag_
+    not_content)과 단언이 반대였다: 단일 목적지 pending scoped 게이트는 레시피 게이트
+    승인 즉시 #4069/#4139 캐스케이드로 **자동 승계-승인될 확정 대상**이라, 승인자가
+    실물(영상·본문 등)을 미리 볼 자격이 있다 — 「승인해도 발행되지 않아요」는 이 경우
+    거짓 경고였다(라이브 2호 실측: 결재함 pending 2개, "②만 눌러도 됐을" 상황인데 화면이
+    그렇게 안 알려줬다). find_ready_recipe_channel_drafts가 이제 이 경우를 ready에
+    포함한다 — 아래는 그 정정 단언(multi-destination pending은 여전히 경고 유지, 별도
+    테스트 test_ac1b3)."""
     from app.models.gate import Gate
     from app.routers.gates import to_gate_response
 
@@ -389,7 +397,8 @@ async def test_ac1b2_pending_scoped_gate_sets_pending_flag_not_content():
             gate_d_id = await _walk_to_pending_approval_with_abc_approved(
                 s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
             )
-            # ⓓ 승인 前에 제출 — scoped 게이트는 pending 그대로(자동충족 조건 미달).
+            # ⓓ 승인 前에 제출 — scoped 게이트는 pending 그대로지만 단일 목적지(다른
+            # connection의 draft 없음)라 캐스케이드 확정 대상이다.
             await _submit_draft(
                 s, org_id=org_id, story_id=story_id, connection_id=connection_id, creator_id=creator_id,
             )
@@ -397,7 +406,50 @@ async def test_ac1b2_pending_scoped_gate_sets_pending_flag_not_content():
         async with Session() as s:
             gate_d = await s.get(Gate, gate_d_id)
             resp = await to_gate_response(s, org_id, gate_d)
-            assert resp.linked_channel_draft is None, "아직 pending인 draft를 확정 콘텐츠로 노출했다"
+            assert resp.linked_channel_draft is not None, "단일 목적지 pending draft가 미리보기에 안 실렸다"
+            assert resp.linked_channel_draft.scoped_gate_status == "pending"
+            assert resp.linked_channel_draft_pending is False, "확정 대상인데 거짓 경고(linked_channel_draft_pending)가 남았다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac1b3_multi_destination_pending_still_shows_warning_not_preview():
+    """test_ac1b2와 대칭(story #4139) — 목적지가 2개면 #4069/#4139 단일-목적지 캐스케이드
+    조건이 원천적으로 성립 안 한다(각자 사람 승인 필요, #3478). 이 경우는 여전히
+    「승인해도 발행되지 않아요」가 정직한 경고라 옛 동작(linked_channel_draft=None·
+    linked_channel_draft_pending=True) 그대로여야 한다 — 회귀 가드."""
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id = await _seed_org_with_owner_shim(s, slug="4098b3")
+            await _seed_default_role(s, org_id)
+            creator_id = await _seed_agent(s, org_id, project_id, name="댄")
+            story_id = await _seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+            connection_a = await _seed_sandbox_connection(s, org_id, account_id="acct-a")
+            connection_b = await _seed_sandbox_connection(s, org_id, account_id="acct-b")
+            await _seed_recipe_channel_binding(s, org_id, connection_a)
+
+            gate_d_id = await _walk_to_pending_approval_with_abc_approved(
+                s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
+            )
+            await _submit_draft(
+                s, org_id=org_id, story_id=story_id, connection_id=connection_a, creator_id=creator_id,
+                text="목적지 A",
+            )
+            await _submit_draft(
+                s, org_id=org_id, story_id=story_id, connection_id=connection_b, creator_id=creator_id,
+                text="목적지 B",
+            )
+
+        async with Session() as s:
+            gate_d = await s.get(Gate, gate_d_id)
+            resp = await to_gate_response(s, org_id, gate_d)
+            assert resp.linked_channel_draft is None, "다중 목적지 pending draft를 확정 콘텐츠로 노출했다"
             assert resp.linked_channel_draft_pending is True
     finally:
         await engine.dispose()

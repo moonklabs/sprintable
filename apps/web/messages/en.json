@@ -5293,6 +5293,8 @@
     "gateReadonlyNotAuthorized": "You don't have permission to approve this gate",
     "gateReadonlyDesignatedElsewhere": "This approval is assigned to a designated approver",
     "gateReadonlyDesignatedElsewhereNamed": "This approval is assigned to {name}",
+    "gateDeferredToRecipeGate": "This approval is handled together with the recipe gate",
+    "gateDeferredToRecipeGateLink": "Go to recipe gate",
     "mergeGateTitle": "Merge gate",
     "outcomeTrustLabel": "Outcome trust",
     "outcomeSummary": "{hit} hit · {resolved} resolved · last {days}d",

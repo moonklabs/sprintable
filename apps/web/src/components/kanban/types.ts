@@ -87,6 +87,12 @@ export interface GateItem {
   // 아직 pending"(이 게이트 승인과 함께 승계-승인됨), false/undefined면 "제출된 초안
   // 자체가 없음".
   linked_channel_draft_pending?: boolean;
+  // story #4139([E-RECIPE-1] Phase3 폴리시) — 이 게이트(draft-scoped external_publish)가
+  // 레시피 unscoped 게이트에 「대신 결재」되는 대상이면 그 레시피 게이트 id(파생값, BE
+  // `_enrich_deferred_to_gate_id`가 매 응답마다 계산·저장 컬럼 0). 있으면 액션 버튼을
+  // 숨기고 「레시피 게이트에서 함께 결재돼요」+링크를 보인다 — 직접 transition은 안 막는다
+  // (멱등, BE가 이미 처리). null/undefined면 이 게이트는 평소처럼 사람이 직접 결재한다.
+  deferred_to_gate_id?: string | null;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.
   // E-DG S33: owner 결재 강제(override) 메타(gate_overridden 이벤트 enrich·S32 reassign 패턴 동형). 디디 BE #1645 design-first·additive·머지 후 정합.
   overridden_by_member_id?: string | null;

@@ -5293,6 +5293,8 @@
     "gateReadonlyNotAuthorized": "본인은 이 게이트를 승인할 권한이 없어요",
     "gateReadonlyDesignatedElsewhere": "이 결재는 지정된 결재자에게 배정되어 있어요",
     "gateReadonlyDesignatedElsewhereNamed": "결재는 {name}님에게 배정돼 있어요",
+    "gateDeferredToRecipeGate": "이 결재는 레시피 게이트에서 함께 결재돼요",
+    "gateDeferredToRecipeGateLink": "레시피 게이트로 이동",
     "mergeGateTitle": "머지 게이트",
     "outcomeTrustLabel": "가설 적중",
     "outcomeSummary": "적중 {hit} · 판정 {resolved} · 최근 {days}일",
