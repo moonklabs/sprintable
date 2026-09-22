@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { HYPOTHESIS_STATUSES, type HypothesisStatus } from '@sprintable/core-storage';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { cn } from '@/lib/utils';
+import { pickEuroJosa } from '@/lib/korean-particle';
 import { HypothesisStatusBadge } from './hypothesis-status-badge';
 import { fetchHypotheses } from '@/components/work-list/fetch-work-list';
 import type { WorkListHypothesisInput } from '@/components/work-list/derive-work-list';
@@ -31,6 +32,12 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
   const t = useTranslations('workList');
   const tc = useTranslations('common');
   const tNav = useTranslations('nav');
+  // story #4383 CI RED 처방(페드루 PO 실측) — 상태 필터 칩의 aria-label. 보이는 라벨은
+  // HypothesisStatusBadge 내부(hypotheses 네임스페이스)가 결정해 이 컴포넌트에선 안
+  // 보이므로(가드가 정적 라벨로 오판) 같은 키(`status${Capitalized}`)로 여기서도 뽑아
+  // aria-label에 품는다(같은 사실=같은 말, 새 문구 0).
+  const tHypotheses = useTranslations('hypotheses');
+  const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -92,20 +99,29 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
         >
           {t('hypothesesFilterAll')}
         </button>
-        {HYPOTHESIS_STATUSES.map((status) => (
-          <button
-            key={status}
-            type="button"
-            aria-pressed={statusFilter === status}
-            onClick={() => setStatusFilter(statusFilter === status ? null : status)}
-            className={cn(
-              'rounded-lg transition-opacity',
-              statusFilter !== null && statusFilter !== status && 'opacity-50 hover:opacity-100',
-            )}
-          >
-            <HypothesisStatusBadge status={status} />
-          </button>
-        ))}
+        {HYPOTHESIS_STATUSES.map((status) => {
+          const statusLabelKey = `status${status.charAt(0).toUpperCase()}${status.slice(1)}` as 'statusProposed';
+          const statusLabel = tHypotheses(statusLabelKey);
+          // §⑤ 규율(story #3900) — 값 의존 조사(으로/로)는 템플릿에 못 박지 않는다. 상태
+          // 라벨(제안됨·측정中 등)마다 받침 유무가 갈려 en 템플릿과 다르게 조사까지 미리
+          // 합쳐 하나의 값으로 넘긴다(historyFieldChanged류와 동형 처리).
+          const statusLabelWithJosa = locale === 'ko' ? `${statusLabel}${pickEuroJosa(statusLabel)}` : statusLabel;
+          return (
+            <button
+              key={status}
+              type="button"
+              aria-pressed={statusFilter === status}
+              aria-label={t('hypothesesStatusFilterAriaLabel', { label: statusLabelWithJosa })}
+              onClick={() => setStatusFilter(statusFilter === status ? null : status)}
+              className={cn(
+                'rounded-lg transition-opacity',
+                statusFilter !== null && statusFilter !== status && 'opacity-50 hover:opacity-100',
+              )}
+            >
+              <HypothesisStatusBadge status={status} />
+            </button>
+          );
+        })}
       </div>
 
       {hypotheses ? (

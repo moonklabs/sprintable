@@ -618,7 +618,8 @@
     "hypothesesFilterAll": "All",
     "hypothesesLinkedWorkCta": "View linked work",
     "hypothesesGoToDetailAriaLabel": "{label}, {n}",
-    "hypothesesGoToLinkedWorkAriaLabel": "{n} {label}"
+    "hypothesesGoToLinkedWorkAriaLabel": "{n} {label}",
+    "hypothesesStatusFilterAriaLabel": "Filter by {label}"
   },
   "organization": {
     "rolesTitle": "Permissions",
