@@ -254,6 +254,13 @@ interface RecipeApprovalFacts {
   // 안 씀·최소단위 원값만).
   estimatedCostMinor: number | null;
   estimatedCostCurrency: 'KRW' | 'USD' | null;
+  // story #4085 AC4-B(3호 라이브 실측 2026-09-22 · 페드루 PO 처방) — org 생성 예산 규칙이
+  // 있을 때만 recipe_gate_hooks.py가 같은 if-블록 안에서 이 셋과 currency를 함께
+  // neutral_facts에 싣는다(위 currency와 동일 존재 보증 — 규칙 없으면 셋 다 null이고
+  // «통화 미확인» 표기만 그대로, 이 줄 자체를 안 그린다).
+  budgetLimitMinor: number | null;
+  budgetSpentMinor: number | null;
+  budgetRemainingMinor: number | null;
   // story #4090([E-RECIPE-1] Publisher 슬롯) AC2·AC3(2026-09-21) — 레시피 자동발행
   // 훅의 기계 소유 결과(gate.publish_outcome, sealed 계열과 달리 승인 *후* 갱신될
   // 수 있는 값 — 그래도 이 카드가 승인자가 자동발행 여부를 보는 유일한 자리라
@@ -319,6 +326,9 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     estimatedCostMinor:
       typeof gate.sealed_estimated_cost_minor === 'number' ? gate.sealed_estimated_cost_minor : null,
     estimatedCostCurrency: f?.['currency'] === 'KRW' || f?.['currency'] === 'USD' ? f['currency'] : null,
+    budgetLimitMinor: typeof f?.['budget_limit_minor'] === 'number' ? f['budget_limit_minor'] : null,
+    budgetSpentMinor: typeof f?.['budget_spent_minor'] === 'number' ? f['budget_spent_minor'] : null,
+    budgetRemainingMinor: typeof f?.['budget_remaining_minor'] === 'number' ? f['budget_remaining_minor'] : null,
     publishOutcome: realString(gate.publish_outcome),
   };
   const hasAny = isCommentReply ||
@@ -901,6 +911,23 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
               <span className="text-muted-foreground"> · {t('generationBudgetSealedCostCurrencyUnknown')}</span>
             )}
           </p>
+          {/* story #4085 AC4-B(3호 라이브 실측 2026-09-22, 페드루 PO 처방) — 스모크
+              #4167에서 «예상 비용»까지는 통화가 뜨는데 org 예산 한도/사용/잔여가
+              FE 어디에도 안 그려짐(grep 0)이 실측됨. 셋이 다 있을 때만 한 줄
+              추가(currency도 같은 if-블록에서 함께 실려 항상 같이 있음 — 위
+              estimatedCostCurrency 재사용, 새 null 처리 축 0). 셋 중 하나라도
+              없으면(구버전 게이트·org 예산 규칙 미등록) 이 줄 자체를 안 그려
+              기존 «통화 미확인» 표기만 무변으로 남긴다. */}
+          {facts.budgetLimitMinor !== null && facts.budgetSpentMinor !== null && facts.budgetRemainingMinor !== null
+            && facts.estimatedCostCurrency ? (
+            <p className="text-muted-foreground">
+              {t('generationBudgetStatusLine', {
+                limit: formatMinorCurrency(facts.budgetLimitMinor, facts.estimatedCostCurrency, locale, tContent),
+                spent: formatMinorCurrency(facts.budgetSpentMinor, facts.estimatedCostCurrency, locale, tContent),
+                remaining: formatMinorCurrency(facts.budgetRemainingMinor, facts.estimatedCostCurrency, locale, tContent),
+              })}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — newsletter_send 전용
