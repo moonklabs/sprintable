@@ -112,6 +112,14 @@ export const DEST_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<DestLitera
     reason: '자체 NAV_ITEMS 로컬 배열(오늘·대화 2항목) — story #4004가 공유 nav 항목 컴포넌트로 교체 예정.',
     counts: { '/today': 1, '/chats': 1 },
   },
+  // story #4158(rebase 시점 실측, 2026-09-22) — 컴패니언 «첫 지시» 진입(#4021)의 두
+  // 폴백 링크(목록으로·대화 열기)가 아직 '/chats' 리터럴이다. #4158이 정확히 이 자리를
+  // buildFirstInstructionTarget(…, flags)·resolveNavV3Destinations 경유로 교체하는
+  // 카드(디디 작업 중, 미착지) — #4402 스코프 밖. #4158 착지 뒤 이 항목 삭제.
+  'src/app/onboarding/first-instruction/first-instruction-redirect.tsx': {
+    reason: 'story #4158이 목적지 모듈 경유로 교체 예정(미착지) — 그 전까지 잔존.',
+    counts: { '/chats': 2 },
+  },
 };
 
 export const ENV_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<EnvName>> = {};

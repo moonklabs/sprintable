@@ -27,12 +27,11 @@ const ORG_DRAFT_STORAGE_PREFIX = 'sp_onboarding_org_draft:';
 // story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지 결정을 순수함수로 뽑아
 // 낸다(closure 안에 묻어 두면 폼 전체를 org→project→agent→connect까지
 // 몰아야 테스트가 되는 자리 — 결정 자체는 이 한 줄뿐이라 여기만 pin한다).
-// story #4017 CHANGES 2(rebase 시점 재정정 2026-09-22) — OFF 폴백은 더 이상 '/chats'
-// 리터럴을 이 함수가 재조립하지 않는다. 부모(page.tsx)가 resolveChatsHref(flags)로
-// 구한 값을 그대로 받는다(chatV3Enabled면 '/chat', 아니면 '/chats' — 목적지 모듈
-// 한 곳에서만). '/today'는 이 함수 고유 결정(오늘 화면 착지)이라 그대로 유지.
-export function resolveOnboardingLandingHref(todayV3Enabled: boolean, chatsHref: string): string {
-  return todayV3Enabled ? '/today' : chatsHref;
+// story #4017 CHANGES 2(rebase 시점 재정정 2026-09-22) — todayHref·chatsHref 둘 다
+// 더 이상 이 함수가 리터럴을 재조립하지 않는다. 부모(page.tsx)가
+// resolveNavV3Destinations(flags)로 구한 값을 그대로 받는다 — 목적지 모듈 한 곳에서만.
+export function resolveOnboardingLandingHref(todayV3Enabled: boolean, todayHref: string, chatsHref: string): string {
+  return todayV3Enabled ? todayHref : chatsHref;
 }
 
 function loadOrgDraft(uid: string): { orgName: string; orgSlug: string } | null {
@@ -80,10 +79,13 @@ const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
 interface OnboardingFormProps {
   initialStep?: Step;
   initialOrgId?: string;
-  // story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지: ON이면 「오늘」·OFF면 chatsHref.
+  // story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지: ON이면 todayHref·OFF면 chatsHref.
   // 서버(page.tsx)가 내려준다(이 컴포넌트는 'use client'라 직접 못 읽음). 기본값
   // false = 기존 테스트(이 prop 없이 마운트)가 계속 현행 착지를 기대.
   todayV3Enabled?: boolean;
+  // story #4017 착지 뒤 재정정(2026-09-22) — resolveNavV3Destinations(flags).today.path를
+  // 부모가 구해 내려준다(하드코딩 '/today' 0, chatsHref와 동형 필수 prop).
+  todayHref: string;
   // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
   // client라 process.env를 못 읽는다. 부모 page.tsx(서버)가
   // resolveChatsHref(readNavV3FlagsFromEnv())로 구해 prop으로 내려준다. 필수로 둬서
@@ -93,7 +95,7 @@ interface OnboardingFormProps {
 }
 
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, chatsHref,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
@@ -301,7 +303,7 @@ export function OnboardingForm({
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
   const finishToHome = async () => {
     await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-    window.location.href = resolveOnboardingLandingHref(todayV3Enabled, chatsHref);
+    window.location.href = resolveOnboardingLandingHref(todayV3Enabled, todayHref, chatsHref);
   };
 
   const handleCreateProject = async () => {
