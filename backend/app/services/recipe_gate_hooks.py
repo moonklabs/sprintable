@@ -13,6 +13,7 @@ core + 단일목적 서비스 호출 컴포지션)와 정합, 테스트도 격�
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import NamedTuple
 
@@ -24,6 +25,101 @@ from app.services.event_definition_registry import APPROVER_ROLE_REFERENCES
 from app.services.reference_token import build_reference_token
 
 logger = logging.getLogger(__name__)
+
+# story #4135(게이트 카드 «확정 대상 실물» 그라운딩, PO 실측 2026-09-22) — gate_type →
+# 그 게이트 직전 stage가 emit하는 evidence의 payload.kind(닫힌 집합, 크리에이터 에이전트
+# stage 산출물 계약 v0.7 §3/§5가 SSOT — doc 3cca821b). `Evidence.ref`는 서버가 검증 안
+# 하는 자유문자열이라 매칭 축 자격이 없다(그라운딩·PO 확定 2026-09-22 01:09Z) — `payload.
+# kind`만 쓴다(evidence.py::_EVIDENCE_KIND_TYPE_REGISTRY가 실제로 강제하는 그 축).
+# generation_budget(봉인 필드, _GATE_TYPE_SEALED_FIELDS)·external_publish(linked_channel_
+# draft, gates.py)는 기존 메커니즘 그대로 — 이 레지스트리에 안 올린다(PO 확定).
+_GATE_TYPE_EXPECTED_EVIDENCE_KINDS: dict[str, tuple[str, ...]] = {
+    "concept_approval": ("concept_brief",),
+    "structure_approval": ("animatic", "storyboard"),
+}
+
+# "entity:<type>:<uuid>" 형태(예: evidence.payload.doc="entity:doc:8341ad70-...", 라이브
+# 실측 2026-09-22 gate 0a3dd999/evidence afcece95). reference_token.py::build_reference_token이
+# 만드는 `[title](entity:type:id)`의 괄호 안쪽 원시형과 같은 문법이나, 여긴 title 없이 그
+# 토큰 몸통만 온다(에이전트가 직접 채운 payload 자유필드 — 서버가 강제하는 계약이 아니다,
+# v0.7 §6 오픈아이템). 형식이 어긋나면 조용히 None(지어내지 않는다 — 크래시도 추측도 금지).
+_ENTITY_TOKEN_RE = re.compile(r"^entity:(\w+):([0-9a-fA-F-]{36})$")
+
+
+async def resolve_stage_evidence_entries(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID, gate_type: str,
+) -> list[dict]:
+    """story #4135 — gate_type이 기대하는 evidence kind(위 레지스트리)에 해당하는 이
+    work_item의 evidence 전부를 최신순으로 반환한다. `_build_approval_neutral_facts`
+    (게이트 생성 시점, 최신 1건만 씀)와 `gates.py::_enrich_linked_evidence`(조회 시점마다
+    전부 씀) 둘 다 이 함수를 공유 — kind 판정·doc/artifact 해소 로직을 두 곳에 안 둔다.
+
+    gate_type이 레지스트리에 없으면(generation_budget·external_publish 등) 쿼리 자체를
+    안 돈다(비용 0, `_enrich_linked_channel_draft`의 좁은 가드 선행과 동일 사상).
+
+    각 항목: {id, kind, ref, entity_type, entity_id, title, summary}. entity_type이 doc/
+    artifact 어느 쪽으로도 안 풀리면(payload.doc 형식 불일치·가리키는 doc/artifact가 이미
+    없음 등) entity_type/entity_id/title은 전부 None — 그래도 항목 자체는 남긴다("이
+    evidence가 존재는 하는데 무엇을 가리키는지 확認 불가"와 "이 evidence 자체가 없음"은
+    다른 사실이므로 구분해서 보여준다, 지어내지 않되 침묵하지도 않는다)."""
+    expected_kinds = _GATE_TYPE_EXPECTED_EVIDENCE_KINDS.get(gate_type)
+    if not expected_kinds:
+        return []
+
+    from app.models.evidence import Evidence
+
+    rows = (await db.execute(
+        select(Evidence.id, Evidence.ref, Evidence.payload, Evidence.artifact_version_id, Evidence.note)
+        .where(
+            Evidence.org_id == org_id,
+            Evidence.work_item_id == work_item_id,
+            Evidence.work_item_type == work_item_type,
+            Evidence.type == "report",
+        )
+        .order_by(Evidence.created_at.desc())
+    )).all()
+
+    entries: list[dict] = []
+    for evidence_id, ref, payload, artifact_version_id, note in rows:
+        kind = (payload or {}).get("kind")
+        if kind not in expected_kinds:
+            continue
+
+        entity_type = entity_id = title = None
+        doc_ref = (payload or {}).get("doc")
+        if isinstance(doc_ref, str):
+            m = _ENTITY_TOKEN_RE.match(doc_ref.strip())
+            if m and m.group(1) == "doc":
+                try:
+                    candidate_id = uuid.UUID(m.group(2))
+                except (ValueError, AttributeError, TypeError):
+                    candidate_id = None
+                if candidate_id is not None:
+                    from app.models.doc import Doc
+
+                    doc_title = (await db.execute(
+                        select(Doc.title).where(Doc.id == candidate_id, Doc.org_id == org_id)
+                    )).scalar_one_or_none()
+                    if doc_title is not None:
+                        entity_type, entity_id, title = "doc", candidate_id, doc_title
+
+        if entity_type is None and artifact_version_id is not None:
+            from app.models.visual_artifact import ArtifactVersion, VisualArtifact
+
+            artifact_row = (await db.execute(
+                select(VisualArtifact.id, VisualArtifact.title)
+                .join(ArtifactVersion, ArtifactVersion.artifact_id == VisualArtifact.id)
+                .where(ArtifactVersion.id == artifact_version_id, VisualArtifact.org_id == org_id)
+            )).first()
+            if artifact_row is not None:
+                entity_type, entity_id, title = "artifact", artifact_row[0], artifact_row[1]
+
+        entries.append({
+            "id": evidence_id, "kind": kind, "ref": ref,
+            "entity_type": entity_type, "entity_id": entity_id, "title": title,
+            "summary": note,
+        })
+    return entries
 
 # PO 확定(페드루, 2026-09-02, 변경요청①) — 값을 지어내지 않는다: 못 찾은 필드는 이 sentinel로
 # 명시한다("가서 보라" 금지 — story #3312 처방 3과 동형, 결재 카드에 실물이 안 보이면 그
@@ -241,19 +337,25 @@ async def _resolve_doc_by_id(
 
 
 async def _build_approval_neutral_facts(
-    db: AsyncSession, *, org_id: uuid.UUID, definition, stage: str, work_item_type: str,
+    db: AsyncSession, *, org_id: uuid.UUID, definition, stage: str, gate_type: str, work_item_type: str,
     work_item_id: uuid.UUID, payload: dict,
 ) -> dict:
     """PO 변경요청①(페드루, 2026-09-02) — 결재함 카드가 승인자에게 «무엇을 승인하는지»를
     실물로 보여줘야 한다(story 처방 3, "가서 보라" 금지). work item 제목+참조 토큰·payload
-    채널·그 work item에 링크된 최신 산출물 doc(직전 draft) 참조+텍스트 요약(첫 300자)을
-    채운다 — 못 찾은 값은 _UNCONFIRMED로 명시(침묵도 지어냄도 아님).
+    채널·그 work item에 링크된 최신 산출물(doc 또는 artifact) 참조+요약을 채운다 — 못 찾은
+    값은 _UNCONFIRMED로 명시(침묵도 지어냄도 아님).
 
-    story #3323 AC2 — draft doc 해소는 3경로 우선순위다: ①payload.previous_output_doc_id
-    (발행자가 이번 stage의 산출물을 직접 지목 — 가장 정확) ②entity_references 최신 링크
-    (#3312 원래 경로, work item↔doc이 나중에 링크되는 경우) ③미확認(둘 다 없음, 지어내지
-    않음). 게이트 생성 시점엔 아직 entity_references가 없는 게 정상 경로(에이전트가 doc을
-    나중에 스토리에 링크)라, ①이 그 갭을 메운다."""
+    story #4135(PO 실측 2026-09-22) — draft doc 해소는 이제 3경로 우선순위다: ①payload.
+    previous_output_doc_id(발행자가 이번 stage의 산출물을 직접 지목 — 가장 정확) ②그
+    gate_type이 기대하는 evidence(resolve_stage_evidence_entries, payload.kind SSOT — v0.7
+    §3/§5) 중 최신 1건이 doc/artifact를 가리키면 그 참조 ③entity_references 최신 링크
+    (#3312 원래 경로, work item↔doc이 나중에 링크되는 경우) ④미확認(셋 다 없음, 지어내지
+    않음). ②가 신설되기 前엔 evidence 테이블 자체를 이 함수가 한 번도 안 읽어(그라운딩
+    확認, recipe_gate_hooks.py 268-279행 구판) 댄이 concept_brief evidence를 먼저 등재해도
+    게이트가 그 실물을 못 실었다(2호 게이트 1 실사고, 2026-09-22 00:33~00:42Z) — 이게 그
+    근본 처방. ②의 evidence가 "최신"이어도 doc/artifact 어느 쪽으로도 안 풀리면(형식 불일치
+    등) 그 자리에서 포기하고 ③으로 넘어간다 — 더 오래된 evidence를 거슬러 찾지 않는다
+    ("최신 1건" 계약, PO 확定)."""
     facts: dict = {"triggered_by_event": definition.key, "stage": stage}
 
     title = await _work_item_title(db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id)
@@ -266,11 +368,25 @@ async def _build_approval_neutral_facts(
     facts["channel"] = channel if isinstance(channel, str) and channel else _UNCONFIRMED
 
     draft = await _resolve_doc_by_id(db, org_id=org_id, doc_id_raw=payload.get("previous_output_doc_id"))
+    evidence_match: dict | None = None
     if draft is None:
-        draft = await _latest_linked_draft_doc(
-            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+        entries = await resolve_stage_evidence_entries(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, gate_type=gate_type,
         )
-    if draft is None:
+        if entries and entries[0]["entity_type"] is not None:
+            evidence_match = entries[0]
+        else:
+            draft = await _latest_linked_draft_doc(
+                db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            )
+
+    if evidence_match is not None:
+        facts["draft_doc_reference_token"] = (
+            build_reference_token(evidence_match["entity_type"], evidence_match["entity_id"], evidence_match["title"])
+            or _UNCONFIRMED
+        )
+        facts["draft_doc_summary"] = evidence_match["summary"] or _UNCONFIRMED
+    elif draft is None:
         facts["draft_doc_reference_token"] = _UNCONFIRMED
         facts["draft_doc_summary"] = _UNCONFIRMED
     else:
@@ -285,6 +401,9 @@ async def _build_approval_neutral_facts(
         # 선례 그대로). _UNCONFIRMED 문자열 sentinel을 쓰지 않는다 — 이 필드는 사람이 읽는
         # 표시용이 아니라 프로그램이 소비하는 UUID라, 가짜 문자열이 섞이면 하류가 그걸
         # UUID로 파싱하려다 깨진다(다른 fact들과 다른 성격 — 값이 없으면 키 자체를 안 싣는다).
+        # story #4135: evidence_match 경로는 이 필드를 안 채운다 — Evidence.created_by는
+        # doc의 created_by와 다른 축(누가 산출물을 만들었나 vs 누가 evidence를 등재했나)이라
+        # 새 필드를 여기서 발명하지 않는다(PO 확定 범위 밖, 필요해지면 별도 카드).
         if draft_author_id is not None:
             facts["draft_author_member_id"] = str(draft_author_id)
 
@@ -355,7 +474,7 @@ async def maybe_create_stage_gate(
     approver_id = await resolver(db, org_id=org_id)
 
     neutral_facts = await _build_approval_neutral_facts(
-        db, org_id=org_id, definition=definition, stage=stage,
+        db, org_id=org_id, definition=definition, stage=stage, gate_type=gate_decl["type"],
         work_item_type=work_item_type, work_item_id=work_item_id, payload=payload,
     )
     # story #3340(선생님 4바퀴 실사고) — 이 게이트를 만든 stage 이벤트의 발행자를 doc
