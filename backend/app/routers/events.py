@@ -1390,6 +1390,32 @@ def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: 
     return json.dumps({"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False)
 
 
+def _resolve_sealed_field_specs_and_payload(
+    next_gate_decl: dict | None, base_payload: dict,
+) -> tuple[tuple, dict]:
+    """story #4085 AC1 공유 — 자기설명 사이클 렌더러(`_render_event_message_content`)·
+    게이트 판정 렌더러(`_render_gate_verdict_message`) 둘 다 "다음 stage가 게이트를
+    여는 자리인가"를 같은 사실로 답해야 한다(recipe_gate_hooks.py::_GATE_TYPE_
+    SEALED_FIELDS SSOT, 레시피 키·stage 하드코딩 0). `next_gate_decl`이 봉인 필드를
+    요구하면 그 스펙들과, 예시 payload에 실값 예시를 채운 버전을 함께 반환한다
+    (base_payload에 이미 같은 키가 있으면 안 덮는다 — 우연한 동명 키 보존).
+
+    ⛔story #4085(페드루 PO 리뷰 정정, PR #4461 코멘트) — 두 렌더러가 처음엔 이
+    구성을 각자 인라인으로 복제했다가(사이클 쪽만 실제로 착지) 판정 렌더러 쪽이
+    빠진 채 merge돼 2호 실측에서 재발했다 — 공유 함수 하나로 합쳐 드리프트 자체를
+    구조로 막는다."""
+    from app.services.recipe_gate_hooks import _GATE_TYPE_SEALED_FIELDS
+
+    specs = _GATE_TYPE_SEALED_FIELDS.get(next_gate_decl["type"], ()) if next_gate_decl is not None else ()
+    if not specs:
+        return specs, base_payload
+    enriched_payload = {
+        **{spec.name: spec.example_value for spec in specs if spec.name not in base_payload},
+        **base_payload,
+    }
+    return specs, enriched_payload
+
+
 # story #4090/#4093/#4142 공유 — gate.publish_outcome(닫힌 어휘 코드)을 "다음 행동" 한
 # 줄로 번역한다. `_render_gate_verdict_message`의 두 표면이 같은 변환을 쓴다: ① 다음
 # stage가 채널 자동발행 대상인 게이트의 승인 안내(#4090 AC3) ② scoped channel_post
@@ -1718,8 +1744,20 @@ async def _render_gate_verdict_message(
                         _base_payload["work_item_type"] = work_item_type
                     if work_item_id_raw:
                         _base_payload["work_item_id"] = work_item_id_raw
-                    _example_json = _next_stage_publish_payload_json(_recipe_definition, _next_stage, _base_payload)
                     _next_meta = (_recipe_definition.stage_metadata or {}).get(_next_stage) or {}
+                    # story #4085 AC1(2/2, 페드루 PO CHANGES — 2호 실측 재발) — 이 판정
+                    # 렌더러는 자기설명 사이클 렌더러(`_render_event_message_content`)와
+                    # 별개 표면인데, PR #4461은 사이클 쪽에만 봉인 필드 주입을 붙였다.
+                    # `structure_approval`처럼 "지금 stage가 이미 자기 게이트를 여는"
+                    # 경우(사이클 렌더러 스코프 B, 발행 예시 자체를 생략) 다음 stage
+                    # (`structure_passed`)의 봉인 필드 안내는 오직 **이 승인-판정 알림**
+                    # (사람이 그 게이트를 승인한 직후 댄이 받는 멘션)에서만 나온다 —
+                    # 2호가 실제로 이 경로였다(구조 승인→예산 게이트 봉인 필드 안내 0).
+                    # 같은 SSOT를 공유 헬퍼로 재사용(드리프트 재발 방지, 새 로직 0).
+                    _sealed_specs, _example_base_payload = _resolve_sealed_field_specs_and_payload(
+                        _next_meta.get("gate"), _base_payload,
+                    )
+                    _example_json = _next_stage_publish_payload_json(_recipe_definition, _next_stage, _example_base_payload)
                     # story #4090 AC3(페드루 PO 確定 2026-09-21) — 다음 stage가 채널
                     # 자동발행 대상(capability.target=="channel_connection")이면 "다음
                     # stage 이벤트를 발행하세요" 지시 자체가 더는 맞지 않는다(AC2가 사람
@@ -1737,6 +1775,8 @@ async def _render_gate_verdict_message(
                         )
                         if _next_meta.get("gate") is not None:
                             _example_line += f" — {t('events.stage_gate_opens_on_publish', resolved_locale)}"
+                            for _spec in _sealed_specs:
+                                _example_line += f"\n- {t(_spec.explanation_catalog_key, resolved_locale)}"
         lines.append(
             _connector_line
             or _example_line
@@ -1808,8 +1848,6 @@ async def _render_event_message_content(
     org, GET /api/v2/events/definitions): stage_metadata 있는 정의 10개 중 9개가 block_template도
     있어 자기설명 0(제네릭 폴백만)이었다. block_template 필드 자체는 무변경(FE 카드 회귀 0) —
     이 분기의 「block_template 있으면 스킵」 조건만 제거한다."""
-    from app.services.recipe_gate_hooks import _GATE_TYPE_SEALED_FIELDS
-
     if definition.key == "preset.gate.verdict":
         return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
     if not definition.stage_metadata:
@@ -1888,15 +1926,7 @@ async def _render_event_message_content(
         # stage용으로 실은 값이 있을 리는 없지만 — payload는 "지금 stage"의 값이라
         # 안전하게 덮어도 되나, 혹시 모를 우연한 동명 키 보존이 더 정직하다).
         _next_gate_decl = next_meta.get("gate")
-        _sealed_specs = (
-            _GATE_TYPE_SEALED_FIELDS.get(_next_gate_decl["type"], ()) if _next_gate_decl is not None else ()
-        )
-        _example_base_payload = payload
-        if _sealed_specs:
-            _example_base_payload = {
-                **{spec.name: spec.example_value for spec in _sealed_specs if spec.name not in payload},
-                **payload,
-            }
+        _sealed_specs, _example_base_payload = _resolve_sealed_field_specs_and_payload(_next_gate_decl, payload)
         example_json = _next_stage_publish_payload_json(definition, next_stage, _example_base_payload)
         lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
         if _next_gate_decl is not None:
