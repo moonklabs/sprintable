@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 // [SID:4021] compose는 URL 쿼리로 실려 가고, 메시지 content는 서버 스키마(SendMessageRequest.content:
 // str·conversation.py content=Text)에 명시 상한이 없다 → «기존 채팅 입력 상한»이 없어 URL-안전 상한을
@@ -43,17 +44,24 @@ export function pickNewestAgentDm(conversations: ConversationLite[], agentId: st
 }
 
 // 대화 화면 목적지. compose 비면 compose 없이, 상한 넘으면 싣지 않고 tooLong 표시(AC3).
+// story #4158 — chatV3Enabled면 v3 셸 딥링크(4404 `?conversation=<id>`+4408 `?compose=`
+// 계약)로, OFF면 기존 레거시 `/chats/<id>?compose=` 그대로(AC2 바이트 동일). 목적지
+// 문자열은 nav-v3-destinations.ts(resolveNavV3Destinations) 한 곳에서만(AC3).
 export function buildFirstInstructionTarget(
   conversationId: string,
   compose: string,
+  flags: NavV3Flags,
 ): { path: string; tooLong: boolean } {
+  const chatsPath = resolveNavV3Destinations(flags).chats.path;
+  const base = flags.chatV3Enabled ? `${chatsPath}?conversation=${conversationId}` : `${chatsPath}/${conversationId}`;
   if (compose.length > MAX_COMPOSE_LENGTH) {
-    return { path: `/chats/${conversationId}`, tooLong: true };
+    return { path: base, tooLong: true };
   }
   if (compose.length === 0) {
-    return { path: `/chats/${conversationId}`, tooLong: false };
+    return { path: base, tooLong: false };
   }
-  return { path: `/chats/${conversationId}?compose=${encodeURIComponent(compose)}`, tooLong: false };
+  const composeQuery = `compose=${encodeURIComponent(compose)}`;
+  return { path: flags.chatV3Enabled ? `${base}&${composeQuery}` : `${base}?${composeQuery}`, tooLong: false };
 }
 
 // 이 프로젝트의 에이전트 멤버 id 집합. null = 조회 실패(생성으로 안 넘어감·PO CHANGES2).
@@ -121,9 +129,12 @@ interface FirstInstructionRedirectProps {
   agentId: string | null;
   compose: string;
   projectId: string | null;
+  flags?: NavV3Flags;
 }
 
-export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstInstructionRedirectProps) {
+export function FirstInstructionRedirect({
+  agentId, compose, projectId, flags = DEFAULT_NAV_V3_FLAGS,
+}: FirstInstructionRedirectProps) {
   const t = useTranslations('onboarding');
   const router = useRouter();
   // agent·project가 없으면 애초에 할 게 없다 — 렌더 시점에 error로 시작(효과 내 동기 setState 회피).
@@ -200,9 +211,10 @@ export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstI
           }
         }
 
-        const { path, tooLong } = buildFirstInstructionTarget(conversationId, compose);
+        const { path, tooLong } = buildFirstInstructionTarget(conversationId, compose, flags);
         if (tooLong) {
-          setConversationHref(`/chats/${conversationId}`);
+          // compose 없이 재구성 — 새 리터럴 0(같은 함수 재사용, 위 base와 동형).
+          setConversationHref(buildFirstInstructionTarget(conversationId, '', flags).path);
           setPhase('too_long');
           return;
         }
@@ -216,14 +228,17 @@ export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstI
     return () => {
       cancelled = true;
     };
-  }, [agentId, projectId, compose, router]);
+  }, [agentId, projectId, compose, router, flags]);
+
+  // 안내 화면의 「목록으로」 폴백 — 목적지 모듈 한 곳(AC3, 파일 안 경로 리터럴 0).
+  const chatsListHref = resolveNavV3Destinations(flags).chats.path;
 
   if (phase === 'error') {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
         <p className="text-base font-medium">{t('firstInstructionErrorTitle')}</p>
         <p className="text-sm text-muted-foreground">{t('firstInstructionErrorHint')}</p>
-        <Link href="/chats" className="text-sm font-medium text-primary underline underline-offset-4">
+        <Link href={chatsListHref} className="text-sm font-medium text-primary underline underline-offset-4">
           {t('firstInstructionOpenList')}
         </Link>
       </main>
@@ -236,7 +251,7 @@ export function FirstInstructionRedirect({ agentId, compose, projectId }: FirstI
         <p className="text-base font-medium">{t('firstInstructionTooLongTitle')}</p>
         <p className="text-sm text-muted-foreground">{t('firstInstructionTooLongHint')}</p>
         <Link
-          href={conversationHref ?? '/chats'}
+          href={conversationHref ?? chatsListHref}
           className="text-sm font-medium text-primary underline underline-offset-4"
         >
           {t('firstInstructionOpenConversation')}

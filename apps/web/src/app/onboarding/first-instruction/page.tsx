@@ -1,13 +1,18 @@
 import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/db/server';
 import { FirstInstructionRedirect } from './first-instruction-redirect';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+
+// story #4158 — env 이름 3개를 한 곳으로 모으는 임시 readNavV3Flags() 헬퍼는 story
+// #4017 착지(develop) 뒤 readNavV3FlagsFromEnv()로 교체 완료(재-onto, 2026-09-22).
 
 // [SID:4021] 컴패니언 «첫 지시»가 여는 웹 주소. 데스크톱은 에이전트 키만 있어 대화 id를
 // 얻지도 만들지도 못한다(onboarding_activation.py의 조회는 요청자=사람 참여 대화만·생성은
 // fetchWithAuth) → 사람 세션인 이 웹뷰에서 그 에이전트와의 첫 지시 대화를 찾거나(중복 생성
 // 방지·PO 보탬1) 없으면 웹이 이미 쓰는 createFirstInstructionConversation로 1회 만든 뒤
-// `/chats/<id>?compose=<문구>`로 교체 이동한다. 전송은 사람이 대화 화면에서 누른다(에이전트
-// 발신 0). 새 BE 0 · 레거시 `/chats` 목록 동작 무변.
+// 대화 화면으로 교체 이동한다(story #4158 — chatV3Enabled면 v3 셸 딥링크, OFF면 기존
+// `/chats/<id>?compose=<문구>` 그대로). 전송은 사람이 대화 화면에서 누른다(에이전트
+// 발신 0). 새 BE 0.
 interface FirstInstructionPageProps {
   // `agent` = 대상 에이전트 member_id · `compose` = 미리 채울 첫 지시 문구(URL 인코딩·빈값 허용).
   searchParams: Promise<{ agent?: string; compose?: string }>;
@@ -38,6 +43,7 @@ export default async function FirstInstructionPage({ searchParams }: FirstInstru
       agentId={agent ?? null}
       compose={compose ?? ''}
       projectId={projectId}
+      flags={readNavV3FlagsFromEnv()}
     />
   );
 }

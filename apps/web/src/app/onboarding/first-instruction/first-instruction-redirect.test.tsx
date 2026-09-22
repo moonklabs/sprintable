@@ -12,6 +12,9 @@ import {
   pickNewestAgentDm,
   type ConversationLite,
 } from './first-instruction-redirect';
+import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
+
+const CHAT_V3_ON: NavV3Flags = { ...DEFAULT_NAV_V3_FLAGS, chatV3Enabled: true };
 
 const routerReplaceMock = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -74,7 +77,7 @@ function stubFetch(opts: StubOpts) {
 let container: HTMLDivElement;
 let root: Root;
 
-async function renderRedirect(props: { agentId: string | null; compose: string; projectId: string | null }) {
+async function renderRedirect(props: { agentId: string | null; compose: string; projectId: string | null; flags?: NavV3Flags }) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -123,17 +126,34 @@ describe('pickNewestAgentDm / participantsIncludeAgent (순수)', () => {
 });
 
 describe('buildFirstInstructionTarget (순수)', () => {
-  it('빈 compose는 compose 없이', () => {
-    expect(buildFirstInstructionTarget('c1', '')).toEqual({ path: '/chats/c1', tooLong: false });
+  it('chatV3 OFF — 빈 compose는 compose 없이', () => {
+    expect(buildFirstInstructionTarget('c1', '', DEFAULT_NAV_V3_FLAGS)).toEqual({ path: '/chats/c1', tooLong: false });
   });
-  it('일반 compose는 인코딩해 실음', () => {
-    expect(buildFirstInstructionTarget('c1', '디자인 시안 만들어 줘')).toEqual({
+  it('chatV3 OFF — 일반 compose는 인코딩해 실음', () => {
+    expect(buildFirstInstructionTarget('c1', '디자인 시안 만들어 줘', DEFAULT_NAV_V3_FLAGS)).toEqual({
       path: `/chats/c1?compose=${encodeURIComponent('디자인 시안 만들어 줘')}`,
       tooLong: false,
     });
   });
-  it('상한 초과는 싣지 않고 tooLong', () => {
-    expect(buildFirstInstructionTarget('c1', 'x'.repeat(MAX_COMPOSE_LENGTH + 1))).toEqual({ path: '/chats/c1', tooLong: true });
+  it('chatV3 OFF — 상한 초과는 싣지 않고 tooLong', () => {
+    expect(buildFirstInstructionTarget('c1', 'x'.repeat(MAX_COMPOSE_LENGTH + 1), DEFAULT_NAV_V3_FLAGS)).toEqual({ path: '/chats/c1', tooLong: true });
+  });
+
+  // story #4158 AC1 — chatV3 ON: v3 셸 딥링크(4404 ?conversation=+4408 ?compose= 계약).
+  it('⭐chatV3 ON — 빈 compose는 conversation만', () => {
+    expect(buildFirstInstructionTarget('c1', '', CHAT_V3_ON)).toEqual({ path: '/chat?conversation=c1', tooLong: false });
+  });
+  it('⭐chatV3 ON — 일반 compose는 conversation+compose 둘 다(& 결합)', () => {
+    expect(buildFirstInstructionTarget('c1', '디자인 시안 만들어 줘', CHAT_V3_ON)).toEqual({
+      path: `/chat?conversation=c1&compose=${encodeURIComponent('디자인 시안 만들어 줘')}`,
+      tooLong: false,
+    });
+  });
+  it('⭐chatV3 ON — 상한 초과는 compose 없이 conversation만·tooLong', () => {
+    expect(buildFirstInstructionTarget('c1', 'x'.repeat(MAX_COMPOSE_LENGTH + 1), CHAT_V3_ON)).toEqual({
+      path: '/chat?conversation=c1',
+      tooLong: true,
+    });
   });
 });
 
@@ -256,5 +276,33 @@ describe('FirstInstructionRedirect (동작)', () => {
     await renderRedirect({ agentId, compose: 'x', projectId: 'proj-1' });
     expect(routerReplaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain(koMessages.onboarding.firstInstructionErrorTitle);
+  });
+
+  // ── story #4158 AC1 — chatV3 ON ──
+  it('⭐chatV3 ON — 기존 대화면 v3 셸 딥링크(?conversation=+&compose=)로 이동', async () => {
+    stubFetch({ conversations: [agentDm('c-existing', '2026-09-17T10:00:00Z')] });
+    await renderRedirect({ agentId, compose: '한 줄 지시', projectId: 'proj-1', flags: CHAT_V3_ON });
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      `/chat?conversation=c-existing&compose=${encodeURIComponent('한 줄 지시')}`,
+    );
+  });
+
+  it('⭐chatV3 ON — compose 상한 초과면 이동 0·「대화 열기」 안내가 v3 셸(conversation만)로', async () => {
+    stubFetch({ conversations: [agentDm('c-x', '2026-09-17T10:00:00Z')] });
+    await renderRedirect({
+      agentId, compose: 'x'.repeat(MAX_COMPOSE_LENGTH + 1), projectId: 'proj-1', flags: CHAT_V3_ON,
+    });
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(koMessages.onboarding.firstInstructionTooLongTitle);
+    const link = container.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('/chat?conversation=c-x');
+  });
+
+  it('⭐chatV3 ON — agent·project 없으면 안내의 「목록으로」 링크가 /chat', async () => {
+    stubFetch({ conversations: [] });
+    await renderRedirect({ agentId: null, compose: '', projectId: 'proj-1', flags: CHAT_V3_ON });
+    expect(container.textContent).toContain(koMessages.onboarding.firstInstructionErrorTitle);
+    const link = container.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('/chat');
   });
 });

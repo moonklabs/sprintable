@@ -56,4 +56,18 @@ describe('FirstInstructionPage (서버)', () => {
     expect(out.props.compose).toBe('x');
     expect(out.props.projectId).toBe('proj-9');
   });
+
+  // story #4158 — 임시 readNavV3Flags()가 개별 isXEnabled() 3개를 그대로 위임하는지.
+  it('⭐chatV3Enabled 플래그를 읽어 자식에 넘김', async () => {
+    const original = process.env.CHAT_V3_ENABLED;
+    process.env.CHAT_V3_ENABLED = 'true';
+    getServerSessionMock.mockResolvedValue({
+      user_id: 'me', email: 'me@x.dev', access_token: 'tok', org_id: 'org-1', project_id: 'proj-9',
+    });
+    const out = (await FirstInstructionPage({
+      searchParams: Promise.resolve({ agent: 'agent-1', compose: 'x' }),
+    })) as unknown as { props: { flags: { chatV3Enabled: boolean } } };
+    expect(out.props.flags.chatV3Enabled).toBe(true);
+    process.env.CHAT_V3_ENABLED = original;
+  });
 });
