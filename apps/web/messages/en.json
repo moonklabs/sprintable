@@ -648,6 +648,8 @@
     "gcFieldProvider": "Provider",
     "gcProviderVertexGeminiLabel": "Vertex Gemini",
     "gcFieldProviderCurrentNote": "1 supported today",
+    "gcFieldLocation": "Region",
+    "gcLocationHint": "Model availability by region follows Vertex's docs — global has the widest coverage.",
     "gcFieldLabel": "Name",
     "gcFieldLabelPlaceholder": "e.g. Main generation connector",
     "gcLabelHint": "A name unique within the organization. 1–200 chars.",

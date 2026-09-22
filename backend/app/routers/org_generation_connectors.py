@@ -23,16 +23,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.org_generation_connector import (
+    GENERATION_CONNECTOR_LOCATIONS,
     GENERATION_CONNECTOR_PROVIDER_KEYS,
     OrgGenerationConnector,
 )
 from app.services.member_resolver import resolve_member
 from app.services.org_generation_connector import (
+    GenerationConnectorInvalidLocationError,
     GenerationConnectorInvalidProviderError,
     GenerationConnectorLabelDuplicateError,
     GenerationConnectorNotFoundError,
     create_org_generation_connector,
     list_org_generation_connectors,
+    resolve_generation_connector_location,
     revoke_org_generation_connector,
 )
 
@@ -98,6 +101,11 @@ class GenerationConnectorResponse(BaseModel):
     provider_key: str
     label: str
     model_config_json: dict
+    # story #4140 — 제품 정책값(crew 재량 0). model_config_json 원본과 별도 top-level
+    # 필드로 노출(저장값 그대로와 "해소된 유효값"을 섞지 않는다 — resolve_generation_
+    # connector_location() 단일 통로, 기존 커넥터(location 없음)도 이 필드로 "global"을
+    # 받는다).
+    location: str
     status: str
     created_by: uuid.UUID | None = None
     created_at: datetime
@@ -107,7 +115,9 @@ class GenerationConnectorResponse(BaseModel):
 def _to_response(row: OrgGenerationConnector) -> GenerationConnectorResponse:
     return GenerationConnectorResponse(
         id=row.id, provider_key=row.provider_key, label=row.label,
-        model_config_json=row.model_config_json, status=row.status, created_by=row.created_by,
+        model_config_json=row.model_config_json,
+        location=resolve_generation_connector_location(row.model_config_json),
+        status=row.status, created_by=row.created_by,
         created_at=row.created_at, revoked_at=row.revoked_at,
     )
 
@@ -142,6 +152,12 @@ async def create_generation_connector_endpoint(
         )
     except GenerationConnectorInvalidProviderError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except GenerationConnectorInvalidLocationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported location {exc.location!r} — must be one of "
+                   f"{sorted(GENERATION_CONNECTOR_LOCATIONS)}",
+        ) from exc
     except GenerationConnectorLabelDuplicateError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "GENERATION_CONNECTOR_LABEL_DUPLICATE"},

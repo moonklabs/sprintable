@@ -3844,6 +3844,12 @@ class GenerationConnectorReadResponse(BaseModel):
     provider_key: str
     label: str
     model_config_json: dict
+    # story #4140(페드루 PO 처방, 2026-09-22) — 제품이 정한 리전 정책값. crew는 이 값
+    # «그대로만» 호출한다(재량 0) — 2호 실사고(aa1c2330·gemini-2.5-flash-image가
+    # asia-northeast3에서 404 → 댄군 자체 판단으로 global 재시도)의 직접 처방.
+    # `resolve_generation_connector_location()` 단일 통로(org_generation_connectors.py의
+    # 사람용 응답과 동일 해소 로직 공유 — 두 벌 계약 방지, #4132 CHANGES-1 선례).
+    location: str
     credentials: str
 
 
@@ -3874,13 +3880,17 @@ async def get_my_generation_connector(
        0: `permission_audit_logs`는 `action` 닫힌 CHECK(member_added/member_removed/
        role_changed, baseline/schema.sql 1541행 실측)라 이 목적에 안 맞아 재사용하지
        않는다 — 새 테이블을 여는 대신(스코프 밖) 기존 로그 축에 싣는다.
-    9. `{provider_key, label, model_config_json, credentials}` 평문 1회 반환.
+    9. `{provider_key, label, model_config_json, location, credentials}` 평문 1회 반환
+       (story #4140 — `location`은 제품이 해소한 정책값, crew 재량 0).
     """
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.services.generation_connector_credential_crypto import (
         decrypt_generation_connector_credential,
     )
-    from app.services.org_generation_connector import get_org_generation_connector
+    from app.services.org_generation_connector import (
+        get_org_generation_connector,
+        resolve_generation_connector_location,
+    )
 
     caller_id, matched_stage, generation_connector_id = await _resolve_crew_scoped_recipe_binding(
         db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, auth=auth,
@@ -3903,6 +3913,7 @@ async def get_my_generation_connector(
         provider_key=connector.provider_key,
         label=connector.label,
         model_config_json=connector.model_config_json,
+        location=resolve_generation_connector_location(connector.model_config_json),
         credentials=decrypt_generation_connector_credential(connector.encrypted_credentials),
     )
 

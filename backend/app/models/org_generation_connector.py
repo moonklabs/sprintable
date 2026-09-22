@@ -32,6 +32,21 @@ GENERATION_CONNECTOR_PROVIDER_KEYS: frozenset[str] = frozenset({"vertex_gemini"}
 
 GENERATION_CONNECTOR_STATUSES: frozenset[str] = frozenset({"active", "revoked"})
 
+# story #4140(2026-09-22, 페드루 PO 처방 — 30분 실측 後 좁힌 폭) — model_config_json.
+# location 허용 목록. «가용성 확認»(라이브 Vertex 프로빙·정적 모델별 표) 둘 다 PO가 명시
+# 기각(전자=커넥터별 동적 자격 전례 0이라 2pt 밖, 후자=2호 404 한 건뿐이라 추측 표) —
+# 이 목록도 같은 원칙(추측 0)으로 이 세션에서 실제 확認된 값 2개만 연다:
+#   - "asia-northeast3": 이 org의 기존 Vertex 기본 리전(app/core/config.py::vertex_ai_location
+#     과 동일 문자열, 그동안 실사용 중).
+#   - "global": 2호 실측(2026-09-22 01:54Z, aa1c2330으로 gemini-2.5-flash-image가 global
+#     엔드포인트에서 실제 200) + Vertex 공식 문서가 이 모델의 global 엔드포인트 지원을
+#     GA로 명시(확認일 2026-09-22:
+#     https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash-image).
+# 새 리전이 필요하면 실측 확認 후에만 추가한다(미리 늘리지 않는다).
+GENERATION_CONNECTOR_LOCATIONS: frozenset[str] = frozenset({"global", "asia-northeast3"})
+# PO 처방 ① "기본 global" — 2호에서 실제로 통과가 확認된 값이라 안전 기본값으로 삼는다.
+DEFAULT_GENERATION_CONNECTOR_LOCATION = "global"
+
 # story #4117 — channel_publication.py::UQ_GATE_VERSION_SEQUENCE_CONSTRAINT_NAME과
 # 동형 관례(story #3808 교훈: 제약 이름을 서비스 쪽에 따로 하드코딩하면 나중에 이
 # 제약이 바뀔 때 그 비교문만 옛 이름에 멈춰 판정이 항상 raise로 떨어진다) — 모델의
