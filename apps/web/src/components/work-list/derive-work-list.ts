@@ -44,6 +44,7 @@
  */
 
 import { deriveGateState } from './work-list-detail-actions';
+import type { HypothesisStatus } from '@sprintable/core-storage';
 
 export type WorkListRowKind = 'task' | 'agent_run';
 export type WorkListRowState = 'awaiting_approval' | 'awaiting_signature' | 'awaiting_answer' | 'in_progress' | 'done' | null;
@@ -125,10 +126,13 @@ export interface WorkListTeamMemberInput {
   name: string | null;
 }
 
-/** GET /api/hypotheses?project_id= 원소 부분집합. */
+/** GET /api/hypotheses?project_id= 원소 부분집합. story #3989(「일감」 흡수 3/N) —
+ * 전수 가설 보기(일감 「가설」 탭)가 상태 필터에 쓰도록 status 추가(새 BE 호출 0 —
+ * 응답 본문엔 이미 있던 필드, 이 타입이 그동안 안 읽었을 뿐). */
 export interface WorkListHypothesisInput {
   id: string;
   statement: string;
+  status: HypothesisStatus;
   epic_ids: string[];
   story_ids: string[];
 }

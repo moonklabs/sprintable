@@ -69,8 +69,16 @@ export interface FetchedWorkList {
   hypotheses: WorkListHypothesisInput[];
 }
 
+/** story #3989 CHANGES(페드루 PO) — 일감 「가설」 보기 단독으로도 쓴다(전수 가설 8콜
+ * 중 1콜만 필요). fetchWorkList도 이걸 그대로 재사용해 같은 호출이 두 곳에 안 흩어지게
+ * 한다. */
+export async function fetchHypotheses(projectId: string): Promise<WorkListHypothesisInput[]> {
+  const json = await fetchEnvelope<WorkListHypothesisInput[]>(`/api/hypotheses?project_id=${projectId}`);
+  return Array.isArray(json.data) ? json.data : [];
+}
+
 export async function fetchWorkList(projectId: string): Promise<FetchedWorkList> {
-  const [goals, stories, tasks, agentRuns, inboxJson, teamMembersJson, artifactsJson, hypothesesJson] = await Promise.all([
+  const [goals, stories, tasks, agentRuns, inboxJson, teamMembersJson, artifactsJson, hypotheses] = await Promise.all([
     fetchPage<WorkListGoalInput>(`/api/goals?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/goals'),
     fetchPage<WorkListStoryInput>(`/api/stories?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/stories'),
     fetchPage<WorkListTaskInput>(`/api/tasks?project_id=${projectId}&limit=${PAGE_LIMIT}`, '/api/tasks'),
@@ -78,7 +86,7 @@ export async function fetchWorkList(projectId: string): Promise<FetchedWorkList>
     fetchEnvelope<WorkListInboxItem[]>('/api/gates/inbox?status=pending'),
     fetchEnvelope<WorkListTeamMemberInput[]>('/api/team-members'),
     fetchEnvelope<Array<{ story_id: string | null }>>('/api/visual-artifacts'),
-    fetchEnvelope<WorkListHypothesisInput[]>(`/api/hypotheses?project_id=${projectId}`),
+    fetchHypotheses(projectId),
   ]);
 
   const artifactCountByStoryId = new Map<string, number>();
@@ -86,8 +94,6 @@ export async function fetchWorkList(projectId: string): Promise<FetchedWorkList>
     if (!a.story_id) continue;
     artifactCountByStoryId.set(a.story_id, (artifactCountByStoryId.get(a.story_id) ?? 0) + 1);
   }
-
-  const hypotheses = Array.isArray(hypothesesJson.data) ? hypothesesJson.data : [];
 
   const workList = deriveWorkList({
     goals,
