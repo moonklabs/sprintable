@@ -92,7 +92,8 @@ afterEach(async () => {
 
 async function mount(todayV3Enabled = true) {
   const { ChatV3Screen } = await import('./chat-v3-screen');
-  await act(async () => { root.render(wrap(<ChatV3Screen todayV3Enabled={todayV3Enabled} />)); });
+  const flags = { todayV3Enabled, chatV3Enabled: true, connectRulesV3Enabled: false };
+  await act(async () => { root.render(wrap(<ChatV3Screen flags={flags} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -184,7 +185,10 @@ describe('ChatV3Screen — 첫 화면 렌더', () => {
   // 교차 PR 드리프트 항목 2 — 빈 aria-hidden div 대신 Skeleton이 실제로 보인다.
   it('⭐로딩 中엔 빈 div가 아니라 Skeleton이 뜬다', async () => {
     fetchMock.mockImplementation(() => new Promise(() => {})); // 영원히 pending
-    await act(async () => { const { ChatV3Screen } = await import('./chat-v3-screen'); root.render(wrap(<ChatV3Screen todayV3Enabled />)); });
+    await act(async () => {
+      const { ChatV3Screen } = await import('./chat-v3-screen');
+      root.render(wrap(<ChatV3Screen flags={{ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: false }} />));
+    });
     const loading = container.querySelector('[data-testid="chat-v3-loading"]');
     expect(loading?.children.length).toBeGreaterThan(0);
   });

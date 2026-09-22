@@ -504,16 +504,9 @@
     "unmeasured": "Unmeasured",
     "searchPlaceholder": "Search or give an instruction",
     "targetColumnEmpty": "Nothing selected.",
-    "chatColumnEmpty": "Select a conversation to see it here.",
-    "navToday": "Today",
-    "navChats": "Chats",
-    "navWork": "Work",
-    "navResults": "Results",
-    "navConnectRules": "Connections & Rules"
+    "chatColumnEmpty": "Select a conversation to see it here."
   },
   "chatV3": {
-    "navToday": "Today",
-    "navChats": "Chats",
     "loadErrorTitle": "Couldn't load this",
     "threadRailTitle": "Chats",
     "threadRailEmpty": "No conversations yet",

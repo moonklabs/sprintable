@@ -15,6 +15,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import type { EvidenceItem, EvidenceType } from '@/services/verify';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
 interface ArtifactDetail {
   title: string | null;
@@ -204,7 +205,12 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef
   const { tz } = resolveDisplayTimezone();
   const artifact = useArtifactDetail(openArtifactId);
   const relatedNeedsMe = needsMe.find((item) => item.conversationId === conversationId) ?? null;
-  const todayHref = todayV3Enabled ? '/today' : '/inbox';
+  // story #4004 — '/today' 리터럴 대신 단일소스(nav-v3-destinations.ts)에서 구한다.
+  // OFF 폴백(/inbox)은 이 화면 고유 맥락("오늘 결정 아니면 옛 큐로")이라 목적지
+  // 모듈이 정할 대상이 아니다 — 그대로 유지.
+  const todayHref = todayV3Enabled
+    ? resolveNavV3Destinations({ todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false }).today.path
+    : '/inbox';
 
   const [evidence, retryEvidence] = useWorkItemScopedList<EvidenceItem>(
     workItemRef,

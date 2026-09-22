@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { buildGateTransitionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
 /**
  * story #3972 AC1 그라운딩(페드루 PO 확認 2026-09-16 17:07Z) — 이 카드는 옛
@@ -71,7 +72,17 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {isInTodayQueue ? (
           <Button asChild size="sm">
-            <Link href={todayV3Enabled ? '/today' : `/gates/${approvalTarget.gate_id}`} data-testid="chat-v3-event-card-sign">
+            {/* story #4004 — '/today' 리터럴 대신 단일소스. OFF 폴백(/gates/{id})은
+                이 카드 고유 맥락(v3 걷기 前 서명 자리)이라 목적지 모듈이 정할 대상이
+                아니다 — 그대로 유지. */}
+            <Link
+              href={
+                todayV3Enabled
+                  ? resolveNavV3Destinations({ todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false }).today.path
+                  : `/gates/${approvalTarget.gate_id}`
+              }
+              data-testid="chat-v3-event-card-sign"
+            >
               {t('eventCardSignAction')}
             </Link>
           </Button>
