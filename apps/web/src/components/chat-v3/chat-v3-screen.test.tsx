@@ -571,6 +571,84 @@ describe('ChatV3Screen — 특정 대화 주소(story #4018)', () => {
     });
   });
 
+  // 까디르군 QA CHANGES-2(2026-09-22) — CHANGES 1 코드의 신규 결함 2건.
+  describe('CHANGES 2 — 빈 목록 딥링크 가림 + 겹친 단건 조회 경합(까디르군 QA)', () => {
+    const EMPTY_THREADS = { data: [] };
+    const ONLY_ID = 'conv-outside-empty-list';
+    const ONLY_CONVERSATION = {
+      id: ONLY_ID,
+      participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'agent-4', name: '오르테가', type: 'agent' }],
+      unread_count: 0,
+    };
+    const ONLY_MESSAGES = {
+      data: [
+        {
+          id: 'm-only', created_by: 'agent-4', sender_name: '오르테가', sender_type: 'agent', sender_avatar_url: null,
+          sender_runtime_type: null, content: '목록이 비어도 이 대화는 보여야 해요.', attachments: [], created_at: '2026-09-01T00:00:00Z',
+          references: [], approval_target: null,
+        },
+      ],
+    };
+
+    it('⭐① 목록 0건 + 유효 딥링크 — 「빈 목록」에 가려지지 않고 단건 조회 결과가 렌더된다', async () => {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+        if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => EMPTY_THREADS };
+        if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+        if (url === `/api/conversations/${ONLY_ID}`) return { ok: true, status: 200, json: async () => ONLY_CONVERSATION };
+        if (url === `/api/conversations/${ONLY_ID}/messages`) return { ok: true, status: 200, json: async () => ONLY_MESSAGES };
+        return { ok: true, status: 200, json: async () => ({ data: null }) };
+      });
+      searchParamsRef.current = new URLSearchParams(`conversation=${ONLY_ID}`);
+      await mount();
+      // 되돌리면(RED 확인) — threads.length===0만 보고 早期 return하던 원래 코드는
+      // 여기서 항상 threadRailEmpty만 보여 아래 두 단언이 모두 실패한다.
+      expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('목록이 비어도 이 대화는 보여야 해요');
+      expect(container.querySelector('[data-testid="chat-v3-thread-rail"]')?.textContent).toContain('아직 대화가 없어요');
+    });
+
+    it('⭐② A→B로 빠르게 넘겨도 늦게 도착한 A 응답이 B 화면을 덮지 않는다', async () => {
+      const pending = new Map<string, { resolve: (v: { ok: boolean; status: number; json: () => Promise<unknown> }) => void }>();
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url === '/api/me') return { ok: true, status: 200, json: async () => ME };
+        if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => EMPTY_THREADS };
+        if (url === '/api/today') return { ok: true, status: 200, json: async () => EMPTY_TODAY };
+        if (url === '/api/conversations/conv-A') {
+          return new Promise((resolve) => { pending.set('A', { resolve }); });
+        }
+        if (url === '/api/conversations/conv-B') {
+          return new Promise((resolve) => { pending.set('B', { resolve }); });
+        }
+        if (url === '/api/conversations/conv-A/messages') return { ok: true, status: 200, json: async () => ({ data: [{ id: 'ma', created_by: 'agent-4', sender_name: 'A', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null, content: 'A 대화 내용', attachments: [], created_at: '2026-09-01T00:00:00Z', references: [], approval_target: null }] }) };
+        if (url === '/api/conversations/conv-B/messages') return { ok: true, status: 200, json: async () => ({ data: [{ id: 'mb', created_by: 'agent-4', sender_name: 'B', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null, content: 'B 대화 내용', attachments: [], created_at: '2026-09-01T00:00:00Z', references: [], approval_target: null }] }) };
+        return { ok: true, status: 200, json: async () => ({ data: null }) };
+      });
+
+      searchParamsRef.current = new URLSearchParams('conversation=conv-A');
+      await mount();
+      // A 조회가 아직 pending인 채로 주소가 B로 바뀐다(실사용 — 딥링크 클릭 연타류).
+      await act(async () => {
+        searchParamsRef.current = new URLSearchParams('conversation=conv-B');
+        const { ChatV3Screen } = await import('./chat-v3-screen');
+        root.render(wrap(<ChatV3Screen flags={{ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: false }} />));
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+      // B가 먼저 응답해 정상 렌더된 뒤, 뒤늦게 A(원래 요청, 이제는 stale)가 도착한다 —
+      // 이 순서라야 가드가 실제로 막는지를 잰다(A→B 순서로 풀면 B가 그냥 마지막에
+      // 이겨 가드 유무와 무관하게 통과 — 재현 실패로 되돌아가 직접 확認한 함정).
+      await act(async () => {
+        pending.get('B')?.resolve({ ok: true, status: 200, json: async () => ({ id: 'conv-B', participants: [], unread_count: 0 }) });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+      await act(async () => {
+        pending.get('A')?.resolve({ ok: true, status: 200, json: async () => ({ id: 'conv-A', participants: [], unread_count: 0 }) });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+      expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('B 대화 내용');
+      expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).not.toContain('A 대화 내용');
+    });
+  });
+
   it('⭐AC3 — 사람이 다른 대화를 고르면 주소가 push로 갱신된다(뒤로가기=이전 대화)', async () => {
     stub4018();
     await mount();

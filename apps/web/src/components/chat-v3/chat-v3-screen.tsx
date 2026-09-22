@@ -117,13 +117,21 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
     setDirectConversation(null);
     return fetchWithAuth(`/api/conversations/${id}`)
       .then(async (res) => {
+        // 까디르군 QA CHANGES-2 ② — A→B로 빠르게 넘기면 늦게 도착한 A 응답이 B 화면을
+        // 덮는다. chat-v3-messages.tsx activeThreadIdRef와 동형(요청 시 id 캡처·응답
+        // 시점에 「지금도 그 id를 조회 中인가」 대조, 아니면 이 응답은 버린다).
+        if (directFetchedIdRef.current !== id) return;
         if (res.status === 404 || res.status === 403) { setDirectConversationStatus('unavailable'); return; }
         if (!res.ok) { setDirectConversationStatus('error'); return; }
         const data = (await res.json()) as ChatV3Thread;
+        if (directFetchedIdRef.current !== id) return;
         setDirectConversation({ ...data, latest_message: data.latest_message ?? null, unread_count: data.unread_count ?? 0 });
         setDirectConversationStatus('idle');
       })
-      .catch(() => { setDirectConversationStatus('error'); });
+      .catch(() => {
+        if (directFetchedIdRef.current !== id) return;
+        setDirectConversationStatus('error');
+      });
   }, []);
 
   useEffect(() => {
@@ -255,7 +263,12 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : threads.length === 0 ? (
+        ) : threads.length === 0 && !selectedId ? (
+          // 까디르군 QA CHANGES-2 ① — 목록이 비어도(threads.length===0) 딥링크
+          // (?conversation=<id>, 30건 캡 밖이라 목록에 없는 대화)가 있으면 이 자리에서
+          // 바로 「빈 목록」으로 단정하지 않고 레일+상세 분기로 넘긴다(단건 조회
+          // 결과가 가려지던 결함). 진짜로 selectedId도 없는 경우(신규 유저·딥링크
+          // 0)만 이 전면 빈 상태를 쓴다.
           <div className="flex flex-1 items-center justify-center">
             <p className="text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
           </div>
