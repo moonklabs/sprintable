@@ -472,6 +472,24 @@ def pytest_collection_modifyitems(items: list) -> None:
     # 바로 그 위험한 패턴이다.
     destructive_items = [i for i in items if i.get_closest_marker(_MARKER_NAME) is not None]
     non_destructive_items = [i for i in items if i.get_closest_marker(_MARKER_NAME) is None]
+
+    # story #4153/#4152 후속(CI·소형, 페드루 PO 確定 2026-09-22) — pytest-timeout 전역
+    # 상한(pyproject.toml [tool.pytest.ini_options] timeout=30)이 destructive_schema
+    # 파일마다 붙는 파일별 완전 격리(fresh DB·마이그레이션 replay 등)를 전제하지 않는다 —
+    # 정상적으로 30초를 넘는 파일(예: test_3804_prod_promotion_bridge_0354a.py의 60-
+    # 마이그레이션 replay+pg_dump 스키마 대조, 등재 weight 85.0s)이 러너 부하 없이도
+    # 매번 하드킬됐다(PR#4381 shard6 run, 10:31:44Z 실측 — "Failed: Timeout (>30.0s)
+    # from pytest-timeout", 그 파일에 자기 timeout 마커도 backend/tests 전체에 per-test
+    # 오버라이드 선례도 0). 처방은 지목 파일 하나가 아니라 destructive_schema 클래스
+    # 전체로 — 자기 자신의 `@pytest.mark.timeout(...)`이 없는 항목에만 상한을 210초로
+    # 올린다(관측 최댓값 83s × 2.5 — #4152 ABSOLUTE_SLOW_MULTIPLIER와 같은 배수, 새
+    # 매직넘버 발명 0). 파일이 자기 자신의 timeout 마커를 이미 명시하면(더 좁게든
+    # 넓게든) 그 값을 그대로 존중한다(덮어쓰지 않는다).
+    _DESTRUCTIVE_SCHEMA_DEFAULT_TIMEOUT_SEC = 210
+    for item in destructive_items:
+        if item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(_DESTRUCTIVE_SCHEMA_DEFAULT_TIMEOUT_SEC))
+
     if destructive_items and non_destructive_items:
         destructive_files = sorted({str(Path(str(i.fspath))) for i in destructive_items})
         preview = destructive_files[:5]
