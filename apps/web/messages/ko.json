@@ -5472,6 +5472,7 @@
     "newsletterSendScheduleLabel": "발송 예정",
     "generationBudgetSealedCostLabel": "예상 비용",
     "generationBudgetSealedCostCurrencyUnknown": "통화 미확인",
+    "generationBudgetStatusLine": "이번 달 예산 · 한도 {limit} · 사용 {spent} · 남음 {remaining}",
     "newsletterEstimatedRecipientLabel": "예상 수신",
     "newsletterEstimatedRecipientCount": "{count}명",
     "newsletterRecipientUnknown": "미확인",

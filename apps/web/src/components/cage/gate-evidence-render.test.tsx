@@ -1579,3 +1579,47 @@ describe('generation_budget «예상 비용» 통화·단위 표기(story #4138 
     expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostLabel);
   });
 });
+
+// story #4085 AC4-B(3호 라이브 실측 2026-09-22, 페드루 PO 처방) — «예상 비용»까지는
+// 통화가 뜨는데(#4138) org 예산 한도·사용·남음이 카드 어디에도 안 그려짐(apps/web grep
+// 0)이 실측됐다. neutral_facts의 budget_limit_minor/budget_spent_minor/budget_
+// remaining_minor 셋이 다 있을 때만 한 줄 추가(BE recipe_gate_hooks.py가 같은
+// if-블록에서 currency와 함께 싣는다 — 존재 보증 동일).
+describe('generation_budget 한도·사용·남음 한 줄(story #4085 AC4-B)', () => {
+  it('⭐budget_limit_minor·budget_spent_minor·budget_remaining_minor 셋이 다 있으면 한 줄로 렌더된다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 500,
+      neutral_facts: {
+        currency: 'KRW',
+        budget_limit_minor: 50000,
+        budget_spent_minor: 11121,
+        budget_remaining_minor: 38879,
+      },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('한도 50,000원');
+    expect(container.textContent).toContain('사용 11,121원');
+    expect(container.textContent).toContain('남음 38,879원');
+  });
+
+  it('셋 중 하나라도 없으면(org 예산 규칙 미등록 등) 이 줄이 안 뜨고 기존 «예상 비용»/«통화 미확인» 표기는 무변이다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { stage: 'structure_passed' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain('한도');
+    expect(container.textContent).not.toContain('남음');
+    expect(container.textContent).toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+});

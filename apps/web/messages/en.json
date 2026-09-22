@@ -5472,6 +5472,7 @@
     "newsletterSendScheduleLabel": "Send scheduled",
     "generationBudgetSealedCostLabel": "Estimated cost",
     "generationBudgetSealedCostCurrencyUnknown": "Currency unknown",
+    "generationBudgetStatusLine": "This month's budget · Limit {limit} · Spent {spent} · {remaining} left",
     "newsletterEstimatedRecipientLabel": "Estimated recipients",
     "newsletterEstimatedRecipientCount": "{count} recipients",
     "newsletterRecipientUnknown": "Unknown",
