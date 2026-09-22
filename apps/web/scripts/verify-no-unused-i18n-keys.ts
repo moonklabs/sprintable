@@ -25,10 +25,21 @@
  *        동일 트레이드오프, #3757 A′와 동형).
  *   B  — `check-i18n-keys.js`의 `DYNAMIC_KEY_PREFIXES`(정밀 접두사 화이트리스트,
  *        `t(\`prefix_${var}\`)`류 — #2371) 대상.
+ *   C  — `verify-i18n-namespace-referenced.ts`의 `collectTableBareKeys`(데이터 카탈로그
+ *        리터럴 — `labelKey: 'x'`/`descriptionKey: 'x'`류, #3420/AC8 blind spot의 그
+ *        "바닥 변수를 그대로 t()에 넘기는 자리" — 선언 자리는 리터럴이지만 실제 t() 호출은
+ *        다른 파일의 변수 경유라 A/A″/A′ 어디에도 안 걸린다)가 그 키의 말단 세그먼트와 일치.
  *   E  — `TEMPLATE_KEY_TABLE`(#2228, apps/web/src/lib/i18n-template-key-table.ts) 전개값.
- * 다섯 다 없으면 죽은-키 후보 — fail-closed. 죽었다고 **못** 판정하는 쪽(위 신호가 하나라도
+ * 여섯 다 없으면 죽은-키 후보 — fail-closed. 죽었다고 **못** 판정하는 쪽(위 신호가 하나라도
  * 있으면 산다)으로 기운다 — PO 처방(2026-09-22): "unknown-ns 버킷은 «죽었다고 못 판정»으로
  * 두는 게 맞다."
+ *
+ * ⚠️ story #3732 첫 실전 오탐(2026-09-22, develop CI RED·PO 직접 그라운딩) —
+ * `content.errorExternalPublishPaused`(api-error.ts:176 `labelKey: 'errorExternalPublishPaused'`
+ * 선언 → 소비처가 `t(entry.labelKey)`로 간접 호출)가 죽은-키 후보로 오판됐다. 착수 당시
+ * scanRepo()의 네 신호(A/A″/A′/A″-word)만 재사용하고 C(테이블 선언)를 빠뜨린 게 원인 —
+ * 이미 존재하는 `collectTableBareKeys`를 재사용만 하면 됐는데 처음엔 안 가져왔다. 지금
+ * 이 파일이 그 갭을 메운다(새 기전 0, 기존 export 재사용).
  *
  * ⚠️ 의도적으로 안 쓰는 신호: `scanRepo().dynamicNamespaces`(ns 전체를 동적 호출 하나로
  * 통째로 보류하는 #3757 층B)는 여기 안 쓴다 — 키 단위 가드에서 그걸 쓰면 "이 ns 안 아무
@@ -50,6 +61,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectLeafKeys, scanRepo } from './verify-i18n-keys-exist';
+// story #3732 후속(2026-09-22, PO 그라운딩) — C 신호(테이블 선언 리터럴)를 새로 안 짓고
+// #3757 namespace 가드가 이미 export하는 collectTableBareKeys를 그대로 재사용한다.
+import { collectTableBareKeys } from './verify-i18n-namespace-referenced';
 // story #3732 — packages/scripts/(Docker 빌드 컨텍스트 안, i18n-key-parser.js와 동일 선례)
 // 에서 import한다. 저장소 루트 scripts/check-i18n-keys.js에서 직접 import했더니
 // verify-frontend-docker-import-context.ts(#3731·#3729)가 "빌드 컨텍스트 밖 참조"로
@@ -85,9 +99,10 @@ export interface DeadKeyScanInputs {
   indirectLookupRefFullKeys: Set<string>;
   unknownNsLiteralWords: Set<string>;
   indirectLookupWords: Set<string>;
+  tableBareKeys: Set<string>;
 }
 
-/** 리프 키 하나가 "참조됨"인지(A/A″/A′/A″-word/B/E 신호 중 하나) 순수 판정 — self-test·main() 공용. */
+/** 리프 키 하나가 "참조됨"인지(A/A″/A′/A″-word/B/C/E 신호 중 하나) 순수 판정 — self-test·main() 공용. */
 export function isKeyReferenced(flatKey: string, inputs: DeadKeyScanInputs): boolean {
   if (inputs.literalRefFullKeys.has(flatKey)) return true; // A
   if (inputs.indirectLookupRefFullKeys.has(flatKey)) return true; // A″
@@ -95,6 +110,7 @@ export function isKeyReferenced(flatKey: string, inputs: DeadKeyScanInputs): boo
   if (inputs.unknownNsLiteralWords.has(bare)) return true; // A′
   if (inputs.indirectLookupWords.has(bare)) return true; // A″-word
   if (isDynamicallyComposed(flatKey)) return true; // B
+  if (inputs.tableBareKeys.has(bare)) return true; // C
   if (templateKeySet.has(flatKey)) return true; // E
   return false;
 }
@@ -122,6 +138,7 @@ export function runScan(overrides: { srcRoot?: string; enPath?: string; minExpec
     indirectLookupRefFullKeys: new Set(scan.indirectLookupRefs.map((r) => r.fullKey)),
     unknownNsLiteralWords: scan.unknownNsLiteralWords,
     indirectLookupWords: scan.indirectLookupWords,
+    tableBareKeys: collectTableBareKeys(srcRoot),
   };
 
   const deadCandidates = [...enLeaves].filter((k) => !isKeyReferenced(k, inputs)).sort();
@@ -149,11 +166,11 @@ function main(): number {
     console.error(`\nFAIL: baseline 밖의 신규 죽은-키 후보 ${newDead.length}건:`);
     for (const k of newDead) console.error(`  ${k}`);
     console.error(
-      '\n→ 코드 어디서도 이 키를 안 읽는다(literal·co-argument·테이블값·unknown-ns 낱말·' +
-        'DYNAMIC_KEY_PREFIXES·TEMPLATE_KEY_TABLE 전부 미매치). 실제로 안 쓰면 messages에서' +
-        '지우고, 쓰는데 이 가드가 오판했으면(새 소비 형태) i18n-dead-key-baseline.json에' +
-        '사유와 함께 등재하거나 verify-i18n-keys-exist.ts의 신호 축을 넓힐 것(발견되면 새' +
-        '기전 없이 기존 축 확장 — #5ead8723 ③⑤⑥ 관례).',
+      '\n→ 코드 어디서도 이 키를 안 읽는다(literal·co-argument·테이블값(A″)·unknown-ns 낱말·' +
+        'DYNAMIC_KEY_PREFIXES·labelKey류 데이터 카탈로그(C)·TEMPLATE_KEY_TABLE 전부 미매치).' +
+        ' 실제로 안 쓰면 messages에서 지우고, 쓰는데 이 가드가 오판했으면(새 소비 형태)' +
+        ' i18n-dead-key-baseline.json에 사유와 함께 등재하거나 신호 축을 넓힐 것(발견되면 새' +
+        ' 기전 없이 기존 축 확장 — #5ead8723 ③⑤⑥·#3757 C 관례).',
     );
   }
 

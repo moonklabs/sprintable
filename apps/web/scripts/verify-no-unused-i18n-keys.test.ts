@@ -12,6 +12,7 @@ describe('isKeyReferenced — story #3732', () => {
       indirectLookupRefFullKeys: new Set(),
       unknownNsLiteralWords: new Set(),
       indirectLookupWords: new Set(),
+      tableBareKeys: new Set(),
       ...overrides,
     };
   }
@@ -36,12 +37,23 @@ describe('isKeyReferenced — story #3732', () => {
     expect(isKeyReferenced('settings.event_story', inputs())).toBe(true);
   });
 
+  // story #3732 첫 실전 오탐(2026-09-22, develop CI RED·PO 그라운딩) — api-error.ts:176
+  // `labelKey: 'errorExternalPublishPaused'`류 데이터 카탈로그 선언(소비는 다른 파일의
+  // t(entry.labelKey) 간접 호출이라 A/A″/A′ 어디에도 안 걸림)이 죽은-키 후보로 오판됐다.
+  // #3757 collectTableBareKeys 재사용으로 메운 신호.
+  it('C: 데이터 카탈로그(labelKey류) 낱말이 말단 세그먼트와 일치하면 참조됨(예: content.errorExternalPublishPaused)', () => {
+    expect(isKeyReferenced(
+      'content.errorExternalPublishPaused',
+      inputs({ tableBareKeys: new Set(['errorExternalPublishPaused']) }),
+    )).toBe(true);
+  });
+
   it('E: TEMPLATE_KEY_TABLE 전개값이면 참조됨(예: gateConfig.work_done)', () => {
     expect(isKeyReferenced('gateConfig.work_done', inputs())).toBe(true);
   });
 
-  // ⭐음성대조 — 다섯 신호가 전부 없으면 RED 대상(죽은-키 후보).
-  it('⭐음성대조 — 다섯 신호가 전부 없으면 참조 안 됨', () => {
+  // ⭐음성대조 — 여섯 신호가 전부 없으면 RED 대상(죽은-키 후보).
+  it('⭐음성대조 — 여섯 신호가 전부 없으면 참조 안 됨', () => {
     expect(isKeyReferenced('nsDead.orphanKey', inputs())).toBe(false);
   });
 
@@ -130,6 +142,36 @@ describe('runScan — 파이프라인 통합(story #3732)', () => {
       `,
     );
 
+    // C: 데이터 카탈로그(labelKey류) — 실 저장소 api-error.ts:176-421 구조 그대로 미러
+    // (Record<string, {labelKey}> 선언 → 다른 함수가 known?.labelKey를 반환 → 소비 파일이
+    // t(info.humanMessageKey)로 바닥 변수 호출, #3420/AC8 blind spot). 2026-09-22 develop
+    // CI 첫 실전 오탐(content.errorExternalPublishPaused)의 재발 방지 표본.
+    writeFileSync(
+      path.join(srcRoot, 'known-errors.ts'),
+      `
+        interface KnownError { labelKey: string; kind: string }
+        const KNOWN_ERRORS: Record<string, KnownError> = {
+          EXTERNAL_PUBLISH_PAUSED: { labelKey: 'errorExternalPublishPaused', kind: 'external_publish_paused' },
+        };
+        export function classifyError(code: string) {
+          const known = KNOWN_ERRORS[code];
+          return { humanMessageKey: known?.labelKey || undefined };
+        }
+      `,
+    );
+    writeFileSync(
+      path.join(srcRoot, 'error-banner.tsx'),
+      `
+        import { useTranslations } from 'next-intl';
+        import { classifyError } from './known-errors';
+        export function ErrorBanner({ code }: { code: string }) {
+          const t = useTranslations('content');
+          const info = classifyError(code);
+          return info.humanMessageKey ? <span>{t(info.humanMessageKey)}</span> : null;
+        }
+      `,
+    );
+
     const enPath = path.join(dir, 'en.json');
     const messages = {
       nsA: { label: 'Label' }, // A로 살아남아야 함.
@@ -138,6 +180,7 @@ describe('runScan — 파이프라인 통합(story #3732)', () => {
       gateConfig: { work_done: 'Done' }, // E(TEMPLATE_KEY_TABLE)로 살아남아야 함(소스 참조 0).
       accountSwitcher: { reloginRequired: 'Needs relogin' }, // 멤버접근(A′-word)으로 살아남아야 함.
       nsRich: { richKey: 'Rich text' }, // .rich() 리터럴(A)로 살아남아야 함.
+      content: { errorExternalPublishPaused: 'Publishing paused' }, // C(테이블 선언)로 살아남아야 함.
       nsDead: { orphanKey: 'Nobody uses this' }, // 다섯 신호 전부 없음 — RED 대상.
     };
     writeFileSync(enPath, JSON.stringify(messages));
