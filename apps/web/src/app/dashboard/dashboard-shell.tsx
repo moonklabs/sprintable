@@ -423,8 +423,12 @@ export function DashboardShell({
         <TopBarProvider>
           {/* story #3756 — dashboard-shell-root가 --bottom-dock-inset·--mobile-tab-bar-h를
               소유(globals.css). MobileTabBar·BottomDock 둘 다 이 아래 자손이라 상속으로 그
-              값을 읽는다. */}
-          <SidebarProvider className="h-svh dashboard-shell-root">
+              값을 읽는다.
+              story #4131 — 같은 요소가 --shell-chrome-h도 소유한다. TopBar 렌더 여부는 JS
+              불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — data 속성으로 다리를
+              놓는다(globals.css가 `[data-topbar-hidden]`로 분기, JS 측정 없이 CSS만으로
+              --shell-chrome-h를 계산하기 위한 유일한 JS 개입). */}
+          <SidebarProvider className="h-svh dashboard-shell-root" data-topbar-hidden={showTopBar ? undefined : ''}>
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}
