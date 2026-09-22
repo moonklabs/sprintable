@@ -1,22 +1,10 @@
 import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/db/server';
 import { FirstInstructionRedirect } from './first-instruction-redirect';
-import { isTodayV3Enabled } from '@/lib/today-v3';
-import { isChatV3Enabled } from '@/lib/chat-v3';
-import { isConnectRulesV3Enabled } from '@/lib/connect-rules-v3';
-import type { NavV3Flags } from '@/lib/nav-v3-destinations';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 
-// story #4158 — env 이름 3개를 nav-v3-flags-server.ts(readNavV3FlagsFromEnv) 한 곳으로
-// 모으는 건 story #4017(이 브랜치 rebase 시점 develop에 아직 없음)의 scope. #4017 착지
-// 뒤 재-onto하며 이 함수를 readNavV3FlagsFromEnv()로 교체(중복 축 발명이 아니라 그
-// 파일이 아직 없을 뿐 — story #4004의 today/page.tsx 등과 동형 임시 패턴).
-function readNavV3Flags(): NavV3Flags {
-  return {
-    todayV3Enabled: isTodayV3Enabled(),
-    chatV3Enabled: isChatV3Enabled(),
-    connectRulesV3Enabled: isConnectRulesV3Enabled(),
-  };
-}
+// story #4158 — env 이름 3개를 한 곳으로 모으는 임시 readNavV3Flags() 헬퍼는 story
+// #4017 착지(develop) 뒤 readNavV3FlagsFromEnv()로 교체 완료(재-onto, 2026-09-22).
 
 // [SID:4021] 컴패니언 «첫 지시»가 여는 웹 주소. 데스크톱은 에이전트 키만 있어 대화 id를
 // 얻지도 만들지도 못한다(onboarding_activation.py의 조회는 요청자=사람 참여 대화만·생성은
@@ -55,7 +43,7 @@ export default async function FirstInstructionPage({ searchParams }: FirstInstru
       agentId={agent ?? null}
       compose={compose ?? ''}
       projectId={projectId}
-      flags={readNavV3Flags()}
+      flags={readNavV3FlagsFromEnv()}
     />
   );
 }
