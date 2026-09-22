@@ -92,6 +92,10 @@ export const DEST_ALLOWED_NON_TEST_FILES: Record<string, AllowedEntry<DestLitera
     reason: '위와 동형 — /today 자기 경로 폴백.',
     counts: { '/today': 1 },
   },
+  'src/app/connect-rules/layout.tsx': {
+    reason: '위와 동형 — x-pathname 헤더 미존재 시 자기 라우트(/connect-rules) 폴백(자기참조, 목적지 "결정" 아님).',
+    counts: { '/connect-rules': 1 },
+  },
   'src/components/chat-v3/chat-v3-context-panel.tsx': {
     reason: '「오늘」 딥링크 로컬 리터럴 — story #4004(공유 목적지 모듈 소비 전환) 전까지 잔존.',
     counts: { '/today': 1 },
