@@ -616,7 +616,9 @@
     "hypothesesEmptyTitle": "아직 가설이 없어요",
     "hypothesesFilterEmptyTitle": "고른 상태에 맞는 가설이 없어요",
     "hypothesesFilterAll": "전체",
-    "hypothesesLinkedWorkCta": "연결된 일 보기"
+    "hypothesesLinkedWorkCta": "연결된 일 보기",
+    "hypothesesGoToDetailAriaLabel": "{label}, 가설 {n}번째",
+    "hypothesesGoToLinkedWorkAriaLabel": "{n}번째 가설 {label}"
   },
   "organization": {
     "rolesTitle": "권한",

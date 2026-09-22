@@ -616,7 +616,9 @@
     "hypothesesEmptyTitle": "No hypotheses yet",
     "hypothesesFilterEmptyTitle": "No hypotheses match this filter",
     "hypothesesFilterAll": "All",
-    "hypothesesLinkedWorkCta": "View linked work"
+    "hypothesesLinkedWorkCta": "View linked work",
+    "hypothesesGoToDetailAriaLabel": "{label}, hypothesis {n}",
+    "hypothesesGoToLinkedWorkAriaLabel": "{label} — hypothesis {n}"
   },
   "organization": {
     "rolesTitle": "Permissions",

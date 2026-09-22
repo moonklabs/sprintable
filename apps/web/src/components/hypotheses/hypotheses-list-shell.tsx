@@ -127,11 +127,12 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
           )
         ) : (
           <div className="space-y-2">
-            {filtered.map((h) => (
+            {filtered.map((h, index) => (
               <Card key={h.id} className="space-y-1.5 p-3">
                 <button
                   type="button"
                   onClick={() => goToDetail(h.id)}
+                  aria-label={t('hypothesesGoToDetailAriaLabel', { n: index + 1, label: h.statement })}
                   className="block w-full text-left text-sm font-medium text-foreground hover:underline"
                 >
                   {h.statement}
@@ -145,6 +146,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
                       size="sm"
                       className="h-auto p-0 text-xs"
                       onClick={() => goToLinkedWork(h.id)}
+                      aria-label={t('hypothesesGoToLinkedWorkAriaLabel', { n: index + 1, label: t('hypothesesLinkedWorkCta') })}
                     >
                       {t('hypothesesLinkedWorkCta')}
                     </Button>
