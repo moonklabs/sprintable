@@ -29,12 +29,24 @@ export interface TodayNeedsMeItem {
   conversationId: string | null;
 }
 
+// story #3970(BE PR #4364, story #3961) — 정지 요청 상태. state는 BE 순수파생값
+// (agent_runs.py::_effective_cancel_outcome과 동일 판정, today.py:AgentRunCancelState)
+// 그대로 옮긴다. 요청된 적 없으면 필드 자체가 null(지어내지 않는다).
+export type TodayAgentCancelState = 'requested' | 'acknowledged' | 'unacknowledged';
+
+export interface TodayAgentCancel {
+  requestedAt: string;
+  reason: string | null;
+  state: TodayAgentCancelState;
+}
+
 export interface TodayAgentProgressItem {
   runId: string;
   agentName: string;
   workItemTitle: string | null;
   status: string;
   startedAt: string;
+  cancel: TodayAgentCancel | null;
 }
 
 export interface TodayPublishedByChannel {
@@ -163,6 +175,14 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
   };
 }
 
+function parseAgentCancel(raw: unknown): TodayAgentCancel | null {
+  if (!isRecord(raw)) return null;
+  const requestedAt = str(raw['requested_at']);
+  const state = raw['state'];
+  if (!requestedAt || (state !== 'requested' && state !== 'acknowledged' && state !== 'unacknowledged')) return null;
+  return { requestedAt, reason: str(raw['reason']), state };
+}
+
 function parseAgentProgressItem(raw: unknown): TodayAgentProgressItem | null {
   if (!isRecord(raw)) return null;
   const runId = str(raw['run_id']);
@@ -177,6 +197,7 @@ function parseAgentProgressItem(raw: unknown): TodayAgentProgressItem | null {
     workItemTitle: workItem ? str(workItem['title']) : null,
     status,
     startedAt,
+    cancel: parseAgentCancel(raw['cancel']),
   };
 }
 
