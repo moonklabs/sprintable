@@ -11,7 +11,7 @@ import { ChatV3Messages } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
-import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
  * story #3972(E-UX-OVERHAUL·「대화」 구현 2/N·FE) — 시안 ②(artifact c707a913)
@@ -30,8 +30,12 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   // resolveNavV3Destinations 그대로 씀). 이벤트 카드 서명·관련 링크는 "결정할 것" 맥락이라
   // 여전히 /gates/{id}·/inbox 자기 fallback을 쓴다(chat-v3-event-card.tsx·
   // chat-v3-context-panel.tsx 참고, 목적지 모듈이 정할 대상이 아님 — 「오늘」 nav 항목과
-  // 다른 결정).
+  // 다른 결정). CHANGES 1(페드루 PO 지적, 2026-09-22) — 두 컴포넌트가 각자 가짜 flags
+  // 조합({todayV3Enabled:true, ...false})으로 resolveNavV3Destinations를 다시 불러
+  // '/today'를 구하던 건 리터럴을 한 겹 감싼 재조립이었다 — 이 화면이 실 flags로
+  // 딱 한 번 구해 todayHref로 내려준다.
   const todayV3Enabled = flags.todayV3Enabled;
+  const todayHref = resolveNavV3Destinations(flags).today.path;
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -117,6 +121,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                   locale={locale}
                   needsMe={needsMe}
                   todayV3Enabled={todayV3Enabled}
+                  todayHref={todayHref}
                   onOpenArtifactChange={setOpenArtifactId}
                   onWorkItemRefChange={setWorkItemRef}
                 />
@@ -126,6 +131,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                   workItemRef={workItemRef}
                   needsMe={needsMe}
                   todayV3Enabled={todayV3Enabled}
+                  todayHref={todayHref}
                 />
               </>
             ) : (
