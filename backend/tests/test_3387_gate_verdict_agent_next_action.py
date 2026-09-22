@@ -30,11 +30,20 @@ class _FakeGateRow:
     construct 선례와 동형). 기본값 `scope_key=""`은 이 파일이 검증하는 unscoped
     site_post/일반 channel_post 게이트와 그대로 일치(레시피 scoped 분기는 안 탐,
     회귀 0)."""
-    def __init__(self, neutral_facts: dict | None, *, id_=None, scope_key: str = "", work_item_id=None):
+    def __init__(
+        self, neutral_facts: dict | None, *, id_=None, scope_key: str = "", work_item_id=None,
+        publish_outcome: str | None = None,
+    ):
         self.neutral_facts = neutral_facts
         self.id = id_ or uuid.uuid4()
         self.scope_key = scope_key
         self.work_item_id = work_item_id or uuid.uuid4()
+        # story #4149(페드루 PO 確定 2026-09-22) — 이 목의 scope_key 기본값("")이 실
+        # unscoped 게이트와 같은 축이라, 신설 분기(events.py:1674)가 접근하는
+        # publish_outcome도 실 컬럼처럼 채워야 AttributeError 없이 기존 human_only
+        # 폴백까지 그대로 통과한다(기본 None → 조건 거짓 → 회귀 0, 4142 CHANGES-1과
+        # 동형 원칙: 목을 실물에 맞춘다).
+        self.publish_outcome = publish_outcome
 
 
 class _FakeResult:
