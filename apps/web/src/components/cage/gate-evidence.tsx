@@ -13,7 +13,7 @@ import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { isCommentReplyGate } from '@/components/cage/gate-risk';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { channelLabel } from '@/lib/channel-label';
-import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
+import { formatMinorCurrency, formatCount, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
@@ -843,8 +843,12 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {/* story #4072(E-RECIPE-1, 페드루 PO 確定 2026-09-19·카디르 QA③ CHANGES) —
           generation_budget 전용 sealing. ads_boost 블록과 동일 선례(이 gate_type이
           아니면 estimatedCostMinor는 항상 null). 통화는 neutral_facts.currency가
-          실 있을 때만 formatMinorCurrency로 라벨(위 facts 타입 주석) — 구버전 gate처럼
-          currency가 없으면 지어내지 않고 최소단위 원값만. */}
+          실 있을 때만 formatMinorCurrency로 라벨(위 facts 타입 주석).
+          story #4138(페드루 PO, 2026-09-22 01:14Z 실측 — 2호 게이트 3에 currency 키
+          자체가 없어(댄의 structure_passed 발행 페이로드 미포함) 「4000」이 통화·천 단위
+          구분·소수 표기 0으로 그대로 찍혔다) — currency가 없으면 원값(minor 그대로, 손
+          구현 콤마 금지, formatMinorCurrency의 자매 함수 formatCount로 천 단위 구분만)
+          + «통화 미확인» 보조 표기(거짓 단위 0 — KRW/USD로 지어내지 않는다). */}
       {facts.estimatedCostMinor !== null ? (
         <div className="space-y-0.5">
           <p>
@@ -852,8 +856,11 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <span className="text-foreground font-medium">
               {facts.estimatedCostCurrency
                 ? formatMinorCurrency(facts.estimatedCostMinor, facts.estimatedCostCurrency, locale, tContent)
-                : facts.estimatedCostMinor}
+                : formatCount(facts.estimatedCostMinor, locale)}
             </span>
+            {!facts.estimatedCostCurrency && (
+              <span className="text-muted-foreground"> · {t('generationBudgetSealedCostCurrencyUnknown')}</span>
+            )}
           </p>
         </div>
       ) : null}

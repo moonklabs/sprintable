@@ -1414,3 +1414,70 @@ describe('GateLinkedEvidenceSection — 제작 산출물 칸(story #4136 AC1~3)'
     expect(container.textContent).not.toContain(koMessages.cage.gateLinkedEvidenceEmpty);
   });
 });
+
+// story #4138(페드루 PO, 2호 게이트 3(generation_budget) 실측 2026-09-22 01:14Z) — «예상
+// 비용»이 통화·천 단위·소수(minor 단위) 표기 0으로 «4000» 그대로 찍혔다. KRW/USD는 기존
+// formatMinorCurrency(§3500 SSOT) 그대로(발명 0) · currency 미기재(BE structure_passed
+// 발행 페이로드 실측처럼)면 formatCount(§3808 자매 함수)로 천 단위 구분만 하고 «통화
+// 미확인»으로 거짓 단위를 안 낸다.
+describe('generation_budget «예상 비용» 통화·단위 표기(story #4138 AC1·AC3)', () => {
+  it('⭐currency=KRW면 기존 금액 관례(4,000원)로 렌더되고 «통화 미확인»은 안 뜬다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { currency: 'KRW' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('4,000원');
+    expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+
+  it('⭐currency=USD면 minor/100로 소수 2자리(40.00)로 렌더된다', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { currency: 'USD' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('$40.00');
+    expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+
+  it('⭐currency 키 자체가 없으면(2호 게이트 3 실측 재현) 천 단위 구분(4,000)만 하고 «통화 미확인»을 명시한다(거짓 단위 0)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: 4000,
+      neutral_facts: { stage: 'structure_passed' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('4,000');
+    expect(container.textContent).not.toContain('4000');
+    expect(container.textContent).toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+
+  it('sealed_estimated_cost_minor가 null(미봉인)이면 «예상 비용» 줄 자체가 안 뜬다(회귀 0 — 이 카드가 안 건드린 조건)', async () => {
+    const gate = realApiShapedGate({
+      gate_type: 'generation_budget',
+      sealed_estimated_cost_minor: null,
+      neutral_facts: { currency: 'KRW' },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.generationBudgetSealedCostLabel);
+  });
+});
