@@ -479,8 +479,8 @@ async def list_site_post_drafts_endpoint(
     ),
     work_item_id: uuid.UUID | None = Query(
         default=None,
-        description="story #3988 — 이 일(work_item_id)에 이어진 초안만(일감 상세 「발행물」 "
-        "탭 전용). 없으면 기존 응답과 완전히 동일(회귀 0).",
+        description="story #3988 — drafts linked to this work item only (worklist detail "
+        "Publications tab). Omitted: response identical to before (no regression).",
     ),
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
