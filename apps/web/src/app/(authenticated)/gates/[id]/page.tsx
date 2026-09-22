@@ -8,7 +8,7 @@ import { ChevronLeft, CheckCircle, XCircle } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
+import { GateEvidence, GateActivityHistory, GateLinkedEvidenceSection, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { ProductionWorkbenchEvidencePanel } from '@/components/cage/production-workbench-evidence';
 import { LineagePerformancePanel } from '@/components/cage/lineage-performance';
 import { BoostExecutionControl } from '@/components/cage/boost-execution-control';
@@ -148,10 +148,16 @@ export default function GateDetailPage() {
   // 레퍼런스를 만들어(resolver가 응답 목록에 없는 한) 이 effect가 무한 재실행됐다(fetch
   // 폭주). resolver_id별로 한 번만 시도하도록 ref로 추적 — 기존 소비처(resolver_id 표시)와
   // 무관한 사전 버그였고 이번 undo 테스트 픽스처(status!='pending')가 처음 건드렸다.
-  const fetchedResolverIdRef = useRef<string | null>(null);
+  // story #4136 — designated_approver_id도 같은 캐시에 태운다(비결재자 뷰의 «결재는
+  // {이름}에게 배정돼 있어요» 표기). BE에 새 name 필드를 요청할 필요가 없다 — /api/team-
+  // members가 이미 전 멤버 이름을 주므로(지어내지 않음, 실 조회) 이 훅만 두 id를 같이
+  // 추적하면 된다. 두 id를 합친 키로 "이미 이 조합을 시도했는지" 판별(둘 중 하나만 바뀌어도
+  // 재시도).
+  const fetchedNamesKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!gate?.resolver_id || fetchedResolverIdRef.current === gate.resolver_id) return;
-    fetchedResolverIdRef.current = gate.resolver_id;
+    const key = `${gate?.resolver_id ?? ''}|${gate?.designated_approver_id ?? ''}`;
+    if (key === '|' || fetchedNamesKeyRef.current === key) return;
+    fetchedNamesKeyRef.current = key;
     void fetchWithAuth('/api/team-members')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
@@ -161,7 +167,7 @@ export default function GateDetailPage() {
         setMemberNames((prev) => ({ ...prev, ...names }));
       })
       .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
-  }, [gate?.resolver_id]);
+  }, [gate?.resolver_id, gate?.designated_approver_id]);
 
   // gate-inbox.tsx와 동형 판정(중복 빌드 봉쇄 취지상 동일 규칙 재사용) — doc/canonicalize gate는
   // requires_human 메타가 없어(BE 구조상) gateNeedsAction()만으로는 액션 필요 여부를 못 잡는다.
@@ -467,6 +473,13 @@ export default function GateDetailPage() {
             const evidencePanels = (
               <>
                 <GateEvidence gate={gate} />
+                {/* story #4136 — canAct/needsAction과 무관하게 항상 렌더(모든 열람자, AC1).
+                    GateProductionWorkbenchEvidence(아래, #4057)는 work-item 범위 훅이 0건이면
+                    조용히 null을 반환하는 게 원래 설계라 그대로 둔다 — 이 섹션이 게이트
+                    자신의 linked_evidence[]/draft_doc_reference_token을 직접 렌더해 "제작
+                    산출물 칸이 아예 안 보인다"는 실사고를 항상 뭔가(칩 또는 명시적 빈 문구)로
+                    막는다. */}
+                <GateLinkedEvidenceSection gate={gate} />
                 <GateProductionWorkbenchEvidence gate={gate} />
                 <GateLineagePerformance gate={gate} />
               </>
@@ -512,12 +525,20 @@ export default function GateDetailPage() {
             // story #3006(유나 design 관찰, 페드루 확定 2026-08-24) — #3001 카드배타화
             // 이후 이 표면(gate 상세, 직접 URL/감사 진입)이 「무권한」과 「지정 결재선이
             // 걸려 있음」을 같은 문구로 뭉뚱그리던 유일한 실 표적(챗카드는 비지정자에게
-            // 애초 안 감 — approval-request-card.tsx 주석 참조). 이름은 안 싣는다(BE도
-            // 안 주고, 지어내지 않는다는 이 코드베이스 관례 그대로).
+            // 애초 안 감 — approval-request-card.tsx 주석 참조).
+            // ⚠️정정(story #4136, 2026-09-22) — "이름은 안 싣는다"는 그때 BE가 이름을
+            // 안 줬기 때문이었지 원칙 자체가 아니었다. designated_approver_id는 이미
+            // memberNames 캐시(위 effect, #4136에서 이 id도 같이 추적하도록 확장)로 실 이름을
+            // 조회할 수 있다(지어내지 않음, /api/team-members 실 조회) — 이름을 아는
+            // 경우에만 named 문구, 모르면(응답 지연·조회 실패) 기존 무명 문구로 graceful
+            // 폴백한다(resolvedStatusExtra의 gateDetailResolvedByStatus/gateDetailResolvedStatus
+            // 폴백과 동형 패턴).
             const unauthorizedExtra = (
               <p className="text-[11px] text-muted-foreground">
                 {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
-                  ? t('gateReadonlyDesignatedElsewhere')
+                  ? (memberNames[gate.designated_approver_id]
+                      ? t('gateReadonlyDesignatedElsewhereNamed', { name: memberNames[gate.designated_approver_id] })
+                      : t('gateReadonlyDesignatedElsewhere'))
                   : t('gateReadonlyNotAuthorized')}
               </p>
             );

@@ -200,6 +200,27 @@ export interface GateItem {
   // 다른 gate_type은 전부 undefined/null. #4072 前엔 BE GateResponse에 이 필드가
   // 아예 없어 API가 항상 None을 냈다(sealed_ads_* PR2 재발 클래스 3번째).
   sealed_estimated_cost_minor?: number | null;
+  // story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 이 단계에 연결된
+  // evidence 레코드 전부(neutral_facts.draft_doc_reference_token은 초안 1개만 가리키는
+  // 단수 필드라 다건 목록이 필요했다 — #4041/#4056 제작 작업대가 stage당 여러 산출물을
+  // 남기는 것과 대칭). shape는 미르코군과 1:1 합의(2026-09-22 01:14Z, BE 구현 그대로) —
+  // 최초 내 제안("doc"|"artifact"|"evidence" kind)은 미르코군이 정정: kind는 evidence.
+  // payload.kind(예: "concept_brief"/"animatic"/"storyboard" — production-workbench-
+  // evidence.tsx의 ProductionWorkbenchKind와 같은 어휘, "이게 뭔지"의 사람이 읽는 라벨이지
+  // doc/artifact 판별자가 아니다). doc/artifact 판별은 reference_token을
+  // parseReferenceToken()으로 파싱한 entityType에서 나온다(같은 정보를 두 곳에 실어
+  // 드리프트를 만들지 않는다는 미르코군 판단). reference_token은 **nullable** — evidence는
+  // 있는데 doc/artifact 어느 쪽으로도 못 풀리면(payload 형식 불일치 등) null이지만 항목
+  // 자체는 남는다("확定 대상은 맞는데 실물을 아직 못 찾음"이라는 정직한 신호 — 조용히
+  // 빼면 "그 산출물이 아예 없다"로 오독될 수 있다, FE 렌더가 null도 다뤄야 한다는 미르코군
+  // 지시). ref(evidence.ref, 자유문자열)는 이 카드가 아직 안 씀(참고 데이터로만 실림).
+  // BE 미착지 구버전 응답은 undefined — 항상 optional.
+  linked_evidence?: Array<{
+    id: string;
+    kind: string;
+    ref: string;
+    reference_token: string | null;
+  }>;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

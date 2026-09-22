@@ -17,6 +17,7 @@ import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -142,7 +143,7 @@ interface ParsedReferenceToken {
 // chat-report-density.ts에만 있던 규칙을 헬퍼로 승격)로 원복하지 않으면 실 제목(예: 이 팀
 // 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려 반영)")이 칩에 `\[...\] ... v2\(...\)`
 // 문자 그대로 새어 나간다 — 초기 구현이 이스케이프 없는 픽스처로만 테스트해 못 잡았던 자리.
-function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
+export function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
   const s = realString(v);
   if (!s) return null;
   const m = s.match(/^\[(.*)\]\((.*)\)$/);
@@ -1192,6 +1193,126 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 라이브 실측(2호 게이트
+ * 1(concept_approval)·PO 세션, 2026-09-22 00:40Z)에서 지정 결재자가 아니면 이 칸에
+ * gateReadonlyDesignatedElsewhere 한 줄뿐이었다 — 컨셉 브리프 doc·컨셉 보드 artifact·게이트
+ * evidence 전부 카드 어디에도 안 보였다. 원인: 기존 productionWorkbenchSectionTitle 패널
+ * (production-workbench-evidence.tsx)은 work-item 범위 훅(useWorkItemProductionEvidence)이
+ * 0건이면 **조용히 null**을 반환한다(「없으면 비운다」 규율 — #4057 자체 설계 의도, 이 카드가
+ * 건드리지 않는다). 이 컴포넌트는 그와 별개로 **게이트 자신의** neutral_facts.draft_doc_
+ * reference_token + gate.linked_evidence[](#4135 신설, gate-scoped라 work-item 범위 오매칭
+ * 문제가 구조적으로 없다)를 직접 렌더한다 — canAct/needsAction과 무관하게 항상 그려진다
+ * (모든 열람자, 이 카드 AC1). 0건이면 명시적으로 «이 게이트에 등록된 산출물이 없어요»(거짓
+ * 참조 0 — #3937 규율 그대로, 조용한 null 금지).
+ *
+ * ⚠️CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"과 "모름"을 가른다. BE가
+ * linked_evidence 필드 자체를 아직 안 보내면(#4135 미배포·구버전 응답) "이 게이트에
+ * 산출물이 없다"를 말할 근거가 없다 — 라이브 2호 게이트 1처럼 evidence·doc·artifact가
+ * 실재하는데도 그 문장을 쓰면 거짓이 된다(#4055류와 같은 급의 "모르면 안다고 안 한다"
+ * 규율). `Array.isArray(gate.linked_evidence)`가 참일 때만(BE가 `[]`든 항목이든 "답을
+ * 한" 때만) 0건 claim 자격이 생긴다 — 배열 자체가 없고 draft_doc도 없으면 이 섹션은
+ * **아예 안 그려진다**(과거 이 칸이 없던 것과 동형, #4135 배포 순서와 무관하게 안전).
+ *
+ * shape는 미르코군과 1:1 합의(2026-09-22 01:14Z) — kanban/types.ts GateItem.linked_evidence
+ * 주석 참고. 핵심: linked_evidence[].kind는 doc/artifact 판별자가 아니라 evidence.payload.kind
+ * (예: "concept_brief") — doc/artifact 판별은 reference_token을 parseReferenceToken()으로
+ * 파싱한 entityType에서 나온다. reference_token은 nullable — null이면 "이 evidence는 확定
+ * 대상이지만 실물 참조를 아직 못 찾음"이라는 정직한 신호라 항목 자체는 유지하되(조용히 빼면
+ * "산출물이 아예 없다"로 오독) 클릭 불가한 kind 배지로만 표시한다(EntityChip이 아니라
+ * Badge — 진짜로 갈 곳이 없다).
+ *
+ * ⚠️CHANGES-2(유나 design-pass, 2026-09-22 01:56Z, PR#4511 issuecomment-5770100618) — kind는
+ * evidence.payload.kind **원문 snake_case enum**이지("concept_brief"가 사람이 읽는 한글 라벨
+ * 이라는 위 문단의 원래 설명은 유나군 정정으로 틀렸다 확認 — 그건 enum이지 라벨이 아니다),
+ * 그대로 배지에 찍으면 고객 대면 화면에 내부어가 샌다(더구나 resolved 칩은 토큰 라벨이
+ * 한글인데 unresolved 배지만 영어 enum — 같은 종류가 표기가 갈림). KIND_LABEL_KEY(아래)로
+ * t() 라벨화 — production-workbench-evidence.tsx의 KIND_TITLE_KEY와 다른 어휘(유나군이 이
+ * 화면 전용으로 명시한 5개 문구, "컨셉 브리프" 등 — 그 파일의 "컨셉" 같은 축약형이 아니다)라
+ * 새 map을 둔다. 미지 kind(#4042 서버 방어선 밖의 5종 이외)는 raw를 그대로 안 내고 중립
+ * «산출물»로 폴백(enum이 UI에 안 닿는다). 배지 형태·클릭불가·honest 의미는 그대로.
+ */
+const KIND_LABEL_KEY: Record<ProductionWorkbenchKind, string> = {
+  material_collection_sheet: 'gateLinkedEvidenceKindMaterialCollectionSheet',
+  concept_brief: 'gateLinkedEvidenceKindConceptBrief',
+  storyboard: 'gateLinkedEvidenceKindStoryboard',
+  animatic: 'gateLinkedEvidenceKindAnimatic',
+  verification_sheet: 'gateLinkedEvidenceKindVerificationSheet',
+};
+export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
+  const t = useTranslations('cage');
+  const seen = new Set<string>();
+  const resolved: (ParsedReferenceToken & { key: string })[] = [];
+  const unresolvedKinds: { key: string; kind: string }[] = [];
+
+  // story #4136 CHANGES-1(페드루 PO 지적, 2026-09-22 01:41Z) — "없음"과 "모름"을 가른다.
+  // BE가 linked_evidence 필드 자체를 아직 안 보내면(#4135 미배포·구버전 응답) 이 게이트에
+  // 정말 산출물이 없는지 우리는 **모른다** — 라이브 2호 게이트 1처럼 evidence·doc·artifact가
+  // 실재하는데도 «없어요»라고 말하면 거짓이 된다. `Array.isArray`가 참일 때만(BE가 `[]`든
+  // 항목이든 "답을 한" 때만) "없어요"를 말할 자격이 생긴다 — 배열 자체가 없으면 그 claim을
+  // 아예 안 한다("모르면 안다고 안 한다" 규율, story #4055류와 동형).
+  const beAnswered = Array.isArray(gate.linked_evidence);
+  if (beAnswered) {
+    for (const ev of gate.linked_evidence!) {
+      const parsed = parseReferenceToken(ev.reference_token);
+      if (parsed) {
+        const key = `${parsed.entityType}:${parsed.entityId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        resolved.push({ ...parsed, key });
+      } else {
+        // reference_token이 null(또는 파싱 실패) — evidence.id로 유일화(같은 kind가 여러
+        // 건일 수 있다).
+        unresolvedKinds.push({ key: `unresolved:${ev.id}`, kind: ev.kind });
+      }
+    }
+  }
+  // draft_doc_reference_token이 linked_evidence[]와 같은 doc을 가리키면(#4135 착지 前엔
+  // 흔함 — 두 필드가 아직 같은 doc을 독립적으로 채우는 과도기) 중복 칩을 안 낸다. 이 필드는
+  // linked_evidence와 무관하게 이미 있어 왔으므로(#3569) beAnswered와 상관없이 항상 본다.
+  const draftDocRef = parseReferenceToken(gate.neutral_facts?.['draft_doc_reference_token']);
+  if (draftDocRef) {
+    const key = `${draftDocRef.entityType}:${draftDocRef.entityId}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      resolved.push({ ...draftDocRef, key });
+    }
+  }
+
+  const totalCount = resolved.length + unresolvedKinds.length;
+  // beAnswered=false + 산출물 0(draft_doc도 없음) — "없다"고 말할 근거가 없으니 섹션 자체를
+  // 생략한다(과거 이 칸이 아예 없던 것과 동형 — #4135 미배포 구간엔 이 카드가 아무 것도
+  // 지어내지 않는다). beAnswered=true(BE가 [] 포함 명시 답)거나 draft_doc이라도 있으면
+  // 렌더한다.
+  if (!beAnswered && totalCount === 0) return null;
+
+  return (
+    <div className="space-y-1.5" data-testid="gate-linked-evidence">
+      <p className="text-[11px] font-semibold text-muted-foreground">{t('gateLinkedEvidenceSectionTitle')}</p>
+      {totalCount === 0 ? (
+        <p className="text-[11.5px] italic text-muted-foreground">{t('gateLinkedEvidenceEmpty')}</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {resolved.map((item) => (
+            <EntityChip
+              key={item.key}
+              entityType={item.entityType}
+              entityId={item.entityId}
+              label={item.label}
+              href={item.href}
+            />
+          ))}
+          {unresolvedKinds.map((u) => (
+            <Badge key={u.key} variant="outline" className="shrink-0">
+              {isProductionWorkbenchKind(u.kind) ? t(KIND_LABEL_KEY[u.kind]) : t('gateLinkedEvidenceKindUnknown')}
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

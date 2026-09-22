@@ -158,6 +158,73 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
   });
 });
 
+// story #4136(FE)·#4135(BE, 미르코) — 게이트 상세 «제작 산출물» 칸. 라이브 실측(PO 세션,
+// 2026-09-22 00:40Z)에서 지정 결재자가 아니면 이 칸에 안내 문장 한 줄뿐이었고 산출물
+// 링크가 전혀 안 보였다 — 비결재자 뷰가 (a) 결재자 이름 표기 + (b) 산출물 목록을 그대로
+// 함께 보여주는지를 실 마운트로 검증한다(AC2). memberNames 캐시는 /api/team-members를
+// 통해 채워지므로(위 mount()의 fallback은 {data:[]}) 이 describe만 그 엔드포인트를
+// 오버라이드하는 전용 mount를 쓴다.
+describe('GateDetailPage — «제작 산출물» 칸 + 비결재자 이름 표기 (story #4136)', () => {
+  async function mountWithTeamMembers(gateFixture: GateItem, members: { id: string; name: string }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/team-members') return { ok: true, json: async () => ({ data: members }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐비결재자 + 이름 조회 성공 — «결재는 {이름}에게 배정돼 있어요» + 산출물 링크가 함께 나타난다(AC2)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mountWithTeamMembers(
+      gate({
+        can_approve: false, designated_approver_id: 'member-2',
+        linked_evidence: [{ id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' }],
+      }),
+      [{ id: 'member-2', name: '댄 어윈' }],
+    );
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyDesignatedElsewhereNamed.replace('{name}', '댄 어윈'));
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+    expect(container.textContent).toContain('컨셉 브리프');
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceSectionTitle);
+  });
+
+  it('이름 조회 실패/지연(빈 team-members 응답)이면 무명 문구로 graceful 폴백(산출물 목록은 그대로)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mountWithTeamMembers(
+      gate({
+        can_approve: false, designated_approver_id: 'member-2',
+        linked_evidence: [{ id: 'ev-1', kind: 'concept_brief', ref: 'concept-brief-ref-1', reference_token: '[컨셉 브리프](entity:doc:33333333-3333-3333-3333-333333333333)' }],
+      }),
+      [],
+    );
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+    expect(container.textContent).toContain('컨셉 브리프');
+  });
+
+  it('결재자 뷰(can_approve=true)에서도 산출물 목록이 함께 보인다(AC2 — 무변경 확認)', async () => {
+    await mount(gate({
+      can_approve: true,
+      linked_evidence: [{ id: 'ev-1', kind: 'storyboard', ref: 'storyboard-ref-1', reference_token: '[컨셉 보드](entity:artifact:44444444-4444-4444-4444-444444444444)' }],
+    }));
+    expect(container.textContent).toContain('컨셉 보드');
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+
+  it('⭐산출물 0건이면 결재자 뷰에도 «이 게이트에 등록된 산출물이 없어요»가 나타난다(거짓 참조 0)', async () => {
+    await mount(gate({ can_approve: true, linked_evidence: [], neutral_facts: null }));
+    expect(container.textContent).toContain(koMessages.cage.gateLinkedEvidenceEmpty);
+  });
+});
+
 // story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 「발행」(ESP 캠페인 생성)과
 // 「발송」이 같은 승인 버튼을 공유하면 두 다른 행위가 같은 낱말("승인")로 뭉개진다.
 describe('GateDetailPage — 뉴스레터 승인 버튼 낱말 분리 (story #3813 PR4)', () => {
