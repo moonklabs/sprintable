@@ -65,7 +65,11 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // `app/(authenticated)/*`, `[ws]`/`(authenticated)` 제외) + Next.js 메타데이터 파일
   // 라우트. `scripts/verify-reserved-first-segments-sync.ts`가 어긋남을 CI에서 잡는다.
   '.well-known', 'activity', 'api', 'apple-app-site-association', 'apple-icon.png', 'auth',
-  'campaigns', 'channel', 'chats', 'content', 'dashboard',
+  'campaigns', 'channel',
+  // [SID:3972] 슬라이스②AC2 — 새 최상위 app/chat/page.tsx(시안 ② 3단 허브, 기능
+  // 플래그 뒤) 신설. 미등재 시 '/chat'이 워크스페이스 slug로 오인될 수 있다
+  // ('today'(#3807 desktop류) 선례와 동형 등재).
+  'chat', 'chats', 'content', 'dashboard',
   // [SID:3807] 슬라이스12 AC2 — 새 최상위 app/desktop/updates/macos.json(공개 업데이트
   // 매니페스트 중계) 신설. 미등재 시 '/desktop/...'가 워크스페이스 slug로 오인될 수 있다
   // (카디르 QA #4187 발견) — 이 카드의 AC3(다운로드 화면, /desktop) 자리도 같은 등재.
