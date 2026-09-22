@@ -46,6 +46,7 @@ from app.services.gate_service import (
     void_gate,
 )
 from app.services.member_resolver import resolve_member
+from app.services.reference_token import build_reference_token
 from app.services.project_auth import (
     accessible_project_ids_in_org,
     get_project_role,
@@ -171,6 +172,19 @@ class LinkedChannelDraft(BaseModel):
     sealed_scheduled_at: datetime | None = None
 
 
+class LinkedEvidenceItem(BaseModel):
+    """story #4135(PO 실측 2026-09-22) — «이것을 가리키는 것들» 0건 실사고 처방. neutral_
+    facts.draft_doc_*은 게이트 *생성* 시점 스냅샷이라(recipe_gate_hooks.py 참조) 생성
+    뒤 핀된 evidence는 거기 절대 안 실린다 — 이 필드는 조회 시점마다 다시 계산해 그
+    갭을 메운다(`_enrich_linked_evidence`). reference_token이 None인 항목도 남긴다 —
+    "이 evidence가 존재는 하는데 무엇을 가리키는지 확認 불가"를 "이 evidence 자체가
+    없음"과 구분해서 보여준다(지어내지 않되 침묵하지도 않는다)."""
+    id: uuid.UUID
+    kind: str
+    ref: str
+    reference_token: str | None = None
+
+
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -250,6 +264,12 @@ class GateResponse(BaseModel):
     # 승인과 함께 승계-승인된다)인지 FE가 갈라야 해서 별도 플래그(같은 조회 한 번의
     # 부산물, 새 쿼리 0 — find_ready_recipe_channel_drafts의 still_pending 그대로).
     linked_channel_draft_pending: bool = False
+    # story #4135(PO 실측 2026-09-22) — concept_approval·structure_approval 게이트의
+    # «확定 대상 실물». `_enrich_linked_evidence()`가 매 응답마다 배선(linked_channel_draft와
+    # 동일 선례) — 그 gate_type이 아니거나(_GATE_TYPE_EXPECTED_EVIDENCE_KINDS 미등재)
+    # evidence가 0건이면 항상 빈 리스트(None 아님 — "아직 안 봄"과 "0건 확認"을 같은 값으로
+    # 안 섞는다).
+    linked_evidence: list[LinkedEvidenceItem] = []
     # story #3001(선생님 정책 확定 2026-08-24) — FE가 "이 카드 원 수신자==나인데 지금은 다른
     # 사람이 지정돼 있다"(위임됨)를 로컬 판단하는 데 필요. Gate ORM 컬럼과 이름 일치라
     # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
@@ -436,6 +456,7 @@ async def to_gate_response(
         posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(posture, gate.gate_type)
     await _enrich_linked_channel_draft(session, org_id, gate, resp)
+    await _enrich_linked_evidence(session, org_id, gate, resp)
     return resp
 
 
@@ -504,6 +525,43 @@ async def _enrich_linked_channel_draft(
         text=latest.text, image_urls=image_urls, video_url=video_url,
         scoped_gate_status=scoped_gate.status, sealed_scheduled_at=scoped_gate.sealed_scheduled_at,
     )
+
+
+async def _enrich_linked_evidence(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, resp: GateResponse,
+) -> None:
+    """story #4135(PO 실측 2026-09-22, 2호 게이트 1 실사고) — «확정 대상 실물»이 게이트
+    카드에 안 보이던 결함. `neutral_facts.draft_doc_*`은 게이트 *생성* 시점 스냅샷
+    (recipe_gate_hooks.py::_build_approval_neutral_facts)이라, 생성 뒤 핀된 evidence는
+    거기 절대 안 실린다(댄이 00:39Z에 artifact를 붙였는데 00:37Z에 만들어진 게이트의
+    neutral_facts는 그대로였던 실측 그 문제) — 이 함수는 조회 시점마다 다시 계산해 그
+    갭을 메운다(`_enrich_linked_channel_draft`와 동일 사상·자리).
+
+    `recipe_gate_hooks._GATE_TYPE_EXPECTED_EVIDENCE_KINDS`에 없는 gate_type(generation_
+    budget·external_publish 등)은 즉시 빈 리스트 — 쿼리 자체를 안 돈다(비용 0, 좁은 가드
+    선행 선례 동일)."""
+    from app.services.recipe_gate_hooks import (
+        _GATE_TYPE_EXPECTED_EVIDENCE_KINDS,
+        resolve_stage_evidence_entries,
+    )
+
+    if gate.gate_type not in _GATE_TYPE_EXPECTED_EVIDENCE_KINDS:
+        return
+
+    entries = await resolve_stage_evidence_entries(
+        session, org_id=org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        gate_type=gate.gate_type,
+    )
+    resp.linked_evidence = [
+        LinkedEvidenceItem(
+            id=e["id"], kind=e["kind"], ref=e["ref"],
+            reference_token=(
+                build_reference_token(e["entity_type"], e["entity_id"], e["title"])
+                if e["entity_type"] is not None else None
+            ),
+        )
+        for e in entries
+    ]
 
 
 @router.post("", response_model=GateResponse, status_code=201)

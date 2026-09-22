@@ -1,0 +1,1 @@
+{"file": "tests/test_4135_gate_linked_evidence_realdb.py", "sec": 16.7, "source": "story-4135(2026-09-22, 신규 파일 — 4건). test-4110/test-4132 선례와 동일 방법론 — 로컬 raw pytest 전체 wall time 실측(16.68s, throwaway pgvector:pg15) 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}
