@@ -121,6 +121,45 @@ describe('findBuildStageArgs — Docker ARG는 스테이지 스코프(story #394
     expect(result.buildStageCount).toBe(1);
     expect(result.buildStageName).toBe('builder');
   });
+
+  // story #4161 — ARG 짝 ENV 재선언 추출.
+  it('story #4161 — ARG NEXT_PUBLIC_FASTAPI_URL의 짝 ENV가 envKeys에 잡힌다', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), '4161-env-'));
+    writeFileSync(path.join(dir, 'Dockerfile'), STANDARD_DOCKERFILE);
+    const result = findBuildStageArgs(path.join(dir, 'Dockerfile'));
+    rmSync(dir, { recursive: true, force: true });
+    expect(result.envKeys.has('NEXT_PUBLIC_FASTAPI_URL')).toBe(true);
+  });
+
+  it('story #4161 — ARG는 있는데 짝 ENV 재선언이 없으면 envKeys에 안 잡힌다', () => {
+    const dockerfile = [
+      'FROM base AS builder',
+      'ARG NEXT_PUBLIC_ARG_ONLY',
+      'RUN pnpm build',
+    ].join('\n');
+    const dir = mkdtempSync(path.join(tmpdir(), '4161-env-'));
+    writeFileSync(path.join(dir, 'Dockerfile'), dockerfile);
+    const result = findBuildStageArgs(path.join(dir, 'Dockerfile'));
+    rmSync(dir, { recursive: true, force: true });
+    expect(result.defaults.has('NEXT_PUBLIC_ARG_ONLY')).toBe(true);
+    expect(result.envKeys.has('NEXT_PUBLIC_ARG_ONLY')).toBe(false);
+  });
+
+  it('story #4161 — 한 ENV 줄에 여러 KEY=값 쌍(Docker 표준 문법)도 전수 잡힌다', () => {
+    const dockerfile = [
+      'FROM base AS builder',
+      'ARG NEXT_PUBLIC_A',
+      'ARG NEXT_PUBLIC_B',
+      'ENV NEXT_PUBLIC_A=${NEXT_PUBLIC_A} NEXT_PUBLIC_B=${NEXT_PUBLIC_B}',
+      'RUN pnpm build',
+    ].join('\n');
+    const dir = mkdtempSync(path.join(tmpdir(), '4161-env-'));
+    writeFileSync(path.join(dir, 'Dockerfile'), dockerfile);
+    const result = findBuildStageArgs(path.join(dir, 'Dockerfile'));
+    rmSync(dir, { recursive: true, force: true });
+    expect(result.envKeys.has('NEXT_PUBLIC_A')).toBe(true);
+    expect(result.envKeys.has('NEXT_PUBLIC_B')).toBe(true);
+  });
 });
 
 describe('extractCloudbuildFrontendBuildArgValues — build-frontend 스텝 경계·스텝 부재 감지', () => {
@@ -252,7 +291,42 @@ describe('checkWiring — 합성 미니 레포 픽스처(AC2①②③, 시점 �
     f.cleanup();
     const appUrl = result.missing.find((m) => m.key === 'NEXT_PUBLIC_APP_URL');
     expect(appUrl).toBeDefined();
-    expect(appUrl?.missingFrom.sort()).toEqual(['cloudbuild', 'dockerfile']);
+    // story #4161 — ARG 자체가 없으니 'dockerfile-env'가 아니라 'dockerfile-arg'.
+    expect(appUrl?.missingFrom.sort()).toEqual(['cloudbuild', 'dockerfile-arg']);
+  });
+
+  // story #4161 AC1 — ARG는 있는데 짝 ENV가 없는 변형(#3948이 못 보던 클래스).
+  it('AC1(#4161) — ARG는 있고 짝 ENV 재선언만 없으면(빌드에 값이 안 넘어감) RED', () => {
+    const f = makeFixtureRepo();
+    const dockerfileArgOnly = [
+      'FROM base AS deps',
+      'RUN pnpm install',
+      '',
+      'FROM base AS builder',
+      'ARG NEXT_PUBLIC_FASTAPI_URL', // ENV 짝 재선언 없음(#4161 실사고 형)
+      'RUN pnpm build',
+      '',
+      'FROM base AS runner',
+    ].join('\n');
+    writeFileSync(f.dockerfilePath, dockerfileArgOnly);
+    writeFileSync(f.cloudbuildPath, STANDARD_CLOUDBUILD);
+    writeFileSync(f.srcPath, 'export const api = process.env.NEXT_PUBLIC_FASTAPI_URL;\n');
+    const result = checkWiring({ files: [f.srcPath], dockerfilePath: f.dockerfilePath, cloudbuildPath: f.cloudbuildPath });
+    f.cleanup();
+    const key = result.missing.find((m) => m.key === 'NEXT_PUBLIC_FASTAPI_URL');
+    expect(key).toBeDefined();
+    expect(key?.missingFrom).toEqual(['dockerfile-env']); // cloudbuild 쪽은 정상 배선이라 안 낌
+  });
+
+  // 음성대조 — 짝 ENV까지 있으면(STANDARD_DOCKERFILE 그대로) 이 축은 안 걸린다.
+  it('음성대조(#4161) — ARG+ENV 짝이 둘 다 있으면 dockerfile-env로 안 걸린다', () => {
+    const f = makeFixtureRepo();
+    writeFileSync(f.dockerfilePath, STANDARD_DOCKERFILE);
+    writeFileSync(f.cloudbuildPath, STANDARD_CLOUDBUILD);
+    writeFileSync(f.srcPath, 'export const api = process.env.NEXT_PUBLIC_FASTAPI_URL;\n');
+    const result = checkWiring({ files: [f.srcPath], dockerfilePath: f.dockerfilePath, cloudbuildPath: f.cloudbuildPath });
+    f.cleanup();
+    expect(result.missing.some((m) => m.key === 'NEXT_PUBLIC_FASTAPI_URL')).toBe(false);
   });
 
   it('이미 정상 배선된 키(FASTAPI_URL)는 missing에 안 뜬다(합성 픽스처, 회귀 없음)', () => {
