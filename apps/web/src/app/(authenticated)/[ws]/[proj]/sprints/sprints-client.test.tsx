@@ -256,3 +256,14 @@ describe('SprintsClient — 종료일 지난 스프린트 배지 렌더(story #2
     expect(container.innerHTML).not.toContain('지남');
   });
 });
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측 — 상세패널의 h2는 다른 자리) TopBarSlot의
+// h1이 그대로 유일한 h1이다.
+describe('SprintsClient — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    stubFetch([{ id: 's1', title: 'Fresh Sprint', status: 'planning', start_date: '2099-01-01', end_date: '2099-01-14' }]);
+    await mount();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+});

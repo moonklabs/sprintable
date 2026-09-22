@@ -49,6 +49,23 @@ async function mount() {
   await act(async () => { root.render(wrap(<MorePage />, TopBarProvider)); });
 }
 
+// story #3946 — TopBarSlot은 렌더 없이(return null) context에만 title을 심는다. 이 파일의
+// 기존 mount()는 소비처(<TopBar/> 등) 없이 Provider만 두르므로 title이 DOM에 아예 안
+// 나타난다 — h1 카운트를 재려면 얇은 소비처가 하나 있어야 한다(chats/layout.test.tsx와
+// 동일 원칙 — 무관한 실 <TopBar/> 트리는 끌어오지 않는다).
+async function mountWithTopBarProbe() {
+  const { default: MorePage } = await import('./page');
+  const { TopBarProvider, useTopBar } = await import('@/components/nav/top-bar-context');
+  function TopBarTitleProbe() {
+    const { title } = useTopBar();
+    return <div>{title}</div>;
+  }
+  function Combined({ children }: { children: React.ReactNode }) {
+    return <TopBarProvider><TopBarTitleProbe />{children}</TopBarProvider>;
+  }
+  await act(async () => { root.render(wrap(<MorePage />, Combined)); });
+}
+
 describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () => {
   // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 조건②) — 데스크톱 사이드바가
   // 5항목으로 줄어도 모바일 `/more`는 회귀 0(PO 조건) — NAV_GROUPS 미러 섹션 뒤에
@@ -225,5 +242,14 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(container.querySelectorAll('[data-slot="card"]').length).toBeGreaterThan(0);
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.className).toContain('min-h-12');
+  });
+});
+
+// story #3946(규칙: 「TopBarSlot 제목은 그 화면에 다른 제목이 없을 때만 h1」) — 이 화면은
+// 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
+describe('MorePage — 페이지 h1 1개(story #3946)', () => {
+  it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    await mountWithTopBarProbe();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });
