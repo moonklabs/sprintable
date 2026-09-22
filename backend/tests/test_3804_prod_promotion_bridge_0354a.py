@@ -50,7 +50,12 @@ _BRIDGE_FILE = _VERSIONS_DIR / "0354a_prod_promotion_skipped_migrations_replay.p
 
 
 def _admin_url() -> str:
-    return str(make_url(_REAL_DB_URL).set(database="postgres"))
+    # story #3804 rebase(미르코, 페드루 PO 지시) — str(URL)은 SQLAlchemy가 기본으로
+    # password를 "***"로 마스킹한다(안전 로깅 기본값) — 그 문자열로 create_engine하면
+    # 실 비밀번호 대신 리터럴 "***"로 접속을 시도해 password authentication failed로
+    # 깨진다(로컬 실측, throwaway PG 비밀번호 인증 환경에서 100% 재현). test_3522/
+    # test_4010이 이미 쓰는 render_as_string(hide_password=False)가 정본 우회.
+    return make_url(_REAL_DB_URL).set(database="postgres").render_as_string(hide_password=False)
 
 
 def _create_disposable_db() -> str:
@@ -60,7 +65,7 @@ def _create_disposable_db() -> str:
         conn.execute(sa.text(f'CREATE DATABASE "{dbname}"'))
     admin_engine.dispose()
 
-    url = str(make_url(_REAL_DB_URL).set(database=dbname))
+    url = make_url(_REAL_DB_URL).set(database=dbname).render_as_string(hide_password=False)
     eng = create_engine(url)
     with eng.connect() as conn:
         # app.models가 vector 컬럼을 선언해 확장 없이는 baseline snapshot 적용이 실패한다.
