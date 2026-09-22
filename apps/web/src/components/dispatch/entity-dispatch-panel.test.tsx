@@ -109,6 +109,41 @@ describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => 
   });
 });
 
+// story #3997 CHANGES(페드루 PO 지적 2026-09-17) — 이 자리가 실은 진짜 "담당자 선택"
+// (스토리·doc·에픽 배정+디스패치)이라 「시스템 발행」에게 배정·디스패치할 수 있던 결함.
+describe('EntityDispatchPanel — 시스템 발행 제외(story #3997 CHANGES)', () => {
+  it('⭐담당자 select에 「시스템 발행」이 안 뜨고 실 멤버는 그대로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'm1', name: '홍길동', type: 'human', is_active: true },
+              { id: 'sp1', name: '시스템 발행', type: 'agent', is_active: true, runtime_type: 'system-publisher' },
+              { id: 'a1', name: '점검봇', type: 'agent', is_active: true, runtime_type: 'claude-code' },
+            ],
+          }),
+        };
+      }
+      if (url === '/api/stories/s1') return { ok: true, json: async () => ({ data: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId={null} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    const options = [...container.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options.some((t) => t?.includes('시스템 발행'))).toBe(false);
+    expect(options.some((t) => t?.includes('홍길동'))).toBe(true);
+    expect(options.some((t) => t?.includes('점검봇'))).toBe(true);
+  });
+});
+
 // story #3007(로드맵 P2·PR-E, L1) — "더보기" 드롭다운은 floating이라 --elev-overlay.
 describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 elevation 토큰)', () => {
   it('더보기 드롭다운이 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {

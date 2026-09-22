@@ -377,6 +377,11 @@ export interface KanbanMember {
   id: string;
   name: string;
   type: string;
+  // story #3997 CHANGES(자체 그라운딩 확장, 2026-09-17) — story-detail-panel.tsx의 담당자
+  // 토글 피커가 이 목록을 그대로 쓴다. memberMap(기존 배정 표시 해소)은 이 필드로 안
+  // 거른다 — 거르면 이미 배정된 값의 표시가 깨진다(3107 "생략 대신 표기"와 동형 원칙),
+  // 오직 «고르는 자리»(토글 후보 목록)에서만 isSystemPublisher로 제외한다.
+  runtime_type?: string | null;
 }
 
 import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';

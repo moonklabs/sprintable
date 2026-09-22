@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface Member {
   id: string;
@@ -18,6 +19,9 @@ interface Member {
   // story #3194 — /api/members(정본 SSOT)엔 없는 필드라 별도 /api/team-members?type=agent
   // 조회로 채운다(#2751 get_verified_map 그대로 재사용, 발명 0). human/미조회는 undefined.
   verified?: boolean | null;
+  // story #3997(3994 후속) — /api/v2/members가 additive로 실어 보내기 시작한 필드
+  // (MemberResponse.runtime_type). 「시스템 발행」을 이 select에서 걸러내는 데 쓴다.
+  runtime_type?: string | null;
 }
 
 // story #2613 — 정책 거부(AGENT_MESSAGE_POLICY_DENIED)는 대상 에이전트로의 워크포스 설정
@@ -48,7 +52,12 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   useEffect(() => {
     fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)
       .then((r) => r.json())
-      .then((json) => setMembers((json.data ?? []) as Member[]))
+      .then((json) => {
+        // story #3997 — 「시스템 발행」에게 DM을 보내는 것 자체가 의미 없다(연결
+        // 대상이 아닌 내부 멤버) — 선택지에서 제외.
+        const list = (json.data ?? []) as Member[];
+        setMembers(list.filter((m) => !isSystemPublisher(m.runtime_type)));
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
     // story #3194 — 연결 상태(발명 0, #2751 get_verified_map)는 /api/members가 안 실어주는

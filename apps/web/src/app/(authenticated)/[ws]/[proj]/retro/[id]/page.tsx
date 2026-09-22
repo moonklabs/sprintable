@@ -36,6 +36,7 @@ import { EvidenceStrip } from '@/components/retro/evidence-strip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -43,6 +44,11 @@ type VisibleStage = RetroVisibleStage;
 interface RetroMemberOption {
   id: string;
   name: string;
+  // story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — 회고 액션
+  // 배정 select에서 「시스템 발행」을 걸러내는 데 쓴다. memberNameById(기존 배정 표시
+  // 해소)는 이 필드로 안 거른다 — 여기서 걸러지는 건 아래 select 후보뿐.
+  type?: string;
+  runtime_type?: string | null;
 }
 
 const STAGE_ORDER = RETRO_STAGE_ORDER;
@@ -899,7 +905,7 @@ export default function RetroSessionPage() {
                         />
                         <OperatorSelect value={newActionAssigneeId} onChange={(e) => setNewActionAssigneeId(e.target.value)} className="w-auto">
                           <option value="">{t('actionUnassigned')}</option>
-                          {members.map((member) => (
+                          {members.filter((member) => !isSystemPublisher(member.runtime_type)).map((member) => (
                             <option key={member.id} value={member.id}>{member.name}</option>
                           ))}
                         </OperatorSelect>
