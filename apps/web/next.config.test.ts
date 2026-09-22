@@ -140,3 +140,51 @@ describe('CSP — Cloudflare Web Analytics beacon 허용(story #3918 AC3)', () =
     expect(extractDirective('connect-src')).toContain('https://cloudflareinsights.com');
   });
 });
+
+// story #3947(2026-09-16, 페드루 PO 판정) — dev-app이 NEXT_PUBLIC_APP_URL 빌드타임 배선
+// 누락으로 localhost:3108을 노출한 사고(cloudbuild.yaml build-frontend 스텝에 --build-arg가
+// 없었음). apps/web/src/lib/public-app-host.ts의 런타임 가드는 그 함수가 실제로 호출되는
+// 시점(클라 렌더)에만 걸려 `next build` 자체는 통과할 수 있다 — 이 config 모듈 레벨
+// 가드는 `next build`가 설정을 로드하는 즉시(빌드 시작 단계) 실패시켜 "빌드 자체가 RED"를
+// 보장한다. 실측: `NEXT_PUBLIC_APP_URL` 없이 `pnpm build` 실행 → `next.config.ts` 로드
+// 단계에서 즉시 실패 확認(양성대조), 값 설정 후 재실행 → 정상 빌드 확認.
+//
+// 페드루 PO CHANGES(카디르 재현) — 처음엔 이 가드를 NODE_ENV=production으로 걸었는데,
+// `next build`는 CI 검증 빌드(ci.yml "Lint, Type Check, Test, Build")·로컬 smoke test
+// (docker-smoke-test.yml)에서도 항상 NODE_ENV=production을 강제해 그 무관 빌드들까지
+// 이 가드로 죽일 뻔했다 — "배포 빌드"의 대용값이 아니었다. 진짜 Cloud Build 배포에서만
+// 심는 명시적 마커 SPRINTABLE_DEPLOY_BUILD로 바꿔 그 둘을 분리한다.
+describe('next.config.ts 모듈 레벨 가드 — NEXT_PUBLIC_APP_URL 배포 빌드 배선(story #3947)', () => {
+  const ENV_KEY = 'NEXT_PUBLIC_APP_URL';
+  const MARKER_KEY = 'SPRINTABLE_DEPLOY_BUILD';
+  const originalEnvValue = process.env[ENV_KEY];
+  const originalMarkerValue = process.env[MARKER_KEY];
+
+  afterEach(() => {
+    if (originalEnvValue === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = originalEnvValue;
+    if (originalMarkerValue === undefined) delete process.env[MARKER_KEY];
+    else process.env[MARKER_KEY] = originalMarkerValue;
+  });
+
+  it('SPRINTABLE_DEPLOY_BUILD=1인데 env가 없으면 설정 로드 자체가 던진다(진짜 배포 빌드 즉시 실패)', async () => {
+    vi.resetModules();
+    process.env[MARKER_KEY] = '1';
+    delete process.env[ENV_KEY];
+    await expect(import('./next.config')).rejects.toThrow(/NEXT_PUBLIC_APP_URL/);
+  });
+
+  it('SPRINTABLE_DEPLOY_BUILD=1이고 env가 있으면 정상 로드(회귀 없음)', async () => {
+    vi.resetModules();
+    process.env[MARKER_KEY] = '1';
+    process.env[ENV_KEY] = 'https://dev-app.sprintable.ai';
+    await expect(import('./next.config')).resolves.toBeDefined();
+  });
+
+  it('마커 부재(CI 검증 빌드·로컬 smoke test)면 env 없어도 조용히 통과 — 무관 빌드 안 죽임(카디르 재현 회귀가드)', async () => {
+    vi.resetModules();
+    delete process.env[MARKER_KEY];
+    delete process.env[ENV_KEY];
+    await expect(import('./next.config')).resolves.toBeDefined();
+  });
+});
