@@ -32,7 +32,7 @@ async def list_team_members(args: SprintableInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/members", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def my_dashboard(args: DashboardInput) -> list[TextContent]:
@@ -42,7 +42,7 @@ async def my_dashboard(args: DashboardInput) -> list[TextContent]:
         params: dict = {"member_id": member, "project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/dashboard", params=params))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def claim_story(args: ClaimStoryInput) -> list[TextContent]:
@@ -56,7 +56,7 @@ async def claim_story(args: ClaimStoryInput) -> list[TextContent]:
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def lock_files(args: LockFilesInput) -> list[TextContent]:
@@ -73,7 +73,7 @@ async def lock_files(args: LockFilesInput) -> list[TextContent]:
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def unlock_files(args: UnlockFilesInput) -> list[TextContent]:
@@ -87,7 +87,7 @@ async def unlock_files(args: UnlockFilesInput) -> list[TextContent]:
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_workflow_guide(args: SprintableInput) -> list[TextContent]:
@@ -98,7 +98,7 @@ async def get_workflow_guide(args: SprintableInput) -> list[TextContent]:
     try:
         return ok(await client.get("/api/v2/events/onboarding-guide"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def unclaim_story(args: SprintableInput) -> list[TextContent]:
@@ -112,4 +112,4 @@ async def unclaim_story(args: SprintableInput) -> list[TextContent]:
         )
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

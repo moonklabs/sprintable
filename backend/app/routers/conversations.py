@@ -2548,12 +2548,34 @@ async def send_message(
 
         open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
         if open_breaker_id is not None:
+            # story #3933 AC3 — 이 자리는 사람이 아니라 «차단된 에이전트 자신»이 읽는다
+            # (MCP send_chat_message 호출자). `error` 키를 `code`로 바꿔 api_client.py::
+            # _extract_error_message의 dict-detail 케이스({code,message})가 그대로
+            # code+message로 뽑게 한다(새 파싱 분기 발명 0). 기존 문장은 이미 저자가
+            # 「무슨 일」(message)과 「다음 행동」(hint)을 em-dash로 나눠 뒀던 것 그대로
+            # 자른다 — 새 낱말 0.
+            # code는 이 코드베이스의 지배적 관례(대문자+밑줄, `grep '"code": "[A-Z_]+"'`
+            # 실측 — ADOPTION_REQUIRES_HUMAN류 수백 건)로 대문자화한다. 소문자
+            # "circuit_breaker_open"이면 api_client.py::_split_code_message의 코드
+            # 인식 정규식(`^[A-Z][A-Z0-9_]*: `)이 못 잡아 code가 안 뽑힌다 — 값 자체를
+            # 새로 발명하는 게 아니라 이 레포 전체가 이미 쓰는 대소문자 관례로 맞추는 것.
+            # 원문 리터럴은 개명 前 그대로 한 덩어리 유지(인접 문자열 리터럴 결합 —
+            # `scripts/verify_no_new_korean_user_strings.py`가 AST `ast.Constant` 단위로
+            # 세므로 이렇게 두 줄로 이어 써도 파서가 하나의 상수로 합친다) — message/hint
+            # 분리는 런타임 `.split(" — ", 1)`로만 한다. 리터럴 자체를 둘로 쪼개면 그
+            # 가드의 "baseline can only shrink" 순증 체크가 파일당 항목 수 증가로 잡는다
+            # (CI 실측, PR#4357 — 5→6건 FAIL). 새 낱말은 여전히 0.
+            _circuit_breaker_notice = (
+                "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
+                "org owner/admin의 해제 또는 자동 해소를 기다려주세요."
+            )
+            _cb_message, _cb_hint = _circuit_breaker_notice.split(" — ", 1)
             raise HTTPException(
                 status_code=423,
                 detail={
-                    "error": "circuit_breaker_open",
-                    "message": "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
-                                "org owner/admin의 해제 또는 자동 해소를 기다려주세요.",
+                    "code": "CIRCUIT_BREAKER_OPEN",
+                    "message": _cb_message,
+                    "hint": _cb_hint.rstrip("."),
                     "conversation_id": str(conversation_id),
                     "circuit_breaker_id": str(open_breaker_id),
                 },

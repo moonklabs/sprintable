@@ -78,7 +78,7 @@ async def emit_event(args: EmitEventInput) -> list[TextContent]:
                 body[field] = val
         return ok(await client.post("/api/v2/agent-runs", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def update_run_status(args: UpdateRunStatusInput) -> list[TextContent]:
@@ -91,7 +91,7 @@ async def update_run_status(args: UpdateRunStatusInput) -> list[TextContent]:
     try:
         return ok(await client.patch(f"/api/v2/agent-runs/{args.run_id}", json=body))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def poll_events(args: PollEventsInput) -> list[TextContent]:
@@ -126,4 +126,4 @@ async def poll_events(args: PollEventsInput) -> list[TextContent]:
             ))
         return blocks
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

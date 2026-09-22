@@ -58,4 +58,4 @@ async def add_evidence(args: AddEvidenceInput) -> list[TextContent]:
         result = await client.post("/api/v2/evidence", json=payload)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

@@ -112,7 +112,7 @@ async def list_docs(args: ListDocsInput) -> list[TextContent]:
             ))
         return blocks
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def get_doc(args: GetDocInput) -> list[TextContent]:
@@ -142,7 +142,7 @@ async def get_doc(args: GetDocInput) -> list[TextContent]:
         doc_id = summaries[0]["id"]
         return ok(await client.get(f"/api/v2/docs/{doc_id}"))
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def search_docs(args: SearchDocsInput) -> list[TextContent]:
@@ -173,7 +173,7 @@ async def search_docs(args: SearchDocsInput) -> list[TextContent]:
             ))
         return blocks
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 async def create_doc(args: CreateDocInput) -> list[TextContent]:
@@ -192,7 +192,7 @@ async def create_doc(args: CreateDocInput) -> list[TextContent]:
         _attach_submit_for_approval_next_action(result)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 def _attach_submit_for_approval_next_action(doc: object) -> None:
@@ -268,7 +268,7 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
         _attach_submit_for_approval_next_action(result)
         return ok(result)
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)
 
 
 class SubmitForApprovalInput(SprintableInput):
@@ -332,4 +332,4 @@ async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]
         gate = gates[0] if isinstance(gates, list) and gates else None
         return ok({"doc": doc, "gate": gate})
     except Exception as exc:
-        return err(str(exc))
+        return err(exc)

@@ -483,7 +483,13 @@ mcp = SprintableMCPServer(
     name="sprintable-mcp-python",
     instructions=(
         "Sprintable Python MCP server. "
-        f"Backend: {settings.sprintable_api_url}"
+        f"Backend: {settings.sprintable_api_url} "
+        # story #3933(AC4) — 도구 오류 응답은 1행 "Error: {code}: {message}"(하위호환) 뒤에
+        # {"code","message","hint"?,"detail"?} JSON 블록이 붙는다. code로 분기하거나
+        # detail(BE 원문 보존)을 참고할 것 — 1행 텍스트만 파싱해도 무방(회귀 없음).
+        "Tool error responses: line 1 is 'Error: {code}: {message}' (back-compat), "
+        "followed by a JSON block {code, message, hint?, detail?} — branch on code or "
+        "read detail (raw BE body) if needed; parsing line 1 alone still works."
     ),
 )
 
