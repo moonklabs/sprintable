@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 const needsMeItem: TodayNeedsMeItem = {
-  id: 'g1', source: 'gate', state: 'signature',
+  id: 'g1', source: 'gate', state: 'signature', risk: 'low',
   workItemType: 'channel_post', workItemId: 'w1', workItemTitle: '발행',
   requestedByName: null, reason: null, createdAt: '2026-09-16T00:00:00Z', conversationId: 'conv-1',
 };
