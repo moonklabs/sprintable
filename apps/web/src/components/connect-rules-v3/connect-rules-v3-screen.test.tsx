@@ -107,23 +107,26 @@ describe('ConnectRulesV3Screen', () => {
   // 콜 = me·team-members·available-channels·channel-connections·measurement-connections·
   // content-rules 6개뿐(관리자·비관리자 동일 — access-matrix/projects는 첫 펼침 때만,
   // 에이전트 절 자체 /api/me 중복 제거). story #3985 AC4 — 이벤트·자동화 절이
-  // `/api/events/definitions` 1콜을 더해 예산은 4376의 6 + 1 = 7.
-  it('⭐마운트 fetch 수 = 7(관리자, 4376의 6 + 이벤트·자동화 1)', async () => {
+  // `/api/events/definitions` 1콜을 더해 예산은 4376의 6 + 1 = 7. story #4006 AC8 —
+  // 이 화면에 새로 물린 MobileTabBar가 채팅 배지용 unread-count 1콜을 더해 7 + 1 = 8
+  // (새 UI 요소가 직접 요구하는 콜 — 과다호출 아님, PO CHANGES-r3-1 예산 규율 그대로
+  // 유지하되 값만 갱신).
+  it('⭐마운트 fetch 수 = 8(관리자, 4376의 6 + 이벤트·자동화 1 + 탭바 배지 1)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/me') return { ok: true, status: 200, json: async () => ({ data: { org_id: 'org1', role: 'owner' } }) };
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
     });
     await mount();
-    expect(fetchMock.mock.calls.length).toBe(7);
+    expect(fetchMock.mock.calls.length).toBe(8);
   });
 
-  it('⭐마운트 fetch 수 = 7(비관리자, access-matrix 자체가 안 걸림)', async () => {
+  it('⭐마운트 fetch 수 = 8(비관리자, access-matrix 자체가 안 걸림)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url === '/api/me') return { ok: true, status: 200, json: async () => ({ data: { org_id: 'org1', role: 'member' } }) };
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
     });
     await mount();
-    expect(fetchMock.mock.calls.length).toBe(7);
+    expect(fetchMock.mock.calls.length).toBe(8);
   });
 
   it('org_id 해소 성공 — 이벤트·자동화 절 제목도 렌더된다', async () => {

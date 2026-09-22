@@ -10,6 +10,8 @@ import { ConnectRulesV3Channels } from './connect-rules-v3-channels';
 import { ConnectRulesV3Rules } from './connect-rules-v3-rules';
 import { ConnectRulesV3Events } from './connect-rules-v3-events';
 import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
@@ -77,11 +79,15 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('common');
   const { orgId, isAdmin, isOwnerStrict, loadError, retry } = useMe();
+  // story #4006 AC8 — 좁은 폭 하단 탭 배지. 이 화면은 today-v3-screen.tsx와 같은 제약
+  // (team_member_id 없음, SSE 구독 없음) — 마운트 스냅숏 근사치.
+  const chatUnreadTotal = useChatUnreadTotal();
 
   return (
-    <div className="flex h-screen min-h-0 bg-muted/20" data-testid="connect-rules-v3-screen">
-      <NavV3Sidebar flags={flags} activeKey="connectRules" />
-      <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex h-screen min-h-0 flex-col bg-muted/20" data-testid="connect-rules-v3-screen">
+      <div className="flex min-h-0 flex-1">
+        <NavV3Sidebar flags={flags} activeKey="connectRules" />
+        <div className="flex min-w-0 flex-1 flex-col">
         <ConnectRulesV3Topbar />
         <div className="min-h-0 flex-1 overflow-auto p-6">
           <div className="mx-auto max-w-[720px] space-y-8">
@@ -136,7 +142,9 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
             )}
           </div>
         </div>
+        </div>
       </div>
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} navV3Flags={flags} />
     </div>
   );
 }
