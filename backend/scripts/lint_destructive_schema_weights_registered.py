@@ -49,6 +49,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from shard_destructive_tests import (  # noqa: E402
     average_weight,
     discover_files,
+    entries_missing_provisional_flag,
     entries_missing_source,
     load_raw_entries,
     load_weights,
@@ -73,8 +74,20 @@ def main() -> int:
         for f in no_source:
             print(f"::error::files[] 항목에 source가 없습니다(story #3465): {f}")
 
-    if not missing and not no_source:
-        print("OK: 신규 미등재 destructive_schema 파일 0건 · source 누락 0건")
+    # story #4159 — source가 "잠정/추정/실측 전" 문구를 쓰면서 구조화 `provisional: true`
+    # 를 안 붙인 항목(#4152 AC4 절대가드 제외가 안 걸려 잠정값이 실측치로 오판되는 실사고
+    # 클래스, test_4101/PR 4381 shard 10). unweighted/source 축과 나란히 한 번에 보고.
+    no_provisional_flag = entries_missing_provisional_flag(load_raw_entries())
+    if no_provisional_flag:
+        print(
+            f"FAIL: source에 잠정/추정 문구가 있는데 provisional:true가 없는 files[] 항목 "
+            f"{len(no_provisional_flag)}개(story #4159)"
+        )
+        for f in no_provisional_flag:
+            print(f"::error::잠정 문구인데 provisional:true 누락(story #4159): {f}")
+
+    if not missing and not no_source and not no_provisional_flag:
+        print("OK: 신규 미등재 destructive_schema 파일 0건 · source 누락 0건 · 잠정 미표시 0건")
         return 0
 
     if not missing:

@@ -518,6 +518,30 @@ def test_provisional_files_in_requires_structured_flag_not_free_text():
     assert mod.provisional_files_in(entries) == frozenset({"tests/b.py"})
 
 
+def test_entries_missing_provisional_flag_catches_tentative_source_without_flag():
+    """story #4159 AC2 — source에 잠정/추정/실측 전 문구가 있는데 provisional:true가
+    없으면 잡힌다(test_4101/PR 4381 shard 10 실사고 클래스)."""
+    mod = _load()
+    entries = [
+        {"file": "tests/a.py", "sec": 10.0, "source": "로컬 추정치 — CI 실측 전 잠정값"},
+        {"file": "tests/b.py", "sec": 10.0, "provisional": True, "source": "잠정값"},
+        {"file": "tests/c.py", "sec": 10.0, "source": "PR#1234 CI 실측 42.0s"},
+    ]
+    assert mod.entries_missing_provisional_flag(entries) == ["tests/a.py"]
+
+
+def test_entries_missing_provisional_flag_is_purely_mechanical_no_tense_awareness():
+    """⚠️story #4159 실측 함정 — 이 축은 자유문 형태소 분석 없이 순수 부분문자열 매치다.
+    "이전 잠정값을 대체"처럼 과거형(이미 실측 교체 완료)으로 써도 "잠정"이 텍스트에
+    남아 있으면 여전히 걸린다(#4159 본 작업 중 330개 파일 source를 처음 이렇게 썼다가
+    이 축에 다시 걸려 재작성한 실사고 — "구 로컬×배율 스냅샷을 대체"로 트리거 단어
+    자체를 피해야 한다). 그래서 문서(entries_missing_provisional_flag docstring)에
+    「실측 완료 서술은 트리거 단어를 아예 안 쓰는 게 정답」을 명시해 둔다."""
+    mod = _load()
+    entries = [{"file": "tests/a.py", "sec": 42.0, "source": "이전 잠정값을 CI 실측으로 대체"}]
+    assert mod.entries_missing_provisional_flag(entries) == ["tests/a.py"]
+
+
 def test_parse_changed_files_strips_blank_lines():
     mod = _load()
     assert mod.parse_changed_files("tests/a.py\n\n  \ntests/b.py\n") == frozenset({"tests/a.py", "tests/b.py"})
