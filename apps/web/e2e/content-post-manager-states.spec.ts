@@ -141,8 +141,8 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
   test('S1 — 목록: 제목·상태 칩·버전·원작성 주체가 각각 실제로 보인다', async ({ page }) => {
     const response = await page.goto('/content');
     expect(response?.status(), '/content 200').toBe(200);
-    await page.waitForLoadState('networkidle');
-
+    // story #4160 — 고정 유휴 대기(#4160) 제거. 바로 다음
+    // 줄의 행 visible 대기가 이미 decisive 신호.
     const firstRow = page.locator('[data-testid="content-list-row"]').first();
     await expect(firstRow, '초안 행이 최소 1건 보인다').toBeVisible({ timeout: 10_000 });
 
@@ -184,12 +184,15 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
   // (미상신 — 새로 생긴 버전엔 아직 게이트가 없다)으로 보이는지 각각 확인한다.
   test('S3/S4 — 편집 완료: 새 버전 번호와 "초안"(미상신) 상태 칩이 실제로 갱신된다(AC2)', async ({ page }) => {
     await page.goto('/content');
-    await page.waitForLoadState('networkidle');
+    // story #4160 — 고정 유휴 대기(#4160) 제거. 목록이
+    // 실제로 settle됐다는 신호(로딩 스켈레톤이 사라짐)로 대체.
+    await page.locator('[data-testid="content-list-loading"]').waitFor({ state: 'hidden' });
 
     const firstRowLink = page.locator('[data-testid="content-list-row"] a').first();
     await firstRowLink.click();
     await page.waitForURL(/\/content\/.+/);
-    await page.waitForLoadState('networkidle');
+    // 상세 화면이 실제로 렌더됐다는 신호(본문 textarea) — 아래서 바로 쓰는 요소이기도 함.
+    await page.locator('#post-body').waitFor({ state: 'visible' });
 
     const versionBadgeBefore = await page.getByText(/^v\d+$/).first().textContent();
 
@@ -221,10 +224,12 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
   // (gate_id=…, status=…)")이 아니다 — 그 진짜 문구 보존 검증은 아래 별도 test.skip.
   test('S10 — 오류 UI 골격이 선다: 승인 요청 클릭 시 오류 alert+"서버 응답 보기" 접힘이 뜬다(오늘은 404)', async ({ page }) => {
     await page.goto('/content');
-    await page.waitForLoadState('networkidle');
+    // story #4160 — 고정 대기(#4160) 제거, 목록 settle 신호(로딩 스켈레톤 사라짐)로 대체.
+    await page.locator('[data-testid="content-list-loading"]').waitFor({ state: 'hidden' });
     await page.locator('[data-testid="content-list-row"] a').first().click();
     await page.waitForURL(/\/content\/.+/);
-    await page.waitForLoadState('networkidle');
+    // 상세 화면 렌더 신호(본문 textarea).
+    await page.locator('#post-body').waitFor({ state: 'visible' });
 
     const submitButton = page.getByRole('button', { name: '승인 요청' });
     await submitButton.click();
@@ -247,7 +252,9 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
   // 의존 없이 "초안" 행을 그때그때 찾는다).
   test('S5 — 승인 요청 성공 뒤 리로드 없이 칩이 «승인 대기»로 바뀐다(story #3385 회귀가드)', async ({ page }) => {
     await page.goto('/content');
-    await page.waitForLoadState('networkidle');
+    // story #4160 — 고정 대기(#4160) 제거. count() 판정이 목록 settle 前에 돌면 오탐(진짜 0건인지
+    // 아직 안 뜬 건지 구분 불가)이라, 로딩 스켈레톤이 사라진 뒤에 센다.
+    await page.locator('[data-testid="content-list-loading"]').waitFor({ state: 'hidden' });
 
     const draftRow = page.locator('[data-testid="content-list-row"]').filter({ has: page.locator('[data-status-chip="draft"]') }).first();
     if ((await draftRow.count()) === 0) {
@@ -256,7 +263,8 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
     }
     await draftRow.locator('a').first().click();
     await page.waitForURL(/\/content\/.+/);
-    await page.waitForLoadState('networkidle');
+    // 상세 화면 렌더 신호(본문 textarea).
+    await page.locator('#post-body').waitFor({ state: 'visible' });
 
     await expect(page.locator('[data-status-chip]'), '상신 전 칩=초안').toHaveAttribute('data-status-chip', 'draft');
 
@@ -281,7 +289,9 @@ test.describe('글 관리 화면 — S4 AC8 다섯 상태 캡처(sellerking 전�
     test(`대비(상태 칩) [${theme}] — dot↔배경 3:1·라벨↔배경 4.5:1(canvas 정규화, oklch 안전)`, async ({ page }) => {
       await page.goto('/content', { waitUntil: 'domcontentloaded' });
       await setTheme(page, theme);
-      await page.waitForLoadState('networkidle');
+      // story #4160 — 고정 대기(#4160) 제거. count() 판정 前에 목록이 settle됐는지(로딩 스켈레톤
+      // 사라짐) 확인 — 위와 동일 이유(진짜 0건 vs 아직 로딩 中 구분).
+      await page.locator('[data-testid="content-list-loading"]').waitFor({ state: 'hidden' });
 
       const chip = page.locator('[data-status-chip]').first();
       if ((await chip.count()) === 0) {
