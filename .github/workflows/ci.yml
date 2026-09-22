@@ -90,11 +90,12 @@ jobs:
           echo "changed files:"
           echo "${CHANGED}"
 
-          # story #4152(CI·결정성) — backend/tests/*.py 변경분만 추려 공백 구분 한 줄로
-          # (shard_destructive_tests.py --check-elapsed --changed-files가 소비). 경로에
-          # 공백/쉼표가 절대 안 끼는 `_FILE_RE` 패턴만 대상이라 이 조인이 안전하다.
-          BACKEND_TEST_FILES_CHANGED="$(printf '%s\n' "${CHANGED}" \
-            | grep -E '^backend/tests/[a-zA-Z0-9_]+\.py$' | sed 's#^backend/##' | tr '\n' ' ' | sed 's/ *$//')"
+          # story #4152(CI·결정성, CHANGES-1 반영) — backend/scripts/classify_backend_
+          # test_diff_scope.sh로 뽑아 독립 테스트한다(check_backend_relevant_diff.sh와
+          # 같은 이유 — 임시 git repo만으로 단위 검증). backend/ 코드/의존성 변경이
+          # 하나라도 있으면 __ALL__(전부 RED 후보) — 좁히기는 백엔드 변경이 테스트
+          # 파일뿐이거나 0건인 PR(오늘 4351 같은 FE-only)에만 적용된다.
+          BACKEND_TEST_FILES_CHANGED="$(bash backend/scripts/classify_backend_test_diff_scope.sh "${BASE_SHA}" "${HEAD_SHA}")"
           echo "backend_test_files_changed=${BACKEND_TEST_FILES_CHANGED}" >> "$GITHUB_OUTPUT"
 
           # story #3897(2026-09-15, 3889 사고 처방) — 판정 로직 전체(allowlist 후보 +

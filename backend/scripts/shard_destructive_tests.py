@@ -73,6 +73,16 @@ BACKEND_DIR = REPO_ROOT / "backend"
 # 성질이다(merge 드라이버 설정과 완전히 무관 — 이번 재설계의 핵심). 자주 안 바뀌는
 # 메타(`_snapshot_policy`·`_drift_remeasure_procedure`·`measured_at`)는 여전히 이
 # 디렉터리 밖 별도 `.meta.json`에 둔다(드물게 손으로만 바뀌므로 충돌 위험이 낮다).
+#
+# story #4152(CI·결정성, 페드루 PO CHANGES-2) — **신규 파일 첫 등재 관례**: CI 첫 run
+# 전 로컬 추정치로 weight를 등재할 때는 `"provisional": true`를 반드시 같이 넣는다
+# (구조화 필드만 신뢰 — `provisional_files_in()` 참고). `source` 필드에 "잠정값" 같은
+# 자유문만 적고 `provisional: true`를 빠뜨리면 AC4의 절대 기준 제외가 걸리지 않아
+# 그 파일의 **첫 CI run 자체가 거짓 RED**로 떨어질 수 있다(예: story #4149가
+# 2026-09-22 처음 등재한 `test_4149_mention_approver_and_publish_outcome_realdb.py.
+# json`은 `source`에 "잠정값"이라고만 적고 `provisional: true`는 안 넣은 실사례 — 값
+# 자체는 참고할 만하나 이 관례의 반례로 남겨 둔다). 실측이 쌓이면(대개 다음 #3558/
+# #3642 재측정 사이클) `provisional` 필드를 지우고 실측 sec로 교체한다.
 WEIGHTS_DIR = REPO_ROOT / "infra" / "destructive-schema-shard-weights"
 WEIGHTS_META_PATH = REPO_ROOT / "infra" / "destructive-schema-shard-weights.meta.json"
 
