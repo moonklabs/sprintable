@@ -5340,6 +5340,7 @@
     "newsletterSegmentLabel": "Segment",
     "newsletterSendScheduleLabel": "Send scheduled",
     "generationBudgetSealedCostLabel": "Estimated cost",
+    "generationBudgetSealedCostCurrencyUnknown": "Currency unknown",
     "newsletterEstimatedRecipientLabel": "Estimated recipients",
     "newsletterEstimatedRecipientCount": "{count} recipients",
     "newsletterRecipientUnknown": "Unknown",
