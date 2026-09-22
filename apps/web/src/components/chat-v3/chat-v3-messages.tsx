@@ -10,6 +10,7 @@ import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
+import { seedFromCompose } from './chat-v3-compose';
 import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
@@ -56,18 +57,33 @@ export interface ChatV3MessagesProps {
   // 파생 규칙(최근 메시지부터 훑어 첫 story/task 참조)이라 같은 루프에서 같이 뽑는다
   // (메시지 배열 재순회 0).
   onWorkItemRefChange: (ref: { type: 'story' | 'task'; id: string } | null) => void;
+  // story #4028 — 주소 `?compose=`로 실려 온 첫 지시. 마운트 시 한 번만 입력창에 미리
+  // 채운다(전송 0 — 사람이 직접 누른다). 부모(chat-v3-screen)가 주소에서 값을 캡처해
+  // 넘겨주고 URL에선 compose를 지운다 — 여기선 그 값을 받기만 한다.
+  initialCompose?: string | null;
 }
 
 export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesProps>(function ChatV3Messages({
-  threadId, meId, agentName, locale, needsMe, todayV3Enabled, todayHref, onOpenArtifactChange, onWorkItemRefChange,
+  threadId, meId, agentName, locale, needsMe, todayV3Enabled, todayHref, onOpenArtifactChange, onWorkItemRefChange, initialCompose,
 }, ref) {
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [draft, setDraft] = useState('');
+  // story #4028 — 주소의 첫 지시로 마운트 1회만 시드(상한 넘으면 안 싣고 안내). lazy
+  // 초기화라 이후 threadId 변경·부모 리렌더로 다시 채워지지 않는다(한 번만 미리 채움).
+  const [draft, setDraft] = useState(() => seedFromCompose(initialCompose).draft);
+  const [composeTooLong, setComposeTooLong] = useState(() => seedFromCompose(initialCompose).tooLong);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // story #4028 CHANGES 2(PO 지적) — 이 컴포넌트는 key가 없어 threadId가 바뀌어도 remount
+  // 되지 않는다(draft는 대화 전환에도 유지 — 사람이 쓰던 초안을 안 잃게 한 기존 결). 그런데
+  // 시드는 «마운트 시점 대화(threadId)를 겨냥해 기계가 넣은» 첫 지시라, 사람이 손대지 않은
+  // 채 다른 대화로 바뀌면 그 대화에서 잘못 전송될 수 있다(사람 초안과 위험이 다르다). 시드한
+  // 대화 id와 「아직 시드 그대로인지」를 들고, 다른 대화로 바뀌면 시드분만 비운다(사람이
+  // 손댔으면 그 글자는 유지 — onChange에서 pristine=false).
+  const seededThreadIdRef = useRef<string | null>(initialCompose ? threadId : null);
+  const seedPristineRef = useRef<boolean>(!!initialCompose);
 
   // story #4008 CHANGES(PO 지적 ①, 2026-09-17) — reload()가 직접 호출하는 loadMessages는
   // React 이펙트가 아니라 그 cleanup(cancelled=true)을 아무도 안 불러준다 — 재연결으로
@@ -77,6 +93,17 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
   // 경로까지 균일하게 보호).
   const activeThreadIdRef = useRef(threadId);
   useEffect(() => { activeThreadIdRef.current = threadId; }, [threadId]);
+
+  // story #4028 CHANGES 2 — 손 안 탄 시드를 겨냥 대화 밖으로는 안 새게 한다. 시드 대화가
+  // 아닌 다른 대화로 바뀌고 아직 시드 그대로면 draft·안내를 비운다(사람이 이미 손댔으면
+  // seedPristineRef=false라 여기서 아무것도 안 지운다 — 그 초안은 유지).
+  useEffect(() => {
+    if (!seedPristineRef.current || seededThreadIdRef.current === null) return;
+    if (threadId === seededThreadIdRef.current) return;
+    seedPristineRef.current = false;
+    setDraft('');
+    setComposeTooLong(false);
+  }, [threadId]);
 
   // story #4008 CHANGES(유나 design·PO 지적, 2026-09-17) — 재연결·탭 복귀마다 이 화면이
   // 스켈레톤으로 순간 비워졌다: reload()가 이 함수를 그대로 불러 매번 setMessages(null)부터
@@ -256,10 +283,19 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
           <div ref={bottomRef} />
         </div>
       )}
-      <div className="flex shrink-0 items-center gap-2 border-t border-border p-3">
+      <div className="shrink-0 border-t border-border">
+        {composeTooLong ? (
+          // story #4028 AC3 — 첫 지시가 상한을 넘어 미리 채우지 못했을 때 안내(자르지
+          // 않음). 대화는 이미 열려 있으니 「직접 적어 주세요」로만 안내하고, 사람이
+          // 입력을 시작하면(onChange) 소임을 다해 지운다.
+          <p role="status" className="px-3 pt-2.5 text-xs text-muted-foreground" data-testid="chat-v3-compose-too-long">
+            {t('composeTooLongNotice')}
+          </p>
+        ) : null}
+        <div className="flex items-center gap-2 p-3">
         <Input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => { setDraft(e.target.value); seedPristineRef.current = false; if (composeTooLong) setComposeTooLong(false); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
           placeholder={t('instructionPlaceholder', { agent: agentName })}
           aria-label={t('instructionPlaceholder', { agent: agentName })}
@@ -268,6 +304,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
         <Button size="sm" disabled={!draft.trim() || sending} onClick={() => void handleSend()} data-testid="chat-v3-send-action">
           {t('sendAction')}
         </Button>
+        </div>
       </div>
     </section>
   );

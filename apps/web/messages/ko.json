@@ -520,6 +520,7 @@
     "roleTagAgent": "에이전트",
     "meLabel": "나",
     "instructionPlaceholder": "{agent}에게 지시하기…",
+    "composeTooLongNotice": "첫 지시가 너무 길어 미리 채우지 못했어요. 아래 입력창에 직접 적어 주세요.",
     "sendAction": "보내기",
     "contextPanelTitle": "맥락",
     "contextOpenArtifactLabel": "열린 산출물",
