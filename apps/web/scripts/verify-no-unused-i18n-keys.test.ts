@@ -90,6 +90,45 @@ describe('runScan — 파이프라인 통합(story #3732)', () => {
         }
       `,
     );
+    // PO PASS 비차단①(2026-09-22) — PR 본문이 "멤버접근·.rich() 표본"을 주장했는데 실
+    // 픽스처엔 없었다(unit 레벨 isKeyReferenced 표본과 통합 파이프라인 표본을 혼동한 결함).
+    // 실 저장소 표본(context-switcher-chip.tsx:258 acc.t()·recruiter-client.tsx
+    // t.rich(\`kitOrientingWakeBody_\${method}\`) — 후자는 TEMPLATE_KEY_TABLE의 실 등재
+    // 항목)을 그대로 미러해 진짜 통합 표본으로 추가한다.
+    //
+    // ⑤ 멤버접근(`acc.t()`) — use-account-switcher.ts가 useTranslations를 내부에서 불러
+    // 반환 객체에 담고, 소비 파일은 그 반환 객체의 프로퍼티로 바로 호출(구조분해 없음).
+    writeFileSync(
+      path.join(srcRoot, 'use-fake-switcher.ts'),
+      `
+        import { useTranslations } from 'next-intl';
+        export function useFakeSwitcher() {
+          const t = useTranslations('accountSwitcher');
+          return { t };
+        }
+      `,
+    );
+    writeFileSync(
+      path.join(srcRoot, 'member-access-widget.tsx'),
+      `
+        import { useFakeSwitcher } from './use-fake-switcher';
+        export function MemberAccessWidget() {
+          const acc = useFakeSwitcher();
+          return <span>{acc.t('reloginRequired')}</span>;
+        }
+      `,
+    );
+    // .rich() — 리터럴 키(TRANSLATION_METHODS: rich/raw/has 지원) 표본.
+    writeFileSync(
+      path.join(srcRoot, 'rich-widget.tsx'),
+      `
+        import { useTranslations } from 'next-intl';
+        export function RichWidget() {
+          const t = useTranslations('nsRich');
+          return t.rich('richKey', { bold: (chunks: unknown) => chunks });
+        }
+      `,
+    );
 
     const enPath = path.join(dir, 'en.json');
     const messages = {
@@ -97,6 +136,8 @@ describe('runScan — 파이프라인 통합(story #3732)', () => {
       nsD: { unnamedLabel: 'No name' }, // A′로 살아남아야 함.
       settings: { event_story: 'Story event' }, // B(DYNAMIC_KEY_PREFIXES)로 살아남아야 함.
       gateConfig: { work_done: 'Done' }, // E(TEMPLATE_KEY_TABLE)로 살아남아야 함(소스 참조 0).
+      accountSwitcher: { reloginRequired: 'Needs relogin' }, // 멤버접근(A′-word)으로 살아남아야 함.
+      nsRich: { richKey: 'Rich text' }, // .rich() 리터럴(A)로 살아남아야 함.
       nsDead: { orphanKey: 'Nobody uses this' }, // 다섯 신호 전부 없음 — RED 대상.
     };
     writeFileSync(enPath, JSON.stringify(messages));

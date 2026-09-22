@@ -12,6 +12,9 @@
  * plain CJS인 이유도 동일 — `check-i18n-keys.js`가 node로 직접 실행되고(로더 없음),
  * apps/web은 allowJs+moduleResolution:bundler라 이 파일을 그대로 require/import할 수 있다.
  */
+// PO PASS 비차단②(2026-09-22) — escapeRegExp를 여기 새로 안 짓고 i18n-key-parser.js(같은
+// 디렉터리, 이미 export)에서 재사용한다. 복제 0.
+const { escapeRegExp } = require('./i18n-key-parser');
 
 // AC4 — 동적 조합 화이트리스트. AC3(②)보다 먼저 서야 하는 이유: 이게 없으면 아래 접두사를
 // 쓰는 «살아 있는» 키 전부가 dead 후보로 잘못 뜬다(실측 2026-08-01 grep 전수 —
@@ -44,10 +47,6 @@ const DYNAMIC_KEY_PREFIXES = [
   { prefix: 'auth.', file: 'components/settings/mcp-connection-settings.tsx', reason: 't(`auth.${connection.authStrategy}`)' },
   { prefix: 'toolPermissions.groups.', file: 'components/agents/tool-permission-picker.tsx', reason: 't(`toolPermissions.groups.${key}`)' },
 ];
-
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 function isDynamicallyComposed(flatKeyPath) {
   return DYNAMIC_KEY_PREFIXES.some(({ prefix }) => {
