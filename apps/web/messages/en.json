@@ -617,8 +617,8 @@
     "hypothesesFilterEmptyTitle": "No hypotheses match this filter",
     "hypothesesFilterAll": "All",
     "hypothesesLinkedWorkCta": "View linked work",
-    "hypothesesGoToDetailAriaLabel": "{label}, hypothesis {n}",
-    "hypothesesGoToLinkedWorkAriaLabel": "{label} — hypothesis {n}"
+    "hypothesesGoToDetailAriaLabel": "{label}, {n}",
+    "hypothesesGoToLinkedWorkAriaLabel": "{n} {label}"
   },
   "organization": {
     "rolesTitle": "Permissions",
