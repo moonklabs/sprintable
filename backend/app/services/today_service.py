@@ -168,6 +168,10 @@ async def _needs_me_from_workflow_steps(
             "requested_by_member_id": a.requested_by_member_id,
             "reason": None,
             "created_at": a.created_at,
+            # story #3965 — approver row의 대표 Gate(S9 parallel gate). 페드루 PO
+            # CHANGES(2026-09-17): 이 값이 없으면 FE가 POST /gates/{id}/approvers/
+            # {approval_id}/decision을 needs_me 응답만으로 못 부른다.
+            "gate_id": a.gate_id,
             "actions": ["approve", "request_changes", "hold"],
         })
     return items

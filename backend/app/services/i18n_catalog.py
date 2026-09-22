@@ -160,6 +160,14 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 액션은 조직 소유자/관리자만 가능해요.",
         "en": "This action requires org admin/owner",
     },
+    "gates.approval_not_found": {
+        "ko": "결재 항목을 찾을 수 없어요.",
+        "en": "Approval item not found",
+    },
+    "gates.approval_self_or_foreign": {
+        "ko": "본인에게 배정된 결재 항목만 처리할 수 있어요.",
+        "en": "You can only act on an approval item assigned to you",
+    },
     "gates.delegate_designated_only": {
         "ko": "지정 결재자 본인만 위임할 수 있어요.",
         "en": "Only the designated approver can delegate",
