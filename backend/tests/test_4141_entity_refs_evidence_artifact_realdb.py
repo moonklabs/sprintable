@@ -135,7 +135,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id, project_id=None):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -153,7 +153,10 @@ async def _setup_app_human(app, Session, user_id, org_id, project_id=None):
     async def _auth():
         return AuthContext(user_id=str(user_id), email="human@test", claims={"app_metadata": app_metadata})
 
-    app.dependency_overrides[get_db] = _db
+    # story #4141(CI RED 처방, 페드루 PO 지적 2026-09-22 05:51Z) — get_db만 직접
+    # 대입하면 get_read_db가 whack-a-mole로 빠진다(story #2451 §6 근본 처방,
+    # conftest.py::override_db_and_read docstring 참조) — 이 헬퍼 하나만 거친다.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
