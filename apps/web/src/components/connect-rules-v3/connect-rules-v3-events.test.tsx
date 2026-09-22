@@ -61,7 +61,10 @@ describe('ConnectRulesV3Events', () => {
     expect(container.querySelector('button')?.textContent).toContain('다시 시도');
   });
 
-  it('⭐내가 만든 정의·기본 제공 정의 — org_id 유무로 정확히 가른다(events/page.tsx와 같은 술어)', async () => {
+  it('⭐내가 만든 워크플로우·기본 제공 워크플로우 — org_id 유무로 정확히 가른다(events/page.tsx와 같은 술어)', async () => {
+    // rebase 시점(2026-09-22) — 「정의」→「워크플로우」i18n 용어 정정(develop 이미 반영,
+    // eventsCustomGroupTitle/eventsPresetGroupTitle 참조)이 이 PR이 갈라진 뒤 들어와
+    // 이 테스트만 옛 문구를 들고 있었다 — 현재 실 값으로 갱신.
     fetchMock.mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({
@@ -71,8 +74,8 @@ describe('ConnectRulesV3Events', () => {
       }),
     });
     await mount();
-    expect(container.textContent).toContain('내가 만든 정의');
-    expect(container.textContent).toContain('기본 제공 정의');
+    expect(container.textContent).toContain('내가 만든 워크플로우');
+    expect(container.textContent).toContain('기본 제공 워크플로우');
     // CountBadge가 숫자를 그대로 텍스트로 낸다 — 2(custom)·3(preset).
     expect(container.textContent).toContain('2');
     expect(container.textContent).toContain('3');
@@ -81,13 +84,17 @@ describe('ConnectRulesV3Events', () => {
   it('원시 배열 응답(래핑 없이)도 받는다 — events/page.tsx와 같은 두 형태 허용', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ([{ org_id: null }]) });
     await mount();
-    expect(container.textContent).toContain('기본 제공 정의');
+    expect(container.textContent).toContain('기본 제공 워크플로우');
   });
 
   it('⭐"켜진 워크플로 프리셋" 줄은 그리지 않는다(AC1 그라운딩 — 출처 없음)', async () => {
+    // 「워크플로우」 자체는 내가 만든/기본 제공 그룹 제목(정당한 UI, i18n 용어 정정 후
+    // 항상 등장)이라 더는 부재 신호가 아니다 — 부재를 확認해야 할 건 "지금 켜진 특정
+    // 프리셋 이름"(출처 없는 값)이므로 "켜진"이라는 qualifying 어휘의 부재로 좁힌다
+    // (테스트 제목 그대로 「켜진 워크플로 프리셋」 문구가 안 뜨는지).
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: [{ org_id: 'org1' }] }) });
     await mount();
     expect(container.textContent).not.toContain('프리셋');
-    expect(container.textContent).not.toContain('워크플로');
+    expect(container.textContent).not.toContain('켜진');
   });
 });
