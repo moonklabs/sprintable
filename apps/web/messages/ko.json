@@ -2593,11 +2593,6 @@
   "connectRulesV3": {
     "pageTitle": "연결·규칙",
     "pageDescription": "에이전트와 채널을 연결하고 규칙을 정하는 곳이에요. 처음과 막힐 때만 들어오는 자리예요.",
-    "navToday": "오늘",
-    "navChats": "대화",
-    "navWork": "일감",
-    "navResults": "결과",
-    "navConnectRules": "연결·규칙",
     "searchPlaceholder": "검색하거나 지시하기",
     "loadErrorTitle": "불러오지 못했어요",
     "agentsSectionTitle": "연결된 에이전트",

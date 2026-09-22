@@ -1,6 +1,6 @@
 // story #4004 AC1 — "화면 파일 안에 경로 문자열 리터럴 0(grep 결과 PR 본문)". 이
-// 가드가 그 grep을 코드로 고정한다. 대상은 오늘·대화 두 v3 셸 화면 자신뿐(연결·규칙
-// 화면은 story #4376 착지 뒤 별도 커밋으로 이 카드에 합류 — 그때 이 목록에 추가).
+// 가드가 그 grep을 코드로 고정한다. 대상은 v3 셸 3화면 전부(오늘·대화·연결·규칙 —
+// story #4376 착지 뒤 연결·규칙도 같은 PR에 합류하며 이 목록에 추가 済).
 // #4017(nav-v3-flags-server.ts 단일소스, 이 카드 rebase 시점 develop에 아직 없음)이
 // 착지하면 이 가드는 verify-nav-v3-single-source.ts로 흡수될 예정(중복 가드 임시
 // 공존 — 그 시점에 이 파일은 지운다).
@@ -16,6 +16,7 @@ const DEST_LITERALS = ['/today', '/org-briefing', '/chats', '/chat', '/organizat
 const TARGET_FILES = [
   'components/today-v3/today-v3-screen.tsx',
   'components/chat-v3/chat-v3-screen.tsx',
+  'components/connect-rules-v3/connect-rules-v3-screen.tsx',
 ] as const;
 
 function stripComments(content: string): string {

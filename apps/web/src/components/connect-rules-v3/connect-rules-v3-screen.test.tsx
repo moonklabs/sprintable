@@ -38,9 +38,12 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-async function mount(props?: { todayV3Enabled?: boolean; chatV3Enabled?: boolean }) {
+async function mount(flags?: { todayV3Enabled?: boolean; chatV3Enabled?: boolean; connectRulesV3Enabled?: boolean }) {
   const { ConnectRulesV3Screen } = await import('./connect-rules-v3-screen');
-  await act(async () => { root.render(wrap(<ConnectRulesV3Screen {...props} />)); });
+  const resolvedFlags = {
+    todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true, ...flags,
+  };
+  await act(async () => { root.render(wrap(<ConnectRulesV3Screen flags={resolvedFlags} />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -49,8 +52,8 @@ describe('ConnectRulesV3Screen', () => {
     fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }));
     await mount();
     expect(container.querySelector('h1')?.textContent).toBe('연결·규칙');
-    expect(container.querySelectorAll('[data-testid^="connect-rules-v3-nav-"]').length).toBe(5);
-    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navConnectRules"]')?.className).toContain('text-primary');
+    expect(container.querySelectorAll('a[data-testid^="nav-v3-item-"]').length).toBe(5);
+    expect(container.querySelector('[data-testid="nav-v3-item-connectRules"]')?.className).toContain('text-primary');
   });
 
   it('⭐/api/me 실패 — 보이는 「다시 시도」 버튼', async () => {
@@ -74,15 +77,15 @@ describe('ConnectRulesV3Screen', () => {
   it('⭐교차 링크 — 오늘·대화 v3 플래그 off(기본)면 기존 라이브 경로로, on이면 v3 경로로', async () => {
     fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }));
     await mount();
-    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navToday"]')?.getAttribute('href')).toBe('/org-briefing');
-    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navChats"]')?.getAttribute('href')).toBe('/chats');
+    expect(container.querySelector('[data-testid="nav-v3-item-today"]')?.getAttribute('href')).toBe('/org-briefing');
+    expect(container.querySelector('[data-testid="nav-v3-item-chats"]')?.getAttribute('href')).toBe('/chats');
   });
 
   it('교차 링크 — 오늘·대화 v3 플래그 on이면 새 v3 경로로 바뀐다', async () => {
     fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }));
     await mount({ todayV3Enabled: true, chatV3Enabled: true });
-    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navToday"]')?.getAttribute('href')).toBe('/today');
-    expect(container.querySelector('[data-testid="connect-rules-v3-nav-navChats"]')?.getAttribute('href')).toBe('/chat');
+    expect(container.querySelector('[data-testid="nav-v3-item-today"]')?.getAttribute('href')).toBe('/today');
+    expect(container.querySelector('[data-testid="nav-v3-item-chats"]')?.getAttribute('href')).toBe('/chat');
   });
 
   // PO CHANGES-r3-1(2026-09-17, PASS 재오픈·카디르 콜 카운트 지적) — 첫 화면 마운트

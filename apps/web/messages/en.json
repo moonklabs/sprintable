@@ -2593,11 +2593,6 @@
   "connectRulesV3": {
     "pageTitle": "Connections & rules",
     "pageDescription": "Connect agents and channels, and set the rules.",
-    "navToday": "Today",
-    "navChats": "Chats",
-    "navWork": "Work",
-    "navResults": "Results",
-    "navConnectRules": "Connections & rules",
     "searchPlaceholder": "Search or instruct",
     "loadErrorTitle": "Couldn't load",
     "agentsSectionTitle": "Connected agents",
