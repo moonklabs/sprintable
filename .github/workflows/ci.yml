@@ -62,6 +62,15 @@ jobs:
       # `__ALL__` 센티널 — backend-test-destructive가 이 값을 보면 --changed-files 자체를
       # 생략해 안전측 폴백(전부 changed 취급, 회귀 0)으로 떨어진다.
       backend_test_files_changed: ${{ steps.scope.outputs.backend_test_files_changed }}
+      # story #4163 — backend_test_files_changed=__ALL__(코드/의존성 변경)일 때만 의미
+      # 있는 보조 신호: 변경된 backend/app/**.py 목록(공백 구분, 파일명이 같은 안전한
+      # 문자 집합이라 이스케이핑 불요 — 위와 동형). backend-test-destructive가 이걸로
+      # RED 범위를 "PR이 바꾼 테스트 + 이 app 변경을 참조하는 테스트"로 좁힌다.
+      backend_app_files_changed: ${{ steps.scope.outputs.backend_app_files_changed }}
+      # story #4163 — __ALL__ 사유와 함께 바뀐 backend/tests/*.py(혼합 변경 — app 코드와
+      # 같은 PR이 직접 건드린 테스트가 둘 다 있는 경우). narrowing이 이걸 빠뜨리면 "이
+      # PR이 신설/수정한 테스트 자신"이 RED가 아니라 WARN으로 새 버린다(AC1).
+      backend_mixed_test_files_changed: ${{ steps.scope.outputs.backend_mixed_test_files_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,6 +92,9 @@ jobs:
             echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
             # story #4152 — diff 정보 자체가 없다(push 이벤트) → __ALL__ 센티널.
             echo "backend_test_files_changed=__ALL__" >> "$GITHUB_OUTPUT"
+            # story #4163 — diff 정보 자체가 없으니 narrowing 재료(변경 app 모듈)도 없다.
+            echo "backend_app_files_changed=" >> "$GITHUB_OUTPUT"
+            echo "backend_mixed_test_files_changed=" >> "$GITHUB_OUTPUT"
             echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드·gateway 전량 실행."
             exit 0
           fi
@@ -95,8 +107,15 @@ jobs:
           # 같은 이유 — 임시 git repo만으로 단위 검증). backend/ 코드/의존성 변경이
           # 하나라도 있으면 __ALL__(전부 RED 후보) — 좁히기는 백엔드 변경이 테스트
           # 파일뿐이거나 0건인 PR(오늘 4351 같은 FE-only)에만 적용된다.
-          BACKEND_TEST_FILES_CHANGED="$(bash backend/scripts/classify_backend_test_diff_scope.sh "${BASE_SHA}" "${HEAD_SHA}")"
+          CLASSIFY_OUTPUT="$(bash backend/scripts/classify_backend_test_diff_scope.sh "${BASE_SHA}" "${HEAD_SHA}")"
+          BACKEND_TEST_FILES_CHANGED="$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '1p')"
+          # story #4163 — 줄2(변경 app 모듈)·줄3(같이 바뀐 테스트, 혼합 변경 축) 둘 다
+          # 줄1이 __ALL__일 때만 값이 있음.
+          BACKEND_APP_FILES_CHANGED="$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '2p')"
+          BACKEND_MIXED_TEST_FILES_CHANGED="$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '3p')"
           echo "backend_test_files_changed=${BACKEND_TEST_FILES_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "backend_app_files_changed=${BACKEND_APP_FILES_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "backend_mixed_test_files_changed=${BACKEND_MIXED_TEST_FILES_CHANGED}" >> "$GITHUB_OUTPUT"
 
           # story #3897(2026-09-15, 3889 사고 처방) — 판정 로직 전체(allowlist 후보 +
           # backend/tests/**가 «코드로» 참조하는 FE 경로 접촉 여부)는 check_backend_relevant_
@@ -1385,11 +1404,33 @@ jobs:
           # 목록(__ALL__=push 이벤트, diff 정보 없음)을 --changed-files로 넘긴다. 생략하면
           # (예: __ALL__) diff 정보 없음으로 간주해 예전처럼 전부 RED 후보(안전측 폴백,
           # shard_destructive_tests.py::slow_files_absolute의 changed_files=None 경로).
+          #
+          # story #4163 — __ALL__은 «backend/app 코드가 바뀌었다»는 뜻일 뿐, 그 변경이
+          # 실제로 이 shard의 모든 무관 파일까지 느리게 만든다는 보장은 없다(2026-09-22
+          # PR#4527 실사고: approval_delivery.py 1파일 변경인데 러너 부하 시간대에 4개
+          # 무관 파일이 RED — 까디르 diff 대조로 무관 확認, rerun만 반복). __ALL__이면서
+          # detect-changed-scope가 변경 app 모듈 목록(backend_app_files_changed)도 냈으면,
+          # 그 모듈을 정적으로 참조하는 테스트 파일만 --resolve-app-module-dependents로
+          # 뽑아 --changed-files로 좁힌다 — 그 밖 무관 파일의 절대 임계 초과는 기존 WARN
+          # 축(잡 초록 유지)이 그대로 흡수한다. app 모듈 목록도 없으면(diff 정보 자체가
+          # 없는 push 이벤트) narrowing 재료가 없어 예전처럼 --changed-files 생략(전부
+          # RED 후보, 회귀 0).
           CHANGED_TEST_FILES="${{ needs.detect-changed-scope.outputs.backend_test_files_changed }}"
+          CHANGED_APP_FILES="${{ needs.detect-changed-scope.outputs.backend_app_files_changed }}"
+          # story #4163 — 혼합 변경(app 코드 + 같은 PR이 직접 건드린 테스트) 축. narrowed
+          # 목록에 안 합치면 "이 PR이 신설/수정한 테스트 자신"이 WARN으로 새 버린다(AC1).
+          MIXED_TEST_FILES="${{ needs.detect-changed-scope.outputs.backend_mixed_test_files_changed }}"
           changed_files_arg=()
           if [ "${CHANGED_TEST_FILES}" != "__ALL__" ]; then
             printf '%s\n' ${CHANGED_TEST_FILES} > /tmp/changed_test_files.txt
             changed_files_arg=(--changed-files /tmp/changed_test_files.txt)
+          elif [ -n "${CHANGED_APP_FILES}" ]; then
+            uv run python scripts/shard_destructive_tests.py \
+              --resolve-app-module-dependents "${CHANGED_APP_FILES}" > /tmp/narrowed_test_files.txt
+            printf '%s\n' ${MIXED_TEST_FILES} >> /tmp/narrowed_test_files.txt
+            echo "story #4163 narrowed(app 모듈 변경을 참조하는 테스트 + 같이 바뀐 테스트만 RED 후보):"
+            cat /tmp/narrowed_test_files.txt
+            changed_files_arg=(--changed-files /tmp/narrowed_test_files.txt)
           fi
           uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}"
           slow_exit=$?

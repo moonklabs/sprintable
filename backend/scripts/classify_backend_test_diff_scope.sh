@@ -16,7 +16,20 @@
 #     backend/tests/*.py 변경분만 공백 구분 한 줄로(0건이면 빈 문자열).
 #
 # 사용법: classify_backend_test_diff_scope.sh <base_sha> [<head_sha>=HEAD]
-# 출력(stdout 1줄): `__ALL__` 또는 `tests/test_a.py tests/test_b.py`(0건이면 빈 줄).
+# 출력(stdout 3줄, story #4163 확장):
+#   줄1(기존 계약 그대로) — `__ALL__` 또는 `tests/test_a.py tests/test_b.py`(0건이면 빈 줄).
+#   줄2(신규) — 줄1이 `__ALL__`(코드/의존성 변경 사유)일 때만: 변경된
+#     `backend/app/**.py` 모듈 경로를 공백 구분으로(`app/services/foo.py` 형,
+#     `backend/` 접두사 제거). 그 외 경우(줄1이 __ALL__이 아니거나, push-이벤트
+#     fail-closed 등 diff 정보 자체가 없는 __ALL__)는 빈 줄 — 좁히기(story #4163
+#     RED-범위 축소)는 "app 코드 변경 탓에 __ALL__이 된" 경우에만 의미가 있다
+#     (diff 정보 자체가 없으면 무엇을 import하는지도 판단 불가 — 안전측 그대로 전부).
+#   줄3(신규) — 줄1이 `__ALL__`일 때 **함께** 변경된 `backend/tests/*.py`(있으면).
+#     "app 코드 + 그 PR이 직접 건드린 테스트 파일" 혼합 변경(예: app/x.py와
+#     tests/test_new.py를 같은 PR에서 함께 바꿈)에서, narrowing이 app-모듈-의존
+#     테스트만 좁히고 "이 PR이 직접 수정한 테스트 자신"을 빠뜨리면 그 테스트는
+#     RED로 남아야 하는데 WARN으로 새 버린다 — ci.yml이 줄2(모듈-의존 목록)와 줄3
+#     (직접 변경 목록)을 합집합해 narrowed 목록을 만든다.
 #
 # ⚠️ check_backend_relevant_diff.sh와 동형 — «현재 체크아웃된 작업트리» 기준(HEAD_SHA가
 # 아닌 실행 시점 CWD의 git 이력 — ci.yml이 이미 head_sha로 체크아웃된 상태에서 호출).
@@ -27,6 +40,8 @@ HEAD_SHA="${2:-HEAD}"
 
 if [ -z "${BASE_SHA}" ]; then
     echo "__ALL__"
+    echo ""
+    echo ""
     exit 0
 fi
 
@@ -34,6 +49,8 @@ CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1)"
 DIFF_RC=$?
 if [ "${DIFF_RC}" -ne 0 ]; then
     echo "__ALL__"
+    echo ""
+    echo ""
     exit 0
 fi
 
@@ -42,9 +59,21 @@ BACKEND_NON_TEST_CHANGED="$(printf '%s\n' "${CHANGED}" \
 
 if [ -n "${BACKEND_NON_TEST_CHANGED}" ]; then
     echo "__ALL__"
+    # story #4163 — app 모듈만(alembic·pyproject 등은 import-그래프 narrowing과 무관 —
+    # 테스트가 마이그레이션 파일을 "import"하는 경우는 없다).
+    CHANGED_APP_MODULES="$(printf '%s\n' "${BACKEND_NON_TEST_CHANGED}" \
+        | grep -E '^backend/app/.*\.py$' | sed 's#^backend/##' | tr '\n' ' ' | sed 's/ *$//' || true)"
+    echo "${CHANGED_APP_MODULES}"
+    # story #4163 — 혼합 변경(app + 이 PR이 직접 건드린 테스트)에서 그 테스트 자신도
+    # narrowed 목록에 들어가야 RED 유지(AC1).
+    CHANGED_TEST_FILES_MIXED="$(printf '%s\n' "${CHANGED}" \
+        | grep -E '^backend/tests/[a-zA-Z0-9_]+\.py$' | sed 's#^backend/##' | tr '\n' ' ' | sed 's/ *$//' || true)"
+    echo "${CHANGED_TEST_FILES_MIXED}"
     exit 0
 fi
 
 BACKEND_TEST_FILES_CHANGED="$(printf '%s\n' "${CHANGED}" \
     | grep -E '^backend/tests/[a-zA-Z0-9_]+\.py$' | sed 's#^backend/##' | tr '\n' ' ' | sed 's/ *$//')"
 echo "${BACKEND_TEST_FILES_CHANGED}"
+echo ""
+echo ""
