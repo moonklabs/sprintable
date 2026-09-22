@@ -118,3 +118,37 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
     expect(container.textContent).toContain('찾을 수 없');
   });
 });
+
+// story #3946(유나 확認·페드루 정정) — 이 페이지는 TopBarSlot을 직접 안 쓴다(그건
+// docs-client-layout.tsx 몫) — 본문 마스트헤드(doc.title h1)가 이 페이지의 유일한 h1
+// 후보다. doc이 아직 안 왔거나(로딩) 못 찾았을 때(404)도 그 h1이 없으면 0개가 되는 gap을
+// sr-only 자리표시자로 메웠다 — 로딩·404·로디드 세 상태 각각 정확히 1개임을 고정한다.
+describe('DocViewPage — 페이지 h1 1개(story #3946)', () => {
+  it('⭐로디드 상태 — h1이 정확히 1개다(doc.title)', async () => {
+    await mount();
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.textContent).toBe(DOC.title);
+  });
+
+  it('⭐로딩 상태(fetch 미해결)에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
+    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
+    fetchWithAuthMock.mockReturnValue(new Promise(() => {}));
+    const { default: DocViewPage } = await import('./page');
+    await act(async () => { root.render(wrap(<DocViewPage />)); });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+  });
+
+  it('⭐404 상태에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
+    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
+    fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 404 }));
+    const { default: DocViewPage } = await import('./page');
+    await act(async () => { root.render(wrap(<DocViewPage />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+  });
+});
