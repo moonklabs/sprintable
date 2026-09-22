@@ -186,9 +186,11 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // 경계 아래 redirect() 호출을 next.config.ts redirects()로 이관, page.tsx 자체가
   // 불요해짐. hitl·[id] 디렉토리도 dangling 없이 통째 제거)로 101→98.
   // story #4116(2026-09-21) — organization/generation-connectors/page.tsx 신설로 98→99.
-  it('실 트리(apps/web/src/app) — 라우트 파일 99개·위반 0건', () => {
+  // story #3962(2026-09-17, rebase 시점 재정정) — `/today`(v3 첫 화면, (authenticated)
+  // 밖 신규 라우트 그룹) page.tsx+layout.tsx 신설로 99→101.
+  it('실 트리(apps/web/src/app) — 라우트 파일 101개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(99);
+    expect(fileCount).toBe(101);
     expect(violations).toEqual([]);
   }, 1000);
 });
