@@ -20,7 +20,6 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 from __future__ import annotations
 
 import asyncio
-import logging
 import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -51,12 +50,11 @@ from app.services.gate_seal import (
 from app.services.gate_service import ConceptApprovalNotApprovedError  # noqa: F401 (재-export, 라우터가 import — story #3561)
 from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채널 라우터도 재사용)
     ExternalPublishGateNotApprovedError,
+    _notify_publish_approval_requested,  # story #3974(페드루 PO CHANGES) — 채널/사이트 동형 헬퍼 중복 제거, site_posts.py 한 벌만
     get_site_post_draft,
     is_agent_caller,
 )
 from app.services.utm import attach_utm, resolve_utm_campaign
-
-logger = logging.getLogger(__name__)
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 예정시각 축.
@@ -1493,6 +1491,11 @@ async def submit_channel_post_draft(
     # site_posts 전용 게이트만 이 컬럼이 항상 null이라는 전제가 채널 게이트에도 새던 결함).
     gate.sealed_destination_connection_id = draft.connection_id
     gate.reapproval_required = False
+
+    await _notify_publish_approval_requested(
+        db, org_id=org_id, work_item_id=draft.work_item_id, gate=gate,
+        requester_id=requester_member_id,
+    )
 
     if was_approved:
         # story #3414 추가② — 이 재상신이 이미 승인된 게이트를 되돌린 경우(위에서
