@@ -348,7 +348,8 @@ async def test_resume_does_not_touch_blocked_commands_from_other_reasons():
         assert refreshed.failure_kind == FAILURE_KIND_CONNECTION
 
 
-# --- ⑥ 중지 순간 in_progress인 명령은 완주 ----------------------------------
+# --- ⑥ 어댑터 호출에 들어간 명령은 완주 · 아직 호출 전(배치 클레임만 된) 명령은 ---
+# --- blocked → resume 재큐(카디르군 QA 관찰 2026-09-22, docstring/PR 본문 정정) ---
 
 
 @pytest.mark.anyio
@@ -426,6 +427,119 @@ async def test_command_already_in_progress_completes_even_if_paused_mid_flight()
             select(PublicationCommand).where(PublicationCommand.id == command_id)
         )).scalar_one()
         assert refreshed.status == "completed"
+
+
+@pytest.mark.anyio
+async def test_batch_gap_second_command_blocks_when_pause_flips_between_commands():
+    """까디르군 QA 관찰(2026-09-22) — process_due_publication_commands가 배치를
+    한 번에 in_progress로 클레임해도(1028행), `_process_one_command`는 명령마다
+    각자 진입 시점에 pause를 새로 본다(293행 전제). 배치 2건(A·B, created_at 순)을
+    클레임한 뒤 A 처리(어댑터 호출) 도중 pause가 켜지면: A는 이미 어댑터 호출에
+    들어갔으니 완주하지만(위 test_command_already_in_progress_completes...와 동형),
+    아직 자기 차례가 안 돼 `_process_one_command`에 진입 전이던 B는 그 진입 시점에
+    paused=True를 보고 blocked로 걸린다(둘 다 "배치 클레임 시점엔 in_progress"였지만
+    운명이 갈린다 — 이게 docstring/PR 본문이 고쳐진 이유). 해제 뒤 재큐되면 B도
+    정상 발행된다."""
+    from unittest.mock import AsyncMock, patch
+    import app.services.threads_publish as tp
+    from app.services.publication_command import (
+        create_or_get_publication_command, process_due_publication_commands,
+    )
+    from app.services.external_publish_pause import set_external_publish_pause
+
+    engine, Session = await _session_factory()
+    async with Session() as s:
+        org_id, project_id = await _seed_org(s)
+        await _seed_default_role(s, org_id)
+        owner_id = await _seed_human(s, org_id, role="owner")
+        story_id = await _seed_story(s, org_id, project_id)
+        connection_id = await _seed_connection(s, org_id)
+
+    from app.main import app
+    _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+    async with _client_for(app) as client, Session() as s:
+        draft_id, gate_id = await _create_draft_submit_approve(
+            client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+        )
+
+    async with Session() as s:
+        from sqlalchemy import select
+        from app.models.channel_post_version import ChannelPostVersion
+
+        latest_version_id = (await s.execute(
+            select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            .order_by(ChannelPostVersion.created_at.desc()).limit(1)
+        )).scalar_one()
+        # command A — 실 채널포스트(어댑터까지 실제로 부를 대상, created_at이 B보다
+        # 먼저라 배치 루프에서 먼저 처리됨, created_at.asc() 정렬).
+        cmd_a, _ = await create_or_get_publication_command(
+            s, org_id=org_id, gate_id=gate_id, destination=connection_id,
+            approved_version=latest_version_id, requested_by_member_id=owner_id, scheduled_at=None,
+        )
+        # command B — 어댑터까지 갈 필요 없음(파우즈 검사 자체가 단언 대상이라 합성
+        # id로 충분, test_resume_does_not_touch_blocked_commands_from_other_reasons와
+        # 동형 최소 생성). A와 다른 키(operation)로 별개 행 확보.
+        cmd_b, _ = await create_or_get_publication_command(
+            s, org_id=org_id, gate_id=uuid.uuid4(), destination=uuid.uuid4(),
+            approved_version=uuid.uuid4(), requested_by_member_id=owner_id, scheduled_at=None,
+            content_kind="channel_post",
+        )
+        await s.commit()
+        cmd_a_id, cmd_b_id = cmd_a.id, cmd_b.id
+
+    async def _create_container_then_pause(*args, **kwargs):
+        # A의 어댑터 호출 "도중"에 pause가 켜진다 — B는 아직 이 배치 루프에서 자기
+        # 차례가 안 왔다(A가 먼저 처리 中).
+        async with Session() as s2:
+            await set_external_publish_pause(s2, org_id=org_id, paused=True, reason="batch-gap", actor_member_id=owner_id)
+            await s2.commit()
+        return "cid-gap"
+
+    with (
+        patch.object(tp, "create_container", AsyncMock(side_effect=_create_container_then_pause)) as mock_create,
+        patch.object(tp, "publish_container", AsyncMock(return_value="media-gap")),
+        patch.object(tp, "get_permalink", AsyncMock(return_value="https://x/permalink")),
+        patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+    ):
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        # A 완주(어댑터 호출 1회) · B는 blocked(어댑터 호출 0 — 그 호출 자체가 안 남).
+        assert counts["completed"] == 1
+        assert counts["blocked"] == 1
+        mock_create.assert_awaited_once()
+
+    async with Session() as s:
+        from sqlalchemy import select
+        from app.models.publication_command import PublicationCommand
+
+        refreshed_a = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_a_id))).scalar_one()
+        refreshed_b = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_b_id))).scalar_one()
+        assert refreshed_a.status == "completed"
+        assert refreshed_b.status == "blocked"
+        assert refreshed_b.failure_kind == "paused"
+
+    # 해제 → B가 재큐돼 정상 발행.
+    async with Session() as s:
+        await set_external_publish_pause(s, org_id=org_id, paused=False, reason=None, actor_member_id=owner_id)
+        await s.commit()
+
+    with (
+        patch.object(tp, "create_container", AsyncMock(return_value="cid-gap-2")) as mock_create2,
+        patch.object(tp, "publish_container", AsyncMock(return_value="media-gap-2")),
+        patch.object(tp, "get_permalink", AsyncMock(return_value="https://x/permalink")),
+        patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
+    ):
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+        assert counts["completed"] == 1
+        mock_create2.assert_awaited_once()
+
+    async with Session() as s:
+        from sqlalchemy import select
+        from app.models.publication_command import PublicationCommand
+
+        refreshed_b = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_b_id))).scalar_one()
+        assert refreshed_b.status == "completed"
 
 
 # --- ⑦ 감사 로그 2건 ----------------------------------------------------------

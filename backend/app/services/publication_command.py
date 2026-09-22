@@ -292,10 +292,15 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
 
     story #3953(블루프린트 §1-5) — content_kind 분기보다 먼저 조직 pause를 본다
     (5도메인 전부를 한 자리에서 막는 유일한 이유 — 여기서 막히면 아래 5개 분기
-    중 어느 것도 adapter를 부르는 자리까지 못 간다). 이 함수는 이미 in_progress로
-    클레임된 «이번 tick»의 command 하나만 처리하므로, pause를 여기서 한 번만 보면
-    "중지 순간 in_progress인 명령은 완주"가 저절로 성립한다(이 호출 도중엔 pause
-    상태를 다시 안 본다 — 중간에 끊을 자리 자체가 없다)."""
+    중 어느 것도 adapter를 부르는 자리까지 못 간다). pause 확認은 이 함수 진입마다
+    (배치의 command 각각)이라, «완주»의 경계는 "in_progress로 클레임됐는가"가 아니라
+    "이미 이 함수를 통과해 adapter 호출에 들어갔는가"다 — 어댑터 호출에 들어간
+    명령은 그대로 끝까지 간다(이 호출 도중엔 pause를 다시 안 본다, 중간에 끊을 자리
+    자체가 없다). 배치가 여러 건을 한 번에 in_progress로 클레임했더라도(아래
+    `process_due_publication_commands`), 아직 자기 차례가 안 돼 이 함수에 진입 전인
+    명령은 그 사이 pause가 켜지면 여기서 blocked로 걸린다 — 안전측(fail-closed,
+    카디르군 QA 관찰 2026-09-22) — pause 해제 시 자동 재큐(resume)가 그 명령을
+    다시 태운다."""
     from app.services.external_publish_pause import is_external_publish_paused
 
     paused, pause_reason = await is_external_publish_paused(db, org_id=command.org_id)
