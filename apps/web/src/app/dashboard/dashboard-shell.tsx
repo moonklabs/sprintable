@@ -174,6 +174,7 @@ function ShellBody({
         orgMemberships={orgMemberships}
         projectId={projectId}
         projectMemberships={projectMemberships}
+        navV3Flags={navV3Flags}
       >
         {children}
       </ScrollShell>
@@ -182,7 +183,7 @@ function ShellBody({
 }
 
 function ScrollShell({
-  showTopBar, tabletCentered, chatUnreadTotal, orgId, orgMemberships, projectId, projectMemberships, children,
+  showTopBar, tabletCentered, chatUnreadTotal, orgId, orgMemberships, projectId, projectMemberships, navV3Flags, children,
 }: {
   showTopBar: boolean;
   tabletCentered: boolean;
@@ -191,6 +192,7 @@ function ScrollShell({
   orgMemberships: OrgSwitcherItem[];
   projectId?: string;
   projectMemberships: DashboardProjectOption[];
+  navV3Flags?: NavV3Flags;
   children: React.ReactNode;
 }) {
   const { setScrollContainer } = useTopBar();
@@ -270,7 +272,7 @@ function ScrollShell({
       {/* story #1958(P2-S2): <1024(lg 미만) 전용 하단 탭바 — SidebarInset의 flex-col 안에서
           scroll 컨테이너의 형제(자식 아님)로 둬야 콘텐츠가 스크롤돼도 탭바가 자기 flex row를
           유지한다(position:fixed 오버레이+패딩 보정 불요 — 시안 511bc035의 flex 레이아웃과 동형). */}
-      <MobileTabBar chatUnreadTotal={chatUnreadTotal} />
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} navV3Flags={navV3Flags} />
     </SidebarInset>
     </TeamPresenceToggleProvider>
     </ReleaseNotesProvider>
