@@ -78,6 +78,7 @@ async function mount(ref: React.RefObject<ChatV3MessagesHandle | null>) {
         locale="ko"
         needsMe={[]}
         todayV3Enabled
+        todayHref="/today"
         onOpenArtifactChange={() => {}}
         onWorkItemRefChange={() => {}}
       />,
@@ -239,7 +240,7 @@ describe('ChatV3Messages — 재연결 따라잡기(story #4008 AC4)', () => {
       root.render(wrap(
         <ChatV3Messages
           ref={ref} threadId="conv-2" meId="me-1" agentName="담롱 온찬" locale="ko" needsMe={[]}
-          todayV3Enabled onOpenArtifactChange={() => {}} onWorkItemRefChange={() => {}}
+          todayV3Enabled todayHref="/today" onOpenArtifactChange={() => {}} onWorkItemRefChange={() => {}}
         />,
       ));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
@@ -317,6 +318,7 @@ describe('ChatV3Messages — 대화 전환 스켈레톤(story #4008 CHANGES)', (
           locale="ko"
           needsMe={[]}
           todayV3Enabled
+          todayHref="/today"
           onOpenArtifactChange={() => {}}
           onWorkItemRefChange={() => {}}
         />,

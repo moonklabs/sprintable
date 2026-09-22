@@ -17,6 +17,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -104,7 +105,7 @@ describe('ChatV3Screen — 실 EventSource 연결 개수(story #4008 AC7, 멀티
   it('⭐스레드 레일+대화 열이 함께 마운트돼도 EventSource는 정확히 1개만 열린다', async () => {
     stub();
     const { ChatV3Screen } = await import('./chat-v3-screen');
-    await act(async () => { root.render(wrap(<ChatV3Screen todayV3Enabled />)); });
+    await act(async () => { root.render(wrap(<ChatV3Screen flags={{ ...DEFAULT_NAV_V3_FLAGS, todayV3Enabled: true }} />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     // 화면이 실제로 스레드+메시지까지 렌더됐는지(연결 개수 판정이 무의미한 빈 렌더가
