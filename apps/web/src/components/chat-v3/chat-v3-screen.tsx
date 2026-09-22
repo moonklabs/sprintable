@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
