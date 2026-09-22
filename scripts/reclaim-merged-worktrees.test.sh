@@ -69,7 +69,13 @@ export PATH="$FAKE_BIN:$PATH"
 
 wt() { echo "$WORK/wt-$1"; }
 
-# 1) MERGED(ancestor) — develop에 fast-forward로 실제 merge된 브랜치, push 완료, clean.
+# 1) story #4137 CHANGES-1(PO 확定 2026-09-22) — GitHub PR 없이 로컬 no-ff 머지 후 push된
+#    브랜치. 이 조직 워크플로우(PR→리뷰→QA→머지)가 금지하는 경로라 실사용 시나리오가 아니다
+#    — 실측: no-ff 머지는 브랜치 자신의 ref를 안 움직여 머지된 브랜치의 tip도 "현재
+#    origin/develop 기준 ahead 0"이 되는 게 그래프 위상상 불가피하다(ancestor-check
+#    참 + ahead-count 0). 이 위상은 story #4137이 막으려는 "커밋 0인 새 브랜치" 버그와
+#    구조적으로 동일해 pure-git-topology로는 못 가른다 — 그래서 이제 KEEP(판별 불가,
+#    과소회수가 안전). 실 머지 경로(gh PR squash)는 시나리오 2가 그대로 커버한다.
 git -C "$MAIN" checkout -q -b ancestor-merged-branch
 echo "a" >> "$MAIN/f.txt"; git -C "$MAIN" commit -q -am "a"
 git -C "$MAIN" checkout -q develop
@@ -107,6 +113,12 @@ git -C "$MAIN" push -q origin unmerged-branch
 git -C "$MAIN" checkout -q develop
 git -C "$MAIN" worktree add -q "$(wt unmerged)" unmerged-branch
 
+# 6) story #4137 AC1 핵심 — 커밋 0인 새 브랜치(방금 `git worktree add -b <branch> <base>`로
+#    뜬 작업 시작 前 워크트리, 실사고 재현). 새 브랜치 자체를 push하지 않는다(실사고와 동형
+#    — sha가 origin/develop 자체에 이미 있어 is_head_pushed는 그 이유만으로 참이 된다,
+#    이 브랜치 고유의 push가 없어도).
+git -C "$MAIN" worktree add -q -b fresh-zero-commit-branch "$(wt fresh)" develop
+
 echo "== dry-run =="
 cd "$MAIN"
 DRY_OUT="$(RECLAIM_BASE_BRANCH=develop "$SCRIPT")"
@@ -114,11 +126,12 @@ echo "$DRY_OUT"
 
 echo
 echo "-- dry-run 판정 검증 --"
-assert_contains "$DRY_OUT" "WOULD-RECLAIM $(wt ancestor-merged)" "ancestor-merged → WOULD-RECLAIM"
+assert_contains "$DRY_OUT" "KEEP     $(wt ancestor-merged) — 머지 확定 불가: 조상이나 ahead 0·머지 PR 없음" "ancestor-merged(PR 없는 no-ff, 지원 경로 아님) → KEEP"
 assert_contains "$DRY_OUT" "WOULD-RECLAIM $(wt squash-merged)" "squash-merged(gh만 앎) → WOULD-RECLAIM"
 assert_contains "$DRY_OUT" "KEEP     $(wt dirty)" "dirty → KEEP"
 assert_contains "$DRY_OUT" "KEEP     $(wt unpushed)" "unpushed HEAD → KEEP"
 assert_contains "$DRY_OUT" "KEEP     $(wt unmerged)" "unmerged → KEEP"
+assert_contains "$DRY_OUT" "KEEP     $(wt fresh) — 머지 확定 불가: 조상이나 ahead 0·머지 PR 없음" "fresh-zero-commit(story #4137 AC1 핵심 실사고 재현) → KEEP"
 
 echo
 echo "== --apply =="
@@ -127,11 +140,12 @@ echo "$APPLY_OUT"
 
 echo
 echo "-- 실제 디스크 상태 검증(AC4 음성대조: 진행중 worktree는 절대 안 지워짐) --"
-assert_not_exists "$(wt ancestor-merged)" "ancestor-merged"
+assert_exists "$(wt ancestor-merged)" "ancestor-merged(판별 불가 → KEEP, 지워지지 않아야 함)"
 assert_not_exists "$(wt squash-merged)" "squash-merged"
 assert_exists "$(wt dirty)" "dirty"
 assert_exists "$(wt unpushed)" "unpushed"
 assert_exists "$(wt unmerged)" "unmerged"
+assert_exists "$(wt fresh)" "fresh-zero-commit(AC1 pin — 회수되면 실사고 재발)"
 
 echo
 echo "== 실 스케일 SIGPIPE 회귀가드(PO 첫 dry-run 실물 발견, 등록 264개 레포에서 exit=141) =="
@@ -173,6 +187,40 @@ if [ "$DETACHED_COUNT" -ge "$STRESS_COUNT" ]; then
 else
   echo "  FAIL detached worktree가 ${DETACHED_COUNT}개만 KEEP으로 잡혔다(기대 >= ${STRESS_COUNT} — 파싱 누락 의심)"
   FAIL=1
+fi
+
+echo
+echo "== story #4137 AC3 — bash 3.2(launchd 실사고 재현) 버전가드 =="
+# launchd plist가 /bin/bash(macOS 시스템 bash, 3.2)로 스크립트를 돌려 `declare -A`에서
+# 원인불명 exit 2로 매일 04:30 조용히 죽던 실사고(cron/reclaim.log 실측)의 재현·고정.
+# /bin/bash 3.2가 실제로 이 macOS에 존재한다는 전제 — 없으면 이 검증 자체가 무의미하므로
+# 스킵(FAIL 아님, 이 머신의 환경 한계).
+BASH32_MAJOR=99
+[ -x /bin/bash ] && BASH32_MAJOR="$(/bin/bash -c 'echo ${BASH_VERSINFO[0]}' 2>/dev/null || echo 99)"
+
+if [ "$BASH32_MAJOR" -lt 4 ]; then
+  OLDBASH_ERR="$WORK/oldbash-stderr.txt"
+  OLDBASH_EXIT=0
+  /bin/bash "$SCRIPT" --dry-run >/dev/null 2>"$OLDBASH_ERR" || OLDBASH_EXIT=$?
+  OLDBASH_OUT="$(cat "$OLDBASH_ERR")"
+
+  if [ "$OLDBASH_EXIT" -eq 65 ]; then
+    echo "  ok   /bin/bash(3.2) 실행 → exit 65"
+  else
+    echo "  FAIL /bin/bash(3.2) 실행 → exit ${OLDBASH_EXIT}(기대 65)"
+    FAIL=1
+  fi
+
+  assert_contains "$OLDBASH_OUT" "bash 4+ 필요" "stderr에 원인 메시지 포함"
+
+  if [[ "$OLDBASH_OUT" == *"declare"* ]]; then
+    echo "  FAIL stderr에 declare 관련 에러가 섞여있다(가드가 declare -A보다 먼저 안 걸렸다) — $OLDBASH_OUT"
+    FAIL=1
+  else
+    echo "  ok   stderr에 declare 관련 에러 없음(가드가 declare -A 도달 前에 먼저 죽음)"
+  fi
+else
+  echo "  skip /bin/bash가 이 머신에서 3.2 미만이 아니거나 실행 불가 — 이 검증은 이 환경에서 의미 없음"
 fi
 
 echo
