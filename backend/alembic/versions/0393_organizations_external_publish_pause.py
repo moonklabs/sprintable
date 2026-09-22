@@ -12,9 +12,10 @@ publication_command.py::requested_by_member_id와 동형 관례. team_members는
 `WrongObjectType: referenced relation "team_members" is not a table`) +
 `pause_reason`(nullable text, owner가 적는 사유).
 
-Revision ID: 0379
-Revises: 0378
-Create Date: 2026-09-16
+Revision ID: 0393
+Revises: 0392
+Create Date: 2026-09-16 (rebase 시점 개명 2026-09-22, 미르코 — 페드루 PO 지시:
+parking/axis-b 착지순 사다리 재배정, 4364(0392) 바로 위)
 """
 from __future__ import annotations
 
@@ -23,8 +24,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "0379"
-down_revision = "0378"
+revision = "0393"
+down_revision = "0392"
 branch_labels = None
 depends_on = None
 

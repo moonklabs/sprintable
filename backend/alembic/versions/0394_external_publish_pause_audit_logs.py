@@ -7,9 +7,10 @@ action_check` — role-변경 3값 전용)라 재사용 불가(실측). 이 코�
 `gate_github_check_event`·0285_chat_command_audit_logs.py의 `chat_command_
 audit_logs`)를 그대로 따른다 — 행 2종(pause·resume)뿐인 소형 테이블.
 
-Revision ID: 0380
-Revises: 0379
-Create Date: 2026-09-16
+Revision ID: 0394
+Revises: 0393
+Create Date: 2026-09-16 (rebase 시점 개명 2026-09-22, 미르코 — 페드루 PO 지시:
+parking/axis-b 착지순 사다리 재배정)
 """
 from __future__ import annotations
 
@@ -18,8 +19,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "0380"
-down_revision = "0379"
+revision = "0394"
+down_revision = "0393"
 branch_labels = None
 depends_on = None
 

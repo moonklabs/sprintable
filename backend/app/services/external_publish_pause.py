@@ -13,7 +13,7 @@ comment_reply·ads_boost·newsletter_send 3도메인은 이 워커 전용이라 
 저장 자리(그라운딩 결론) — `org_content_rules.rules`(JSONB)는 모델 자체
 docstring이 "콘텐츠 린트 전용 자루"라 의미상 안 맞아 기각. `organizations`에
 `agent_session.py`·`github_installation.py`가 이미 쓰는 `suspended_at` 관례를
-그대로 미러(마이그 0379)."""
+그대로 미러(마이그 0393 — rebase 개명 前엔 0379)."""
 from __future__ import annotations
 
 import uuid

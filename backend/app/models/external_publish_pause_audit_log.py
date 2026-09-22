@@ -29,7 +29,7 @@ class ExternalPublishPauseAuditLog(Base):
     # 'pause' | 'resume'.
     action: Mapped[str] = mapped_column(Text, nullable=False)
     # FK 無 — publication_command.py::requested_by_member_id와 동형 관례(team_members는
-    # 뷰라 FK 대상이 될 수 없다, 0379 마이그 코멘트 참고).
+    # 뷰라 FK 대상이 될 수 없다, 0393 마이그 코멘트 참고 — rebase 개명 前엔 0379).
     actor_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
