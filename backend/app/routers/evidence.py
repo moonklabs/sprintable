@@ -430,10 +430,64 @@ async def _create_evidence(
         created_by=caller.id,
     )
     session.add(evidence)
+    await session.flush()  # entity_references FK 삽입 前 evidence.id를 확정(같은 트랜잭션).
+    await _reconcile_evidence_entity_references(
+        session, org_id=org_id, evidence_id=evidence.id, work_item_id=body.work_item_id,
+        work_item_type=body.work_item_type, artifact_id=body.artifact_id, payload=payload,
+        created_by=caller.id,
+    )
     await session.commit()
     await session.refresh(evidence)
     [denorm] = await _attach_artifact_denorm(session, [evidence])
     return denorm
+
+
+async def _reconcile_evidence_entity_references(
+    session: AsyncSession, *, org_id: uuid.UUID, evidence_id: uuid.UUID,
+    work_item_id: uuid.UUID, work_item_type: str, artifact_id: uuid.UUID | None,
+    payload: dict | None, created_by: uuid.UUID | None,
+) -> None:
+    """story #4141(페드루 PO 確定 2026-09-22) — evidence 생성이 entity_references에
+    source_type="evidence" 행을 남긴다(이 write-path 신설 前엔 0건 — «이것을 가리키는
+    것들» backlinks가 evidence를 아예 못 셌다). 대상 3종, 전부 이미 있는 신호 재사용
+    (새 파서·새 판정 0):
+      ① artifact — `body.artifact_id`(이미 있는 값, artifact_version_id로 다시 안 풀어도
+         됨 — target은 artifact 그 자체지 특정 버전이 아니다).
+      ② doc — `payload.doc`("entity:doc:uuid" 원시 토큰, recipe_gate_hooks.resolve_entity_
+         token 재사용 — #4135 파서를 다시 안 짠다).
+      ③ 게이트 핀 — `payload.kind`가 있으면 `recipe_gate_hooks._GATE_TYPE_EXPECTED_EVIDENCE_
+         KINDS`(같은 표, #4135와 공유)로 이 kind를 기대하는 gate_type의 실 게이트를 찾아
+         전부 target=gate로 싣는다(상태 무관 — "이 게이트가 이 산출물을 기대한다"는 사실
+         자체는 게이트 상태와 별개).
+    `known_new=True`(evidence는 이 라우터에 수정 엔드포인트가 없다 — 생성 시점 1회뿐이라
+    채팅 메시지와 동일하게 기존 참조 diff/stale-delete가 구조적으로 불필요, existing-refs
+    SELECT를 건너뛴다)."""
+    from app.services.mention_parser import reconcile_entity_references
+    from app.services.recipe_gate_hooks import resolve_entity_token, resolve_pinned_gate_ids_for_evidence_kind
+    from app.services.reference_registry import WRITE_TARGET_TYPES_WITH_TARGET_ONLY
+
+    extracted_refs: list[tuple[str, uuid.UUID, str, str]] = []
+    if artifact_id is not None:
+        extracted_refs.append(("artifact", artifact_id, "mention", "explicit"))
+
+    doc_id = resolve_entity_token((payload or {}).get("doc"), expect_type="doc")
+    if doc_id is not None:
+        extracted_refs.append(("doc", doc_id, "mention", "explicit"))
+
+    kind = (payload or {}).get("kind")
+    if isinstance(kind, str):
+        gate_ids = await resolve_pinned_gate_ids_for_evidence_kind(
+            session, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, kind=kind,
+        )
+        extracted_refs.extend(("gate", gate_id, "mention", "explicit") for gate_id in gate_ids)
+
+    if not extracted_refs:
+        return
+    await reconcile_entity_references(
+        session, org_id=org_id, source_type="evidence", source_field="ref", source_id=evidence_id,
+        extracted_refs=extracted_refs, created_by=created_by,
+        target_types=WRITE_TARGET_TYPES_WITH_TARGET_ONLY, known_new=True,
+    )
 
 
 @router.get("", response_model=list[EvidenceResponse])
@@ -531,5 +585,15 @@ async def delete_evidence(
     if evidence.created_by != caller.id:
         raise HTTPException(status_code=403, detail="Only the creator can retract evidence")
 
+    # story #4141(AC1 "삭제 시 참조 정리") — entity_references.source_id는 polymorphic이라
+    # FK가 없다(모듈 docstring 그대로, ON DELETE CASCADE 불가) — evidence 행을 지우기 前에
+    # 이 evidence가 source인 Reference 행을 직접 지운다(그대로 두면 backlinks가 "존재하지
+    # 않는 evidence를 가리키는 유령 행"을 계속 낸다 — still_exists=False 폴백이 있어도
+    # 그건 "끊어짐을 보여주는 것"이지 "정리"가 아니다).
+    from app.models.reference import Reference
+
+    await session.execute(
+        Reference.__table__.delete().where(Reference.source_type == "evidence", Reference.source_id == id)
+    )
     await session.delete(evidence)
     await session.commit()

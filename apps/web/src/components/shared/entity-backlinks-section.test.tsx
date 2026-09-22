@@ -100,11 +100,15 @@ describe('EntityBacklinksSection', () => {
   });
 
   it('빈 목록이면 수집범위를 실은 0건 문구를 보인다(미수집을 없음으로 표시하지 않는다)', async () => {
+    // story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
+    // 정식 source_type이라 그 exclude 사유 자체가 소멸, backlinks.py 참조). 픽스처를 BE가
+    // 실제로 낼 수 있는 값(pr_sid_text_convention뿐)으로 되돌리고, evidence는 source_types
+    // 쪽에 새로 넣어 사람 낱말 매핑을 같이 확認한다.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [],
       meta: {
         next_cursor: null, has_more: false,
-        collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: ['pr_sid_text_convention', 'evidence_free_text_reference'] },
+        collection_scope: { source_types: ['chat_message', 'doc', 'evidence'], forms: 'all', excludes: ['pr_sid_text_convention'] },
       },
     }))));
     await render('story', 's1');
@@ -113,12 +117,12 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).not.toContain('chat_message');
     expect(container.textContent).toContain('대화');
     expect(container.textContent).toContain('문서');
-    expect(container.textContent).toContain('PR/커밋');
     expect(container.textContent).toContain('증거');
-    // 조사 플레이스홀더(«참조은(는)»류)가 그대로 안 남고, 결정적으로 고른 조사(여기선 "증거
-    // 자유텍스트 참조"의 «참조»=받침 없음 → "는")가 실제로 붙는다.
+    expect(container.textContent).toContain('PR/커밋');
+    // 조사 플레이스홀더(«참조은(는)»류)가 그대로 안 남고, 결정적으로 고른 조사(여기선 "PR/
+    // 커밋의 [SID:XXX] 텍스트 관례"의 «관례»=받침 없음 → "는")가 실제로 붙는다.
     expect(container.textContent).not.toContain('은(는)');
-    expect(container.textContent).toContain('참조는 미수집');
+    expect(container.textContent).toContain('관례는 미수집');
   });
 
   it('source_types/excludes 매핑에 없는 미지 코드는 원문 코드 그대로 보인다(지어내지 않는다)', async () => {
@@ -135,6 +139,36 @@ describe('EntityBacklinksSection', () => {
     // 받침 있는 미지 코드("_code"의 「e」는 한글이 아니므로 lastHangulChar가 한글만 훑는다 —
     // 이 케이스는 완전 비한글이라 「는」으로 폴백(korean-particle.ts 관례).
     expect(container.textContent).toContain('future_exclude_code는 미수집');
+  });
+
+  it('story #4141 — evidence·artifact 항목이 라벨·아이콘과 함께 실제로 렌더된다(source_type=doc/meeting/story와 동형)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        {
+          id: 'r1', source_type: 'evidence', source_id: 'ev1', created_by: null,
+          created_at: '2026-09-22T00:00:00Z', relation: 'none', still_exists: true,
+          doc: null, message: null, meeting: null, story: null,
+          evidence: { id: 'ev1', title: '컨셉 브리프 v1' }, artifact: null,
+        },
+        {
+          id: 'r2', source_type: 'artifact', source_id: 'a1', created_by: null,
+          created_at: '2026-09-22T00:00:00Z', relation: 'none', still_exists: false,
+          doc: null, message: null, meeting: null, story: null,
+          evidence: null, artifact: { id: 'a1', title: '무드보드' },
+        },
+      ],
+      meta: { next_cursor: null, has_more: false, collection_scope: null },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('컨셉 브리프 v1');
+    expect(container.textContent).toContain('무드보드');
+    // still_exists=false인 artifact 항목만 «대상이 없어요» 배지가 붙는다(evidence 항목엔 없음).
+    const goneMatches = container.textContent?.match(/대상이 없어요/g) ?? [];
+    expect(goneMatches.length).toBe(1);
+    // 아이콘이 실제 DOM에 그려졌는지(각 li당 svg 1개 이상).
+    const items = container.querySelectorAll('li');
+    expect(items.length).toBe(2);
+    items.forEach((li) => expect(li.querySelector('svg')).not.toBeNull());
   });
 
   it('빈 목록에 살아있는 항목만 있으면 「대상이 없어요」가 안 뜬다(정상 케이스 오탐 방지)', async () => {

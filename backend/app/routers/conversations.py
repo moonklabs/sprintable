@@ -2750,13 +2750,15 @@ async def send_message(
     # story #2889(S2h③, 페드루 확定 2026-08-21): gate/pull_request/member는 TARGET_ONLY_TYPES
     # (완전지원 ENTITY_RESOLVERS 아님)라 insert_chat_mentions의 기본 target_types(=ENTITY_
     # RESOLVERS만)엔 안 잡힌다 — "존재판정+멘션 자동감지"까지가 이 세 타입의 계약(reference_
-    # registry.py 참고)이라 여기서 명시로 넓힌다. chat_message는 안 넣는다(자기 자신을
-    # @멘션하는 토큰은 의미가 없음 — proof form의 별도 경로로만 채팅 메시지를 인용한다).
-    from app.services.reference_registry import ENTITY_RESOLVERS
+    # registry.py 참고)이라 여기서 명시로 넓힌다. chat_message는 이 합집합에도 포함되지만
+    # 여기선 실질적으로 안 쓰인다(자기 자신을 @멘션하는 토큰은 의미가 없음 — proof form의
+    # 별도 경로로만 채팅 메시지를 인용한다). story #4141 — evidence.py write-path(게이트 핀)도
+    # 같은 조합이 필요해져 `WRITE_TARGET_TYPES_WITH_TARGET_ONLY`로 합쳤다(literal 재타이핑 0).
+    from app.services.reference_registry import WRITE_TARGET_TYPES_WITH_TARGET_ONLY
     mention_result = await insert_chat_mentions(
         db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
         auto_story_ids=frozenset(_auto_story_ids),
-        target_types=frozenset(ENTITY_RESOLVERS) | {"gate", "pull_request", "member"},
+        target_types=WRITE_TARGET_TYPES_WITH_TARGET_ONLY,
     )
 
     # story #2889(S2h): #2263 AC6이 남긴 갭(SSE/POST 응답엔 읽기 경로의 references[] 키가

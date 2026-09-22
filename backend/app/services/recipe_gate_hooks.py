@@ -121,6 +121,51 @@ async def resolve_stage_evidence_entries(
         })
     return entries
 
+
+def resolve_entity_token(raw: object, *, expect_type: str) -> uuid.UUID | None:
+    """story #4141 — `payload.doc`류 원시 필드("entity:doc:uuid")를 `_ENTITY_TOKEN_RE`로
+    파싱해 `expect_type`과 일치할 때만 UUID를 돌려준다. `resolve_stage_evidence_entries`
+    (위 88-104행)가 인라인으로 하던 파싱을 재사용 가능한 조각으로 뺀 것 — evidence
+    write-path(#4141 entity_references 기록)가 같은 파싱을 여기서 다시 짜지 않는다(파서
+    2곳 소유=twin-system 갭, 이 파일 자체가 이미 여러 번 겪은 그 클래스). 형식이 안 맞거나
+    (raw가 str이 아님·정규식 미매치·type 불일치·UUID 형식 아님) 전부 None(지어내지 않는다)."""
+    if not isinstance(raw, str):
+        return None
+    m = _ENTITY_TOKEN_RE.match(raw.strip())
+    if not m or m.group(1) != expect_type:
+        return None
+    try:
+        return uuid.UUID(m.group(2))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+async def resolve_pinned_gate_ids_for_evidence_kind(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID, kind: str,
+) -> list[uuid.UUID]:
+    """story #4141 — evidence write-path(entity_references «게이트 핀» 기록) 전용 역방향
+    조회: 이 `kind`를 기대하는 gate_type(들)(`_GATE_TYPE_EXPECTED_EVIDENCE_KINDS`, 위
+    36-39행 — #4135와 완전히 같은 표를 이 모듈에서 그대로 재사용, 표를 둘로 안 늘린다)이
+    이 work_item에 실제로 연 게이트 id를 전부 돌려준다(상태 무관 — pending/approved 어느
+    쪽이든 "이 게이트가 이 산출물을 기대한다"는 사실 자체는 변하지 않는다). kind가 어느
+    gate_type의 기대 목록에도 없으면(generation_cost·verification_sheet 등) 빈 리스트
+    (쿼리 자체를 안 돈다 — `resolve_stage_evidence_entries`의 좁은 가드와 동일 사상)."""
+    matching_gate_types = [
+        gt for gt, kinds in _GATE_TYPE_EXPECTED_EVIDENCE_KINDS.items() if kind in kinds
+    ]
+    if not matching_gate_types:
+        return []
+
+    from app.models.gate import Gate
+
+    rows = (await db.execute(
+        select(Gate.id).where(
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+            Gate.work_item_type == work_item_type, Gate.gate_type.in_(matching_gate_types),
+        )
+    )).scalars().all()
+    return list(rows)
+
 # PO 확定(페드루, 2026-09-02, 변경요청①) — 값을 지어내지 않는다: 못 찾은 필드는 이 sentinel로
 # 명시한다("가서 보라" 금지 — story #3312 처방 3과 동형, 결재 카드에 실물이 안 보이면 그
 # 사실 자체를 정직하게 드러낸다).

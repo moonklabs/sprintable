@@ -18,12 +18,18 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 그 컴포넌트는 이미 테스트·다른 소비처(doc [slug]/view)가 있는 공유 컴포넌트라 공개
 // 계약(props)을 넓히는 대신 — 상세 패널당 1회뿐인 가벼운 GET 중복을 택했다(스토리 상세는
 // 자주 리렌더되는 목록이 아니다). 재사용 폭 넓히기가 필요해지면 그때 끌어올린다.
+// story #4141 — evidence/artifact의 쓰기 경로(routers/evidence.py·visual_artifacts.py)는
+// relation을 항상 기본값 'none'으로 남긴다('created_from'을 채우는 caller가 없다) — 즉
+// 이 섹션(relation==='created_from'만 다룬다, 위 §2267 AC4 docstring)엔 구조적으로 절대
+// 안 들어온다. 그래도 BacklinkItem 유니온을 공유하므로 스위치는 두 케이스를 다뤄야
+// 한다(exhaustiveness) — "있을 수 없는 값"을 undefined/null로 솔직히 반환한다(지어내지 않음).
 function sourceIcon(sourceType: BacklinkItem['source_type']) {
   switch (sourceType) {
     case 'doc': return FileText;
     case 'chat_message': return MessageSquare;
     case 'meeting': return Calendar;
     case 'story': return BookOpen;
+    case 'evidence': case 'artifact': return undefined;
   }
 }
 
@@ -33,6 +39,7 @@ function sourceLabel(item: BacklinkItem): string | undefined {
     case 'chat_message': return item.message?.content_snippet;
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
+    case 'evidence': case 'artifact': return undefined;
   }
 }
 
@@ -50,6 +57,7 @@ function sourceHref(item: BacklinkItem): string | null {
     // 폴백 경로(href=null)로 평문 렌더 — 카드 존재 여부(still_exists)와 무관하게 이제
     // meeting 출처는 애초에 도달 가능한 목적지가 없다.
     case 'meeting': return null;
+    case 'evidence': case 'artifact': return null;
   }
 }
 
@@ -146,7 +154,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
           const creatorName = origin.created_by?.name;
           const content = (
             <span className="flex items-start gap-2 text-xs">
-              <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              {Icon && <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden />}
               <span className="min-w-0 flex-1">
                 <span className="[overflow-wrap:anywhere]">{label ?? origin.source_id}</span>
                 {!origin.still_exists && (
