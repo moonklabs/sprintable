@@ -177,6 +177,13 @@ export function extractSourceKeys(files: string[]): { refs: KeyRef[]; dynamicSit
 
 export interface BuildStageArgs {
   defaults: Map<string, string | undefined>;
+  /** story #4161 — 같은 빌드 스테이지 안 `ENV KEY=...` LHS에 등장하는 NEXT_PUBLIC_* 키.
+   * Docker의 ARG는 빌드-시점 변수일 뿐, `RUN`이 도는 셸(따라서 `next build`가 읽는
+   * `process.env`)에 자동으로 안 실린다 — `ENV KEY=${KEY}` 재선언이 있어야 그 스테이지의
+   * RUN들이 실제로 그 값을 환경변수로 본다. ARG만 있고 이 짝이 없으면 빌드는 ARG를
+   * "받기는" 하지만 `next build`엔 값이 안 넘어가 조용히 undefined를 굽는다(#4161 — #3948
+   * 이 못 보던 변형, 까디르 QA가 실 Dockerfile로 확認). */
+  envKeys: Set<string>;
   buildStageName: string | null;
   /** 0 또는 2 이상이면 스테이지 구조가 애매하다는 뜻 — 호출부가 이걸 RED로 다뤄야 한다. */
   buildStageCount: number;
@@ -187,12 +194,16 @@ export interface BuildStageArgs {
  * <name>` 경계로 스테이지를 나누고, `RUN … (pnpm|next) build`가 있는 스테이지 «단
  * 하나»의 `ARG NEXT_PUBLIC_*`만 유효로 센다. 그 스테이지가 0개나 2개 이상이면(스테이지
  * 구조가 바뀌어 이 가드가 못 따라간 신호) buildStageCount로 알린다 — 호출부가 RED 처리.
+ *
+ * story #4161 — 같은 루프에서 `ENV`도 함께 훑어 `envKeys`를 채운다(신규 순회 없음).
  */
 export function findBuildStageArgs(dockerfilePath: string): BuildStageArgs {
   const lines = readFileSync(dockerfilePath, 'utf8').split('\n');
   const stages: { name: string; lines: string[] }[] = [];
   let current: { name: string; lines: string[] } | null = null;
   const argRe = /^ARG\s+(NEXT_PUBLIC_[A-Z0-9_]+)(?:=(.*))?$/;
+  /** `ENV KEY=값` — Docker는 한 ENV 줄에 여러 KEY=값 쌍을 허용하므로 라인 전체에서 전수. */
+  const envAssignRe = /(?:^|\s)(NEXT_PUBLIC_[A-Z0-9_]+)=/g;
 
   for (const raw of lines) {
     const trimmed = raw.trim();
@@ -208,15 +219,19 @@ export function findBuildStageArgs(dockerfilePath: string): BuildStageArgs {
   const buildStages = stages.filter((s) => s.lines.some((l) => BUILD_RUN_RE.test(l)));
 
   if (buildStages.length !== 1) {
-    return { defaults: new Map(), buildStageName: null, buildStageCount: buildStages.length };
+    return { defaults: new Map(), envKeys: new Set(), buildStageName: null, buildStageCount: buildStages.length };
   }
 
   const defaults = new Map<string, string | undefined>();
+  const envKeys = new Set<string>();
   for (const line of buildStages[0]!.lines) {
     const m = argRe.exec(line);
     if (m) defaults.set(m[1]!, m[2]);
+    if (/^ENV\b/.test(line)) {
+      for (const em of line.matchAll(envAssignRe)) envKeys.add(em[1]!);
+    }
   }
-  return { defaults, buildStageName: buildStages[0]!.name, buildStageCount: 1 };
+  return { defaults, envKeys, buildStageName: buildStages[0]!.name, buildStageCount: 1 };
 }
 
 export function extractDockerfileArgDefaults(dockerfilePath: string): Map<string, string | undefined> {
@@ -314,7 +329,14 @@ export function resolveGateValue(
 }
 
 export interface WiringResult {
-  missing: { key: string; refs: KeyRef[]; missingFrom: ('dockerfile' | 'cloudbuild')[] }[];
+  missing: {
+    key: string;
+    refs: KeyRef[];
+    /** story #4161 — 'dockerfile-arg'(ARG 자체가 없음) vs 'dockerfile-env'(ARG는 있는데
+     * 짝 ENV 재선언이 없음, #3948이 못 보던 변형) vs 'cloudbuild'를 구분해 정확히 어느
+     * 축이 빠졌는지 알린다. */
+    missingFrom: ('dockerfile-arg' | 'dockerfile-env' | 'cloudbuild')[];
+  }[];
   excludedButNowWired: string[]; // EXCLUDED_KEYS/FLAG_GATED_KEYS인데 실은 이미 배선됨 — 목록 정리 대상(정보성)
   dynamicSites: { file: string; line: number }[];
   sourceKeyCount: number;
@@ -378,15 +400,21 @@ export function checkWiring(options: CheckWiringOptions = {}): WiringResult {
   const missing: WiringResult['missing'] = [];
   const excludedButNowWired: string[] = [];
   for (const [key, keyRefs] of byKey) {
-    const inDocker = dockerfileArgs.has(key);
+    // story #4161 — ARG만으론 "Dockerfile에 배선됐다"고 안 본다. Docker ARG는 빌드-시점
+    // 변수일 뿐 RUN 셸에 자동으로 안 실리므로, 짝 ENV 재선언까지 있어야 next build가
+    // 실제로 값을 읽는다(#3948이 ARG 유무만 봐서 못 잡던 변형).
+    const hasArg = dockerfileArgs.has(key);
+    const hasEnv = stageArgs.envKeys.has(key);
+    const inDocker = hasArg && hasEnv;
     const inCloudbuild = cloudbuildArgs.has(key);
     if (key in EXCLUDED_KEYS || gatedExcluded.has(key)) {
       if (inDocker && inCloudbuild) excludedButNowWired.push(key);
       continue;
     }
     if (!inDocker || !inCloudbuild) {
-      const missingFrom: ('dockerfile' | 'cloudbuild')[] = [];
-      if (!inDocker) missingFrom.push('dockerfile');
+      const missingFrom: WiringResult['missing'][number]['missingFrom'] = [];
+      if (!hasArg) missingFrom.push('dockerfile-arg');
+      else if (!hasEnv) missingFrom.push('dockerfile-env');
       if (!inCloudbuild) missingFrom.push('cloudbuild');
       missing.push({ key, refs: keyRefs, missingFrom });
     }
