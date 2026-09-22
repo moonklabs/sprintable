@@ -10,6 +10,19 @@ import koMessages from '../../../messages/ko.json';
 
 const fetchMock = vi.fn();
 
+// story #4019 — 채널 절(ConnectRulesV3Channels)이 이제 OAuthResultBanner를 마운트해
+// useSearchParams·usePathname·useRouter를 쓴다(connect-rules-v3-channels.test.tsx와
+// 동형 mock 관례).
+const { useSearchParamsMock, routerReplaceMock } = vi.hoisted(() => ({
+  useSearchParamsMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
+}));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => useSearchParamsMock(),
+  usePathname: () => '/connect-rules',
+  useRouter: () => ({ replace: routerReplaceMock }),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -29,6 +42,8 @@ beforeEach(() => {
   root = createRoot(container);
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  useSearchParamsMock.mockReturnValue(new URLSearchParams());
+  routerReplaceMock.mockClear();
 });
 
 afterEach(async () => {

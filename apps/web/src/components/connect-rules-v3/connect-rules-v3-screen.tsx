@@ -77,6 +77,11 @@ function ConnectRulesV3Topbar() {
 function useMe() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // story #4019(PO 確定 2026-09-17) — OAuthResultBanner의 CHANNEL_APP_CREDENTIALS_MISSING
+  // 분기는 owner|admin 폭(isAdmin)이 아니라 owner 단독(isOwnerStrict)을 요구한다(레거시
+  // channels/page.tsx:1142 `isOwnerStrict = currentRole === 'owner'`와 동일 근거 —
+  // 앱 자격 등록이 owner 전용). 같은 /api/me 응답의 role을 한 번 더 갈라 낸다(새 콜 0).
+  const [isOwnerStrict, setIsOwnerStrict] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -92,6 +97,7 @@ function useMe() {
         if (id) {
           setOrgId(id);
           setIsAdmin(json.data?.role === 'admin' || json.data?.role === 'owner');
+          setIsOwnerStrict(json.data?.role === 'owner');
         } else {
           setLoadError(true);
         }
@@ -100,7 +106,7 @@ function useMe() {
     return () => { cancelled = true; };
   }, [retryNonce]);
 
-  return { orgId, isAdmin, loadError, retry: () => setRetryNonce((n) => n + 1) };
+  return { orgId, isAdmin, isOwnerStrict, loadError, retry: () => setRetryNonce((n) => n + 1) };
 }
 
 export function ConnectRulesV3Screen({
@@ -108,7 +114,7 @@ export function ConnectRulesV3Screen({
 }: { todayV3Enabled?: boolean; chatV3Enabled?: boolean }) {
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('common');
-  const { orgId, isAdmin, loadError, retry } = useMe();
+  const { orgId, isAdmin, isOwnerStrict, loadError, retry } = useMe();
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="connect-rules-v3-screen">
@@ -147,7 +153,7 @@ export function ConnectRulesV3Screen({
                     <h2 className="text-sm font-semibold text-foreground">{t('channelsSectionTitle')}</h2>
                     <span className="text-[11px] text-muted-foreground">{t('channelsSectionHint')}</span>
                   </div>
-                  <ConnectRulesV3Channels orgId={orgId} />
+                  <ConnectRulesV3Channels orgId={orgId} isOwnerStrict={isOwnerStrict} />
                 </section>
 
                 <section aria-label={t('rulesSectionTitle')}>
