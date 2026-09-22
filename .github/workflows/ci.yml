@@ -55,6 +55,13 @@ jobs:
     outputs:
       backend_relevant: ${{ steps.scope.outputs.backend_relevant }}
       gateway_relevant: ${{ steps.scope.outputs.gateway_relevant }}
+      # story #4152(CI·결정성) — backend/tests/*.py 변경분만 공백 구분 단일 줄로(테스트
+      # 파일 경로는 `_FILE_RE`(shard_destructive_tests.py)가 이미 `tests/[a-zA-Z0-9_]+\.py`
+      # 로 좁혀 두므로 공백·쉼표 등 특수문자가 절대 안 낀다 — 멀티라인 GITHUB_OUTPUT
+      # 이스케이핑 없이 단일 줄로 안전하게 넘길 수 있다). push 이벤트(diff 정보 없음)는
+      # `__ALL__` 센티널 — backend-test-destructive가 이 값을 보면 --changed-files 자체를
+      # 생략해 안전측 폴백(전부 changed 취급, 회귀 0)으로 떨어진다.
+      backend_test_files_changed: ${{ steps.scope.outputs.backend_test_files_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,12 +81,21 @@ jobs:
           if [ -z "${BASE_SHA}" ] || [ -z "${HEAD_SHA}" ]; then
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
             echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
+            # story #4152 — diff 정보 자체가 없다(push 이벤트) → __ALL__ 센티널.
+            echo "backend_test_files_changed=__ALL__" >> "$GITHUB_OUTPUT"
             echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드·gateway 전량 실행."
             exit 0
           fi
           CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
           echo "changed files:"
           echo "${CHANGED}"
+
+          # story #4152(CI·결정성) — backend/tests/*.py 변경분만 추려 공백 구분 한 줄로
+          # (shard_destructive_tests.py --check-elapsed --changed-files가 소비). 경로에
+          # 공백/쉼표가 절대 안 끼는 `_FILE_RE` 패턴만 대상이라 이 조인이 안전하다.
+          BACKEND_TEST_FILES_CHANGED="$(printf '%s\n' "${CHANGED}" \
+            | grep -E '^backend/tests/[a-zA-Z0-9_]+\.py$' | sed 's#^backend/##' | tr '\n' ' ' | sed 's/ *$//')"
+          echo "backend_test_files_changed=${BACKEND_TEST_FILES_CHANGED}" >> "$GITHUB_OUTPUT"
 
           # story #3897(2026-09-15, 3889 사고 처방) — 판정 로직 전체(allowlist 후보 +
           # backend/tests/**가 «코드로» 참조하는 FE 경로 접촉 여부)는 check_backend_relevant_
@@ -1316,7 +1332,17 @@ jobs:
             echo "unweighted 초과 파일(story #3392 AC1, 위 ::error:: 참고): ${overage_files[*]}"
             exit 1
           fi
-          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file"
+          # story #4152(CI·결정성) — detect-changed-scope가 낸 backend/tests/*.py diff
+          # 목록(__ALL__=push 이벤트, diff 정보 없음)을 --changed-files로 넘긴다. 생략하면
+          # (예: __ALL__) diff 정보 없음으로 간주해 예전처럼 전부 RED 후보(안전측 폴백,
+          # shard_destructive_tests.py::slow_files_absolute의 changed_files=None 경로).
+          CHANGED_TEST_FILES="${{ needs.detect-changed-scope.outputs.backend_test_files_changed }}"
+          changed_files_arg=()
+          if [ "${CHANGED_TEST_FILES}" != "__ALL__" ]; then
+            printf '%s\n' ${CHANGED_TEST_FILES} > /tmp/changed_test_files.txt
+            changed_files_arg=(--changed-files /tmp/changed_test_files.txt)
+          fi
+          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}"
           slow_exit=$?
           # story #3558(CI·소형) AC1 — 삭제(rm -f) 前에 등재값 대조용 산출물로 변환해
           # 둔다(DB 준비를 제외한 순수 pytest wall time, `_t0`가 dropdb/createdb 뒤에서

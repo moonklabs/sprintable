@@ -1,1 +1,1 @@
-{"file": "tests/test_3804_prod_promotion_bridge_0354a.py", "sec": 25.0, "source": "story-3804-local-run(2026-09-16, 로컬 PG16 실측 5테스트 합 24.94s — 잠정값, CI 첫 run 뒤 실측치로 교체 예정)"}
+{"file": "tests/test_3804_prod_promotion_bridge_0354a.py", "sec": 25.0, "provisional": true, "source": "story-3804-local-run(2026-09-16, 로컬 PG16 실측 5테스트 합 24.94s — 잠정값, CI 첫 run 뒤 실측치로 교체 예정) · story #4152(2026-09-22) provisional:true 등재 — PR#4355 shard(6) 실사고(80s>71.2s 거짓 RED)의 실측예"}

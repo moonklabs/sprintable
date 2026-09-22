@@ -34,6 +34,22 @@ elapsed/weight 중앙값 배율을 구해 60초 판정선을 스케일한다(느
 늘어 오탐이 안 나고, 러너가 정상인데 그 파일 하나만 느려진 진짜 회귀는 배율이 1 근처라
 그대로 잡힌다). unweighted 파일은 이 배율 표본·판정 대상 모두에서 제외 — 그쪽은 이미
 `--meta-out`의 unweighted 초과 가드(#3392)가 별도로 담당한다.
+
+story #4152(CI·결정성, 페드루 PO 確定 2026-09-22) — 위 #3396의 «같은 run 상대» 정규화가
+러너 부하 노이즈에 취약함이 실사고 2건으로 드러났다: PR#4351 run 35696793719 shard(2)에서
+이 PR과 무관한 `test_3502_insights_board.py`(FE h1 파일 9개뿐인 PR, 백엔드 파일 0)가
+261s(그 run의 정규화 판정선 187.7s 초과)로 RED — 재실행만으로 초록(=거짓 RED). PR#4355
+shard(6)에서도 자기 신규 테스트 `test_3804_prod_promotion_bridge_0354a.py`가 80s(판정선
+71.2s 초과)로 RED — 재실행만으로 초록. 둘 다 코드 결함이 아니라 그 run 자체의 러너
+부하였다(#3396 자신의 정규화가 있어도 표본 전체가 같이 튀면 못 걸러낸다).
+
+`_check_elapsed_mode`(실제 CI 판정 경로)를 이제 `slow_files_absolute`(아래, 파일 자신의
+등재 weight × 배수를 절대 기준으로, PR의 diff 밖 파일은 경고만)로 바꾼다. #3396/#3636의
+run-relative 함수들(`weighted_ratios`·`normalized_slow_threshold_sec`·
+`slow_files_normalized`·`warned_only_files_normalized`·`HEAVY_FILE_OWN_WEIGHT_FAIL_
+MULTIPLIER`)은 실사고 이력(PR#3753·test_2813 2건)을 고정한 회귀가드 가치가 있어 삭제하지
+않고 그대로 둔다 — 더는 `_check_elapsed_mode`가 부르는 판정 경로가 아니다(이 문단이 그
+사실의 단일 출처).
 """
 from __future__ import annotations
 
@@ -319,6 +335,78 @@ def warned_only_files_normalized(
     return sorted(over_threshold - set(slow))
 
 
+# story #4152(CI·결정성, 페드루 PO 確定 2026-09-22) — «같은 run 상대» 정규화(#3396)를
+# `_check_elapsed_mode`의 실제 판정 경로에서 은퇴시키고, 파일 자신의 등재 weight(shard-
+# weights sec — main 이력의 대리값. #3558/#3642가 이미 드리프트로 그 값을 실측에 맞게
+# 계속 갱신 中이라 새 N-run 이력 저장소를 따로 만들 필요가 없다, 발명 0) × 배수를 절대
+# 기준으로 쓴다. "이 run이 느렸나"가 아니라 "이 파일이 자기 역사 대비 느려졌나"를 묻는
+# 축이라 run 전체 표본과 무관하게 파일 단위로 즉시 계산 가능하다. 2.5를 고른 이유:
+# HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER(#3636, 3.0)보다 살짝 좁혀 «절대 기준 자체가
+# 유일한 방어선»이 됐을 때도(diff-scoping 밖 unrelated 파일은 이제 이 축만 본다) 여전히
+# 유효한 판정력을 유지한다 — 3.0과 비교해 특별히 새 근거가 필요할 만큼 크게 다르지 않은
+# 값이라 카드 확定값(AC1) 그대로 채택.
+ABSOLUTE_SLOW_MULTIPLIER = 2.5
+
+
+def absolute_slow_threshold_sec(
+    weight: float, *, multiplier: float = ABSOLUTE_SLOW_MULTIPLIER, base_seconds: float = 60.0,
+) -> float:
+    """story #4152(AC1/AC3) — 파일 자신의 등재 weight × multiplier, #3383 AC5의 60초
+    절대 최저선은 무변(AC3 — 가벼운 파일이 그 최저선 밑에서 튀어도 여전히 60초 자체는
+    최소 방어선)."""
+    return max(weight * multiplier, base_seconds)
+
+
+def provisional_files_in(entries: list[dict]) -> frozenset[str]:
+    """story #4152(AC4) — `provisional: true`로 구조화 등재된 항목만(자유문 "잠정값"
+    텍스트 파싱 0 — story #3465의 `source` 필수화와 동형으로 구조화 필드만 신뢰).
+    첫 CI run 전 로컬 추정치는 절대 기준 계산에서 제외한다(잠정값은 기준 계산에서
+    제외 — 카드 확定): 실측이 쌓이면 #3558(ratio_outliers)/#3642(drift streak)이 이미
+    "등재값 대 실측" 갱신을 전담하므로(새 로직 0) 이 축은 그 갱신 前까지 가양성만
+    안 내는 게 목적이다."""
+    return frozenset(e["file"] for e in entries if e.get("provisional") is True)
+
+
+def parse_changed_files(text: str) -> frozenset[str]:
+    """story #4152(AC2) — `git diff --name-only` 1줄=1파일 형식을 그대로 읽는다(기존
+    elapsed 파일의 tab-separated 관례와는 다른 축 — 이쪽은 파일명 1개뿐이라 단순 split)."""
+    return frozenset(line.strip() for line in text.splitlines() if line.strip())
+
+
+def slow_files_absolute(
+    elapsed_by_file: dict[str, float],
+    weights: dict[str, float],
+    *,
+    provisional_files: frozenset[str] = frozenset(),
+    changed_files: frozenset[str] | None = None,
+    multiplier: float = ABSOLUTE_SLOW_MULTIPLIER,
+    base_seconds: float = 60.0,
+) -> tuple[list[str], list[str]]:
+    """story #4152(AC1/AC2/AC3/AC4) — `_check_elapsed_mode`의 실제 판정 함수(순수 —
+    AC2가 요구하는 단위 테스트 대상). weighted 파일만 대상(unweighted는 #3392가 전담,
+    무변). provisional(AC4)은 절대 기준 계산 자체에서 빠진다 — red에도 warn에도 안
+    실린다(등재값을 못 믿는 축이므로 이 게이트 자체가 no-op, #3558의 별도 등재값
+    대조 경고는 그대로 살아 있다).
+
+    나머지 중 threshold(파일 weight×multiplier, #3383 AC5의 60초 최저선 포함) 초과
+    파일은: `changed_files`가 None(호출측이 diff 정보를 안 줬을 때의 안전측 폴백 —
+    회귀 0, `--changed-files` 인자 생략 시의 예전 동작 그대로 전부 RED 후보)이거나
+    그 파일이 `changed_files` 안에 있으면 RED(AC2 — 변경 파일이거나 PR이 신설한
+    테스트, git diff가 신규 파일도 목록에 올리므로 별도 처리 불요), 아니면 WARN
+    (AC2 — 무관 파일 초과는 경고, 잡은 초록 유지). 반환 (red 정렬·warn 정렬)."""
+    red: list[str] = []
+    warn: list[str] = []
+    for f, elapsed in elapsed_by_file.items():
+        if f not in weights or f in provisional_files:
+            continue
+        threshold = absolute_slow_threshold_sec(weights[f], multiplier=multiplier, base_seconds=base_seconds)
+        if elapsed <= threshold:
+            continue
+        is_changed = changed_files is None or f in changed_files
+        (red if is_changed else warn).append(f)
+    return sorted(red), sorted(warn)
+
+
 def partition(files: list[str], weights: dict[str, float], shard_count: int) -> tuple[list[list[str]], list[float]]:
     """greedy LPT — 무거운 순으로 정렬해 매번 «지금 가장 가벼운 샤드」에 넣는다.
     ⭐이 함수는 무손실이다(모든 파일이 정확히 하나의 샤드에 들어간다) —
@@ -602,44 +690,46 @@ def _save_drift_state(path: Path, *, run_id: str | None, streaks: dict[str, int]
     path.write_text(json.dumps({"run_id": run_id, "streaks": streaks}, indent=2, sort_keys=True))
 
 
-def _check_elapsed_mode(elapsed_path: Path) -> int:
-    """story #3396 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
-    호출한다(중앙값은 그 run 전체 표본이 있어야 나온다 — 파일 단위 즉시 판정이 애초에
-    불가능한 가드다)."""
+def _check_elapsed_mode(elapsed_path: Path, *, changed_files_path: Path | None = None) -> int:
+    """story #4152 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
+    호출한다. #3396의 run-relative 중앙값 정규화 대신 `slow_files_absolute`(파일 자신의
+    등재 weight×AC1 배수, AC2 diff-scoping·AC4 provisional 제외)로 판정한다."""
     elapsed_by_file = _parse_elapsed_file(elapsed_path)
     weights = load_weights()
-    slow, threshold, sample_size = slow_files_normalized(elapsed_by_file, weights)
+    provisional = provisional_files_in(load_raw_entries())
+    changed_files = (
+        parse_changed_files(changed_files_path.read_text()) if changed_files_path is not None else None
+    )
 
-    # story #3636 — weight×3.0 여유축에 막혀 FAIL에서 빠진 파일도 조용히 넘기지 않고
-    # WARN으로 남긴다(가시성 — story #3558 ratio_outliers와 동형 관례).
-    for f in warned_only_files_normalized(elapsed_by_file, weights, threshold, slow):
+    red, warn = slow_files_absolute(
+        elapsed_by_file, weights, provisional_files=provisional, changed_files=changed_files,
+    )
+
+    for f in warn:
+        threshold = absolute_slow_threshold_sec(weights[f])
         print(
-            f"::warning::러너 정규화 가드 — {f} 임계값({threshold:.1f}s) 초과했지만 자기 weight"
-            f"({weights[f]:.1f}s)×{HEAVY_FILE_OWN_WEIGHT_FAIL_MULTIPLIER:.1f} 이내라 WARN만(story #3636): "
-            f"{elapsed_by_file[f]:.0f}s"
+            f"::warning::러너 정규화 가드(story #4152) — {f} 절대 임계({threshold:.1f}s, "
+            f"등재 weight {weights[f]:.1f}s×{ABSOLUTE_SLOW_MULTIPLIER:.1f}) 초과했지만 이 PR의 "
+            f"변경 파일 밖(AC2): {elapsed_by_file[f]:.0f}s — RED 아님(잡 초록 유지)."
         )
 
-    if sample_size < MIN_RATIO_SAMPLE:
+    if changed_files is None:
         print(
-            f"러너 정규화 표본 {sample_size}개 < {MIN_RATIO_SAMPLE} — 절대 {threshold:.0f}초로 폴백(story #3396 AC3)",
+            "diff 정보 없음(--changed-files 미지정) — 전부 changed 취급(회귀 0, story #4152 안전측 폴백)",
             file=sys.stderr,
         )
-    else:
-        print(
-            f"러너 정규화 판정선: {threshold:.1f}초(표본 {sample_size}개 · 중앙값 배율 "
-            f"×{threshold / 60.0:.2f}, story #3396 AC1)",
-            file=sys.stderr,
-        )
 
-    if slow:
-        for f in slow:
+    if red:
+        for f in red:
+            threshold = absolute_slow_threshold_sec(weights[f])
             print(
-                f"::error::러너 정규화 60초 가드 초과(story #3396): {f} "
-                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 같은 run의 다른 파일 대비로도 무거워졌다)"
+                f"::error::러너 정규화 절대 가드 초과(story #4152): {f} "
+                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 등재 weight×{ABSOLUTE_SLOW_MULTIPLIER:.1f} "
+                "절대 기준, 변경 파일이거나 diff 정보 없음)"
             )
         return 1
 
-    print(f"OK: 러너 정규화 가드 통과({sample_size}개 표본 기준)", file=sys.stderr)
+    print(f"OK: 러너 정규화 가드(절대 기준, story #4152) 통과 — 무관 파일 경고 {len(warn)}건", file=sys.stderr)
     return 0
 
 
@@ -703,10 +793,17 @@ def main() -> int:
              "always()라 result=success로 끝나, --shard-result만으로는(§3653) 이 케이스가 "
              "업로드 결함과 구분이 안 됐다.",
     )
+    ap.add_argument(
+        "--changed-files", type=Path, default=None,
+        help="story #4152(AC2) — --check-elapsed와 함께 쓴다. `git diff --name-only` "
+             "1줄=1파일 텍스트 파일 — 이 목록 밖에서 절대 임계를 넘은 파일은 RED가 아니라 "
+             "WARN(잡 초록 유지). 생략하면 diff 정보 없음으로 간주해 전부 RED 후보(회귀 0, "
+             "예전 동작 그대로).",
+    )
     args = ap.parse_args()
 
     if args.check_elapsed is not None:
-        return _check_elapsed_mode(args.check_elapsed)
+        return _check_elapsed_mode(args.check_elapsed, changed_files_path=args.changed_files)
 
     if args.elapsed_to_json is not None:
         elapsed_in, json_out = args.elapsed_to_json
