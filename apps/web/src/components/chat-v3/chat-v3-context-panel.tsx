@@ -243,7 +243,7 @@ export function ChatV3ContextPanel({
     : (workItemRef ? t('contextOpenLinkedWorkItem') : null);
 
   return (
-    <section className="flex w-[340px] shrink-0 flex-col bg-card" data-testid="chat-v3-context-panel">
+    <section className="flex w-full shrink-0 flex-col bg-card lg:w-[340px]" data-testid="chat-v3-context-panel">
       <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
         <h2 className="text-[13px] font-bold text-muted-foreground">{t('contextPanelTitle')}</h2>
       </div>

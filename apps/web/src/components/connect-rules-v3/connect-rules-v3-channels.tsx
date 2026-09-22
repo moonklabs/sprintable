@@ -97,9 +97,17 @@ function ChannelRow({
   const label = tc(channelConnectionStatusLabelKey(worst));
   return (
     <div className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm" data-testid="connect-rules-v3-channel-row">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium text-foreground">{item.display_name}</span>
-        {needsReconnect ? <Badge variant={statusBadgeVariant(worst)}>{label}</Badge> : <span className="text-xs text-muted-foreground">{label}</span>}
+      {/* story #4006 AC5 — lg 미만 좁은 열: 라벨(긴 고유명은 단어 중간 줄바꿈 대신
+          break-words)과 상태(3자 이하 「미연결」류가 「미연/결」로 쪼개지지 않게
+          whitespace-nowrap)가 한 줄에서 서로를 밀어내던 것 → 세로로 쌓는다. lg↑는
+          현행 한 줄 그대로(§7 무변). */}
+      <div className="flex flex-col items-start gap-1 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+        <span className="min-w-0 font-medium break-words text-foreground">{item.display_name}</span>
+        {needsReconnect ? (
+          <Badge variant={statusBadgeVariant(worst)} className="shrink-0 whitespace-nowrap">{label}</Badge>
+        ) : (
+          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{label}</span>
+        )}
       </div>
       {needsReconnect ? (
         <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">

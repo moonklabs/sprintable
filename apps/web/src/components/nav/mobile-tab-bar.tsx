@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
+import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
@@ -81,7 +81,31 @@ export const TABS = [
   { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
 
-export function resolveTabHref(tab: (typeof TABS)[number], dest: NavV3Destinations): string {
+// story #4006(critical, 5pt) AC8(§2, doc 5bc82986) — v3 플래그 중 하나라도 ON이면
+// (nav-v3-destinations.ts의 anyV3Enabled와 동일 신호, resolveNavV3Destinations.work
+// 참고) 하단 탭이 이 4탭으로 바뀐다: 오늘·대화·일감·더보기. 「승인」은 별 탭 없이
+// 「오늘」의 결정 큐로 흡수(PO 確定 — today_service의 `_needs_me_from_gate_inbox`가
+// ApprovalsQueue와 같은 `list_gate_inbox(status=pending, sort=urgency,
+// assigned_to_me=True)`·limit 없음이라 누락 0 — 그래서 badge도 아래 렌더에서 기존
+// pendingCount를 그대로 「오늘」 탭에 옮겨 붙인다, 새 API 0). 「결과·연결·규칙」은 이
+// 4탭엔 없고 `/more` 목록에서 진입(AC8, 이 모듈 스코프 밖).
+export const V3_TABS = [
+  { key: 'today', destKey: 'today' as const, href: destHref(DEFAULT_DEST.today), icon: Newspaper, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
+  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
+  { key: 'work', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work), icon: Workflow, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
+  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
+] as const;
+
+export type TabConfig = typeof TABS | typeof V3_TABS;
+export type TabDef = (typeof TABS)[number] | (typeof V3_TABS)[number];
+
+/** flags 중 v3 하나라도 ON이면 V3_TABS, 전부 OFF면 기존 TABS(AC8 "플래그 OFF 탭 4칸 바이트 무변"). */
+export function resolveTabsForFlags(navV3Flags: NavV3Flags): TabConfig {
+  const anyV3Enabled = navV3Flags.todayV3Enabled || navV3Flags.chatV3Enabled || navV3Flags.connectRulesV3Enabled;
+  return anyV3Enabled ? V3_TABS : TABS;
+}
+
+export function resolveTabHref(tab: TabDef, dest: NavV3Destinations): string {
   return destHref(dest[tab.destKey]);
 }
 
@@ -138,11 +162,23 @@ function isStaticPathExact(pathname: string, staticPath: string): boolean {
 //     — "전체"가 이 전부의 소속 탭이라는 게 이미 그 스텁 페이지 설계로 확定돼 있다.
 // navV3Flags 생략 시 DEFAULT_NAV_V3_FLAGS(전부 OFF)로 판정 — 기존 1-인자 호출부(테스트
 // 포함)와 바이트 동일 동작(AC2).
+// story #4006 AC8 — v3(anyV3Enabled) 판정 分岐 추가: 「오늘」이 자기 목적지(dest.today.path)
+// 뿐 아니라 옛 「결재」 경로(gates/*·inbox?tab=gates)까지 흡수한다(승인 탭 폐지, §2).
+// 「일감」은 이제 key가 'now'가 아니라 'work'(V3_TABS와 정합). 플래그 전부 OFF면 기존
+// 판정 그대로(AC8 "플래그 OFF 바이트 무변").
 export function getActiveTabKey(
   pathname: string,
   navV3Flags: NavV3Flags = DEFAULT_NAV_V3_FLAGS,
-): (typeof TABS)[number]['key'] {
+): TabDef['key'] {
   const dest = resolveNavV3Destinations(navV3Flags);
+  const anyV3Enabled = navV3Flags.todayV3Enabled || navV3Flags.chatV3Enabled || navV3Flags.connectRulesV3Enabled;
+  if (anyV3Enabled) {
+    if (isStaticPathOrChild(pathname, dest.today.path)) return 'today';
+    if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'today';
+    if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
+    if (isResourcePath(pathname, dest.work.path)) return 'work';
+    return 'more';
+  }
   if (isResourcePath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
   if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'approvals';
   if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
@@ -217,6 +253,9 @@ export function MobileTabBar({
   }, []);
 
   const activeKey = getActiveTabKey(pathname, navV3Flags);
+  // story #4006 AC8 — v3(anyV3Enabled)면 4탭이 V3_TABS로 바뀐다(플래그 OFF는 기존 TABS
+  // 그대로, 바이트 무변).
+  const tabs = resolveTabsForFlags(navV3Flags);
 
   return (
     <nav
@@ -226,13 +265,16 @@ export function MobileTabBar({
       // 이 값을 바꾸려면 globals.css 그 한 줄만 고치면 우하단 fixed 요소들의 인셋도 함께 맞다).
       className="flex h-[var(--mobile-tab-bar-h)] shrink-0 border-t border-border bg-card lg:hidden"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const { key, icon: Icon, labelKey, namespace } = tab;
         const href = resolveTabHref(tab, dest);
         const active = key === activeKey;
         // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
         // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
-        const badge = key === 'approvals' && pendingCount > 0
+        // story #4006 AC8 — v3 4탭엔 「승인」이 없다. 같은 pendingCount를 「오늘」 탭
+        // 배지로 그대로 옮겨 붙인다(승인 큐가 「오늘」의 결정 큐로 흡수됐다는 뜻 —
+        // PO 確定, 위 V3_TABS 주석 참고. 새 fetch 0).
+        const badge = (key === 'approvals' || key === 'today') && pendingCount > 0
           ? pendingCount
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal

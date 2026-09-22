@@ -58,23 +58,25 @@ describe('NavV3ItemList — story #4004 AC1(목적지 5항목·라벨)', () => {
   });
 });
 
-describe('NavV3ItemList — story #4004 AC(09-17 추가) 활성 표시(유나 § 確定, doc 6a179c7c)', () => {
-  it('⭐활성 항목 — bg-primary/10·text-primary·font-medium·aria-current="page"', async () => {
+describe('NavV3ItemList — story #4006 §6 역전 활성 표시(레거시 sidebar page-active 묶음, doc 5bc82986)', () => {
+  it('활성 항목 — bg-sidebar-active-fill·border-l-proof-citron·font-medium·text-sidebar-active-fill-foreground·aria-current="page"', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'chats');
     const chatsLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '대화')!;
-    expect(chatsLink.className).toContain('bg-primary/10');
-    expect(chatsLink.className).toContain('text-primary');
+    expect(chatsLink.className).toContain('bg-sidebar-active-fill');
+    expect(chatsLink.className).toContain('border-l-proof-citron');
     expect(chatsLink.className).toContain('font-medium');
+    expect(chatsLink.className).toContain('text-sidebar-active-fill-foreground');
     expect(chatsLink.getAttribute('aria-current')).toBe('page');
   });
 
-  it('⭐비활성 항목 — text-muted-foreground·hover:bg-muted(중립, 파랑 미포함)·aria-current 없음', async () => {
+  it('비활성 항목 — text-muted-foreground·hover:bg-muted(중립)·border-l-transparent(자리 예약)·activefill 미포함·aria-current 없음', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'chats');
     const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘')!;
     expect(todayLink.className).toContain('text-muted-foreground');
     expect(todayLink.className).toContain('hover:bg-muted');
-    expect(todayLink.className).not.toContain('bg-primary/10');
-    expect(todayLink.className).not.toContain('text-primary');
+    expect(todayLink.className).toContain('border-l-transparent');
+    expect(todayLink.className).not.toContain('bg-sidebar-active-fill');
+    expect(todayLink.className).not.toContain('border-l-proof-citron');
     expect(todayLink.getAttribute('aria-current')).toBeNull();
   });
 

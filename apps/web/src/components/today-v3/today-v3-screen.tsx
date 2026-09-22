@@ -9,7 +9,9 @@ import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/com
 import { TodayV3Decisions } from './today-v3-decisions';
 import { TodayV3AgentProgress } from './today-v3-agent-progress';
 import { useMyOrgRole } from './use-my-org-role';
-import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
+import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
@@ -48,14 +50,6 @@ function TodayResultsSummary({ snapshot }: { snapshot: TodaySnapshot }) {
   );
 }
 
-function TodayV3Nav({ needsMeCount, flags }: { needsMeCount: number; flags: NavV3Flags }) {
-  return (
-    <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3" data-testid="today-v3-nav">
-      <NavV3ItemList flags={flags} activeKey="today" todayBadgeCount={needsMeCount} />
-    </aside>
-  );
-}
-
 function TodayV3Topbar({ needsMeCount }: { needsMeCount: number }) {
   const t = useTranslations('todayV3');
   return (
@@ -80,6 +74,11 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
   const locale = useLocale();
   const myRole = useMyOrgRole();
   const isAdminOrOwner = myRole === 'owner' || myRole === 'admin';
+  // story #4006 AC8 — 좁은 폭(lg 미만) 하단 탭 바. 이 화면은 org_id/team_member_id를
+  // (authenticated) 밖이라 DashboardContext로 못 받는다(useMyOrgRole 동형 제약) —
+  // currentTeamMemberId 없이 부르면 초기 unread-count fetch는 그대로 되고 SSE
+  // 실시간 갱신만 빠진다(마운트 스냅숏, 화면 전환마다 재계산돼 충분한 근사치).
+  const chatUnreadTotal = useChatUnreadTotal();
 
   const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
   // story #3962 ④(FE 계산) — 서버는 agent.id를 안 준다(derive-today.ts가 agentName만
@@ -88,56 +87,64 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
   const distinctAgentCount = new Set(snapshot.agentProgress.map((a) => a.agentName)).size;
 
   return (
-    <div className="flex h-screen min-h-0 bg-muted/20" data-testid="today-v3-screen">
-      <TodayV3Nav needsMeCount={snapshot.needsMeCount} flags={flags} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TodayV3Topbar needsMeCount={snapshot.needsMeCount} />
-        <div className="flex min-h-0 flex-1">
-          <section className="w-[392px] shrink-0 overflow-auto border-r border-border p-5" data-testid="today-v3-today-column">
-            <p className="text-xs text-muted-foreground">{dateLabel}</p>
-            <h1 className="mb-1 text-[26px] font-bold tracking-tight text-foreground">{t('title')}</h1>
-            <p className="mb-6 text-xs text-muted-foreground">
-              {t('headerSummary', { decisions: snapshot.needsMeCount, agents: distinctAgentCount })}
-            </p>
+    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-muted/20" data-testid="today-v3-screen">
+      <div className="flex min-h-0 flex-1">
+        <NavV3Sidebar flags={flags} activeKey="today" todayBadgeCount={snapshot.needsMeCount} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TodayV3Topbar needsMeCount={snapshot.needsMeCount} />
+          <div className="flex min-h-0 flex-1">
+            {/* story #4006 AC3/AC4 — lg 미만은 목록(이 칸)이 전폭(오늘 화면은 상세 칸이
+                항상 빈 셸 자리라 실제로 열 것이 없다 — §3 "선택→상세" 토글은 대상/대화
+                칸에 실 콘텐츠가 생기는 후속 스토리 스코프, 지금은 목록 칸만 있으면 된다). */}
+            <section className="min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]" data-testid="today-v3-today-column">
+              <p className="text-xs text-muted-foreground">{dateLabel}</p>
+              <h1 className="mb-1 text-[26px] font-bold tracking-tight text-foreground">{t('title')}</h1>
+              <p className="mb-6 text-xs text-muted-foreground">
+                {t('headerSummary', { decisions: snapshot.needsMeCount, agents: distinctAgentCount })}
+              </p>
 
-            {loadError ? (
-              <div className="flex flex-col items-center gap-3 py-10 text-center">
-                <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
-                <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
-              </div>
-            ) : !data ? (
-              <div className="space-y-3" aria-hidden="true" data-testid="today-v3-loading">
-                <Skeleton className="h-24 w-full" />
-                <Skeleton className="h-24 w-full" />
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <TodayV3Decisions
-                  items={snapshot.needsMe} count={snapshot.needsMeCount}
-                  isAdminOrOwner={isAdminOrOwner} onActionSuccess={retry}
-                />
-                <TodayV3AgentProgress items={snapshot.agentProgress} onActionSuccess={retry} />
-                <TodayResultsSummary snapshot={snapshot} />
-              </div>
-            )}
-          </section>
+              {loadError ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
+                  <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+                </div>
+              ) : !data ? (
+                <div className="space-y-3" aria-hidden="true" data-testid="today-v3-loading">
+                  <Skeleton className="h-24 w-full" />
+                  <Skeleton className="h-24 w-full" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <TodayV3Decisions
+                    items={snapshot.needsMe} count={snapshot.needsMeCount}
+                    isAdminOrOwner={isAdminOrOwner} onActionSuccess={retry}
+                  />
+                  <TodayV3AgentProgress items={snapshot.agentProgress} onActionSuccess={retry} />
+                  <TodayResultsSummary snapshot={snapshot} />
+                </div>
+              )}
+            </section>
 
-          {/* story #3962 「하지 않는 것: 대화/일감 화면(별 카드)」 — 대상·대화 컬럼은
-              3단 프레임(시안 셸)만 서고 내용은 빈 자리(선택 없음 상태). */}
-          <section
-            className="flex flex-1 items-center justify-center border-r border-border bg-background/60"
-            data-testid="today-v3-target-column"
-          >
-            <p className="text-sm text-muted-foreground">{t('targetColumnEmpty')}</p>
-          </section>
-          <section
-            className="hidden w-[384px] shrink-0 items-center justify-center bg-card lg:flex"
-            data-testid="today-v3-chat-column"
-          >
-            <p className="text-sm text-muted-foreground">{t('chatColumnEmpty')}</p>
-          </section>
+            {/* story #3962 「하지 않는 것: 대화/일감 화면(별 카드)」 — 대상·대화 컬럼은
+                3단 프레임(시안 셸)만 서고 내용은 빈 자리(선택 없음 상태). story #4006
+                AC3 — lg 미만에선 이 빈 셸 2칸이 목록 칸과 겹쳐 넘칠 이유가 없으니 그냥
+                숨긴다(§3, 실 콘텐츠가 없는 자리를 토글할 필요 0). */}
+            <section
+              className="hidden flex-1 items-center justify-center border-r border-border bg-background/60 lg:flex"
+              data-testid="today-v3-target-column"
+            >
+              <p className="text-sm text-muted-foreground">{t('targetColumnEmpty')}</p>
+            </section>
+            <section
+              className="hidden w-[384px] shrink-0 items-center justify-center bg-card lg:flex"
+              data-testid="today-v3-chat-column"
+            >
+              <p className="text-sm text-muted-foreground">{t('chatColumnEmpty')}</p>
+            </section>
+          </div>
         </div>
       </div>
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} navV3Flags={flags} />
     </div>
   );
 }

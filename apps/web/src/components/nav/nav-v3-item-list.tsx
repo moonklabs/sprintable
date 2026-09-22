@@ -14,12 +14,18 @@ import { destHref } from '@/components/nav/mobile-tab-bar';
  * 재사용(호출부가 org/project 컨텍스트를 안 받는 v3 셸의 기존 관례 — proxy.ts의
  * bare-path 301 안전망이 최종 착지를 보정, mobile-tab-bar.tsx 상단 주석 참고).
  *
- * 활성 표시 정본(유나 § 확定, 2026-09-22, doc 6a179c7c) — v3 파랑(`bg-primary/10
- * text-primary font-medium` + `aria-current="page"`). 레거시 사이드바의 회색
- * (`sidebar-accent`)은 이 모듈에 채택하지 않는다(근거: 색+굵기 2축 vs 칠 하나,
- * AA 대비 5.21:1(light)/5.49:1(dark), v3 3화면+모바일 탭바가 이미 파랑 언어).
- * 호버(비활성)는 중립(`hover:bg-muted`)으로 — 파랑 활성과 안 섞이게. 포커스 링은
- * 현행 v3에 없던 신규(`focus-visible:ring-2 focus-visible:ring-ring
+ * 활성 표시 정본 — story #4006(critical, 5pt) §6 역전(2026-09-22, doc
+ * 5bc82986-6617-4e5a-9f4d-aef29e2201f9) — #4004 PASS 당시 정본이었던 v3 파랑
+ * (`bg-primary/10 text-primary`, doc 6a179c7c)을 레거시 사이드바 page-active
+ * 묶음(`components/ui/sidebar.tsx:539` data-active)으로 되돌린다: `bg-sidebar-
+ * active-fill` + `border-l-proof-citron`(좌측 선) + `font-medium` + `text-
+ * sidebar-active-fill-foreground`. 근거 — v3 3화면만 파랑이면 화면마다 활성
+ * 표시가 갈리는 것 자체가 이 스토리가 잡는 결함(§6): app 전역이 이미 이 묶음을
+ * 쓰므로 v3↔레거시가 한 언어가 되게(blast radius도 최소 — v3 3화면만 바뀌고
+ * 레거시는 무변). 좌측 선은 비활성일 때 `border-l-transparent`로 자리만
+ * 예약해 둬 활성 전환 때 레이아웃이 안 밀리게 한다(sidebar.tsx 관례 동형).
+ * 호버(비활성)는 중립(`hover:bg-muted`)으로 유지 — §6은 활성만 역전. 포커스
+ * 링은 현행 v3에 없던 신규(`focus-visible:ring-2 focus-visible:ring-ring
  * focus-visible:ring-offset-2`).
  */
 export type NavV3ItemKey = 'today' | 'chats' | 'work' | 'results' | 'connectRules';
@@ -69,8 +75,8 @@ export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3It
             aria-current={isActive ? 'page' : undefined}
             className={
               isActive
-                ? 'flex items-center gap-2.5 rounded-md bg-primary/10 px-2.5 py-2 text-sm font-medium text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                : 'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                ? 'flex items-center gap-2.5 rounded-md border-l-2 border-l-proof-citron bg-sidebar-active-fill px-2.5 py-2 text-sm font-medium text-sidebar-active-fill-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                : 'flex items-center gap-2.5 rounded-md border-l-2 border-l-transparent px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
             }
           >
             <Icon className="size-4 shrink-0" aria-hidden="true" />
@@ -84,5 +90,30 @@ export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3It
         );
       })}
     </nav>
+  );
+}
+
+/**
+ * story #4006(critical, 5pt) AC2 — v3 nav 칸의 폭·접힘은 공유 컴포넌트 한 곳에서만
+ * 정한다(세 화면 파일에 `w-[216px]` 류 nav 고정폭 리터럴 0 — grep 0 단언, verify-
+ * nav-v3-narrow-width-single-source.test.ts). lg(1024, 레포 useIsMobile 관례와
+ * 동일 경계) 이상은 현행 216px aside 그대로, 미만은 `hidden`(§2 시안 — 상단 nav
+ * «발명» 0, 대신 기존 레거시 하단 MobileTabBar를 각 v3 화면이 별도로 물린다).
+ */
+export interface NavV3SidebarProps {
+  flags: NavV3Flags;
+  activeKey: NavV3ItemKey;
+  /** 「오늘」 항목에만 붙는 배지 — NavV3ItemList로 그대로 전달. */
+  todayBadgeCount?: number;
+}
+
+export function NavV3Sidebar({ flags, activeKey, todayBadgeCount = 0 }: NavV3SidebarProps) {
+  return (
+    <aside
+      className="hidden w-[216px] shrink-0 flex-col border-r border-border bg-card p-3 lg:flex"
+      data-testid="nav-v3-sidebar"
+    >
+      <NavV3ItemList flags={flags} activeKey={activeKey} todayBadgeCount={todayBadgeCount} />
+    </aside>
   );
 }
