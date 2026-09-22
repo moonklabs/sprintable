@@ -351,6 +351,7 @@ describe('ChatV3Messages — 첫 지시 미리 채우기(story #4028)', () => {
           locale="ko"
           needsMe={[]}
           todayV3Enabled
+          todayHref="/today"
           onOpenArtifactChange={() => {}}
           onWorkItemRefChange={() => {}}
           initialCompose={initialCompose}
@@ -422,6 +423,7 @@ describe('ChatV3Messages — 대화 전환 시 시드 처리(story #4028 CHANGES
           locale="ko"
           needsMe={[]}
           todayV3Enabled
+          todayHref="/today"
           onOpenArtifactChange={() => {}}
           onWorkItemRefChange={() => {}}
           initialCompose={initialCompose}
