@@ -1,0 +1,4006 @@
+[
+  {
+    "key": "agentRuns.backToAgents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agentRuns.description",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agentRuns.eyebrow",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agentRuns.runHistory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agentRuns.runHistoryDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.featureAutoBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.featureAutoTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.featureSkillBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.featureSkillTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.featureTaskBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.featureTaskTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.recruiterCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.tabDeployments",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.tabPerformance",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.verificationOpenWorkflowCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowActionForward",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowActionLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowActionReport",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowCanvasBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowCanvasTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowConnectMode",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowCycleWarningAllowsSave",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowCycleWarningBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowCycleWarningTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDeleteEdge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDesktopHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDisableErrorBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDisableErrorTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDisableSuccessBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDisableSuccessTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDraftInvalidBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDraftInvalidShort",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDragHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunDraft",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunLive",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunMatchedRule",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunNoRule",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunOutcomeFallback",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunOutcomeForward",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunOutcomeReport",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunPathLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowDryRunTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEdgeConfigBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEdgeConfigTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEdgeCreatedBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEdgeCreatedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEdgeDeletedBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEdgeDeletedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEditorCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEditorDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEditorTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmergencyBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmergencyDisable",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmergencyRollback",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmergencyTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmptyBadge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmptyBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowEmptyTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowExpectedPathsBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowExpectedPathsChanged",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowExpectedPathsTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowExpectedPathsUnchanged",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowForwardAgentHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowForwardTargetLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowHumanBadge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowHumanSourceBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowHumanSourceTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowHumanTargetHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMatchTypeEvent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMatchTypeLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMembersAgents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMembersBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMembersHumans",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMembersTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMobileBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowMobileTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNoAgentsBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNoAgentsTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNoEdgeSelected",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNoHumans",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNodeAddedBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNodeAddedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNodeAlreadyPlacedBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNodeAlreadyPlacedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowNodeConnect",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowOriginalAssignee",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowOriginalAssigneeHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowPriorityBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowPriorityEmpty",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowPriorityTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRollbackErrorBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRollbackErrorTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRollbackSuccessBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRollbackSuccessTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutAddedRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutBlocked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutChangedRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutChecklistBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutChecklistDryRun",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutChecklistExpectedPaths",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutChecklistRecovery",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutChecklistTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutDisableEmpty",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutDisableReady",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutNoChanges",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutReady",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutRemovedRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutRollbackMissing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRolloutRollbackReady",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowRuleCount",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowSaveErrorBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowSaveErrorTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowSaveSuccessBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowSaveSuccessTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowSelfLoopBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowSelfLoopTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateAppliedBody_review-heavy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateAppliedBody_solo-dev",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateAppliedBody_standard-dev",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateAppliedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateReview",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateSolo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplateStandard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplatesBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowTemplatesTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionAddedRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionChangedRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionHistoryEmpty",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionHistoryTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionPreviewTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionRemovedRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionRollbackButton",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionRollbackCancel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionRollbackConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionRollbackConfirmBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "agents.workflowVersionRollbackConfirmTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.assignees",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.epicSwimlaneLoadError",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.epicSwimlaneLoadTimeout",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.epics",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.filterTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.filters",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.invalidTransition",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.proofCapsuleStateClaimed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.proofCapsuleStateVerified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.proofCapsuleStateViolation",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.recipeStarted",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustClaimedDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustMergeReady",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustNeedsInput",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustQueued",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustResolveGate",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustRunning",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.trustVerified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "board.unassigned",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.byRole",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.ciUnknown",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.cleanPasses",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.correctionRounds",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.corrections",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.decisionAskHuman",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.decisionAutoMerge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.decisionBlock",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.decisionCollapse",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.decisionExpand",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.docGateTitlePrefix",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateApproveCampaign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateApproveNewsletterSend",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateDetailViewTargetArtifact",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateDetailViewTargetDoc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateDetailViewTargetLoop",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateInboxEmptyHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateLinkedEvidenceKindAnimatic",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateLinkedEvidenceKindConceptBrief",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateLinkedEvidenceKindMaterialCollectionSheet",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateLinkedEvidenceKindStoryboard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateLinkedEvidenceKindVerificationSheet",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateMoreActions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateOpenInDoc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateRejectConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateRejectNotePlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateRejectTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.gateRejectedHistory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.githubCheckFailure",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.githubCheckNotPublished",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.githubCheckPending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.githubCheckSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.heldUntilLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdConfirmTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdImpact",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdIndefinite",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdReasonPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.holdTimed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.hypothesisDraftTargetFalsified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.hypothesisDraftTargetKilled",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.hypothesisDraftTargetVerified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineEngineDegraded",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineEvidenceDivider",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineGrandfathered",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineWaitingHuman",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineageRelationKindAspectAdapt",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineageRelationKindHookVariant",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.lineageRelationKindPlatformCut",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.outcomeAccumulating",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overriddenTag",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideApprove",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideDecisionLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideImpact",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideOwnerOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideReasonPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideReject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.overrideTypedLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.productionWorkbenchKindAnimatic",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.productionWorkbenchKindConceptBrief",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.productionWorkbenchKindMaterialCollection",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.productionWorkbenchKindStoryboard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.productionWorkbenchKindVerificationSheet",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.queueResolvedApproved",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.queueResolvedRejected",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.rankedHooksMetricLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignCurrent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignNewLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignNewPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignOldLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignReasonPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.reassignedBy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.resumeAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.seedKeep",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.seedKill",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.sigApproveAndSign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.sigApproveAndSignCampaign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.sigApproveAndSignNewsletterSend",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.slaPaused",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.totalReviews",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.trustScoreLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.trustScoreWindowHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidConfirmTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidImpact",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidReasonPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidedBadge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "cage.voidedHistory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.artifactInteractiveOff",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.artifactInteractiveOffHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.artifactInteractiveOn",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.artifactInteractiveOnHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.exportComingSoon",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.rollupOpen",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.rollupResolved",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.viewerCanvasHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "canvas.viewerCanvasHintTouch",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectAdAccountNoAccounts",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectAdAccountSelectInstruction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectAdAccountSelectInvalidAccount",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectErrorAppCredentialsMissingMember",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFacebookNoPages",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFacebookSelectInstruction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFacebookSelectInvalidPage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldAdminApiKey",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldApiKey",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldAppPassword",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldListId",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldSecret",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldSenderEmail",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldSenderName",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldSiteUrl",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldTargetUrl",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectFieldUsername",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectPastedSecretAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelConnectPastedSecretAnotherAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelExpiringActionNote",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelExpiringInfoNote",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelReauthError",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelReauthExpired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelReauthRevoked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelStatusConfigIncomplete",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelStatusExpiringSoon",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "channelConnect.channelStatusProviderError",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.assetScopeAll",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.collapseRail",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandArgHintAssign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandArgHintDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandArgHintPriority",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandSuggestAssign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandSuggestDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandSuggestHandoff",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandSuggestPixel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandSuggestPriority",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.commandSuggestReview",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.deliveryContractLevel_all",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.deliveryContractLevel_mentions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.deliveryContractLevel_mute",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.embedFormMention",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatAudio",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatImage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatOffice",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatPowerpoint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatText",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatUnknown",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatVideo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.formatWord",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.intentSuggestionApprovalCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.intentSuggestionAssignmentCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.intentSuggestionCompletionCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.mediaLoadFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.networkErrorShort",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.nowStripGroupDanger",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.nowStripGroupInfo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.nowStripGroupWarn",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.presenceIdle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.presenceOffline",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.presenceOnline",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.presenceWorking",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.referenceCandidatePromptDoc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.referenceCandidatePromptStory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "chats.unknownError",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "commandPalette.goDashboard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "commandPalette.goEpics",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "commandPalette.goHypotheses",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "commandPalette.goRetro",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "commandPalette.goSprints",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "commandPalette.goWorkList",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "common.create",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsColumnAuthor",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsColumnOriginAuthor",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsColumnTextLength",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsColumnUpdatedAt",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsColumnVersion",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsCommandInFlightReasonBlocked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsCommandInFlightReasonScheduled",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsPublicationFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryAutos",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryComedy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryEducation",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryEntertainment",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryFilmAnimation",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryGaming",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryHowtoStyle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryMusic",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryNewsPolitics",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryNonprofits",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryPeopleBlogs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryPets",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryScienceTech",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategorySports",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.channelPostsYoutubeCategoryTravel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.columnActions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.columnAuthor",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.columnUpdatedAt",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.columnVersion",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.commentsReplyStatusAwaitingSend",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.commentsReplyStatusDraft",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.commentsReplyStatusFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.commentsReplyStatusNone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.commentsReplyStatusPublished",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.commentsReplyStatusSubmitted",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.contentStatusReapprovalNeeded",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementAssigneeLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementConvertSuccessRefreshNote",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementDeletedCommentPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementKindComment",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementKindReply",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementOpenCountAtLeast",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementOpenCountExact",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementStatusDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementStatusInProgress",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementStatusOpen",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.engagementStatusSkipped",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorApprovalRequired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelApproverRoleMissing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelConnectionNotActive",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelDraftAlreadyPublished",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelDraftWithdrawn",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelImageStorageNotConfigured",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelImageUndecodable",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelImageUnsupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelPostNotPublished",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelPublishHumanOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelPublishInProgress",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelPublishProviderError",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelRateLimited",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelTokenExpired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelUnpublishUnsupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorChannelWithdrawForbidden",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorConceptNotApproved",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorMediaNotSupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorPublicationCommandNotFound",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorPublishHumanOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorReapprovalRequired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorResubmitRequired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorSealMissing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorStibeePlanRestricted",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorStibeeSenderNotVerified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorUnpublishHumanOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.errorUnpublishOwnerOrAdminOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.externalPublicationStatusFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.externalPublicationStatusPending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.externalPublicationStatusPublished",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.externalPublicationStatusUnknown",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.externalPublicationStatusUnpublished",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.generationBudgetAmountKrw",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.generationBudgetAmountUsd",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricClicks",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricConversions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricDelivered",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricEngagements",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricImpressions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricInflowSessions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricInflowUsers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricOpens",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricReach",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricSpend",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightMetricViews",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusCaptured",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusPending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusSkipped",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusSuperseded",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusUnsupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "content.insightStatusWaiting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "contentRules.bannedTermsLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "contentRules.generationBudgetRowTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "contentRules.requireUtmRowTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "contentRules.utmRulesRowTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.advancedOptions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.autosaveOn",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.closeSidebar",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.commentsSection",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.contentLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docGateAwaitingReviewer",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docGateConfirmed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docGateDenied",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docGatePending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docGateResubmit",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docGateRevisions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docIconLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docIconPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docTagsHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docTagsLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.docTagsPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.documentSection",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.edit",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.editorMode",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.emptyDoc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.formatHtml",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.indexStatusDraft",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.loadMore",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.noChildDocs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.noComments",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.noDocs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.noProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.noRevisions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.previewTab",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.remoteRefresh",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.revisionClosePreview",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.revisionPreview",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.revisionRestore",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.revisionsSection",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.searchPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.selectDoc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.slugLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.slugPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.tabDocs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.tabPolicyDocs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.titleLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.tocEmpty",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.toolbarHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "docs.writeTab",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderName_building",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderName_city",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderName_continent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderName_earth",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderName_street",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderQuestion_building",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderQuestion_city",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderQuestion_continent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderQuestion_earth",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.ladderQuestion_street",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextMakerAllHaveNext",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextMakerFlowboxHeading",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextMakerHasNextHeading",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextMakerNoStems",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextMakerOpenAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextMakerPickAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextPickReasonReferenced",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextPickReasonSpawned",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.nextPickReasonWaiting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.portUndoTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "flow.portUndoTitleUnknownAuthor",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "gateConfig.levelAsk",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "gateConfig.levelAuto",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "gateConfig.levelBlock",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "gateConfig.noProjectForOrgEdit",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "glance.noProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "goals.fieldStatus",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "goals.noProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "goals.notAssigned",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "goals.progress",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "goals.selectGoal",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "goals.subtitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "hypotheses.gateConfirmed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "hypotheses.gateConfirmedBy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "hypotheses.gatePending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "hypotheses.gateRejected",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "hypotheses.gateRejectedBy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "hypotheses.linkedStories",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.daysAgo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.decisionsErrorRetry",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.decisionsWaiting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.detailEmptyTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.dismiss",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.filterAll",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.hoursAgo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.justNow",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.minutesAgo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.priorityHigh",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.reasonAssigned",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.reasonInvited",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.reasonMentioned",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "inbox.surfaceDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.errorFollowUpHumanOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.errorFollowUpInvalidKind",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.errorInvalidSort",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.errorInvalidWindow",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.reconcileErrorChannelUnsupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.storyCompareAxisBlog",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.storyCompareAxisSocial",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.storyCompareSourceChannelApi",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.storyCompareSourceSiteBeacon",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.window30d",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.window7d",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "insightsBoard.window90d",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.contextPackLoading",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.decisionSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.loopNodeExecute",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.loopNodeHypothesis",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.loopNodeLearn",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.loopNodeNext",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.loopNodeVerify",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.noProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.subtitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "loops.viewDetail",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.actionItems",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.addActionItem",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.addDecision",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.allTypes",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.assigneeLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.cortiLink",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.createMeeting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.createStory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.createStoryFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.dateRange",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.decisions",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.dueLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.editSummary",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.editTranscript",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.filter",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.fromMeeting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.general",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.hideTranscript",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.loadFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.meetings",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.micDenied",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.minuteAbbrev",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.newMeeting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.noMeetings",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.notApplicable",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.participants",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.recordingFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.retro",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.review",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.saveFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.saveSummary",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.standup",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.sttNotSupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.summary",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.transcript",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.upgradeForStt",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.upgradeRequired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.uploadRecordingFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "meeting.viewTranscript",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "mobileTabBar.more",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.activity",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.agents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.channelPosts",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.configure",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.content",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.dashboard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descActivity",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descArtifacts",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descBoard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descChannelPosts",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descChats",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descConnectRulesV3",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descContent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descDocs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descGoals",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descInbox",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descLoops",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgBriefing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgChannels",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgContentRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgEvents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgGenerationConnectors",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgInsightsBoard",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgMembers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgMemory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgRoles",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descOrgTrust",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descRetro",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descSettings",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descStandup",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descStorage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.descWorkforce",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.docs",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.epic",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.goals",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.help",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.loops",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.meetings",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.moreOtherScreens",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.navResults",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgBriefing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgConnectors",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgContentRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgEvents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgGenerationConnectors",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgMembers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgMemory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgRoles",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.orgTrust",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.retro",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.rewards",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.sprint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.sprintManagement",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.standup",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.storage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.switcherAccountSectionLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.workList",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.workforce",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneConnectRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneDev",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneHistory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneKnowledge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneMarketing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneOrganization",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "nav.zoneTrust",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.finish",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.mcpConfigTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.promptTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.railAck",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.railConfigCopied",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.railEventDelivered",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.railMcpReachable",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.railVerified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.railWaiting",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "onboarding.unknownUser",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.actionAnswerNow",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.actionApproveAndSign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.actionApproveOnly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureDiagnostic",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureReasonExpired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureReasonInvalid",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureReasonRevoked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureReissue",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureSub",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterAuthFailureUnknownAgent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterBegetLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterBegetLinked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterBegetUnlinked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterFalsifiedBadge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterFalsifiedResult",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterFalsifiedResultUnknown",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterFalsifiedSub",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterFalsifiedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterOpenNarrative",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallAgeDays",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallBucket1moPlus",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallBucket1wTo2w",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallBucket2wTo1mo",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallBucket48hTo1w",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallSub",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterSilentStallUnassigned",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedBadgeOutcomeMissing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedBadgeOverdueGoal",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedBadgeOverdueHypothesis",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedCapNotice",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedDaysDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedDaysOverdue",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedShowMore",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedSub",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedUnmeasurableGoal",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterUnclosedViewQueue",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterViewAll",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.clusterViewLess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.stateAwaitingAnswer",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.stateAwaitingApproval",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgBriefing.stateAwaitingSignature",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgGatePolicy.postureBalanced",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgGatePolicy.postureConservative",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "orgGatePolicy.posturePermissive",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.definerFormatDesc_cycle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.definerFormatDesc_measure",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.definerFormatDesc_signal",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.definerFormat_cycle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.definerFormat_measure",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.definerFormat_signal",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeApplyV2NotConfiguredNote",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeApplyV2PersonPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeGalleryCreateCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeGalleryMarketingGroupTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeGalleryPresetBadge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeGallerySearchPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeGalleryTabAll",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.recipeGalleryWorkflowGroupTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.roleGroupAdmin",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.roleGroupMember",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.roleGroupOwner",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.trustColdStartEmptyReason",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.trustColdStartPendingReason",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "organization.trustSlotBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "presence.authFailureTooltipExpired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "presence.authFailureTooltipInvalid",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "presence.authFailureTooltipRevoked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "presence.groupOffline",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "presence.groupOnline",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "presence.groupWorking",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.checkoutCanceled",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.checkoutFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.checkoutSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.confirmDowngrade",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.currentPlan",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.downgradeWarningDesc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.downgradeWarningTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.freePlan",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.monthly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.noPriceMapping",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.perMonth",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.perYear",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.subtitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.unlimited",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.upgrade",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.yearly",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricing.yearlyDiscount",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisAgents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisAutomation",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisAutomationRules",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisEventReplay",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisMaxFile",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisRealtimeConnections",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisRequestRate",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisSeats",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisStorage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisSupport",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.axisWebhooks",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.orderHistoryPurposeCharge",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.orderHistoryPurposePackPurchase",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.orderHistoryStatusConfirmed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.orderHistoryStatusFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.orderHistoryStatusPending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.packDialogConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.packDialogNote",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierName_business",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierName_free",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierName_starter",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierName_team",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierPositioning_business",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierPositioning_free",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierPositioning_starter",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "pricingPlans.tierPositioning_team",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "recruiter.verifyGuideConnector",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "recruiter.verifyGuideMcp",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "recruiter.verifyGuideMcpStdio",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.actionPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.categoryBad",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.categoryGood",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.categoryImprove",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.evidenceStripEmpty",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictActive",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictArchived",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictFalsified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictKilled",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictMeasuring",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictProposed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.hVerdictVerified",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.itemPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseClosed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseCollect",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseDiscuss",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseGroup",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseNext",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.phaseVote",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.recMeasureChip",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.sessionNotFound",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.stageAction",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.stageBackConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.stageClosed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.stageCollect",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.stageForwardConfirm",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.stagePriority",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.submit",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.synthesisGenerating",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "retro.synthesisRegenerating",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.accepted",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.addAgent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.addMemberAgentError",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.addMemberAgentRequired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.addMemberAgentSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.addMemberType",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.addToProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.agentAdded",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.agentDetailTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.agentOwner",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.agentScopeLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.agentWebhookDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.agentWebhookTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.assignExistingMember",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.billingTab",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.chooseMember",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.defaultWebhook",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.emailPlaceholder",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.expired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.humanMember",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.inviteDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.inviteLinkCopied",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.inviteMembers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.lastProjectMembership",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.lineModeDiff",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.lineModeEdit",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.lineModeHistory",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.lineModeView",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.memberActionFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.memberAdded",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.memberManagement",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.memberManagementDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.memberRemoved",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.noAssignableMembers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.noProjectMembers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.noProjectMembersHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.orgWide",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.orgWideInvite",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.pending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.personalSettings",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.projectMembers",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.refresh15s",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.refresh1min",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.refresh30s",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.refresh5min",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.refreshOff",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesPauseCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesPauseSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesPausing",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesResumeCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesResumeSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesResuming",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesRunNowCta",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesRunNowSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.repeatSchedulesRunningNow",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.revoke",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.revoked",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimePartial",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimePartialHelp",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimeSupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimeSupportedHelp",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimeUnknownHelp",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimeUnsetHelp",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimeUnsupported",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.runtimeUnsupportedHelp",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.selectProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.setPasswordSuccess",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.simDecisionAsk",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.simDecisionAuto",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.simDecisionBlock",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.surfaceDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.tabApiKeys",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.typeAgent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.typeHuman",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.usage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.usageTab",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.webhookHelperActiveHuman",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.webhookHelperEmptyHuman",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.webhookListEmpty",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.webhookListTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "settings.webhookUrlRequired",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.agentsDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.currentSprintDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.entryCount",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.entryDate",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.feedbackDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.linkedStoriesDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.myStandup",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.myStandupDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.myStoryCount",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.noEntryForMember",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.noEntryForMemberDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.noLinkedStories",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.noLinkedStoriesDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.peopleDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.projectionViewDesc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.relatedPlan",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.selfEditTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.surfaceDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.team",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.teamDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.teamReviewDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "standup.yourEntryPending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "teamActivity.reload",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "teamActivity.tabAudit",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.activeAgents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.agents",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.ai_calls",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertScopeAllProjectsBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertScopeHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertScopeOrgWideTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertScopeSelectedProjectBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertThresholdHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.alertTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.allProjects",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.billingTab",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.capExceeded",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.capHealthy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.costHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.exportBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.exportCsv",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.exportHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.exportTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByAgent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByModel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByValue_agent",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByValue_model",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.groupByValue_project",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.limitDesc",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.limitReached",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.loadFailed",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.members",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.monthLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.monthToDateCost",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.monthlyCap",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.noAlerts",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.noUsage",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.notConfigured",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.period",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.projectLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.queryExportScopeHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.querySurfaceBody",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.querySurfaceTitle",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.recentAlerts",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.settingsTab",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.storage_mb",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.stt_minutes",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.surfaceDescription",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.tableCost",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.tableHours",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.tableLabel",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.tableRuns",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.tableTokens",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.thresholdAmount",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.thresholdPending",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.thresholdReached",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.tokenHint",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.totalCost",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.totalHours",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.totalTokens",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.unknownProject",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.unlimited",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.upgrade",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.warning80",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "usage.warning90",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypeDeploy",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypeFile",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypeGateApproval",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypeMetric",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypePr",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypeReport",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.evidenceTypeUrl",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.verificationSheetVerdictFail",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "verify.verificationSheetVerdictPass",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.actionApproveAndSign",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.riskSentenceHigh",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.stateAwaitingAnswer",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.stateAwaitingApproval",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.stateAwaitingSignature",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.stateDone",
+    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  }
+]
