@@ -425,7 +425,7 @@ async def test_current_stage_gate_shows_already_open_sentence_and_no_immediate_e
             content, _resp = await _publish_and_get_content(
                 s, definition_key=definition_key, payload=payload, publisher_id=publisher_id, org_id=org_id,
             )
-            assert "지금 사람 승인 게이트가 열려 있어요(승인자 역할: org_owner)" in content
+            assert "지금 사람 승인 게이트가 열려 있어요(승인자 역할: org 소유자)" in content
             assert "preset.gate.verdict" in content
             assert "- 다음 단계: research (Researcher)" in content
             assert "publish_event(" not in content
