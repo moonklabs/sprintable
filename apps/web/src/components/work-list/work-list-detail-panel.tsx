@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { FileText, Layers, X } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,10 @@ import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { translateEntityStatus } from '@/components/chat/entity-status-labels';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { pickEulReulJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { STATE_TEXT } from './work-list-row';
 import type { WorkListRow } from './derive-work-list';
 import {
@@ -40,6 +44,38 @@ interface DocBacklinkItem {
   doc: { id: string; title: string } | null;
   still_exists: boolean;
 }
+
+// story #3976 — 「일」 체크리스트 탭. GET /api/tasks?story_id= 그대로(신규 BE 0).
+interface TaskChecklistItem {
+  id: string;
+  title: string;
+  status: string;
+}
+
+// story #3976 CHANGES(페드루 PO C1, 2026-09-17 00:38Z, dev 실측 — moonklabs 스토리
+// 로그 100건: story_updated의 81%에 context.old_status/new_status·14%에
+// context.fields) — 「이력」 탭. GET /api/v2/activity-logs?entity_type=story&entity_id=
+// (FE 프록시 /api/activity-logs, activity-log-view.tsx::ActivityLogItem과 동형 부분집합
+// +context).
+interface ActivityLogItem {
+  id: string;
+  actor_name: string | null;
+  action: string;
+  created_at: string;
+  context: { old_status?: string; new_status?: string; fields?: string[] } | null;
+}
+interface ActivityLogResponse {
+  items: ActivityLogItem[];
+}
+
+// 낱말 표 §⑤-1 3875(2026-09-17 00:32Z 등재) — «유형» 라벨. 미등록 필드는 «알 수
+// 없음»이 아니라 중립 라벨 1개("그 밖의 변경")로 접는다(딱 하나, 원시 필드명 노출 0).
+const HISTORY_FIELD_LABEL_KEY: Record<string, string> = {
+  title: 'historyFieldTitle',
+  assignee_id: 'historyFieldAssignee',
+  epic_id: 'historyFieldEpic',
+  sprint_id: 'historyFieldSprint',
+};
 
 // 픽셀 커밋 CHANGES 5(페드루 PO 판정 09:45Z, CI run 34828958082 RED) — story #2691/#2689
 // 회귀가드(verify-no-new-raw-fetch-api.ts)가 콜드마운트 GET의 raw fetch(`/api/...`)를
@@ -72,6 +108,39 @@ async function fetchPendingGate(row: WorkListRow, storyId: string): Promise<Work
   return null;
 }
 
+// story #3976 CHANGES(페드루 PO C1) — 「이력」 문장의 «무엇을»을 실 context에서 뽑는다
+// (생성=그대로 · 상태 전후 있으면 SSOT 라벨로 「상태를 {old} → {new}로」 · fields 있으면
+// §3875 유형 라벨(모르면 중립 폴백 1개) · 그 외(진짜 아무 근거 없음)도 같은 중립 폴백).
+// t: 'workList' 네임스페이스 useTranslations 인스턴스, locale: 목적어 조사 계산용(§⑤
+// korean-particle.ts 관례 — en 템플릿은 조사가 없어 label 그대로 씀).
+function historyClaim(item: ActivityLogItem, t: ReturnType<typeof useTranslations>, locale: string): string {
+  if (item.action.endsWith('_created')) return t('historyActionCreated');
+
+  const oldStatus = item.context?.old_status;
+  const newStatus = item.context?.new_status;
+  if (oldStatus && newStatus) {
+    const oldLabel = translateEntityStatus('story', oldStatus) ?? oldStatus;
+    const newLabel = translateEntityStatus('story', newStatus) ?? newStatus;
+    // §⑤ 규율(story #3900) — 값 의존 조사("으로/로")는 템플릿에 못 박지 않는다(배치म
+    // 의존적, verify-scoped-i18n-honorific-tone.test.ts가 이걸 잡는다) — 조사까지 미리
+    // 합쳐 하나의 값으로 넘긴다(historyFieldChanged의 을/를과 동형 처리).
+    const newDisplay = locale === 'ko' ? `${newLabel}${pickEuroJosa(newLabel)}` : newLabel;
+    return t('historyStatusChanged', { old: oldLabel, new: newDisplay });
+  }
+
+  const fields = item.context?.fields ?? [];
+  const knownFieldKey = fields.map((f) => HISTORY_FIELD_LABEL_KEY[f]).find((k): k is string => !!k);
+  const fieldLabel = knownFieldKey ? t(knownFieldKey) : null;
+  if (fieldLabel) {
+    const display = locale === 'ko' ? `${fieldLabel}${pickEulReulJosa(fieldLabel)}` : fieldLabel;
+    return t('historyFieldChanged', { field: display });
+  }
+
+  // 알려진 status 전후도 fields 매치도 없음(진짜 근거 부재·미등록 필드뿐) — 중립 폴백
+  // 1개(§3875 "그 밖의 변경", 딱 하나 — 「활동했어요」류 발명 0).
+  return t('historyOtherChange');
+}
+
 export interface WorkListDetailPanelProps {
   row: WorkListRow;
   storyId: string;
@@ -93,6 +162,8 @@ export function WorkListDetailPanel({
 }: WorkListDetailPanelProps) {
   const t = useTranslations('workList');
   const tCommon = useTranslations('common');
+  const locale = useLocale();
+  const { tz } = resolveDisplayTimezone();
   const { currentMemberType } = useDashboardContext();
 
   const [story, setStory] = useState<StoryDetail | null>(null);
@@ -107,6 +178,8 @@ export function WorkListDetailPanel({
   // artifactCount만 가볍게 별도 조회해 0이면 이 패널 자기만의 1줄 muted 문구로 대체하고,
   // 1건 이상일 때만 ArtifactSection을 그대로 쓴다(그 컴포넌트 자체는 안 건드림).
   const [artifactCount, setArtifactCount] = useState<number | null>(null); // null=로딩 중
+  const [tasks, setTasks] = useState<TaskChecklistItem[] | null>(null); // story #3976 — null=로딩 중
+  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[] | null>(null); // story #3976 — null=로딩 중
   const [gate, setGate] = useState<WorkListGate | null | undefined>(undefined); // undefined=로딩 중
   const [transitioning, setTransitioning] = useState(false);
   const [transitionError, setTransitionError] = useState<'forbidden' | 'other' | null>(null);
@@ -122,6 +195,8 @@ export function WorkListDetailPanel({
     setHypotheses(null);
     setDocs(null);
     setArtifactCount(null);
+    setTasks(null);
+    setActivityLogs(null);
     setGate(undefined);
     setTransitionError(null);
     setApproved(false);
@@ -130,6 +205,12 @@ export function WorkListDetailPanel({
     void fetchJsonData<HypothesisSummary[]>(`/api/hypotheses?story_id=${storyId}`).then((v) => { if (!cancelled) setHypotheses(v ?? []); });
     void fetchJsonData<DocBacklinkItem[]>(`/api/stories/${storyId}/backlinks?source_type=doc`).then((v) => { if (!cancelled) setDocs(v ?? []); });
     void fetchJsonData<unknown[]>(`/api/visual-artifacts?story_id=${storyId}`).then((v) => { if (!cancelled) setArtifactCount((v ?? []).length); });
+    // story #3976 — 「일」 체크리스트(기존 /api/tasks 재사용, 상세 패널을 열 때만 — 첫
+    // 화면 콜 수 무증가).
+    void fetchJsonData<TaskChecklistItem[]>(`/api/tasks?story_id=${storyId}`).then((v) => { if (!cancelled) setTasks(v ?? []); });
+    // story #3976 — 「이력」(기존 activity-logs 재사용, 3971 정정 대상과 같은 API).
+    void fetchJsonData<ActivityLogResponse>(`/api/activity-logs?entity_type=story&entity_id=${storyId}`)
+      .then((v) => { if (!cancelled) setActivityLogs(v?.items ?? []); });
     fetchPendingGate(row, storyId).then((v) => { if (!cancelled) setGate(v); }).catch(() => { if (!cancelled) setGate(null); });
 
     return () => { cancelled = true; };
@@ -319,8 +400,10 @@ export function WorkListDetailPanel({
         <Tabs defaultValue="evidence" className="w-full">
           <TabsList variant="line" className="w-full border-b border-border">
             <TabsTrigger value="evidence" className="flex-1 after:bg-primary" data-testid="panel-tab-evidence">{t('tabEvidence')}</TabsTrigger>
+            <TabsTrigger value="tasks" className="flex-1 after:bg-primary" data-testid="panel-tab-tasks">{t('tabTasks')}</TabsTrigger>
             <TabsTrigger value="docs" className="flex-1 after:bg-primary" data-testid="panel-tab-docs">{t('tabDocs')}</TabsTrigger>
             <TabsTrigger value="artifacts" className="flex-1 after:bg-primary" data-testid="panel-tab-artifacts">{t('tabArtifacts')}</TabsTrigger>
+            <TabsTrigger value="history" className="flex-1 after:bg-primary" data-testid="panel-tab-history">{t('tabHistory')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="evidence" className="mt-4 space-y-3">
@@ -379,6 +462,53 @@ export function WorkListDetailPanel({
               <p className="text-xs text-muted-foreground" data-testid="panel-artifacts-empty">{t('panelEmptyArtifacts')}</p>
             ) : (
               <ArtifactSection storyId={storyId} />
+            )}
+          </TabsContent>
+
+          {/* story #3976 AC2 — 「일」 체크리스트(기존 GET /api/tasks?story_id= 재사용,
+              task status 라벨은 entity-status-labels.ts SSOT — 새 어휘 0). */}
+          <TabsContent value="tasks" className="mt-4">
+            {tasks === null ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-tasks-loading">{tCommon('loading')}</p>
+            ) : tasks.length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-tasks-empty">{t('panelEmptyTasks')}</p>
+            ) : (
+              <ul className="space-y-1.5" data-testid="panel-tasks-list">
+                {tasks.map((task) => {
+                  const label = translateEntityStatus('task', task.status);
+                  return (
+                    <li key={task.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate text-foreground">{task.title}</span>
+                      {label ? <span className="shrink-0 text-muted-foreground">{label}</span> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </TabsContent>
+
+          {/* story #3976 AC1 — 「이력」(기존 GET /api/v2/activity-logs?entity_type=story&
+              entity_id= 재사용, 새 BE 0 — 3971 정정 확認한 그 API). 문장 틀 = 「{누가}가
+              {유형}」(action 원시값은 절대 노출 0 — 모르는 action은 제네릭 문구로 fail-closed). */}
+          <TabsContent value="history" className="mt-4">
+            {activityLogs === null ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-history-loading">{tCommon('loading')}</p>
+            ) : activityLogs.length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="panel-history-empty">{t('panelEmptyHistory')}</p>
+            ) : (
+              <ul className="space-y-2" data-testid="panel-history-list">
+                {activityLogs.map((log) => {
+                  const actorName = log.actor_name ?? t('historyUnknownActor');
+                  return (
+                    <li key={log.id} className="text-xs">
+                      <span className="text-foreground">
+                        {actorName}{pickIGaJosa(actorName)} {historyClaim(log, t, locale)}
+                      </span>
+                      <span className="ml-1.5 text-muted-foreground">{formatRelativeTime(log.created_at, locale, tz)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </TabsContent>
         </Tabs>
