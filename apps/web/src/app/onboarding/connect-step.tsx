@@ -17,6 +17,7 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { copyTextSafely } from '@/lib/clipboard';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -103,6 +104,7 @@ export function HighlightedJson({ text }: { text: string }) {
 
 export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabled = false }: ConnectStepProps) {
   const t = useTranslations('onboarding');
+  const tc = useTranslations('common');
 
   // transport=null: 최초 default-resolve 응답 대기 中(BE edition 기본 판별 前).
   const [transport, setTransport] = useState<Transport | null>(null);
@@ -113,8 +115,24 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
   const [hostedUnavailable, setHostedUnavailable] = useState(false);
   const [hasCopiedMap, setHasCopiedMap] = useState<Partial<Record<Transport, boolean>>>({});
   const [justCopied, setJustCopied] = useState(false);
+  // story #3986(클래스 «거짓 성공 표시») — 실패 시 「복사됨」을 안 띄우고, 화면에
+  // 보이는 config는 마스킹판(displayConfig)이라 클립보드용 실 config(cfg, 실키
+  // 포함)와 다르다 — 실패했을 때만 실 config를 선택 가능한 자리에 노출한다
+  // (유나 지시 2026-09-17 02:47Z — 실패 문구가 이미 "직접 선택" 지시, 별도 안내
+  // 줄은 안 만든다).
+  const [copyFailed, setCopyFailed] = useState(false);
+  const [copyFailedRawConfig, setCopyFailedRawConfig] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
+  const verifyPromptFailedPanelRef = useRef<HTMLDivElement>(null);
+
+  // story #3986 CHANGES(페드루 PO C4) — 실패 시 뜬 raw config는 그 transport/키 것이다.
+  // transport를 바꾸거나 키가 갱신되는데 리셋을 안 하면 이전 transport의 raw config가
+  // 새 화면에 그대로 남아, 사용자가 선택해 붙이면 엉뚱한 transport 설정을 붙이게 된다.
+  useEffect(() => {
+    setCopyFailed(false);
+    setCopyFailedRawConfig(null);
+  }, [transport, apiKey]);
 
   const hasCopied = transport ? Boolean(hasCopiedMap[transport]) : false;
   // misconfig 폴백(아래) — edition 기본이 http인데 배포가 없을 때 stdio로 명시 재요청해야
@@ -214,7 +232,28 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
     enabled: Boolean(apiKey),
     configCopiedDone: hasCopied,
   });
-  const { displaySteps, verified, verifying, awaitingVerification, timedOut } = rail;
+  const { displaySteps, verified, verifying, awaitingVerification, timedOut, copyVerifyPromptFailed: railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed } = rail;
+
+  // story #3986 CHANGES(페드루 PO 2회차) — 검증 예시 프롬프트 실패 패널도 더는
+  // 3초 뒤 자동으로 안 꺼진다(verify-rail.tsx 쪽 처방). 대신 바깥 클릭·Esc로
+  // 닫는다(다음 성공은 훅 안에서 이미 리셋).
+  useEffect(() => {
+    if (!railCopyVerifyPromptFailed) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (verifyPromptFailedPanelRef.current && !verifyPromptFailedPanelRef.current.contains(e.target as Node)) {
+        dismissCopyVerifyPromptFailed();
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dismissCopyVerifyPromptFailed();
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed]);
 
   // unload(탭닫기/이탈) best-effort — 미검증 시 abandoned_explicit 보조 신호(SoT는 BE 파생).
   useEffect(() => {
@@ -230,11 +269,14 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
     if (!apiKey || !transport) return;
     const cfg = renderArtifact(artifacts[transport] ?? null, apiKey, false);
     if (!cfg) return; // 아티팩트 미준비(pending) — copy 불가
-    try {
-      await navigator.clipboard.writeText(cfg);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(cfg);
+    if (!result.ok) {
+      setCopyFailed(true);
+      setCopyFailedRawConfig(cfg);
+      return;
     }
+    setCopyFailed(false);
+    setCopyFailedRawConfig(null);
     setHasCopiedMap((p) => ({ ...p, [transport]: true }));
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 2000);
@@ -269,13 +311,17 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
   };
 
   const [desktopKeyCopied, setDesktopKeyCopied] = useState(false);
+  // story #3986 — 실패 시 마스킹판(maskApiKey) 대신 실 키를 선택 가능하게
+  // 보여야 「직접 선택」 지시가 실행 가능하다(유나 2026-09-17 02:47Z).
+  const [desktopKeyCopyFailed, setDesktopKeyCopyFailed] = useState(false);
   const handleCopyKeyForDesktop = async () => {
     if (!apiKey) return;
-    try {
-      await navigator.clipboard.writeText(apiKey);
-    } catch {
-      // ignore clipboard failure
+    const result = await copyTextSafely(apiKey);
+    if (!result.ok) {
+      setDesktopKeyCopyFailed(true);
+      return;
     }
+    setDesktopKeyCopyFailed(false);
     setDesktopKeyCopied(true);
     setTimeout(() => setDesktopKeyCopied(false), 2000);
     // story #3983 CHANGES r2(페드루 PO 2026-09-17 02:23Z) — config_copied는
@@ -353,7 +399,19 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
             {t('desktopKeyHandoffTitle')} — {t('desktopKeyHandoffCanonicalNote')}
           </p>
           <div className="mt-2 flex items-center justify-between gap-2 rounded border border-border bg-background px-2.5 py-1.5">
-            <code className="truncate font-mono text-xs text-foreground">{maskApiKey(apiKey)}</code>
+            {/* story #3986 — 실패했을 때만 마스킹판 대신 실 키를 선택 가능한
+                input으로 보인다(유나 지시 — 실패 문구가 이미 "직접 선택" 지시). */}
+            {desktopKeyCopyFailed ? (
+              <input
+                readOnly
+                value={apiKey}
+                onFocus={(e) => e.currentTarget.select()}
+                className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-foreground"
+                data-testid="connect-step-desktop-key-raw"
+              />
+            ) : (
+              <code className="truncate font-mono text-xs text-foreground">{maskApiKey(apiKey)}</code>
+            )}
             <Button
               variant="outline" size="sm"
               onClick={() => void handleCopyKeyForDesktop()}
@@ -367,6 +425,9 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
               )}
             </Button>
           </div>
+          {desktopKeyCopyFailed ? (
+            <p role="alert" className="mt-1.5 text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+          ) : null}
         </div>
         {/* CHANGES ②: 낱말 = 착지와 같이(ON이면 「오늘」 낱말·OFF면 현행
             dashboardCta). variant도 outline(이 절의 주 행동은 내려받기 —
@@ -462,6 +523,23 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
             </div>
           )}
         </div>
+        {/* story #3986 — 복사 실패는 화면에 보이는 config(마스킹판)와 클립보드용
+            실 config가 다르므로, 실패했을 때만 실 config를 선택 가능한 자리에
+            노출한다(유나 지시 — 실패 문구가 이미 "직접 선택" 지시, 별도 안내
+            줄은 안 만든다). */}
+        {copyFailed && copyFailedRawConfig ? (
+          <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
+            <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p>
+            <textarea
+              readOnly
+              value={copyFailedRawConfig}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="connect-step-copy-failed-raw-config"
+            />
+          </div>
+        ) : null}
         {transport === 'http' && !isHostedUnavailable && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
           <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
@@ -538,13 +616,43 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
           </p>
         )}
         {rail.showVerifyExamplePrompt && (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-            <span className="min-w-0 truncate text-foreground">
-              {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
-            </span>
-            <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
-              {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
-            </Button>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
+              <span className="min-w-0 truncate text-foreground">
+                {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
+              </span>
+              <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="connect-step-verify-prompt-copy">
+                {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
+              </Button>
+            </div>
+            {/* story #3986 CHANGES(페드루 PO C2·2회차) — 위 인용부호 안 문구는
+                truncate라 좁은 화면에선 말줄임표로 잘린다. 실패했을 때만 안 잘린
+                전체 문구를 선택 가능하게 새로 보여준다 — 3초로 안 자르고 다음
+                성공·바깥 클릭·Esc·닫기까지 유지한다. */}
+            {railCopyVerifyPromptFailed ? (
+              <div ref={verifyPromptFailedPanelRef} className="space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={dismissCopyVerifyPromptFailed}
+                    aria-label={tc('close')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    ✕
+                  </Button>
+                </div>
+                <input
+                  readOnly
+                  value={t('verifyExamplePrompt')}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+                  data-testid="connect-step-verify-prompt-raw"
+                />
+              </div>
+            ) : null}
           </div>
         )}
         {verified && (

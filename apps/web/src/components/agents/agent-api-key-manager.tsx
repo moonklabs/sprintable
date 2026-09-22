@@ -17,6 +17,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
+import { copyTextSafely } from '@/lib/clipboard';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -65,6 +66,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   };
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
+  // story #3986 CHANGES(페드루 PO C2) — 헤더의 「온보딩 메시지 복사」는 다이얼로그가
+  // 닫혀 있을 때도 쓸 수 있는데, 그 메시지 본문은 이 화면 어디에도 안 떠 있다.
+  // 실패했을 때만 본문을 선택 가능하게 노출한다.
+  const [copyFailedOnboardingMessage, setCopyFailedOnboardingMessage] = useState<string | null>(null);
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   // story #2416 — 개별 키 revoke의 native confirm() 대체. null=닫힘, 아니면 대상 키 id.
   const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
@@ -175,46 +180,32 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     }
   };
 
-  const writeToClipboard = async (text: string): Promise<void> => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+  // story #3986(클래스 «거짓 성공 표시») — 이 파일의 writeToClipboard(execCommand
+  // 폴백+실패 시 throw)가 선례였다. 공용 lib/clipboard.ts::copyTextSafely로
+  // 일반화됐으니(발명 0, 로직 그대로) 여기 로컬 사본은 걷는다.
+  const copyToClipboard = async (text: string) => {
+    const result = await copyTextSafely(text);
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
       return;
     }
-    const prev = document.activeElement as HTMLElement | null;
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.setAttribute('readonly', '');
-    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px';
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    el.setSelectionRange(0, el.value.length);
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    prev?.focus();
-    if (!ok) throw new Error('execCommand copy failed');
-  };
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await writeToClipboard(text);
-      setCopiedKey(true);
-      addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
-      window.setTimeout(() => setCopiedKey(false), 1500);
-    } catch {
-      addToast({ type: 'error', title: 'Copy failed', body: t('agentApiKeyClipboardFailBody') });
-    }
+    setCopiedKey(true);
+    addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
+    window.setTimeout(() => setCopiedKey(false), 1500);
   };
 
   const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null) => {
-    try {
-      await writeToClipboard(buildOnboardingMessage(apiKey, mcpConfig));
-      setCopiedOnboarding(true);
-      addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
-      window.setTimeout(() => setCopiedOnboarding(false), 1500);
-    } catch {
-      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: t('agentApiKeyClipboardFailBody') });
+    const message = buildOnboardingMessage(apiKey, mcpConfig);
+    const result = await copyTextSafely(message);
+    if (!result.ok) {
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
+      setCopyFailedOnboardingMessage(message);
+      return;
     }
+    setCopyFailedOnboardingMessage(null);
+    setCopiedOnboarding(true);
+    addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
+    window.setTimeout(() => setCopiedOnboarding(false), 1500);
   };
 
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
@@ -257,6 +248,16 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               Generate API Key
             </Button>
           </div>
+          {copyFailedOnboardingMessage ? (
+            <textarea
+              readOnly
+              value={copyFailedOnboardingMessage}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+              rows={4}
+              data-testid="agent-api-key-copy-failed-raw-onboarding-message"
+            />
+          ) : null}
         </div>
       </div>
 

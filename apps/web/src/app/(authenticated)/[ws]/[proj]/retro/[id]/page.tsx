@@ -35,6 +35,7 @@ import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
 import { EvidenceStrip } from '@/components/retro/evidence-strip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
+import { copyTextSafely } from '@/lib/clipboard';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -196,6 +197,9 @@ export default function RetroSessionPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
+  // story #3986 CHANGES(페드루 PO C2) — 내보내기 markdown은 fetch 응답에만 있고
+  // 화면 어디에도 안 떠 있다. 복사 실패했을 때만 그 내용을 선택 가능하게 노출한다.
+  const [exportCopyFailedMarkdown, setExportCopyFailedMarkdown] = useState<string | null>(null);
   const [votedItemIds, setVotedItemIds] = useState<Set<string>>(new Set());
   const { addToast } = useToast();
 
@@ -552,7 +556,15 @@ export default function RetroSessionPage() {
       // 동형 신규 1키.
       if (!res.ok) { addToast({ title: t('exportFailed'), type: 'error' }); return; }
       const json = await res.json() as { data: { markdown: string } };
-      await navigator.clipboard.writeText(json.data.markdown);
+      // story #3986(클래스 «거짓 성공 표시») — export 자체(fetch)와 클립보드 복사는
+      // 다른 실패축이다. 공용 헬퍼로 클립보드만 정직하게 갈라 정본 문구로 알린다.
+      const result = await copyTextSafely(json.data.markdown);
+      if (!result.ok) {
+        setExportCopyFailedMarkdown(json.data.markdown);
+        addToast({ title: tc('copyFailedSelectManually'), type: 'error' });
+        return;
+      }
+      setExportCopyFailedMarkdown(null);
       addToast({ title: t('exportCopied'), type: 'success' });
     } catch {
       addToast({ title: t('exportFailed'), type: 'error' });
@@ -649,6 +661,19 @@ export default function RetroSessionPage() {
         }
       />
 
+      {exportCopyFailedMarkdown ? (
+        <div className="space-y-1.5 border-b border-border p-3">
+          <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+          <textarea
+            readOnly
+            value={exportCopyFailedMarkdown}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+            rows={6}
+            data-testid="retro-export-copy-failed-raw-markdown"
+          />
+        </div>
+      ) : null}
       {/* story #4130 — 고정 툴바 없음(TopBarSlot은 포털) — 로컬 스크롤 경계를 걷어내고
           셸의 단일 스크롤러(:199)가 스크롤하게 둔다. */}
       <div className="focus-inset flex flex-col">
