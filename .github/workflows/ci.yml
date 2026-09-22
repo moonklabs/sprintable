@@ -2499,6 +2499,19 @@ jobs:
       - name: Run card-surface e2e (background-adjacent surfaceless box)
         run: pnpm --filter web e2e:card-surface
 
+      # story #4006(critical, 5pt) AC3 — v3 화면(오늘·대화·연결·규칙·일감·결과, 「가설」은
+      # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 별도 env로 v3 플래그
+      # 3개를 켠다(job 레벨 env엔 안 실음 — 위 contrast/card-surface e2e는 플래그 OFF 기준을
+      # 전제로 하므로 오염 방지). `pnpm --filter web e2e:X`는 매번 독립 `pnpm dev`를 새로
+      # 띄우므로(playwright.config webServer, reuseExistingServer=false in CI) 이 스텝의
+      # env만 그 서버 프로세스에 반영된다.
+      - name: Run v3 narrow-width overflow e2e (story #4006 AC3)
+        env:
+          TODAY_V3_ENABLED: 'true'
+          CHAT_V3_ENABLED: 'true'
+          CONNECT_RULES_V3_ENABLED: 'true'
+        run: pnpm --filter web e2e:v3-narrow-width
+
       - name: Dump backend log on failure
         if: failure()
         run: cat /tmp/backend.log || true
