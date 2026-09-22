@@ -78,9 +78,24 @@ async def _seed_org_project_with_owner(session, *, slug="e3313"):
     `maybe_create_stage_gate`가 approver="org_owner"를 실제로 해소하려 한다(test_3312의
     `_seed_org_with_owner`와 동형) — org owner가 없으면 UnknownApproverRoleError로 발행
     자체가 죽는다(이 함수는 events.py의 try/except GenerationBudgetExceededError 밖이라
-    안 잡힘). 게이트 문구 테스트는 이 helper로 org를 세운다."""
+    안 잡힘). 게이트 문구 테스트는 이 helper로 org를 세운다.
+
+    story #4153(2026-09-22, 페드루 PO 確定) — 이 헬퍼가 org_member만 만들고 members
+    앵커(`ensure_human_member`, #3635가 세운 정상 생성경로 choke point가 항상 부르는
+    바로 그 함수)를 빠뜨려, `dispatch_approval_request_cards`의 참여자 INSERT가
+    `conversation_participants_member_id_fkey` 위반으로 조용히 실패(WARNING만)하던
+    실사고 원인이었다(2026-09-22 PR#4523 shard4 로그). 제품 정상 경로(organizations.py
+    OSS bootstrap 등)와 동형으로 앵커를 호출 — 시드만 고쳐서 통과시키는 게 아니라
+    `_resolve_org_owner` 자체도 같은 이유로 방어적 self-heal을 얻었다(recipe_gate_
+    hooks.py, 같은 카드). `TeamMember` 행도 같이 심는다 — prod의 `team_members`는
+    `members`⋈`project_access` VIEW지만 이 realdb 하네스는 `Base.metadata.create_all()`
+    (마이그 미경유)이라 뷰 대신 별도 실 테이블이 생겨(story #4152 세션에서도 동일 하네스
+    한계 확認) `ensure_human_member`의 `members` 쓰기만으론 이 하네스의 FK가 안 풀린다
+    (`_seed_agent`의 기존 TeamMember 패턴과 동형 — 발명 0)."""
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
+    from app.models.team import TeamMember
+    from app.services.agent_anchor_sync import ensure_human_member
 
     org = Organization(id=uuid.uuid4(), name="Org3313", slug=slug)
     session.add(org)
@@ -89,6 +104,12 @@ async def _seed_org_project_with_owner(session, *, slug="e3313"):
     session.add(project)
     owner_member = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uuid.uuid4(), role="owner")
     session.add(owner_member)
+    await session.commit()
+    await ensure_human_member(session, owner_member.id)
+    session.add(TeamMember(
+        id=owner_member.id, org_id=org.id, project_id=project.id, type="human",
+        name="org owner", is_active=True,
+    ))
     await session.commit()
     return org.id, project.id
 

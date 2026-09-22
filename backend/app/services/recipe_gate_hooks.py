@@ -267,6 +267,29 @@ async def _resolve_org_owner(db: AsyncSession, *, org_id: uuid.UUID) -> uuid.UUI
     )).scalar_one_or_none()
     if member_id is None:
         raise UnknownApproverRoleError(f"org {org_id}에 role=owner인 org_member가 없습니다.")
+
+    # story #4153(2026-09-22, 페드루 PO 確定) — members.id == org_member.id는 "0075
+    # 불변식"(agent_anchor_sync.py::ensure_human_member)이지만, 이 함수가 그 앵커
+    # INSERT가 실제로 일어났음을 보장하진 않는다(정상 생성경로는 #3635가 세운 choke
+    # point — org_member.py::OrgMemberRepository.create — 가 전수 커버하지만, 그
+    # choke point를 안 거치는 손시드(테스트)·미지의 경로가 건너뛸 수 있다). 반환 前
+    # 멱등 앵커를 방어적으로 보장한다(기존 정본 함수 재사용, 새 메커니즘 0) — 승인
+    # 요청 카드가 `conversation_participants` FK 위반으로 조용히 안 가던 결함 클래스의
+    # 근본 처방(approval_delivery.py의 WARNING 삼킴과는 별개 축). 앵커 보장이 그래도
+    # 실패하면(orphan org/user, 극히 드묾) 조용히 그 id를 반환하지 않고 loud(기존
+    # UnknownApproverRoleError 계열 그대로 — 카드가 못 갈 승인자를 지정하는 것보다
+    # 발행 자체를 막는 게 정직하다).
+    from app.services.agent_anchor_sync import ensure_human_member
+
+    if not await ensure_human_member(db, member_id):
+        # story #3779 — 이 예외는 사람 표면이 아니라 발행 API를 부른 에이전트에게 닿는
+        # 내부 진단 문자열이라(events.py의 try/except 밖, loud) 영문으로 둔다(#4147
+        # CHANGES-2와 동형 — human_error()/한글 축 대상이 아닌 raw exception 문구).
+        raise UnknownApproverRoleError(
+            f"failed to guarantee members anchor for org {org_id} owner "
+            f"org_member={member_id} (orphan org/user) — blocking publish instead of "
+            "silently dropping the approval card"
+        )
     return member_id
 
 
