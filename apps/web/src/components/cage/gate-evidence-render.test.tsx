@@ -890,7 +890,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
-      expect(container.textContent).toContain(koMessages.content.channelLabelInstagramSandbox);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelLabelInstagramSandbox);
     });
   });
 
