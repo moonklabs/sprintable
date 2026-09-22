@@ -1891,6 +1891,15 @@ jobs:
       - name: "Verify non-text icon contrast (story #4123 AC3 regression guard)"
         run: pnpm --filter web verify:nontext-icon-contrast
 
+      # story #4128(유나 canon 정식 결정, 2026-09-21) — 폼 컨트롤 accent-color 전역 토큰화
+      # (globals.css `@layer base { :root { accent-color: var(--primary); } }`)의 채움색이
+      # 실제로 3:1 요건을 만족하는지 정의 시점에 잰다: (a) 채움 vs 페이지 배경·카드 배경
+      # (b) UA 흰 체크 표시 vs 채움. 양 테마 기대값 라이트 6.02/6.51·다크 6.09/3.21 — 미달이면
+      # 즉시 FAIL. 존재-검사 축(verify:nontext-icon-contrast의 폼 컨트롤 부분)과는 분업 —
+      # 저 가드는 명시적 accent-* override, 이 가드는 전역 기본값 자체를 잰다.
+      - name: "Verify accent-color contrast (story #4128 regression guard)"
+        run: pnpm --filter web verify:accent-color-contrast
+
       # story #4125(라이브 실측, 페드루 PO 2026-09-21) — globals.css 최상위(레이어 밖) 단일-
       # 클래스 선택자 규칙 재유입 가드. Cascade Layers 스펙상 레이어 밖 규칙은 명시도·순서
       # 무관하게 모든 @layer를 항상 이긴다 — `.proof-surface`가 최상위에 있어 같은 요소의

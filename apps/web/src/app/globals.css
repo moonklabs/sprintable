@@ -566,6 +566,25 @@
   --glass-overlay-bg: rgba(252, 251, 247, .62);
 }
 
+/* story #4128 — 유나 canon 정식 결정(2026-09-21): 폼 컨트롤(checkbox/radio) accent-color를
+   전역 토큰화한다. 근거 = 네이티브 a11y·키보드 동작 유지(appearance-none 커스텀 컨트롤보다
+   우선)·브랜드 정합·체크 상태가 토큰 시스템 안으로 들어와 측정 가능해짐(이전엔 UA 기본색이라
+   verify-nontext-icon-contrast.ts의 폼 컨트롤 축이 «존재-검사»만 하고 수치는 못 쟀다).
+   실측 접지(현 --primary 토큰): 채움 vs 페이지 배경 라이트 6.02 / 다크 6.09 · UA 흰 체크 on
+   채움 라이트 6.51 / 다크 3.21(둘 다 3:1 이상). `:root` 한 선언으로 라이트·다크 전부 커버되는
+   것은 `.dark`가 --primary를 재정의하고 accent-color가 상속되기 때문(별도 `.dark` 선언 불요).
+   `@layer base`에 넣는 이유 — 커스텀 프로퍼티 블록(위 `:root { --var: ... }`, 레이어 밖)에
+   같이 넣으면 이 선언도 레이어 밖이 되어 story #4125/#4127과 같은 이유로 Tailwind의
+   `accent-*` 유틸리티(있다면)를 항상 이겨버린다. 미체크 박스 테두리 3:1은 이 결정 밖(네이티브
+   UA 회색 테두리 — 실측 실패 테마가 나오면 그때 별도 카드로 appearance-none 커스텀 컨트롤).
+   `.tiptap … input[type="checkbox"] { accent-color: var(--tiptap-link) }`(에디터 스코프
+   override, story #4127 그룹 A 허용)는 특이도가 더 높아 그대로 우선한다. */
+@layer base {
+  :root {
+    accent-color: var(--primary);
+  }
+}
+
 /* story #7d7634ee — `.proof-surface`가 재질 지오메트리 유일 정본(구 `.proof-cut` 계승,
    doc ea94dac4 유나 확定: "컷 소멸이라 재질명으로 리네임"). 그레인은 `::before`로 얹는다 —
    `border-radius: inherit`가 배경을 부모 라운드 안에 자동으로 가둬 별도 overflow-hidden
