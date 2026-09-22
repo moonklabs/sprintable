@@ -182,7 +182,9 @@ function useArtifactDetail(artifactId: string | null): ArtifactDetail | null {
   return detail;
 }
 
-export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef, needsMe, todayV3Enabled }: {
+export function ChatV3ContextPanel({
+  conversationId, openArtifactId, workItemRef, needsMe, todayV3Enabled, todayHref: todayV3Href,
+}: {
   conversationId: string;
   openArtifactId: string | null;
   // story #3990 — 「근거」·「이력」이 스코프할 일. null=아직 이 대화에 이어진 story/
@@ -196,6 +198,10 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef
   // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — TODAY_V3_ENABLED
   // OFF면 「오늘」 링크가 404라 옛 큐(/inbox)로 보낸다.
   todayV3Enabled: boolean;
+  // story #4004 CHANGES 1(페드루 PO 지적, 2026-09-22) — '/today' 값 자체는 이 컴포넌트가
+  // 재조립하지 않는다(가짜 flags 조합으로 resolveNavV3Destinations를 또 부르면 리터럴을
+  // 한 겹 감싼 것뿐) — ChatV3Screen이 실 flags로 한 번 구해 내려준다.
+  todayHref: string;
 }) {
   const t = useTranslations('chatV3');
   const tVerify = useTranslations('verify');
@@ -204,7 +210,9 @@ export function ChatV3ContextPanel({ conversationId, openArtifactId, workItemRef
   const { tz } = resolveDisplayTimezone();
   const artifact = useArtifactDetail(openArtifactId);
   const relatedNeedsMe = needsMe.find((item) => item.conversationId === conversationId) ?? null;
-  const todayHref = todayV3Enabled ? '/today' : '/inbox';
+  // OFF 폴백(/inbox)은 이 화면 고유 맥락("오늘 결정 아니면 옛 큐로")이라 목적지 모듈이
+  // 정할 대상이 아니다 — 그대로 유지.
+  const todayHref = todayV3Enabled ? todayV3Href : '/inbox';
 
   const [evidence, retryEvidence] = useWorkItemScopedList<EvidenceItem>(
     workItemRef,

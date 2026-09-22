@@ -21,7 +21,7 @@ import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
  * 승인류 게이트는 지금 이 필드 자체를 안 받는다 — 정직한 상태, 가짜 placeholder
  * 0. `dispatch_approval_request_cards`를 타는 gate_type만 이 필드를 가진다).
  */
-export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, todayV3Enabled, onDone }: {
+export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, todayV3Enabled, todayHref, onDone }: {
   approvalTarget: { work_item_type: string; work_item_id: string; gate_id: string; actions?: string[] };
   // BE가 이 카드 전용으로 지은 설명 문장(dispatch_approval_request_cards가 채운
   // message.content) — 제목을 새로 지어내지 않고 그대로 옮긴다(work_item 제목은
@@ -35,6 +35,9 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
   // OFF면 `/today` 자체가 404 — 옛 게이트 상세(`/gates/{id}`, 이 카드가 v3
   // 원칙으로 걷기 前 서명 자리)로 되돌린다.
   todayV3Enabled: boolean;
+  // story #4004 CHANGES 1 — ChatV3Screen이 실 flags로 구한 값을 그대로 받는다(가짜
+  // flags 조합으로 다시 조립 0).
+  todayHref: string;
   onDone: () => void;
 }) {
   const t = useTranslations('chatV3');
@@ -71,7 +74,12 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {isInTodayQueue ? (
           <Button asChild size="sm">
-            <Link href={todayV3Enabled ? '/today' : `/gates/${approvalTarget.gate_id}`} data-testid="chat-v3-event-card-sign">
+            {/* story #4004 — OFF 폴백(/gates/{id})은 이 카드 고유 맥락(v3 걷기 前
+                서명 자리)이라 목적지 모듈이 정할 대상이 아니다 — 그대로 유지. */}
+            <Link
+              href={todayV3Enabled ? todayHref : `/gates/${approvalTarget.gate_id}`}
+              data-testid="chat-v3-event-card-sign"
+            >
               {t('eventCardSignAction')}
             </Link>
           </Button>

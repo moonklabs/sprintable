@@ -504,16 +504,9 @@
     "unmeasured": "Unmeasured",
     "searchPlaceholder": "Search or give an instruction",
     "targetColumnEmpty": "Nothing selected.",
-    "chatColumnEmpty": "Select a conversation to see it here.",
-    "navToday": "Today",
-    "navChats": "Chats",
-    "navWork": "Work",
-    "navResults": "Results",
-    "navConnectRules": "Connections & Rules"
+    "chatColumnEmpty": "Select a conversation to see it here."
   },
   "chatV3": {
-    "navToday": "Today",
-    "navChats": "Chats",
     "loadErrorTitle": "Couldn't load this",
     "threadRailTitle": "Chats",
     "threadRailEmpty": "No conversations yet",
@@ -2600,11 +2593,6 @@
   "connectRulesV3": {
     "pageTitle": "Connections & rules",
     "pageDescription": "Connect agents and channels, and set the rules.",
-    "navToday": "Today",
-    "navChats": "Chats",
-    "navWork": "Work",
-    "navResults": "Results",
-    "navConnectRules": "Connections & rules",
     "searchPlaceholder": "Search or instruct",
     "loadErrorTitle": "Couldn't load",
     "agentsSectionTitle": "Connected agents",

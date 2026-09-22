@@ -47,20 +47,20 @@ describe('/connect-rules page — 플래그 게이트', () => {
     expect(result).toBeTruthy();
   });
 
-  it('⭐오늘·대화 v3 플래그 둘 다 off — 화면 element props에 false/false(교차 링크 404 방지)', () => {
+  it('⭐오늘·대화 v3 플래그 둘 다 off — 화면 element props의 flags에 false/false(교차 링크 404 방지)', () => {
     process.env.CONNECT_RULES_V3_ENABLED = 'true';
     delete process.env.TODAY_V3_ENABLED;
     delete process.env.CHAT_V3_ENABLED;
-    const result = ConnectRulesV3Page() as unknown as { type: unknown; props: Record<string, unknown> };
+    const result = ConnectRulesV3Page() as unknown as { type: unknown; props: { flags: Record<string, unknown> } };
     expect(result.type).toBe(screenMock);
-    expect(result.props).toEqual({ todayV3Enabled: false, chatV3Enabled: false });
+    expect(result.props.flags).toEqual({ todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
   });
 
-  it('오늘·대화 v3 플래그 on — 화면 element props에 true/true', () => {
+  it('오늘·대화 v3 플래그 on — 화면 element props의 flags에 true/true', () => {
     process.env.CONNECT_RULES_V3_ENABLED = 'true';
     process.env.TODAY_V3_ENABLED = 'true';
     process.env.CHAT_V3_ENABLED = 'true';
-    const result = ConnectRulesV3Page() as unknown as { type: unknown; props: Record<string, unknown> };
-    expect(result.props).toEqual({ todayV3Enabled: true, chatV3Enabled: true });
+    const result = ConnectRulesV3Page() as unknown as { type: unknown; props: { flags: Record<string, unknown> } };
+    expect(result.props.flags).toEqual({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true });
   });
 });

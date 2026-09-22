@@ -88,7 +88,8 @@ describe('TodayV3Screen — 렌더 3', () => {
     await mount();
     expect(container.textContent).toContain('블로그 글 발행');
     expect(container.textContent).toContain('광고비 집행');
-    expect(container.querySelector('[data-testid="today-v3-nav-navToday"]')?.textContent).toContain('2');
+    // story #4004 — nav 배지는 이제 공유 NavV3ItemList(nav-v3-item-{key})가 그린다.
+    expect(container.querySelector('[data-testid="nav-v3-item-today"]')?.textContent).toContain('2');
   });
 
   it('⭐진행 中 N — agent_progress N건이 렌더된다', async () => {

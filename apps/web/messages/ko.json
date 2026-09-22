@@ -504,16 +504,9 @@
     "unmeasured": "미측정",
     "searchPlaceholder": "검색하거나 지시하기",
     "targetColumnEmpty": "선택한 항목이 없어요.",
-    "chatColumnEmpty": "대화를 선택하면 여기에 나타나요.",
-    "navToday": "오늘",
-    "navChats": "대화",
-    "navWork": "일감",
-    "navResults": "결과",
-    "navConnectRules": "연결·규칙"
+    "chatColumnEmpty": "대화를 선택하면 여기에 나타나요."
   },
   "chatV3": {
-    "navToday": "오늘",
-    "navChats": "대화",
     "loadErrorTitle": "불러오지 못했어요",
     "threadRailTitle": "대화",
     "threadRailEmpty": "아직 대화가 없어요",
@@ -2600,11 +2593,6 @@
   "connectRulesV3": {
     "pageTitle": "연결·규칙",
     "pageDescription": "에이전트와 채널을 연결하고 규칙을 정하는 곳이에요. 처음과 막힐 때만 들어오는 자리예요.",
-    "navToday": "오늘",
-    "navChats": "대화",
-    "navWork": "일감",
-    "navResults": "결과",
-    "navConnectRules": "연결·규칙",
     "searchPlaceholder": "검색하거나 지시하기",
     "loadErrorTitle": "불러오지 못했어요",
     "agentsSectionTitle": "연결된 에이전트",

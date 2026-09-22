@@ -43,7 +43,12 @@ const approvalTarget = { work_item_type: 'channel_post', work_item_id: 'w1', gat
 
 async function mount(onDone = vi.fn(), isInTodayQueue = true, todayV3Enabled = true) {
   await act(async () => {
-    root.render(wrap(<ChatV3EventCard approvalTarget={approvalTarget} content="발행 승인을 올려요" isInTodayQueue={isInTodayQueue} todayV3Enabled={todayV3Enabled} onDone={onDone} />));
+    root.render(wrap(
+      <ChatV3EventCard
+        approvalTarget={approvalTarget} content="발행 승인을 올려요" isInTodayQueue={isInTodayQueue}
+        todayV3Enabled={todayV3Enabled} todayHref="/today" onDone={onDone}
+      />,
+    ));
   });
   return onDone;
 }

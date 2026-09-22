@@ -29,7 +29,7 @@ function formatDayLabel(key: string, locale: string): string {
 }
 
 export function ChatV3Messages({
-  threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange, onWorkItemRefChange,
+  threadId, meId, agentName, locale, needsMe, todayV3Enabled, todayHref, onOpenArtifactChange, onWorkItemRefChange,
 }: {
   threadId: string;
   meId: string;
@@ -39,6 +39,9 @@ export function ChatV3Messages({
   // story #3972 CHANGES(페드루 PO 2026-09-17 01:54Z, 실결함) — 이벤트 카드 서명
   // 버튼도 같은 게이트(TODAY_V3_ENABLED OFF면 /today가 404).
   todayV3Enabled: boolean;
+  // story #4004 CHANGES 1 — ChatV3Screen이 실 flags로 구한 값을 그대로 흘려보낸다
+  // (아래로 재조립 0, chat-v3-event-card.tsx가 최종 소비).
+  todayHref: string;
   onOpenArtifactChange: (artifactId: string | null) => void;
   // story #3990 — 「근거」·「이력」 절이 스코프할 일(work item). 열린 산출물과 같은
   // 파생 규칙(최근 메시지부터 훑어 첫 story/task 참조)이라 같은 루프에서 같이 뽑는다
@@ -168,6 +171,7 @@ export function ChatV3Messages({
                         // 없으면 막다른 길이라 서명 버튼 자체를 숨긴다(자리 0).
                         isInTodayQueue={needsMe.some((item) => item.source === 'gate' && item.id === m.approval_target!.gate_id)}
                         todayV3Enabled={todayV3Enabled}
+                        todayHref={todayHref}
                         onDone={() => { /* story #3972 — 낙관 갱신 0, 다음 목록 재조회 때 반영(가짜 0) */ }}
                       />
                     </div>

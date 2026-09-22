@@ -48,7 +48,7 @@ const needsMeItem: TodayNeedsMeItem = {
 describe('ChatV3ContextPanel — 관련(오늘 스냅샷 역조회)', () => {
   it('⭐conversationId가 needsMe[].conversationId와 일치하면 관련 링크가 뜬다', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={null} needsMe={[needsMeItem]} todayV3Enabled />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={null} needsMe={[needsMeItem]} todayV3Enabled todayHref="/today" />));
     });
     const link = container.querySelector('[data-testid="chat-v3-related-today-link"]');
     expect(link).not.toBeNull();
@@ -57,7 +57,7 @@ describe('ChatV3ContextPanel — 관련(오늘 스냅샷 역조회)', () => {
 
   it('일치하는 needsMe가 없으면 관련은 빈 상태 문구', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-2" openArtifactId={null} workItemRef={null} needsMe={[needsMeItem]} todayV3Enabled />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-2" openArtifactId={null} workItemRef={null} needsMe={[needsMeItem]} todayV3Enabled todayHref="/today" />));
     });
     expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')).toBeNull();
   });
@@ -66,7 +66,7 @@ describe('ChatV3ContextPanel — 관련(오늘 스냅샷 역조회)', () => {
   // OFF면 /today가 404라 옛 큐(/inbox)로 보낸다.
   it('⭐todayV3Enabled=false면 관련 링크가 /inbox로 간다(404 방지)', async () => {
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={null} needsMe={[needsMeItem]} todayV3Enabled={false} />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={null} needsMe={[needsMeItem]} todayV3Enabled={false} todayHref="/today" />));
     });
     expect(container.querySelector('[data-testid="chat-v3-related-today-link"]')?.getAttribute('href')).toBe('/inbox');
   });
@@ -89,7 +89,7 @@ async function mountWithWorkItem(
   });
   await act(async () => {
     root.render(wrap(
-      <ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={workItemRef} needsMe={[]} todayV3Enabled />,
+      <ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={workItemRef} needsMe={[]} todayV3Enabled todayHref="/today" />,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
@@ -154,7 +154,7 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
       return { ok: true, status: 200, json: async () => ({ data: { items: [] } }) };
     });
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={{ type: 'story', id: 's1' }} needsMe={[]} todayV3Enabled />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={{ type: 'story', id: 's1' }} needsMe={[]} todayV3Enabled todayHref="/today" />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.querySelector('[data-testid="chat-v3-evidence-error"]')?.textContent).toContain('근거를 불러오지 못했어요');
@@ -227,13 +227,13 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
       return { ok: true, status: 200, json: async () => ({ data: { items: [] } }) };
     });
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={{ type: 'story', id: 'a1' }} needsMe={[]} todayV3Enabled />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={{ type: 'story', id: 'a1' }} needsMe={[]} todayV3Enabled todayHref="/today" />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.querySelector('[data-testid="chat-v3-evidence-loading"]')).not.toBeNull();
 
     await act(async () => {
-      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={{ type: 'story', id: 'b1' }} needsMe={[]} todayV3Enabled />));
+      root.render(wrap(<ChatV3ContextPanel conversationId="conv-1" openArtifactId={null} workItemRef={{ type: 'story', id: 'b1' }} needsMe={[]} todayV3Enabled todayHref="/today" />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.querySelector('[data-testid="chat-v3-evidence-list"]')?.textContent).toContain('B글');

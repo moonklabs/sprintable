@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -10,6 +9,8 @@ import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/com
 import { TodayV3Decisions } from './today-v3-decisions';
 import { TodayV3AgentProgress } from './today-v3-agent-progress';
 import { useMyOrgRole } from './use-my-org-role';
+import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
+import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
  * story #3962(E-UX-OVERHAUL·「오늘」 구현 3/N·FE) — 시안 ①(artifact d31b9e6d) 그대로.
@@ -20,14 +21,6 @@ import { useMyOrgRole } from './use-my-org-role';
  * 무접촉(org-briefing이 그대로 쓴다) — v3는 같은 `TodaySnapshot`/`derive-today.ts`
  * 타입만 공유하고 렌더는 독립.
  */
-
-const NAV_ITEMS: { key: string; href: string; active?: boolean }[] = [
-  { key: 'navToday', href: '/today', active: true },
-  { key: 'navChats', href: '/chats' },
-  { key: 'navWork', href: '/flow' },
-  { key: 'navResults', href: '/organization/insights-board' },
-  { key: 'navConnectRules', href: '/organization/channels' },
-];
 
 function formatTodayCount(value: TodayCount | undefined, unmeasuredLabel: string): string {
   if (!value || !value.measured) return unmeasuredLabel;
@@ -55,31 +48,10 @@ function TodayResultsSummary({ snapshot }: { snapshot: TodaySnapshot }) {
   );
 }
 
-function TodayV3Nav({ needsMeCount }: { needsMeCount: number }) {
-  const t = useTranslations('todayV3');
+function TodayV3Nav({ needsMeCount, flags }: { needsMeCount: number; flags: NavV3Flags }) {
   return (
     <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3" data-testid="today-v3-nav">
-      <nav className="mt-1 flex flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => (
-          <Link
-            key={item.key}
-            href={item.href}
-            data-testid={`today-v3-nav-${item.key}`}
-            className={
-              item.active
-                ? 'flex items-center gap-2.5 rounded-md bg-primary/10 px-2.5 py-2 text-sm font-medium text-primary'
-                : 'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted'
-            }
-          >
-            <span className="min-w-0 flex-1 truncate">{t(item.key)}</span>
-            {item.key === 'navToday' && needsMeCount > 0 ? (
-              <span className="flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-primary px-1 text-[11.5px] font-bold text-primary-foreground">
-                {needsMeCount}
-              </span>
-            ) : null}
-          </Link>
-        ))}
-      </nav>
+      <NavV3ItemList flags={flags} activeKey="today" todayBadgeCount={needsMeCount} />
     </aside>
   );
 }
@@ -100,7 +72,7 @@ function TodayV3Topbar({ needsMeCount }: { needsMeCount: number }) {
   );
 }
 
-export function TodayV3Screen() {
+export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Flags }) {
   const { data, loadError, retry } = useTodaySnapshot();
   const snapshot = data ?? EMPTY_TODAY_SNAPSHOT;
   const t = useTranslations('todayV3');
@@ -117,7 +89,7 @@ export function TodayV3Screen() {
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="today-v3-screen">
-      <TodayV3Nav needsMeCount={snapshot.needsMeCount} />
+      <TodayV3Nav needsMeCount={snapshot.needsMeCount} flags={flags} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TodayV3Topbar needsMeCount={snapshot.needsMeCount} />
         <div className="flex min-h-0 flex-1">

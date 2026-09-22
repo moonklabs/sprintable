@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
@@ -11,6 +10,8 @@ import { ChatV3ThreadRail, type ChatV3Thread } from './chat-v3-thread-rail';
 import { ChatV3Messages } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
+import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
  * story #3972(E-UX-OVERHAUL·「대화」 구현 2/N·FE) — 시안 ②(artifact c707a913)
@@ -24,11 +25,17 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
  * 옛 `/chats`·`ChatListView`·`ChatView`·`approval-request-card.tsx` 전부 무접촉
  * (재사용은 import/조각뿐, 그 파일들 자체는 1줄도 안 건드림).
  */
-export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
-  // 페드루 PO 정렬(2026-09-17 02:10Z) — nav 「오늘」의 OFF 폴백은 nav-config.ts의
-  // 「오늘」 zone 정본 경로(zoneNow) /org-briefing(이벤트 카드 서명·관련 링크는
-  // "결정할 것" 맥락이라 /gates/{id}·/inbox 그대로 — 이 줄만 정렬).
-  const todayHref = todayV3Enabled ? '/today' : '/org-briefing';
+export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Flags }) {
+  // story #4004 — 「오늘」 목적지는 더 이상 이 화면이 재조립하지 않는다(nav-v3-item-list.tsx가
+  // resolveNavV3Destinations 그대로 씀). 이벤트 카드 서명·관련 링크는 "결정할 것" 맥락이라
+  // 여전히 /gates/{id}·/inbox 자기 fallback을 쓴다(chat-v3-event-card.tsx·
+  // chat-v3-context-panel.tsx 참고, 목적지 모듈이 정할 대상이 아님 — 「오늘」 nav 항목과
+  // 다른 결정). CHANGES 1(페드루 PO 지적, 2026-09-22) — 두 컴포넌트가 각자 가짜 flags
+  // 조합({todayV3Enabled:true, ...false})으로 resolveNavV3Destinations를 다시 불러
+  // '/today'를 구하던 건 리터럴을 한 겹 감싼 재조립이었다 — 이 화면이 실 flags로
+  // 딱 한 번 구해 todayHref로 내려준다.
+  const todayV3Enabled = flags.todayV3Enabled;
+  const todayHref = resolveNavV3Destinations(flags).today.path;
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -88,10 +95,7 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="chat-v3-screen">
       <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3">
-        <nav className="mt-1 flex flex-col gap-0.5">
-          <Link href={todayHref} className="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted">{t('navToday')}</Link>
-          <span className="rounded-md bg-primary/10 px-2.5 py-2 text-sm font-medium text-primary">{t('navChats')}</span>
-        </nav>
+        <NavV3ItemList flags={flags} activeKey="chats" />
       </aside>
       <div className="flex min-w-0 flex-1">
         {loadError || meError ? (
@@ -117,6 +121,7 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
                   locale={locale}
                   needsMe={needsMe}
                   todayV3Enabled={todayV3Enabled}
+                  todayHref={todayHref}
                   onOpenArtifactChange={setOpenArtifactId}
                   onWorkItemRefChange={setWorkItemRef}
                 />
@@ -126,6 +131,7 @@ export function ChatV3Screen({ todayV3Enabled }: { todayV3Enabled: boolean }) {
                   workItemRef={workItemRef}
                   needsMe={needsMe}
                   todayV3Enabled={todayV3Enabled}
+                  todayHref={todayHref}
                 />
               </>
             ) : (
