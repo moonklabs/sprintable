@@ -9,7 +9,7 @@ import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/com
 import { TodayV3Decisions } from './today-v3-decisions';
 import { TodayV3AgentProgress } from './today-v3-agent-progress';
 import { useMyOrgRole } from './use-my-org-role';
-import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
+import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
@@ -48,14 +48,6 @@ function TodayResultsSummary({ snapshot }: { snapshot: TodaySnapshot }) {
   );
 }
 
-function TodayV3Nav({ needsMeCount, flags }: { needsMeCount: number; flags: NavV3Flags }) {
-  return (
-    <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3" data-testid="today-v3-nav">
-      <NavV3ItemList flags={flags} activeKey="today" todayBadgeCount={needsMeCount} />
-    </aside>
-  );
-}
-
 function TodayV3Topbar({ needsMeCount }: { needsMeCount: number }) {
   const t = useTranslations('todayV3');
   return (
@@ -89,7 +81,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="today-v3-screen">
-      <TodayV3Nav needsMeCount={snapshot.needsMeCount} flags={flags} />
+      <NavV3Sidebar flags={flags} activeKey="today" todayBadgeCount={snapshot.needsMeCount} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TodayV3Topbar needsMeCount={snapshot.needsMeCount} />
         <div className="flex min-h-0 flex-1">

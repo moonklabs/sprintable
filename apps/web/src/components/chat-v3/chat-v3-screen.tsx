@@ -12,7 +12,7 @@ import { ChatV3ThreadRail, type ChatV3Thread } from './chat-v3-thread-rail';
 import { ChatV3Messages, type ChatV3MessagesHandle } from './chat-v3-messages';
 import { ChatV3ContextPanel } from './chat-v3-context-panel';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
-import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
+import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 
@@ -248,9 +248,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="chat-v3-screen">
-      <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3">
-        <NavV3ItemList flags={flags} activeKey="chats" />
-      </aside>
+      <NavV3Sidebar flags={flags} activeKey="chats" />
       <div className="flex min-w-0 flex-1">
         {loadError || meError ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3">

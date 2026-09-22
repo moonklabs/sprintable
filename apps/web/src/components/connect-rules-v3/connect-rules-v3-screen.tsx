@@ -9,29 +9,20 @@ import { ConnectRulesV3Agents } from './connect-rules-v3-agents';
 import { ConnectRulesV3Channels } from './connect-rules-v3-channels';
 import { ConnectRulesV3Rules } from './connect-rules-v3-rules';
 import { ConnectRulesV3Events } from './connect-rules-v3-events';
-import { NavV3ItemList } from '@/components/nav/nav-v3-item-list';
+import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
- * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N·FE) — 시안 ⑤ 그대로. 「오늘」(#3962)·
- * 「대화」(#3972) 선례와 같은 NAV_ITEMS 손 배열(공유 셸 컴포넌트가 아직 없다 — 「셸 변경은
- * 흡수 화면 착지 뒤」 원칙). A(외부 발행 일시 중지) 절은 #4363(#3953) 착지 뒤 별도
- * rebase로 추가(AC7) — 이 PR엔 없음.
+ * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N·FE) — 시안 ⑤ 그대로. A(외부 발행
+ * 일시 중지) 절은 #4363(#3953) 착지 뒤 별도 rebase로 추가(AC7) — 이 PR엔 없음.
  *
  * org_id는 (authenticated) 밖이라 DashboardContext가 없다 — agent-management-tab.tsx가
  * 이미 하는 `fetchWithAuth('/api/me')` 1콜을 그대로 반복해 org_id만 뽑는다(새 BE 0).
  *
  * story #4004 — nav 렌더(목적지·활성/호버/포커스 스타일)는 공유
- * `NavV3ItemList`(nav-v3-item-list.tsx)가 전담한다. 이 화면 자신은 목적지 문자열
- * 리터럴을 안 가진다 — page.tsx가 내려준 전체 플래그(`flags`)를 그대로 넘길 뿐.
+ * `NavV3ItemList`가, story #4006 — nav 칸의 폭·접힘은 공유 `NavV3Sidebar`가 전담한다.
+ * 이 화면 자신은 목적지 문자열·`w-[216px]` 리터럴을 안 가진다.
  */
-function ConnectRulesV3Nav({ flags }: { flags: NavV3Flags }) {
-  return (
-    <aside className="flex w-[216px] shrink-0 flex-col border-r border-border bg-card p-3" data-testid="connect-rules-v3-nav">
-      <NavV3ItemList flags={flags} activeKey="connectRules" />
-    </aside>
-  );
-}
 
 function ConnectRulesV3Topbar() {
   const t = useTranslations('connectRulesV3');
@@ -89,7 +80,7 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
 
   return (
     <div className="flex h-screen min-h-0 bg-muted/20" data-testid="connect-rules-v3-screen">
-      <ConnectRulesV3Nav flags={flags} />
+      <NavV3Sidebar flags={flags} activeKey="connectRules" />
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectRulesV3Topbar />
         <div className="min-h-0 flex-1 overflow-auto p-6">

@@ -68,7 +68,7 @@ describe('ConnectRulesV3Screen', () => {
     await mount();
     expect(container.querySelector('h1')?.textContent).toBe('연결·규칙');
     expect(container.querySelectorAll('a[data-testid^="nav-v3-item-"]').length).toBe(5);
-    expect(container.querySelector('[data-testid="nav-v3-item-connectRules"]')?.className).toContain('text-primary');
+    expect(container.querySelector('[data-testid="nav-v3-item-connectRules"]')?.className).toContain('bg-sidebar-active-fill');
   });
 
   it('⭐/api/me 실패 — 보이는 「다시 시도」 버튼', async () => {
