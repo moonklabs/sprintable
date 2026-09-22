@@ -466,7 +466,16 @@ async def test_ac1c_two_drafts_picks_same_target_as_publish_recipe_approved_draf
 
 
 @pytest.mark.anyio
-async def test_ac1d_other_gate_type_and_scoped_gate_leave_field_null():
+async def test_ac1d_other_gate_type_leaves_field_null_scoped_gate_now_gets_its_own_draft():
+    # story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 이 테스트 이름·scoped_gate
+    # 기대값이 바뀌었다. 이 함수(`_enrich_linked_channel_draft`)는 여전히 unscoped(레시피)
+    # 게이트 전용이라 scoped 게이트에 절대 안 들어가는 건 그대로다(그래서 concept_gate
+    # 기대값은 무변경). 그러나 #4143이 scoped 게이트 자신의 초안 미디어를 싣는 자리(
+    # `_enrich_scoped_channel_draft_media`, to_gate_response 안에서 이 함수와 나란히
+    # 호출)를 신설해, scoped 게이트도 이제 자기 초안이 있으면 `linked_channel_draft`가
+    # non-null이다(라이브 실사고 그대로 — «제출된 초안 없음»으로 잘못 비어 있던 게 이
+    # 스토리의 원인). null을 기대하던 옛 단언은 이 카드가 정확히 고친 결함의 반대
+    # 표현이었다 — 새 값을 pin.
     from app.models.gate import Gate
     from app.routers.gates import to_gate_response
 
@@ -500,7 +509,10 @@ async def test_ac1d_other_gate_type_and_scoped_gate_leave_field_null():
             assert resp_concept.linked_channel_draft_pending is False
 
             resp_scoped = await to_gate_response(s, org_id, await s.get(Gate, scoped_gate_id))
-            assert resp_scoped.linked_channel_draft is None
+            assert resp_scoped.linked_channel_draft is not None, (
+                "story #4143 — scoped 게이트가 자기 초안 실물을 못 실었다(이 카드가 고친 결함 재발)"
+            )
+            assert resp_scoped.linked_channel_draft.draft_id == draft_id
             assert resp_scoped.linked_channel_draft_pending is False
     finally:
         await engine.dispose()
