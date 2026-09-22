@@ -28,7 +28,9 @@ function formatDayLabel(key: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(`${key}T00:00:00`));
 }
 
-export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange }: {
+export function ChatV3Messages({
+  threadId, meId, agentName, locale, needsMe, todayV3Enabled, onOpenArtifactChange, onWorkItemRefChange,
+}: {
   threadId: string;
   meId: string;
   agentName: string;
@@ -38,6 +40,10 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
   // 버튼도 같은 게이트(TODAY_V3_ENABLED OFF면 /today가 404).
   todayV3Enabled: boolean;
   onOpenArtifactChange: (artifactId: string | null) => void;
+  // story #3990 — 「근거」·「이력」 절이 스코프할 일(work item). 열린 산출물과 같은
+  // 파생 규칙(최근 메시지부터 훑어 첫 story/task 참조)이라 같은 루프에서 같이 뽑는다
+  // (메시지 배열 재순회 0).
+  onWorkItemRefChange: (ref: { type: 'story' | 'task'; id: string } | null) => void;
 }) {
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
@@ -61,16 +67,28 @@ export function ChatV3Messages({ threadId, meId, agentName, locale, needsMe, tod
         const list = (json.data ?? []).map(normalizeToMessage);
         setMessages(list);
         // story #3972 — 최근 것부터 훑어 첫 artifact 참조를 「열린 산출물」로(맥락 패널).
+        // story #3990 — 같은 한 번의 역순회에서 첫 story/task 참조도 같이 뽑는다(「근거」·
+        // 「이력」 스코프, #3972와 동일 "가장 최근 참조 1개" 규칙 — 재순회 0).
         let latestArtifactId: string | null = null;
+        let latestWorkItemRef: { type: 'story' | 'task'; id: string } | null = null;
         for (let i = list.length - 1; i >= 0; i -= 1) {
-          const found = list[i]?.references?.find((r) => r.target_type === 'artifact');
-          if (found) { latestArtifactId = found.target_id; break; }
+          const refs = list[i]?.references ?? [];
+          if (latestArtifactId === null) {
+            const found = refs.find((r) => r.target_type === 'artifact');
+            if (found) latestArtifactId = found.target_id;
+          }
+          if (latestWorkItemRef === null) {
+            const found = refs.find((r) => r.target_type === 'story' || r.target_type === 'task');
+            if (found) latestWorkItemRef = { type: found.target_type as 'story' | 'task', id: found.target_id };
+          }
+          if (latestArtifactId !== null && latestWorkItemRef !== null) break;
         }
         onOpenArtifactChange(latestArtifactId);
+        onWorkItemRefChange(latestWorkItemRef);
       })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onOpenArtifactChange는 부모가 매 렌더 새로 안 만든다는 계약(useCallback) 가정 밖·threadId 변경 시만 재조회.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onOpenArtifactChange/onWorkItemRefChange는 부모가 매 렌더 새로 안 만든다는 계약(useCallback) 가정 밖·threadId 변경 시만 재조회.
   }, [threadId]);
 
   useEffect(() => loadMessages(), [loadMessages]);
