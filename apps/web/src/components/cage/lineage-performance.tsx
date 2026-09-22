@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { channelLabel } from '@/lib/channel-label';
+import { useChannelLabel } from '@/lib/channel-label';
 import { useMaterialLineage } from '@/hooks/use-material-lineage';
 import { useHookPerformances } from '@/hooks/use-hook-performances';
 import { useMaterialPerformances } from '@/hooks/use-material-performances';
@@ -53,8 +53,12 @@ function DerivedRef({ edge }: { edge: MaterialLineageEdge }) {
 }
 
 function VariantDisplayName({ edge }: { edge: MaterialLineageEdge }) {
-  const tContent = useTranslations('content');
-  if (edge.channel) return <span className="text-[11.5px] font-medium text-foreground">{channelLabel(edge.channel, tContent)}</span>;
+  // story #3742(rebase 개명, 미르코) — channelLabel()의 표시명 키는 channelConnect
+  // 네임스페이스 하나가 정본(useChannelLabel 훅이 내부에서 고정), content ns로 넘기던
+  // 예전 시그니처는 이 스토리가 은퇴시켰다(#4063이 3742보다 늦게 develop에 착지해
+  // 옛 시그니처를 그대로 썼던 자리 — rebase 시점에 잡힘).
+  const channelLabel = useChannelLabel();
+  if (edge.channel) return <span className="text-[11.5px] font-medium text-foreground">{channelLabel(edge.channel)}</span>;
   return <DerivedRef edge={edge} />;
 }
 

@@ -1735,7 +1735,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // channelLabel('threads', t) 보간을 거친 값 — 템플릿 그대로가 아니다(아래
     // sandbox 표본 테스트가 그 차이를 실제로 가른다).
     expect(what?.textContent).toBe(
-      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.content.channelThreads),
+      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.channelConnect.channelThreads),
     );
     expect(reversible?.textContent).toBe(koMessages.content.channelPostsUnpublishConfirmReversible);
     expect(what).not.toBe(reversible);
@@ -1753,7 +1753,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 같은 모양으로 맞춘다: publication_status='unpublished'·published_at=null·permalink=null.
     // 리로드 없이 「회수됨」 오버레이가 뜨고, 발행됨 정보 카드·회수 버튼은 사라진다.
     expect(container.querySelector('[data-testid="channel-post-unpublished-notice"]')?.textContent)
-      .toBe(koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.content.channelThreads));
+      .toBe(koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.channelConnect.channelThreads));
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-post-unpublish-button"]')).toBeNull();
   });
@@ -1785,9 +1785,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     const what = document.body.querySelector('[data-testid="channel-post-unpublish-confirm-what"]');
     expect(what?.textContent).toBe(
-      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.content.channelLabelSandbox),
+      koMessages.content.channelPostsUnpublishConfirmWhat.replace('{channel}', koMessages.channelConnect.channelLabelSandbox),
     );
-    expect(what?.textContent).not.toContain(koMessages.content.channelThreads);
+    expect(what?.textContent).not.toContain(koMessages.channelConnect.channelThreads);
   });
 
   // 페드루 PO nit(2026-09-04 09:07Z) — 이전 판 테스트명이 "서버 문구가 보인다"였지만
@@ -3676,9 +3676,9 @@ describe('ChannelPostEditPage — §17-15 processing_kind 오버레이 우선순
 
     const notice = container.querySelector('[data-testid="channel-post-unpublished-notice"]');
     expect(notice?.textContent).toBe(
-      koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.content.channelLabelSandbox),
+      koMessages.content.channelPostsUnpublishedNotice.replace('{channel}', koMessages.channelConnect.channelLabelSandbox),
     );
-    expect(notice?.textContent).not.toContain(koMessages.content.channelThreads);
+    expect(notice?.textContent).not.toContain(koMessages.channelConnect.channelThreads);
   });
 });
 

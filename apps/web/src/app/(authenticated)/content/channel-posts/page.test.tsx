@@ -236,7 +236,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain(koMessages.content.channelThreads);
+    expect(container.textContent).toContain(koMessages.channelConnect.channelThreads);
     expect(container.textContent).toContain('v2');
     // story #3744 — 원작성 주체는 최종수정과 같으면 부제로 강등돼 안 보인다(content/
     // page.tsx와 동형 판단) — latest_author_kind='human'만 있고 origin은 없어 이
@@ -358,7 +358,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
     await flush();
 
-    expect(container.textContent).toContain(`${koMessages.content.channelThreads} · v2`);
+    expect(container.textContent).toContain(`${koMessages.channelConnect.channelThreads} · v2`);
   });
 
   it('⭐text_preview 계약 필드 존재(착지 後) — 본문 미리보기가 첫 열에 보인다', async () => {

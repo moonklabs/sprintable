@@ -11,7 +11,7 @@ import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
-import { channelLabel, channelConnectionIdentityLabel } from '@/lib/channel-label';
+import { channelConnectionIdentityLabel, useChannelLabel } from '@/lib/channel-label';
 import { channelTextLength } from '@/components/content/channel-text-length';
 import { parseSitePostApiError, type SitePostApiErrorInfo } from '@/components/content/api-error';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
@@ -489,6 +489,7 @@ export default function ChannelPostEditPage() {
   const params = useParams();
   const draftId = String(params.draftId);
   const t = useTranslations('content');
+  const channelLabel = useChannelLabel();
   // story #3679 — 훅 미태깅 라벨은 새 낱말을 안 만들고 insights-board가 이미 재사용
   // 중인 docs 네임스페이스 키(indexCategoryUncategorized, 「미분류」)를 그대로 쓴다
   // (같은 사실=같은 낱말, 유나 §3656 확定과 동형).
@@ -1069,7 +1070,7 @@ export default function ChannelPostEditPage() {
             // AC9 — account_label 없으면 폴백(지어내지 않는다). story #3671(3661 후속) —
             // account_id를 그대로 쓰면 webhook류가 139자 URL로 문장을 무너뜨린다
             // (channel-label.ts::channelConnectionIdentityLabel, 3661과 동형 처방).
-            if (conn) setAccountLabel(channelConnectionIdentityLabel(conn, t));
+            if (conn) setAccountLabel(channelConnectionIdentityLabel(conn, channelLabel));
             // story #3426 — can_unpublish/unpublish_blocked_reason은 draft가 아니라
             // 이 연결 응답에 실린다(그라운딩 확認) — 새 왕복을 만들지 않고 같은 응답에서 읽는다.
             if (conn) {
@@ -1146,7 +1147,7 @@ export default function ChannelPostEditPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, draftId]);
+  }, [orgId, draftId, channelLabel]);
 
   // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
   // 규칙과 별개 왕복(draft/versions 로드를 막지 않는다, `limit`과 동형 원칙).
@@ -1375,7 +1376,7 @@ export default function ChannelPostEditPage() {
         // 문구는 쓰지 않는다(제품에 없는 동작 — doc §5 각주 명시).
         if (info.kind === 'gate_already_held' && info.heldByDraftId) {
           const holdingDraftId = info.heldByDraftId;
-          const holdingChannelLabel = info.heldByChannel ? channelLabel(info.heldByChannel, t) : t('channelThreads');
+          const holdingChannelLabel = channelLabel(info.heldByChannel ?? 'threads');
           let holdingLabel = `${holdingChannelLabel} 초안 ····${holdingDraftId.slice(0, 4)}`;
           try {
             const holdingRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${holdingDraftId}`);
@@ -2261,7 +2262,7 @@ export default function ChannelPostEditPage() {
           {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
         </div>
         <p className="text-sm text-muted-foreground">
-          {channelLabel(draft.channel, t)} · v{draft.current_version}
+          {channelLabel(draft.channel)} · v{draft.current_version}
         </p>
         {/* story 15e481ce(#3453 AC2, 유나 §14-2 안전 표기) — "원문" 단정이 아니라 "같은
             스토리의 글". source_content_item_id 없으면(정상값) 이 줄 자체를 안 그린다.
@@ -2591,9 +2592,9 @@ export default function ChannelPostEditPage() {
                 {/* story #3426 후속(페드루 지시·유나 435fd06d 실측, 2026-09-10) — 이
                     자리가 채널 무관하게 「Threads」를 문자열에 박아 놨었다. 이 화면은
                     sandbox·facebook_sandbox·instagram_sandbox 초안도 서므로(헤더는
-                    이미 :1921에서 channelLabel(draft.channel, t)로 정확히 그린다 —
+                    이미 :1921에서 channelLabel(draft.channel)로 정확히 그린다 —
                     같은 정본 재사용, 새 낱말 0) 그 채널의 라벨로 보간한다. */}
-                {t('channelPostsUnpublishedNotice', { channel: channelLabel(draft.channel, t) })}
+                {t('channelPostsUnpublishedNotice', { channel: channelLabel(draft.channel) })}
               </AlertDescription>
             </Alert>
           );
@@ -2861,7 +2862,7 @@ export default function ChannelPostEditPage() {
           description={(
             <>
               <span className="block" data-testid="channel-post-unpublish-confirm-what">
-                {t('channelPostsUnpublishConfirmWhat', { channel: channelLabel(draft.channel, t) })}
+                {t('channelPostsUnpublishConfirmWhat', { channel: channelLabel(draft.channel) })}
               </span>
               <span className="block" data-testid="channel-post-unpublish-confirm-reversible">{t('channelPostsUnpublishConfirmReversible')}</span>
             </>

@@ -1217,7 +1217,7 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
 
     const item = container.querySelector('[data-testid="content-variants-list-item"]');
     expect(item?.querySelector('a')?.getAttribute('href')).toBe('/content/channel-posts/cp-1');
-    expect(item?.textContent).toContain(koMessages.content.channelThreads);
+    expect(item?.textContent).toContain(koMessages.channelConnect.channelThreads);
     expect(item?.querySelector('[data-status-chip]')?.getAttribute('data-status-chip')).toBe('approved');
   });
 
@@ -1278,7 +1278,7 @@ describe('ContentPostEditPage — 같은 스토리의 채널 글(story 15e481ce 
     expect(items[0]?.textContent).toContain('@brand_a');
     expect(items[1]?.textContent).toContain('@brand_b');
     expect(items[2]?.textContent).not.toContain('@brand');
-    expect(items[2]?.textContent).toContain(koMessages.content.channelThreads);
+    expect(items[2]?.textContent).toContain(koMessages.channelConnect.channelThreads);
   });
 });
 
@@ -1687,7 +1687,7 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
 
     const info = container.querySelector('[data-testid="content-external-publication-info"]');
     expect(info).not.toBeNull();
-    expect(info?.textContent).toContain(koMessages.content.channelLabelWordpress);
+    expect(info?.textContent).toContain(koMessages.channelConnect.channelLabelWordpress);
     const link = info?.querySelector<HTMLAnchorElement>('a[href="https://blog.example.com/hello"]');
     expect(link).not.toBeNull();
     // completed엔 보일 실패가 없다 — FailureActionBadge 자체가 안 뜬다(가짜 상태 금지).

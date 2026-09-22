@@ -809,7 +809,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).toContain(koMessages.content.authorAgent);
-      expect(container.textContent).toContain(koMessages.content.channelLabelWordpress);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelLabelWordpress);
       expect(container.textContent).not.toContain('99999999');
       expect(container.textContent).not.toContain('44443333');
       // 호스팅 블로그 문구가 잘못 새지 않는다(destination이 실제로 non-null인데).
@@ -890,7 +890,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
-      expect(container.textContent).toContain(koMessages.content.channelLabelInstagramSandbox);
+      expect(container.textContent).toContain(koMessages.channelConnect.channelLabelInstagramSandbox);
     });
   });
 
