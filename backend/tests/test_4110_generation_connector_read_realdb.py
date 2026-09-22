@@ -239,6 +239,9 @@ async def test_crew_agent_reads_config_and_plaintext_credentials():
             assert resp.label == "v1"
             assert resp.model_config_json == {"image": "gemini-2.5-flash-image"}
             assert resp.credentials == "super-secret-api-key"
+            # story #4140 — 제품 리전 정책값(crew 재량 0). 이 seed의 model_config_json엔
+            # location 키가 없다(기존 커넥터 동형) → 해소값은 "global"이어야 한다.
+            assert resp.location == "global"
     finally:
         await engine.dispose()
 

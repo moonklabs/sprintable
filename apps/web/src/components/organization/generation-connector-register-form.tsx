@@ -17,7 +17,18 @@ import { fetchWithAuth } from '@/lib/db/client';
  * pasted-secret-connect-card.tsx의 §2 규율(autoComplete off·제출/오류 무관 자격 칸
  * 비움)을 credentials 필드에 그대로 적용 — 이 폼은 채널 커넥터와 달리 필드가 채널마다
  * 갈리는 표 기반이 아니라(provider 1종 고정) 전용 컴포넌트로 짠다.
+ *
+ * story #4140(페드루 PO 처방, 2026-09-22) — 리전(location) select 추가. 2호 실사고
+ * (aa1c2330·gemini-2.5-flash-image가 asia-northeast3에서 404 → 댄군 자체 판단으로
+ * global 재시도)의 직접 처방 — "어느 리전을 쓸지"가 제품 밖(에이전트 재량)에 있던 것을
+ * 제품 값으로 가져온다. 허용 목록·기본값은 BE와 동일 폭(`GENERATION_CONNECTOR_LOCATIONS`
+ * — 추측 0 원칙으로 이 세션에서 실제 확認된 2개뿐, org_generation_connector.py 모델
+ * 주석 참조). 힌트 문구는 가용성을 단정하지 않는다(PO 처방 원문 그대로 — "모델별 가용
+ * 리전은 Vertex 문서 기준이에요 — global이 가장 넓어요").
  */
+const GENERATION_CONNECTOR_LOCATIONS = ['global', 'asia-northeast3'] as const;
+const DEFAULT_GENERATION_CONNECTOR_LOCATION: (typeof GENERATION_CONNECTOR_LOCATIONS)[number] = 'global';
+
 export function GenerationConnectorRegisterForm({
   orgId, onRegistered, onCancel, t, tc, tChannel,
 }: {
@@ -31,6 +42,7 @@ export function GenerationConnectorRegisterForm({
   tChannel: ReturnType<typeof useTranslations>;
 }) {
   const [label, setLabel] = useState('');
+  const [location, setLocation] = useState<string>(DEFAULT_GENERATION_CONNECTOR_LOCATION);
   const [modelImage, setModelImage] = useState('');
   const [modelVideo, setModelVideo] = useState('');
   const [modelVoice, setModelVoice] = useState('');
@@ -43,7 +55,7 @@ export function GenerationConnectorRegisterForm({
   const handleSubmit = async () => {
     setSaving(true);
     setError(null);
-    const modelConfigJson: Record<string, string> = {};
+    const modelConfigJson: Record<string, string> = { location };
     if (modelImage.trim()) modelConfigJson.image = modelImage.trim();
     if (modelVideo.trim()) modelConfigJson.video = modelVideo.trim();
     if (modelVoice.trim()) modelConfigJson.voice = modelVoice.trim();
@@ -107,6 +119,22 @@ export function GenerationConnectorRegisterForm({
           <span>{t('gcProviderVertexGeminiLabel')} <span className="ml-1 rounded border border-input bg-background px-1 py-0.5 font-mono text-[10px]">vertex_gemini</span></span>
           <span className="text-[11px] text-muted-foreground">{t('gcFieldProviderCurrentNote')}</span>
         </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="gc-field-location">{t('gcFieldLocation')}</label>
+        <select
+          id="gc-field-location"
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          data-testid="gc-field-location"
+        >
+          {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
+            <option key={loc} value={loc}>{loc}</option>
+          ))}
+        </select>
+        <p className="text-[10.5px] text-muted-foreground">{t('gcLocationHint')}</p>
       </div>
 
       <div className="space-y-1">

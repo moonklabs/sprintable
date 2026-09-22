@@ -12,6 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_generation_connector import (
+    DEFAULT_GENERATION_CONNECTOR_LOCATION,
+    GENERATION_CONNECTOR_LOCATIONS,
     GENERATION_CONNECTOR_PROVIDER_KEYS,
     UQ_ORG_LABEL_CONSTRAINT_NAME,
     OrgGenerationConnector,
@@ -31,6 +33,24 @@ class GenerationConnectorInvalidProviderError(Exception):
         super().__init__(f"unsupported provider_key: {provider_key!r}")
 
 
+class GenerationConnectorInvalidLocationError(Exception):
+    def __init__(self, location: str) -> None:
+        self.location = location
+        super().__init__(f"unsupported location: {location!r}")
+
+
+def resolve_generation_connector_location(model_config_json: dict) -> str:
+    """story #4140 — 응답에 실을 «제품 정책값» 리전 해소. crew는 이 값으로만 호출한다
+    (재량 0, PO 처방 ②). 허용 목록 밖이거나 아예 없는 값(마이그레이션 0으로 남은 기존
+    커넥터 포함)은 `DEFAULT_GENERATION_CONNECTOR_LOCATION`("global")로 폴백 —
+    거짓 확信 0: 이 폴백은 "이 리전에서 된다"는 보장이 아니라 "제품이 아는 값이 없으니
+    2호에서 실제로 통과한 안전 기본값을 쓴다"는 뜻."""
+    location = model_config_json.get("location")
+    if location in GENERATION_CONNECTOR_LOCATIONS:
+        return location
+    return DEFAULT_GENERATION_CONNECTOR_LOCATION
+
+
 class GenerationConnectorLabelDuplicateError(Exception):
     """story #4117(라이브 실사고 그라운딩, 2026-09-21) — uq_org_generation_connectors_
     org_label 위반이 그동안 어디서도 안 잡혀 FastAPI 미처리 500(INTERNAL_ERROR)으로
@@ -46,6 +66,9 @@ async def create_org_generation_connector(
 ) -> OrgGenerationConnector:
     if provider_key not in GENERATION_CONNECTOR_PROVIDER_KEYS:
         raise GenerationConnectorInvalidProviderError(provider_key)
+    location = model_config_json.get("location")
+    if location is not None and location not in GENERATION_CONNECTOR_LOCATIONS:
+        raise GenerationConnectorInvalidLocationError(location)
     row = OrgGenerationConnector(
         org_id=org_id, provider_key=provider_key, label=label,
         model_config_json=model_config_json,

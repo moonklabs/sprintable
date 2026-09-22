@@ -36,6 +36,9 @@ interface GenerationConnector {
   provider_key: string;
   label: string;
   model_config_json: Record<string, unknown>;
+  // story #4140 — 제품 정책값(crew 재량 0). model_config_json에 location 키가 없는
+  // 기존 커넥터도 BE가 "global"로 해소해 이 필드는 항상 채워져 있다.
+  location: string;
   status: string;
   created_by: string | null;
   created_at: string;
@@ -159,6 +162,13 @@ export default function OrganizationGenerationConnectorsPage() {
                     <span>{c.label}</span>
                     <span className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                       {c.provider_key}
+                    </span>
+                    {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출). */}
+                    <span
+                      data-testid="gc-location-chip"
+                      className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                    >
+                      {c.location}
                     </span>
                     <span
                       data-status-chip={c.status}

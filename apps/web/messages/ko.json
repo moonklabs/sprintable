@@ -648,6 +648,8 @@
     "gcFieldProvider": "제공자",
     "gcProviderVertexGeminiLabel": "Vertex Gemini",
     "gcFieldProviderCurrentNote": "현재 1종",
+    "gcFieldLocation": "리전",
+    "gcLocationHint": "모델별 가용 리전은 Vertex 문서 기준이에요 — global이 가장 넓어요.",
     "gcFieldLabel": "이름",
     "gcFieldLabelPlaceholder": "예: 메인 연산 커넥터",
     "gcLabelHint": "조직 안에서 겹치지 않는 이름이에요. 1~200자.",

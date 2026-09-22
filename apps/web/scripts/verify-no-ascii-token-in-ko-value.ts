@@ -324,6 +324,11 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'organization.eventActionAuthRolePlaceholder::admin',
   'organization.eventActionAuthRolePlaceholder::owner',
   'organization.eventKeyPrefixHint::org',
+  // story #4140(페드루 PO 처방 원문, 2026-09-22) — "global"은 Vertex AI의 실제 리전
+  // 값 리터럴(GENERATION_CONNECTOR_LOCATIONS의 원소, select 옵션에 그대로 노출)이라
+  // 번역하면 실제 API 값과 달라진다 — organization.definerStagesSlugHint::slug/enum과
+  // 동일 사유(시스템이 실제로 쓰는 리터럴 값).
+  'organization.gcLocationHint::global',
   'recruiter.keyOnceBody::mcp',
   'recruiter.keyOnceBodyNoMcp::transport',
   'recruiter.kitOrientingConnectBodyCli::cmd',
