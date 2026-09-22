@@ -454,12 +454,21 @@ async def test_batch_gap_second_command_blocks_when_pause_flips_between_commands
         owner_id = await _seed_human(s, org_id, role="owner")
         story_id = await _seed_story(s, org_id, project_id)
         connection_id = await _seed_connection(s, org_id)
+        # 페드루 PO CHANGES(까디르군 QA 디버그, 2026-09-22) — draft는 (work_item_id,
+        # connection_id) 쌍으로 식별된다(create_channel_post_draft_version) — text만
+        # 바꿔도 같은 story+connection이면 같은 draft/gate로 되돌아온다(1차 로컬
+        # 재현 실측). B는 별개 connection으로 진짜 별개 draft를 만든다.
+        connection_id_b = await _seed_connection(s, org_id)
 
     from app.main import app
     _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
     async with _client_for(app) as client, Session() as s:
         draft_id, gate_id = await _create_draft_submit_approve(
             client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+        )
+    async with _client_for(app) as client, Session() as s:
+        draft_id_b, gate_id_b = await _create_draft_submit_approve(
+            client, s, org_id=org_id, connection_id=connection_id_b, story_id=story_id,
         )
 
     async with Session() as s:
@@ -470,19 +479,21 @@ async def test_batch_gap_second_command_blocks_when_pause_flips_between_commands
             select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
             .order_by(ChannelPostVersion.created_at.desc()).limit(1)
         )).scalar_one()
+        latest_version_id_b = (await s.execute(
+            select(ChannelPostVersion.id).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id_b))
+            .order_by(ChannelPostVersion.created_at.desc()).limit(1)
+        )).scalar_one()
         # command A — 실 채널포스트(어댑터까지 실제로 부를 대상, created_at이 B보다
         # 먼저라 배치 루프에서 먼저 처리됨, created_at.asc() 정렬).
         cmd_a, _ = await create_or_get_publication_command(
             s, org_id=org_id, gate_id=gate_id, destination=connection_id,
             approved_version=latest_version_id, requested_by_member_id=owner_id, scheduled_at=None,
         )
-        # command B — 어댑터까지 갈 필요 없음(파우즈 검사 자체가 단언 대상이라 합성
-        # id로 충분, test_resume_does_not_touch_blocked_commands_from_other_reasons와
-        # 동형 최소 생성). A와 다른 키(operation)로 별개 행 확보.
+        # command B — 별개 실 draft(위 draft_id_b)로 만든 행. 재큐 뒤 실제로 완주해야
+        # 하는 단언 대상이라(아래 2단계) 합성 id 대신 실 채널포스트를 쓴다.
         cmd_b, _ = await create_or_get_publication_command(
-            s, org_id=org_id, gate_id=uuid.uuid4(), destination=uuid.uuid4(),
-            approved_version=uuid.uuid4(), requested_by_member_id=owner_id, scheduled_at=None,
-            content_kind="channel_post",
+            s, org_id=org_id, gate_id=gate_id_b, destination=connection_id_b,
+            approved_version=latest_version_id_b, requested_by_member_id=owner_id, scheduled_at=None,
         )
         await s.commit()
         cmd_a_id, cmd_b_id = cmd_a.id, cmd_b.id
