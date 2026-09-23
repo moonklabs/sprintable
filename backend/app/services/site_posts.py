@@ -1190,6 +1190,71 @@ async def _resolve_public_url(
     return f"{backend_base_url.rstrip('/')}/api/v2/public/site-posts/{slug}?public_key={public_key}&lang={lang}"
 
 
+async def publish_recipe_approved_hosted_site_draft(
+    db: AsyncSession, *, gate: Gate, resolver_id: uuid.UUID | None,
+) -> None:
+    """story #4192(PO 판정 2026-09-23 08:56Z ③) — 레시피 회차(블로그 프리셋 «발행 승인 대기» 단계)의 **자사 블로그**
+    초안 게이트가 사람 승인으로 approved가 되면, 서버가 그 봉인 버전을 외부 블로그와 같은 모양으로 발행하고 레시피
+    `published` 단계 이벤트를 낸다. 외부 블로그는 승인 순간 발행 명령이 생기고 워커가 발행한다(publication_command.py
+    `_process_one_site_post_command` — 이벤트도 거기서). 자사 블로그만 «승인 뒤 사람 발행 클릭»이 남아 있던 비대칭
+    (조각③c «사용자는 목적지를 골랐지 내부/외부를 고른 게 아니다» · 4177 «사람은 게이트만»)을 레시피 문맥에서만 없앤다.
+
+    사람 전용 규칙(3365·3369)은 그대로 성립: 에이전트 호출자는 발행 엔드포인트를 못 부르고, 서버는 **사람이 승인한
+    정확한 봉인 버전만** `publish_site_post_from_draft`(게이트 approved·봉인 재검증 그대로)로 공개한다 — 발행을 결정한
+    주체는 승인한 사람(`published_by_member_id` = 승인자). 레시피 밖 자사 블로그(승인 뒤 사람 클릭)는 무변.
+
+    실패는 승인을 되돌리지 않고 `gate.publish_outcome = publish_failed:<닫힌 어휘>`로 보인다(채널 자동 발행
+    `publish_recipe_approved_draft`와 같은 처리) · 이벤트 0. 레시피 문맥 판별 = `resolve_site_post_recipe_context`
+    (승인 알림 «다음 행동» 문구와 같은 판정)."""
+    if gate.gate_type != "external_publish" or gate.scope_key != HOSTED_SITE_SCOPE_KEY or gate.status != "approved":
+        return
+    raw_draft_id = (gate.neutral_facts or {}).get("draft_id")
+    try:
+        draft_id = uuid.UUID(str(raw_draft_id))
+    except (ValueError, TypeError, AttributeError):
+        return
+
+    from app.routers.events import resolve_site_post_recipe_context
+
+    ctx = await resolve_site_post_recipe_context(
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+    )
+    if ctx is None:
+        return
+    definition_key, next_stage = ctx
+
+    from app.services.channel_posts import classify_publish_failure_outcome, emit_recipe_published_stage_event
+
+    publisher_member_id = resolver_id or gate.resolver_id
+    if publisher_member_id is None:
+        gate.publish_outcome = "no_resolver"
+        await db.commit()
+        return
+
+    from app.core.config import settings
+
+    try:
+        await publish_site_post_from_draft(
+            db, org_id=gate.org_id, draft_id=draft_id, published_by_member_id=publisher_member_id,
+            backend_base_url=settings.backend_url,
+        )
+    except Exception as exc:
+        logger.warning(
+            "recipe hosted-site auto-publish: 발행 실패(gate=%s draft=%s) — 승인은 되돌리지 않는다",
+            gate.id, draft_id, exc_info=True,
+        )
+        gate.publish_outcome = f"publish_failed:{classify_publish_failure_outcome(exc)}"
+        await db.commit()
+        return
+
+    gate.publish_outcome = "published"
+    await db.commit()
+    await emit_recipe_published_stage_event(
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        definition_key=definition_key, next_stage=next_stage,
+    )
+
+
 async def publish_site_post_from_draft(
     db: AsyncSession,
     *,

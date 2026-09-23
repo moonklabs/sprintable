@@ -416,6 +416,10 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+        # story #4192(PO 09:34Z) — 실제 외부 발행 성공(completed)을 레시피 이벤트보다 **먼저** 커밋한다. 예전엔 같은
+        # 트랜잭션에서 이벤트까지 냈다가 이벤트 쪽 DB 오류로 트랜잭션이 중단되면 completed가 안 남아 다음 tick이 같은 글을
+        # 외부 채널에 다시 발행할 수 있었다. 이벤트는 커밋 뒤, emit_recipe_published_stage_event 안의 SAVEPOINT에서.
+        await db.commit()
 
         # story #4093(#4090 지름길 해소, 페드루 PO 確定 2026-09-21) — 즉시-발행 경로는
         # `publish_recipe_approved_draft`가 발행 직후 레시피 published stage 이벤트를
@@ -436,10 +440,13 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             if recipe_ctx is not None:
                 recipe_gate, definition_key, next_stage = recipe_ctx
                 recipe_gate.publish_outcome = "published"
+                work_item_type = recipe_gate.work_item_type
+                # story #4192 — 게이트 결과도 이벤트 전에 커밋(이벤트 쓰기와 같은 트랜잭션에 묶지 않는다).
+                await db.commit()
                 # 페드루 PO REQUIRED(PR #4473) — work_item_type을 하드코딩("story")
                 # 않고 찾은 게이트 행 자신의 값을 그대로 쓴다(SSOT는 행 자신).
                 await emit_recipe_published_stage_event(
-                    db, org_id=command.org_id, work_item_type=recipe_gate.work_item_type,
+                    db, org_id=command.org_id, work_item_type=work_item_type,
                     work_item_id=draft.work_item_id, definition_key=definition_key, next_stage=next_stage,
                 )
                 await db.commit()
@@ -603,6 +610,33 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     )
 
 
+async def _emit_recipe_published_for_site_post_command(db: AsyncSession, command: PublicationCommand) -> None:
+    """story #4192 AC1·AC2 — 외부 블로그 발행 명령이 **성공으로** 끝난 순간, 그 초안이 블로그 레시피 회차(«발행 승인
+    대기» 단계)에서 온 것이면 레시피 `published` 단계 이벤트를 낸다(채널 워커 #4093과 같은 `emit_recipe_published_
+    stage_event` — 멱등: 이미 낸 stage면 스킵, 겹친 tick도 중복 0). 실패·무효화(void)·차단 분기는 이 함수에 오지 않는다
+    (성공 분기에서만 호출). 레시피 문맥 판별 = `resolve_site_post_recipe_context`(자사 블로그 자동 발행·승인 알림과 같은
+    판정). 이벤트 발행 실패는 발행 성공을 되돌리지 않는다(emit 자체가 side-channel 격리)."""
+    from app.models.gate import Gate
+
+    gate = await db.get(Gate, command.gate_id)
+    if gate is None:
+        return
+    from app.routers.events import resolve_site_post_recipe_context
+
+    ctx = await resolve_site_post_recipe_context(
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+    )
+    if ctx is None:
+        return
+    definition_key, next_stage = ctx
+    from app.services.channel_posts import emit_recipe_published_stage_event
+
+    await emit_recipe_published_stage_event(
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        definition_key=definition_key, next_stage=next_stage,
+    )
+
+
 async def _process_one_site_post_command(db: AsyncSession, command: PublicationCommand, *, now: datetime) -> None:
     """story e4fc29fa(조각③c) — content_kind="site_post" 커맨드 분기. `operation`으로
     publish/unpublish를 가른다. 실패 분류는 channel_post와 같은 표(`classify_failure_
@@ -639,6 +673,18 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+        if command.operation != "unpublish":
+            # story #4192 — 발행 성공(completed)을 먼저 커밋(채널 분기와 같은 이유 — 이벤트 쪽 DB 오류가 completed를
+            # 지워 다음 tick이 같은 글을 다시 발행하는 일이 없게).
+            await db.commit()
+            # story #4192 — 레시피 이벤트는 발행 성공의 부산물(side-channel). 여기서 나는 예외가 아래 except로 흘러
+            # «완료된 발행»을 실패로 재분류하지 않게 격리한다.
+            try:
+                await _emit_recipe_published_for_site_post_command(db, command)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "site_post 발행 성공 뒤 레시피 published 이벤트 처리 실패 command_id=%s", command.id, exc_info=True,
+                )
         return
     except ExternalPublishPausedError as exc:
         # story #4195(PO 리뷰) — 지금 이 분기가 부르는 publish_site_post_external_command엔 pause 검사가 없어

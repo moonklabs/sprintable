@@ -20,6 +20,7 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 from __future__ import annotations
 
 import asyncio
+import logging
 import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,10 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
     is_agent_caller,
 )
 from app.services.utm import attach_utm, resolve_utm_campaign
+
+# story #4192(디디 발견) — 이 모듈은 logger.warning/info/exception을 4곳에서 쓰는데 모듈 logger가 없어, side-channel
+# 격리 except(emit_recipe_published_stage_event 등)가 로그 대신 NameError를 던지고 바깥 try가 그걸 삼켰다.
+logger = logging.getLogger(__name__)
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 예정시각 축.
@@ -2523,10 +2528,9 @@ async def publish_recipe_approved_draft(
     예약(target_gate.sealed_scheduled_at) 존중 — 기존 `_maybe_create_scheduled_
     publication_command`(gate_service.py)를 재사용해 큐잉만 하고 즉시발행은 하지
     않는다(#4069 자동충족이 `transition_gate()`를 안 거쳐, 이 큐잉 훅이 원래 자동으로는
-    전혀 안 걸리던 두 번째 구멍이었다). ⚠️ 범위 밖 기록 — 예약 경로는 `publish_outcome=
-    "scheduled"`까지만 채운다. 실제 발행은 워커 tick이 나중에 처리하는데, 그 시점에
-    이 레시피의 `published` stage 이벤트를 잇는 코드는 이 스토리 스코프 밖(즉시-발행
-    경로만 AC2 대상, 페드루 PO에 별도 보고)."""
+    전혀 안 걸리던 두 번째 구멍이었다). 예약 경로는 여기서 `publish_outcome="scheduled"`까지만
+    채우고, 워커가 실제로 발행한 순간 `published` stage 이벤트를 낸다(story #4093 —
+    publication_command.py 채널 성공 분기 · 블로그는 story #4192가 같은 함수로)."""
     if gate.gate_type != _EXTERNAL_PUBLISH_GATE_TYPE or (gate.scope_key or "") != "":
         return
 
@@ -2767,6 +2771,10 @@ async def emit_recipe_published_stage_event(
     발행부. `_get_or_create_system_publisher`+`_publish_registry_event_core` 재사용
     (recipe_repeat_scheduler.py 선례 그대로, 새 로직 0).
 
+    ⛔호출 계약(story #4192): 발행 성공 상태(command completed·publish_outcome 등)는 **이 호출 전에 커밋**한다 —
+    이벤트 쓰기는 SAVEPOINT라 실패해도 바깥 트랜잭션은 살아 있지만, 발행 성공 기록이 이벤트와 같은 트랜잭션에 묶여
+    이벤트 문제로 흔들리지 않게 하는 이중 방어.
+
     **멱등**(story #4093 AC3 "중복 발행 0") — 이 work_item에 이 stage가 이미 발행돼
     있으면(재시도·겹친 tick 등) 스킵한다. `_find_existing_stage_publish`(story #4075,
     publish-history와 같은 SSOT)를 그대로 재사용 — 새 중복방지 축 발명 안 함."""
@@ -2792,11 +2800,15 @@ async def emit_recipe_published_stage_event(
     )
     background_tasks = BackgroundTasks()
     try:
-        await _publish_registry_event_core(
-            db, org_id, auth, definition_key,
-            {"stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
-            background_tasks,
-        )
+        # story #4192(PO 09:34Z) — 이벤트 쓰기는 SAVEPOINT 안에서. 여기서 DB 오류가 나면 savepoint만 되돌려 바깥
+        # 트랜잭션(호출자가 이미 커밋한 발행 성공 뒤의 새 트랜잭션)을 중단 상태로 남기지 않는다 — 예전엔 중단된
+        # 트랜잭션 탓에 뒤따르는 커밋이 실패해 completed가 안 남고 다음 tick이 같은 글을 다시 발행할 수 있었다.
+        async with db.begin_nested():
+            await _publish_registry_event_core(
+                db, org_id, auth, definition_key,
+                {"stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
+                background_tasks,
+            )
         await background_tasks()
     except Exception:
         # story #3337 선례(recipe_repeat_scheduler.py) — «발행 자체는 이미 성공했다»를
