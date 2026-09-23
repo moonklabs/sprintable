@@ -1018,3 +1018,64 @@ describe('ApprovalRequestCard — 저위험 반려는 사유 패널을 거친다
     expect(JSON.parse(postCall?.body ?? '{}')).toMatchObject({ status: 'rejected', note: '스키마 필드명이 기존 컨벤션과 다릅니다' });
   });
 });
+
+// story #4190(유나 «본 버전 대조» 3 · 자리별 동작) — 채팅 카드: 레시피 발행 게이트의 원탭은 «초안 보고 승인»으로 서명 패널
+// (초안 카드 포함)을 연다. 패널 승인은 본 (draft_id, version)을 싣고, 409 gate_draft_changed면 문장 + 자동 재조회 +
+// «최신 초안 보기» → /gates/{id}.
+describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (story #4190)', () => {
+  function recipeGate(version: number): GateItem {
+    return gate({
+      gate_type: 'external_publish', scope_key: '', neutral_facts: { stage: 'pending_approval', triggered_by_event: 'e-1' },
+      linked_site_draft: {
+        draft_id: 'site-d1', version, title: `제목 v${version}`, body_preview: '본문',
+        channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      },
+    });
+  }
+
+  it('⭐원탭 «초안 보고 승인» → 패널 · 본 버전 전송 · 409면 문장+재조회(v2)+«최신 초안 보기» 링크', async () => {
+    let getCount = 0;
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      if (init?.method === 'POST' && url.endsWith('/transition')) {
+        bodies.push(JSON.parse(String(init.body)));
+        return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
+      }
+      if (url.includes('/api/gates/')) { getCount += 1; return { ok: true, json: async () => ({ data: recipeGate(getCount === 1 ? 1 : 2) }) }; }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons.some((b) => b.textContent === koMessages.cage.gateApprove)).toBe(false);
+    const reviewBtn = buttons.find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
+    await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v1');
+    expect(bodies).toHaveLength(0);
+
+    await act(async () => { (container.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'v1 봤음');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const signBtn = [...container.querySelectorAll('button')].find((b) => !b.disabled && b.textContent?.includes(koMessages.cage.sigApproveAndSign)) as HTMLButtonElement;
+    await act(async () => { signBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bodies[0]).toMatchObject({ reviewed_draft_id: 'site-d1', reviewed_draft_version: 1 });
+    expect(container.textContent).toContain(koMessages.cage.gateDraftChangedError);
+    expect(getCount).toBe(2);
+    expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
+    const link = container.querySelector('a[href="/gates/g-1"]');
+    expect(link?.textContent).toBe(koMessages.cage.gateDraftChangedViewLatest);
+  });
+});

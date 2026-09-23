@@ -53,6 +53,9 @@ class NeedsMeItem(BaseModel):
     # 한 콜로 못 부른다(별도 조회 없이 needs_me 응답만으로 액션 완결). gate/hitl 소스는
     # null(그 개념 자체가 없음 — 지어내지 않는다).
     gate_id: uuid.UUID | None = None
+    # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트(초안을 보고 승인해야 함). true면 「오늘」이 저위험 일괄
+    # 승인에서 빼고 개별 카드(«초안 보고 승인» → 게이트 상세)로 둔다. gate 소스만 true가 될 수 있다.
+    recipe_publish: bool = False
 
 
 class AgentRunCancelState(BaseModel):

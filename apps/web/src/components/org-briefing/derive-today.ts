@@ -27,6 +27,9 @@ export interface TodayNeedsMeItem {
   reason: string | null;
   createdAt: string;
   conversationId: string | null;
+  // story #4190(유나 «본 버전 대조» 2) — BE `recipe_publish`(레시피 발행 게이트 — 초안을 보고 승인해야 함). true면 저위험
+  // 일괄 승인에서 빼고 개별 카드(«초안 보고 승인» → 게이트 상세)로 둔다.
+  recipePublish: boolean;
 }
 
 // story #3970(BE PR #4364, story #3961) — 정지 요청 상태. state는 BE 순수파생값
@@ -172,6 +175,7 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
     createdAt,
     // story #3828(PR #4253) develop 착지 — 응답 값 그대로(비참여 실행은 BE가 이미 null).
     conversationId: str(raw['conversation_id']),
+    recipePublish: raw['recipe_publish'] === true,
   };
 }
 

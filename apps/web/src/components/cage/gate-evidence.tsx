@@ -10,7 +10,7 @@ import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
-import { isCommentReplyGate } from '@/components/cage/gate-risk';
+import { isCommentReplyGate, isRecipePublishGate } from '@/components/cage/gate-risk';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { useChannelLabel } from '@/lib/channel-label';
 import { formatMinorCurrency, formatCount, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
@@ -785,11 +785,15 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
     if (gate.status !== 'pending') {
       return null;
     }
+    // story #4190(유나 빈 상태 절 · PO 12:17Z) — 대기 문구는 채널·블로그 공용(기존 키 재사용). «없음» 문구는 BE
+    // `linked_draft_kind`(레시피 정의 capability 판별)로만 고른다 — 모르는 레시피(null)는 중립 문구.
+    const pending = gate.linked_channel_draft_pending || gate.linked_site_draft_pending;
+    const noneKey = gate.linked_draft_kind === 'channel_post'
+      ? 'linkedChannelDraftNone'
+      : gate.linked_draft_kind === 'site_post' ? 'linkedSiteDraftNone' : 'linkedDraftNone';
     return (
       <p className="mt-1.5 text-[11.5px] text-muted-foreground">
-        {gate.linked_channel_draft_pending
-          ? t('linkedChannelDraftPending')
-          : t('linkedChannelDraftNone')}
+        {pending ? t('linkedChannelDraftPending') : t(noneKey)}
       </p>
     );
   }
@@ -807,6 +811,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
           <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
         </p>
       ) : null}
+      <LinkedDraftVersionLine version={draft.version} />
       {draft.video_url ? (
         // 유나 design:CHANGES(PR #4475 리뷰, PO 確定) — object-cover가 9:16 릴스의 상·하
         // ~22%(훅·CTA)를 잘라 이 카드의 목적(실물 보고 승인)과 어긋났다. 채널 영상 aspect가
@@ -829,6 +834,59 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
       ) : null}
       <a
         href={`/content/channel-posts/${draft.draft_id}`}
+        className="inline-block text-[11px] text-primary underline underline-offset-2"
+      >
+        {t('linkedChannelDraftOpenLink')}
+      </a>
+    </div>
+  );
+}
+
+/** story #4190(유나 site 초안 카드) — «버전 · v{n}». 채널·블로그 카드가 같이 그린다 — 이 카드가 그린 버전이 «본 버전»이고
+ * 승인 요청이 그대로 돌려보낸다(gate-risk.ts reviewedDraftOf). 409 뒤 재조회하면 번호가 바뀌는 걸 눈으로 확인한다. */
+function LinkedDraftVersionLine({ version }: { version: number }) {
+  const t = useTranslations('cage');
+  return (
+    <p className="text-muted-foreground" data-testid="linked-draft-version">
+      {t('linkedDraftVersionLabel')} · <span className="text-foreground">{t('productionWorkbenchVersionRef', { v: version })}</span>
+    </p>
+  );
+}
+
+/**
+ * story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `LinkedChannelDraftCard`의 블로그(site) 형제. 같은 틀·
+ * 크기·링크, 레시피 게이트에만. BE `linked_site_draft`만 읽는다(어느 카드인지 BE가 가른다 — FE는 목적지 문자열로 추정하지
+ * 않는다). 목적지 줄은 외부 블로그일 때만(자사 블로그는 위 레시피 사실 블록이 이미 말한다). 본문은 BE가 마크다운 기호를
+ * 걷은 평문 앞부분 — FE는 파싱하지 않는다. 요약·태그·언어는 넣지 않는다(«초안 열기»에서 본다).
+ * 초안이 없을 때의 빈 상태는 채널 카드가 그린다(레시피 게이트엔 두 카드 중 하나만 그려진다).
+ */
+function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
+  const t = useTranslations('cage');
+  const draft = gate.linked_site_draft;
+  if (!draft) return null;
+  const destinationLabel = draft.channel
+    ? draft.account_label || `${draft.channel}(${draft.account_id ?? ''})`
+    : null;
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]" data-testid="linked-site-draft">
+      {destinationLabel ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
+        </p>
+      ) : null}
+      {draft.sealed_scheduled_at ? (
+        <p className="text-muted-foreground">
+          {t('linkedChannelDraftScheduledLabel')} ·{' '}
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+        </p>
+      ) : null}
+      <LinkedDraftVersionLine version={draft.version} />
+      <p className="break-keep text-xs font-semibold text-foreground">{draft.title}</p>
+      {draft.body_preview ? (
+        <p className="line-clamp-4 min-w-0 break-words text-foreground">{draft.body_preview}</p>
+      ) : null}
+      <a
+        href={`/content/${draft.draft_id}`}
         className="inline-block text-[11px] text-primary underline underline-offset-2"
       >
         {t('linkedChannelDraftOpenLink')}
@@ -1267,8 +1325,10 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           게이트(scope_key≠"")도 이 카드를 탄다(BE가 이제 그쪽에도 linked_channel_
           draft를 싣는다, AC2 "편입 영상은 <video controls>") — isRecipeGate로
           레시피 전용 빈-상태 문구 분기만 가른다. */}
-      {gate.gate_type === 'external_publish' && (gate.scope_key ?? '') === '' && recipeFacts?.stage ? (
-        <LinkedChannelDraftCard gate={gate} isRecipeGate />
+      {/* story #4190 — 레시피 게이트 판정은 gate-risk.ts isRecipePublishGate 하나(작업 목록·오늘 v3·원탭과 공유). 두 카드 중
+          BE가 채운 하나만 그린다 — 블로그 카드가 있으면 채널 카드(빈 상태 문구 포함)는 그리지 않는다. */}
+      {isRecipePublishGate(gate) ? (
+        gate.linked_site_draft ? <LinkedSiteDraftCard gate={gate} /> : <LinkedChannelDraftCard gate={gate} isRecipeGate />
       ) : gate.gate_type === 'external_publish' && (gate.scope_key ?? '') !== '' ? (
         <LinkedChannelDraftCard gate={gate} isRecipeGate={false} />
       ) : null}

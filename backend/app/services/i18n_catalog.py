@@ -89,7 +89,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "doc 결재 게이트는 doc 상신 경로로만 생성돼요 (직접 생성 불가).",
         "en": "Doc approval gates are created only through the doc submission flow — direct creation is not allowed",
     },
-    # story #4190(유나 확정 · PO 11:53Z) — 레시피 발행 승인 화면을 연 뒤 초안이 새 버전으로 바뀌었을 때(409 GATE_DRAFT_CHANGED).
+    # story #4190(유나 확정 · PO 11:53Z) — 레시피 발행 승인 화면을 연 뒤 초안이 새 버전으로 바뀌었을 때(409 gate_draft_changed).
     "gates.draft_changed": {
         "ko": "그 사이 초안이 새 버전으로 바뀌어 승인되지 않았어요. 최신 초안을 확인한 뒤 다시 승인해 주세요.",
         "en": "The draft was updated in the meantime, so it wasn't approved. Review the latest draft, then approve again.",

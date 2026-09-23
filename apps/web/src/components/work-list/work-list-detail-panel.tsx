@@ -19,6 +19,7 @@ import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -244,6 +245,7 @@ export function WorkListDetailPanel({
 }: WorkListDetailPanelProps) {
   const t = useTranslations('workList');
   const tCommon = useTranslations('common');
+  const tCage = useTranslations('cage');
   const locale = useLocale();
   const { tz } = resolveDisplayTimezone();
   const { currentMemberType, orgId } = useDashboardContext();
@@ -264,7 +266,9 @@ export function WorkListDetailPanel({
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[] | null>(null); // story #3976 — null=로딩 중
   const [gate, setGate] = useState<WorkListGate | null | undefined>(undefined); // undefined=로딩 중
   const [transitioning, setTransitioning] = useState(false);
-  const [transitionError, setTransitionError] = useState<'forbidden' | 'other' | null>(null);
+  // story #4190 — 'draft_changed' = 409 gate_draft_changed(서명 흐름에서 본 초안이 그 사이 새 버전이 됨 — 게이트 상세와 같은
+  // 문장 · loadGate()로 재조회해 카드가 최신 버전을 그린다).
+  const [transitionError, setTransitionError] = useState<'forbidden' | 'draft_changed' | 'other' | null>(null);
   const [approved, setApproved] = useState(false);
   // story #3988 — 「발행물」 탭은 다른 5탭과 달리 패널이 열릴 때 같이 안 부른다(첫 화면
   // 콜 수 무증가, AC2 "탭 열 때만 조회"). idle=아직 그 탭을 연 적 없음.
@@ -378,6 +382,7 @@ export function WorkListDetailPanel({
 
   const submitTransition = useCallback(async (status: 'approved' | 'rejected', evidenceViewed: boolean, note?: string) => {
     if (!gate) return;
+    const reviewedDraft = reviewedDraftOf(gate);
     setTransitioning(true);
     setTransitionError(null);
     try {
@@ -392,10 +397,23 @@ export function WorkListDetailPanel({
         // 다시 검증할 필요 없이 "그 콜백이 불렸다"는 사실 자체가 "사람이 실제로 체크박스를
         // 봤다"는 증거다(gates/[id]/page.tsx의 동일 계약 그대로 재사용 — 새 근거열람
         // 추적을 이 패널이 독자로 만들지 않는다).
-        body: JSON.stringify({ status, evidence_viewed: evidenceViewed, note: note ?? null }),
+        // story #4190 — 레시피 발행 게이트면 서명 흐름의 초안 카드가 그린 (draft_id, version)도(없으면 키 없음).
+        body: JSON.stringify({
+          status, evidence_viewed: evidenceViewed, note: note ?? null,
+          ...(reviewedDraft ? { reviewed_draft_id: reviewedDraft.id, reviewed_draft_version: reviewedDraft.version } : {}),
+        }),
       });
       if (res.status === 403) { setTransitionError('forbidden'); return; }
-      if (!res.ok) { setTransitionError('other'); return; }
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+        if (errBody?.error?.code === 'gate_draft_changed') {
+          setTransitionError('draft_changed');
+          await loadGate();
+          return;
+        }
+        setTransitionError('other');
+        return;
+      }
       if (status === 'approved') setApproved(true);
       await loadGate();
     } catch {
@@ -532,9 +550,15 @@ export function WorkListDetailPanel({
             {isSigFlowGate ? (
               <div data-testid="panel-signature-flow">
                 <GateSignatureApproval
+                  // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌면 열람 체크·사유를 리셋(새 버전을 다시 보고 서명).
+                  key={`${gate!.github_check_run_sha ?? ''}:${reviewedDraftOf(gate!)?.version ?? ''}`}
                   gate={gate!}
                   resolving={transitioning}
-                  error={transitionError ? (transitionError === 'forbidden' ? t('transitionForbidden') : t('transitionError')) : null}
+                  error={transitionError
+                    ? (transitionError === 'forbidden' ? t('transitionForbidden')
+                      : transitionError === 'draft_changed' ? tCage('gateDraftChangedError')
+                      : t('transitionError'))
+                    : null}
                   onApprove={handleSignedApprove}
                   onReject={handleReject}
                   compact
@@ -542,16 +566,24 @@ export function WorkListDetailPanel({
               </div>
             ) : (
               <>
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  disabled={transitioning}
-                  onClick={handlePlainApprove}
-                  data-testid="panel-primary-action"
-                >
-                  {t(labelKey!)}
-                </Button>
+                {/* story #4190(유나 «본 버전 대조» 1) — 이 평문 자리는 초안 카드를 안 그린다. 레시피 발행 게이트면 승인 대신
+                    카드가 있는 게이트 상세로 보내는 링크(같은 자리·같은 크기). 여기선 승인이 안 일어나 409 문장도 없다. */}
+                {isRecipePublishGate(gate!) ? (
+                  <Button asChild variant="default" size="sm">
+                    <Link href={`/gates/${gate!.id}`} data-testid="panel-primary-action">{tCage('gateReviewDraftToApprove')}</Link>
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    disabled={transitioning}
+                    onClick={handlePlainApprove}
+                    data-testid="panel-primary-action"
+                  >
+                    {t(labelKey!)}
+                  </Button>
+                )}
                 {transitionError === 'forbidden' ? (
                   <p className="text-xs text-destructive" data-testid="panel-transition-error">{t('transitionForbidden')}</p>
                 ) : null}

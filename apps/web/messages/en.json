@@ -5494,6 +5494,10 @@
     "linkedChannelDraftScheduledLabel": "Scheduled for",
     "linkedChannelDraftImageAlt": "Attached image",
     "linkedChannelDraftOpenLink": "Open draft",
+    "linkedSiteDraftNone": "No submitted blog draft — approving won't publish anything.",
+    "linkedDraftNone": "No submitted draft — approving won't publish anything.",
+    "linkedDraftVersionLabel": "Version",
+    "gateReviewDraftToApprove": "Review draft and approve",
     "publishOutcomePublished": "Published",
     "publishOutcomePublishing": "Publishing in progress — will finish shortly",
     "publishOutcomeScheduled": "Scheduled — will auto-publish at the scheduled time",
@@ -5653,6 +5657,8 @@
     "gateActivityActionAdsBoostResumed": "Resumed the ad boost",
     "gateActivityActionAdsBoostAutoPausedCapReached": "Auto-paused (ad spend cap reached)",
     "gateHeadChangedError": "The commit this gate targets changed after you confirmed. Please review the latest changes before approving.",
+    "gateDraftChangedError": "The draft was updated in the meantime, so it wasn't approved. Review the latest draft, then approve again.",
+    "gateDraftChangedViewLatest": "View latest draft",
     "gateAlreadyResolvedError": "This approval has already been processed. Ask the PO for a re-review if you'd like it reconsidered."
   },
   "recruiter": {

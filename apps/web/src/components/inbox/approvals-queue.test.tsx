@@ -1428,3 +1428,69 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(JSON.parse(postCall?.body ?? '{}').status).toBe('rejected');
   });
 });
+
+// story #4190(유나 «본 버전 대조» 3 · 자리별 동작) — 레시피 발행 게이트: 저위험 원탭은 승인하지 않고 초안 카드가 있는 서명
+// 모달을 연다(라벨 «초안 보고 승인»). 모달 승인은 카드가 그린 (draft_id, version)을 싣고, 409 gate_draft_changed면 행 오류
+// 자리 문장 + 그 행만 재조회 → 모달 카드가 새 버전.
+describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story #4190)', () => {
+  function recipeGate(version: number): GateItem {
+    return gate({
+      id: 'g-recipe', gate_type: 'external_publish', scope_key: '', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '블로그 레시피', slug: null },
+      neutral_facts: { stage: 'pending_approval', triggered_by_event: 'e-1' },
+      linked_site_draft: {
+        draft_id: 'site-d1', version, title: `제목 v${version}`, body_preview: '본문',
+        channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      },
+    });
+  }
+
+  it('⭐원탭 라벨이 «초안 보고 승인»이고 누르면 전이 없이 초안 카드가 있는 서명 모달이 열린다', async () => {
+    const calls = mockFetches([recipeGate(1)], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons.some((b) => b.textContent === koMessages.cage.gateApprove)).toBe(false);
+    const reviewBtn = buttons.find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
+    expect(reviewBtn).toBeTruthy();
+    await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]');
+    expect(dialog?.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v1');
+    expect(calls.some((c) => c.url.endsWith('/transition'))).toBe(false);
+  });
+
+  it('⭐모달 승인이 본 버전을 싣고, 409면 문장 + 그 행 재조회로 모달 카드가 v2가 된다', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    let rowFetches = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.includes('status=pending')) return { ok: true, json: async () => [recipeGate(1)] };
+      if (url.includes('status=held')) return { ok: true, json: async () => [] };
+      if (url === '/api/gates/g-recipe/transition') {
+        bodies.push(JSON.parse(String(init?.body)));
+        return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
+      }
+      if (url === '/api/gates/g-recipe') { rowFetches += 1; return { ok: true, status: 200, json: async () => ({ data: recipeGate(2) }) }; }
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const reviewBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
+    await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    let dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    await act(async () => { (dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
+    const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'v1 봤음');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const signBtn = [...dialog.querySelectorAll('button')].find((b) => !b.disabled && b.textContent?.includes(koMessages.cage.sigApproveAndSign)) as HTMLButtonElement;
+    await act(async () => { signBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bodies[0]).toMatchObject({ reviewed_draft_id: 'site-d1', reviewed_draft_version: 1 });
+    expect(document.body.textContent).toContain(koMessages.cage.gateDraftChangedError);
+    expect(rowFetches).toBe(1);
+    dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    expect(dialog.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
+    expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+  });
+});

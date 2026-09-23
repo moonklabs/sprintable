@@ -85,7 +85,7 @@ async def _needs_me_from_gate_inbox(
     list_gates·gate 승인 집행과 동일 패턴).
     """
     from app.routers.gates import list_gate_inbox  # 순환 최소화 위해 지역 import(established 관례).
-    from app.services.gate_service import derive_risk_grade, get_org_posture
+    from app.services.gate_service import _is_recipe_external_publish_gate, derive_risk_grade, get_org_posture
 
     rows = await list_gate_inbox(
         status="pending", sort="urgency", assigned_to_me=True,
@@ -111,6 +111,9 @@ async def _needs_me_from_gate_inbox(
                 "reason": None,
                 "created_at": r.created_at,
                 "actions": ["approve", "request_changes", "hold"],
+                # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트는 초안을 보고 승인해야 해 「오늘」 저위험 일괄에서
+                # 빠진다(FE가 이 값으로 가른다 — 판정은 봉인과 같은 BE 함수 하나).
+                "recipe_publish": _is_recipe_external_publish_gate(r),
             })
         else:  # r.source == "hitl"
             # HitlRequest.work_item_id는 실무상 항상 Story(gates.py 기존 주석 근거).

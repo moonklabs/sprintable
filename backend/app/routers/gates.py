@@ -2322,7 +2322,7 @@ async def _transition_gate_endpoint(
         raise HTTPException(
             status_code=409,
             detail=human_error(
-                "GATE_DRAFT_CHANGED", "The draft changed after this approval screen was opened.",
+                "gate_draft_changed", "The draft changed after this approval screen was opened.",
                 user_message=t("gates.draft_changed", resolved_locale),
                 current_draft_id=str(e.current_draft_id), current_version=e.current_version,
             ),
@@ -3277,7 +3277,7 @@ async def _override_gate_endpoint(
         raise HTTPException(
             status_code=409,
             detail=human_error(
-                "GATE_DRAFT_CHANGED", "Recipe publish approval must carry the reviewed draft — use the approval screen.",
+                "gate_draft_changed", "Recipe publish approval must carry the reviewed draft — use the approval screen.",
                 user_message=t("gates.draft_changed", resolved_locale),
                 current_draft_id=str(e.current_draft_id), current_version=e.current_version,
             ),

@@ -9,7 +9,8 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
+import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
 import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
 import { useReadingPanel } from '@/components/chat/reading-panel-context';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -124,6 +125,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #4190(유나 자리별 동작) — 409 gate_draft_changed였는지. 이 카드는 초안을 보여 주지 않는 자리라 문장 아래에
+  // «최신 초안 보기»(→ /gates/{id}) 링크를 둔다. 다음 승인·반려 때 transitionError와 같이 지운다.
+  const [draftChanged, setDraftChanged] = useState(false);
   // story #2926(P0-F F1) — claim 클릭(제목 미리보기)이 이제 ProofCapsule 셸 소관이라 이
   // state도 그쪽에 맞춰 여기(바깥 컴포넌트)로 끌어올렸다(기존 ApprovalRequestBody 소유였음).
   const [showPreview, setShowPreview] = useState(false);
@@ -213,6 +217,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     setResolving(true);
     setTransitionError(null);
+    setDraftChanged(false);
     try {
       const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
         method: 'POST',
@@ -223,10 +228,12 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
         // page.tsx만 #2975에서 고쳐지고 이 챗 카드는 빠져 있었다). known SHA 있는 merge
         // 게이트를 이 카드에서 승인하면 #3410 착지 後 항상 409(gate_head_changed)로
         // 거부되는 라이브 회귀 — state.gate(fetchGate 실측)에서 채운다.
-        body: JSON.stringify({
-          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
-          reviewed_head_sha: state.kind === 'ready' ? (state.gate.github_check_run_sha ?? null) : null,
-        }),
+        // story #4190 — 레시피 발행 게이트면 서명 패널의 초안 카드가 그린 (draft_id, version)도(없으면 키 없음).
+        body: JSON.stringify(buildGateTransitionBody({
+          status, note, evidenceViewed,
+          reviewedHeadSha: state.kind === 'ready' ? (state.gate.github_check_run_sha ?? null) : null,
+          reviewedDraft: state.kind === 'ready' ? reviewedDraftOf(state.gate) : null,
+        })),
       });
       if (res.ok) { await fetchGate(); return; }
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
@@ -234,11 +241,13 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
       // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문) 대신 사람
       // 문구로 매핑(gates/[id]/page.tsx와 동형). 둘 다 "화면이 아는 상태가 서버와
       // 어긋났다"는 뜻이라 재조회로 실제 현재 상태를 반영(AC1 — 죽은 버튼이 다시 안 뜬다).
-      if (code === 'gate_head_changed' || code === 'gate_already_resolved') {
+      if (code === 'gate_head_changed' || code === 'gate_draft_changed' || code === 'gate_already_resolved') {
         await fetchGate();
       }
+      setDraftChanged(code === 'gate_draft_changed');
       setTransitionError(
         code === 'gate_head_changed' ? tCage('gateHeadChangedError')
+          : code === 'gate_draft_changed' ? tCage('gateDraftChangedError')
           : code === 'gate_already_resolved' ? tCage('gateAlreadyResolvedError')
           : (body?.error?.message ?? `HTTP ${res.status}`)
       );
@@ -354,6 +363,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
+            draftChanged={draftChanged}
             onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
             onReject={(reason) => void transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
@@ -385,13 +395,26 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   );
 }
 
+/** story #4190(유나 자리별 동작) — 채팅 카드는 초안을 보여 주지 않는 자리라, 409 gate_draft_changed 문장 아래에 초안
+ * 증거가 있는 게이트 상세로 가는 링크 하나. */
+function DraftChangedViewLatestLink({ gateId }: { gateId: string }) {
+  const tCage = useTranslations('cage');
+  return (
+    <a href={`/gates/${gateId}`} className="inline-block text-[11px] text-primary underline underline-offset-2">
+      {tCage('gateDraftChangedViewLatest')}
+    </a>
+  );
+}
+
 function ApprovalRequestBody({
-  gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
-  addToast,
+  gate, resolving, transitionError, draftChanged = false, onApprove, onReject, onDiscuss, onDiscussClick, onUndone,
+  eventDefinitionsByKey, addToast,
 }: {
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
+  /** story #4190 — 직전 거절이 409 gate_draft_changed(«최신 초안 보기» 링크를 그린다). */
+  draftChanged?: boolean;
   onApprove: (reason?: string, evidenceViewed?: boolean) => void;
   onReject: (reason?: string) => void;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
@@ -539,6 +562,8 @@ function ApprovalRequestBody({
   // gate.id는 이 카드 인스턴스의 수명 동안 고정(target.gate_id로 매 폴링/재조회를 같은
   // 게이트에 거는 구조라 다른 게이트로 안 바뀐다) — 리셋 이펙트 불요.
   const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
+  // story #4190 — 레시피 발행 게이트의 «초안 보고 승인»이 여는 같은 서명 패널(초안 카드 포함).
+  const [signPanelOpen, setSignPanelOpen] = useState(false);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
   // story #3001 — 지정이 걸린 게이트인데 지금 이 카드를 보는 나는 더 이상 그 지정자가
   // 아니다(위임됨). 미지정(broadcast) 게이트는 gate.designated_approver_id가 애초 null이라
@@ -747,14 +772,15 @@ function ApprovalRequestBody({
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
-      ) : needsFullFlow || rejectPanelOpen ? (
+      ) : needsFullFlow || rejectPanelOpen || signPanelOpen ? (
         // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
         // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
         // 에만 적용되고 이 챗 카드는 빠져 있었다. 같은 컴포넌트·같은 취약(SHA 바뀐 뒤에도
         // 열람체크가 살아있어 재확認 없이 재승인 가능)이라 동형 처방.
         <div className="space-y-1.5">
           <GateSignatureApproval
-            key={gate.github_check_run_sha}
+            // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌어도 같은 리셋(새 버전을 다시 보고 서명).
+            key={`${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
             gate={gate}
             resolving={resolving}
             error={transitionError}
@@ -769,8 +795,9 @@ function ApprovalRequestBody({
               근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈
               길을 남긴다. 고위험(needsFullFlow) 게이트는 이 패널이 유일한 경로라 취소
               버튼이 무의미(숨김). */}
+          {draftChanged ? <DraftChangedViewLatestLink gateId={gate.id} /> : null}
           {!needsFullFlow ? (
-            <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
+            <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => { setRejectPanelOpen(false); setSignPanelOpen(false); }}>
               {tCage('cancel')}
             </Button>
           ) : null}
@@ -782,11 +809,21 @@ function ApprovalRequestBody({
               {tCage('gateTransitionError', { reason: transitionError })}
             </p>
           ) : null}
-          <div className="flex gap-1.5">
-            <Button type="button" size="sm" onClick={() => onApprove()} disabled={resolving} className="flex-1">
-              <Check className="h-3.5 w-3.5" aria-hidden />
-              {tCage('gateApprove')}
-            </Button>
+          {draftChanged ? <DraftChangedViewLatestLink gateId={gate.id} /> : null}
+          <div className="flex flex-wrap gap-1.5">
+            {/* story #4190(유나 «본 버전 대조» 3) — 레시피 발행 게이트는 원탭으로 승인하지 않고 초안 카드가 있는 서명 패널을
+                연다 — 이름도 «초안 보고 승인». en 라벨이 길어 390에서 줄이 넘치면 flex-wrap으로 다음 줄로. */}
+            {isRecipePublishGate(gate) ? (
+              <Button type="button" size="sm" onClick={() => setSignPanelOpen(true)} disabled={resolving} className="flex-1">
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                {tCage('gateReviewDraftToApprove')}
+              </Button>
+            ) : (
+              <Button type="button" size="sm" onClick={() => onApprove()} disabled={resolving} className="flex-1">
+                <Check className="h-3.5 w-3.5" aria-hidden />
+                {tCage('gateApprove')}
+              </Button>
+            )}
             <Button type="button" size="sm" variant="destructive" onClick={() => setRejectPanelOpen(true)} disabled={resolving} className="flex-1">
               <X className="h-3.5 w-3.5" aria-hidden />
               {tCage('gateReject')}

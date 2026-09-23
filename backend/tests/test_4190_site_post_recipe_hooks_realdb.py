@@ -663,7 +663,7 @@ async def test_real_concurrent_edit_waits_for_the_approval_lock(monkeypatch):
 
 
 async def test_stale_screen_click_is_409_and_nothing_is_approved():
-    """PO 판정 11:49Z «본 버전 대조» — 승인 화면(v1)을 연 뒤 v2가 커밋되고 v1 화면에서 승인 클릭 → 409 GATE_DRAFT_CHANGED ·
+    """PO 판정 11:49Z «본 버전 대조» — 승인 화면(v1)을 연 뒤 v2가 커밋되고 v1 화면에서 승인 클릭 → 409 gate_draft_changed ·
     레시피 게이트 pending 그대로 · 초안 게이트 승계 0. 화면이 받은 linked_channel_draft에는 version이 실린다(FE가 돌려보낼
     재료). 뮤테이션: 봉인의 본 버전 대조 제거 → v2 봉인·승계로 RED."""
     from app.main import app
@@ -690,7 +690,7 @@ async def test_stale_screen_click_is_409_and_nothing_is_approved():
                 "reviewed_draft_id": seen["draft_id"], "reviewed_draft_version": seen["version"],
             })
         assert r.status_code == 409, r.text
-        assert r.json()["error"]["code"] == "GATE_DRAFT_CHANGED"
+        assert r.json()["error"]["code"] == "gate_draft_changed"
         assert (await _gate(Session, c["gate_d_id"])).status == "pending"
         assert (await _gate(Session, scoped_id)).status == "pending"
     finally:
@@ -721,7 +721,7 @@ async def test_approve_without_reviewed_draft_is_409_when_a_draft_is_shown():
                 "decision": "approved", "reason": "강제 승인",
             })
         assert r_override.status_code == 409, r_override.text
-        assert r_override.json()["error"]["code"] == "GATE_DRAFT_CHANGED"
+        assert r_override.json()["error"]["code"] == "gate_draft_changed"
         assert (await _gate(Session, c["gate_d_id"])).status == "pending"
     finally:
         app.dependency_overrides.clear()
@@ -735,3 +735,50 @@ async def _owner_user_id(Session, c):
 
     async with Session() as s:
         return (await s.execute(select(OrgMember.user_id).where(OrgMember.id == c["owner_member_id"]))).scalar_one()
+
+
+async def test_today_marks_recipe_publish_gate_so_low_risk_bulk_can_exclude_it():
+    """유나 «본 버전 대조» 2 — 「오늘」 저위험 일괄 승인은 초안 카드를 안 그린다. 레시피 발행 게이트(판정 = 봉인과 같은
+    `_is_recipe_external_publish_gate`)는 `recipe_publish=true`로 실려 FE가 일괄에서 뺀다 · 레시피 밖 external_publish는
+    false(무회귀). 뮤테이션: today_service의 recipe_publish를 False 고정 → RED."""
+    from app.main import app
+    from tests.test_3868_today_kind_risk_derive_ssot_realdb import (
+        _client_for as _today_client_for,
+        _make_gate,
+        _make_member,
+        _make_org,
+        _make_project,
+        _make_story,
+        _set_posture,
+        _setup_app_human,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s, name="Org4190today")
+            project = await _make_project(s, org.id)
+            _caller_id, caller_user_id = await _make_member(s, org.id, project.id, org_role="owner")
+            await _set_posture(s, org.id, "permissive")
+            recipe_story = await _make_story(s, org.id, project.id, title="블로그 레시피")
+            plain_story = await _make_story(s, org.id, project.id, title="일반 외부 발행")
+            await _make_gate(
+                s, org.id, work_item_type="story", work_item_id=recipe_story.id, gate_type="external_publish",
+                neutral_facts=dict(_RECIPE_FACTS),
+            )
+            await _make_gate(s, org.id, work_item_type="story", work_item_id=plain_story.id, gate_type="external_publish")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _today_client_for(app)
+        try:
+            resp = await client.get("/api/v2/today")
+            assert resp.status_code == 200, resp.text
+            by_item = {i["work_item"]["id"]: i for i in resp.json()["needs_me"]}
+            assert by_item[str(recipe_story.id)]["recipe_publish"] is True
+            assert by_item[str(recipe_story.id)]["risk"] == "low"
+            assert by_item[str(plain_story.id)]["recipe_publish"] is False
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

@@ -185,6 +185,27 @@ function HitlAnswerCard({ item, onDone }: { item: TodayNeedsMeItem; onDone: () =
   );
 }
 
+// story #4190(유나 «본 버전 대조» 2) — 저위험 일괄에서 뺀 레시피 발행 게이트의 개별 카드. 고위험 카드와 같은 틀(제목·
+// 요청자)에 주 버튼 하나(«초안 보고 승인» → 초안 카드가 있는 게이트 상세). «고위험» 태그는 사실이 아니라 붙이지 않고,
+// 변경 요청·보류도 두지 않는다(초안을 보고 게이트 상세에서 판단할 일).
+function RecipeDraftReviewCard({ item }: { item: TodayNeedsMeItem }) {
+  const tOrg = useTranslations('orgBriefing');
+  const tCage = useTranslations('cage');
+  return (
+    <Card className="p-3.5" data-testid="today-v3-decision-card">
+      <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
+      {item.requestedByName ? (
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{tOrg('needsMeMetaRequestedBy', { name: item.requestedByName })}</p>
+      ) : null}
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <Button asChild size="sm">
+          <Link href={`/gates/${item.id}`} data-testid="today-v3-recipe-review-draft-action">{tCage('gateReviewDraftToApprove')}</Link>
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 // story #3964 ① — workflow_step은 실동작 엔드포인트가 없다(그라운딩 참고). 클릭 0
 // (비활성 버튼)·「곧 돼요」류 문구는 짓지 않는다(기존 액션 라벨을 그대로 비활성 표시).
 function WorkflowStepPlaceholderCard({ item }: { item: TodayNeedsMeItem }) {
@@ -210,7 +231,11 @@ export function TodayV3Decisions({ items, count, isAdminOrOwner, onActionSuccess
   const t = useTranslations('todayV3');
   const workflowStep = items.filter((i) => i.source === 'workflow_step');
   const individual = items.filter((i) => i.source !== 'workflow_step' && (i.risk === 'high' || i.state === 'answer'));
-  const lowRiskBulk = items.filter((i) => i.source !== 'workflow_step' && i.risk === 'low' && i.state !== 'answer');
+  // story #4190(유나) — 레시피 발행 게이트는 초안을 보고 승인해야 해 일괄에서 뺀다 — «저위험 {count}건»도 뺀 뒤의 수
+  // (줄의 수 = 버튼이 실제로 승인하는 수).
+  const lowRiskCandidates = items.filter((i) => i.source !== 'workflow_step' && i.risk === 'low' && i.state !== 'answer');
+  const recipeDraftReview = lowRiskCandidates.filter((i) => i.recipePublish);
+  const lowRiskBulk = lowRiskCandidates.filter((i) => !i.recipePublish);
 
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -248,6 +273,7 @@ export function TodayV3Decisions({ items, count, isAdminOrOwner, onActionSuccess
               ? <HitlAnswerCard key={item.id} item={item} onDone={onActionSuccess} />
               : <GateSignatureCard key={item.id} item={item} isAdminOrOwner={isAdminOrOwner} onDone={onActionSuccess} />
           ))}
+          {recipeDraftReview.map((item) => <RecipeDraftReviewCard key={item.id} item={item} />)}
           {workflowStep.map((item) => <WorkflowStepPlaceholderCard key={item.id} item={item} />)}
           {lowRiskBulk.length > 0 ? (
             <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/50 px-3.5 py-2.5" data-testid="today-v3-low-risk-row">

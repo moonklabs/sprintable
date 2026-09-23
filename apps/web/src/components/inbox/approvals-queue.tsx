@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, ChevronDown, ChevronUp, Pencil, XCircle } from 'lucide-react';
-import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -344,6 +344,17 @@ export function ApprovalsQueue() {
     }
   };
 
+  // story #4190 — 409 gate_draft_changed 뒤 그 행 하나만 최신으로 바꾼다(목록 전체 재조회 없이 — 다른 행의 오류·완료
+  // 표시를 보존).
+  const refetchGateRow = async (id: string) => {
+    const res = await fetchWithAuth(`/api/gates/${id}`);
+    if (!res.ok) return;
+    const json = await res.json().catch(() => null);
+    const fresh = (json?.data ?? json) as GateItem | null;
+    if (!fresh?.id) return;
+    setItems((prev) => prev.map((it) => (it.id === id && !isHitl(it) ? { ...it, ...fresh } : it)));
+  };
+
   // story #1961(P2-S5) — 저위험 gate 원탭 승인/반려, gates/[id]/page.tsx의 transition()과
   // 동일 엔드포인트·body. story 22affaf2 — 고위험 서명 플로우(GateSignatureApproval)도
   // 이제 이 함수를 그대로 쓴다(note=서명 사유) — 별도 함수를 새로 짓지 않는다(canonical
@@ -363,8 +374,10 @@ export function ApprovalsQueue() {
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
+        // story #4190 — 레시피 발행 게이트면 서명 모달의 초안 카드가 그린 (draft_id, version)도 같이(없으면 키 없음).
         body: JSON.stringify(buildGateTransitionBody({
           status, note, evidenceViewed, reviewedHeadSha: g?.github_check_run_sha ?? null,
+          reviewedDraft: g ? reviewedDraftOf(g) : null,
         })),
       });
       if (res.ok) {
@@ -392,9 +405,13 @@ export function ApprovalsQueue() {
           setSignatureTargetId((c) => (c === id ? null : c));
         }
         const reason = errorKind === 'head_changed' ? t('gateHeadChangedError')
+          : errorKind === 'draft_changed' ? t('gateDraftChangedError')
           : errorKind === 'already_resolved' ? t('gateAlreadyResolvedError')
           : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
         setGateErrors((prev) => ({ ...prev, [id]: reason }));
+        // story #4190(유나 자리별 동작) — 그 행을 재조회해 서명 모달의 초안 카드를 최신 버전으로(모달은 열린 채 — 다시 보고
+        // 승인). 문장은 다음 승인·반려까지 남는다(resolveGate 첫 줄이 지운다).
+        if (errorKind === 'draft_changed') void refetchGateRow(id);
       }
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
@@ -719,9 +736,13 @@ export function ApprovalsQueue() {
         // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 같은 판별을
         // gates/[id]/page.tsx·gate-signature-approval.tsx와 공유(newsletter-gate-
         // approve-label.ts 한 곳).
-        const primaryLabel = isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : t(gateApproveLabelKey(gate));
+        // story #4190(유나 «본 버전 대조» 3) — 레시피 발행 게이트의 저위험 원탭은 승인하지 않고 초안 카드가 있는 서명 모달을
+        // 연다 — 이름도 «초안 보고 승인»(누르면 승인된다는 약속과 동작이 갈리지 않게).
+        const opensDraftReview = !isSigFlow && isRecipePublishGate(gate);
+        const primaryLabel = isSigFlow ? t(sigApproveAndSignLabelKey(gate))
+          : opensDraftReview ? t('gateReviewDraftToApprove') : t(gateApproveLabelKey(gate));
         const primaryOnClick = () => {
-          if (isSigFlow) setSignatureTargetId(gate.id);
+          if (isSigFlow || opensDraftReview) setSignatureTargetId(gate.id);
           // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록한다(BE 신규
           // 필드 없이 기존 자유텍스트 필드 재사용 — 결과 조회 시 "어느 안"이었는지 그대로 읽힌다).
           else void resolveGate(gate.id, 'approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption }) : null);
@@ -849,8 +870,9 @@ export function ApprovalsQueue() {
           {signatureGate ? (
             // story #2975(유나양 design 판정) 갭 자체발견(#2982 작업 중) — 동형 처방(SHA
             // 변경 시 evidenceViewed/reason 강제 리셋). page.tsx만 #2975에서 고쳐졌었다.
+            // story #4190 — 초안 버전이 바뀌어도(409 뒤 행 재조회) 같은 리셋: 새 버전을 다시 보고 서명하게.
             <GateSignatureApproval
-              key={signatureGate.github_check_run_sha}
+              key={`${signatureGate.github_check_run_sha ?? ''}:${reviewedDraftOf(signatureGate)?.version ?? ''}`}
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
