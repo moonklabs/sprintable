@@ -677,6 +677,72 @@ async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def find_ready_recipe_site_drafts(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
+) -> tuple[list[tuple[SitePostDraft, Gate, SitePostVersion]], bool]:
+    """story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `channel_posts.find_ready_recipe_channel_drafts`
+    의 블로그(site) 짝. 레시피 게이트 승인 화면이 그리는 블로그 초안 카드·승인 순간 봉인·캐스케이드가 같은 답을 쓴다
+    (`gate_service.find_recipe_shown_draft`). 규칙은 채널과 같다 — 최신 초안부터, scoped 게이트가 이 work item의 유일한
+    pending이면(레시피 승인이 승계할 대상) 포함, approved면 아직 발행 안 된 것만, 그 밖의 pending은 still_pending
+    (멀티목적지 — 각자 사람 승인). 발행 판정: 자사 블로그는 그 게이트의 공개 글(내리지 않은 것), 외부 블로그는 그 게이트·
+    최신 버전의 발행 명령 completed."""
+    drafts = (await db.execute(
+        select(SitePostDraft).where(
+            SitePostDraft.org_id == org_id, SitePostDraft.work_item_id == work_item_id,
+            SitePostDraft.deleted_at.is_(None),
+        ).order_by(SitePostDraft.created_at.desc())
+    )).scalars().all()
+    if not drafts:
+        return [], False
+
+    from app.models.publication_command import PublicationCommand
+    from app.services.gate_service import (
+        find_gate_slot_with_pr_fallback,
+        find_sole_pending_scoped_external_publish_gate,
+    )
+
+    sole_pending = await find_sole_pending_scoped_external_publish_gate(
+        db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+    )
+    ready: list[tuple[SitePostDraft, Gate, SitePostVersion]] = []
+    still_pending = False
+    for draft in drafts:
+        scoped_gate = await find_gate_slot_with_pr_fallback(
+            db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+            gate_type="external_publish", pr_number=None, repo_full_name=None,
+            scope_key=site_post_gate_scope_key(draft.connection_id),
+        )
+        if scoped_gate is None or (scoped_gate.neutral_facts or {}).get("draft_id") != str(draft.id):
+            continue
+        if scoped_gate.status == "pending":
+            if sole_pending is not None and sole_pending.id == scoped_gate.id:
+                versions = await list_site_post_draft_versions(db, draft_id=draft.id)
+                if versions:
+                    ready.append((draft, scoped_gate, versions[-1]))
+            else:
+                still_pending = True
+            continue
+        if scoped_gate.status != "approved":
+            continue
+        versions = await list_site_post_draft_versions(db, draft_id=draft.id)
+        if not versions:
+            continue
+        latest = versions[-1]
+        hosted_live = (await db.execute(
+            select(SitePost.id).where(SitePost.gate_id == scoped_gate.id, SitePost.unpublished_at.is_(None)).limit(1)
+        )).first()
+        external_done = (await db.execute(
+            select(PublicationCommand.id).where(
+                PublicationCommand.gate_id == scoped_gate.id, PublicationCommand.approved_version == latest.id,
+                PublicationCommand.status == "completed",
+            ).limit(1)
+        )).first()
+        if hosted_live is not None or external_done is not None:
+            continue
+        ready.append((draft, scoped_gate, latest))
+    return ready, still_pending
+
+
 async def list_site_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0,
     draft_id: uuid.UUID | None = None,
@@ -1019,8 +1085,9 @@ async def submit_site_post_draft(
     # story #4190(훅A — channel_posts.submit_channel_post_draft의 #4069와 동형) — 레시피 unscoped
     # external_publish 게이트가 이미 approved이고, 그 승인이 이 초안의 이 버전을 봉인했고(승인 화면이 보여 준
     # 내용 — gate_service.RECIPE_APPROVED_DRAFT_FACT), 이 work item의 목적지가 이 초안 하나뿐이면 그 사람 승인을
-    # 이 초안 게이트가 승계한다. 봉인이 없거나 다르면(승인 뒤 새 초안·재제출) 사람 승인. 블로그 초안은 아직 승인
-    # 화면에 안 보여 봉인되지 않으므로 지금은 승계 0(PO 판정 2026-09-23). 목적지가 둘 이상이면 각자 사람 승인(#3478).
+    # 이 초안 게이트가 승계한다. 봉인이 없거나 다르면(승인 뒤 새 초안·재제출) 사람 승인. 블로그 초안은 승인 화면의
+    # 블로그 초안 카드(`linked_site_draft`)로 보이고 그 버전이 봉인된다(PO 판정 2026-09-23 12:03Z). 목적지가 둘 이상이면
+    # 각자 사람 승인(#3478).
     auto_satisfied_by = await find_recipe_approval_for_single_destination(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story", scope_key=scope_key,
         draft_id=draft.id, version=target.version,

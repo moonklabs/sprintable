@@ -30,3 +30,34 @@ def plain_text_preview(text: str | None, max_len: int) -> str:
     if len(normalized) <= max_len:
         return normalized
     return normalized[:max_len].rstrip() + "…"
+
+
+# story #4190(유나 site 초안 카드 · PO 판정 2026-09-23) — 결재 화면 블로그 초안 카드의 본문 앞부분. FE는 파싱하지
+# 않고(카드에 `#`·`**`·`[](...)`가 그대로 보이면 안 된다) BE가 기호를 걷은 평문을 준다.
+SITE_DRAFT_BODY_PREVIEW_MAX = 300
+
+_MD_FENCE_LINE_RE = re.compile(r"^\s*(```|~~~).*$", re.MULTILINE)
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_REF_LINK_RE = re.compile(r"\[([^\]]*)\]\[[^\]]*\]")
+_MD_LINE_PREFIX_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)", re.MULTILINE)
+_MD_RULE_LINE_RE = re.compile(r"^\s*(?:[-*_]\s*){3,}$|^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$", re.MULTILINE)
+_MD_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*>")
+_MD_EMPHASIS_RE = re.compile(r"(\*\*|__|~~|\*|_|`)")
+
+
+def markdown_plain_text_preview(text: str | None, max_len: int) -> str:
+    """마크다운 → 평문 미리보기. 주석 제거(절삭 전) → 펜스 줄·구분선·표 구분 줄 제거 → 이미지·링크는 보이는 글자만 →
+    줄머리 기호(제목·인용·목록) 제거 → 인라인 강조·코드 기호·HTML 태그·표 `|` 제거 → `plain_text_preview`와 같은 정규화·절삭.
+    낱말 안의 `_`(snake_case)도 걷히지만 미리보기라 무해하다 — 기호가 새는 쪽이 사람 눈엔 더 큰 결함."""
+    s = strip_html_comments(text or "")
+    s = _MD_FENCE_LINE_RE.sub("", s)
+    s = _MD_RULE_LINE_RE.sub("", s)
+    s = _MD_IMAGE_RE.sub(r"\1", s)
+    s = _MD_LINK_RE.sub(r"\1", s)
+    s = _MD_REF_LINK_RE.sub(r"\1", s)
+    s = _MD_LINE_PREFIX_RE.sub("", s)
+    s = _MD_HTML_TAG_RE.sub("", s)
+    s = _MD_EMPHASIS_RE.sub("", s)
+    s = s.replace("|", " ")
+    return plain_text_preview(s, max_len)

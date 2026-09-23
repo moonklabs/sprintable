@@ -183,6 +183,22 @@ class LinkedChannelDraft(BaseModel):
     sealed_scheduled_at: datetime | None = None
 
 
+class LinkedSiteDraft(BaseModel):
+    """story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `LinkedChannelDraft`의 블로그(site) 짝. 레시피 게이트
+    승인 화면이 그리는 블로그 초안(`gate_service.find_recipe_shown_draft`가 고른 것 — 봉인·캐스케이드와 같은 답).
+    목적지 연결 필드(channel·account_*)는 외부 블로그일 때만 값이 있다 — 자사(호스팅) 블로그면 None(카드가 그 줄을 생략).
+    `body_preview`는 마크다운 기호를 걷은 평문 앞부분(`text_preview.markdown_plain_text_preview`) — FE는 파싱하지 않는다."""
+    draft_id: uuid.UUID
+    version: int
+    title: str
+    body_preview: str
+    channel: str | None = None
+    account_id: str | None = None
+    account_label: str | None = None
+    scoped_gate_status: str
+    sealed_scheduled_at: datetime | None = None
+
+
 class LinkedEvidenceItem(BaseModel):
     """story #4135(PO 실측 2026-09-22) — «이것을 가리키는 것들» 0건 실사고 처방. neutral_
     facts.draft_doc_*은 게이트 *생성* 시점 스냅샷이라(recipe_gate_hooks.py 참조) 생성
@@ -275,6 +291,11 @@ class GateResponse(BaseModel):
     # 승인과 함께 승계-승인된다)인지 FE가 갈라야 해서 별도 플래그(같은 조회 한 번의
     # 부산물, 새 쿼리 0 — find_ready_recipe_channel_drafts의 still_pending 그대로).
     linked_channel_draft_pending: bool = False
+    # story #4190(PO 판정 2026-09-23 12:03Z) — 레시피 게이트가 보여 주는 초안이 블로그(site)일 때의 카드. 채널 카드와
+    # 둘 중 하나만 채워진다(어느 카드인지 BE가 가른다 — `find_recipe_shown_draft`). `_pending`은 채널 짝과 같은 뜻
+    # (제출은 됐지만 멀티목적지 pending이라 이 승인이 승계하지 않음).
+    linked_site_draft: "LinkedSiteDraft | None" = None
+    linked_site_draft_pending: bool = False
     # story #4135(PO 실측 2026-09-22) — concept_approval·structure_approval 게이트의
     # «확定 대상 실물». `_enrich_linked_evidence()`가 매 응답마다 배선(linked_channel_draft와
     # 동일 선례) — 그 gate_type이 아니거나(_GATE_TYPE_EXPECTED_EVIDENCE_KINDS 미등재)
@@ -547,19 +568,42 @@ async def _enrich_linked_channel_draft(
     if gate.status != "pending":
         return
 
-    from app.services.channel_posts import find_ready_recipe_channel_drafts
+    from app.services.gate_service import find_recipe_shown_draft
 
-    ready, still_pending = await find_ready_recipe_channel_drafts(
+    # story #4190 — 채널·블로그 중 어느 카드를 그릴지는 봉인·캐스케이드와 같은 판정 하나(`find_recipe_shown_draft`).
+    shown, channel_pending, site_pending = await find_recipe_shown_draft(
         session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
     )
-    if not ready:
-        resp.linked_channel_draft_pending = still_pending
+    if shown is None:
+        resp.linked_channel_draft_pending = channel_pending
+        resp.linked_site_draft_pending = site_pending
         return
-
-    draft, scoped_gate, latest = ready[0]
+    if shown.kind == "site_post":
+        resp.linked_site_draft = await _build_linked_site_draft(
+            session, draft=shown.draft, latest=shown.latest,
+            scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
+        )
+        return
     resp.linked_channel_draft = await _build_linked_channel_draft(
-        session, draft=draft, latest=latest,
-        scoped_gate_status=scoped_gate.status, sealed_scheduled_at=scoped_gate.sealed_scheduled_at,
+        session, draft=shown.draft, latest=shown.latest,
+        scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
+    )
+
+
+async def _build_linked_site_draft(
+    session: AsyncSession, *, draft, latest, scoped_gate_status: str, sealed_scheduled_at,
+) -> "LinkedSiteDraft":
+    from app.models.channel_connection import ChannelConnection
+    from app.services.text_preview import SITE_DRAFT_BODY_PREVIEW_MAX, markdown_plain_text_preview
+
+    connection = await session.get(ChannelConnection, draft.connection_id) if draft.connection_id else None
+    return LinkedSiteDraft(
+        draft_id=draft.id, version=latest.version, title=latest.title,
+        body_preview=markdown_plain_text_preview(latest.body_md, SITE_DRAFT_BODY_PREVIEW_MAX),
+        channel=connection.channel if connection is not None else None,
+        account_id=connection.account_id if connection is not None else None,
+        account_label=connection.account_label if connection is not None else None,
+        scoped_gate_status=scoped_gate_status, sealed_scheduled_at=sealed_scheduled_at,
     )
 
 

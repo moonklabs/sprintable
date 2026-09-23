@@ -99,10 +99,13 @@ async def _recipe_gate(Session, w):
 
 
 async def _approve(Session, w, gate_id):
+    """승인 화면이 보여 준 초안(있으면)의 (id, 버전)을 싣고 승인 — FE가 보내는 모양."""
     from app.services.gate_service import transition_gate
+    from tests.recipe_reviewed_draft import reviewed_draft_for
 
     async with Session() as s:
-        await transition_gate(s, w["org_id"], gate_id, "approved", resolver_id=w["human_id"])
+        reviewed = await reviewed_draft_for(s, org_id=w["org_id"], work_item_id=w["story_id"])
+        await transition_gate(s, w["org_id"], gate_id, "approved", resolver_id=w["human_id"], reviewed_draft=reviewed)
         await s.commit()
 
 
@@ -173,10 +176,14 @@ async def test_site_recipe_approved_first_then_new_blog_draft_is_not_inherited()
         await engine.dispose()
 
 
-async def test_site_draft_not_shown_on_approval_screen_is_not_cascaded():
-    """초안 먼저 → 레시피 승인. 블로그 초안은 승인 화면에 안 보여 봉인되지 않는다 → 캐스케이드 0 · 명령 0.
-    뮤테이션: 판정 함수의 ready[0] 대조 제거 → approved·명령 1로 RED."""
+async def test_site_draft_shown_on_approval_screen_is_sealed_and_cascaded():
+    """PO 판정 12:03Z — 블로그 초안도 승인 화면 카드(`linked_site_draft`)로 보인다. 초안 먼저 → 레시피 승인(본 버전 실음)
+    → 그 초안·버전 봉인(kind=site_post) · 단일 목적지 scoped 게이트 캐스케이드 승인 · 외부 블로그 발행 명령 1.
+    카드는 마크다운 기호를 걷은 평문 미리보기·버전·외부 목적지를 싣고 채널 카드는 비어 있다(어느 카드인지 BE가 가름).
+    뮤테이션: 판정 함수의 블로그 분기 제거 → 카드 None·봉인 0·캐스케이드 0으로 RED."""
     from app.main import app
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
     from app.services.gate_service import RECIPE_APPROVED_DRAFT_FACT
 
     engine, Session = await _session_factory()
@@ -185,38 +192,62 @@ async def test_site_draft_not_shown_on_approval_screen_is_not_cascaded():
             w = await _seed_site_world(s)
             wp = await _seed_wordpress_connection(s, w["org_id"], site_url="https://o2.example.com")
         recipe_id = await _recipe_gate(Session, w)
-        draft_id = await _post_site_version(app, Session, w, wp, "order-2")
+        body = "# 큰 제목\n\n**굵게** 쓴 문장과 [링크 글자](https://example.com/very/long/url) 그리고 ![그림](https://x/y.png)\n\n- 목록 하나\n> 인용"
+        draft_id = await _post_site_version(app, Session, w, wp, "order-2", body=body)
         gate_id = await _submit_site(app, Session, w, draft_id)
+
+        async with Session() as s:
+            screen = await to_gate_response(s, w["org_id"], await s.get(Gate, recipe_id))
+        assert screen.linked_channel_draft is None
+        card = screen.linked_site_draft
+        assert card is not None and card.draft_id == draft_id and card.version == 1 and card.title == "제목"
+        assert card.body_preview == "큰 제목 굵게 쓴 문장과 링크 글자 그리고 그림 목록 하나 인용"
+        assert not any(ch in card.body_preview for ch in "#*[]()>`")
+        assert card.channel is not None and card.scoped_gate_status == "pending"
 
         await _approve(Session, w, recipe_id)
         recipe = await _gate(Session, recipe_id)
-        assert RECIPE_APPROVED_DRAFT_FACT not in (recipe.neutral_facts or {})
+        sealed = recipe.neutral_facts[RECIPE_APPROVED_DRAFT_FACT]
+        assert (sealed["kind"], sealed["draft_id"], sealed["version"]) == ("site_post", str(draft_id), 1)
         gate = await _gate(Session, gate_id)
-        assert gate.status == "pending"
-        assert await _commands(Session, gate_id) == []
+        assert gate.status == "approved" and gate.requires_human is False
+        assert len(await _commands(Session, gate_id)) == 1
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
 
 
-async def test_site_gate_not_shown_on_approval_screen_is_not_marked_deferred():
-    """#4139 «레시피가 대신 결재»(deferred_to_gate_id → 인박스에서 숨김)는 승인 화면이 보여 주고 봉인할 초안에만.
-    블로그 초안 게이트를 숨기면 레시피 승인 뒤에도 사람이 못 찾는다. 뮤테이션: gates.py의 ready[0] 대조 제거 →
-    deferred_to_gate_id가 채워져 RED."""
+async def test_site_gate_shown_on_approval_screen_is_marked_deferred_and_stale_click_is_409():
+    """«대신 결재»(deferred_to_gate_id)는 캐스케이드와 같은 판정 — 보여 준 블로그 초안의 게이트면 표시. 화면(v1)을 연 뒤
+    v2가 커밋되면 v1 화면 클릭은 409 · 레시피·블로그 게이트 둘 다 pending. 뮤테이션: 봉인의 본 버전 대조 제거 → v2
+    승계로 RED."""
     from app.main import app
     from app.models.gate import Gate
     from app.routers.gates import to_gate_response
+    from app.services.gate_service import RecipeReviewedDraftChangedError, transition_gate
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             w = await _seed_site_world(s)
             wp = await _seed_wordpress_connection(s, w["org_id"], site_url="https://d.example.com")
-        await _recipe_gate(Session, w)
-        gate_id = await _submit_site(app, Session, w, await _post_site_version(app, Session, w, wp, "deferred"))
+        recipe_id = await _recipe_gate(Session, w)
+        draft_id = await _post_site_version(app, Session, w, wp, "deferred")
+        gate_id = await _submit_site(app, Session, w, draft_id)
         async with Session() as s:
             resp = await to_gate_response(s, w["org_id"], await s.get(Gate, gate_id))
-        assert resp.deferred_to_gate_id is None
+            screen = await to_gate_response(s, w["org_id"], await s.get(Gate, recipe_id))
+        assert resp.deferred_to_gate_id == recipe_id
+        seen = (screen.linked_site_draft.draft_id, screen.linked_site_draft.version)
+
+        await _post_site_version(app, Session, w, wp, "deferred", body="화면 뒤에 바뀐 본문")
+        async with Session() as s:
+            with pytest.raises(RecipeReviewedDraftChangedError) as exc:
+                await transition_gate(s, w["org_id"], recipe_id, "approved", resolver_id=w["human_id"], reviewed_draft=seen)
+            await s.rollback()
+        assert exc.value.current_version == 2
+        assert (await _gate(Session, recipe_id)).status == "pending"
+        assert (await _gate(Session, gate_id)).status == "pending"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

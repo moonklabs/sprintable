@@ -1,5 +1,5 @@
-"""story #4190 — 레시피 external_publish 게이트 승인 테스트 공용: 승인 화면이 보여 주는 초안(`find_ready_recipe_channel_
-drafts()[0]` — gates.py `_enrich_linked_channel_draft`와 같은 판정)의 (draft_id, version). 실제 FE가 승인 요청에 싣는
+"""story #4190 — 레시피 external_publish 게이트 승인 테스트 공용: 승인 화면이 보여 주는 초안(`gate_service.
+find_recipe_shown_draft` — 게이트 응답 `linked_channel_draft`/`linked_site_draft`와 같은 판정)의 (draft_id, version). 실제 FE가 승인 요청에 싣는
 `reviewed_draft_id`·`reviewed_draft_version`과 같은 값이다. 보여 줄 초안이 없으면 None(승인에 필드 불요)."""
 from __future__ import annotations
 
@@ -7,15 +7,14 @@ import uuid
 
 
 async def reviewed_draft_for(session, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str = "story"):
-    from app.services.channel_posts import find_ready_recipe_channel_drafts
+    from app.services.gate_service import find_recipe_shown_draft
 
-    ready, _still_pending = await find_ready_recipe_channel_drafts(
+    shown, _channel_pending, _site_pending = await find_recipe_shown_draft(
         session, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
     )
-    if not ready:
+    if shown is None:
         return None
-    draft, _gate, latest = ready[0]
-    return draft.id, latest.version
+    return shown.draft.id, shown.latest.version
 
 
 async def reviewed_draft_body(session, *, org_id: uuid.UUID, work_item_id: uuid.UUID) -> dict:
