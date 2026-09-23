@@ -101,19 +101,6 @@ function stubFetch(applyBody: unknown, capture: { body: unknown }) {
 }
 
 describe('ApplyRecipeDialog', () => {
-  it('story #4202(유나 390) — 제목에 pr-8(닫기 X와 안 겹치게, 공용 dialog 수정 시 걷음)', async () => {
-    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, { body: null as unknown });
-    await act(async () => {
-      root.render(wrap(
-        <ApplyRecipeDialog target={TARGET} open onOpenChange={() => {}}
-          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
-      ));
-    });
-    await flush();
-    const title = [...document.body.querySelectorAll('h2, [data-slot="dialog-title"]')].find((e) => e.textContent?.includes('eventApplyDialogTitle'));
-    expect(title?.className).toContain('pr-8');
-  });
-
   it('프로젝트를 고르기 전엔 역할매핑 select가 안 뜬다(고를 프로젝트가 있어야 agent 후보를 안다)', async () => {
     const capture = { body: null as unknown };
     stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, capture);

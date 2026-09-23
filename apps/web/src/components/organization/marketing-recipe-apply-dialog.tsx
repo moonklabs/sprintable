@@ -379,10 +379,9 @@ export function MarketingRecipeApplyDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!submitting) onOpenChange(next); }}>
-      {/* story #4202(유나 390 실측) — 국소 수정. 만료 조건: 공용 ui/dialog.tsx가 같은 부류(제목 옆 닫기 버튼 자리 · grid 열 폭 minmax(0,1fr))를 고치면 이 국소 클래스를 걷어 낸다. */}
-      <DialogContent className="grid-cols-[minmax(0,1fr)]">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle className="pr-8">{t('recipeApplyV2Title', { name: presetName(recipe, tPreset) })}</DialogTitle>
+          <DialogTitle>{t('recipeApplyV2Title', { name: presetName(recipe, tPreset) })}</DialogTitle>
           <DialogDescription>{t('recipeApplyV2Description')}</DialogDescription>
         </DialogHeader>
 

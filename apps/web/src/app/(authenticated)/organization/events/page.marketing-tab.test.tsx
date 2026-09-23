@@ -126,29 +126,6 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     expect(document.body.textContent).toContain(koMessages.recipePreset.videoProductionName);
   });
 
-  // story #4202(유나 390 실측) — 적용 다이얼로그 제목이 닫기(X) 밑으로 겹침(pr-8) · 적용/상세 다이얼로그 내용이
-  // 다이얼로그보다 넓어짐(grid 열 폭 minmax(0,1fr)). 공용 ui/dialog.tsx가 고쳐지면 이 핀과 국소 클래스를 같이 걷는다.
-  it('390 레이아웃 핀 — 적용 다이얼로그 제목 pr-8·내용 grid 열 minmax · 상세 다이얼로그 내용 grid 열 minmax', async () => {
-    mockFetches();
-    await mount();
-    await switchToMarketingTab();
-
-    const applyBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용');
-    await act(async () => { applyBtn!.click(); });
-    await flush();
-    const applyDialog = document.body.querySelector('[role="dialog"]')!;
-    expect(applyDialog.className).toContain('grid-cols-[minmax(0,1fr)]');
-    expect(applyDialog.querySelector('h2, [data-slot="dialog-title"]')?.className).toContain('pr-8');
-    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-    await flush();
-
-    const detailBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상세 보기');
-    await act(async () => { detailBtn!.click(); });
-    await flush();
-    const detailDialog = [...document.body.querySelectorAll('[role="dialog"]')].find((d) => d.querySelector('[data-testid="recipe-stepper"]'));
-    expect(detailDialog?.className).toContain('grid-cols-[minmax(0,1fr)]');
-  });
-
   it('카드 「적용」 → 4슬롯 다이얼로그 → 크리에이터 제출 → 상세 뷰 도달(AC2 전체 흐름)', async () => {
     const applyBodies = mockFetches();
     await mount();

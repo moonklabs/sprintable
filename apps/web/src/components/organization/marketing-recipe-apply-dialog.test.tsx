@@ -1047,15 +1047,3 @@ describe('MarketingRecipeApplyDialog — 제목의 프리셋 이름 로케일(st
     }
   });
 });
-
-// story #4202(유나 390 실측 · 까디르 QA) — 이 다이얼로그 자체 파일에서 390 레이아웃 클래스 핀(events 페이지 통합
-// 테스트에도 있지만 이 파일만 돌려도 잡히게). 공용 ui/dialog.tsx가 같은 부류를 고치면 이 핀과 국소 클래스를 같이 걷는다.
-describe('MarketingRecipeApplyDialog — 390 레이아웃 클래스(story #4202)', () => {
-  it('DialogContent grid 열 minmax(0,1fr) · 제목 pr-8', async () => {
-    stubAll();
-    await mountDialog(RECIPE);
-    const dialog = document.body.querySelector('[role="dialog"]')!;
-    expect(dialog.className).toContain('grid-cols-[minmax(0,1fr)]');
-    expect(dialog.querySelector('h2, [data-slot="dialog-title"]')?.className).toContain('pr-8');
-  });
-});

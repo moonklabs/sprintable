@@ -73,3 +73,43 @@ describe('DialogContent — 닫기 버튼 sr-only 접근 이름(story 3436)', ()
     expect(closeBtn?.textContent).not.toContain('Close');
   });
 });
+
+// story #4210(유나 390 실측) — 공용 다이얼로그 390 규격(#4202가 두 다이얼로그에만 국소로 넣던 것을 공용으로 옮김):
+// ① 내용 그리드 열 = minmax(0,1fr) — 넓은 자식(레시피 상세 스테퍼 1040px)이 다이얼로그를 가로로 넘기지 않게.
+// ② 닫기(X)가 떠 있을 때만 제목 오른쪽을 비운다(pr-8) — 긴 제목이 X 밑으로 들어가지 않게.
+describe('DialogContent·DialogTitle — 390 규격(story #4210)', () => {
+  async function render(showCloseButton: boolean) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(
+        <Dialog open>
+          <DialogContent showCloseButton={showCloseButton}>
+            <DialogTitle>긴 제목 Video production (Reels, Shorts) — Apply to project</DialogTitle>
+          </DialogContent>
+        </Dialog>,
+      ));
+    });
+    const popup = document.body.querySelector('[data-slot="dialog-content"]') as HTMLElement;
+    const title = document.body.querySelector('[data-slot="dialog-title"]') as HTMLElement;
+    return { popup, title };
+  }
+
+  it('내용 그리드 열이 minmax(0,1fr) — 모든 다이얼로그에 공통', async () => {
+    const { popup } = await render(true);
+    expect(popup.className).toContain('grid-cols-[minmax(0,1fr)]');
+  });
+
+  it('닫기 버튼이 있으면 팝업에 data-close-button 표지 · 제목이 그 표지로 pr-8', async () => {
+    const { popup, title } = await render(true);
+    expect(popup.hasAttribute('data-close-button')).toBe(true);
+    expect(popup.className).toContain('group/dialog');
+    expect(title.className).toContain('group-data-[close-button]/dialog:pr-8');
+  });
+
+  it('닫기 버튼이 없으면 표지도 없다(제목 오른쪽을 비우지 않음)', async () => {
+    const { popup } = await render(false);
+    expect(popup.hasAttribute('data-close-button')).toBe(false);
+  });
+});
