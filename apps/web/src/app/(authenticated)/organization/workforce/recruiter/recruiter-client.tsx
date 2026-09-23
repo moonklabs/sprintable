@@ -395,7 +395,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [equipError, setEquipError] = useState<string | null>(null);
   const [equipResult, setEquipResult] = useState<{
     name: string;
-    mcp_config: Record<string, unknown> | null;
+    mcp_config: McpConfigBundle | null;
     api_key: string | null;
   } | null>(null);
   const [equipMcpCopied, setEquipMcpCopied] = useState(false);
@@ -426,7 +426,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { id?: string; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+          data?: { id?: string; mcp_config?: McpConfigBundle | null; api_key?: string | null };
         };
         const agentId = json.data?.id;
         if (agentId) {
@@ -463,7 +463,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   const handleCopyEquipMcp = async () => {
     if (!equipResult?.mcp_config) return;
-    const result = await copyTextSafely(JSON.stringify(equipResult.mcp_config, null, 2));
+    const result = await copyTextSafely(buildMcpConfigText(equipResult.mcp_config, runtime));
     if (!result.ok) {
       setEquipMcpCopyFailed(true);
       setTimeout(() => setEquipMcpCopyFailed(false), 3000);
@@ -1259,14 +1259,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 {equipResult.mcp_config ? (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-foreground">{t('equipMcpConfigLabel')}</p>
+                      {/* story #4180(카디르 QA CHANGES) — equip-skip도 같은 renderRuntimePicker를
+                          렌더해(#2433 B) Codex 선택이 가능하다 — STEP4와 같은 파일명·포맷 분기. */}
+                      <p className="text-xs font-medium text-foreground">
+                        {t('equipMcpConfigLabel')} <span className="font-mono font-normal text-foreground">{mcpConfigFilename}</span>
+                      </p>
                       <Button variant="glass" size="sm" onClick={() => void handleCopyEquipMcp()}>
                         {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>
                     </div>
                     {equipMcpCopyFailed ? <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p> : null}
+                    {runtime === 'codex' && (
+                      <p className="text-[11px] text-foreground">
+                        {t('codexConfigTomlPathNote', { path: '.codex/config.toml', globalPath: '~/.codex/config.toml' })}
+                      </p>
+                    )}
                     <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                      {JSON.stringify(equipResult.mcp_config, null, 2)}
+                      {buildMcpConfigText(equipResult.mcp_config, runtime)}
                     </pre>
                   </div>
                 ) : null}
