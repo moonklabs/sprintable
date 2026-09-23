@@ -18,7 +18,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags } from '@/lib/nav-v3-destinations';
+import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, slugForEffectiveProject } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -438,9 +438,11 @@ export function DashboardShell({
   // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
-  // currentProjectSlug 는 server prop(me.project_id) 기준 — effectiveProjectId 가 탭 SSOT로
-  // 갈렸으면 살짝 stale 할 수 있으나, "문서로 가기" 바로가기 링크 용도라 무해(틀려도 미들웨어
-  // 리다이렉트 안전망이 받는다). 완전 동기화는 이 슬라이스 스코프 밖(over-engineering).
+  // story #4211(까디르 QA) — currentProjectSlug 는 server prop(me.project_id) 기준이라 탭 effective 프로젝트와 갈리는 창
+  // (flat 경로 프로젝트 전환 → router.refresh 전)이 있다. 그 창에 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게
+  // slug는 effective 프로젝트와 같을 때만 싣는다(다르면 undefined → bare 안전망). 이 값 하나를 컨텍스트(탭바·⌘K 등)와
+  // 사이드바(ShellBody→AppSidebar) 둘 다에 넘긴다 — 한쪽만 막으면 또 갈린다.
+  const scopedProjectSlug = slugForEffectiveProject(projectId, currentProjectSlug, effectiveProjectId);
 
   // story #2007(perf·서버부하): GNB 채팅 unread 총합을 AppSidebar+MobileTabBar가 각자
   // useChatUnreadTotal()을 호출해 SSE(EventSource) 연결을 독립적으로 2개 열던 것을 한
@@ -456,7 +458,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -476,7 +478,7 @@ export function DashboardShell({
               orgMemberships={orgMemberships}
               projectId={effectiveProjectId}
               projectMemberships={projectMemberships}
-              currentProjectSlug={currentProjectSlug}
+              currentProjectSlug={scopedProjectSlug}
               userName={userName}
               navV3Flags={navV3Flags}
             >

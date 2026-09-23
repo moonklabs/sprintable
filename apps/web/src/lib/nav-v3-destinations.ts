@@ -106,3 +106,16 @@ export function resolveConnectRulesHref(flags: NavV3Flags | undefined, legacyFal
 export function scopedResourceHref(resource: string, orgSlug: string | undefined, projectSlug: string | undefined): string {
   return orgSlug && projectSlug ? `/${orgSlug}/${projectSlug}/${resource}` : `/${resource}`;
 }
+
+/**
+ * story #4211(까디르 QA) — 직접 경로에 쓸 project slug는 **이 탭의 effective 프로젝트**의 것일 때만. 서버가 준 slug
+ * (`currentProjectSlug`)는 me.project_id 기준이라, flat 경로에서 프로젝트를 바꾸면(`?p=B` push → `/api/switch-project`
+ * → `router.refresh()`) refresh가 새 서버 prop을 가져오기 전까지 A의 slug로 남는다 — 그 창에 탭바·사이드바가
+ * `/{ws}/A/…`로 **명시적으로 옛 프로젝트**를 가리켰다(bare였다면 쿠키가 이미 B라 B로 풀렸다). 탭 effective 프로젝트와
+ * slug의 프로젝트가 다르면 slug를 버려 bare(서버 307 no-store 해소)로 — 탭바·사이드바가 같은 값(대시보드 셸 한 곳)을 받는다.
+ */
+export function slugForEffectiveProject(
+  serverProjectId: string | undefined, serverProjectSlug: string | undefined, effectiveProjectId: string | undefined,
+): string | undefined {
+  return serverProjectSlug && serverProjectId && effectiveProjectId === serverProjectId ? serverProjectSlug : undefined;
+}

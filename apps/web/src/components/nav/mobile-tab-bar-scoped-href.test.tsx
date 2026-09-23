@@ -79,3 +79,34 @@ describe('MobileTabBar — 탭 href에 세션 의존 flat 경로 0(story #4211 A
     for (const href of list) expect(href).not.toContain('undefined');
   });
 });
+
+// story #4211(까디르 QA) — flat 경로 프로젝트 전환(`?p=B` push → /api/switch-project → router.refresh) 창에서 서버 slug는
+// 아직 A라, 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게 slug는 탭 effective 프로젝트와 같을 때만 싣는다.
+describe('slugForEffectiveProject — 전환 창에서 옛 프로젝트 직접 경로 0(story #4211 까디르 QA)', () => {
+  it('전환 창(effective B · 서버 slug A) → slug 없음 → 탭바·사이드바 href 둘 다 bare', async () => {
+    const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
+    const slug = slugForEffectiveProject('proj-a', 'alpha', 'proj-b');
+    expect(slug).toBeUndefined();
+    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/flow');
+  });
+
+  it('refresh 뒤(서버 slug B · effective B) → /{org}/{B}/…', async () => {
+    const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
+    const slug = slugForEffectiveProject('proj-b', 'beta', 'proj-b');
+    expect(slug).toBe('beta');
+    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/acme/beta/flow');
+  });
+
+  it('배선 핀 — 대시보드 셸이 이 값 하나를 컨텍스트(탭바)와 사이드바(ShellBody) 둘 다에 넘긴다', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, '..', '..', 'app', 'dashboard', 'dashboard-shell.tsx'), 'utf8');
+    expect(src).toMatch(/const scopedProjectSlug = slugForEffectiveProject\(projectId, currentProjectSlug, effectiveProjectId\);/);
+    expect(src).toMatch(/currentProjectSlug: scopedProjectSlug,/);
+    expect(src).toMatch(/currentProjectSlug=\{scopedProjectSlug\}/);
+    // 원시 서버 slug를 그대로 넘기는 자리가 남아 있으면 안 된다(한쪽만 막으면 갈린다). 남는 1곳은 ShellBody가 **받은**
+    // (이미 걸러진) prop을 AppSidebar로 그대로 넘기는 통로뿐이다.
+    expect(src.match(/currentProjectSlug=\{currentProjectSlug\}/g) ?? []).toHaveLength(1);
+    expect(src).not.toMatch(/projectName: effectiveProjectName, currentProjectSlug, /);
+  });
+});
