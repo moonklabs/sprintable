@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { orderedRecipeRoles, recipeConnectionTargets, roleActorKind, stagesWithGate, type RecipeConnectionTarget } from '@/lib/recipe-role-slots';
+import { orderedRecipeRoles, recipeConnectionTargets, roleActorKind, stagesWithGate } from '@/lib/recipe-role-slots';
 import { stageRoleLabel } from '@/lib/stage-role';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §1) 구현. AC1: 마케팅 레시피
@@ -22,7 +22,9 @@ function stageCount(def: EventDefinitionResponse): number {
 
 // story #4173(유나 디자인 앵커 2026-09-23) — 카드가 «필요한 역할»·«필요한 연결»을 이름으로
 // 보여준다. 역할 순서는 적용 다이얼로그 자리 순서와 같은 함수(orderedRecipeRoles).
-const CONNECTION_LABEL_KEY: Record<RecipeConnectionTarget, string> = {
+// 타입을 Record<string, string>으로 둔다 — verify-no-unused-i18n-keys 가드는 정확히 이 모양의
+// 리터럴 테이블 값만 «읽힌 키»로 본다. target이 늘면 이 표 한 곳만 고친다.
+const CONNECTION_LABEL_KEY: Record<string, string> = {
   channel_connection: 'recipeCardConnectionChannel',
   generation_connector: 'recipeCardConnectionGenerator',
 };
@@ -37,7 +39,7 @@ function roleNames(def: EventDefinitionResponse, t: (key: string, values?: Recor
 
 function connectionNames(def: EventDefinitionResponse, t: (key: string, values?: Record<string, string>) => string): string[] {
   return recipeConnectionTargets(def.stage_metadata).map((c) => {
-    const name = t(CONNECTION_LABEL_KEY[c.target]);
+    const name = t(CONNECTION_LABEL_KEY[c.target]!);
     return c.optional ? t('recipeCardConnectionOptional', { name }) : name;
   });
 }

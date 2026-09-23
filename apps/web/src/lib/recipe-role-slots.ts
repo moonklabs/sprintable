@@ -149,8 +149,6 @@ export const RECIPE_CONNECTION_TARGETS = [
   { target: 'generation_connector', optional: true },
 ] as const;
 
-export type RecipeConnectionTarget = (typeof RECIPE_CONNECTION_TARGETS)[number]['target'];
-
 /** 정의가 요구하는 조직 연결 종류(표 순서). agent·미지정 target은 연결이 아니라 뺀다. */
 export function recipeConnectionTargets(stageMetadata: RecipeStageMetadata): (typeof RECIPE_CONNECTION_TARGETS)[number][] {
   const declared = new Set(Object.values(stageMetadata).map((m) => m?.capability?.target).filter(Boolean));

@@ -800,6 +800,20 @@ describe('AC1 — 영상 레시피(실 seed) 적용 회귀 0(story #4173)', () =
   });
 });
 
+// 유나 design CHANGES(PR #4547) — 390에서 «크리에/이터»·«없/어요»처럼 낱말 중간이 잘리지 않게
+// 자리 텍스트 칸 전체에 break-keep(카드와 같은 이유).
+describe('자리 텍스트 줄바꿈(story #4173 유나 design)', () => {
+  it('모든 자리의 텍스트 칸이 break-keep이다', async () => {
+    stubAll();
+    await mountDialog(VIDEO_PRODUCTION_RECIPE);
+    const slots = [...document.body.querySelectorAll('[data-role]')];
+    expect(slots).toHaveLength(4);
+    for (const slot of slots) {
+      expect(slot.firstElementChild?.className, slot.getAttribute('data-role') ?? '').toContain('break-keep');
+    }
+  });
+});
+
 describe('AC2 — 역할 구성이 다른 정의는 그 자리대로 그려지고 제출된다(story #4173)', () => {
   const BLOG: EventDefinitionResponse & { id: string } = {
     id: 'blog', key: 'preset.marketing.blog_post', org_id: null, name: '블로그 글', description: null,

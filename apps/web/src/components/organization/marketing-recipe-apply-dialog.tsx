@@ -226,11 +226,11 @@ export function MarketingRecipeApplyDialog({
       const approvers = Array.from(new Set(slot.gateApprovers.map((a) => gateApproverLabel(t, a))));
       return (
         <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-director" data-role={slot.role}>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 break-keep">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               {title} <Badge variant="secondary">{t('recipeApplyV2DirectorBadge')}</Badge>
             </div>
-            <p className="mt-0.5 break-keep text-xs text-muted-foreground">{stageList(slot)}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
           </div>
           <div className="shrink-0 text-xs text-muted-foreground" data-testid="director-approver">
             {approvers.length > 0 ? approvers.join(', ') : '—'}
@@ -242,11 +242,11 @@ export function MarketingRecipeApplyDialog({
       const members = membersFor(slot);
       return (
         <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-creator" data-role={slot.role}>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 break-keep">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               {title} <Badge variant="secondary">{slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge')}</Badge>
             </div>
-            <p className="mt-0.5 break-keep text-xs text-muted-foreground">{stageList(slot)}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
           </div>
           <select
@@ -266,7 +266,7 @@ export function MarketingRecipeApplyDialog({
     if (slot.kind === 'compute') {
       return (
         <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-compute" data-role={slot.role}>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 break-keep">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               {title} <Badge variant="secondary">{t('recipeApplyV2ComputeBadge')}</Badge>
             </div>
@@ -306,7 +306,7 @@ export function MarketingRecipeApplyDialog({
     }
     return (
       <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-publisher" data-role={slot.role}>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 break-keep">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
             {title} <Badge variant="secondary">{t('recipeApplyV2PublisherBadge')}</Badge>
           </div>
