@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
+import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
@@ -13,12 +13,14 @@ import {
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { clearReopenMarker, reopenCurrentUrlOnce, retryReopenCurrentUrl } from '@/lib/hard-reload';
+import { RouteErrorState } from '@/components/ui/route-error-state';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, navProjectSlug } from '@/lib/nav-v3-destinations';
+import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProject, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -37,6 +39,9 @@ import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 export interface DashboardProjectOption {
   projectId: string;
   projectName: string;
+  // story #4217 — 현재 URL `/{ws}/{proj}`를 id로 푸는 키(`/me/memberships` 가산 필드 · 옛 응답이면 없음).
+  projectSlug?: string | null;
+  orgId?: string | null;
 }
 
 interface DashboardContext {
@@ -51,6 +56,8 @@ interface DashboardContext {
   // story a539c649 S2: 현재 project 의 slug(사이드바/⌘K 가 /{ws}/{proj}/docs 직접 path 를
   // 만드는 데만 사용 — /me/memberships 는 slug 를 안 실어보내 여기 단건 조회로 보강했다).
   currentProjectSlug?: string;
+  // story #4217 — 현재 URL의 프로젝트를 못 풀어 전체 이동 대기·오류 상태. 탭바가 그 경로를 활성으로 표시하지 않게.
+  projectPathUnresolved?: boolean;
   userName?: string;
   role?: string;
   // story #2103 — BE가 여러 write action을 "휴먼 멤버만 가능"으로 명시 거부한다(게이트/HITL
@@ -119,6 +126,8 @@ interface DashboardShellProps extends DashboardContext {
   // 이 값을 우선한다. 경로 세그먼트가 없는 flat 라우트(/glance 등)에선 undefined.
   pathOrgId?: string;
   pathProjectId?: string;
+  // story #4217 — 서버가 pathProjectId를 해석한 요청 경로(x-pathname). 클라이언트 이동은 이 값을 안 바꾼다(공유 레이아웃).
+  serverResolvedPath?: string;
   // story #2545(카디르 라이브 재QA) — JWT `app_metadata.org_id` 클레임을 직접 읽은 값
   // (getServerSession, 신규 fetch 0). #2544가 "top-level org_id"라 부른 바로 그 필드
   // (backend/app/dependencies/auth.py의 `jwt_org_id = auth.claims.get("app_metadata",
@@ -304,6 +313,8 @@ function useProjectSsot(
   serverProjectId: string | undefined,
   memberships: DashboardProjectOption[],
   pathProjectId: string | undefined,
+  // story #4217 — 경로 프로젝트를 못 풀어 전체 문서 이동을 기다리는 중이면 확정 보류(undefined · `?p=`·탭 저장 안 씀).
+  suspended = false,
 ): string | undefined {
   const router = useRouter();
   const pathname = usePathname();
@@ -323,7 +334,7 @@ function useProjectSsot(
 
   // story #2093 — pathProjectId(경로 `[ws]/[proj]` 서버측 resolve 결과)가 최우선. `?p=`는
   // 경로 세그먼트가 없는 flat 라우트에서만 실질적인 SSOT로 남는다(project-context-client.ts 참고).
-  const effectiveProjectId = resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds, hydrated, pathProjectId);
+  const effectiveProjectId = suspended ? undefined : resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds, hydrated, pathProjectId);
 
   // ref 동기화 + 인터셉터 설치를 **렌더 단계**에서 — effect(자식→부모 순)에 두면 부모(DashboardShell)
   // 설치 effect 가 자식(app-sidebar·use-team-presence·kanban-board) 초기 fetch *후* 실행돼 첫 로드
@@ -360,6 +371,7 @@ export function DashboardShell({
   orgMemberships,
   pathOrgId,
   pathProjectId,
+  serverResolvedPath,
   jwtOrgId,
   navV3Flags,
   initialActivationComplete,
@@ -435,17 +447,46 @@ export function DashboardShell({
       }
     })();
   }, [pathOrgId, actualTokenOrgId, router]);
-  // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
-  const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
+  // story #4217 — 경로 프로젝트는 서버 prop이 아니라 **현재 pathname**에서(클라이언트 이동 뒤에도 최신 · lib 주석 참고).
+  const shellPathname = usePathname();
+  const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
+  const livePath = livePathProject({
+    pathname: shellPathname, currentOrgSlug, currentOrgId: effectiveOrgId, memberships: projectMemberships,
+    serverPathProjectId: pathProjectId, serverPathname: serverResolvedPath,
+  });
+  // 워크스페이스 경로인데 스냅샷으로 못 풂 → 현재 주소를 전체 문서 이동으로(서버가 해석 · 같은 주소 1회만). 그 전(과 1회 뒤에도
+  // 못 풀면 계속) 프로젝트 확정 보류(`?p=`·탭 값·세션으로 떨어지지 않음 · 인터셉터 ref 비움 · 페이지 미마운트 = 옛 프로젝트 요청 0).
+  const pathUnresolved = livePath.kind === 'unresolved';
+  const tCommon = useTranslations('common');
+  // 같은 주소 전체 이동은 1회(lib/hard-reload) — 이미 한 번 다시 열었는데도 못 풀면 빈 화면이 아니라 오류 상태 + 다시 시도.
+  const [reopenSpentFor, setReopenSpentFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pathUnresolved) { clearReopenMarker(); return; }
+    if (!reopenCurrentUrlOnce()) startTransition(() => setReopenSpentFor(shellPathname));
+  }, [pathUnresolved, shellPathname]);
+  const retryUnresolvedPath = useCallback(() => { retryReopenCurrentUrl(); }, []);
+  // R2: URL `?p=` = flat 라우트의 탭별 SSOT. 경로 프로젝트(위 livePath)가 있으면 그게 최우선.
+  const effectiveProjectId = useProjectSsot(projectId, projectMemberships, livePath.kind === 'scoped' ? livePath.projectId : undefined, pathUnresolved);
+  // story #4217 — 인터셉터 ref(프로젝트·org)의 수명을 셸에 묶는다. 셸에서 셸 밖 화면(v3 /today·/chat·/connect-rules)으로
+  // 클라이언트 이동하면 셸은 언마운트되는데 ref를 안 비워, 그 화면의 API 요청에 옛 프로젝트·org 헤더가 계속 실렸다(로컬 실측
+  // 7~18건/화면 · 하드 로드는 0). 렌더 단계 설정(첫 자식 fetch 커버)은 그대로 두고, layout effect로 같은 값을 다시 설정 +
+  // 언마운트 시 비운다 — layout effect는 자식 passive effect(fetch)보다 먼저 끝나 재렌더·StrictMode 재실행에도 공백 0.
+  useLayoutEffect(() => {
+    setEffectiveProjectId(effectiveProjectId);
+    setEffectiveOrgId(pathUnresolved ? undefined : effectiveOrgId);
+    return () => {
+      setEffectiveProjectId(undefined);
+      setEffectiveOrgId(undefined);
+    };
+  }, [effectiveProjectId, effectiveOrgId, pathUnresolved]);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
   // story #4211(까디르 QA) — currentProjectSlug 는 server prop(me.project_id) 기준이라 탭 effective 프로젝트와 갈리는 창
   // (flat 경로 프로젝트 전환 → router.refresh 전)이 있다. 그 창에 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게
   // slug는 effective 프로젝트와 같을 때만 싣는다(다르면 undefined → bare 안전망). 이 값 하나를 컨텍스트(탭바·⌘K 등)와
   // 사이드바(ShellBody→AppSidebar) 둘 다에 넘긴다 — 한쪽만 막으면 또 갈린다.
   // scoped 경로에선 서버 prop 대신 현재 URL의 프로젝트 조각(클라이언트 이동 뒤에도 최신) — flat 경로만 위 가드로.
-  const shellPathname = usePathname();
-  const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
-  const scopedProjectSlug = navProjectSlug({
+  // 못 푼 경로(전체 이동 대기·오류 상태)면 탭바·사이드바 링크를 그 프로젝트로 다시 보내지 않는다 — bare(유나 QA).
+  const scopedProjectSlug = pathUnresolved ? undefined : navProjectSlug({
     pathname: shellPathname, currentOrgSlug,
     pathProjectId, sessionProjectId: projectId, slug: currentProjectSlug, effectiveProjectId,
   });
@@ -464,7 +505,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -488,7 +529,16 @@ export function DashboardShell({
               userName={userName}
               navV3Flags={navV3Flags}
             >
-              {children}
+              {pathUnresolved
+                ? (reopenSpentFor === shellPathname ? (
+                  <div className="px-4">
+                    <RouteErrorState
+                      compact breakKeep reset={retryUnresolvedPath}
+                      title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
+                    />
+                  </div>
+                ) : null)
+                : children}
             </ShellBody>
             {/* story #3260 — SidebarProvider 안(ShellBody와 형제)에 마운트해야
                 useSidebar()로 실 사이드바 폭을 읽어 데스크톱 겹침을 피할 수 있다(2차 finding,

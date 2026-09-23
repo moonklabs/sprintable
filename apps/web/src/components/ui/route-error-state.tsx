@@ -7,9 +7,12 @@ interface RouteErrorStateProps {
   error?: Error;
   title?: string;
   description?: string;
+  /** 보조 링크 목적지. 없으면 보조 링크를 안 그린다(story #4217 — 예전 기본값 `/login`은 목적지가 다른 자리에서 거짓 라벨). */
   secondaryHref?: string;
   secondaryLabel?: string;
   compact?: boolean;
+  /** 한국어 낱말 단위 줄바꿈(`break-keep`) — 기본 꺼짐(기존 호출부 무변). */
+  breakKeep?: boolean;
 }
 
 export function RouteErrorState({
@@ -17,9 +20,10 @@ export function RouteErrorState({
   error,
   title,
   description,
-  secondaryHref = '/login',
+  secondaryHref,
   secondaryLabel,
   compact = false,
+  breakKeep = false,
 }: RouteErrorStateProps) {
   const t = useTranslations('common');
 
@@ -31,10 +35,10 @@ export function RouteErrorState({
           이미 있음)만으로 경계. */}
       <div className={`space-y-4 rounded-lg bg-card text-center ${compact ? 'w-full max-w-lg border p-6' : 'w-full max-w-sm border p-8'}`}>
         <div className="space-y-2">
-          <p className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-foreground`}>
+          <p className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-foreground${breakKeep ? ' break-keep' : ''}`}>
             {title ?? t('error')}
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className={`text-sm text-muted-foreground${breakKeep ? ' break-keep' : ''}`}>
             {description ?? t('errorDescription')}
           </p>
           {error?.message ? <p className="text-xs text-muted-foreground">{error.message}</p> : null}
@@ -46,12 +50,14 @@ export function RouteErrorState({
           >
             {t('retry')}
           </button>
-          <a
-            href={secondaryHref}
-            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/50"
-          >
-            {secondaryLabel ?? t('goToLogin')}
-          </a>
+          {secondaryHref ? (
+            <a
+              href={secondaryHref}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/50"
+            >
+              {secondaryLabel ?? t('goToLogin')}
+            </a>
+          ) : null}
         </div>
       </div>
     </div>

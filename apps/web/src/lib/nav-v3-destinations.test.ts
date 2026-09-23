@@ -114,3 +114,58 @@ describe('resolveConnectRulesHref — story #4017 AC3', () => {
     expect(resolveConnectRulesHref(flags, '/organization/content-rules')).toBe('/connect-rules');
   });
 });
+
+describe('livePathProject — 셸 경로 프로젝트는 현재 pathname에서, 세 갈래(story #4217)', () => {
+  const base = { currentOrgSlug: 'repro', currentOrgId: 'org-r', serverPathProjectId: 'b', serverPathname: '/repro/beta/flow' };
+  const memberships = [
+    { projectId: 'b', projectSlug: 'beta', orgId: 'org-r' },
+    { projectId: 'c', projectSlug: 'charlie', orgId: 'org-r' },
+    { projectId: 'x-c', projectSlug: 'charlie', orgId: 'org-x' },
+  ];
+  it('scoped → 멤버십 org + slug로 id(서버 prop이 옛 B여도 URL의 C · 다른 org의 같은 slug 무시)', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships })).toEqual({ kind: 'scoped', projectId: 'c' });
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships: [memberships[2]!, memberships[1]!] })).toEqual({ kind: 'scoped', projectId: 'c' });
+  });
+  it('서버가 이미 푼 경로(같은 /{ws}/{proj})면 그 값 우선 — 하위 경로가 달라도', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/beta/docs', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
+  });
+  it('⭐org 멤버십 조회 실패(현재 org slug 없음)여도 서버가 푼 경로는 scoped — 새로고침 루프 0(PO 무한 새로고침 위험)', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, currentOrgSlug: undefined, pathname: '/repro/beta/flow', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
+    // 서버가 안 푼 경로면 여전히 unresolved(→ 1회 전체 이동).
+    expect(livePathProject({ ...base, currentOrgSlug: undefined, pathname: '/repro/charlie/flow', memberships })).toEqual({ kind: 'unresolved' });
+  });
+  it('워크스페이스 경로인데 못 풂(멤버십에 없음 · 다른 org 경로) → unresolved', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/delta/flow', memberships })).toEqual({ kind: 'unresolved' });
+    expect(livePathProject({ ...base, pathname: '/other/charlie/flow', memberships })).toEqual({ kind: 'unresolved' });
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships: [memberships[2]!] })).toEqual({ kind: 'unresolved' });
+  });
+  it('⭐`/repro/beta → /other/beta` 클라 이동(같은 project 조각 · 다른 org) → 옛 서버 값 불신 → unresolved', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/other/beta/flow', memberships })).toEqual({ kind: 'unresolved' });
+  });
+  it('⭐퍼센트 인코딩 경로(비ASCII slug) → 디코딩 뒤 비교해 scoped(서버 값·멤버십 둘 다)', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    const enc = `/repro/${encodeURIComponent('장부')}/flow`;
+    expect(livePathProject({ ...base, pathname: enc, serverPathname: enc, serverPathProjectId: 'jb', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'jb' });
+    expect(livePathProject({ ...base, pathname: enc, memberships: [{ projectId: 'jb', projectSlug: '장부', orgId: 'org-r' }] })).toEqual({ kind: 'scoped', projectId: 'jb' });
+  });
+  it('서버 경로에 쿼리·해시가 붙어도(`x-pathname` = pathname + search) 조각 비교는 경로만', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/beta', serverPathname: '/repro/beta?x=1', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
+    expect(livePathProject({ ...base, pathname: '/repro/beta#h', serverPathname: '/repro/beta', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
+  });
+  it('flat·예약 첫 조각 → flat(옛 서버 pathProjectId를 쓰지 않는다)', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    for (const pathname of ['/flow', '/gates/123', '/']) {
+      expect(livePathProject({ ...base, pathname, memberships }), pathname).toEqual({ kind: 'flat' });
+    }
+  });
+  it('멤버십 orgId 없는 옛 응답 → 현재 org로 간주', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships: [{ projectId: 'c', projectSlug: 'charlie' }] })).toEqual({ kind: 'scoped', projectId: 'c' });
+  });
+});

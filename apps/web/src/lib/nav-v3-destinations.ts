@@ -151,3 +151,47 @@ export function navProjectSlug(args: {
 }): string | undefined {
   return projectSlugFromScopedPath(args.pathname, args.currentOrgSlug) ?? slugForEffectiveProject(args);
 }
+
+/**
+ * story #4217(critical · 데이터 결함) — 셸의 «경로 프로젝트»를 **현재 pathname**에서 한 곳 계산한다. `(authenticated)` 레이아웃은
+ * 공유 레이아웃이라 클라이언트 이동(`/{ws}/B/flow` → `/{ws}/C/flow` · 사이드바 Link·전환기 `next`)에서 다시 렌더되지 않아 서버
+ * prop `pathProjectId`가 B로 남았고, 그 값이 `?p=`보다 우선이라 effective가 B → 셸이 `?p=B`를 써 넣고 인터셉터가 C 화면의 API
+ * 요청에 `X-Project-Id: B`를 실었다(로컬 실측: C 화면 요청 23/24가 B · 칸반 모양 쓰기가 B 프로젝트에 저장).
+ * 세 갈래(PO 결정 — «flat»과 «scoped인데 못 풂»을 한 값으로 뭉개면 못 풀 때 `?p=`·세션(B)으로 조용히 떨어진다):
+ * - `flat`: 워크스페이스 경로가 아님(조각 2개 미만 · 첫 조각이 예약 목록) — 서버 `pathProjectId`는 이전 scoped 화면의 옛 값일 수
+ *   있어 쓰지 않는다(`?p=`·탭 값·세션 순 — 하드 로드와 같은 결과).
+ * - `scoped`: ① **서버가 이미 푼 경로**(서버가 pathProjectId를 해석한 요청 경로와 org 조각·project 조각이 **둘 다** 같음)면 그 id
+ *   — org 검사보다 먼저(org 목록 조회가 실패해도 새로고침으로 연 scoped 경로가 되풀이 이동하지 않게 · PO 무한 새로고침 위험).
+ *   두 조각을 다 봐서 `/org-a/x → /org-b/x` 클라이언트 이동에선 옛 org A 서버 값을 받아들이지 않는다. ② 아니면 첫 조각 = 현재
+ *   org slug이고 멤버십에서 **org + slug**로(slug는 org 안에서만 유일 — slug만 보면 다른 org의 같은 slug 프로젝트를 고른다).
+ * 조각은 퍼센트 디코딩 뒤 비교(Next `usePathname`은 인코딩된 경로 — 비ASCII slug면 같은 경로도 달라 보인다).
+ * - `unresolved`: 워크스페이스 경로인데 못 풂(레이아웃 뒤 생긴 프로젝트·새 권한·slug 변경 · 다른 org 경로로 클라이언트 이동) —
+ *   셸이 현재 주소를 전체 문서 이동으로 다시 연다(서버가 해석). 그 전까지 프로젝트·org 헤더 0 · 페이지 미마운트.
+ */
+function decodedSegments(pathname: string | null | undefined): string[] {
+  // 쿼리·해시는 조각이 아니다 — 서버 경로(x-pathname)는 `pathname + search`라 `/org/proj?x=1`의 두 번째 조각이 `proj?x=1`이 됐다.
+  return (pathname ?? '').split(/[?#]/)[0]!.split('/').filter(Boolean).map((seg) => {
+    try { return decodeURIComponent(seg); } catch { return seg; }
+  });
+}
+
+export type LivePathProject = { kind: 'flat' } | { kind: 'scoped'; projectId: string } | { kind: 'unresolved' };
+
+export function livePathProject(args: {
+  pathname: string | null | undefined; currentOrgSlug: string | undefined; currentOrgId: string | undefined;
+  memberships: ReadonlyArray<{ projectId: string; projectSlug?: string | null; orgId?: string | null }>;
+  serverPathProjectId: string | undefined;
+  /** 서버(레이아웃)가 pathProjectId를 해석한 요청 경로(x-pathname). 클라이언트 이동은 이 값을 안 바꾼다. */
+  serverPathname: string | null | undefined;
+}): LivePathProject {
+  const segments = decodedSegments(args.pathname);
+  if (segments.length < 2 || !looksLikeWorkspaceSegment(segments[0])) return { kind: 'flat' };
+  const [orgSegment, projectSegment] = segments as [string, string];
+  const serverSegments = decodedSegments(args.serverPathname);
+  if (args.serverPathProjectId && serverSegments[0] === orgSegment && serverSegments[1] === projectSegment) {
+    return { kind: 'scoped', projectId: args.serverPathProjectId };
+  }
+  if (!args.currentOrgSlug || orgSegment !== args.currentOrgSlug) return { kind: 'unresolved' };
+  const hit = args.memberships.find((m) => m.projectSlug === projectSegment && (m.orgId ?? args.currentOrgId) === args.currentOrgId);
+  return hit ? { kind: 'scoped', projectId: hit.projectId } : { kind: 'unresolved' };
+}

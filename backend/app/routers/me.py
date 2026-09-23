@@ -293,7 +293,7 @@ async def get_my_memberships(
     rows = await session.execute(
         text(
             """
-            SELECT DISTINCT p.id::text AS project_id, p.name AS project_name
+            SELECT DISTINCT p.id::text AS project_id, p.name AS project_name, p.slug AS project_slug, p.org_id::text AS org_id
             FROM projects p
             WHERE p.deleted_at IS NULL
               AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)
@@ -331,8 +331,11 @@ async def get_my_memberships(
         ),
         {"user_id": user_id_param, "org_id": org_id_param},
     )
+    # story #4217 — projectSlug·orgId(가산 필드): 셸이 클라이언트 이동 뒤 현재 URL `/{ws}/{proj}`의 프로젝트를 이 목록에서
+    # (org + slug)→id로 풀어 현재 프로젝트로 쓴다(공유 레이아웃은 클라이언트 이동에서 다시 렌더되지 않아 서버 prop이 옛 값).
+    # slug는 org 안에서만 유일하므로 orgId를 같이 준다.
     return [
-        {"projectId": row.project_id, "projectName": row.project_name}
+        {"projectId": row.project_id, "projectName": row.project_name, "projectSlug": row.project_slug, "orgId": row.org_id}
         for row in rows
     ]
 
