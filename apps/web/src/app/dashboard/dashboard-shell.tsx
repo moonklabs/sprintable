@@ -321,7 +321,6 @@ function useProjectSsot(
   // story #4217 — 경로 프로젝트를 못 풀어 전체 문서 이동을 기다리는 중이면 확정 보류(undefined · `?p=`·탭 저장 안 씀).
   suspended = false,
 ): string | undefined {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get('p');
@@ -333,7 +332,7 @@ function useProjectSsot(
   // effectiveProjectId 값이 바뀔 수 있다. 그 값이 서버 렌더 결과와 다르면 하이드레이션 직후
   // useEffect가 즉시 다른 URL로 replace를 걸어 자식(GlanceBoard 등) subtree를 다시 흔든다.
   // hydrated로 한 틱 미뤄 첫 렌더(서버+첫 클라이언트 둘 다)를 항상 동일하게 만들면 이 잦은
-  // 재-replace 근원 하나가 사라진다 — router.replace 자체(2번째 소스)는 여전히 필요하면 실행.
+  // 재-replace 근원 하나가 사라진다 — `?p=` 정규화 자체(2번째 소스)는 여전히 필요하면 실행(story #4226부터 서버 왕복 없는 history).
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { startTransition(() => setHydrated(true)); }, []);
 
@@ -349,15 +348,23 @@ function useProjectSsot(
   installProjectHeaderInterceptor();
 
   // 탭별 backstop 영속 + URL 정규화(`?p=` 누락/불일치 시 effective 로 replace → 링크 드롭에도 stale 방지).
+  // story #4226(E-MOBILE-SPEED) — `?p=`는 이 셸(클라)만 읽는다(서버 컴포넌트·proxy 소비 0). 그런데 router.replace는 현재 페이지 RSC를
+  // 다시 받아 왔다: 착지마다 같은 페이지 RSC 1건 + 라우터 트리가 바뀌어 탭·링크 프리패치 한 바퀴 더, 탭 이동마다 같은 ms에 RSC 2건
+  // (로컬 prod 빌드 · 요청별 history/헤더 실측). 주소창만 고치면 되므로 네이티브 history.replaceState — Next(14.1+)가 이를
+  // useSearchParams/usePathname에 동기화하고 서버 왕복은 없다.
+  // ⛔한 틱 미룬다: Next는 그 동기화 패치(history.replaceState 가로채기 → 내부 상태 복사 + 라우터 반영)를 AppRouter의 useEffect에서
+  // 설치하는데, 부모 effect는 자식(이 셸) effect보다 늦게 돈다. 하이드레이션 커밋에서 바로 부르면 패치 전이라 history 항목이 Next
+  // 내부 상태 없이 남고(뒤로 가기로 이 항목에 오면 Next popstate가 무시 → 주소만 바뀌고 화면은 그대로 · 로컬 실측) 라우터도 `?p=`를 모른다.
   useEffect(() => {
     if (!effectiveProjectId || typeof window === 'undefined') return;
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, effectiveProjectId);
-    if (urlProjectId !== effectiveProjectId) {
-      const sp = new URLSearchParams(Array.from(searchParams.entries()));
-      sp.set('p', effectiveProjectId);
-      router.replace(`${pathname}?${sp.toString()}`);
-    }
-  }, [effectiveProjectId, urlProjectId, pathname, searchParams, router]);
+    if (urlProjectId === effectiveProjectId) return;
+    const sp = new URLSearchParams(Array.from(searchParams.entries()));
+    sp.set('p', effectiveProjectId);
+    const url = `${pathname}?${sp.toString()}`;
+    const timer = window.setTimeout(() => { window.history.replaceState(null, '', url); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [effectiveProjectId, urlProjectId, pathname, searchParams]);
 
   return effectiveProjectId;
 }
