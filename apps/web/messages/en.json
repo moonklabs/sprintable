@@ -2476,6 +2476,8 @@
     "externalPublishPauseReasonPlaceholder": "Why are you pausing? — saved to the audit log.",
     "externalPublishResumeReasonPlaceholder": "Why are you resuming? — saved to the audit log.",
     "externalPublishPauseActionFailed": "Couldn't complete this — please try again.",
+    "externalPublishPauseLoadFailed": "Couldn't load the status — please try again.",
+    "externalPublishPauseLoadRetryCta": "Retry",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable blog",
     "channelLabelWordpress": "WordPress",

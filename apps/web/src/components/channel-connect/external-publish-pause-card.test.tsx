@@ -194,4 +194,83 @@ describe('ExternalPublishPauseCard', () => {
     expect(container.querySelector('[data-testid="external-publish-pause-error"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('정상');
   });
+
+  it('story #3953 CHANGES — 최초 GET 실패(404 등) 시 카드가 조용히 안 사라지고 로드-실패 문구+다시 시도가 뜬다', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')?.textContent).toBe(
+      '상태를 불러오지 못했어요 — 다시 시도해 주세요.',
+    );
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-load-retry"]')).not.toBeNull();
+  });
+
+  it('story #3953 CHANGES(유나 design 리뷰) — 로드-실패 상태에서도 카드 제목이 보인다(채널 연결 상태로 오해되지 않도록)', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.textContent).toContain('외부 발행 일시 중지');
+  });
+
+  it('story #3953 CHANGES(유나 design 리뷰) — 재시도 중엔 버튼이 disabled+aria-busy', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    let resolveRetry: (v: unknown) => void = () => {};
+    mockFetchWithAuth.mockReturnValueOnce(new Promise((resolve) => { resolveRetry = resolve; }));
+    const retry = container.querySelector('[data-testid="external-publish-pause-load-retry"]') as HTMLButtonElement;
+    await act(async () => {
+      retry.click();
+      await Promise.resolve();
+    });
+
+    expect(retry.disabled).toBe(true);
+    expect(retry.getAttribute('aria-busy')).toBe('true');
+
+    await act(async () => {
+      resolveRetry({ ok: false, json: async () => ({}) });
+      await Promise.resolve();
+    });
+  });
+
+  it('story #3953 CHANGES — GET 자체가 throw(네트워크 오류)해도 로드-실패 문구가 뜬다', async () => {
+    mockFetchWithAuth.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')).not.toBeNull();
+  });
+
+  it('story #3953 CHANGES — 로드-실패 뒤 「다시 시도」를 누르면 재조회해 정상 카드로 전환된다', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')).not.toBeNull();
+
+    mockFetchWithAuth.mockResolvedValueOnce(
+      jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
+    );
+    const retry = container.querySelector('[data-testid="external-publish-pause-load-retry"]') as HTMLButtonElement;
+    await act(async () => {
+      retry.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('정상');
+  });
 });

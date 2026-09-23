@@ -30,12 +30,26 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
   const [reasonInput, setReasonInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetchWithAuth(`/api/organizations/${orgId}/external-publish-pause`);
-    if (!res.ok) return;
-    const json = (await res.json().catch(() => null)) as { data?: PauseState } | null;
-    if (json?.data) setState(json.data);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/external-publish-pause`);
+      if (!res.ok) {
+        setLoadFailed(true);
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as { data?: PauseState } | null;
+      if (json?.data) {
+        setState(json.data);
+        setLoadFailed(false);
+      } else {
+        setLoadFailed(true);
+      }
+    } catch {
+      setLoadFailed(true);
+    }
   }, [orgId]);
 
   useEffect(() => {
@@ -63,7 +77,33 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
     }
   };
 
-  if (state === null) return null;
+  if (state === null) {
+    if (!loadFailed) return null;
+    return (
+      <Card className="p-4 space-y-3" data-testid="external-publish-pause-card">
+        <div>
+          <p className="text-sm font-medium text-foreground">{t('externalPublishPauseCardTitle')}</p>
+          <p className="text-xs text-destructive" data-testid="external-publish-pause-load-error">
+            {t('externalPublishPauseLoadFailed')}
+          </p>
+        </div>
+        <Button
+          variant="outline" size="sm" disabled={retrying} aria-busy={retrying}
+          data-testid="external-publish-pause-load-retry"
+          onClick={async () => {
+            setRetrying(true);
+            try {
+              await load();
+            } finally {
+              setRetrying(false);
+            }
+          }}
+        >
+          {t('externalPublishPauseLoadRetryCta')}
+        </Button>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4 space-y-3" data-testid="external-publish-pause-card">
