@@ -166,3 +166,57 @@ describe('AddParticipantModal — story #3049(AgentIdentity 헤어라인+신호 
     expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
   });
 });
+
+// story #4193 — 거부/실패 안내가 스크롤 목록 맨 끝이 아니라 목록 밖 고정 줄(목록과 푸터 사이)에 뜬다.
+const MANY_MEMBERS = [
+  ...Array.from({ length: 20 }, (_, i) => ({ id: `m-${i}`, name: `멤버${i + 1}`, type: 'human' })),
+  { id: 'a-bot', name: '점검봇', type: 'agent' },
+];
+const POLICY_DENIED = {
+  ok: false, status: 403,
+  json: async () => ({
+    data: null,
+    error: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-bot', member_id: 'm-0', reason: 'allowlist_miss' } },
+    meta: null,
+  }),
+};
+
+function assertAlertOutsideScroll(footerButtonText: string) {
+  const alert = document.body.querySelector('[role="alert"]') as HTMLElement | null;
+  expect(alert).not.toBeNull();
+  // 스크롤 목록(max-h-[60vh] overflow-y-auto)의 자식이 아니다 — 목록 길이와 무관하게 클릭 직후 보인다.
+  const scroll = document.body.querySelector('.overflow-y-auto') as HTMLElement;
+  expect(scroll.contains(alert)).toBe(false);
+  // 안내와 주 버튼이 같은 푸터 영역(선 하나) — 목록 바로 뒤가 그 영역이고, 안내 바로 다음이 버튼 줄이다(유나 design).
+  const footer = alert!.parentElement!;
+  expect(scroll.nextElementSibling).toBe(footer);
+  expect([...alert!.nextElementSibling!.querySelectorAll('button')].some((b) => b.textContent === footerButtonText)).toBe(true);
+  // 선은 푸터 영역 하나에만 — 안내·버튼 줄엔 따로 없다.
+  expect(footer.className).toContain('border-t');
+  expect(alert!.className).not.toContain('border-t');
+  expect(alert!.nextElementSibling!.className).not.toContain('border-t');
+  // 좁은 폭 줄바꿈: 본문은 낱말 단위, 링크는 한 덩어리.
+  expect(alert!.className).toContain('break-keep');
+  const link = alert!.querySelector('a');
+  if (link) expect(link.className).toContain('whitespace-nowrap');
+}
+
+describe('AddParticipantModal — 안내는 스크롤 목록 밖(story #4193)', () => {
+  function manyFetch(post: () => unknown) {
+    return vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: MANY_MEMBERS }) };
+      if (url === `/api/conversations/${CONV_ID}/participants` && init?.method === 'POST') return post();
+      return { ok: true, json: async () => ({}) };
+    });
+  }
+
+  it('멤버 20명 — 정책 거부 안내가 목록 밖, 푸터 바로 위', async () => {
+    await mountAndSelectBot(manyFetch(() => POLICY_DENIED));
+    assertAlertOutsideScroll(koMessages.chats.addParticipants);
+  });
+
+  it('일반 실패 안내도 같은 자리', async () => {
+    await mountAndSelectBot(manyFetch(() => ({ ok: false, status: 500, json: async () => ({ data: null, error: { code: 'HTTP_500', message: 'boom' }, meta: null }) })));
+    assertAlertOutsideScroll(koMessages.chats.addParticipants);
+  });
+});

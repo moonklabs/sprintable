@@ -141,32 +141,36 @@ export function AddParticipantModal({
               ))}
             </ul>
           )}
+        </div>
 
+        {/* Footer — story #4193: 거부/실패 안내는 스크롤 목록 «밖», 버튼 줄과 선 하나짜리 푸터 영역 안(안내가 누른
+            버튼 바로 위에 붙는다). 목록 안 맨 끝에 있으면 멤버가 많을 때 «대화 시작» 직후 보이는 영역 아래(라이브
+            380~414px)에 묻혀 «눌렀는데 아무 일도 없음»이 됐다. 링크는 한 덩어리(nowrap), 본문은 낱말 단위(break-keep)로
+            접힌다(유나 design, 390·360). */}
+        <div className="border-t border-border">
           {/* story #2105 2차 — handleAdd이 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
               시도마다 언마운트→리마운트된다. */}
           {error && (
-            <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">
+            <p role="alert" aria-live="assertive" aria-atomic="true" className="break-keep px-4 pt-3 text-xs text-destructive">
               {error.message}
               {error.kind === 'policy' ? (
                 <>
                   {' · '}
-                  <Link href={`/organization/workforce/${error.agentId}`} className="text-primary underline">
+                  <Link href={`/organization/workforce/${error.agentId}`} className="whitespace-nowrap text-primary underline">
                     {t('policyDeniedManageLink')}
                   </Link>
                 </>
               ) : null}
             </p>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={adding}>
-            {tc('cancel')}
-          </Button>
-          <Button size="sm" onClick={() => void handleAdd()} disabled={!selected || adding}>
-            {adding ? tc('adding') : t('addParticipants')}
-          </Button>
+          <div className="flex justify-end gap-2 px-4 py-3">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={adding}>
+              {tc('cancel')}
+            </Button>
+            <Button size="sm" onClick={() => void handleAdd()} disabled={!selected || adding}>
+              {adding ? tc('adding') : t('addParticipants')}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
