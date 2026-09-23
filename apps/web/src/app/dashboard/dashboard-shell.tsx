@@ -531,12 +531,10 @@ export function DashboardShell({
             >
               {pathUnresolved
                 ? (reopenSpentFor === shellPathname ? (
-                  <div className="px-4">
-                    <RouteErrorState
-                      compact breakKeep reset={retryUnresolvedPath}
-                      title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
-                    />
-                  </div>
+                  <RouteErrorState
+                    compact breakKeep reset={retryUnresolvedPath}
+                    title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
+                  />
                 ) : null)
                 : children}
             </ShellBody>

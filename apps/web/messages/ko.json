@@ -29,7 +29,6 @@
     "projectOpenFailedDescription": "다시 시도해 주세요. 계속 열리지 않으면 링크와 이 프로젝트의 접근 권한을 확인해 주세요.",
     "backToDocs": "문서로 돌아가기",
     "backToStorage": "스토리지로 돌아가기",
-    "backToSettings": "설정으로 돌아가기",
     "copyFailedSelectManually": "복사하지 못했어요 — 직접 선택해 복사해 주세요.",
     "goToLogin": "로그인으로 이동",
     "enable_all": "전체 켜기",

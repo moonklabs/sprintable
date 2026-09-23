@@ -28,7 +28,9 @@ export function RouteErrorState({
   const t = useTranslations('common');
 
   return (
-    <div className={`flex items-center justify-center ${compact ? 'min-h-[50vh]' : 'min-h-screen bg-background'}`}>
+    // story #4221(유나) — compact는 페이지 안 여백 없는 자리에 놓여 390에서 카드가 x=0에 붙었다(모든 compact 호출부 공통) →
+    // compact 자체가 좌우 여백을 가진다(호출부 래퍼 금지 — 이중 여백).
+    <div className={`flex items-center justify-center ${compact ? 'min-h-[50vh] px-4' : 'min-h-screen bg-background'}`}>
       {/* story #2969 §2 C행(doc proofline-system-layer-2969, PR-6) — rounded-2xl→rounded-lg
           (§1.1 퇴역). 이 표면은 인라인(오버레이 아님·portal/backdrop 없음)이라 shadow-lg
           제거(§1.2, doc 요약행 "route-error(인라인이면 제거)") — border(compact variant는

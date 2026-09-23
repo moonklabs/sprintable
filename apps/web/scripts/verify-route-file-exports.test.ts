@@ -200,9 +200,10 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // (−1 챗 레이아웃, +1 v3 그룹 레이아웃, 이동은 파일 수 불변). develop 착지분 106.
   // story #3989(「일감」 흡수 3/N, rebase 시점 재정정 2026-09-22) — [ws]/[proj]/hypotheses/
   // page.tsx 신규(일감 「가설」 보기)로 106→107(이 브랜치 자체 기준 +1).
-  it('실 트리(apps/web/src/app) — 라우트 파일 107개·위반 0건', () => {
+  // story #4221 — 죽은 app/dashboard/settings/error.tsx 삭제(그 경로는 redirect뿐이라 오류 경계가 뜰 일이 없음)로 107→106.
+  it('실 트리(apps/web/src/app) — 라우트 파일 106개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(107);
+    expect(fileCount).toBe(106);
     expect(violations).toEqual([]);
   }, 1000);
 });
