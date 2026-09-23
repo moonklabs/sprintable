@@ -4912,6 +4912,7 @@
     "deleteMessageErrorTitle": "삭제 실패",
     "deleteMessageErrorBody": "메시지를 삭제하지 못했어요. 다시 시도해 주세요.",
     "deletedMessagePlaceholder": "삭제된 메시지예요",
+    "emptyMessagePlaceholder": "표시할 내용이 없는 메시지예요",
     "blockedSenderMessagePlaceholder": "차단한 사용자의 메시지예요",
     "blockedSenderMessageReveal": "보기",
     "blockedSenderMessageHide": "숨기기",
