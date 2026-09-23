@@ -97,4 +97,11 @@ describe('toPlainPreview (story #3949)', () => {
   it('HTML 주석이 없는 일반 본문은 무변(회귀 0)', () => {
     expect(toPlainPreview('그냥 평범한 메시지입니다')).toBe('그냥 평범한 메시지입니다');
   });
+
+  // PO CHANGES(페드루, 2026-09-23) — content_snippet은 서버가 160자로 절삭해 주므로
+  // 긴 주석이 그 지점에서 잘려 `-->`가 아예 없이 끝날 수 있다(닫히지 않은 주석).
+  it('⭐서버 절삭으로 닫히지 않은 HTML 주석(«-->» 없음)도 문자열 끝까지 제거된다', () => {
+    const raw = '본문 앞부분 <!-- linear-comment-id: f4';
+    expect(toPlainPreview(raw)).toBe('본문 앞부분');
+  });
 });

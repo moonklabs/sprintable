@@ -53,10 +53,16 @@ export function unescapeReferenceLabel(label: string): string {
  * 마커)이 마크다운 링크가 아니라서 위 치환을 그냥 통과해 미리보기에 원문 그대로 샜다.
  * HTML 주석은 여기서 통째로 제거한다(`[\s\S]*?` — 개행 포함 비탐욕 매치, 여러 개면
  * 전부). 렌더 시점 전용 처리(저장 데이터 이관 0), 본문 칩 렌더는 무변.
+ *
+ * PO CHANGES(페드루, 2026-09-23) — 백링크·스토리 출처 섹션이 쓰는 `content_snippet`은
+ * 서버 `build_content_snippet`(backend/app/services/backlinks.py:205, 160자+ellipsis)이
+ * 이미 잘라서 준다. 긴 주석이 절삭 지점에 걸리면 `<!-- linear-comment-id: f4…`처럼
+ * `-->`가 아예 안 남아 위 정규식이 못 잡는다 — 닫히지 않은 `<!--`는 문자열 끝까지
+ * 제거한다(`(?:-->|$)`).
  */
 export function toPlainPreview(content: string): string {
   return content
-    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
     .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }
