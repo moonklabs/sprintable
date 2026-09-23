@@ -305,15 +305,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
 
     paused, pause_reason = await is_external_publish_paused(db, org_id=command.org_id)
     if paused:
-        await record_publication_attempt(
-            db, command=command, approval_check="paused", adapter_called=False,
-            started_at=now, finished_at=now, result_code=None,
-        )
-        command.status = "blocked"
-        command.failure_kind = FAILURE_KIND_PAUSED
-        command.last_error = (
-            f"EXTERNAL_PUBLISH_PAUSED: {pause_reason}" if pause_reason else "EXTERNAL_PUBLISH_PAUSED"
-        )
+        await _block_for_external_publish_pause(db, command, now=now, reason=pause_reason)
         return
 
     if command.content_kind == "site_post":
@@ -365,6 +357,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         get_channel_post_draft,
         publish_channel_post_draft,
     )
+    from app.services.external_publish_pause import ExternalPublishPausedError
     from app.services.generation_budget import GenerationBudgetExceededError
     from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
     from app.services.youtube_quota import YouTubeQuotaExceededError
@@ -546,6 +539,13 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             error_code, last_error = "CHANNEL_PUBLISH_PROVIDER_ERROR", str(exc)
     except ChannelPublishInProgressError as exc:
         error_code, last_error = "CHANNEL_PUBLISH_IN_PROGRESS", str(exc)
+    except ExternalPublishPausedError as exc:
+        # story #4195 ② — 워커 진입 검사(위 _process_one_command)를 통과한 직후 pause가 켜져
+        # publish_channel_post_draft 안 두 번째 검사에 걸린 경우. 예전엔 여기 절이 없어 아래
+        # 미분류 실패로 떨어져 백오프·attempt 증가 → 길면 dead_letter(resume 대상 밖)였다.
+        # 진입 검사와 같은 분기로 — 어댑터는 안 불렸다.
+        await _block_for_external_publish_pause(db, command, now=now, reason=exc.reason)
+        return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("publication_command 처리 중 미분류 예외 command_id=%s", command.id)
@@ -992,6 +992,22 @@ async def _sweep_stuck_container_created_publications(db: AsyncSession, *, now: 
     return queued
 
 
+async def _block_for_external_publish_pause(
+    db: AsyncSession, command: PublicationCommand, *, now: datetime, reason: str | None,
+) -> None:
+    """story #3953/#4195 — 조직 pause로 이 명령을 멈춘다. 워커 진입 검사와 발행 함수 안 두 번째 검사
+    (channel_posts.publish_channel_post_draft) 둘 다 이 한 분기로 간다 — `blocked`·`failure_kind=paused`,
+    attempt_count·백오프는 안 건드린다(실패가 아니라 대기). 해제(resume)와 크론 자가복구 스윕이 이
+    failure_kind만 골라 되살린다."""
+    await record_publication_attempt(
+        db, command=command, approval_check="paused", adapter_called=False,
+        started_at=now, finished_at=now, result_code=None,
+    )
+    command.status = "blocked"
+    command.failure_kind = FAILURE_KIND_PAUSED
+    command.last_error = f"EXTERNAL_PUBLISH_PAUSED: {reason}" if reason else "EXTERNAL_PUBLISH_PAUSED"
+
+
 async def process_due_publication_commands(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3414 AC3 — cron 워커의 유일한 진입점. `scheduled_at`(예약 시각, null=즉시라
     이미 동기 경로가 처리했어야 함 — 여기 남아 있다면 그 동기 경로가 중간에 죽은
@@ -1015,6 +1031,14 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     # 방금 큐잉된 command는 next_attempt_at=+30s라 아래 SELECT엔 안 걸린다(같은
     # tick 즉시완료 특혜 0 — 다음 tick이 잇는다).
     await _sweep_stuck_container_created_publications(db, now=now)
+    # story #4195 ① — pause가 풀린 조직의 `blocked/paused` 명령 자가복구. resume의 1회 스캔은 그 순간
+    # 워커가 들고 있던(pause를 읽고 blocked를 아직 커밋 안 한 in_progress) 명령을 못 본다 — 그 명령은
+    # 해제 뒤에 blocked/paused로 내려앉아 영구 정체였다. 매 tick이 «지금 안 멈춘 조직인데 pause로
+    # 막힌 명령»을 다시 보므로 경합 창이 한 tick 뒤로 닫힌다(재큐는 pending 전환뿐 — 같은 행이라 중복 0).
+    from app.services.external_publish_pause import requeue_paused_commands_of_unpaused_orgs
+
+    await requeue_paused_commands_of_unpaused_orgs(db)
+    await db.commit()
     rows = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.status == "pending",
