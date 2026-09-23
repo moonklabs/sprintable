@@ -4,6 +4,7 @@ newsletter_send는 pause/resume 같은 토글이 없는 1회성 명령(OP_BOOST_
 동형, toggle_seq는 항상 0)."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -15,6 +16,8 @@ from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
 from app.services.publication_command import create_or_get_publication_command
+
+logger = logging.getLogger(__name__)
 
 _NEWSLETTER_SEND_GATE_TYPE = "newsletter_send"
 _NEWSLETTER_SEND_CONTENT_KIND = "newsletter_send"
@@ -236,6 +239,7 @@ async def _process_sandbox_send(db: AsyncSession, command: PublicationCommand, *
         context={"recipient_count": result["recipient_count"], "segment_name": result["segment_name_confirmed"]},
     )
     await _schedule_snapshots(db, command=command, gate=gate, publication=publication, channel="stibee_sandbox", now=now)
+    await _emit_recipe_next_stage_after_send(db, command=command, gate=gate)
 
 
 async def _process_real_send(
@@ -305,6 +309,7 @@ async def _process_real_send(
         context={"recipient_count": None, "segment_name": gate.sealed_newsletter_segment_name},
     )
     await _schedule_snapshots(db, command=command, gate=gate, publication=publication, channel="stibee", now=now)
+    await _emit_recipe_next_stage_after_send(db, command=command, gate=gate)
 
 
 async def _schedule_snapshots(
@@ -324,3 +329,58 @@ async def _schedule_snapshots(
         publication_kind="channel_publication", channel=channel,
         external_id=publication.external_id, anchor_at=now,
     )
+
+
+async def _resolve_recipe_next_stage(db: AsyncSession, gate: Gate) -> tuple[str, str] | None:
+    """story #4214 — 이 발송 게이트가 레시피 회차에서 온 것이면 (정의 key, 다음 stage). 레시피 경로 게이트는
+    `neutral_facts.triggered_by_event`(정의 key)·`stage`(발송 요청 단계)를 싣는다(recipe_gate_hooks.
+    _build_approval_neutral_facts, #4191). 사람이 발송 요청 API로 연 게이트(레시피 무관)는 그 둘이 없어 None.
+    정의 조회는 channel_posts.resolve_recipe_context_for_scheduled_publication과 같은 모양(org 정의 우선 ·
+    플랫폼 프리셋 폴백 · enabled만) — 그 파일은 4192(site 발행)가 넓히는 중이라 이 카드는 건드리지 않는다(PO 분리 근거)."""
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+    from app.routers.events import _next_recipe_stage
+
+    facts = gate.neutral_facts or {}
+    definition_key, gate_stage = facts.get("triggered_by_event"), facts.get("stage")
+    if not definition_key or not gate_stage:
+        return None
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == definition_key, EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == gate.org_id, EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalars().first()
+    if definition is None:
+        return None
+    next_stage = _next_recipe_stage(definition, gate_stage)
+    if next_stage is None:
+        return None
+    return definition.key, next_stage
+
+
+async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: PublicationCommand, gate: Gate) -> None:
+    """story #4214(4192에서 분리) — 크론 발송 실행이 **성공**으로 끝난 뒤, 레시피 회차에서 온 발송이면 레시피 다음
+    단계(뉴스레터 프리셋은 «발송 결과 확인» send_checked) 이벤트를 1회. 예전엔 activity log만 남겨 레시피가 발송
+    완료를 자동으로 몰랐다(4191 그라운딩). channel post 예약 발행(publication_command.py 성공 분기)과 같은 모양:
+    - 성공 분기에서만 부른다(실패·차단 분기엔 호출 자체가 없다).
+    - 멱등은 `emit_recipe_published_stage_event`의 «이 work item에 이 stage가 이미 발행됐으면 스킵»(#4093 SSOT) —
+      재시도·겹친 틱이 다시 와도 이벤트는 1.
+    - 이 블록 실패가 방금 확정된 발송 성공(command completed)을 되돌리면 안 된다 — side-channel 격리."""
+    try:
+        resolved = await _resolve_recipe_next_stage(db, gate)
+        if resolved is None:
+            return
+        definition_key, next_stage = resolved
+        from app.services.channel_posts import emit_recipe_published_stage_event
+
+        await emit_recipe_published_stage_event(
+            db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            definition_key=definition_key, next_stage=next_stage,
+        )
+    except Exception:
+        logger.warning(
+            "newsletter send 완료 뒤 레시피 다음 단계 이벤트 연결 실패 command_id=%s gate_id=%s — "
+            "발송 자체는 이미 성공했다(되돌리지 않음)", command.id, gate.id, exc_info=True,
+        )
