@@ -320,3 +320,20 @@ describe('ThreadPanel — 답글 열람 시 mark-read(onMarkRead) 배선(2026-08
     expect(onMarkRead).toHaveBeenCalledWith('2026-08-08T00:05:00.000Z');
   });
 });
+
+// story #4182 — 원 메시지 요약 칩도 미리보기 자리라 내부 HTML 주석을 벗긴다(toPlainPreview 경유).
+describe('ThreadPanel — 원 메시지 요약 칩 HTML 주석 평문화(story #4182)', () => {
+  it('원 메시지 본문의 <!-- … --> 마커가 헤더 칩에 안 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    const commented = { ...parentMessage, content: '<!-- linear-comment-id: abc-123 -->\n\n원본 메시지' };
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={commented} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />,
+      ));
+    });
+    await flush();
+    const header = container.querySelector('.border-b.border-border\\/80')!;
+    expect(header.textContent).not.toContain('<!--');
+    expect(header.textContent).toContain('원본 메시지');
+  });
+});

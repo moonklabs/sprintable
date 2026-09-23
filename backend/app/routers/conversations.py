@@ -31,6 +31,7 @@ from app.routers.events import _push_to_agent
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
+from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.services.command_classifier import classify_command
@@ -552,9 +553,7 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     이벤트명(`conversation.message_created`)이 노출됐다. 발신자+미리보기로 "무슨 일인지" 1초 노출.
     """
     name = sender_name or "Someone"
-    preview = " ".join((content or "").split())  # 개행/연속공백 정규화
-    if len(preview) > _SUMMARY_PREVIEW_MAX:
-        preview = preview[:_SUMMARY_PREVIEW_MAX].rstrip() + "…"
+    preview = plain_text_preview(content, _SUMMARY_PREVIEW_MAX)
     if not preview:
         preview = "📎" if has_attachment else ""
     return f"{name}: {preview}" if preview else name
@@ -3097,7 +3096,7 @@ async def send_message(
                             # story #3903 PO PASS 후속 — 「회원님을」→「나를」(inbox.mentionTitle과
                             # 동일 문구·PO 2인칭 통일 지시 그대로 적용, f0083e15dc).
                             title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
-                            body=(msg.content or "")[:200],
+                            body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
                             # story #3903(migration 0378) — sender_name(제목 렌더시 조합용)
@@ -3147,7 +3146,7 @@ async def send_message(
                         # 「새 메시지」는 명사구라 합니다체/해요체 어미 자체가 없음(AC1 대상
                         # 아님, 3903 실측 확認) — 그대로.
                         title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
-                        body=(msg.content or "")[:200],
+                        body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
                         # story #3903(migration 0378) — 위 mention 블록과 동형.
@@ -3310,7 +3309,7 @@ async def send_message(
             entity_id=conversation_id,
             context={
                 "message_id": str(msg.id),
-                "content_preview": msg.content[:80] if msg.content else "",
+                "content_preview": plain_text_preview(msg.content, _SUMMARY_PREVIEW_MAX),
             },
         )
 

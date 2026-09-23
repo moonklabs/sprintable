@@ -308,3 +308,19 @@ describe('buildNowFace', () => {
     expect(buildNowFace(emptyRaw(), [], t)).toEqual([]);
   });
 });
+
+// story #4182 — 완료 보고 알림 body가 「지금」 행의 한 줄 맥락으로 쓰이므로 내부 HTML 주석을 벗긴다.
+describe('buildNowFace — 완료 보고 맥락 HTML 주석 평문화(story #4182)', () => {
+  const tId = (k: string) => k;
+  const emptyRaw: RawMyActions = { ...ZERO_LOOP_COUNTS, queue: [], attention: [] };
+
+  it('body의 <!-- … -->가 context에 안 남는다', () => {
+    const items = buildNowFace(emptyRaw, [{ id: 'n1', title: '완료', body: '<!-- linear-comment-id: x -->근거 3건', href: '/inbox' }], tId);
+    expect(items.find((i) => i.kind === 'done')?.context).toBe('근거 3건');
+  });
+
+  it('주석뿐인 body면 기본 문구로 폴백한다', () => {
+    const items = buildNowFace(emptyRaw, [{ id: 'n1', title: '완료', body: '<!-- only -->', href: '/inbox' }], tId);
+    expect(items.find((i) => i.kind === 'done')?.context).toBe('doneGenericContext');
+  });
+});

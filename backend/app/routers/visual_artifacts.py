@@ -44,6 +44,7 @@ from app.schemas.visual_artifact import (
     VisualArtifactSummary,
 )
 from app.services.member_resolver import filter_org_member_ids, resolve_member_db_verified
+from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
 
@@ -740,7 +741,7 @@ async def add_artifact_comment(
             event_type="comment.created",
             target_member_ids=target_member_ids,
             title=f"새 코멘트: {artifact.title}",
-            body=body.content[:200],
+            body=plain_text_preview(body.content, NOTIFICATION_BODY_PREVIEW_MAX),
             reference_type="visual_artifact",
             reference_id=artifact.id,
             source_project_id=project_id,

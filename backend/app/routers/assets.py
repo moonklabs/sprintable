@@ -32,6 +32,7 @@ from app.models.team import TeamMember
 from app.services.asset_registry import DEFAULT_CONTAINER
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access, require_project_access
+from app.services.text_preview import plain_text_preview
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +455,7 @@ def _build_source_link(stype, sid, asset_name, story_t, doc_t, msg_t) -> SourceL
         if sid not in msg_t:
             return None
         conv_id, content = msg_t[sid]
-        title = (content or "").strip()[:_SNIPPET] or "메시지"
+        title = plain_text_preview(content, _SNIPPET) or "메시지"
         deeplink = {"conversation_id": str(conv_id), "message_id": str(sid)} if conv_id else None
         return SourceLink(type=stype, id=sid, title=title, deeplink=deeplink)
     # manual: 파일명 title·deeplink 없음(source 조회 불요·항상 생성)

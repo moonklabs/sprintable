@@ -555,3 +555,37 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     expect(darkContrast).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// story #4182 — 이미 저장된 옛 summary엔 내부 HTML 주석(`<!-- linear-comment-id … -->`)이
+// 남아 있다. 서버 수정으로는 안 고쳐지므로 렌더(목록·데스크톱/OS 알림)에서 평문화한다.
+describe('NotificationBell — summary 내부 HTML 주석 평문화(story #4182)', () => {
+  const COMMENTED = '유나: <!-- linear-comment-id: abc-123 -->답장 내용';
+
+  it('목록 행에 주석이 안 보이고 본문은 남는다', async () => {
+    stubFetchSequenceByOffset({ 0: { items: [{ ...notif('c1'), payload: { summary: COMMENTED } }], hasMore: false } });
+    await openBell();
+    expect(container.textContent).not.toContain('<!--');
+    expect(container.textContent).toContain('유나: 답장 내용');
+  });
+
+  it('데스크톱 셸 notify_show body에도 주석이 안 실린다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('notification', {
+        id: 'live-c', event_type: 'conversation.message_created', source_entity_type: null, source_entity_id: null,
+        payload: { summary: COMMENTED }, read_at: null, created_at: '2026-09-23T01:00:00Z',
+      });
+    });
+
+    expect(notifyShow).toHaveBeenCalledTimes(1);
+    expect(notifyShow.mock.calls[0]![0].body).toBe('유나: 답장 내용');
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+  });
+});

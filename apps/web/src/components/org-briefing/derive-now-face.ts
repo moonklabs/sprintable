@@ -11,6 +11,7 @@
  * `/api/notifications?type=task_completed`(완료 보고). 신규 BE 0 — 두 기존 BFF만 조합.
  */
 import { projectHref, crossProjectLabel, type ViewerContext } from './derive-attention-clusters';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 
 export type NowKind = 'decide' | 'signal' | 'done';
 
@@ -329,7 +330,7 @@ export function buildNowFace(
       id: `task_completed-${n.id}`,
       kind: 'done', kindLabel: t('kindDone'),
       title: n.title,
-      context: n.body ?? t('doneGenericContext'),
+      context: (n.body ? toPlainPreview(n.body) : '') || t('doneGenericContext'),
       actionLabel: t('actionConfirm'), actionTone: 'ghost',
       href: n.href ?? '/inbox',
       priority: 30,

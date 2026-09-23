@@ -8,6 +8,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 
@@ -249,7 +250,7 @@ export default function ChannelPage() {
               <span>
                 ↩{' '}
                 {/* eslint-disable-next-line react-hooks/refs */}
-                {(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || t('attachment')}
+                {toPlainPreview(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || t('attachment')}
               </span>
               <button
                 type="button"

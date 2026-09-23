@@ -71,4 +71,52 @@ describe('toPlainPreview (story #3949)', () => {
     expect(toPlainPreview('![캡처](https://example.com/cap.png)')).toBe('캡처');
     expect(toPlainPreview('참고: ![스크린샷](https://x.png) 확인')).toBe('참고: 스크린샷 확인');
   });
+
+  // story #4182(산티아고 prod 에스컬레이션 aca44e0d) — 외부 동기화(Linear 등)가 본문
+  // 앞에 심는 비가시 HTML 주석 메타데이터 마커가 미리보기에 원문 그대로 새던 결함.
+  it('⭐HTML 주석(linear-comment-id 마커, 실 증상 형태)이 제거되고 본문 텍스트는 보존된다', () => {
+    const raw = '<!-- linear-comment-id: abc-123 -->\n\n댓글 본문 내용입니다';
+    expect(toPlainPreview(raw)).toBe('댓글 본문 내용입니다');
+  });
+
+  it('여러 줄에 걸친 HTML 주석도 통째로 제거된다', () => {
+    const raw = '<!--\n  linear-comment-id: abc-123\n  synced-at: 2026-09-23\n-->\n실제 내용';
+    expect(toPlainPreview(raw)).toBe('실제 내용');
+  });
+
+  it('HTML 주석이 여러 개면 전부 제거된다', () => {
+    const raw = '<!-- a --> 앞부분 <!-- b --> 뒷부분';
+    expect(toPlainPreview(raw)).toBe('앞부분  뒷부분');
+  });
+
+  it('HTML 주석과 마크다운 링크가 섞여도 둘 다 처리된다', () => {
+    const raw = '<!-- linear-comment-id: xyz -->[공지](https://example.com/notice) 확인';
+    expect(toPlainPreview(raw)).toBe('공지 확인');
+  });
+
+  it('HTML 주석이 없는 일반 본문은 무변(회귀 0)', () => {
+    expect(toPlainPreview('그냥 평범한 메시지입니다')).toBe('그냥 평범한 메시지입니다');
+  });
+
+  // PO CHANGES(페드루, 2026-09-23) — content_snippet은 서버가 160자로 절삭해 주므로
+  // 긴 주석이 그 지점에서 잘려 `-->`가 아예 없이 끝날 수 있다(닫히지 않은 주석).
+  it('⭐서버 절삭으로 닫히지 않은 HTML 주석(«-->» 없음)도 문자열 끝까지 제거된다', () => {
+    const raw = '본문 앞부분 <!-- linear-comment-id: f4';
+    expect(toPlainPreview(raw)).toBe('본문 앞부분');
+  });
+});
+
+// PR #4541 까디르 QA ② — 코드 안의 리터럴 `<!--`는 주석이 아니다(서버와 같은 규칙).
+describe('toPlainPreview — 코드 속 리터럴 주석 여는 기호(story #4182)', () => {
+  it('인라인 코드 안의 `<!--`는 뒷본문을 삼키지 않는다', () => {
+    expect(toPlainPreview('Use `<!--` literally. After it comes the decision')).toBe('Use `<!--` literally. After it comes the decision');
+  });
+
+  it('펜스 코드 안의 `<!--`는 뒷본문을 삼키지 않는다', () => {
+    expect(toPlainPreview('Before\n```html\n<!--\n```\nAfter')).toBe('Before\n```html\n<!--\n```\nAfter');
+  });
+
+  it('코드 밖 주석은 여전히 지워진다', () => {
+    expect(toPlainPreview('<!-- meta -->코드 `<!--` 는 남는다 <!-- tail')).toBe('코드 `<!--` 는 남는다');
+  });
 });

@@ -31,6 +31,11 @@ export function unescapeReferenceLabel(label: string): string {
   return label.replace(/\\(.)/g, '$1');
 }
 
+// 코드(펜스·인라인) 안의 리터럴 `<!--`는 주석이 아니다 — 코드를 먼저 통째로 매치해 그대로
+// 두고 코드 밖 주석만 지운다(서버 text_preview.strip_html_comments와 같은 규칙, PR #4541
+// 까디르 QA: 코드 속 `<!--`가 뒷본문을 전부 삼키던 회귀).
+const CODE_OR_HTML_COMMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)|<!--[\s\S]*?(?:-->|$)/g;
+
 /**
  * story #3949(E-UX-OVERHAUL·customer-zero·§①) — 3888(대화 목록 미리보기 raw 키)·
  * 3903/3940(알림 요약 raw 키)과 같은 「본문 렌더러는 고쳤는데 요약 소비처는 원문」
@@ -47,9 +52,22 @@ export function unescapeReferenceLabel(label: string): string {
  * PO CHANGES 1회차(2026-09-16 11:42Z) C1 — 마크다운 이미지 `![alt](url)`도 같은 클래스
  * (문법 기호가 평문 자리에 샘)라 선행 `!` 1글자까지 같이 벗긴다(`!?` — 있으면 소비,
  * 없으면 기존 링크 동작 그대로).
+ *
+ * story #4182(산티아고 prod 에스컬레이션 aca44e0d) — 같은 클래스의 4번째: 내부 HTML
+ * 주석(`<!-- linear-comment-id … -->` 등, 외부 동기화가 본문 앞에 심는 비가시 메타데이터
+ * 마커)이 마크다운 링크가 아니라서 위 치환을 그냥 통과해 미리보기에 원문 그대로 샜다.
+ * HTML 주석은 여기서 통째로 제거한다(`[\s\S]*?` — 개행 포함 비탐욕 매치, 여러 개면
+ * 전부). 렌더 시점 전용 처리(저장 데이터 이관 0), 본문 칩 렌더는 무변.
+ *
+ * PO CHANGES(페드루, 2026-09-23) — 백링크·스토리 출처 섹션이 쓰는 `content_snippet`은
+ * 서버 `build_content_snippet`(backend/app/services/backlinks.py:205, 160자+ellipsis)이
+ * 이미 잘라서 준다. 긴 주석이 절삭 지점에 걸리면 `<!-- linear-comment-id: f4…`처럼
+ * `-->`가 아예 안 남아 위 정규식이 못 잡는다 — 닫히지 않은 `<!--`는 문자열 끝까지
+ * 제거한다(`(?:-->|$)`).
  */
 export function toPlainPreview(content: string): string {
   return content
+    .replace(CODE_OR_HTML_COMMENT_RE, (_m, code: string | undefined) => code ?? '')
     .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }
