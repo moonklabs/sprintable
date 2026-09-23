@@ -43,6 +43,9 @@ describe('buildCodexConfigToml', () => {
       },
     };
     const toml = buildCodexConfigToml(bundle);
+    // 유나 design(PR 4542) — 긴 Bearer 줄이 카드 폭을 넘지 않게 하위 테이블 형식.
+    expect(toml).toContain('[mcp_servers.sprintable-mcp.http_headers]');
+    expect(toml).not.toContain('http_headers = {');
     const parsed = parse(toml) as {
       mcp_servers: { 'sprintable-mcp': { url: string; http_headers: Record<string, string> } };
     };

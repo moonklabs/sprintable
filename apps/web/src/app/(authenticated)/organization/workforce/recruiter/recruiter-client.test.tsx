@@ -315,6 +315,16 @@ describe('resolveMcpConfigFilename — story #4180(Codex는 .mcp.json을 안 읽
     const ko = (koMessages as { recruiter: Record<string, string> }).recruiter;
     expect(en.codexConfigTomlPathNote).toContain('{path}');
     expect(ko.codexConfigTomlPathNote).toContain('{path}');
+    // 유나 design·PO 처방(PR 4542) — 덮어쓰기 대신 추가·전역 경로(에이전트 전용 키 누출 위험)
+    // 금지·신뢰는 버튼명(버전마다 다름) 대신 행동으로.
+    for (const v of [en.codexConfigTomlPathNote, ko.codexConfigTomlPathNote]) {
+      expect(v).not.toContain('{globalPath}');
+      expect(v).not.toMatch(/Trust and continue|Yes, continue/);
+    }
+    expect(ko.codexConfigTomlPathNote).toContain('추가하세요');
+    expect(ko.codexConfigTomlPathNote).not.toContain('저장하세요');
+    expect(ko.codexConfigTomlPathNote).toContain('신뢰');
+    expect(en.codexConfigTomlPathNote).toContain('trust');
     expect(en.kitOrientingConnectBodyMcp).toContain('{filename}');
     expect(ko.kitOrientingConnectBodyMcp).toContain('{filename}');
     expect(en.keyOnceBody).toContain('{filename}');

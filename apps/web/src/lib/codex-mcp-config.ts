@@ -26,11 +26,6 @@ function tomlStringArray(values: string[]): string {
   return `[${values.map(tomlString).join(', ')}]`;
 }
 
-function tomlInlineTable(entries: Record<string, string>): string {
-  const parts = Object.entries(entries).map(([k, v]) => `${tomlKey(k)} = ${tomlString(v)}`);
-  return `{ ${parts.join(', ')} }`;
-}
-
 /**
  * `McpConfigBundle`(JSON, `.mcp.json` 아티팩트)을 Codex `config.toml`의 `[mcp_servers.<name>]`
  * 조각으로 재직렬화. stdio는 `command`/`args`/`[mcp_servers.<name>.env]`, http는 `url`/
@@ -45,8 +40,14 @@ export function buildCodexConfigToml(bundle: McpConfigBundle): string {
 
   if (server.type === 'http') {
     lines.push(`url = ${tomlString(server.url ?? '')}`);
+    // 유나 design(PR 4542) — 인라인 테이블이면 Bearer 키 줄이 카드 폭을 넘는다. env와 같은
+    // 하위 테이블 형식(파서상 같은 객체)으로 줄을 짧게.
     if (server.headers && Object.keys(server.headers).length > 0) {
-      lines.push(`http_headers = ${tomlInlineTable(server.headers)}`);
+      lines.push('');
+      lines.push(`[mcp_servers.${table}.http_headers]`);
+      for (const [k, v] of Object.entries(server.headers)) {
+        lines.push(`${tomlKey(k)} = ${tomlString(v)}`);
+      }
     }
   } else {
     lines.push(`command = ${tomlString(server.command ?? '')}`);

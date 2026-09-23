@@ -5698,7 +5698,7 @@
     "guideFileDeliveryNoteMcp": "Drop {filename} in your working folder and tell your agent to read and follow it — your existing {promptFile} stays as-is.",
     "guideFileDeliveryNoteConnector": "After finishing the manual connection setup, deliver {filename} to your agent.",
     "mcpFileNote": "· connection · real key inline",
-    "codexConfigTomlPathNote": "Save this config file as {path} in your project (only read for trusted projects) — the global file is {globalPath}.",
+    "codexConfigTomlPathNote": "Add the snippet below to {path} in your project folder (create the file if it doesn't exist). Codex reads it only after you choose to trust the folder when it asks.",
     "mcpNotApplicable": "This runtime doesn't use MCP transport — it connects via a separate SSE connector setup instead.",
     "copy": "Copy",
     "copied": "Copied",

@@ -141,6 +141,8 @@ describe('RecruiterClient equip-skip — Codex면 결과 카드·복사가 confi
     const card = equipCard(container);
     expect(card.textContent).toContain('config.toml');
     expect(card.textContent).toContain('recruiter.codexConfigTomlPathNote');
+    expect(card.textContent).toContain('"path":".codex/config.toml"');
+    expect(card.textContent).not.toContain('globalPath');
     const pre = card.querySelector('pre')!;
     expect(pre.textContent).toContain('[mcp_servers.sprintable-mcp]');
     expect(pre.textContent).not.toContain('mcpServers');

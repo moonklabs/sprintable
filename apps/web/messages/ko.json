@@ -5698,7 +5698,7 @@
     "guideFileDeliveryNoteMcp": "{filename}{josa} 작업 폴더에 두고 에이전트에게 '읽고 따르라'고 지시하세요 — 기존 {promptFile}{promptJosa} 그대로 둬요.",
     "guideFileDeliveryNoteConnector": "수동 연결 설정을 완료한 후 {filename}{josa} 에이전트에게 전달하세요.",
     "mcpFileNote": "· 연결 · 실제 키 포함",
-    "codexConfigTomlPathNote": "이 설정 파일을 프로젝트의 {path}에 저장하세요(신뢰된 프로젝트에서만 읽혀요) — 전역 설정은 {globalPath}예요.",
+    "codexConfigTomlPathNote": "프로젝트 폴더의 {path}에 아래 내용을 추가하세요(파일이 없으면 새로 만들어요). Codex가 이 폴더를 신뢰할지 물으면 신뢰해야 이 설정을 읽어요.",
     "mcpNotApplicable": "이 런타임은 MCP transport를 사용하지 않아요 — SSE 커넥터 방식으로 별도 연결 설정이 필요해요.",
     "copy": "복사",
     "copied": "복사됨",

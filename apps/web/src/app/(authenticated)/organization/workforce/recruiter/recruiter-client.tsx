@@ -130,6 +130,11 @@ export function resolveMcpConfigFilename(runtime: string): string {
   return runtime === 'codex' ? 'config.toml' : '.mcp.json';
 }
 
+// 유나 design·PO 처방(PR 4542) — 에이전트 전용 키가 든 조각이라 전역(~/.codex) 경로는 안내하지
+// 않는다. 신뢰 버튼명은 Codex 앱·버전마다 달라(CLI 0.153.4 실측 «Yes, continue») 이름 대신
+// 행동으로 쓴다 — 버튼명을 i18n에 박지 말 것.
+const CODEX_PATH_NOTE_PARAMS = { path: '.codex/config.toml' };
+
 /** resolveMcpConfigFilename과 같은 가드(runtime==='codex') — 파일명·본문 포맷이 한 조건에서
  * 갈라지므로 한쪽만 바뀌는 회귀(파일명은 config.toml인데 본문은 여전히 JSON 등)를 막기 위해
  * 별도 함수로 뽑아 직접 테스트한다(이 파일 컴포넌트 전체 마운트 테스트는 없다는 기존 관례). */
@@ -1270,8 +1275,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     </div>
                     {equipMcpCopyFailed ? <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p> : null}
                     {runtime === 'codex' && (
-                      <p className="text-[11px] text-foreground">
-                        {t('codexConfigTomlPathNote', { path: '.codex/config.toml', globalPath: '~/.codex/config.toml' })}
+                      <p className="text-xs text-foreground">
+                        {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
                       </p>
                     )}
                     <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
@@ -1432,8 +1437,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       다운로드가 "/"를 살리지 못함) "config.toml" 평문으로만 받는다. 실제 저장
                       위치(.codex/config.toml)는 별도 문장으로 명시 — AC1(공식 스키마·경로 안내). */}
                   {runtime === 'codex' && (
-                    <p className="border-b border-border bg-muted/20 px-3 py-1.5 text-[11px] text-muted-foreground">
-                      {t('codexConfigTomlPathNote', { path: '.codex/config.toml', globalPath: '~/.codex/config.toml' })}
+                    <p className="border-b border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-foreground">
+                      {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
                     </p>
                   )}
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
