@@ -443,9 +443,10 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "승인된 초안은 서버가 블로그에 발행했어요. get_site_post_publication으로 공개 주소를 확인해요.",
         "en": "The server published the approved draft to the blog. Check its public URL using get_site_post_publication.",
     },
+    # 유나 문안(PO 09:16Z) — 한 문장에 «발행» 두 뜻(블로그/이벤트)이 섞이지 않게 금지 대상을 도구 이름으로.
     "events.stage_next_server_driven": {
-        "ko": "다음 단계는 서버가 실제 발행 뒤 넘겨요 — 이 단계에서는 다음 단계 이벤트를 발행하지 마세요.",
-        "en": "The server moves to the next stage after it actually publishes — do not publish the next stage event from this stage.",
+        "ko": "블로그 발행이 끝나면 서버가 다음 단계로 넘겨요 — 이 단계에서는 publish_event를 부르지 마세요.",
+        "en": "The server moves to the next stage once the blog post is published — don't call publish_event from this stage.",
     },
     # story #4174 — 승인 뒤 에이전트가 받는 판정 알림의 «다음 행동»(레시피 문맥 블로그) · 유나 문안 6 정정본.
     # — «바로»가 없는 것은 예약 시각이 봉인된 초안은 그 시각에 발행되기 때문.

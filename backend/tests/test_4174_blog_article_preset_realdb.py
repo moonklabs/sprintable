@@ -132,7 +132,7 @@ async def test_every_stage_mention_is_self_describing_and_server_driven_stage_is
             if next_kind in _SERVER_DRIVEN_CAPABILITY_KINDS:
                 checked_wait += 1
                 assert "publish_event(" not in content, f"{stage}: 서버가 낼 단계의 발행 예시를 에이전트에게 줬다"
-                assert "서버가 실제 발행 뒤" in content, content
+                assert "서버가 다음 단계로 넘겨요" in content, content
             elif nxt is not None:
                 assert "publish_event(" in content, (stage, content)
         assert checked_wait == 1

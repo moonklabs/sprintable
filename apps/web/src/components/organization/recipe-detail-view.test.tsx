@@ -239,7 +239,8 @@ const BLOG_RECIPE: EventDefinitionResponse = {
     published: { role: 'Publisher', capability: { kind: 'site_post_auto_publish' } },
     publish_checked: { role: 'Publisher' },
   },
-} as EventDefinitionResponse;
+  enabled: true,
+};
 
 describe('RecipeDetailView — 블로그 글(story #4174)', () => {
   it('게이트 마커는 기획 승인 자리 하나뿐 — 발행 승인 대기 뒤에는 서지 않고, 새 단계 라벨이 원시 slug로 안 뜬다', async () => {
