@@ -148,7 +148,8 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
     - 항목마다 새 세션(`session`과 같은 엔진)에서 그 행을 **상태 필터와 함께** `FOR UPDATE SKIP LOCKED`로 다시 잡는다 — 다른
       cron이 잡고 있거나 이미 해소돼 SLA 상태가 아니면 건너뛴다(`skipped`).
     - 처리 뒤 그 세션만 커밋한다. 카운트는 그 커밋이 성공한 뒤에만 더하고, 실패 항목은 그 세션만 롤백·`error`로 센다.
-    - 호출자 `session`은 id 조회에만 쓴다(쓰기 0) — 대기 중 에이전트 wake 목록(event_seq)도 항목 세션마다 따로라, 한 항목의
+    - 호출자 `session`은 id 조회에만 쓰고(쓰기 0) 곧바로 트랜잭션을 끝내 커넥션을 돌려준다 — 항목당 동시 커넥션은 최대 2
+      (항목 세션 + 항목 안 격리 세션)로, 워커 풀(기본 2+1=3)을 혼자 다 잡지 않는다. 대기 중 에이전트 wake 목록(event_seq)도 항목 세션마다 따로라, 한 항목의
       롤백이 다른 항목의 wake를 지우지 않는다."""
     now = now or _now()
     ids = list((await session.execute(
@@ -157,6 +158,9 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
         ).order_by(WorkflowLineStepRun.started_at.asc())
         .limit(_SLA_BATCH_SIZE)
     )).scalars().all())
+    # 호출자 세션의 트랜잭션을 여기서 끝내 커넥션을 풀에 돌려준다(쓰기 0이라 무해). 열어 두면 항목 세션 · 항목 안 격리 세션과
+    # 겹쳐 항목 하나에 커넥션 3개 = 워커 풀(기본 2+1) 전부라, 다른 cron과 겹치면 `pool_timeout`으로 항목이 error가 된다.
+    await session.commit()
 
     counts = {"reminded": 0, "escalated": 0, "auto_approved": 0, "kept_pending": 0,
               "unresolved": 0, "skipped": 0, "error": 0}

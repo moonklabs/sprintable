@@ -297,3 +297,42 @@ async def test_a_wake_scheduled_by_one_item_survives_another_items_rollback(monk
         assert ("agent-A", 7) in fired, fired
     finally:
         await engine.dispose()
+
+
+async def test_caller_session_returns_its_connection_before_items_so_a_two_connection_pool_suffices(monkeypatch):
+    """호출자 세션은 id 조회 직후 트랜잭션을 끝내 커넥션을 풀에 돌려준다. 워커 풀은 기본 2+1=3이고 다른 cron과 나눠 쓴다 —
+    호출자 세션이 트랜잭션을 연 채(커넥션 보유) 항목 세션 + 항목 안 격리 세션(`run_side_effect_in_own_session`류)까지 겹치면
+    항목 하나에 3개다. 여기서는 **커넥션 2개짜리 풀**(pool_size=1 · max_overflow=1 · pool_timeout=2s)로 cron을 돌리고,
+    항목마다 격리 세션을 하나 더 열어 쿼리한다: 막힘 없이 전부 처리 · 항목 처리 중 호출자 세션은 트랜잭션 밖.
+    뮤테이션: 조회 뒤 반환을 빼면 항목마다 세 번째 커넥션을 기다리다 `pool_timeout` → 전부 error — RED."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    import app.services.workflow_sla_processor as sla
+
+    engine, Session = await _session()
+    small = create_async_engine(engine.url, pool_size=1, max_overflow=1, pool_timeout=2)
+    try:
+        batch = await _seed_auto_approve_batch(Session, 2)
+        real_one = sla._process_one_step_run
+        caller_in_tx: list[bool] = []
+        caller: dict[str, AsyncSession] = {}
+
+        async def _one(session, sr, now, counts):
+            caller_in_tx.append(caller["s"].in_transaction())
+            async with AsyncSession(bind=small) as side:  # 항목 안 격리 세션(훅의 run_side_effect_in_own_session 자리)
+                await side.execute(text("SELECT 1"))
+            await real_one(session, sr, now, counts)
+
+        monkeypatch.setattr(sla, "_process_one_step_run", _one)
+        with patch(_NOTIFY, new=AsyncMock()):
+            async with async_sessionmaker(small, expire_on_commit=False)() as s:
+                caller["s"] = s
+                counts = await sla.process_sla(s, now=_NOW)
+        assert counts["auto_approved"] == 2 and counts["error"] == 0, counts
+        assert caller_in_tx == [False, False], caller_in_tx
+        for sr_id, _gate_id in batch:
+            assert await _events(Session, sr_id, "auto_approved") == 1
+    finally:
+        await small.dispose()
+        await engine.dispose()
