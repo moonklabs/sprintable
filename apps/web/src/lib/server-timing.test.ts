@@ -61,23 +61,31 @@ describe('withServerTiming — 실 fetch 기록', () => {
     expect(totalMs).toBeGreaterThanOrEqual(spans[0]!.durMs!);
   });
 
-  it('⭐연결 판정 — 같은 소켓으로 나간 두 번째 요청은 재사용(false) · 다른 소켓은 새 연결(true)', async () => {
-    // 재사용 여부는 undici가 넘겨 주는 소켓 객체 동일성으로 가른다(실 Node에선 keep-alive 재사용 시 같은 소켓 · 로컬 프로브
-    // 확인). 테스트 러너 안 fetch는 연결 풀 동작이 달라 실 재사용을 재현 못 해, 채널에 같은 모양의 이벤트를 직접 싣는다.
+  it('⭐연결 판정 — 소켓 연결 시각이 이 호출 생성 뒤면 새 연결, 전이면(범위 밖 요청이 연 keep-alive 포함) 재사용', async () => {
+    // 테스트 러너 안 fetch는 연결 풀 동작이 달라 실 재사용을 재현 못 해, undici와 같은 모양의 채널 이벤트를 직접 싣는다.
     process.env['SERVER_TIMING_MARKERS'] = 'true';
+    const connected = diagnosticsChannel.channel('undici:client:connected');
     const create = diagnosticsChannel.channel('undici:request:create');
     const send = diagnosticsChannel.channel('undici:client:sendHeaders');
     const trailers = diagnosticsChannel.channel('undici:request:trailers');
-    const socketA = {}, socketB = {};
+    const warm = await withServerTiming(async () => {}); // 구독 보장(모듈 로드 때 꺼져 있었으므로)
+    expect(warm.spans).toEqual([]);
+    const outsideSocket = {}, freshSocket = {};
+    // 범위 밖 요청이 먼저 연결을 열어 쓰고 있었다.
+    connected.publish({ socket: outsideSocket, connectParams: {} });
+    const one = (path: string, socket: object, connectFirst: boolean) => {
+      const request = { origin: 'http://be', path };
+      create.publish({ request });
+      if (connectFirst) connected.publish({ socket, connectParams: {} });
+      send.publish({ request, socket, headers: '' });
+      trailers.publish({ request, trailers: [] });
+    };
     const { spans } = await withServerTiming(async () => {
-      for (const [path, socket] of [['/api/v2/me', socketA], ['/api/v2/resolve', socketA], ['/api/v2/project/x', socketB]] as const) {
-        const request = { origin: 'http://be', path };
-        create.publish({ request });
-        send.publish({ request, socket, headers: '' });
-        trailers.publish({ request, trailers: [] });
-      }
+      one('/api/v2/me', outsideSocket, false); // 범위 밖이 연 소켓 재사용
+      one('/api/v2/resolve', freshSocket, true); // 이 요청이 새로 연 소켓
+      one('/api/v2/projects/x', freshSocket, false); // 방금 연 소켓 재사용
     });
-    expect(spans.map((s) => s.newConnection)).toEqual([true, false, true]);
+    expect(spans.map((s) => s.newConnection)).toEqual([false, true, false]);
   });
 
   it('동시 호출(Promise.all) 둘은 같은 시각에 시작하고 각자 기록된다', async () => {

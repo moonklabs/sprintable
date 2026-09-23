@@ -42,7 +42,8 @@ export interface TimingSpan {
   durMs: number | null;
   /** 호출 시작 → 요청 헤더 송신(= 연결 확보까지 기다린 시간). */
   waitMs: number | null;
-  /** 이 호출이 새 연결을 열었는지(false = keep-alive 재사용). 모르면 null. */
+  /** 이 호출이 새 연결을 열었는지 — 소켓 연결 시각이 이 호출 생성 뒤면 true, 전이면(범위 밖 요청이 열어 둔 keep-alive 포함)
+   * false. 소켓 정보가 없으면 null. */
   newConnection: boolean | null;
 }
 
@@ -55,12 +56,18 @@ interface UndiciRequestLike { origin?: unknown; path?: unknown }
 
 const als = new AsyncLocalStorage<Collector>();
 const inflight = new WeakMap<object, { collector: Collector; span: TimingSpan; t: number }>();
-const seenSockets = new WeakSet<object>();
+// 모든 소켓의 연결 시각(계측 범위와 무관) — 범위 밖 요청(페이지 쪽 fetch · 첫 계측 전 요청)이 열어 쓰던 keep-alive 소켓을
+// «처음 본 소켓 = 새 연결»로 오판하지 않게(PO 리뷰: 재사용률이 낮게 나와 «연결 풀 필요»로 틀리게 기우는 자리).
+const socketConnectedAt = new WeakMap<object, number>();
 let subscribed = false;
 
 function subscribe(): void {
   if (subscribed) return;
   subscribed = true;
+  diagnosticsChannel.subscribe('undici:client:connected', (msg) => {
+    const socket = (msg as { socket?: unknown }).socket;
+    if (socket && typeof socket === 'object') socketConnectedAt.set(socket, performance.now());
+  });
   diagnosticsChannel.subscribe('undici:request:create', (msg) => {
     const collector = als.getStore();
     const request = (msg as { request?: UndiciRequestLike }).request;
@@ -79,8 +86,9 @@ function subscribe(): void {
     if (!entry) return;
     entry.span.waitMs = Math.round(performance.now() - entry.t);
     if (socket && typeof socket === 'object') {
-      entry.span.newConnection = !seenSockets.has(socket);
-      seenSockets.add(socket);
+      // 연결 시각을 모르면(구독 전에 열린 소켓) 이 요청 전부터 있던 연결 = 재사용.
+      const connectedAt = socketConnectedAt.get(socket);
+      entry.span.newConnection = connectedAt !== undefined && connectedAt >= entry.t;
     }
   });
   const finish = (msg: unknown) => {
@@ -119,3 +127,6 @@ export function formatServerTiming(surface: string, totalMs: number, spans: Timi
 export function logServerTiming(surface: string, kind: string, totalMs: number, spans: TimingSpan[]): void {
   console.log(JSON.stringify({ message: 'server_timing', surface, kind, totalMs, spans }));
 }
+
+// 켜져 있으면 모듈 로드 시점에 구독 — 첫 계측 전에 열린 연결의 시각도 잡는다(꺼져 있으면 구독 0).
+if (isServerTimingEnabled()) subscribe();
