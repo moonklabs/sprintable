@@ -5,6 +5,7 @@
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchWithAuth, loginWithPassword, refreshAuthTokens, registerUser } from './client';
+import { fetchMe } from '@/lib/me-client';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
 beforeEach(() => {
@@ -211,5 +212,18 @@ describe('callAuthRoute → notifySessionChanged 브릿지(story #3302 AC1/AC3)'
   it('셸 밖(브라우저)에서 로그인 성공해도 예외 없이 조용하다(AC2)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
     await expect(loginWithPassword('a@b.com', 'pw')).resolves.toMatchObject({ error: null });
+  });
+});
+
+// story #4184(PR #4548 까디르 QA ②) — 세션 만료 신호가 난 뒤의 fetchMe()는 앞서 받은 200을
+// 돌려주지 않고 실제 fetchWithAuth 경로(신호 뒤 즉시 401)를 탄다 — 호출부의 실패 갈래가 산다.
+describe('fetchMe — 세션 만료 신호 뒤(story #4184)', () => {
+  it('앞서 200을 받았어도 만료 신호 뒤엔 401을 돌려준다(저장해 둔 값이 없다)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { id: 'm-1' } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await fetchMe()).status).toBe(200);
+    signalSessionExpired();
+    expect((await fetchMe()).status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -37,6 +37,13 @@ export function setEffectiveOrgId(id: string | undefined): void {
   effectiveOrgIdRef.current = id;
 }
 
+/** story #4184 — 인터셉터가 지금 실어 보낼 요청 맥락(org·project) 그대로의 키. 같은 요청을 나눠
+ * 쓰는 쪽(lib/me-client.ts)이 «맥락이 같을 때만 합류»하는 데 쓴다 — 전환 직전에 출발한 요청에
+ * 전환 뒤 호출이 붙지 않게. */
+export function getRequestContextKey(): string {
+  return `${effectiveOrgIdRef.current ?? ''}|${effectiveProjectIdRef.current ?? ''}`;
+}
+
 // story #2545(카디르 라이브 재QA, 2단계) — DashboardShell의 자동 switch-org(불일치 감지 →
 // 토큰 재발급, 위 참고)가 성공한 뒤 `router.refresh()`는 **서버 컴포넌트만** 재실행한다.
 // hypotheses/goals처럼 `useEffect(() => fetch(...), [projectId])`로 짜인 클라이언트 fetch는

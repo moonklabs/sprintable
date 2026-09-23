@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Check, Circle } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -57,7 +58,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
       // (#3688) 가드가 읽는 try/catch+res.ok 형으로) — 네트워크 자체가 죽으면(HTTP 에러
       // 응답이 아니라) fetchWithAuth가 reject해 이 IIFE 밖으로 unhandled rejection이 샜다.
       let res: Response;
-      try { res = await fetchWithAuth('/api/me'); } catch { onLoadError?.(); return; }
+      try { res = await fetchMe(); } catch { onLoadError?.(); return; }
       if (!res.ok) { onLoadError?.(); return; }
       const json = await res.json() as { data?: { has_password?: boolean } };
       setHasPassword(json.data?.has_password ?? null);
@@ -80,7 +81,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
     setMessage(null);
     try {
       // 카디르 QA(PR#3688, story #2691 회귀가드) — Settings는 세션 인증을 전제하는 화면
-      // (이미 위 useEffect가 fetchWithAuth('/api/me')를 씀)이라 raw fetch는 401을 재시도
+      // (이미 위 useEffect가 fetchMe()로 /api/me를 씀)이라 raw fetch는 401을 재시도
       // 없이 삼킨다(#2689 근본원인 재발). fetchWithAuth로.
       const res = await fetchWithAuth('/api/auth/set-password/request', {
         method: 'POST',

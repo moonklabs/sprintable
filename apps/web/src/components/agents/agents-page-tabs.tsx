@@ -12,7 +12,7 @@ import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/re
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';
 const VALID_TABS = new Set<AgentsTab>(['stats', 'manage', 'recruit', 'access']);
@@ -49,7 +49,7 @@ export function AgentsPageTabs() {
 
   useEffect(() => {
     void (async () => {
-      const res = await fetchWithAuth('/api/me');
+      const res = await fetchMe();
       if (res.ok) {
         const json = await res.json() as { data?: { role?: string } };
         const role = json.data?.role ?? 'member';

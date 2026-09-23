@@ -10,6 +10,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { CountBadge } from '@/components/ui/count-badge';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole } from '@/lib/org-member-role';
 
 interface OrgMember {
@@ -50,7 +51,7 @@ export default function OrganizationRolesPage() {
   const refresh = async () => {
     const [res, meRes] = await Promise.all([
       fetchWithAuth('/api/org-members').catch(() => null),
-      fetchWithAuth('/api/me').catch(() => null),
+      fetchMe().catch(() => null),
     ]);
     if (meRes?.ok) {
       const json = await meRes.json() as { data?: { user_id?: string | null } };

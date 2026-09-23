@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { ConnectRulesV3Agents } from './connect-rules-v3-agents';
 import { ConnectRulesV3Channels } from './connect-rules-v3-channels';
 import { ConnectRulesV3Rules } from './connect-rules-v3-rules';
@@ -19,7 +19,7 @@ import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations
  * 일시 중지) 절은 #4363(#3953) 착지 뒤 별도 rebase로 추가(AC7) — 이 PR엔 없음.
  *
  * org_id는 (authenticated) 밖이라 DashboardContext가 없다 — agent-management-tab.tsx가
- * 이미 하는 `fetchWithAuth('/api/me')` 1콜을 그대로 반복해 org_id만 뽑는다(새 BE 0).
+ * 이미 하는 `/api/me` 1콜(story #4184부터 `fetchMe()` 공유 요청)에서 org_id만 뽑는다(새 BE 0).
  *
  * story #4004 — nav 렌더(목적지·활성/호버/포커스 스타일)는 공유
  * `NavV3ItemList`가, story #4006 — nav 칸의 폭·접힘은 공유 `NavV3Sidebar`가 전담한다.
@@ -55,7 +55,7 @@ function useMe() {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadError(false);
-    fetchWithAuth('/api/me')
+    fetchMe()
       .then((res) => (res.ok ? res.json() as Promise<{ data?: { org_id?: string; role?: string } }> : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json) => {
         if (cancelled) return;

@@ -31,6 +31,7 @@ import {
 } from '@/lib/runtime-capabilities';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { copyTextSafely } from '@/lib/clipboard';
 
@@ -157,7 +158,7 @@ export default function AgentDetailPage() {
     // 조용히 못 채워졌다. leg별로 격리한다.
     const [projectRes, meRes] = await Promise.all([
       fetchWithAuth('/api/projects').catch(() => null),
-      fetchWithAuth('/api/me').catch(() => null),
+      fetchMe().catch(() => null),
     ]);
     if (projectRes?.ok) {
       const json = await projectRes.json() as { data: ProjectOption[] };

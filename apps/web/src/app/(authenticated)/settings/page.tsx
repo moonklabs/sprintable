@@ -44,6 +44,7 @@ import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -361,7 +362,7 @@ export default function SettingsPage() {
     async function loadContext() {
       // admin 감지: /api/me role 기반 (invitations 응답 결과에 의존하지 않음)
       try {
-        const meRes = await fetchWithAuth('/api/me');
+        const meRes = await fetchMe();
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
         setIsAdmin(role === 'admin' || role === 'owner');

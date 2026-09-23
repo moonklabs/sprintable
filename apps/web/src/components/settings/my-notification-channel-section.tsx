@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 interface WebhookConfig {
   id: string;
@@ -95,7 +96,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         // 응답한 projRes의 결과(nameMap)까지 조용히 못 씌워졌다. meRes도 격리한다(한쪽만
         // 격리하면 나머지 격리가 무의미해진다).
         const [meRes, projRes] = await Promise.all([
-          fetchWithAuth('/api/me').catch(() => null),
+          fetchMe().catch(() => null),
           fetchWithAuth('/api/projects').catch(() => null),
         ]);
         if (projRes?.ok) {
