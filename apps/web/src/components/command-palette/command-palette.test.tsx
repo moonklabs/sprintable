@@ -162,7 +162,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     // 파생으로 그 밖의 항목(신뢰·지식·마케팅·조직 구역)도 전부 도달하는지 표본 확認.
     expect(document.body.textContent).toContain('신뢰 센터'); // org-trust(신뢰 구역, 예전엔 누락)
     expect(document.body.textContent).toContain('블로그 포스트'); // content(마케팅 구역, 예전엔 누락)
-    expect(document.body.textContent).toContain('기억'); // org-memory(지식 구역, 예전엔 누락)
+    expect(document.body.textContent).toContain('스토리지'); // storage(지식 구역, 예전엔 누락)
     expect(document.body.textContent).toContain('설정'); // settings(예전엔 누락)
   });
 

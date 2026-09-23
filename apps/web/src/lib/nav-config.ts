@@ -2,7 +2,6 @@ import {
   Award,
   BookOpen,
   Bot,
-  Brain,
   ClipboardList,
   Cpu,
   FileText,
@@ -227,7 +226,6 @@ export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
   { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project', absorbTarget: 'knowledge' },
   { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project', absorbTarget: 'history' },
   { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org', absorbTarget: 'connect' },
-  { id: 'org-memory', labelKey: 'orgMemory', descriptionKey: 'descOrgMemory', icon: Brain, kind: 'static', path: '/organization/memory', scope: 'org', absorbTarget: 'knowledge' },
   { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org', absorbTarget: 'work' },
   { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org', absorbTarget: 'work' },
   // story #3985(E-UX-OVERHAUL·「연결·규칙」 흡수 2편, 페드루 PO 確定 2026-09-17) — 구성원·
