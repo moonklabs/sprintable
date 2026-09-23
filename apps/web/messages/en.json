@@ -6227,6 +6227,22 @@
     "videoProductionName": "Video production (Reels, Shorts)",
     "videoProductionDescription": "9 stages from sourcing to publishing. People approve only the concept, structure, generation budget, and final publish; agents handle the rest.",
     "newsletterName": "Newsletter",
-    "newsletterDescription": "6 stages from sourcing to the results check. People approve only the content review and the send; agents handle the rest."
+    "newsletterDescription": "6 stages from sourcing to the results check. People approve only the content review and the send; agents handle the rest.",
+    "workflowAgentSoloName": "Solo agent",
+    "workflowAgentSoloDescription": "One agent handles intake, the run, and the report. Good for simple automation tasks.",
+    "workflowSoloName": "Solo",
+    "workflowSoloDescription": "One person takes the work from assignment to done. Good for work done alone.",
+    "workflowKanbanName": "Kanban alerts",
+    "workflowKanbanDescription": "Notifies the team whenever a status changes. Good for teams that don't split roles.",
+    "workflowKanbanSimpleName": "Three-step kanban",
+    "workflowKanbanSimpleDescription": "To do → in progress → done check. Good for teams that ship continuously.",
+    "workflowScrum3StepName": "Three-step scrum",
+    "workflowScrum3StepDescription": "Plan → build → QA. Good for small to mid-sized sprints.",
+    "workflowTwoStepName": "Submit & review",
+    "workflowTwoStepDescription": "Submit → review. Good for work reviewed once, like code review or copy editing.",
+    "workflowThreeStepName": "Submit, review & approve",
+    "workflowThreeStepDescription": "Submit → review → approval. Good for work checked twice, like write, edit, publish.",
+    "workflowLoopAgencyName": "Experiment cycle",
+    "workflowLoopAgencyDescription": "Goal and hypothesis → brief → options → a person picks → run → learn from results. Good for repeated experiments like copy or campaign tests."
   }
 }

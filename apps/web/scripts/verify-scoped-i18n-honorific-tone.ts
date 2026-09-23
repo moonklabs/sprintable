@@ -352,7 +352,22 @@ export interface AdnominalTerminalFinding {
   value: string;
 }
 
-const ADNOMINAL_TERMINAL_RE = /[가-힣](는|인)\.(\s|$)/;
+const ADNOMINAL_TERMINAL_RE = /([가-힣]+)(는|인)\.(\s|$)/g;
+
+// story #4203(유나 확정 문안 «할 일 → 진행 중 → 완료 확인.»·«제출 → 검토 → 승인.») — «확인»·«승인»은 관형형
+// 어미 '인'이 아니라 '인'으로 끝나는 한자어 명사다(명사형 종결은 이 제품의 설명 두 마디 꼴 «흐름. ~에 적합.»).
+// 정규식이 글자만 보고 명사까지 관형형으로 잡던 오탐 — '인'으로 끝나는 명사를 낱말 단위로만 뺀다(관형형 «~엣지인.»·
+// «~되돌리는.»은 그대로 잡힌다). 새 명사가 필요하면 이 표에 한 줄(사유: 명사형 종결 문안).
+const NOUNS_ENDING_IN_IN = new Set(['확인', '승인', '원인', '요인']);
+
+function hasAdnominalTerminal(value: string): boolean {
+  for (const m of value.matchAll(ADNOMINAL_TERMINAL_RE)) {
+    const word = m[1]! + m[2]!;
+    if (m[2] === '인' && NOUNS_ENDING_IN_IN.has(word.slice(-2))) continue;
+    return true;
+  }
+  return false;
+}
 
 export function findPersonaAdnominalTerminal(
   ko: Record<string, unknown>,
@@ -364,7 +379,7 @@ export function findPersonaAdnominalTerminal(
     if (typeof value !== 'string') continue;
     // '~는 것' / '~인 것' 등 정당한 관형형+의존명사는 마침표가 아니라 뒤에 명사가 오므로
     // 위 정규식에 안 걸린다.
-    if (ADNOMINAL_TERMINAL_RE.test(value)) findings.push({ key, value });
+    if (hasAdnominalTerminal(value)) findings.push({ key, value });
   }
   return findings;
 }

@@ -201,3 +201,31 @@ describe('LoopCreateDialog 레시피 선택 — 플랫폼 프리셋 이름·설�
     expect(document.body.textContent).not.toContain('초안부터 발행까지 5단계예요.');
   });
 });
+
+// story #4203 — 워크플로우 프리셋: 시드 이름이 언어가 섞여 있어(«Kanban Flow») ko 화면에도 한국어 문안으로.
+describe('LoopCreateDialog 레시피 선택 — 워크플로우 프리셋 이름 로케일(story #4203)', () => {
+  const KANBAN = {
+    id: 'k1', key: 'preset.workflow.kanban', org_id: null,
+    name: 'Kanban Flow', description: '상태가 바뀔 때마다 팀에 알림.',
+    payload_schema: { properties: { stage: { enum: ['assign_step_1'] } } },
+    stage_metadata: { assign_step_1: { role: 'Worker', action: '작업' } },
+    enabled: true,
+  };
+  it.each([['ko', koMessages], ['en', enMessages]] as const)('%s — 드롭다운 이름이 로케일 문안(시드 «Kanban Flow» 0)', async (locale, messages) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [KANBAN] };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
+          <LoopCreateDialog projectId="proj-1" open onOpenChange={() => {}} onCreated={() => {}} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    const options = Array.from(document.body.querySelectorAll('#loop-create-recipe option')).map((o) => o.textContent);
+    expect(options).toContain(messages.recipePreset.workflowKanbanName);
+    expect(options).not.toContain('Kanban Flow');
+  });
+});

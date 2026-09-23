@@ -442,6 +442,17 @@ describe('story #3900 axis ① — 의문형 합니다체(습니까·ㅂ니까)'
 // story #3900 axis ② — findPersonaAdnominalTerminal(완결 어미 없는 관형형 '는'/'인'+마침표).
 // ---------------------------------------------------------------------------
 describe('findPersonaAdnominalTerminal — 순수 판정 함수(axis ②)', () => {
+  it("story #4203 — '인'으로 끝나는 한자어 명사(확인·승인)의 명사형 종결은 관형형이 아니다(오탐 0) · 관형형은 그대로", () => {
+    const ko = { p: {
+      a: '할 일 → 진행 중 → 완료 확인. 꾸준히 배포하는 팀에 적합.',
+      b: '제출 → 검토 → 승인. 두 번 확인하는 일에 적합.',
+      c: '재승인.',
+      d: '완료 확인. 이건 엣지인.',
+    } };
+    expect(findPersonaAdnominalTerminal(ko, ['p.a', 'p.b', 'p.c'])).toEqual([]);
+    expect(findPersonaAdnominalTerminal(ko, ['p.d'])).toEqual([{ key: 'p.d', value: ko.p.d }]);
+  });
+
   it("'…되돌리는.'·'…엣지인.'(관형형+마침표 종결)를 잡는다", () => {
     const findings = findPersonaAdnominalTerminal(
       { p: { a: '연결을 되돌리는.', b: '이건 엣지인.' } },
