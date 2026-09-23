@@ -30,6 +30,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { publishHistorySenderLabel } from '@/lib/member-display';
 import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
+import { presetName } from '@/lib/platform-preset-copy';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -386,7 +387,8 @@ export default function OrganizationEventsPage() {
       />
 
       <Dialog open={marketingDetailTarget !== null} onOpenChange={(open) => { if (!open) setMarketingDetailTarget(null); }}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+        {/* story #4202(유나 390 실측) — 국소 수정. 만료 조건: 공용 ui/dialog.tsx가 같은 부류(제목 옆 닫기 버튼 자리 · grid 열 폭 minmax(0,1fr))를 고치면 이 국소 클래스를 걷어 낸다. */}
+        <DialogContent className="max-h-[85vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-3xl">
           {marketingDetailTarget ? (
             <RecipeDetailView
               recipe={marketingDetailTarget}
@@ -416,6 +418,7 @@ function EventDefRow({
 }) {
   // story #2664 — id 없는(구 목록 API, #2663 머지 전) 항목은 수정/비활성 버튼을 숨긴다(그릴 수
   // 없는 액션을 보여주는 게 UX상 더 나쁘다) — id가 실리는 순간 자동으로 나타난다.
+  const tPreset = useTranslations('recipePreset');
   const canMutate = !readonly && isAdmin && !!def.id;
   // story #3316 — "적용"은 사이클형(stage.enum이 있는) 정의에서만 의미가 있다(role_mapping이
   // 붙을 stage가 아예 없으면 적용할 게 없다) — isCyclicDefinition()(loop-create-dialog SSOT)
@@ -425,7 +428,9 @@ function EventDefRow({
   // 커스텀 정의가 name=key로(코드 키를 그대로 이름 자리에) 등록된 옛 데이터를 못 잡는다
   // (name이 빈 문자열이 아니라 truthy라 폴백이 안 걸림). 제목 자리 값을 한 곳에서
   // 계산해 아래 부제 판정도 같은 값을 본다.
-  const titleLabel = def.name && def.name !== def.key ? def.name : t('eventUnnamedDefinition');
+  // story #4202 — 플랫폼 마케팅 프리셋은 로케일 문안(presetName), 나머지는 원문 판정 그대로.
+  const localizedName = presetName(def, tPreset);
+  const titleLabel = localizedName && localizedName !== def.key ? localizedName : t('eventUnnamedDefinition');
   return (
     <div className="p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

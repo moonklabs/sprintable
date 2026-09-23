@@ -3689,6 +3689,9 @@ class RecipeStartCandidate(BaseModel):
     definition_id: str
     key: str
     name: str
+    # story #4202 — FE가 플랫폼 프리셋(None)만 로케일 문안으로 바꿔 그린다(조직 정의는 원문).
+    # EventDefinitionResponse.org_id와 같은 꼴.
+    org_id: str | None = None
     first_stage: str
     role_bound: bool
     started: bool
@@ -3816,6 +3819,7 @@ async def get_recipe_start_candidates(
             definition_id=str(definition.id),
             key=definition.key,
             name=definition.name,
+            org_id=str(definition.org_id) if definition.org_id else None,
             first_stage=first_stage,
             role_bound=role_bound,
             started=existing_publish is not None,

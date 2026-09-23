@@ -415,3 +415,32 @@ async def test_start_candidates_two_applied_recipes_both_listed():
             assert all(c.role_bound for c in resp.candidates)
     finally:
         await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_start_candidates_carry_org_id_platform_none_org_str():
+    """story #4202 — FE «레시피 시작»이 플랫폼 프리셋(org_id None)만 로케일 문안으로 바꾼다. 응답에 org_id가 없으면
+    플랫폼 판정이 늘 거짓이라 번역이 조용히 안 걸린다 — 두 갈래를 값으로 핀."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            org_def = await _seed_cyclic_definition(s, org_id=org_id)
+            platform_def = await _seed_cyclic_definition(s, org_id=None, key="preset.marketing.e4202")
+            story_id = await _seed_story(s, org_id, project_id)
+            for d in (org_def, platform_def):
+                await _seed_role_binding(
+                    s, org_id=org_id, project_id=project_id, definition_key=d.key,
+                    stage="draft", agent_id=agent_id,
+                )
+
+            resp = await _get_candidates(s, org_id=org_id, project_id=project_id, story_id=story_id, user_id=owner_id)
+            by_key = {c.key: c for c in resp.candidates}
+            assert set(by_key) == {org_def.key, platform_def.key}
+            assert by_key[org_def.key].org_id == str(org_id)
+            assert by_key[platform_def.key].org_id is None
+            assert "org_id" in resp.model_dump()["candidates"][0]
+    finally:
+        await engine.dispose()

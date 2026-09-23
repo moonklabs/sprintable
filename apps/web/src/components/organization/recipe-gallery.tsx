@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { orderedRecipeRoles, recipeConnectionTargets, roleActorKind, stagesWithGate } from '@/lib/recipe-role-slots';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §1) 구현. AC1: 마케팅 레시피
 // 카드(#4046 useMarketingRecipes 위)와 개발 워크플로를 탭으로 분리한다.
@@ -57,12 +58,14 @@ function RecipeCard({
 }) {
   const t = useTranslations('organization');
   const roles = roleNames(recipe, t);
+  const tPreset = useTranslations('recipePreset');
   const connections = connectionNames(recipe, t);
+  const description = presetDescription(recipe, tPreset);
   return (
     <Card className="h-full" data-testid={`recipe-card-${recipe.id}`}>
       <CardBody className="flex h-full flex-col gap-2">
-        <h4 className="text-sm font-semibold text-foreground">{recipe.name || recipe.key}</h4>
-        {recipe.description ? <p className="min-h-8 text-xs text-muted-foreground">{recipe.description}</p> : null}
+        <h4 className="text-sm font-semibold text-foreground">{presetName(recipe, tPreset)}</h4>
+        {description ? <p className="min-h-8 text-xs text-muted-foreground">{description}</p> : null}
         <div className="flex flex-wrap gap-1.5">
           <Badge variant="outline">{t('recipeGalleryStageCountBadge', { count: stageCount(recipe) })}</Badge>
           <Badge variant="outline">{t('recipeGalleryGateCountBadge', { count: gateCount(recipe) })}</Badge>

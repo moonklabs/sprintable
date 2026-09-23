@@ -12,6 +12,8 @@ export interface RecipeStartCandidate {
   definition_id: string;
   key: string;
   name: string;
+  // story #4202 — 플랫폼 프리셋이면 null(로케일 문안으로 그린다), 조직 정의면 org id.
+  org_id: string | null;
   first_stage: string;
   role_bound: boolean;
   started: boolean;

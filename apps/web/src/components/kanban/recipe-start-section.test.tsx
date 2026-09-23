@@ -9,14 +9,15 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import { RecipeStartSection } from './recipe-start-section';
 import type { RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function withIntl(node: React.ReactNode) {
+function withIntl(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
   return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+    <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -40,7 +41,7 @@ afterEach(async () => {
 
 function candidateStub(overrides: Partial<RecipeStartCandidate> = {}): RecipeStartCandidate {
   return {
-    definition_id: 'def-1', key: 'org.acme.recipe', name: '테스트 레시피', first_stage: 'draft',
+    definition_id: 'def-1', key: 'org.acme.recipe', name: '테스트 레시피', org_id: 'org-acme', first_stage: 'draft',
     role_bound: true, started: false, conversation_id: null, message_id: null,
     current_stage: null, current_role: null, next_stage: null, next_role: null, last_published_at: null,
     current_stage_position: null, total_stages: null,
@@ -48,7 +49,7 @@ function candidateStub(overrides: Partial<RecipeStartCandidate> = {}): RecipeSta
   };
 }
 
-async function render(candidates: RecipeStartCandidate[], opts: { onPublish?: () => Promise<Response> } = {}) {
+async function render(candidates: RecipeStartCandidate[], opts: { onPublish?: () => Promise<Response>; locale?: 'ko' | 'en' } = {}) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith('/api/events/definitions/start-candidates')) {
       return new Response(JSON.stringify({ candidates }));
@@ -60,7 +61,7 @@ async function render(candidates: RecipeStartCandidate[], opts: { onPublish?: ()
   });
   vi.stubGlobal('fetch', fetchMock);
   await act(async () => {
-    root.render(withIntl(<RecipeStartSection storyId="story-1" projectId="proj-1" />));
+    root.render(withIntl(<RecipeStartSection storyId="story-1" projectId="proj-1" />, opts.locale));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
   return fetchMock;
@@ -242,5 +243,33 @@ describe('RecipeStartSection', () => {
     await act(async () => { await Promise.resolve(); });
     expect(container.textContent).toBe('');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// story #4202 — «레시피 시작» 칸도 플랫폼 마케팅 프리셋(org_id null)은 로케일 문안, 조직 정의는 원문.
+describe('RecipeStartSection — 플랫폼 프리셋 이름 로케일(story #4202)', () => {
+  const PLATFORM = { key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)', org_id: null };
+
+  it('en — 시작 전 한 줄: 플랫폼은 영어 이름, 조직 정의는 원문', async () => {
+    await render([
+      candidateStub({ definition_id: 'p1', ...PLATFORM }),
+      candidateStub({ definition_id: 'o1', key: 'org.acme.video', name: '우리 영상 흐름', org_id: 'org-acme' }),
+    ], { locale: 'en' });
+    const text = container.textContent ?? '';
+    expect(text).toContain(enMessages.recipePreset.videoProductionName);
+    expect(text).not.toContain('영상 제작(릴스·쇼츠)');
+    expect(text).toContain('우리 영상 흐름');
+  });
+
+  it('en — 진행 중 둘 이상일 때 진행 줄 제목도 영어 이름', async () => {
+    const started = { started: true, current_stage: 'draft', current_role: '크리에이터', current_stage_position: 1, total_stages: 3 };
+    await render([
+      candidateStub({ definition_id: 'p1', ...PLATFORM, ...started }),
+      candidateStub({ definition_id: 'o1', key: 'org.acme.video', name: '우리 영상 흐름', org_id: 'org-acme', ...started }),
+    ], { locale: 'en' });
+    const titles = [...container.querySelectorAll('p.font-medium')].map((e) => e.textContent);
+    expect(titles).toContain(enMessages.recipePreset.videoProductionName);
+    expect(titles).toContain('우리 영상 흐름');
+    expect(container.textContent).not.toContain('영상 제작(릴스·쇼츠)');
   });
 });
