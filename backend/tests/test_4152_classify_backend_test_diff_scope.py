@@ -195,3 +195,27 @@ def test_app_file_deleted_counts_as_changed_on_line2(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert _line1(proc) == "__ALL__"
     assert _line2(proc) == "app/routers/other.py"
+
+
+def test_4206_push_range_classifies_only_that_push(tmp_path):
+    """story #4206 — develop push는 이제 push 범위(before..after)로 판정한다. 앞 머지가 app 코드를 바꿨어도
+    이번 push(FE만)의 범위만 보면 빈 목록(좁힘) — 예전엔 push마다 __ALL__(diff 정보 없음)이었다."""
+    repo, _base = _init_repo(tmp_path)
+    _write(repo, "backend/app/routers/other.py", "x = 2\n")
+    _git(repo, "commit", "-q", "-am", "merge 1: app change")
+    before = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    _write(repo, "apps/web/src/components/unrelated.tsx", "export const X = 2\n")
+    _git(repo, "commit", "-q", "-am", "merge 2: FE only")
+
+    proc = _run(repo, before, "HEAD")
+    assert proc.returncode == 0, proc.stderr
+    assert _line1(proc) == ""
+
+
+def test_4206_ci_push_branch_uses_push_range_with_fallback():
+    """ci.yml detect-changed-scope의 push 분기가 push 범위로 classify를 부르고, before가 없거나 0000…이면 예전
+    __ALL__ 폴백을 유지한다(정적 대조 — 이 배선이 빠지면 develop push가 다시 전 파일 RED 후보)."""
+    ci = open(os.path.join(os.path.dirname(__file__), "..", "..", ".github", "workflows", "ci.yml")).read()
+    assert "PUSH_BEFORE_SHA: ${{ github.event.before }}" in ci
+    assert 'classify_backend_test_diff_scope.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}"' in ci
+    assert "grep -qE '^0+$'" in ci

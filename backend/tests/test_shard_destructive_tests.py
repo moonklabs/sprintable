@@ -836,20 +836,28 @@ def test_check_elapsed_mode_exit_code_matches_slow_files(tmp_path, capsys, monke
 
 
 def test_check_elapsed_mode_without_changed_files_arg_is_conservative_red(tmp_path, capsys, monkeypatch):
-    """story #4152 회귀 0 — `--changed-files` 생략(옛 호출부와 동형)이면 diff 정보가
-    없다는 뜻이라 전부 changed 취급, 위와 같은 표본이라도 절대 임계(weight×2.5)를
-    넘는 파일은 그대로 RED다(안전측 폴백, 새 인자를 안 넘기는 기존 소비처가 조용히
-    더 관대해지는 회귀를 막는다)."""
+    """story #4152 회귀 0 — `--changed-files` 생략(diff 정보 없음)이면 전부 RED 후보(안전측 폴백)는 그대로다.
+
+    story #4206 정정 — 다만 판정선은 샤드 전체를 대조군으로 잰 러너 배율만큼 올라간다. 이 픽스처(PR#3753 당시
+    shard 0, 중앙값 약 5.9배 — 러너 자체가 느렸던 날)는 그래서 이제 RED가 아니라 WARN이고(① exit 0), 같은
+    느린 러너 위에서 파일 하나만 혼자 튀면 여전히 RED다(② exit 1 — 폴백이 «조용히 전부 봐주는» 가드가 되지 않음)."""
     mod = _load()
     monkeypatch.setattr(mod, "load_weights", lambda: _RUN_33773872963_SHARD0_WEIGHTS)
     elapsed_path = tmp_path / "elapsed.tsv"
     elapsed_path.write_text(
         "\n".join(f"{f}\t{s}" for f, s in _RUN_33773872963_SHARD0_ELAPSED.items())
     )
-    exit_code = mod._check_elapsed_mode(elapsed_path)
-    assert exit_code == 1
+    assert mod._check_elapsed_mode(elapsed_path) == 0
     captured = capsys.readouterr()
-    assert "::error::" in captured.out
+    assert "::warning::" in captured.out and "::error::" not in captured.out
+
+    lone = next(iter(_RUN_33773872963_SHARD0_WEIGHTS))
+    spiked = dict(_RUN_33773872963_SHARD0_ELAPSED) | {
+        lone: mod.absolute_slow_threshold_sec(_RUN_33773872963_SHARD0_WEIGHTS[lone]) * 20,
+    }
+    elapsed_path.write_text("\n".join(f"{f}\t{s}" for f, s in spiked.items()))
+    assert mod._check_elapsed_mode(elapsed_path) == 1
+    assert "::error::" in capsys.readouterr().out
 
 
 def test_check_elapsed_mode_returns_1_and_prints_error_when_genuinely_slow(tmp_path, capsys, monkeypatch):
@@ -1457,3 +1465,111 @@ def test_s3911_genuinely_hanging_file_still_caught_after_rebaseline():
     slow, threshold, _ = mod.slow_files_normalized(elapsed, weights)
     assert slow == ["tests/test_3497_insight_snapshots.py"]
     assert threshold == 60.0  # 정상 러너(배율 1.0)
+
+
+# ─── story #4206 — 러너 속도 배율(대조군)·push 범위 ─────────────────────────────────────
+
+_RUNS_4206 = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "story_4206_runner_guard_runs.json").read_text()
+)
+
+
+def _judge_4206(run: dict, *, changed_files, use_factor: bool):
+    mod = _load()
+    changed = frozenset(changed_files) if changed_files is not None else None
+    provisional = frozenset(run["provisional"])
+    factor = (
+        mod.runner_speed_factor(
+            run["elapsed"], run["weights"], exclude=changed or frozenset(), provisional_files=provisional,
+        )
+        if use_factor else 1.0
+    )
+    red, _warn = mod.slow_files_absolute(
+        run["elapsed"], run["weights"], provisional_files=provisional, changed_files=changed, runner_factor=factor,
+    )
+    return red, factor
+
+
+@pytest.mark.parametrize("run", _RUNS_4206, ids=[r["label"] for r in _RUNS_4206])
+def test_4206_old_judgment_reproduces_todays_red(run):
+    """AC3 전제 — 옛 판정(diff 정보 없음·배율 1.0)이 오늘 attempt-1 로그의 RED 파일을 그대로 재현한다(픽스처가
+    실제 입력임을 고정: job 로그의 파일별 elapsed · 그 시점 등재 weight)."""
+    red, _ = _judge_4206(run, changed_files=None, use_factor=False)
+    assert red == run["observed_red"]
+
+
+@pytest.mark.parametrize("run", _RUNS_4206, ids=[r["label"] for r in _RUNS_4206])
+def test_4206_new_judgment_passes_todays_runs(run):
+    """⭐AC3 — 새 판정(push·PR 실제 diff의 변경 파일 + 대조군 러너 배율)으로 오늘 세 실행(6개 RED 샤드) 전부 RED 0.
+    changed_files = 그 실행의 실제 diff를 classify_backend_test_diff_scope.sh(+#4163 app 모듈 참조 좁힘)로 판정한 값."""
+    red, factor = _judge_4206(run, changed_files=run["changed_files"], use_factor=True)
+    assert red == [], f"{run['label']} factor={factor:.2f} red={red}"
+
+
+def test_4206_each_half_alone_is_not_enough():
+    """근거(선택 이유) — 둘 중 하나만으로는 오늘을 못 구한다: diff만 쓰면 push ece08100e shard 5의 test_4098
+    (events.py 변경의 참조 테스트, 73s>60s)이 남고, 배율만 쓰면(diff 없음) 등재값이 낡은 파일(test_3806 등)이 남는다."""
+    diff_only = [r for run in _RUNS_4206 for r in _judge_4206(run, changed_files=run["changed_files"], use_factor=False)[0]]
+    factor_only = [r for run in _RUNS_4206 for r in _judge_4206(run, changed_files=None, use_factor=True)[0]]
+    assert diff_only == ["tests/test_4098_gate_linked_channel_draft_realdb.py"]
+    assert "tests/test_3806_ads_boost_gate.py" in factor_only
+
+
+def test_4206_slow_runner_changed_file_passes_but_lone_regression_stays_red():
+    """AC2 — 느린 러너 흉내(대조군 전부 ×2): 변경 파일도 ×2면 통과. 러너는 정상(대조군 ×1)인데 변경 파일만 ×3이면 RED
+    (양성 대조 — 배율이 «진짜로 느려진 변경 파일»까지 덮지 않는다)."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    changed = frozenset({"tests/changed.py"})
+
+    slow_runner = {f"tests/c{i}.py": 60.0 for i in range(6)} | {"tests/changed.py": 80.0}
+    factor = mod.runner_speed_factor(slow_runner, weights, exclude=changed)
+    assert factor == 2.0
+    red, _ = mod.slow_files_absolute(slow_runner, weights, changed_files=changed, runner_factor=factor)
+    assert red == []
+
+    normal_runner = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 90.0}
+    factor = mod.runner_speed_factor(normal_runner, weights, exclude=changed)
+    assert factor == 1.0
+    red, _ = mod.slow_files_absolute(normal_runner, weights, changed_files=changed, runner_factor=factor)
+    assert red == ["tests/changed.py"]
+
+
+def test_4206_mutation_without_factor_slow_runner_is_red():
+    """뮤테이션 — 배율을 빼면(1.0) 같은 느린 러너 표본이 RED로 되돌아간다."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    slow_runner = {f"tests/c{i}.py": 60.0 for i in range(6)} | {"tests/changed.py": 80.0}
+    red, _ = mod.slow_files_absolute(slow_runner, weights, changed_files=frozenset({"tests/changed.py"}))
+    assert red == ["tests/changed.py"]
+
+
+def test_4206_factor_never_lowers_threshold_and_needs_min_sample():
+    """빠른 러너(대조군 ×0.5)는 임계를 좁히지 않는다(1.0) · 대조군이 MIN_RATIO_SAMPLE 미만이면 1.0 ·
+    변경 파일·provisional은 대조군에서 빠진다."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(4)}
+    fast = {f"tests/c{i}.py": 15.0 for i in range(4)}
+    assert mod.runner_speed_factor(fast, weights) == 1.0
+    slow = {f"tests/c{i}.py": 90.0 for i in range(4)}
+    assert mod.runner_speed_factor(slow, weights) == 3.0
+    assert mod.runner_speed_factor(slow, weights, exclude=frozenset({"tests/c0.py", "tests/c1.py"})) == 1.0
+    assert mod.runner_speed_factor(
+        slow, weights, provisional_files=frozenset({"tests/c0.py", "tests/c1.py"}),
+    ) == 1.0
+
+
+def test_4206_check_elapsed_mode_uses_factor_end_to_end(tmp_path, capsys, monkeypatch):
+    """_check_elapsed_mode 전체 경로 — 오늘 push ece08100e shard 5(가장 빡빡했던 샤드) 입력 그대로: 변경 파일 목록을
+    주면 exit 0 · 배율이 로그에 찍힌다."""
+    mod = _load()
+    run = next(r for r in _RUNS_4206 if r["label"] == "push ece08100e shard 5")
+    monkeypatch.setattr(mod, "load_weights", lambda: run["weights"])
+    monkeypatch.setattr(mod, "load_raw_entries", lambda: [{"file": f, "provisional": True} for f in run["provisional"]])
+    elapsed_path = tmp_path / "elapsed.tsv"
+    elapsed_path.write_text("\n".join(f"{f}\t{s}" for f, s in run["elapsed"].items()))
+    changed_path = tmp_path / "changed.txt"
+    changed_path.write_text("\n".join(run["changed_files"]))
+    assert mod._check_elapsed_mode(elapsed_path, changed_files_path=changed_path) == 0
+    err = capsys.readouterr().err
+    assert "러너 속도 배율" in err and "OK" in err

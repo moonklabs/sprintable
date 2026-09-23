@@ -389,6 +389,29 @@ def absolute_slow_threshold_sec(
     return max(weight * multiplier, base_seconds)
 
 
+def runner_speed_factor(
+    elapsed_by_file: dict[str, float],
+    weights: dict[str, float],
+    *,
+    exclude: frozenset[str] = frozenset(),
+    provisional_files: frozenset[str] = frozenset(),
+) -> float:
+    """story #4206 — 이 run의 러너 속도 배율. 같은 샤드의 **판정 대상이 아닌** 파일(`exclude` = 변경 파일 밖,
+    provisional 제외)을 대조군으로 elapsed/weight 중앙값을 낸다. 절대 임계를 **올리기만** 한다(1.0 미만은 1.0 —
+    빠른 러너가 판정선을 좁히지 않게). 대조군이 MIN_RATIO_SAMPLE 미만이면 1.0(#3396 AC3와 같은 폴백).
+
+    #3396(같은 run 상대 비교)을 되살리는 게 아니다: 그때는 모든 파일을 run 중앙값과 비교해 무관 파일 하나가 튀어도
+    RED였다. 여기선 RED 후보가 여전히 «변경 파일»(#4152 AC2)뿐이고, 무관 파일은 러너가 얼마나 느렸나를 재는 자로만
+    쓴다 — 변경 파일만 혼자 느려진 진짜 회귀(대조군은 정상 속도)는 배율 1 근처라 그대로 RED."""
+    control = {
+        f: e for f, e in elapsed_by_file.items() if f not in exclude and f not in provisional_files
+    }
+    ratios = weighted_ratios(control, weights)
+    if len(ratios) < MIN_RATIO_SAMPLE:
+        return 1.0
+    return max(1.0, statistics.median(ratios))
+
+
 def provisional_files_in(entries: list[dict]) -> frozenset[str]:
     """story #4152(AC4) — `provisional: true`로 구조화 등재된 항목만(자유문 "잠정값"
     텍스트 파싱 0 — story #3465의 `source` 필수화와 동형으로 구조화 필드만 신뢰).
@@ -480,6 +503,7 @@ def slow_files_absolute(
     changed_files: frozenset[str] | None = None,
     multiplier: float = ABSOLUTE_SLOW_MULTIPLIER,
     base_seconds: float = 60.0,
+    runner_factor: float = 1.0,
 ) -> tuple[list[str], list[str]]:
     """story #4152(AC1/AC2/AC3/AC4) — `_check_elapsed_mode`의 실제 판정 함수(순수 —
     AC2가 요구하는 단위 테스트 대상). weighted 파일만 대상(unweighted는 #3392가 전담,
@@ -492,7 +516,10 @@ def slow_files_absolute(
     회귀 0, `--changed-files` 인자 생략 시의 예전 동작 그대로 전부 RED 후보)이거나
     그 파일이 `changed_files` 안에 있으면 RED(AC2 — 변경 파일이거나 PR이 신설한
     테스트, git diff가 신규 파일도 목록에 올리므로 별도 처리 불요), 아니면 WARN
-    (AC2 — 무관 파일 초과는 경고, 잡은 초록 유지). 반환 (red 정렬·warn 정렬)."""
+    (AC2 — 무관 파일 초과는 경고, 잡은 초록 유지). 반환 (red 정렬·warn 정렬).
+
+    story #4206 — RED 판정선만 `runner_factor`(`runner_speed_factor`, 기본 1.0 = 예전 그대로)만큼 올린다. 절대
+    임계는 넘었지만 러너 배율이 흡수한 변경 파일은 WARN(가시성 — 무관 파일 WARN과 같은 축, 낡은 등재값 신호 유지)."""
     red: list[str] = []
     warn: list[str] = []
     for f, elapsed in elapsed_by_file.items():
@@ -502,7 +529,7 @@ def slow_files_absolute(
         if elapsed <= threshold:
             continue
         is_changed = changed_files is None or f in changed_files
-        (red if is_changed else warn).append(f)
+        (red if is_changed and elapsed > threshold * max(1.0, runner_factor) else warn).append(f)
     return sorted(red), sorted(warn)
 
 
@@ -800,16 +827,32 @@ def _check_elapsed_mode(elapsed_path: Path, *, changed_files_path: Path | None =
         parse_changed_files(changed_files_path.read_text()) if changed_files_path is not None else None
     )
 
+    # story #4206 — 판정 대상이 아닌 파일(변경 파일 밖)로 이 러너가 얼마나 느렸나를 재 임계를 올린다. diff 정보가
+    # 없으면(전부 판정 대상) 샤드 전체가 대조군 — 러너 부하로 샤드 전체가 느려진 날의 거짓 RED를 막는다.
+    runner_factor = runner_speed_factor(
+        elapsed_by_file, weights, exclude=changed_files or frozenset(), provisional_files=provisional,
+    )
+    print(
+        f"러너 속도 배율(story #4206 — 대조군 elapsed/weight 중앙값, 1.0 미만은 1.0): {runner_factor:.2f}",
+        file=sys.stderr,
+    )
+
     red, warn = slow_files_absolute(
         elapsed_by_file, weights, provisional_files=provisional, changed_files=changed_files,
+        runner_factor=runner_factor,
     )
 
     for f in warn:
         threshold = absolute_slow_threshold_sec(weights[f])
+        is_changed = changed_files is None or f in changed_files
+        reason = (
+            f"러너 배율 {runner_factor:.2f}로 흡수(story #4206 — 판정선 {threshold * runner_factor:.1f}s)"
+            if is_changed else "이 PR의 변경 파일 밖(AC2)"
+        )
         print(
             f"::warning::러너 정규화 가드(story #4152) — {f} 절대 임계({threshold:.1f}s, "
-            f"등재 weight {weights[f]:.1f}s×{ABSOLUTE_SLOW_MULTIPLIER:.1f}) 초과했지만 이 PR의 "
-            f"변경 파일 밖(AC2): {elapsed_by_file[f]:.0f}s — RED 아님(잡 초록 유지)."
+            f"등재 weight {weights[f]:.1f}s×{ABSOLUTE_SLOW_MULTIPLIER:.1f}) 초과했지만 {reason}: "
+            f"{elapsed_by_file[f]:.0f}s — RED 아님(잡 초록 유지)."
         )
 
     if changed_files is None:
@@ -820,11 +863,11 @@ def _check_elapsed_mode(elapsed_path: Path, *, changed_files_path: Path | None =
 
     if red:
         for f in red:
-            threshold = absolute_slow_threshold_sec(weights[f])
+            threshold = absolute_slow_threshold_sec(weights[f]) * runner_factor
             print(
                 f"::error::러너 정규화 절대 가드 초과(story #4152): {f} "
-                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 등재 weight×{ABSOLUTE_SLOW_MULTIPLIER:.1f} "
-                "절대 기준, 변경 파일이거나 diff 정보 없음)"
+                f"({elapsed_by_file[f]:.0f}s > {threshold:.1f}s — 등재 weight×{ABSOLUTE_SLOW_MULTIPLIER:.1f}"
+                f"×러너 {runner_factor:.2f} 절대 기준, 변경 파일이거나 diff 정보 없음)"
             )
         return 1
 

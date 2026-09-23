@@ -58,7 +58,8 @@ jobs:
       # story #4152(CI·결정성) — backend/tests/*.py 변경분만 공백 구분 단일 줄로(테스트
       # 파일 경로는 `_FILE_RE`(shard_destructive_tests.py)가 이미 `tests/[a-zA-Z0-9_]+\.py`
       # 로 좁혀 두므로 공백·쉼표 등 특수문자가 절대 안 낀다 — 멀티라인 GITHUB_OUTPUT
-      # 이스케이핑 없이 단일 줄로 안전하게 넘길 수 있다). push 이벤트(diff 정보 없음)는
+      # 이스케이핑 없이 단일 줄로 안전하게 넘길 수 있다). push 이벤트는 story #4206부터 push
+      # 범위(github.event.before..sha)로 같은 판정을 낸다 — before가 없을 때(diff 정보 없음)만
       # `__ALL__` 센티널 — backend-test-destructive가 이 값을 보면 --changed-files 자체를
       # 생략해 안전측 폴백(전부 changed 취급, 회귀 0)으로 떨어진다.
       backend_test_files_changed: ${{ steps.scope.outputs.backend_test_files_changed }}
@@ -82,6 +83,9 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # story #4206 — push 이벤트의 직전·직후 커밋(develop/main에 squash 머지되면 그 머지 한 커밋의 범위).
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           # push 이벤트(브랜치 직접 push — develop/main에 머지될 때 등)는 PR base/head가
@@ -90,7 +94,21 @@ jobs:
           if [ -z "${BASE_SHA}" ] || [ -z "${HEAD_SHA}" ]; then
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
             echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
-            # story #4152 — diff 정보 자체가 없다(push 이벤트) → __ALL__ 센티널.
+            # story #4206 — 전량 실행(fail-closed)은 그대로 두되, 러너 정규화 가드의 «어느 파일이 이 push의
+            # 변경인가»는 push 범위(before..after)로 판정한다. 예전엔 diff 정보 없음 → __ALL__(전 파일 RED 후보)이라
+            # develop push마다 러너가 느린 시간대면 무관 파일로 필수 체크가 RED였다(2026-09-23 35829164703·
+            # 35833427833). before가 없거나(새 브랜치 0000…) 이력에 없으면 예전 폴백 그대로.
+            if [ -n "${PUSH_BEFORE_SHA}" ] && ! printf '%s' "${PUSH_BEFORE_SHA}" | grep -qE '^0+$' \
+              && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+              CLASSIFY_OUTPUT="$(bash backend/scripts/classify_backend_test_diff_scope.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}")"
+              echo "backend_test_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '1p')" >> "$GITHUB_OUTPUT"
+              echo "backend_app_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '2p')" >> "$GITHUB_OUTPUT"
+              echo "backend_mixed_test_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '3p')" >> "$GITHUB_OUTPUT"
+              echo "push 이벤트 — 백엔드·gateway 전량 실행 · 가드 변경 파일은 push 범위 ${PUSH_BEFORE_SHA}..${PUSH_AFTER_SHA}로 판정:"
+              printf '%s\n' "${CLASSIFY_OUTPUT}"
+              exit 0
+            fi
+            # story #4152 — diff 정보 자체가 없다 → __ALL__ 센티널.
             echo "backend_test_files_changed=__ALL__" >> "$GITHUB_OUTPUT"
             # story #4163 — diff 정보 자체가 없으니 narrowing 재료(변경 app 모듈)도 없다.
             echo "backend_app_files_changed=" >> "$GITHUB_OUTPUT"
@@ -1401,7 +1419,9 @@ jobs:
             exit 1
           fi
           # story #4152(CI·결정성) — detect-changed-scope가 낸 backend/tests/*.py diff
-          # 목록(__ALL__=push 이벤트, diff 정보 없음)을 --changed-files로 넘긴다. 생략하면
+          # 목록(__ALL__=코드 변경 또는 diff 정보 없음 — push는 #4206부터 push 범위로 판정)을
+          # --changed-files로 넘긴다. story #4206 — 판정선은 같은 샤드의 무관 파일로 잰 러너 속도
+          # 배율만큼 올라간다(shard_destructive_tests.py::runner_speed_factor). 생략하면
           # (예: __ALL__) diff 정보 없음으로 간주해 예전처럼 전부 RED 후보(안전측 폴백,
           # shard_destructive_tests.py::slow_files_absolute의 changed_files=None 경로).
           #
