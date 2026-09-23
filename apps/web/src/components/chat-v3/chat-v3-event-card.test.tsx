@@ -125,3 +125,21 @@ describe('ChatV3EventCard', () => {
     expect(document.body.querySelector('[role="alert"]')).toBeNull();
   });
 });
+
+// story #4187 — 카드 제목 자리는 메시지 원문을 옮긴 요약이라 미리보기 변환을 거친다.
+describe('ChatV3EventCard — 제목 평문화(story #4187)', () => {
+  it('내부 HTML 주석·마크다운 링크 문법이 제목에 안 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatV3EventCard
+          approvalTarget={approvalTarget}
+          content={'<!-- linear-comment-id: abc -->[발행 승인](entity:story:11111111-1111-1111-1111-111111111111)을 올려요'}
+          isInTodayQueue todayV3Enabled todayHref="/today" onDone={vi.fn()}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('<!--');
+    expect(container.textContent).not.toContain('](entity:');
+    expect(container.textContent).toContain('발행 승인을 올려요');
+  });
+});
