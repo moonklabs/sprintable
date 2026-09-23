@@ -1153,7 +1153,10 @@ async def find_sole_pending_scoped_external_publish_gate(
       "이 게이트는 레시피 게이트가 대신 결재한다"는 계산 필드를 싣는 역방향).
 
     두 소비처가 각자 이 쿼리를 재구현하면 조용히 갈릴 수 있다(캐스케이드는 승인하는데
-    "대신 결재돼요" 표시는 안 뜨거나 그 반대) — 그래서 한 곳에서만 계산한다."""
+    "대신 결재돼요" 표시는 안 뜨거나 그 반대) — 그래서 한 곳에서만 계산한다.
+
+    story #4190 — 승인 캐스케이드·«대신 결재» 표시는 이제 이 함수를 직접 쓰지 않고 `recipe_approval_cascade_target`
+    (이 판정 + 승인 화면 초안·봉인 버전·다른 목적지 조건)을 같이 쓴다. 반려 캐스케이드는 이 함수 그대로."""
     _scoped_pending = (await session.execute(
         select(Gate).where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id,
@@ -1213,11 +1216,34 @@ def recipe_approval_covers(recipe_gate: Gate, *, draft_id: uuid.UUID | str | Non
     )
 
 
-def _recipe_approval_covers_scoped_gate(recipe_gate: Gate, scoped_gate: Gate) -> bool:
-    return recipe_approval_covers(
-        recipe_gate, draft_id=(scoped_gate.neutral_facts or {}).get("draft_id"),
-        version=scoped_gate.sealed_content_version,
+async def recipe_approval_cascade_target(
+    session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
+) -> Gate | None:
+    """story #4190(PO diff 2026-09-23 08:49Z) — «레시피 승인이 이 work item의 어느 scoped 게이트에 캐스케이드되는가»의
+    유일한 판정. 캐스케이드(`transition_gate`)와 «레시피가 대신 결재» 표시(gates.py `_enrich_deferred_to_gate_id`)가
+    이 함수 하나를 같이 쓴다 — 둘이 따로 판정하면 인박스가 숨긴 게이트를 레시피 승인이 안 거는 식으로 갈린다.
+
+    조건: 단일 pending scoped 게이트 · 승인 화면이 보여 주는 초안(`find_ready_recipe_channel_drafts()[0]`)이 바로 그
+    게이트 · 그 초안 최신 버전 == 게이트가 봉인한 버전(승인하면 봉인될 값과 같은 것) · 다른 목적지가 pending·approved로
+    살아 있지 않음. 승인 순간엔 같은 `[0]`이 봉인되므로(`seal_recipe_approved_draft`) 이 판정이 곧 봉인 일치다."""
+    sole = await find_sole_pending_scoped_external_publish_gate(
+        session, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
     )
+    if sole is None:
+        return None
+    from app.services.channel_posts import find_ready_recipe_channel_drafts
+
+    ready, _still_pending = await find_ready_recipe_channel_drafts(
+        session, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+    )
+    if not ready:
+        return None
+    _draft, shown_gate, latest = ready[0]
+    if shown_gate.id != sole.id or latest.version != sole.sealed_content_version:
+        return None
+    if await _has_other_live_destination(session, sole):
+        return None
+    return sole
 
 
 async def _has_other_live_destination(session: AsyncSession, scoped_gate: Gate) -> bool:
@@ -1358,15 +1384,12 @@ async def transition_gate(
         # 코드는 삭제(중복 제거, 이 한 곳이 유일한 소유자).
         if gate.gate_type == "external_publish" and (gate.scope_key or "") == "":
             # story #4190 — 승인 화면이 보여 준 초안을 먼저 봉인하고(캐스케이드가 scoped 게이트를 바꾸기 前 —
-            # 화면과 같은 판정), 승계는 그 봉인과 같은 초안·버전에만.
+            # 화면과 같은 판정), 승계 대상은 «대신 결재» 표시와 같은 판정 함수 하나로.
             await seal_recipe_approved_draft(session, gate)
-            _scoped_gate = await find_sole_pending_scoped_external_publish_gate(
+            _scoped_gate = await recipe_approval_cascade_target(
                 session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
             )
-            if (
-                _scoped_gate is not None and _recipe_approval_covers_scoped_gate(gate, _scoped_gate)
-                and not await _has_other_live_destination(session, _scoped_gate)
-            ):
+            if _scoped_gate is not None:
                 set_gate_status(_scoped_gate, "approved", now=datetime.now(timezone.utc))
                 _scoped_gate.requires_human = False
                 _scoped_gate.resolver_id = gate.resolver_id

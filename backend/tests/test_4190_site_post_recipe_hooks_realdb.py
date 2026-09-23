@@ -4,8 +4,9 @@ PO 판정(2026-09-23 07:36Z) «사람 승인은 그 사람이 본 내용에만 �
 - 레시피 unscoped 게이트가 승인되는 순간 승인 화면이 보여 준 초안(`find_ready_recipe_channel_drafts()[0]`)의
   id·버전을 neutral_facts[`approved_draft`]에 봉인한다. 승계(훅A 채널·사이트)와 캐스케이드(훅B)는 봉인된 초안·
   버전에만 — 승인 뒤 새 초안·재제출한 새 버전은 scoped 게이트 pending(사람 승인).
-- 사이트 초안은 승인 화면에 안 보여 봉인되지 않는다(승계 0). 봉인 경로 자체는 사이트에도 같으므로, 봉인이
-  있을 때의 동작은 봉인 사실을 직접 심어 잰다(화면 노출은 후속 카드).
+- 사이트 초안은 승인 화면에 안 보여 봉인되지 않는다(승계 0) — 블로그의 발행 승인은 내용이 봉인된 초안 게이트
+  하나다(PO 08:49Z · 4174 (a)).
+- PO diff(08:49Z): 캐스케이드와 «대신 결재» 표시는 판정 함수 하나(`recipe_approval_cascade_target`)를 같이 쓴다.
 까디르 QA:
 - P2 승인된 게이트의 새 버전 → 옛 발행 명령을 같은 트랜잭션에서 무효화.
 - P3 캐스케이드의 «단일 목적지» 판정이 승인된 다른 목적지도 센다.
@@ -103,20 +104,6 @@ async def _approve(Session, w, gate_id):
         await s.commit()
 
 
-async def _seal_site_draft(Session, recipe_id, draft_id, version):
-    """승인 화면이 이 블로그 초안을 보여 줬다고 가정(후속 FE 카드) — seal_recipe_approved_draft가 남기는 모양 그대로."""
-    from app.models.gate import Gate
-    from app.services.gate_service import RECIPE_APPROVED_DRAFT_FACT
-
-    async with Session() as s:
-        gate = await s.get(Gate, recipe_id)
-        gate.neutral_facts = {
-            **(gate.neutral_facts or {}),
-            RECIPE_APPROVED_DRAFT_FACT: {"kind": "site_post", "draft_id": str(draft_id), "version": version},
-        }
-        await s.commit()
-
-
 async def _gate(Session, gate_id):
     from app.models.gate import Gate
 
@@ -186,7 +173,7 @@ async def test_site_recipe_approved_first_then_new_blog_draft_is_not_inherited()
 
 async def test_site_draft_not_shown_on_approval_screen_is_not_cascaded():
     """초안 먼저 → 레시피 승인. 블로그 초안은 승인 화면에 안 보여 봉인되지 않는다 → 캐스케이드 0 · 명령 0.
-    뮤테이션: 캐스케이드의 봉인 대조 제거 → approved·명령 1로 RED."""
+    뮤테이션: 판정 함수의 ready[0] 대조 제거 → approved·명령 1로 RED."""
     from app.main import app
     from app.services.gate_service import RECIPE_APPROVED_DRAFT_FACT
 
@@ -233,34 +220,11 @@ async def test_site_gate_not_shown_on_approval_screen_is_not_marked_deferred():
         await engine.dispose()
 
 
-async def test_site_sealed_version_cascades_and_commands_once():
-    """봉인된 초안·버전이면 캐스케이드 승계 + 발행 명령 정확히 1(«초록인데 안 나감» 해소)."""
+async def test_site_new_version_of_approved_gate_voids_old_command_and_is_not_reinherited():
+    """까디르 P2(재현) — 승인된 블로그 게이트(명령 1)에 본문을 바꾼 v2 → 옛 명령 즉시 void(CONTENT_CHANGED) · 게이트
+    pending · 재제출해도(레시피가 승인돼 있어도) 승계 0 · 새 명령 0. 뮤테이션: 새 버전 훅의 void 제거 → 옛 명령 pending으로 RED."""
     from app.main import app
-
-    engine, Session = await _session_factory()
-    try:
-        async with Session() as s:
-            w = await _seed_site_world(s)
-            wp = await _seed_wordpress_connection(s, w["org_id"], site_url="https://o3.example.com")
-        recipe_id = await _recipe_gate(Session, w)
-        draft_id = await _post_site_version(app, Session, w, wp, "sealed-b")
-        gate_id = await _submit_site(app, Session, w, draft_id)
-        await _seal_site_draft(Session, recipe_id, draft_id, (await _gate(Session, gate_id)).sealed_content_version)
-
-        await _approve(Session, w, recipe_id)
-        gate = await _gate(Session, gate_id)
-        assert gate.status == "approved", gate.resolution_note
-        assert len(await _commands(Session, gate_id)) == 1
-    finally:
-        app.dependency_overrides.clear()
-        await engine.dispose()
-
-
-async def test_site_sealed_version_inherits_on_submit_then_new_version_voids_old_command():
-    """봉인된 버전을 승인 뒤 제출 → 승계 + 명령 1. 이어 본문을 바꾼 v2(까디르 재현) → 옛 명령 즉시 void ·
-    게이트 pending · 재제출해도 승계 0 · 새 명령 0. 뮤테이션: 새 버전 훅의 void 제거 → 옛 명령 pending으로 RED."""
-    from app.main import app
-    from app.services.gate_service import RECIPE_AUTO_SATISFIED_NOTE
+    from app.services.gate_service import transition_gate
 
     engine, Session = await _session_factory()
     try:
@@ -268,17 +232,16 @@ async def test_site_sealed_version_inherits_on_submit_then_new_version_voids_old
             w = await _seed_site_world(s)
             wp = await _seed_wordpress_connection(s, w["org_id"], site_url="https://o4.example.com")
         recipe_id = await _recipe_gate(Session, w)
-        draft_id = await _post_site_version(app, Session, w, wp, "sealed-a")
-        await _seal_site_draft(Session, recipe_id, draft_id, 1)
-        await _approve(Session, w, recipe_id)
-
+        draft_id = await _post_site_version(app, Session, w, wp, "p2-version")
         gate_id = await _submit_site(app, Session, w, draft_id)
-        gate = await _gate(Session, gate_id)
-        assert gate.status == "approved" and gate.resolution_note == RECIPE_AUTO_SATISFIED_NOTE
+        async with Session() as s:
+            await transition_gate(s, w["org_id"], gate_id, "approved", resolver_id=w["human_id"])
+            await s.commit()
+        await _approve(Session, w, recipe_id)
         [v1_command] = await _commands(Session, gate_id)
         assert v1_command.status == "pending"
 
-        await _post_site_version(app, Session, w, wp, "sealed-a", body="바뀐 본문")
+        await _post_site_version(app, Session, w, wp, "p2-version", body="바뀐 본문")
         voided = await _commands(Session, gate_id, status="voided")
         assert [c.id for c in voided] == [v1_command.id] and voided[0].reason_code == "CONTENT_CHANGED"
         assert (await _gate(Session, gate_id)).status == "pending"
@@ -290,7 +253,6 @@ async def test_site_sealed_version_inherits_on_submit_then_new_version_voids_old
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
-
 
 async def test_site_resubmit_of_approved_gate_voids_its_pending_command():
     """까디르 P2(제출 경로) — 이미 approved인 블로그 게이트를 새 버전 없이 재상신해 다시 봉인하면(여기선 예상 비용만
@@ -322,37 +284,6 @@ async def test_site_resubmit_of_approved_gate_voids_its_pending_command():
         voided = await _commands(Session, gate_id, status="voided")
         assert [c.id for c in voided] == [command.id] and voided[0].reason_code == "BUDGET_CHANGED"
         assert (await _gate(Session, gate_id)).status == "pending"
-    finally:
-        app.dependency_overrides.clear()
-        await engine.dispose()
-
-
-async def test_cascade_counts_approved_other_destination():
-    """까디르 P3 — «승인된 목적지 1 + 대기 목적지 1»이면 봉인돼 있어도 캐스케이드 0.
-    뮤테이션: `_has_other_live_destination` 검사 제거 → 대기 목적지가 approved로 RED."""
-    from app.main import app
-    from app.services.gate_service import transition_gate
-
-    engine, Session = await _session_factory()
-    try:
-        async with Session() as s:
-            w = await _seed_site_world(s)
-            wp = await _seed_wordpress_connection(s, w["org_id"], site_url="https://p3.example.com")
-            wh = await _seed_webhook_connection(s, w["org_id"], target_url_builder=lambda cid: f"https://h.example.com/{cid}")
-        draft_a = await _post_site_version(app, Session, w, wp, "p3-a")
-        gate_a = await _submit_site(app, Session, w, draft_a)
-        async with Session() as s:
-            await transition_gate(s, w["org_id"], gate_a, "approved", resolver_id=w["human_id"])
-            await s.commit()
-
-        recipe_id = await _recipe_gate(Session, w)
-        draft_b = await _post_site_version(app, Session, w, wh, "p3-b")
-        gate_b = await _submit_site(app, Session, w, draft_b)
-        await _seal_site_draft(Session, recipe_id, draft_b, (await _gate(Session, gate_b)).sealed_content_version)
-        await _approve(Session, w, recipe_id)
-
-        assert (await _gate(Session, gate_b)).status == "pending", "승인된 다른 목적지가 있는데 캐스케이드가 승계했다"
-        assert await _commands(Session, gate_b) == []
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -505,6 +436,103 @@ async def test_channel_resubmitted_new_version_is_not_inherited():
         voided = await _commands(Session, scoped_id, status="voided")
         assert [x.id for x in voided] == [v1_command.id]
         assert await _commands(Session, scoped_id, status="pending") == []
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_channel_deferred_display_and_cascade_share_one_judgment():
+    """PO diff(08:49Z) — «대신 결재» 표시와 캐스케이드가 같은 판정(`recipe_approval_cascade_target`)을 쓴다. 다른 목적지
+    A가 이미 approved이고 B가 단일 pending이면: 표시 = 안 숨김(deferred 없음) · 레시피 승인 = B에 캐스케이드 안 함(까디르 P3).
+    뮤테이션: 표시 쪽을 옛 조건(sole pending만)으로 되돌리면 deferred가 채워져 RED · 판정 함수에서 다른 목적지 검사를 빼면
+    둘 다 뒤집혀 RED."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+    from app.services.gate_service import transition_gate
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session, _seed_sandbox_connection
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190d")
+        _draft_a, gate_a = await _channel_draft_and_submit(app, Session, c, "A안")
+        async with Session() as s:
+            await transition_gate(s, c["org_id"], gate_a, "approved", c["owner_member_id"], "A 직접 승인")
+            await s.commit()
+        async with Session() as s:
+            connection_b = await _seed_sandbox_connection(s, c["org_id"], account_id="p3-b")
+        _draft_b, gate_b = await _channel_draft_and_submit(app, Session, c | {"connection_id": connection_b}, "B안")
+
+        async with Session() as s:
+            resp = await to_gate_response(s, c["org_id"], await s.get(Gate, gate_b))
+        assert resp.deferred_to_gate_id is None, "인박스가 숨겼는데"
+
+        await _approve_d(Session, c)
+        assert (await _gate(Session, gate_b)).status == "pending", "레시피 승인이 걸지 않아야"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_channel_sole_shown_draft_is_marked_deferred_and_cascaded():
+    """양성 쌍 — 단일 목적지 채널 초안(승인 화면에 보임)은 표시 = «대신 결재» · 레시피 승인 = 캐스케이드. 두 표면이 같은 답."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190e")
+        _draft_id, scoped_id = await _channel_draft_and_submit(app, Session, c, "단일 목적지 본문")
+        async with Session() as s:
+            resp = await to_gate_response(s, c["org_id"], await s.get(Gate, scoped_id))
+        assert resp.deferred_to_gate_id == c["gate_d_id"]
+
+        await _approve_d(Session, c)
+        assert (await _gate(Session, scoped_id)).status == "approved"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_channel_edited_after_approval_is_not_cascaded_until_resubmitted():
+    """판정 함수의 버전 조건 — 사람이 승인한 채널 초안을 고치면(새 버전) 게이트는 pending으로 돌아가지만 봉인은 옛
+    버전이다. 이때 레시피 승인은 사람이 본 적 없는 새 내용이라 캐스케이드하지 않고, 표시도 «대신 결재»가 아니다.
+    뮤테이션: 판정 함수에서 버전 대조를 빼면 캐스케이드·표시 둘 다 뒤집혀 RED."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+    from app.services.gate_service import transition_gate
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _client_for as _ch_client_for
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _setup_org_scoped_app as _ch_setup
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190f")
+        scheduled_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        _draft_id, scoped_id = await _channel_draft_and_submit(app, Session, c, "v1 본문", scheduled_at=scheduled_at)
+        async with Session() as s:
+            await transition_gate(s, c["org_id"], scoped_id, "approved", c["owner_member_id"], "v1 직접 승인")
+            await s.commit()
+
+        _ch_setup(app, Session, c["org_id"], user_id=c["creator_id"], agent=True)
+        async with _ch_client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{c['org_id']}/channel-posts/drafts",
+                json={"work_item_id": str(c["story_id"]), "connection_id": str(c["connection_id"]), "text": "v2 고친 본문"},
+            )
+            assert r.status_code == 201, r.text
+        scoped = await _gate(Session, scoped_id)
+        assert scoped.status == "pending" and scoped.reapproval_required is True
+
+        async with Session() as s:
+            resp = await to_gate_response(s, c["org_id"], await s.get(Gate, scoped_id))
+        assert resp.deferred_to_gate_id is None
+
+        await _approve_d(Session, c)
+        assert (await _gate(Session, scoped_id)).status == "pending", "사람이 안 본 v2에 레시피 승인이 걸렸다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -483,10 +483,9 @@ async def _enrich_deferred_to_gate_id(
     if gate.gate_type != "external_publish" or (gate.scope_key or "") == "" or gate.status != "pending":
         return
 
-    from app.services.channel_posts import find_ready_recipe_channel_drafts
     from app.services.gate_service import (
         find_pending_recipe_external_publish_gate,
-        find_sole_pending_scoped_external_publish_gate,
+        recipe_approval_cascade_target,
     )
 
     recipe_gate = await find_pending_recipe_external_publish_gate(
@@ -494,18 +493,12 @@ async def _enrich_deferred_to_gate_id(
     )
     if recipe_gate is None:
         return
-    sole_pending = await find_sole_pending_scoped_external_publish_gate(
+    # story #4190 — «대신 결재»는 레시피 승인이 실제로 캐스케이드할 게이트뿐 — 캐스케이드(transition_gate)와 같은 판정
+    # 함수. 블로그 초안(승인 화면에 없음)·다른 목적지가 살아 있는 게이트를 숨기면 레시피 승인 뒤에도 사람이 못 찾는다.
+    target = await recipe_approval_cascade_target(
         session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
     )
-    if sole_pending is None or sole_pending.id != gate.id:
-        return
-    # story #4190 — 레시피 승인이 대신 결재하는 건 승인 화면이 보여 주고 승인 순간 봉인할 초안
-    # (gate_service.seal_recipe_approved_draft와 같은 `find_ready_recipe_channel_drafts()[0]`)뿐이다. 블로그
-    # 초안처럼 화면에 안 보이는 게이트를 «대신 결재»로 숨기면 레시피 승인 뒤에도 사람이 못 찾는다.
-    ready, _still_pending = await find_ready_recipe_channel_drafts(
-        session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
-    )
-    if ready and ready[0][1].id == gate.id:
+    if target is not None and target.id == gate.id:
         resp.deferred_to_gate_id = recipe_gate.id
 
 
