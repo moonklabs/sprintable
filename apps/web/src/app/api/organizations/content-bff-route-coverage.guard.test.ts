@@ -137,6 +137,44 @@ function routeTsExistsAndExports(dir: string, method: string): { exists: boolean
   return { exists, exportsIt: exists && exportsMethod(routeTs, method), routeTs };
 }
 
+type Segment = { value: string; dynamic: boolean };
+
+/** 한 호출의 판정 — 통과면 null, 실패면 사유 문자열. */
+function checkCall(segments: Segment[], method: string): string | null {
+  const dir = resolveRouteDir(segments);
+  if (dir) {
+    const direct = routeTsExistsAndExports(dir, method);
+    if (direct.exists) return direct.exportsIt ? null : `${direct.routeTs} 가 ${method} export 안 함`;
+  }
+  // 일반 경로에 route.ts가 없으면(디렉터리 자체 미해소 포함), 선언된 리터럴 우주로만
+  // 구제한다 — 선언 없으면 닫힌 실패.
+  const fanoutDirs = resolveFanoutDirs(segments);
+  if (!fanoutDirs) return 'BFF 디렉터리를 찾지 못함(리터럴 우주 선언도 없음)';
+  for (const fdir of fanoutDirs) {
+    const { exists, exportsIt, routeTs } = routeTsExistsAndExports(fdir, method);
+    if (!exists) return `route.ts 없음: ${routeTs}`;
+    if (!exportsIt) return `${routeTs} 가 ${method} export 안 함`;
+  }
+  return null;
+}
+
+/** 같은 호출을 한 번만 검사한다. 키는 변수명을 살린 원문 템플릿 — 동적 세그먼트를 `*`로
+ * 뭉개면 미선언 `${unknownChannel}` 호출이 선언된 `${channel}`과 같은 키가 돼, 파일 순서상
+ * 뒤에 오면 검사 없이 빠진다(까디르 QA 재현, PR #4539). KNOWN_LITERAL_FANOUTS 조회도
+ * 같은 원문 키를 쓰므로 두 축이 같은 단위로 맞물린다. */
+function dedupeCalls(calls: CallSite[]): { call: CallSite; segments: Segment[] }[] {
+  const seen = new Set<string>();
+  const out: { call: CallSite; segments: Segment[] }[] = [];
+  for (const call of calls) {
+    const segments = templateSegments(call.template);
+    const key = `${segments.map((s) => s.value).join('/')} ${call.method}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ call, segments });
+  }
+  return out;
+}
+
 describe('org BFF 경로 커버리지 가드(story #3445, story #3953 CHANGES — apps/web/src 전체)', () => {
   const files = listSourceFiles(SRC_ROOT);
   const calls = extractCalls(files);
@@ -146,33 +184,24 @@ describe('org BFF 경로 커버리지 가드(story #3445, story #3953 CHANGES �
     expect(calls.length).toBeGreaterThan(0);
   });
 
-  const seen = new Set<string>();
-  for (const call of calls) {
-    const segments = templateSegments(call.template);
-    const key = `${segments.map((s) => (s.dynamic ? '*' : s.value)).join('/')} ${call.method}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
+  for (const { call, segments } of dedupeCalls(calls)) {
     it(`${call.template} [${call.method}] → route.ts 존재 + 메서드 export (${call.file.split('/src/')[1]})`, () => {
-      const dir = resolveRouteDir(segments);
-      if (dir) {
-        const direct = routeTsExistsAndExports(dir, call.method);
-        if (direct.exists) {
-          expect(direct.exportsIt, `${direct.routeTs} 가 ${call.method} export 안 함`).toBe(true);
-          return;
-        }
-      }
+      expect(checkCall(segments, call.method), call.template).toBeNull();
+    });
+  }
+});
 
-      // 일반 경로에 route.ts가 없으면(디렉터리 자체 미해소 포함), 선언된
-      // 리터럴 우주로만 구제한다(선언 없으면 아래 not.toBeNull()에서 그대로
-      // RED — 새 호출은 기본이 닫힌 실패).
-      const fanoutDirs = resolveFanoutDirs(segments);
-      expect(fanoutDirs, `${call.template} 에 대응하는 BFF 디렉터리를 찾지 못함(리터럴 우주 선언도 없음)`).not.toBeNull();
-      for (const fdir of fanoutDirs as string[]) {
-        const { exists, exportsIt, routeTs } = routeTsExistsAndExports(fdir, call.method);
-        expect(exists, `route.ts 없음: ${routeTs}`).toBe(true);
-        expect(exportsIt, `${routeTs} 가 ${call.method} export 안 함`).toBe(true);
-      }
+describe('중복제거가 미선언 동형 호출을 삼키지 않는다(PR #4539 까디르 QA)', () => {
+  const declared: CallSite = { file: 'aa.tsx', template: '/api/organizations/${orgId}/channel-connections/${channel}', method: 'POST' };
+  const undeclared: CallSite = { file: 'zz.tsx', template: '/api/organizations/${orgId}/channel-connections/${unknownChannel}', method: 'POST' };
+
+  for (const [label, order] of [['선언 → 미선언', [declared, undeclared]], ['미선언 → 선언', [undeclared, declared]]] as const) {
+    it(`파일 순서 ${label}: 미선언 \${unknownChannel} 호출이 검사되고 RED다`, () => {
+      const verdicts = dedupeCalls([...order]).map(({ call, segments }) => ({ template: call.template, reason: checkCall(segments, call.method) }));
+      const undeclaredVerdict = verdicts.find((v) => v.template === undeclared.template);
+      expect(undeclaredVerdict, '미선언 호출이 중복제거로 사라짐').toBeDefined();
+      expect(undeclaredVerdict?.reason).not.toBeNull();
+      expect(verdicts.find((v) => v.template === declared.template)?.reason).toBeNull();
     });
   }
 });
