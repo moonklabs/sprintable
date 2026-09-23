@@ -1019,3 +1019,13 @@ describe('MarketingRecipeApplyDialog — 한 역할에 자리 여럿(A·C)', () 
     expect(creatorSelect.getAttribute('aria-label')).not.toContain(' · ');
   });
 });
+
+// PR #4547(유나 권고·PO 처방) — 발행 자리 배지는 다른 배지(사람·에이전트·모델)처럼 «고르는 대상의
+// 이름». 예전 «담당»은 경고·설명문의 일반 낱말 «담당»과 겹쳤다(phrase-collision 가드가 잡은 진짜 겹침).
+describe('발행 자리 배지 문구', () => {
+  it('ko «채널» · en «Channel»', async () => {
+    const en = (await import('../../../messages/en.json')).default;
+    expect(koMessages.organization.recipeApplyV2PublisherBadge).toBe('채널');
+    expect(en.organization.recipeApplyV2PublisherBadge).toBe('Channel');
+  });
+});

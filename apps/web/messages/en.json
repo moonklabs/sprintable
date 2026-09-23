@@ -832,7 +832,7 @@
     "recipeApplyV2ComputeBadge": "Model",
     "recipeApplyV2ComputeDesc": "The generation connector the generation stage uses",
     "recipeApplyV2ComputeEmptyFallbackHint": "Leave it empty and the assigned agent generates with its own tools — no organization connector.",
-    "recipeApplyV2PublisherBadge": "Owner",
+    "recipeApplyV2PublisherBadge": "Channel",
     "recipeApplyV2PublisherDesc": "Posts the approved material to the channel",
     "recipeApplyV2StageCoverage": "Executes {count} stages",
     "recipeApplyV2CreatorMembershipError": "The selected agent isn't a member of this project. Please choose again.",

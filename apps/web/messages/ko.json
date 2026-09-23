@@ -832,7 +832,7 @@
     "recipeApplyV2ComputeBadge": "모델",
     "recipeApplyV2ComputeDesc": "생성 단계가 쓰는 연산 커넥터",
     "recipeApplyV2ComputeEmptyFallbackHint": "비워 두면 담당 에이전트가 자기 도구로 생성해요 — 조직 커넥터는 안 써요.",
-    "recipeApplyV2PublisherBadge": "담당",
+    "recipeApplyV2PublisherBadge": "채널",
     "recipeApplyV2PublisherDesc": "승인된 소재를 채널에 게시",
     "recipeApplyV2StageCoverage": "{count}개 단계 실행",
     "recipeApplyV2CreatorMembershipError": "선택한 에이전트가 이 프로젝트 소속이 아니에요. 다시 선택해 주세요.",
