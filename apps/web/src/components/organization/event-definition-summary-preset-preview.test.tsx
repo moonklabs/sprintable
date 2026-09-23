@@ -63,6 +63,9 @@ describe('EventDefinitionSummary 미리보기 — 플랫폼 프리셋은 로케�
     expect(text).toContain(`${enMessages.recipePreset.workflowKanbanName} workflow`);
     expect(text).not.toContain('Kanban Flow');
     expect(text).not.toContain('넘어갔습니다');
+    // 유나 반려 — «대상»이 ⟨missing⟩ 마커가 아니라 예시 일감.
+    expect(text).toContain(enMessages.organization.definerPreviewSampleWorkItem);
+    expect(text).not.toMatch(/missing/i);
   });
 
   it('정의를 안 넘기면(조직 정의 경로와 같은 자리) 원문 그대로 — 위 테스트가 전달을 재는 대조군', async () => {

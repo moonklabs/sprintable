@@ -934,6 +934,7 @@
     "definerFieldOptional": "Optional",
     "definerAddField": "Add field",
     "definerPreviewLabel": "Live preview — this is what the chat card will look like",
+    "definerPreviewSampleWorkItem": "Example work item",
     "definerPreviewNote": "This card is drawn with the actual renderer — pixel-identical to what appears in chat after saving. \"Test publish\" round-trips a real publish sent only to you, verifying routing and permissions end to end.",
     "definerTestPublishCta": "Test publish…",
     "definerTestPublishSuccess": "Test published.",

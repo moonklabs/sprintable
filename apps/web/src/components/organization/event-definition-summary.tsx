@@ -136,7 +136,12 @@ export function EventDefinitionSummary({
       {blockTemplate ? (
         <div>
           <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{t('definerPreviewLabel')}</p>
-          <EventBlockCard template={blockTemplate as unknown as BlockTemplate} payload={samplePayload} definition={definition} />
+          {/* PR #4575 유나 반려 — 미리보기엔 실제 일감이 없어 `{{label.work_item_target}}`(플랫폼 프리셋 «대상»)이 ⟨missing⟩으로
+              떴다. 채팅과 같은 refs 모양의 예시 일감을 넣어 «대상 · 예시 일감»으로 보인다. */}
+          <EventBlockCard
+            template={blockTemplate as unknown as BlockTemplate} payload={samplePayload} definition={definition}
+            refs={{ work_item: { found: true, type: 'story', token: t('definerPreviewSampleWorkItem') } }}
+          />
         </div>
       ) : null}
 

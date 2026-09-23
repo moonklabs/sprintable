@@ -934,6 +934,7 @@
     "definerFieldOptional": "선택",
     "definerAddField": "필드 추가",
     "definerPreviewLabel": "실물 미리보기 — 발행되면 채팅 카드가 이렇게 떠요",
+    "definerPreviewSampleWorkItem": "예시 일감",
     "definerPreviewNote": "이 카드는 실제 렌더러로 그려요 — 저장 뒤 채팅에 뜨는 것과 픽셀 동일해요. 「테스트 발행」은 나에게만 보내는 실 발행으로 라우팅·권한까지 왕복 검증해요.",
     "definerTestPublishCta": "테스트 발행…",
     "definerTestPublishSuccess": "테스트 발행했어요.",
