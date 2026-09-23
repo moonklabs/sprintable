@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // story #4184 — `/api/me` 공유(lib/me-client.ts)의 계약: 진행 중 합류 + 성공 결과 재사용(맥락별) + 무효화.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -6,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args) }));
 
-import { fetchMe } from './me-client';
+import { fetchMe, ME_REUSE_TTL_MS } from './me-client';
 import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 import { setEffectiveOrgId, setEffectiveProjectId } from '@/lib/project-context-client';
 
@@ -73,6 +74,49 @@ describe('fetchMe — 진행 중 /api/me 요청 공유(story #4184)', () => {
     resolveOld(okMe('stale'));
     expect(await (await after).json()).toEqual({ data: { id: 'fresh' } });
     await old;
+  });
+
+  it(`재사용은 유효 시간(${ME_REUSE_TTL_MS}ms) 안에서만 — 지나면 새 요청 1(다른 세션의 역할 변경이 몇 시간씩 안 보이는 부류 차단)`, async () => {
+    const t0 = 1_000_000;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      fetchWithAuthMock.mockResolvedValueOnce(okMe('old')).mockResolvedValueOnce(okMe('new'));
+      expect(await (await fetchMe()).json()).toEqual({ data: { id: 'old' } });
+      now.mockReturnValue(t0 + 2_700); // 설정 화면 두 호출 간격(배포 18 CDP) — 재사용
+      expect(await (await fetchMe()).json()).toEqual({ data: { id: 'old' } });
+      expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(t0 + ME_REUSE_TTL_MS);
+      expect(await (await fetchMe()).json()).toEqual({ data: { id: 'new' } });
+      expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('탭이 다시 보이면(visibilitychange → visible) 버리고 새 요청 1', async () => {
+    fetchWithAuthMock.mockResolvedValueOnce(okMe('before')).mockResolvedValueOnce(okMe('after'));
+    expect(await (await fetchMe()).json()).toEqual({ data: { id: 'before' } });
+    const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+    } finally {
+      vis.mockRestore();
+    }
+    expect(await (await fetchMe()).json()).toEqual({ data: { id: 'after' } });
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('음성대조 — 탭이 가려질 때(hidden)는 버리지 않는다', async () => {
+    fetchWithAuthMock.mockResolvedValue(okMe('keep'));
+    await fetchMe();
+    const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+    } finally {
+      vis.mockRestore();
+    }
+    await fetchMe();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
   });
 
   it('맥락(org·project)이 바뀌면 저장된 결과를 안 쓰고 새로 부른다', async () => {
