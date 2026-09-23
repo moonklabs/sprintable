@@ -226,7 +226,7 @@ const BLOG_RECIPE: EventDefinitionResponse = {
   payload_schema: {
     properties: {
       stage: {
-        enum: ['draft', 'concept_confirmed', 'editing', 'verification', 'pending_approval', 'published', 'publish_checked'],
+        enum: ['planning', 'concept_confirmed', 'writing', 'verification', 'pending_approval', 'published', 'publish_checked'],
       },
     },
   },

@@ -148,7 +148,7 @@ async def test_site_post_stages_carry_their_tool_hints():
         org_id = uuid.uuid4()
         base = {"work_item_type": "story", "work_item_id": str(uuid.uuid4())}
         expect = {
-            "editing": "create_site_post_draft",
+            "writing": "create_site_post_draft",
             "verification": "submit_site_post_draft",
             "published": "get_site_post_publication",
         }
@@ -245,8 +245,8 @@ async def test_every_next_stage_line_is_localized():
     from app.routers.events import _render_event_message_content
 
     cases = {
-        "concept_confirmed": ("Next stage: editing (Creator)", "다음 단계: editing (Creator)"),
-        "draft": ("Next stage: concept_confirmed (Director)", "다음 단계: concept_confirmed (Director)"),
+        "concept_confirmed": ("Next stage: writing (Creator)", "다음 단계: writing (Creator)"),
+        "planning": ("Next stage: concept_confirmed (Director)", "다음 단계: concept_confirmed (Director)"),
         "publish_checked": ("Next stage: none (last stage)", "다음 단계: 없음(마지막 stage)"),
     }
 
@@ -314,7 +314,7 @@ async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_conte
     응답에 더함 — 에이전트가 제출에 넣은 값과 같다 · PO 12:44Z: 안내 문구는 플러그인 배포 전에도 참이도록 «제출한 초안의 draft_id») → 실제 발행 경로(`publish_registry_event`)로 «발행 승인 대기» 단계를 그
     값의 `site_post_draft_id`와 함께 발행 → `resolve_site_post_recipe_context`가 레시피 문맥을 돌려준다. fail-closed(음성)만
     재면 «제출 응답에 그 값이 없어 늘 안 걸림»을 못 잡는다. 음성 짝: 연결 없이 발행한 회차는 문맥 None.
-    뮤테이션: 제출 응답의 draft_id 제거 → 응답 키 없음으로 RED."""
+    뮤테이션: 제출 응답의 draft_id를 엉뚱한 uuid4로 → RED(실측) · 응답에서 draft_id 제거 → RED."""
     from fastapi import BackgroundTasks
     from sqlalchemy import select
     from starlette.requests import Request as StarletteRequest
@@ -334,8 +334,16 @@ async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_conte
         async with Session() as s:
             seeded = await _seed(s)
         _body, submit = await _create_and_submit_hosted_draft(app, Session, seeded)
-        assert "draft_id" in submit, submit
-        draft_id = uuid.UUID(submit["draft_id"])
+        # 까디르 P2(9a0103caa) — 운영은 resolver를 제출된 게이트의 `neutral_facts["draft_id"]`로 부른다(events.py 승인 알림
+        # 경로). 응답 값을 양쪽에 그대로 넣으면 틀릴 수 없는 대조다 → 응답 draft_id == 게이트가 쥔 초안 id를 단언하고, 연결은
+        # 응답 값으로·조회는 게이트 값으로 한다(응답이 엉뚱한 id를 주면 여기서, 또는 문맥 None으로 RED).
+        from app.models.gate import Gate
+
+        async with Session() as s:
+            gate = await s.get(Gate, uuid.UUID(submit["gate_id"]))
+            gate_draft_id = uuid.UUID(gate.neutral_facts["draft_id"])
+        assert uuid.UUID(submit["draft_id"]) == gate_draft_id, (submit, gate_draft_id)
+        draft_id = uuid.UUID(submit["draft_id"])  # 에이전트가 연결에 싣는 값 = 제출 응답
 
         auth = AuthContext(
             user_id=str(seeded["agent_id"]), email=None,
@@ -359,16 +367,45 @@ async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_conte
         await publish({**base, "stage": "pending_approval"})
         async with Session() as s:
             assert await events.resolve_site_post_recipe_context(
-                s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=draft_id,
+                s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=gate_draft_id,
             ) is None
 
         msg = await publish({**base, "stage": "pending_approval", events.RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)})
         assert msg.msg_metadata["event"]["payload"][events.RECIPE_SITE_DRAFT_LINK_FIELD] == str(draft_id)
         async with Session() as s:
             got = await events.resolve_site_post_recipe_context(
-                s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=draft_id,
+                s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=gate_draft_id,
             )
         assert got == (_KEY, "published")
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_blog_uses_its_own_stage_slugs_not_the_video_ones():
+    """유나 design CHANGES(9a0103caa) — 블로그가 영상 슬러그 draft«초안»·editing«편집»을 빌리면 레시피 상세 단계 목록이
+    «초안(실제로는 기획) → … → 편집(실제로는 초안 작성)»으로 읽힌다. 블로그 전용 슬러그 planning«기획»·writing«초안 작성».
+    옛 슬러그가 블로그 경로(시드 단계 순서·stage_metadata·FE 단계 설명 표)에 남으면 RED · 새 슬러그는 단계 라벨 표에 있다.
+    `draft`·`editing` 라벨 행 자체는 영상 등 다른 레시피가 계속 쓰므로 남는다."""
+    from pathlib import Path
+
+    from tests.test_4202_platform_preset_copy_keys_realdb import _ts_table
+
+    web = Path(__file__).resolve().parents[2] / "apps/web/src/lib"
+
+    async def body(s):
+        d = await _definition(s)
+        assert _stages(d) == [
+            "planning", "concept_confirmed", "writing", "verification", "pending_approval", "published", "publish_checked",
+        ]
+        assert not {"draft", "editing"} & set(d.stage_metadata)
+        assert d.stage_metadata["writing"]["capability"]["kind"] == "draft_site_post"
+
+    await _with_session(body)
+
+    actions = _ts_table("PLATFORM_PRESET_ACTION_KEY")
+    assert not {f"{_KEY}:draft", f"{_KEY}:editing"} & set(actions)
+    assert {f"{_KEY}:planning", f"{_KEY}:writing"} <= set(actions)
+    labels = (web / "recipe-stage-label.ts").read_text(encoding="utf-8")
+    assert "planning: 'recipeStageLabelPlanning'" in labels and "writing: 'recipeStageLabelWriting'" in labels
+    assert "draft: 'recipeStageLabelDraft'" in labels and "editing: 'recipeStageLabelEditing'" in labels

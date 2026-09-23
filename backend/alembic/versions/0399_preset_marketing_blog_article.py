@@ -3,10 +3,10 @@
 규격: doc «레시피 프리셋 추가 규격 + 발행 표면별 게이트 경로 대조»(story #4172, 7ca3cab5) §4.
 
 흐름(7단계 — 설명 문구 «7단계»와 테스트로 대조):
-  draft(Creator) 주제·키워드 기획
+  planning(Creator) 주제·키워드 기획
   → concept_confirmed(Director, gate=concept_approval) 기획 승인 — 미승인이면 블로그 초안 제출이 막힌다
     (site_posts 제출의 concept_approval 검사, doc §2)
-  → editing(Creator, capability=draft_site_post) 블로그 초안 작성
+  → writing(Creator, capability=draft_site_post) 블로그 초안 작성
   → verification(Creator, capability=submit_site_post) 콘텐츠 규칙 검수 후 초안 제출(제출이 규칙 검사를 다시 돈다)
   → pending_approval(Director, 게이트 없음) 발행 승인 대기 — 발행 승인은 내용이 봉인된 **초안 게이트** 하나다
     (PO 판정 2026-09-23 08:49Z (a): 레시피 게이트는 블로그 내용을 못 보여 줘 승인이 아니다 — story #4190 봉인 원칙)
@@ -42,7 +42,7 @@ _KEY = "preset.marketing.blog_article"
 _OWNER = "org_owner"
 
 _STAGES = [
-    "draft", "concept_confirmed", "editing", "verification", "pending_approval", "published", "publish_checked",
+    "planning", "concept_confirmed", "writing", "verification", "pending_approval", "published", "publish_checked",
 ]
 
 _PAYLOAD_SCHEMA = {
@@ -70,12 +70,12 @@ _BLOCK_TEMPLATE = {
 }
 
 _STAGE_METADATA = {
-    "draft": {"role": "Creator", "action": "주제·키워드 기획(제목 후보와 글 구성)"},
+    "planning": {"role": "Creator", "action": "주제·키워드 기획(제목 후보와 글 구성)"},
     "concept_confirmed": {
-        "role": "Director", "action": "기획 승인(주제·키워드·구성 확인)",
+        "role": "Director", "action": "컨셉 승인(주제·키워드·구성 확인)",
         "gate": {"type": "concept_approval", "approver": _OWNER},
     },
-    "editing": {
+    "writing": {
         "role": "Creator", "action": "블로그 초안 작성",
         "capability": {"kind": "draft_site_post"},
     },

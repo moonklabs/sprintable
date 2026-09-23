@@ -51,6 +51,10 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   track_and_learn: 'recipeStageLabelTrackAndLearn',
   // story #4174(레시피 2호 블로그) — 서버가 발행한 뒤 에이전트가 공개 주소를 확인하는 단계(유나 문안 «발행 확인»).
   publish_checked: 'recipeStageLabelPublishChecked',
+  // story #4174(유나 design CHANGES) — 블로그 전용 슬러그. 영상의 draft«초안»·editing«편집»을 빌리면 블로그 단계 목록이
+  // «초안(실제로는 기획) → … → 편집(실제로는 초안 작성)»으로 읽혔다.
+  planning: 'recipeStageLabelPlanning',
+  writing: 'recipeStageLabelWriting',
 };
 
 export function recipeStageLabel(stage: string, t: (key: string) => string): string {
