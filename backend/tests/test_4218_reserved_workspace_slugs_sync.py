@@ -2,7 +2,8 @@
 
 예전 백엔드 목록은 2026-07-15 손 스냅샷이라 그 뒤 FE에 생긴 최상위 라우트(`gates`·`content`·`campaigns`·`desktop`·`today`·
 `connect-rules`…)로 org를 만들 수 있었다 — 그 org의 scoped 경로 `/{slug}/…`는 미들웨어가 flat 라우트로 해석해 들어갈 수 없다.
-이제 FE 목록을 직접 읽어(`tests/fe_reserved_segments.py`) «FE ⊆ 백엔드»를 고정한다: FE에 라우트가 늘면 여기가 RED.
+이제 FE가 커밋한 산출물 `apps/web/src/lib/reserved-first-segments.json`만 읽어 «JSON ⊆ 백엔드»를 고정한다(TS 파싱 없음).
+FE에 라우트가 늘면: JSON을 안 고치면 FE vitest가 RED, JSON만 고치면 여기가 RED.
 """
 from __future__ import annotations
 
@@ -36,11 +37,11 @@ def _missing_from_backend(fe: set[str]) -> list[str]:
     return sorted(fe - RESERVED_WORKSPACE_SLUGS)
 
 
-def test_fe_reserved_segments_parser_reads_both_branches():
-    """파서가 조용히 비거나 한 갈래만 읽지 않는다 — 손 스냅샷 리터럴과 `Object.keys(...)` 파생 둘 다."""
+def test_fe_reserved_segments_json_is_the_full_list():
+    """산출물이 비거나 한 갈래만 담기지 않았다 — 손 스냅샷 이름과 레거시 리소스 표 파생 이름이 둘 다 있다."""
     fe = fe_reserved_first_segments()
     assert len(fe) >= 50, sorted(fe)
-    assert {"gates", "today", "connect-rules", "set-password"} <= fe  # 손 스냅샷 리터럴
+    assert {"gates", "today", "connect-rules", "set-password"} <= fe  # 손 스냅샷
     assert {"flow", "work-list", "hypotheses", "mockups"} <= fe  # MIGRATED/RENAMED/RETIRED_RESOURCES 키
 
 
@@ -50,16 +51,17 @@ def test_backend_reserved_workspace_slugs_cover_every_fe_reserved_first_segment(
     assert _missing_from_backend(fe_reserved_first_segments()) == []
 
 
-def test_sync_guard_goes_red_when_fe_gains_a_route(tmp_path, monkeypatch):
-    """뮤테이션 고정 — FE 목록에 이름을 하나 더한 사본을 읽히면 가드가 그 이름을 잡는다."""
-    import tests.fe_reserved_segments as mod
+def test_sync_guard_goes_red_when_the_json_gains_a_name(tmp_path):
+    """뮤테이션 고정 — JSON에 이름 하나를 더한 사본을 읽히면 가드가 정확히 그 이름을 잡는다."""
+    import json
 
-    src = mod.RESERVED_TS.read_text(encoding="utf-8")
-    anchor = "export const RESERVED_FIRST_SEGMENTS = new Set(["
-    mutated = tmp_path / "reserved-first-segments.ts"
-    mutated.write_text(src.replace(anchor, anchor + "\n  'brand-new-route-4218',"), encoding="utf-8")
-    monkeypatch.setattr(mod, "RESERVED_TS", mutated)
-    assert _missing_from_backend(mod.fe_reserved_first_segments()) == ["brand-new-route-4218"]
+    from tests.fe_reserved_segments import RESERVED_JSON
+
+    data = json.loads(RESERVED_JSON.read_text(encoding="utf-8"))
+    data["segments"].append("brand-new-route-4218")
+    mutated = tmp_path / "reserved-first-segments.json"
+    mutated.write_text(json.dumps(data), encoding="utf-8")
+    assert _missing_from_backend(fe_reserved_first_segments(mutated)) == ["brand-new-route-4218"]
 
 
 def _message(resp) -> str | None:

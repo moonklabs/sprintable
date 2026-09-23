@@ -21,6 +21,7 @@
     "verify:no-unformatted-usage-count": "tsx scripts/verify-no-unformatted-usage-count.ts",
     "verify:no-orphan-resource-routes": "tsx scripts/verify-no-orphan-resource-routes.ts",
     "verify:reserved-first-segments-sync": "tsx scripts/verify-reserved-first-segments-sync.ts",
+    "gen:reserved-first-segments-json": "tsx scripts/write-reserved-first-segments-json.ts",
     "verify:migrated-resources-sync": "tsx scripts/verify-migrated-resources-sync.ts",
     "verify:no-new-raw-fetch-api": "tsx scripts/verify-no-new-raw-fetch-api.ts",
     "verify:no-card-surfaceless-box": "tsx scripts/verify-no-card-surfaceless-box.ts",
