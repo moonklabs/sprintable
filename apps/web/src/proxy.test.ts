@@ -398,7 +398,7 @@ describe('proxy', () => {
     });
     // sp_at은 서명 자체가 무효(claims 검증 실패) — verifyAccessToken이 null을 반환하는 경로.
     const response = await middleware(makeRequest('/board', { sp_at: 'not.a.valid.jwt', sp_rt: 'old-rt' }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
     expect(response.headers.get('set-cookie')).toContain('sp_at=');
   });
@@ -422,7 +422,7 @@ describe('proxy', () => {
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/board', { sp_rt: 'valid-rt' }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
   });
 });
@@ -583,7 +583,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
@@ -602,7 +602,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/docs', { sp_at: token, sprintable_current_project_id: 'proj-1' }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
   });
 
@@ -689,7 +689,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
@@ -745,7 +745,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/liveorg/sprintable/docs/my-doc');
     expect(mockFetch.mock.calls.some((args: unknown[]) => (args[0] as string).includes('/api/v2/organizations/jwt-org-stale'))).toBe(false);
   });
@@ -773,7 +773,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     const response = await middleware(makeRequest('/docs/my-doc?_prRetry=1', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
@@ -817,7 +817,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       const response = await middleware(makeRequest(`/${resource}`, {
         sp_at: token, sprintable_current_project_id: 'proj-1',
       }));
-      expect(response.status).toBe(301);
+      expect(response.status).toBe(307);
       // story #4170 — 이름이 바뀐(RENAMED)·은퇴한(RETIRED) 리소스는 이 301에서 최종 이름까지 한 번에 간다
       // (예전엔 옛 이름으로 한 번 더 301). 나머지는 이름 그대로.
       const finalName = RENAMED_RESOURCES[resource] ?? RETIRED_RESOURCES[resource] ?? resource;
@@ -841,7 +841,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     });
     // 쿠키 없이 sp_at만 — 온보딩/switch-project를 거치지 않은 순수 로그인 세션 재현.
     const response = await middleware(makeRequest('/board?story=abc', { sp_at: token }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow?story=abc');
   });
 
@@ -865,7 +865,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/glance?story=abc', { sp_at: token }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow?story=abc');
   });
 
@@ -881,15 +881,33 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       });
     }
 
-    it('/glance → 301 /{ws}/{proj}/flow, 그 목적지는 더 이상 리다이렉트되지 않는다(홉 1)', async () => {
+    it('/glance → 307 /{ws}/{proj}/flow, 그 목적지는 더 이상 리다이렉트되지 않는다(홉 1)', async () => {
       const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
       mockResolve();
       const first = await middleware(makeRequest('/glance', { sp_at: token }));
-      expect(first.status).toBe(301);
+      expect(first.status).toBe(307);
       const location = first.headers.get('location')!;
       expect(location).toBe('https://app.example.com/moonklabs/sprintable/flow');
       const second = await middleware(makeRequest(new URL(location).pathname, { sp_at: token }));
       expect([301, 302, 307, 308]).not.toContain(second.status);
+    });
+
+    // story #4170 AC4(PO 리뷰) — 세션(현재 org·project)으로 목적지가 정해지는 flat 주소는 캐시되면 안 된다
+    // (301+캐시 헤더 없음 → 크롬 디스크 캐시로 2회차부터 서버에 안 물어 프로젝트·계정을 바꿔도 옛 목적지).
+    it('세션 의존 flat 리다이렉트는 307 + Cache-Control: no-store', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockResolve();
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    });
+
+    it('경로만으로 정해지는 이름 바꿈(/{ws}/{proj}/board → /flow)은 301 그대로(no-store 없음)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockResolve();
+      const res = await middleware(makeRequest('/moonklabs/sprintable/board', { sp_at: token }));
+      expect(res.status).toBe(301);
+      expect(res.headers.get('cache-control')).not.toBe('no-store');
     });
 
     it('이름 바뀐 리소스는 하위 경로(id)를 들고 가고, 은퇴한 리소스는 버린다(두 번째 홉이 하던 규칙 그대로)', async () => {
@@ -931,7 +949,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/board', { sp_at: token, sprintable_current_project_id: 'proj-new' }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/newer-project/flow');
   });
 
@@ -979,7 +997,7 @@ describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니�
     const response = await middleware(makeRequest(`/artifacts/${ARTIFACT_ID}`, {
       sp_at: token, sprintable_current_project_id: 'proj-zerogo',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/artifacts/${ARTIFACT_ID}`);
     // «현재» project(zerogo)를 조회하는 일반 경로(projects/proj-zerogo)는 안 탔어야 한다.
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('/projects/proj-zerogo'), expect.anything());
@@ -1005,7 +1023,7 @@ describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니�
     const response = await middleware(makeRequest(`/artifacts/${ARTIFACT_ID}`, {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/artifacts/${ARTIFACT_ID}`);
   });
 
@@ -1024,7 +1042,7 @@ describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니�
       return Promise.resolve({ ok: false, status: 404 });
     });
     const response = await middleware(makeRequest('/artifacts', { sp_at: token }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
     expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('/visual-artifacts/preview'), expect.anything());
   });

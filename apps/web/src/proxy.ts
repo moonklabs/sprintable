@@ -252,7 +252,7 @@ async function redirectLegacyResourcePath(
       const url = request.nextUrl.clone();
       url.pathname = `/${ownSlugs.orgSlug}/${ownSlugs.projectSlug}/${resourceName}${rest}`;
       url.searchParams.delete(RESOLVE_RETRY_PARAM);
-      return NextResponse.redirect(url, 301);
+      return sessionDependentRedirect(url);
     }
   }
 
@@ -284,7 +284,22 @@ async function redirectLegacyResourcePath(
   const url = request.nextUrl.clone();
   url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
   url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
-  return NextResponse.redirect(url, 301);
+  return sessionDependentRedirect(url);
+}
+
+/**
+ * story #4170 AC4(PO 리뷰) — 옛 flat 주소(`/glance` 등)의 목적지는 **세션**(현재 org·project 쿠키/토큰)으로
+ * 정해진다. 301(+Cache-Control 없음)이면 브라우저가 디스크에 캐시해 2회차부터 서버에 안 묻는다(크롬 실측
+ * `fromDiskCache: true`) — 프로젝트를 바꾸거나 같은 기기에서 다른 계정으로 들어와도 캐시된 옛 목적지로 간다.
+ * 그래서 307 + `Cache-Control: no-store`. 경로만으로 정해지는 이름 바꿈(`/{ws}/{proj}/board`→`/flow`,
+ * redirectRenamedResourcePath·redirectRetiredResourcePath)은 누구에게나 같으니 301 그대로.
+ * 트레이드오프: 캐시 덕에 2회차부터 0이던 이 홉의 서버 처리(0.12~0.2초)가 매번 한 번 든다 — 정확성이 먼저이고,
+ * 같은 PR이 홉 2→1로 번 왕복(0.3~0.45초)이 그보다 크다.
+ */
+function sessionDependentRedirect(url: URL): NextResponse {
+  const response = NextResponse.redirect(url, 307);
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }
 
 /**
