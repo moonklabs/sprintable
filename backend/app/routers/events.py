@@ -400,9 +400,8 @@ async def agent_event_stream(
     member_id: uuid.UUID | None = Query(
         default=None,
         description=(
-            "구독할 멤버 id. API 키 세션은 생략(키의 멤버로 자동). 사람(JWT) 세션은 필수이며 "
-            "GET /api/v2/auth/me 의 org_member_id 를 넣는다 — 같은 응답의 member_id(users.id)는 "
-            "404가 난다."
+            "Member to subscribe. Omit for API key sessions (the key's member is used). "
+            "Required for human (JWT) sessions: use `org_member_id` from GET /api/v2/auth/me."
         ),
     ),
     auth: AuthContext = Depends(get_current_user_streaming),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3). P0(#abaf6279): SSE 커넥션 비점유 변형

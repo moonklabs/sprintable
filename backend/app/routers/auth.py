@@ -2229,9 +2229,9 @@ class AuthMeResponse(BaseModel):
     org_member_id: str | None = Field(
         default=None,
         description=(
-            "사람(JWT) 세션의 현재 org 멤버 id(org_members.id). GET /api/v2/events/stream 의 "
-            "member_id 쿼리에 넣는 값이다 — member_id 필드(users.id)로는 404. 에이전트(API 키) "
-            "세션·org 미해소면 null(에이전트는 member_id 그대로 쓴다)."
+            "Current-org member id for human (JWT) sessions. Pass this as `member_id` to "
+            "GET /api/v2/events/stream — the `member_id` field here is users.id and returns 404 "
+            "there. Null for agent (API key) sessions or when no org is resolved."
         ),
     )
 
