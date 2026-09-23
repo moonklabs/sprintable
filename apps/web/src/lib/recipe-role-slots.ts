@@ -28,7 +28,7 @@ export interface RecipeStageMeta {
   role?: string;
   action?: string;
   gate?: { type?: string; approver?: string };
-  capability?: { kind?: string; connector_key?: string };
+  capability?: { kind?: string; connector_key?: string; target?: string };
 }
 
 export type RecipeStageMetadata = Record<string, RecipeStageMeta>;
@@ -41,12 +41,8 @@ export type RoleActorKinds = Record<string, 'human' | 'agent'>;
 
 /**
  * role 문자열 → 사람/에이전트 분류. 정의가 role_actor_kinds를 선언 안 했거나("모름") 그
- * role이 선언 안에 없으면 null — 지어내지 않는다. 지금은 어떤 UI도 이 함수의 반환값으로
- * 렌더 분기를 바꾸지 않는다(적용 다이얼로그의 크리에이터/디렉터 구분은 여전히 role_binding
- * vs gate 존재라는 구조 신호로 판별 — #4046/#4048 기존 계약 그대로, AC1 "기존 관례와 충돌
- * 0"). 이 함수는 그 구조 판별과 별개로 "이 role이 실제로 사람인가 에이전트인가"를 정의
- * 저자가 명시한 값으로 정직하게 답하는 자리 — 향후 소비처(예: 연산/발행자 슬롯 확장)가
- * role 이름 추측 대신 이 함수를 부를 수 있게 SSOT로 먼저 연다.
+ * role이 선언 안에 없으면 null — 지어내지 않는다. story #4173부터 역할 순서(사람 먼저)·
+ * 적용 자리 판별(recipeRoleSlots)·카드 «(사람)» 표시가 이 값을 읽는다.
  */
 export function roleActorKind(role: string | undefined, roleActorKinds: RoleActorKinds | null | undefined): 'human' | 'agent' | null {
   if (!role || !roleActorKinds) return null;
@@ -140,13 +136,88 @@ export function recipeKeyDomain(key: string): string | null {
   return key.split('.')[1] ?? null;
 }
 
-// story #4426 P1(카디르 실 시드 E2E 재현, 2026-09-19) — 이 상수는 stage_metadata.role과
-// 대조하는 내부 데이터 키인데, #4419 실 seed(0381_preset_marketing_video_production_
-// recipe.py)의 실제 role 값은 영어 키("Creator"/"Director"/"Compute"/"Publisher")다 —
-// 이전 값 '크리에이터'(한글 표시라벨)는 그 어떤 stage_metadata.role과도 매칭되지 않아
-// groupStagesByRole(...)['크리에이터']가 항상 undefined → expandRoleSlotBindings가
-// 항상 빈 role_mapping을 냈다(크리에이터 배정이 조용히 완전 no-op, [거짓성공표시] 클래스
-// — 고립fixture 테스트는 role 값을 자유롭게 지어써서 이 불일치를 못 잡았다, [합성표본=
-// 구조숨김]). 표시 문구(t('recipeApplyV2CreatorRole')="크리에이터")와는 별개 축이다 —
-// 이 상수는 절대 화면에 안 뜨고 오직 seed의 role 키와 문자열 대조에만 쓰인다.
-export const MARKETING_CREATOR_ROLE_KEY = 'Creator';
+// ── story #4173(E-RECIPE-2) — 레시피 종류에 묶인 상수 없이 정의 자체로 역할·연결을 구동 ──
+// 예전엔 적용 다이얼로그가 영상 레시피 4슬롯(Director/Creator/Compute/Publisher)을 고정으로
+// 그렸고, «크리에이터» 축을 가리키는 레시피 전용 role 키 상수를 페이지가 넘겼다. 아래
+// 함수들은 stage_metadata·role_actor_kinds·payload_schema 흐름 순서만 읽는다.
+
+/** 조직 연결이 필요한 capability.target과 필수 여부 — 카드(«연결» 행)와 적용 다이얼로그
+ * (연산 슬롯은 비워도 제출 가능)가 같은 표를 본다. 순서 = 표시 순서(필수 먼저).
+ * generation_connector가 선택인 근거: 비워 두면 담당 에이전트가 자기 도구로 생성한다(#4110). */
+export const RECIPE_CONNECTION_TARGETS = [
+  { target: 'channel_connection', optional: false },
+  { target: 'generation_connector', optional: true },
+] as const;
+
+export type RecipeConnectionTarget = (typeof RECIPE_CONNECTION_TARGETS)[number]['target'];
+
+/** 정의가 요구하는 조직 연결 종류(표 순서). agent·미지정 target은 연결이 아니라 뺀다. */
+export function recipeConnectionTargets(stageMetadata: RecipeStageMetadata): (typeof RECIPE_CONNECTION_TARGETS)[number][] {
+  const declared = new Set(Object.values(stageMetadata).map((m) => m?.capability?.target).filter(Boolean));
+  return RECIPE_CONNECTION_TARGETS.filter((c) => declared.has(c.target));
+}
+
+/** stage를 흐름 순서로 — payload_schema stage enum 순서가 정본이고, enum에 없는 stage는
+ * stage_metadata 순서대로 뒤에 붙인다(stage_metadata의 JSON 키 순서는 흐름 순서가 아니다 —
+ * 실 seed는 DB JSONB 저장 순서로 나온다). */
+export function stagesInFlowOrder(stageMetadata: RecipeStageMetadata, flowStages: readonly string[]): string[] {
+  const inFlow = flowStages.filter((s) => Object.hasOwn(stageMetadata, s));
+  const rest = Object.keys(stageMetadata).filter((s) => !flowStages.includes(s));
+  return [...inFlow, ...rest];
+}
+
+/** 역할 순서 — 사람 역할(role_actor_kinds 선언이 human) 먼저, 그다음 흐름에서 처음 나오는
+ * 순서. 갤러리 카드 «역할» 행과 적용 다이얼로그 슬롯이 이 함수 하나를 쓴다(두 화면 순서가
+ * 갈리지 않게). 영상 레시피 = Director · Creator · Compute · Publisher. */
+export function orderedRecipeRoles(
+  stageMetadata: RecipeStageMetadata,
+  flowStages: readonly string[],
+  roleActorKinds: RoleActorKinds | null | undefined,
+): string[] {
+  const seen: string[] = [];
+  for (const stage of stagesInFlowOrder(stageMetadata, flowStages)) {
+    const role = stageMetadata[stage]?.role;
+    if (role && !seen.includes(role)) seen.push(role);
+  }
+  const human = seen.filter((r) => roleActorKind(r, roleActorKinds) === 'human');
+  return [...human, ...seen.filter((r) => !human.includes(r))];
+}
+
+/** 적용 다이얼로그 한 자리. 역할마다 어떤 메커니즘에 꽂히는지를 정의의 신호로 판별한다:
+ * - channel: 그 역할 stage가 capability.target=channel_connection → 조직 채널 연결(필수).
+ * - compute: capability.target=generation_connector → 연산 커넥터(선택).
+ * - approver: 사람 역할(선언 human, 또는 선언이 없고 모든 stage에 게이트)이면서 게이트가
+ *   있다 → 게이트 승인 주체를 읽기 전용으로 보여준다(role_mapping 축 아님).
+ * - member: 그 밖 → 그 역할 stage 전부를 팀 멤버(선언 human이면 사람, 아니면 에이전트)에
+ *   바인딩(필수).
+ * `stages`는 그 자리가 값을 채우는 stage(channel/compute는 해당 target stage만). */
+export type RecipeSlotKind = 'approver' | 'member' | 'compute' | 'channel';
+
+export interface RecipeRoleSlot {
+  role: string;
+  kind: RecipeSlotKind;
+  stages: string[];
+  memberType: 'agent' | 'human';
+  gateApprovers: string[];
+}
+
+export function recipeRoleSlots(
+  stageMetadata: RecipeStageMetadata,
+  flowStages: readonly string[],
+  roleActorKinds: RoleActorKinds | null | undefined,
+): RecipeRoleSlot[] {
+  const flow = stagesInFlowOrder(stageMetadata, flowStages);
+  return orderedRecipeRoles(stageMetadata, flowStages, roleActorKinds).map((role) => {
+    const roleStages = flow.filter((s) => stageMetadata[s]?.role === role);
+    const withTarget = (target: string) => roleStages.filter((s) => stageMetadata[s]?.capability?.target === target);
+    const gated = roleStages.filter((s) => stageMetadata[s]?.gate);
+    const gateApprovers = gated.map((s) => stageMetadata[s]!.gate!.approver ?? '');
+    const declared = roleActorKind(role, roleActorKinds);
+    const base = { role, memberType: declared === 'human' ? 'human' as const : 'agent' as const, gateApprovers };
+    if (withTarget('channel_connection').length > 0) return { ...base, kind: 'channel', stages: withTarget('channel_connection') };
+    if (withTarget('generation_connector').length > 0) return { ...base, kind: 'compute', stages: withTarget('generation_connector') };
+    const isHuman = declared === 'human' || (declared === null && !roleActorKinds && roleStages.length > 0 && gated.length === roleStages.length);
+    if (isHuman && gated.length > 0) return { ...base, kind: 'approver', stages: gated };
+    return { ...base, kind: 'member', stages: roleStages };
+  });
+}

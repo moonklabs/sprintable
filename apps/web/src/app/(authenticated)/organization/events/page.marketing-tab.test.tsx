@@ -60,7 +60,7 @@ afterEach(async () => {
 // marketing_video_production_recipe.py 실측) — id 있는 마케팅 프리셋 1건.
 // story #4426 P1(카디르 실 시드 E2E 재현, 2026-09-19) — 이전엔 role 값이 한글 표시라벨
 // ("크리에이터" 등)이었다 — 실 seed는 영어 role 키("Creator" 등)를 쓴다. 이 드리프트가
-// MARKETING_CREATOR_ROLE_KEY의 실 seed 불일치(크리에이터 배정 항상 no-op)를 이 스위트
+// 크리에이터 role 키 상수의 실 seed 불일치(크리에이터 배정 항상 no-op)를 이 스위트
 // 에서도 숨기고 있었다([합성표본=구조숨김]) — 실 값으로 교정.
 const MARKETING_RECIPE = {
   id: 'mkt-1', key: 'preset.marketing.video_production', org_id: null,
@@ -70,8 +70,10 @@ const MARKETING_RECIPE = {
   stage_metadata: {
     draft: { role: 'Creator' },
     concept_confirmed: { role: 'Director', gate: { type: 'concept_approval', approver: 'org_owner' } },
-    published: { role: 'Publisher' },
+    published: { role: 'Publisher', capability: { kind: 'publish', target: 'channel_connection' } },
   },
+  // story #4173 — 실 seed(version 8)와 같은 선언. 발행자는 채널 연결 자리라 흐름마다 채널을 고른다.
+  role_actor_kinds: { Creator: 'agent', Director: 'human', Publisher: 'agent' },
   enabled: true, version: 1,
 };
 
@@ -87,6 +89,7 @@ function mockFetches() {
       applyBodies.push(JSON.parse(String(init.body)));
       return { ok: true, json: async () => ({ ok: true, bindings_upserted: 1, warnings: [] }) };
     }
+    if (url === '/api/organizations/org-1/channel-connections') return { ok: true, json: async () => ({ data: [ACTIVE_CHANNEL] }) };
     return { ok: true, json: async () => ({}) };
   }));
   return applyBodies;
@@ -100,6 +103,13 @@ async function mount() {
 
 async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+}
+
+const ACTIVE_CHANNEL = { id: 'conn-1', channel: 'threads', account_label: '뭉클랩 스레드', account_id: 'acc-1', status: 'active' };
+
+async function pickChannel() {
+  const channelSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
+  await act(async () => { channelSelect.value = 'conn-1'; channelSelect.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 
 async function switchToMarketingTab() {
@@ -126,7 +136,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     await flush();
 
     // 4슬롯 다이얼로그가 열렸는지 — 계약 문구로 확認.
-    expect(document.body.textContent).toContain('네 슬롯은 각자 제 메커니즘에 꽂혀요');
+    expect(document.body.textContent).toContain('워크플로우의 역할 자리마다 담당을 연결하세요.');
 
     const projectSelect = document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!;
     await act(async () => {
@@ -140,13 +150,15 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
       creatorSelect.value = 'agent-1';
       creatorSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    await pickChannel();
 
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
     await act(async () => { submitBtn.click(); });
     await flush();
 
-    // 제출 바디 — 크리에이터 stage(draft)만 실린다(디렉터·발행자 stage는 role_mapping 밖).
-    expect(applyBodies).toEqual([{ project_id: 'proj-1', role_mapping: { draft: 'agent-1' } }]);
+    // 제출 바디 — 크리에이터 stage(draft)는 멤버, 발행 stage(published)는 채널 연결. 디렉터
+    // (게이트 승인 주체)는 role_mapping 밖.
+    expect(applyBodies).toEqual([{ project_id: 'proj-1', role_mapping: { draft: 'agent-1', published: 'conn-1' } }]);
 
     // 적용 성공 → 상세 뷰로 이어짐(9단계 스텝퍼 존재로 판별).
     expect(document.body.querySelector('[data-testid="recipe-stepper"]')).not.toBeNull();
@@ -167,7 +179,8 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
       if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
         return { ok: true, json: async () => ({ ok: true, bindings_upserted: 0, warnings: [] }) };
       }
-      return { ok: true, json: async () => ({}) };
+      if (url === '/api/organizations/org-1/channel-connections') return { ok: true, json: async () => ({ data: [ACTIVE_CHANNEL] }) };
+    return { ok: true, json: async () => ({}) };
     }));
     await mount();
     await switchToMarketingTab();
@@ -182,6 +195,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
 
     const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
     await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await pickChannel();
 
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
     await act(async () => { submitBtn.click(); });
@@ -227,7 +241,8 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({}) };
+      if (url === '/api/organizations/org-1/channel-connections') return { ok: true, json: async () => ({ data: [ACTIVE_CHANNEL] }) };
+    return { ok: true, json: async () => ({}) };
     }));
     await mount();
     await switchToMarketingTab();
@@ -242,6 +257,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
 
     const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
     await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await pickChannel();
 
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
     await act(async () => { submitBtn.click(); });
@@ -272,7 +288,8 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({}) };
+      if (url === '/api/organizations/org-1/channel-connections') return { ok: true, json: async () => ({ data: [ACTIVE_CHANNEL] }) };
+    return { ok: true, json: async () => ({}) };
     }));
     await mount();
     await switchToMarketingTab();
@@ -287,6 +304,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
 
     const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
     await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await pickChannel();
 
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
     await act(async () => { submitBtn.click(); });
@@ -319,7 +337,8 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
       if (url === `/api/events/definitions/${MARKETING_RECIPE.id}/apply` && init?.method === 'POST') {
         return { ok: true, json: async () => ({ ok: true, bindings_upserted: 5, warnings: [] }) };
       }
-      return { ok: true, json: async () => ({}) };
+      if (url === '/api/organizations/org-1/channel-connections') return { ok: true, json: async () => ({ data: [ACTIVE_CHANNEL] }) };
+    return { ok: true, json: async () => ({}) };
     }));
     await mount();
     await switchToMarketingTab();
@@ -334,6 +353,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
 
     const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
     await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await pickChannel();
 
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
     await act(async () => { submitBtn.click(); });
@@ -361,7 +381,8 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
           }),
         };
       }
-      return { ok: true, json: async () => ({}) };
+      if (url === '/api/organizations/org-1/channel-connections') return { ok: true, json: async () => ({ data: [ACTIVE_CHANNEL] }) };
+    return { ok: true, json: async () => ({}) };
     }));
     await mount();
     await switchToMarketingTab();
@@ -376,6 +397,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
 
     const creatorSelect = document.body.querySelector<HTMLSelectElement>('[data-testid="creator-agent-select"]')!;
     await act(async () => { creatorSelect.value = 'agent-1'; creatorSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await pickChannel();
 
     const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
     await act(async () => { submitBtn.click(); });
