@@ -277,3 +277,51 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
     expect(titleEl?.className).not.toContain('font-medium');
   });
 });
+
+// story #4179(E-PROD-ESC) — free_response가 단건 GET에 없어서 켜 둔 방을 새로 열면 「전달
+// 설정」 토글이 off로 보였다(그대로 저장하면 꺼짐). BE가 이제 싣는 값으로 토글이 초기화되는지
+// 실 마운트로 고정 — 「새로고침」 = 이 페이지를 새로 마운트해 단건 GET을 다시 읽는 것.
+describe('ConversationPage — 전달 설정 free_response 초기값(story #4179)', () => {
+  async function openDeliveryContractSwitch(freeResponse: boolean | undefined) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: '팀 채널', type: 'group', muted: false, last_read_at: null,
+            ...(freeResponse === undefined ? {} : { free_response: freeResponse }),
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const settingsBtn = [...container.querySelectorAll('button')].find(
+      (b) => b.getAttribute('title') === koMessages.chats.deliveryContractTitle,
+    );
+    expect(settingsBtn).not.toBeUndefined();
+    await act(async () => { settingsBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const sw = document.querySelector(
+      `[aria-label="${koMessages.chats.deliveryContractFreeResponseLabel}"]`,
+    );
+    expect(sw).not.toBeNull();
+    return sw!;
+  }
+
+  it('서버가 free_response=true를 주면 다시 열어도 토글이 켜진 채 보인다', async () => {
+    const sw = await openDeliveryContractSwitch(true);
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('서버가 false를 주면 꺼진 채(음성대조 — 늘 켜짐으로 통과하는 허수아비 아님)', async () => {
+    const sw = await openDeliveryContractSwitch(false);
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+  });
+});

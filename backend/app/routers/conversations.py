@@ -1246,6 +1246,9 @@ class ConversationResponse(BaseModel):
     # story #2009: list_conversations와 동일 shape의 participants(재사용, 로직 복제 금지 — AC).
     # dict 그대로 노출(별도 Pydantic 서브모델 미도입) — list 엔드포인트와 byte-identical JSON 보장.
     participants: list[dict] = Field(default_factory=list)
+    # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
+    # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
+    free_response: bool = False
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -1583,6 +1586,7 @@ async def list_conversations(
                 **_event_payload(latest_msg),
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
+            "free_response": conv.free_response,  # story #4179 — 단건 GET과 같은 값(additive).
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
@@ -1837,6 +1841,7 @@ async def get_conversation(
         created_by=conv.created_by,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
+        free_response=conv.free_response,
     )
     resp.muted = caller_row is not None and caller_row.muted_at is not None
     if caller_row is not None:
