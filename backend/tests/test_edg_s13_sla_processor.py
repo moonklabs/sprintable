@@ -220,3 +220,85 @@ async def test_auto_approve_forbidden_high_risk_falls_back():
         g = (await s.execute(select(Gate).where(Gate.id == gate.id))).scalar_one()
         assert g.status == "pending"  # 자동승인 안 됨(금지조건)
     await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_recipe_publish_gate_is_never_sla_auto_approved_and_rest_of_batch_proceeds():
+    """story #4190(까디르 4564 CHANGES ②) — «사람 승인은 그 사람이 본 내용에만». SLA auto_approve 스텝에 걸린 레시피 발행
+    게이트(external_publish · scope_key "" · triggered_by_event+stage)는 자동 승인하지 않는다: `auto_approve_skipped` 한 줄
+    기록 · 게이트 pending 유지 · 기존 폴백(keep_pending). 같은 배치의 일반 게이트는 그대로 자동 승인.
+    뮤테이션: 제외 분기 제거 → 레시피 게이트가 approved로 RED."""
+    from app.services.workflow_sla_processor import process_sla
+    from app.models.gate import Gate
+    from app.models.workflow_line import WorkflowLineStepRunEvent
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        recipe = Gate(id=uuid.uuid4(), org_id=org, work_item_id=uuid.uuid4(), work_item_type="story",
+                      gate_type="external_publish", scope_key="", status="pending",
+                      neutral_facts={"triggered_by_event": "preset.marketing.blog_article", "stage": "pending_approval"})
+        plain = Gate(id=uuid.uuid4(), org_id=org, work_item_id=uuid.uuid4(), work_item_type="story",
+                     gate_type="merge", status="pending")
+        s.add_all([recipe, plain])
+        await s.flush()
+        defn = await _seed_line(s, org, {"timeout_hours": 4, "on_timeout": "auto_approve"})
+        sr_recipe = await _seed_run(s, org, defn, age_h=12, entity_id=recipe.work_item_id, gate_id=recipe.id,
+                                    risk_snapshot={}, trust_snapshot={})
+        await _seed_run(s, org, defn, age_h=10, entity_id=plain.work_item_id, gate_id=plain.id,
+                        risk_snapshot={}, trust_snapshot={})
+        with patch(_NOTIFY, new=AsyncMock()):
+            c = await process_sla(s, now=_NOW)
+        assert c["auto_approved"] == 1 and c["kept_pending"] == 1 and c["error"] == 0, c
+        assert (await s.execute(select(Gate.status).where(Gate.id == recipe.id))).scalar_one() == "pending"
+        assert (await s.execute(select(Gate.status).where(Gate.id == plain.id))).scalar_one() == "approved"
+        skipped = (await s.execute(select(WorkflowLineStepRunEvent).where(
+            WorkflowLineStepRunEvent.step_run_id == sr_recipe.id,
+            WorkflowLineStepRunEvent.event_type == "auto_approve_skipped"))).scalars().all()
+        assert len(skipped) == 1 and skipped[0].payload["reason"] == "requires_human_reviewed_draft"
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_one_step_run_failing_does_not_stop_the_sla_batch():
+    """story #4190(까디르 4564 CHANGES ② · PO 21:58Z 조건) — 한 항목에서 **실 PG 오류로 트랜잭션이 깨져도** `process_sla`
+    배치가 끊기지 않는다. 먼저 처리되는 항목(started_at이 앞선 것)의 자동 승인이 같은 세션에서 없는 테이블을 조회해
+    트랜잭션을 aborted로 만든다(파이썬 예외만 던지는 가짜는 롤백 경로를 안 거친다 — 4214 교훈). 판정: ① 뒤 항목 정상
+    자동 승인 · error 1 ② **새 세션으로 다시 읽어** 커밋 확인(뒤 게이트 approved · 앞 게이트 pending) ③ 뮤테이션: 항목별
+    SAVEPOINT만 빼면(try/except는 둠) 깨진 트랜잭션에서 뒤 항목·커밋이 실패해 RED."""
+    import app.services.gate_service as gate_service
+    from app.services.workflow_sla_processor import process_sla
+    from app.models.gate import Gate
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        first = Gate(id=uuid.uuid4(), org_id=org, work_item_id=uuid.uuid4(), work_item_type="story",
+                     gate_type="merge", status="pending")
+        second = Gate(id=uuid.uuid4(), org_id=org, work_item_id=uuid.uuid4(), work_item_type="story",
+                      gate_type="merge", status="pending")
+        s.add_all([first, second])
+        await s.flush()
+        defn = await _seed_line(s, org, {"timeout_hours": 4, "on_timeout": "auto_approve"})
+        await _seed_run(s, org, defn, age_h=12, entity_id=first.work_item_id, gate_id=first.id,
+                        risk_snapshot={}, trust_snapshot={})
+        await _seed_run(s, org, defn, age_h=10, entity_id=second.work_item_id, gate_id=second.id,
+                        risk_snapshot={}, trust_snapshot={})
+        real_transition = gate_service.transition_gate
+
+        async def _flaky(session, org_id, gate_id, *a, **kw):
+            if gate_id == first.id:
+                from sqlalchemy import text
+
+                await session.execute(text("SELECT * FROM no_such_table_4190_sla"))  # 실 PG 오류 → 트랜잭션 aborted
+            return await real_transition(session, org_id, gate_id, *a, **kw)
+
+        with patch.object(gate_service, "transition_gate", _flaky), patch(_NOTIFY, new=AsyncMock()):
+            c = await process_sla(s, now=_NOW)
+        assert c["error"] == 1 and c["auto_approved"] == 1, c
+    async with Session() as fresh:
+        assert (await fresh.execute(select(Gate.status).where(Gate.id == first.id))).scalar_one() == "pending"
+        assert (await fresh.execute(select(Gate.status).where(Gate.id == second.id))).scalar_one() == "approved"
+    await engine.dispose()

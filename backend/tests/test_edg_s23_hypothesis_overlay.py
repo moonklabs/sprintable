@@ -33,7 +33,7 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     caller_id, spoofed = uuid.uuid4(), uuid.uuid4()
     captured = {}
 
-    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None):
+    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None, reviewed_draft=None):
         captured["resolver_id"] = resolver_id
         return MagicMock()
 
