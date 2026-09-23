@@ -14,7 +14,9 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 import { SupportWidgetLauncher } from './support-widget-launcher';
 
-const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete';
+const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete:org-1';
+// story #4219 F1 — 완주 플래그는 org 범위라 런처도 대시보드 컨텍스트의 org로 읽는다.
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ orgId: 'org-1' }) }));
 
 // story #3260 2차 finding(유나 라이브 실측 FAIL — 재시도 스톰, 2026-08-31) 회귀가드용 —
 // isSupportGatewayConfiguredMock 기본값은 false(기존 테스트 전부가 'unavailable'을 가정

@@ -40,3 +40,26 @@ export function writeActivationHint(orgId: string, complete: boolean): void {
     // 쿠키 차단 — 다음 문서는 «없음» 갈래(서버 await)로 안전하게 돌아간다.
   }
 }
+
+/**
+ * story #4219 F1(PO 리뷰 CLS) — 배너 접힘 상태. 예전엔 sessionStorage라 서버가 몰라 자리 표시(스켈레톤)가 늘 펼친 배너 크기였고,
+ * 접어 둔 사용자에겐 스켈레톤 → 접힌 칩으로 줄며 흔들렸다. 서버·클라가 같은 값을 읽게 **세션 쿠키**(Max-Age 없음 = 브라우저 세션
+ * 동안 · 예전 sessionStorage와 비슷한 수명)로 옮긴다. 값 = 접어 둔 org id(다른 org면 펼침). ⛔표시 외 판단 금지(위와 같음).
+ */
+export const ACTIVATION_COLLAPSED_COOKIE = 'sp_activation_collapsed';
+
+export function isActivationCollapsed(value: string | undefined | null, orgId: string | undefined | null): boolean {
+  return Boolean(value && orgId && value === orgId);
+}
+
+export function writeActivationCollapsed(orgId: string, collapsed: boolean): void {
+  if (typeof document === 'undefined') return;
+  const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+  try {
+    document.cookie = collapsed
+      ? `${ACTIVATION_COLLAPSED_COOKIE}=${encodeURIComponent(orgId)}; Path=/; SameSite=Lax${secure}`
+      : `${ACTIVATION_COLLAPSED_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+  } catch {
+    // 쿠키 차단 — 이번 렌더만 토글(다음 문서는 펼침)
+  }
+}

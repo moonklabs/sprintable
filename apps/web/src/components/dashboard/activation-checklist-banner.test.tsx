@@ -17,8 +17,13 @@ import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-stat
 // 16건 회귀 없음, 서버가 모르는 것과 동일하게 클라이언트가 알아낸다) — 신규 테스트만
 // mutable 참조로 덮어써 "서버가 이미 완주를 안다" 경로를 시뮬레이션한다.
 let mockInitialActivationComplete: boolean | undefined;
+// story #4219 F1 — 완주 플래그·결과는 org 범위(orgId) · 접힘은 서버도 아는 세션 쿠키(initialActivationCollapsed).
+let mockInitialActivationCollapsed: boolean | undefined;
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ projectId: 'proj-1', initialActivationComplete: mockInitialActivationComplete }),
+  useDashboardContext: () => ({
+    projectId: 'proj-1', orgId: 'org-1',
+    initialActivationComplete: mockInitialActivationComplete, initialActivationCollapsed: mockInitialActivationCollapsed,
+  }),
 }));
 const routerPushMock = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -31,8 +36,7 @@ vi.mock('@/lib/onboarding/first-instruction', () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const COMPLETE_KEY = 'sprintable_activation_checklist_complete';
-const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
+const COMPLETE_KEY = 'sprintable_activation_checklist_complete:org-1';
 
 // story #2059(kanban-board.test.tsx)/chat-input.test.tsx와 동일 패턴 — jsdom/Node의 네이티브
 // local/sessionStorage가 이 실행 환경에서 온전치 않아(--localstorage-file 미설정 시 .clear()
@@ -61,6 +65,8 @@ beforeEach(() => {
   createFirstInstructionConversationMock.mockReset();
   _resetActivationStatusCacheForTests();
   mockInitialActivationComplete = undefined;
+  mockInitialActivationCollapsed = undefined;
+  document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -143,7 +149,8 @@ describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점�
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     const busyEl = container.querySelector('[aria-busy="true"]');
     expect(busyEl).not.toBeNull();
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
     await act(async () => { resolve(PARTIAL); });
     await flush();
     expect(container.querySelector('[aria-busy="true"]')).toBeNull();
@@ -171,7 +178,8 @@ describe('ActivationChecklistBanner — 로딩 스켈레톤이 자리를 선점�
     // 좁은 잔여 케이스만 고정한다.
     await flush();
     expect(container.querySelector('[aria-busy="true"]')).toBeNull();
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
   });
 });
 
@@ -187,10 +195,12 @@ describe('ActivationChecklistBanner — 서버가 이미 아는 완주 신호(st
     expect(window.localStorage.getItem(COMPLETE_KEY)).toBeNull(); // 새 기기 전제 확認
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     expect(container.querySelector('[aria-busy="true"]')).toBeNull(); // 스켈레톤 자체가 없음
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
     await flush();
     expect(fetchSpy).not.toHaveBeenCalled(); // 클라이언트 fetch 자체가 안 나감
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
   });
 
   it('initialActivationComplete=false면 서버가 "아직 아님"을 확認해 준 것이므로 fetch로 실 진행률을 마저 받아온다(스켈레톤 경로는 그대로 유지)', async () => {
@@ -209,7 +219,8 @@ describe('ActivationChecklistBanner — 완주 시 완전 소멸 (PO 지시)', (
     stubChecklist(COMPLETE);
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
     expect(window.localStorage.getItem(COMPLETE_KEY)).toBe('1');
   });
 
@@ -220,7 +231,8 @@ describe('ActivationChecklistBanner — 완주 시 완전 소멸 (PO 지시)', (
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
   });
 });
 
@@ -238,11 +250,11 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
 
     expect(container.textContent).not.toContain('이메일 인증하기');
     expect(container.textContent).toContain('가입 완료 2/5');
-    expect(window.sessionStorage.getItem(COLLAPSE_KEY)).toBe('1');
+    expect(document.cookie).toContain('sp_activation_collapsed=org-1');
   });
 
   it('접힌 칩을 다시 누르면 펼쳐진다', async () => {
-    window.sessionStorage.setItem(COLLAPSE_KEY, '1');
+    mockInitialActivationCollapsed = true;
     stubChecklist(PARTIAL);
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
@@ -269,7 +281,8 @@ describe('ActivationChecklistBanner — scope_is_requested_org 불일치 시 미
     stubChecklist({ ...PARTIAL, scope_is_requested_org: false });
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
   });
 
   it('scope_is_requested_org가 undefined(구 응답 shape)면 기존처럼 렌더 유지(과다 은닉 방지)', async () => {
@@ -285,7 +298,8 @@ describe('ActivationChecklistBanner — 조회 실패 시 미노출', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
-    expect(container.textContent).toBe('');
+    // 스켈레톤 줄 상자용 폭 0 글자(​ · story #4219)는 보이는 글자가 아니다.
+    expect(container.textContent!.replace(/\u200b/g, '')).toBe('');
   });
 });
 
@@ -393,5 +407,50 @@ describe('ActivationChecklistBanner — 5번째 항목 아이콘 들여쓰기/�
       expect(agentLink.className.split(' ')).toContain(cls);
       expect(roundtripBtn.className.split(' ')).toContain(cls);
     }
+  });
+});
+
+describe('ActivationChecklistBanner — 자리 표시 크기 = 배너 상태(story #4219 F1 CLS)', () => {
+  it('⭐접어 둔 사용자(세션 쿠키) → 조회 중 자리 표시가 접힌 칩과 같은 박스 · 결과 뒤 접힌 칩', async () => {
+    mockInitialActivationCollapsed = true;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async () => { await gate; return { ok: true, json: async () => ({ data: PARTIAL }) }; }));
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    const skeleton = container.querySelector('[data-testid="activation-skeleton-collapsed"]');
+    expect(skeleton).toBeTruthy();
+    expect(container.querySelector('[data-testid="activation-skeleton-expanded"]')).toBeNull();
+    const boxOf = (el: Element | null) => (el?.getAttribute('class') ?? '').split(/\s+/).sort().join(' ');
+    const skeletonBox = boxOf(skeleton);
+    release();
+    await flush();
+    const chip = container.querySelector('button[aria-expanded="false"]');
+    expect(chip).toBeTruthy();
+    expect(boxOf(chip)).toBe(skeletonBox);
+  });
+
+  it('펼친 사용자 → 조회 중 자리 표시는 펼친 배너 스켈레톤(기존 #4032)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async () => { await gate; return { ok: true, json: async () => ({ data: PARTIAL }) }; }));
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.querySelector('[data-testid="activation-skeleton-expanded"]')).toBeTruthy();
+    // ⭐<p>(AlertTitle·AlertDescription) 안에 <div> 스켈레톤이 있으면 서버 HTML을 파서가 쪼개 줄 상자가 실 배너와 달라진다
+    // (로컬 실측 226 vs 221.5px → 수정 뒤 221.5 = 221.5 · 접힘 30 = 30).
+    const sk = container.querySelector('[data-testid="activation-skeleton-expanded"]')!;
+    expect(sk.querySelectorAll('p div').length).toBe(0);
+    expect(sk.querySelector('[data-testid="activation-skeleton-title"]')).toBeTruthy();
+    expect(sk.querySelector('[data-testid="activation-skeleton-desc"]')).toBeTruthy();
+    release();
+    await flush();
+  });
+
+  it('힌트 기록은 결과가 판정된 org로(현재 컨텍스트 org 아님) — 소스 핀', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, 'activation-checklist-banner.tsx'), 'utf8');
+    expect(src).toMatch(/writeActivationHint\(stateOrgId, state\.all_complete\)/);
+    expect(src).toMatch(/writeActivationHint\(activationOrgId, true\)/);
+    expect(src).not.toMatch(/writeActivationHint\(orgId,/);
   });
 });

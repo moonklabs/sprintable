@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cookies, headers } from 'next/headers';
-import { ACTIVATION_HINT_COOKIE, parseActivationHint } from '@/lib/activation-hint';
+import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollapsed, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
@@ -126,10 +126,10 @@ async function AuthenticatedLayoutBody({
   // story #4219 F1 — 체크리스트를 첫 문서 임계 경로에서 뺀다(표시용 힌트 쿠키 · lib/activation-hint 참고). 힌트가
   // 이 org의 것이면 서버 조회를 생략: complete → 배너 0(클라가 임계 경로 밖에서 한 번 다시 확인) · incomplete → 배너가
   // 자기 스켈레톤(같은 크기)으로 자리를 잡고 클라 조회로 채움. 힌트가 없을 때만 예전처럼 서버에서 기다린다.
-  const activationHint = parseActivationHint(
-    decodeHeaderValue((await cookies()).get(ACTIVATION_HINT_COOKIE)?.value),
-    pathOrgId ?? me?.org_id,
-  );
+  const cookieStore = await cookies();
+  const activationOrgId = pathOrgId ?? me?.org_id;
+  const activationHint = parseActivationHint(decodeHeaderValue(cookieStore.get(ACTIVATION_HINT_COOKIE)?.value), activationOrgId);
+  const activationCollapsed = isActivationCollapsed(decodeHeaderValue(cookieStore.get(ACTIVATION_COLLAPSED_COOKIE)?.value), activationOrgId);
   // story #4219 D1 — 경로 프로젝트의 slug는 proxy resolve가 이미 줬고 이름은 멤버십에 있으면 단건 조회 불요.
   const needProjectInfo = Boolean(projectInfoTargetId)
     && !(pathProjectId && pathProjectSlug && projectMemberships.some((m) => m.projectId === pathProjectId));
@@ -215,6 +215,8 @@ async function AuthenticatedLayoutBody({
       navV3Flags={navV3Flags}
       initialActivationComplete={activationChecklist}
       activationSeedFromHint={activationHint === 'complete'}
+      activationOrgId={activationOrgId}
+      initialActivationCollapsed={activationCollapsed}
     >
       <StorageCapacityToastProvider>
         <CrossProjectToastProvider>

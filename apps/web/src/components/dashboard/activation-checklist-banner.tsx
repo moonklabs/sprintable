@@ -9,7 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { writeActivationHint } from '@/lib/activation-hint';
+import { writeActivationCollapsed, writeActivationHint } from '@/lib/activation-hint';
 import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
@@ -45,33 +45,32 @@ import { cn } from '@/lib/utils';
  * activation-status.ts)로 분리했다 — support-widget-launcher.tsx의 온보딩 단계 게이팅과
  * 같은 조회를 공유한다(두 벌 판별자·중복 네트워크 호출 금지, AC①).
  */
-const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
 
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
-  const { projectId, orgId, initialActivationComplete, activationSeedFromHint } = useDashboardContext();
-  const { state, allComplete } = useActivationStatus(initialActivationComplete, { verifyInBackground: activationSeedFromHint });
+  const {
+    projectId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed,
+  } = useDashboardContext();
+  const { state, stateOrgId, allComplete } = useActivationStatus(initialActivationComplete, {
+    verifyInBackground: activationSeedFromHint, orgId,
+  });
   // story #4219 F1 — 받은 결과를 다음 문서 요청의 표시용 힌트로(레이아웃이 체크리스트를 임계 경로에서 기다리지 않게).
-  // 이 org 판정일 때만(scope_is_requested_org === false면 다른 org 판정이라 남기지 않는다).
+  // **결과가 판정된 org로만** 기록한다(PO 리뷰: 예전엔 캐시된 옛 org 결과를 현재 org로 기록해 섞였다).
+  // - 클라 결과: stateOrgId(요청 org) · scope_is_requested_org === false면 다른 org 판정이라 안 남김.
+  // - 서버 시드: 레이아웃이 조회한 org(activationOrgId = pathOrgId ?? me.org_id)로 — 다음 문서가 같은 식으로 읽는다.
   useEffect(() => {
-    if (!orgId) return;
-    if (state) {
-      if (state.scope_is_requested_org !== false) writeActivationHint(orgId, state.all_complete);
-    } else if (initialActivationComplete === true && !activationSeedFromHint) {
-      writeActivationHint(orgId, true); // 서버가 이번 요청에 확인한 완주
+    if (state && stateOrgId) {
+      if (state.scope_is_requested_org !== false) writeActivationHint(stateOrgId, state.all_complete);
+    } else if (!state && initialActivationComplete === true && !activationSeedFromHint && activationOrgId) {
+      writeActivationHint(activationOrgId, true); // 서버가 이번 요청에 확인한 완주
     }
-  }, [orgId, state, initialActivationComplete, activationSeedFromHint]);
+  }, [state, stateOrgId, initialActivationComplete, activationSeedFromHint, activationOrgId]);
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.sessionStorage.getItem(COLLAPSE_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  // story #4219 F1(PO 리뷰 CLS) — 접힘 상태는 서버도 아는 세션 쿠키(lib/activation-hint)가 정본 — 자리 표시(스켈레톤)를 접힌 칩과
+  // 같은 크기로 그리려면 서버가 알아야 한다. 서버·클라가 같은 값이라 하이드레이션 차이도 0.
+  const [collapsed, setCollapsed] = useState<boolean>(initialActivationCollapsed === true);
 
   // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
   // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
@@ -94,18 +93,43 @@ export function ActivationChecklistBanner() {
   // 채워 자리를 미리 잡아 두면, fetch가 끝나 실 콘텐츠로 바뀔 때 박스 높이가 그대로라
   // 그 아래(모든 페이지 공통 그리드)가 밀리지 않는다.
   if (!state) {
+    // story #4219 F1 — 접어 둔 사용자에겐 접힌 칩과 같은 박스(테두리·패딩·글자 높이)로 자리를 잡는다(펼친 스켈레톤 → 칩으로 줄던
+    // 흔들림 0).
+    if (collapsed) {
+      return (
+        <div
+          aria-busy="true"
+          data-testid="activation-skeleton-collapsed"
+          // 접힌 칩(아래 button)과 **같은 className** — 박스가 정의상 같다(CLS 0).
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+        >
+          <Skeleton variant="text" className="h-4 w-40" />
+          <Skeleton variant="circle" className="size-3.5 shrink-0" />
+        </div>
+      );
+    }
     return (
-      <Alert variant="info" className="relative" aria-busy="true">
+      <Alert variant="info" className="relative" aria-busy="true" data-testid="activation-skeleton-expanded">
         {/* story #4032 — 높이는 실 텍스트의 line-height에 맞춘다(폭은 CLS에 안 실린다):
             AlertTitle은 leading-5(20px), AlertDescription은 text-xs leading-relaxed
             (~19.5px→h-5로 근사), li 텍스트는 text-sm 기본 line-height(20px, story #3939가
             5행 전부를 이 box로 통일해 둔 것과 동형) — 전부 h-5로 맞추면 실 콘텐츠 교체
             시 박스 높이가 유지된다. */}
+        {/* story #4219 F1 — AlertTitle·AlertDescription은 <p>라 그 안의 <div> 스켈레톤을 파서가 밖으로 쪼개 줄 상자가 실 배너와
+            달랐다(실측: 스켈레톤 226px vs 배너 221.5px). span 막대 + 폭 0 글자(​)로 실 글자와 같은 줄 상자(20px · 19.5px)를 만든다. */}
         <AlertTitle>
-          <Skeleton variant="text" className="h-5 w-32" />
+          <span className="flex items-center" data-testid="activation-skeleton-title">
+            <Skeleton as="span" variant="text" className="h-3 w-32" />
+            {'\u200b'}
+          </span>
         </AlertTitle>
         <AlertDescription>
-          <Skeleton variant="text" className="mt-1 h-5 w-48" />
+          {/* story #4219 F1(유나 실측) — 예전 `mt-1 h-5`(24px)가 실 설명 줄(text-xs leading-relaxed ≈19.5px)보다 4.5px 커서
+              스켈레톤 → 배너에서 줄었다. 폭 0 글자(​)로 실 설명과 같은 줄 상자를 만들고 그 안에 막대를 세워 높이를 정의상 맞춘다. */}
+          <span className="flex items-center" data-testid="activation-skeleton-desc">
+            <Skeleton as="span" variant="text" className="h-3 w-48" />
+            {'\u200b'}
+          </span>
         </AlertDescription>
         <ul className="col-start-2 mt-2 space-y-1.5">
           {stepItems.map(({ key }) => (
@@ -128,11 +152,7 @@ export function ActivationChecklistBanner() {
   const toggleCollapse = () => {
     const next = !collapsed;
     setCollapsed(next);
-    try {
-      window.sessionStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
-    } catch {
-      // 영속 실패해도 이번 렌더는 토글 반영
-    }
+    if (orgId) writeActivationCollapsed(orgId, next);
   };
 
   // story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(전 항목 클릭화는 범위 밖·#3196 잔존分
@@ -167,6 +187,7 @@ export function ActivationChecklistBanner() {
         onClick={toggleCollapse}
         aria-expanded={false}
         aria-label={t('expandAria')}
+        data-testid="activation-chip"
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
       >
         <span>{t('collapsedChip', { completed: state.completed, total: state.total })}</span>
@@ -176,7 +197,7 @@ export function ActivationChecklistBanner() {
   }
 
   return (
-    <Alert variant="info" className="relative">
+    <Alert variant="info" className="relative" data-testid="activation-banner">
       <AlertTitle>{t('bannerTitle')}</AlertTitle>
       <AlertDescription>{t('bannerProgress', { completed: state.completed, total: state.total })}</AlertDescription>
 

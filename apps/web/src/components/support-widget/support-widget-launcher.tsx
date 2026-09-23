@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { LifeBuoy, X } from 'lucide-react';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useActivationStatus } from '@/hooks/use-activation-status';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { SupportWidgetPanelHeader, SupportWidgetPanelBody } from './support-widget-panel';
 
@@ -55,7 +56,8 @@ export function SupportWidgetLauncher() {
   const session = useSupportWidgetSession();
   const { isMobile } = useSidebar();
   const pathname = usePathname();
-  const { state: activationState, allComplete } = useActivationStatus();
+  const { orgId } = useDashboardContext();
+  const { state: activationState, allComplete } = useActivationStatus(undefined, { orgId });
   const isMobileChatDetailRoute = isMobile && pathname !== '/chats' && pathname.startsWith('/chats/');
   // story #3274(유나 design 리뷰 🟡, 2026-09-01) — 설정 > 문의 탭(support-tab-panel.tsx)이
   // 마운트 시 자체 세션을 연다. 같은 화면에 이 플로팅까지 열려있으면 세션 훅 인스턴스
