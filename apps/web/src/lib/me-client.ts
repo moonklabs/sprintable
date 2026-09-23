@@ -1,27 +1,37 @@
 import { fetchWithAuth } from '@/lib/db/client';
 import { getRequestContextKey } from '@/lib/project-context-client';
+import { onMeInvalidated } from '@/lib/auth/me-invalidation';
 
 /**
- * story #4184(E-MOBILE-SPEED) — `GET /api/me` 요청 공유. 22곳 18파일이 각자 부르던 탓에
- * `/settings` 한 번 진입에 7회(dev·prod 라이브) 나갔다 — 한 화면이 동시에 마운트하는 여러 절이
- * 같은 요청 하나를 나눠 쓰게 한다.
+ * story #4184(E-MOBILE-SPEED) — `GET /api/me` 공유. 22곳 18파일이 각자 부르던 탓에 `/settings` 한 번 진입에
+ * 7회(dev·prod 라이브) 나갔다.
  *
- * - **진행 중인 요청만** 공유한다. 응답이 오면(성공·실패·예외 모두) 공유를 끝내고, 그 뒤 호출은
- *   다시 네트워크로 간다 — 응답이 끝난 값은 저장하지 않는다(무효화 목록을 관리하지 않는다).
- *   PR #4548 까디르 QA 뒤 PO 실측 처방: 응답 지연 300ms로 잰 `/settings` 탭별 호출 수가 5초 재사용
- *   창과 똑같이 1회라 창을 뺐다.
- * - 합류는 **요청 맥락(인터셉터가 싣는 org·project)이 같을 때만**. 전환 직전에 출발한 요청이
- *   아직 진행 중이어도 org·project 전환 뒤 호출은 거기 붙지 않고 새로 보낸다(PR #4548 까디르 재QA
- *   P3, PO 처방 — 무효화 호출 대신 구조로). 단, 맥락 키가 같으면 인증 전환(로그인·로그아웃·만료)을
- *   넘어 진행 중 요청에 합류할 수 있다 — 그 창은 그 요청의 응답 시간(수백 ms)뿐이다.
- * - 호출부마다 새 Response를 받는다(본문을 한 번만 읽어 두고 매번 새로 만든다) — 기존
- *   `fetchWithAuth('/api/me')` 호출부의 `.ok`/`.status`/`.json()` 모양 그대로 바꿔 끼울 수 있다.
- * - 세션 생존 확인(`sse-session-guard.ts`)은 공유 없이 매번 실제로 물어야 해서 이 함수를 안 쓴다.
+ * - **진행 중 요청 합류 + 성공 결과 재사용(한 페이지 수명 · 요청 맥락별).** 배포 18 라이브(PO CDP, 하드 로드)에서
+ *   진행 중 공유만으로는 3회였다 — 설정 화면은 loadContext가 끝난 뒤 절들이 차례로 마운트해 두 번째 호출이 첫
+ *   요청이 끝난 뒤(~1초 뒤) 나가서 합류할 요청이 없었다(PR #4548의 jsdom 측정은 모든 절이 동시에 마운트해 이 순서를
+ *   못 봤다). 그래서 성공 응답(2xx)을 맥락 키별로 들고 있다가 같은 맥락의 다음 호출에 돌려준다. 실패 응답은 들지 않는다.
+ * - **무효화**(`lib/auth/me-invalidation.ts`가 쏘는 자리 전수): 로그인·가입·토큰 갱신·로그아웃 · fetchWithAuth의 쓰기
+ *   요청 전부 · 401 · 세션 만료 신호. 무효화는 진행 중 요청도 떼어 내고 세대 번호를 올린다 — 무효화 전에 출발한
+ *   요청이 뒤늦게 도착해도 그 값은 저장하지 않는다(쓰기 직전 값이 쓰기 뒤 캐시로 남는 경합 차단). 까디르 QA가
+ *   5초 창 때 잡은 ① 무효화 누락 ② 만료 뒤 캐시 200을 이 두 장치가 닫는다.
+ * - 합류·재사용은 **요청 맥락(인터셉터가 싣는 org·project)이 같을 때만**. 전환 뒤 호출은 새로 보낸다(무효화 호출 없이 구조로).
+ * - 호출부마다 새 Response를 받는다(본문을 한 번만 읽어 두고 매번 새로 만든다) — 기존 `fetchWithAuth('/api/me')`
+ *   호출부의 `.ok`/`.status`/`.json()` 모양 그대로.
+ * - 세션 생존 확인(`sse-session-guard.ts`)은 캐시가 아니라 매번 실제로 물어야 해서 이 함수를 안 쓴다.
  */
 
 interface SharedMe { ok: boolean; status: number; body: string | null }
 
 let inFlight: { key: string; promise: Promise<SharedMe> } | null = null;
+let resolved: { key: string; value: SharedMe } | null = null;
+let generation = 0;
+
+function invalidate(): void {
+  generation += 1;
+  inFlight = null;
+  resolved = null;
+}
+onMeInvalidated(invalidate);
 
 // 응답을 한 번만 읽어 두고 호출부마다 새 Response를 만든다(본문은 한 번만 읽을 수 있어서).
 // 본문이 JSON이 아니면 null로 두어 호출부의 `.json()`이 원래처럼 실패한다.
@@ -38,11 +48,17 @@ function toResponse(shared: SharedMe): Response {
 
 export function fetchMe(): Promise<Response> {
   const key = getRequestContextKey();
+  if (resolved && resolved.key === key) return Promise.resolve(toResponse(resolved.value));
   if (!inFlight || inFlight.key !== key) {
+    const startedAt = generation;
     const current = { key, promise: fetchWithAuth('/api/me').then(readShared) };
     inFlight = current;
-    const release = () => { if (inFlight === current) inFlight = null; };
-    current.promise.then(release, release);
+    const settle = (value: SharedMe | null) => {
+      if (inFlight === current) inFlight = null;
+      // 무효화(세대 변경) 뒤에 도착한 값·실패 응답은 들지 않는다.
+      if (value && value.ok && startedAt === generation) resolved = { key, value };
+    };
+    current.promise.then(settle, () => settle(null));
   }
   return inFlight.promise.then(toResponse);
 }
@@ -50,4 +66,4 @@ export function fetchMe(): Promise<Response> {
 // 테스트 격리 — 한 테스트가 끝나지 않은 요청을 남기면 다음 테스트의 첫 호출이 그걸 물 수 있다.
 // vitest.setup.ts가 매 테스트 전에 부른다(setup이 이 모듈을 직접 import하면 테스트 파일의
 // vi.mock('@/lib/db/client')보다 먼저 진짜 모듈을 물어 버려서, 로드된 인스턴스가 스스로 등록한다).
-(globalThis as Record<symbol, unknown>)[Symbol.for('sprintable.resetMeClient')] = () => { inFlight = null; };
+(globalThis as Record<symbol, unknown>)[Symbol.for('sprintable.resetMeClient')] = invalidate;

@@ -3,6 +3,7 @@
 import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 import { notifySessionChanged } from '@/lib/native-shell-bridge';
 import { collectRefreshDiagnostics } from '@/lib/auth/refresh-diagnostics';
+import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   // sp_at/sp_rt 쿠키가 새로 세워졌다는 뜻(각 route.ts가 Set-Cookie) — 네이티브 셸에 즉시
   // 알려 디스크로 내리게 한다(강제종료 시 갱신 쿠키 유실 방지, AC1).
   notifySessionChanged();
+  // story #4184 — 인증 주체가 바뀌었을 수 있다(로그인·가입·갱신) — fetchMe() 결과 재사용을 버린다.
+  invalidateMeCache();
   return { data: json.data as AuthTokens, error: null };
 }
 
@@ -47,6 +50,7 @@ export async function registerUser(email: string, password: string): Promise<Aut
 }
 
 export async function logoutUser(refreshToken?: string): Promise<void> {
+  invalidateMeCache(); // story #4184
   await fetch('/api/auth/logout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -75,6 +79,10 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit
   if (typeof window !== 'undefined' && isSessionExpiredSignaled()) {
     return new Response(null, { status: 401 });
   }
+  // story #4184 — 쓰기 요청(GET·HEAD 아님)은 `/api/me` 내용을 바꿀 수 있다(프로필·2단계 인증·비밀번호·연결 계정·
+  // 역할 …) — 어떤 쓰기가 그런지 목록으로 관리하지 않고 쓰기는 전부 fetchMe() 결과 재사용을 버린다.
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') invalidateMeCache();
   const res = await fetch(input, init);
   if (res.status !== 401) return res;
 
