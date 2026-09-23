@@ -2451,3 +2451,40 @@ describe('ChatBubble — 첨부 전용 메시지는 텍스트 말풍선 생략(s
     expect(c.textContent).toContain('<!-- keep -->');
   });
 });
+
+// story #4200(유나 결정 · PO) — 자리표시 조건 = «보여 줄 글자 0 그리고 첨부 0»(references 메타는 조건 밖). 첨부 0인데 빈
+// 말풍선이 남던 세 경우를 문구로 · 판정은 단일 술어(hasNoVisibleText)라 두 분기가 갈릴 수 없다.
+describe('ChatBubble — 글자 0·첨부 0이면 빈 본문 문구(story #4200 유나 결정)', () => {
+  const REF = [{ entity_type: 'doc', entity_id: 'doc-1', title: '문서' }] as unknown as ChatMessage['references'];
+  async function render(content: string, extra: Partial<ChatMessage> = {}) {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content, references: [], attachments: [], deleted_at: null, ...extra }} isMine={false} />));
+    });
+    return container;
+  }
+  const placeholder = () => container.querySelector('[data-testid="chat-bubble-empty-placeholder"]');
+  const textBubbles = () => container.querySelectorAll('[data-testid="chat-bubble-text"]');
+
+  it.each([
+    ['빈 문자열(16px 알약이던 자리)', '', {}],
+    ['공백뿐(39px 빈 말풍선이던 자리)', '   ', {}],
+    ['주석뿐 + references 메타(16px 알약이던 자리)', '<!-- linear-comment-id: abc -->', { references: REF }],
+  ])('%s → 빈 본문 문구 · 텍스트 말풍선 0', async (_n, content, extra) => {
+    await render(content, extra as Partial<ChatMessage>);
+    expect(placeholder()?.textContent).toBe(koMessages.chats.emptyMessagePlaceholder);
+    expect(textBubbles()).toHaveLength(0);
+  });
+
+  it('음성대조 — 글자 1자면 텍스트 말풍선(문구 0)', async () => {
+    await render('a');
+    expect(placeholder()).toBeNull();
+    expect(textBubbles()).toHaveLength(1);
+  });
+
+  it('음성대조 — 글자 0 + 첨부 1이면 문구도 말풍선도 없이 첨부만', async () => {
+    await render('', { attachments: [{ url: 'chat/p/c/a.pdf', name: 'a.pdf', content_type: 'application/pdf' }] });
+    expect(placeholder()).toBeNull();
+    expect(textBubbles()).toHaveLength(0);
+    expect(container.textContent).toContain('a.pdf');
+  });
+});

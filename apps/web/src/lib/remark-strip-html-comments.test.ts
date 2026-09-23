@@ -1,6 +1,6 @@
 // story #4197 — 말풍선 주석 제거 보조 함수(평문 경로 줄 단위 제거 · «빈 본문» 보수 판정).
 import { describe, expect, it } from 'vitest';
-import { isCommentOnlyContent, stripHtmlCommentsFromPlainText } from './remark-strip-html-comments';
+import { hasNoVisibleText, isCommentOnlyContent, stripHtmlCommentsFromPlainText } from './remark-strip-html-comments';
 
 describe('stripHtmlCommentsFromPlainText', () => {
   it.each([
@@ -31,5 +31,11 @@ describe('isCommentOnlyContent', () => {
   it('주석 여러 개·안 닫힌 주석·빈 줄 섞여도 주석뿐이면 true', () => {
     expect(isCommentOnlyContent('<!-- a -->\n\n<!-- b -->\n')).toBe(true);
     expect(isCommentOnlyContent('  <!-- a -->  ')).toBe(true);
+  });
+});
+
+describe('hasNoVisibleText(story #4200 단일 술어)', () => {
+  it.each([['', true], ['   \n ', true], ['<!-- a -->', true], ['a', false], ['```\n<!-- x -->\n```', false]])('%j → %s', (c, want) => {
+    expect(hasNoVisibleText(c as string)).toBe(want);
   });
 });
