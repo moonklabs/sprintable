@@ -5,10 +5,11 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from jose import jwt as jose_jwt
 import re
@@ -53,7 +54,7 @@ from app.core.security import (
     create_refresh_token,
 )
 from app.core.rate_limit import limiter, resend_verification_limiter
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, resolve_request_org_id
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
 )
@@ -2231,7 +2232,10 @@ class AuthMeResponse(BaseModel):
         description=(
             "Current-org member id for human (JWT) sessions. Pass this as `member_id` to "
             "GET /api/v2/events/stream — the `member_id` field here is users.id and returns 404 "
-            "there. Null for agent (API key) sessions or when no org is resolved."
+            "there. The org is resolved with the same rule as the stream: the X-Org-Id header if "
+            "sent (you must be a member, else 403), otherwise the session's org; `org_id` in this "
+            "response is that same org. Send the same X-Org-Id to both endpoints. Null for agent "
+            "(API key) sessions or when no org is resolved."
         ),
     )
 
@@ -2262,12 +2266,14 @@ async def _resolve_project_default(
 async def get_auth_me(
     auth: AuthContext = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    x_org_id: Annotated[str | None, Header(alias="X-Org-Id")] = None,
+    request: Request = None,
 ) -> AuthMeResponse:
     """API Key Bearer 인증으로 바인딩된 member_id, org_id, project_id 반환.
 
     E-MCP-OPT: agent API 키(멀티프로젝트 가능)에 한해 resolved_default_project_id/
-    is_project_ambiguous/accessible_project_ids를 근본 판정(§1)해 추가 — human JWT 경로는
-    무변경(기본값 그대로, 이 스토리 스코프 밖)."""
+    is_project_ambiguous/accessible_project_ids를 근본 판정(§1)해 추가. story #4178: human
+    세션은 org를 resolve_request_org_id(스트림과 같은 규칙)로 정하고 org_member_id를 싣는다."""
     meta = auth.claims.get("app_metadata", {})
     resolved: str | None = None
     ambiguous = False
@@ -2283,6 +2289,11 @@ async def get_auth_me(
         except Exception:
             logger.warning("get_auth_me: 신규 project default 판정 실패 — 레거시 필드만 반환", exc_info=True)
     else:
+        # story #4178(PO CHANGES) — 사람 세션의 org는 /events/stream과 같은 규칙(공유 함수):
+        # X-Org-Id(가입 확인·아니면 403) → JWT org → 없으면 None(무 org여도 200 계약 유지).
+        # 응답 org_id도 이 org로 — 한 응답 안에서 org가 섞이지 않게. 에이전트 분기는 무변(AC3).
+        resolved_org = await resolve_request_org_id(auth, x_org_id, request)
+        org_id_raw = str(resolved_org) if resolved_org is not None else None
         # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
@@ -2291,12 +2302,12 @@ async def get_auth_me(
             ).scalar_one_or_none()
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
-        # story #4178 — org 미해소(org_id_raw 없음·OrgMember 행 없음)는 예외가 아니라 None.
-        if org_id_raw:
+        # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
+        if resolved_org is not None:
             try:
                 row = (await db.execute(
                     select(OrgMember.id).where(
-                        OrgMember.org_id == uuid.UUID(str(org_id_raw)),
+                        OrgMember.org_id == resolved_org,
                         OrgMember.user_id == uuid.UUID(auth.user_id),
                         OrgMember.deleted_at.is_(None),
                     )

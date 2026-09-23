@@ -401,7 +401,8 @@ async def agent_event_stream(
         default=None,
         description=(
             "Member to subscribe. Omit for API key sessions (the key's member is used). "
-            "Required for human (JWT) sessions: use `org_member_id` from GET /api/v2/auth/me."
+            "Required for human (JWT) sessions: use `org_member_id` from GET /api/v2/auth/me, "
+            "called with the same X-Org-Id header (both endpoints resolve the org the same way)."
         ),
     ),
     auth: AuthContext = Depends(get_current_user_streaming),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3). P0(#abaf6279): SSE 커넥션 비점유 변형

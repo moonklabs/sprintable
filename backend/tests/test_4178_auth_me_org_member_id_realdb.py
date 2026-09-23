@@ -216,3 +216,158 @@ async def test_agent_api_key_session_unchanged_org_member_id_none():
             assert exc.value.status_code == 403
     finally:
         await engine.dispose()
+
+
+# ── PO CHANGES ①(보안·IDOR) — 사람 세션 400·403 갈래를 게이트 함수로 직접 핀 ──────────────
+
+async def _seed_org_with_two_humans(session):
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+    out = {"org_id": org.id}
+    for key in ("me", "other"):
+        uid = uuid.uuid4()
+        session.add(User(id=uid, email=f"{key}-{uid.hex[:8]}@test.com", hashed_password="x"))
+        await session.commit()
+        om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=uid, role="member")
+        session.add(om)
+        await session.commit()
+        out[f"{key}_user_id"] = uid
+        out[f"{key}_om_id"] = om.id
+    return out
+
+
+@pytest.mark.anyio
+async def test_human_stream_gate_requires_member_id_400():
+    from fastapi import HTTPException
+
+    from app.routers.events import _resolve_stream_member
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_with_two_humans(s)
+        me = _human_auth(seeded["me_user_id"], seeded["org_id"])
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc:
+                await _resolve_stream_member(me, None, seeded["org_id"], s)
+        assert exc.value.status_code == 400
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_human_stream_gate_rejects_other_members_stream_403():
+    """같은 org의 남의 org_member_id로는 구독 불가(IDOR) — 본인 것은 통과(양성대조)."""
+    from fastapi import HTTPException
+
+    from app.routers.events import _resolve_stream_member
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_with_two_humans(s)
+        me = _human_auth(seeded["me_user_id"], seeded["org_id"])
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc:
+                await _resolve_stream_member(me, seeded["other_om_id"], seeded["org_id"], s)
+            assert exc.value.status_code == 403
+            assert await _resolve_stream_member(me, seeded["me_om_id"], seeded["org_id"], s) == seeded["me_om_id"]
+    finally:
+        await engine.dispose()
+
+
+# ── PO CHANGES ② — /auth/me와 /events/stream의 «현재 org» 규칙 통일 ─────────────────────
+
+async def _seed_two_org_human(session):
+    """사람 1명이 org A(JWT org)·org B 둘 다 가입, org C는 미가입."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    orgs = {}
+    for key in ("a", "b", "c"):
+        org = Organization(id=uuid.uuid4(), name=f"Org{key}", slug=f"org-{key}-{uuid.uuid4().hex[:8]}")
+        session.add(org)
+        await session.commit()
+        orgs[key] = org.id
+    uid = uuid.uuid4()
+    session.add(User(id=uid, email=f"multi-{uid.hex[:8]}@test.com", hashed_password="x"))
+    await session.commit()
+    oms = {}
+    for key in ("a", "b"):
+        om = OrgMember(id=uuid.uuid4(), org_id=orgs[key], user_id=uid, role="member")
+        session.add(om)
+        await session.commit()
+        oms[key] = om.id
+    return {"user_id": uid, "orgs": orgs, "oms": oms}
+
+
+async def _auth_me(app, Session, auth_ctx, headers=None):
+    _override(app, Session, auth_ctx)
+    try:
+        return await _client_for(app).get("/api/v2/auth/me", headers=headers or {})
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_auth_me_follows_x_org_id_header_like_the_stream():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_org_human(s)
+        orgs, oms = seeded["orgs"], seeded["oms"]
+        human = _human_auth(seeded["user_id"], orgs["a"])  # JWT org = A
+
+        # 헤더 org B → 응답 org_id·org_member_id 둘 다 B(한 응답 안에서 org가 섞이지 않음).
+        resp_b = await _auth_me(app, Session, human, {"X-Org-Id": str(orgs["b"])})
+        assert resp_b.status_code == 200, resp_b.text
+        body_b = resp_b.json().get("data", resp_b.json())
+        assert body_b["org_id"] == str(orgs["b"])
+        assert body_b["org_member_id"] == str(oms["b"])
+        async with Session() as s:
+            # 스트림(org B)이 그 값을 통과시킨다 · 옛 규칙의 값(org A 기준)은 org B 스트림에서 404.
+            assert await _stream_gate_status(s, human, oms["b"], orgs["b"]) == 200
+            assert await _stream_gate_status(s, human, oms["a"], orgs["b"]) == 404
+
+        # 헤더 없음 → JWT org(A) 기준(기존 동작 무변).
+        resp_a = await _auth_me(app, Session, human)
+        body_a = resp_a.json().get("data", resp_a.json())
+        assert body_a["org_id"] == str(orgs["a"])
+        assert body_a["org_member_id"] == str(oms["a"])
+
+        # 미가입 org C를 헤더로 → 스트림과 같은 판정(403).
+        resp_c = await _auth_me(app, Session, human, {"X-Org-Id": str(orgs["c"])})
+        assert resp_c.status_code == 403, resp_c.text
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_no_org_human_without_header_still_200():
+    """«무 org여도 항상 200» 계약(test_3195가 mock으로 핀) — 실 PG·실 요청 경로로도 재확認."""
+    from app.dependencies.auth import AuthContext
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        from app.models.user import User
+
+        uid = uuid.uuid4()
+        async with Session() as s:
+            s.add(User(id=uid, email=f"noorg-{uid.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+        no_org = AuthContext(user_id=str(uid), email="n@test", claims={"app_metadata": {}})
+        resp = await _auth_me(app, Session, no_org)
+        assert resp.status_code == 200, resp.text
+        body = resp.json().get("data", resp.json())
+        assert body["org_id"] is None and body["org_member_id"] is None
+    finally:
+        await engine.dispose()
