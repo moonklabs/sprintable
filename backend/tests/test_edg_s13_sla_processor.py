@@ -52,6 +52,19 @@ async def _session():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
+async def _run_sla(s, **kw):
+    """story #4228 — `process_sla`는 항목마다 자기 세션에서 행을 다시 잠그고 커밋한다(호출자 세션은 id 조회만). 그래서 시드는
+    먼저 **커밋**해야 보이고(운영 cron도 커밋된 행만 본다), 끝난 뒤엔 이 세션이 들고 있는 객체를 커밋된 새 값으로 다시 읽는다
+    (`expire_all`은 async에서 다음 속성 접근이 지연 적재로 터진다 — 명시 refresh)."""
+    from app.services.workflow_sla_processor import process_sla
+
+    await s.commit()
+    counts = await process_sla(s, **kw)
+    for obj in list(s.identity_map.values()):
+        await s.refresh(obj)
+    return counts
+
+
 async def _seed_line(s, org, sla_policy, *, from_status="in-review", to_status="done"):
     from app.models.workflow_line import WorkflowLineDefinition, WorkflowLineDefinitionVersion
     defn = WorkflowLineDefinition(org_id=org, project_id=None, entity_type="story", name="L",
@@ -83,7 +96,6 @@ async def _seed_run(s, org, defn_id, *, age_h, status="gate_pending", from_statu
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_reminder_fires_records_event_and_idempotent():
-    from app.services.workflow_sla_processor import process_sla
     from app.models.workflow_line import WorkflowLineStepRun, WorkflowLineStepRunEvent
     from sqlalchemy import select
     engine, Session = await _session()
@@ -93,7 +105,7 @@ async def test_reminder_fires_records_event_and_idempotent():
                                          "reminder_every_hours": 2, "max_reminders": 3})
         sr = await _seed_run(s, org, defn, age_h=3, resolved_member_id=uuid.uuid4())
         with patch(_NOTIFY, new=AsyncMock()) as notify:
-            c1 = await process_sla(s, now=_NOW)
+            c1 = await _run_sla(s, now=_NOW)
         assert c1["reminded"] == 1 and notify.await_count == 1
         row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
         assert row.reminder_count == 1 and row.status == "reminded" and row.next_reminder_at is not None
@@ -103,7 +115,7 @@ async def test_reminder_fires_records_event_and_idempotent():
         assert len(evs) == 1
         # 같은 now 재실행 → next_reminder_at 미도래 → 재reminder 0(idempotent)
         with patch(_NOTIFY, new=AsyncMock()) as notify2:
-            c2 = await process_sla(s, now=_NOW)
+            c2 = await _run_sla(s, now=_NOW)
         assert c2["reminded"] == 0 and notify2.await_count == 0
     await engine.dispose()
 
@@ -111,7 +123,6 @@ async def test_reminder_fires_records_event_and_idempotent():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_reminder_cap_respected():
-    from app.services.workflow_sla_processor import process_sla
     engine, Session = await _session()
     async with Session() as s:
         org = uuid.uuid4()
@@ -119,7 +130,7 @@ async def test_reminder_cap_respected():
                                          "reminder_every_hours": 2, "max_reminders": 1})
         await _seed_run(s, org, defn, age_h=10, reminder_count=1)  # 이미 cap 도달
         with patch(_NOTIFY, new=AsyncMock()) as notify:
-            c = await process_sla(s, now=_NOW)
+            c = await _run_sla(s, now=_NOW)
         assert c["reminded"] == 0 and notify.await_count == 0
     await engine.dispose()
 
@@ -127,7 +138,6 @@ async def test_reminder_cap_respected():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_timeout_keep_pending_default_no_transition():
-    from app.services.workflow_sla_processor import process_sla
     from app.models.workflow_line import WorkflowLineStepRun
     from sqlalchemy import select
     engine, Session = await _session()
@@ -136,7 +146,7 @@ async def test_timeout_keep_pending_default_no_transition():
         defn = await _seed_line(s, org, {"timeout_hours": 4})  # on_timeout 미지정 → keep_pending
         sr = await _seed_run(s, org, defn, age_h=10)
         with patch(_NOTIFY, new=AsyncMock()):
-            c = await process_sla(s, now=_NOW)
+            c = await _run_sla(s, now=_NOW)
         assert c["kept_pending"] == 1 and c["auto_approved"] == 0
         row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
         assert row.status == "gate_pending"  # 전이 없음(보수적)
@@ -146,7 +156,6 @@ async def test_timeout_keep_pending_default_no_transition():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_timeout_escalates_and_idempotent():
-    from app.services.workflow_sla_processor import process_sla
     from app.models.workflow_line import WorkflowLineStepRun
     from sqlalchemy import select
     engine, Session = await _session()
@@ -155,13 +164,13 @@ async def test_timeout_escalates_and_idempotent():
         defn = await _seed_line(s, org, {"timeout_hours": 4, "escalate_to": str(deputy)})
         sr = await _seed_run(s, org, defn, age_h=10)
         with patch(_NOTIFY, new=AsyncMock()) as notify:
-            c = await process_sla(s, now=_NOW)
+            c = await _run_sla(s, now=_NOW)
         assert c["escalated"] == 1 and notify.await_count == 1
         row = (await s.execute(select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == sr.id))).scalar_one()
         assert row.escalated_to_member_id == deputy and row.status == "escalated"
         # 재실행 → 이미 escalated_to 세팅 → 재escalate 0(idempotent)
         with patch(_NOTIFY, new=AsyncMock()):
-            c2 = await process_sla(s, now=_NOW)
+            c2 = await _run_sla(s, now=_NOW)
         assert c2["escalated"] == 0 and c2["kept_pending"] == 1
     await engine.dispose()
 
@@ -169,7 +178,6 @@ async def test_timeout_escalates_and_idempotent():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_timeout_auto_approve_when_allowed_resolver_none():
-    from app.services.workflow_sla_processor import process_sla
     from app.models.gate import Gate
     from app.models.project import Project
     from app.models.pm import Story
@@ -190,7 +198,7 @@ async def test_timeout_auto_approve_when_allowed_resolver_none():
         await _seed_run(s, org, defn, age_h=10, entity_id=story_id, gate_id=gate.id,
                         risk_snapshot={}, trust_snapshot={})
         with patch(_NOTIFY, new=AsyncMock()):
-            c = await process_sla(s, now=_NOW)
+            c = await _run_sla(s, now=_NOW)
         assert c["auto_approved"] == 1
         g = (await s.execute(select(Gate).where(Gate.id == gate.id))).scalar_one()
         assert g.status == "approved" and g.resolver_id is None  # ⭐system transition·trust 환류 차단
@@ -200,7 +208,6 @@ async def test_timeout_auto_approve_when_allowed_resolver_none():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_auto_approve_forbidden_high_risk_falls_back():
-    from app.services.workflow_sla_processor import process_sla
     from app.models.gate import Gate
     from sqlalchemy import select
     engine, Session = await _session()
@@ -215,7 +222,7 @@ async def test_auto_approve_forbidden_high_risk_falls_back():
         await _seed_run(s, org, defn, age_h=10, entity_id=story_id, gate_id=gate.id,
                         risk_snapshot={"prod_touch": True}, trust_snapshot={})
         with patch(_NOTIFY, new=AsyncMock()):
-            c = await process_sla(s, now=_NOW)
+            c = await _run_sla(s, now=_NOW)
         assert c["auto_approved"] == 0 and c["kept_pending"] == 1
         g = (await s.execute(select(Gate).where(Gate.id == gate.id))).scalar_one()
         assert g.status == "pending"  # 자동승인 안 됨(금지조건)
@@ -229,7 +236,6 @@ async def test_recipe_publish_gate_is_never_sla_auto_approved_and_rest_of_batch_
     게이트(external_publish · scope_key "" · triggered_by_event+stage)는 자동 승인하지 않는다: `auto_approve_skipped` 한 줄
     기록 · 게이트 pending 유지 · 기존 폴백(keep_pending). 같은 배치의 일반 게이트는 그대로 자동 승인.
     뮤테이션: 제외 분기 제거 → 레시피 게이트가 approved로 RED."""
-    from app.services.workflow_sla_processor import process_sla
     from app.models.gate import Gate
     from app.models.workflow_line import WorkflowLineStepRunEvent
     from sqlalchemy import select
@@ -249,7 +255,7 @@ async def test_recipe_publish_gate_is_never_sla_auto_approved_and_rest_of_batch_
         await _seed_run(s, org, defn, age_h=10, entity_id=plain.work_item_id, gate_id=plain.id,
                         risk_snapshot={}, trust_snapshot={})
         with patch(_NOTIFY, new=AsyncMock()):
-            c = await process_sla(s, now=_NOW)
+            c = await _run_sla(s, now=_NOW)
         assert c["auto_approved"] == 1 and c["kept_pending"] == 1, c
         assert (await s.execute(select(Gate.status).where(Gate.id == recipe.id))).scalar_one() == "pending"
         assert (await s.execute(select(Gate.status).where(Gate.id == plain.id))).scalar_one() == "approved"
