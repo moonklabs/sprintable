@@ -269,7 +269,7 @@ async def test_recipe_approval_cascades_to_hosted_gate_and_publish_succeeds():
 
 
 def _load_migration():
-    path = Path(__file__).resolve().parents[1] / "alembic/versions/0395_hosted_site_gate_scope_key.py"
+    path = Path(__file__).resolve().parents[1] / "alembic/versions/0397_hosted_site_gate_scope_key.py"
     spec = importlib.util.spec_from_file_location("_mig_4189", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

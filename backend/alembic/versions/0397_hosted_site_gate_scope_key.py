@@ -13,8 +13,8 @@
   "hosted_site"를 쓰는 코드는 이 PR 전엔 없었다. 그래도 NOT EXISTS로 막는다.
 - downgrade는 같은 work_item의 "" 슬롯이 비어 있을 때만 되돌린다(그 사이 레시피 게이트가 생겼으면 둔다).
 
-Revision ID: 0395
-Revises: 0394
+Revision ID: 0397
+Revises: 0396
 Create Date: 2026-09-23
 """
 from __future__ import annotations
@@ -22,8 +22,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0395"
-down_revision = "0394"
+revision = "0397"
+down_revision = "0396"
 branch_labels = None
 depends_on = None
 
