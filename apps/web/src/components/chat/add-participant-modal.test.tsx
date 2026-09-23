@@ -118,11 +118,13 @@ describe('AddParticipantModal — 에이전트 정책 거부 구조화 안내(st
       ok: false,
       status: 403,
       json: async () => ({
-        detail: {
+        data: null,
+        error: {
           code: 'AGENT_MESSAGE_POLICY_DENIED',
           message: 'member is not in the agent allowlist',
           details: { agent_id: 'a-bot', member_id: 'm-yuna', reason: 'allowlist_miss' },
         },
+        meta: null,
       }),
     })));
 
@@ -134,7 +136,7 @@ describe('AddParticipantModal — 에이전트 정책 거부 구조화 안내(st
   });
 
   it('정책 거부가 아닌 실패는 기존 generic 문구 그대로(회귀 0)', async () => {
-    await mountAndSelectBot(mockFetches(() => ({ ok: false, status: 500, json: async () => ({ detail: 'boom' }) })));
+    await mountAndSelectBot(mockFetches(() => ({ ok: false, status: 500, json: async () => ({ data: null, error: { code: 'HTTP_500', message: 'boom' }, meta: null }) })));
     expect(document.body.textContent).toContain('참여자 추가에 실패했어요. 다시 시도해 주세요.');
     expect(document.body.querySelectorAll('a[href^="/organization/workforce/"]').length).toBe(0);
   });

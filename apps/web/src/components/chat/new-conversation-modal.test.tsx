@@ -101,11 +101,13 @@ describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(s
       ok: false,
       status: 403,
       json: async () => ({
-        detail: {
+        data: null,
+        error: {
           code: 'AGENT_MESSAGE_POLICY_DENIED',
           message: 'member is not in the agent allowlist',
           details: { agent_id: 'a-bot', member_id: 'm-yuna', reason: 'allowlist_miss' },
         },
+        meta: null,
       }),
     })));
 
@@ -123,11 +125,13 @@ describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(s
       ok: false,
       status: 403,
       json: async () => ({
-        detail: {
+        data: null,
+        error: {
           code: 'AGENT_MESSAGE_POLICY_DENIED',
           message: 'agent has no creator',
           details: { agent_id: 'a-bot', reason: 'created_by_none' },
         },
+        meta: null,
       }),
     })));
 
@@ -142,11 +146,13 @@ describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(s
       ok: false,
       status: 403,
       json: async () => ({
-        detail: {
+        data: null,
+        error: {
           code: 'AGENT_MESSAGE_POLICY_DENIED',
           message: 'creator not a participant',
           details: { agent_id: 'a-bot', reason: 'creator_not_participant' },
         },
+        meta: null,
       }),
     })));
 
@@ -154,7 +160,7 @@ describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(s
   });
 
   it('정책 거부가 아닌 4xx(generic)는 기존 문구 그대로(회귀 0) — 딥링크는 안 뜬다', async () => {
-    await mountAndSelect(mockFetches(() => ({ ok: false, status: 422, json: async () => ({ detail: 'unrelated validation error' }) })));
+    await mountAndSelect(mockFetches(() => ({ ok: false, status: 422, json: async () => ({ data: null, error: { code: 'UNPROCESSABLE_ENTITY', message: 'unrelated validation error' }, meta: null }) })));
 
     expect(document.body.textContent).toContain('대화 생성에 실패했어요. 다시 시도해 주세요.');
     expect(document.body.querySelectorAll('a[href^="/organization/workforce/"]').length).toBe(0);
