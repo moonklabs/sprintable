@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from jose import jwt as jose_jwt
 import re
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
@@ -2226,7 +2226,14 @@ class AuthMeResponse(BaseModel):
     # 있어, 그 값을 org_member.id로 바꾸면 org 미가입 사용자의 온보딩이 깨진다(그라운딩
     # 실측). 대신 additive 신규 필드 — 사람 세션 + org 해소 가능일 때만 org_member.id,
     # 그 외(에이전트 세션·org 미해소)는 email_verified와 같은 안전판으로 None(예외 없음).
-    org_member_id: str | None = None
+    org_member_id: str | None = Field(
+        default=None,
+        description=(
+            "사람(JWT) 세션의 현재 org 멤버 id(org_members.id). GET /api/v2/events/stream 의 "
+            "member_id 쿼리에 넣는 값이다 — member_id 필드(users.id)로는 404. 에이전트(API 키) "
+            "세션·org 미해소면 null(에이전트는 member_id 그대로 쓴다)."
+        ),
+    )
 
 
 async def _resolve_project_default(

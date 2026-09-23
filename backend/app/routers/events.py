@@ -360,10 +360,51 @@ class EventResponse(BaseModel):
 
 # ─── Agent SSE stream (S2) ────────────────────────────────────────────────────
 
+async def _resolve_stream_member(
+    auth: AuthContext, member_id: uuid.UUID | None, org_id: uuid.UUID, db: AsyncSession,
+) -> uuid.UUID:
+    """/events/stream 구독자 신원 게이트 — 통과하면 구독할 member id, 아니면 HTTPException.
+
+    story #4178(PO CHANGES) — 엔드포인트와 테스트가 같은 함수를 부르도록 뽑았다(테스트가 이
+    블록을 옮겨 적으면 원본이 바뀌어도 복제본만 초록으로 남는다). 판정 자체는 무변경."""
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+
+    # AC2: API key → member_id 자동 추출 (auth.user_id = team_member.id)
+    if is_api_key:
+        resolved_member_id = uuid.UUID(auth.user_id)
+        # query param이 명시된 경우 일치 여부 검증 — AC4
+        if member_id is not None and member_id != resolved_member_id:
+            raise HTTPException(status_code=403, detail="API key can only subscribe to its own stream")
+    else:
+        if member_id is None:
+            raise HTTPException(status_code=400, detail="member_id query parameter required")
+        resolved_member_id = member_id
+
+    # member_id가 org 소속인지 검증 + AC4: JWT 경로에서 타인 stream 접근 차단
+    # E-MEMBER-SSOT Phase 0: team_member 강요 제거 — grant-only 휴먼(org_member)도 구독 허용
+    member_row = await resolve_member_identity(resolved_member_id, org_id, db)
+    if member_row is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    # AC4: JWT 사용자는 자신의 신원(user_id 일치)에만 구독 허용
+    if not is_api_key:
+        if member_row.user_id is None or str(member_row.user_id) != auth.user_id:
+            raise HTTPException(status_code=403, detail="Cannot subscribe to another member's stream")
+    return resolved_member_id
+
+
 @router.get("/stream")
 async def agent_event_stream(
     request: Request,
-    member_id: uuid.UUID | None = Query(default=None),  # AC2: API key 시 자동 추출, JWT 시 필수
+    # AC2: API key 시 자동 추출, JWT 시 필수
+    member_id: uuid.UUID | None = Query(
+        default=None,
+        description=(
+            "구독할 멤버 id. API 키 세션은 생략(키의 멤버로 자동). 사람(JWT) 세션은 필수이며 "
+            "GET /api/v2/auth/me 의 org_member_id 를 넣는다 — 같은 응답의 member_id(users.id)는 "
+            "404가 난다."
+        ),
+    ),
     auth: AuthContext = Depends(get_current_user_streaming),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3). P0(#abaf6279): SSE 커넥션 비점유 변형
     org_id: uuid.UUID = Depends(get_verified_org_id_streaming),
     since_timestamp: datetime | None = Query(default=None),
@@ -388,30 +429,8 @@ async def agent_event_stream(
     """
     from app.core.database import async_session_factory
 
-    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
-
-    # AC2: API key → member_id 자동 추출 (auth.user_id = team_member.id)
-    if is_api_key:
-        resolved_member_id = uuid.UUID(auth.user_id)
-        # query param이 명시된 경우 일치 여부 검증 — AC4
-        if member_id is not None and member_id != resolved_member_id:
-            raise HTTPException(status_code=403, detail="API key can only subscribe to its own stream")
-    else:
-        if member_id is None:
-            raise HTTPException(status_code=400, detail="member_id query parameter required")
-        resolved_member_id = member_id
-
-    # member_id가 org 소속인지 검증 + AC4: JWT 경로에서 타인 stream 접근 차단
-    # E-MEMBER-SSOT Phase 0: team_member 강요 제거 — grant-only 휴먼(org_member)도 구독 허용
     async with async_session_factory() as db:
-        member_row = await resolve_member_identity(resolved_member_id, org_id, db)
-        if member_row is None:
-            raise HTTPException(status_code=404, detail="Member not found")
-
-        # AC4: JWT 사용자는 자신의 신원(user_id 일치)에만 구독 허용
-        if not is_api_key:
-            if member_row.user_id is None or str(member_row.user_id) != auth.user_id:
-                raise HTTPException(status_code=403, detail="Cannot subscribe to another member's stream")
+        resolved_member_id = await _resolve_stream_member(auth, member_id, org_id, db)
 
     # AC1(S-COMM-05): Last-Event-ID 헤더 우선, 쿼리 파라미터 fallback (RFC 8895)
     _header_last_id = request.headers.get("Last-Event-ID") or request.headers.get("last-event-id")

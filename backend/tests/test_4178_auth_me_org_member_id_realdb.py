@@ -47,9 +47,9 @@ async def _session_factory():
 
 
 async def _seed(session, *, with_org_member: bool = True):
-    from app.models.member import Member
+    from app.models.member import AgentProjectProfile, Member
     from app.models.organization import Organization
-    from app.models.project import OrgMember
+    from app.models.project import OrgMember, Project
     from app.models.user import User
 
     org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
@@ -67,8 +67,14 @@ async def _seed(session, *, with_org_member: bool = True):
         await session.commit()
         om_id = om.id
 
+    # 에이전트가 team_members VIEW(members⋈agent_project_profiles)에 보이려면 프로젝트 프로필이 필요.
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
     agent = Member(id=uuid.uuid4(), org_id=org.id, type="agent", name="Agent")
     session.add(agent)
+    await session.commit()
+    session.add(AgentProjectProfile(id=uuid.uuid4(), member_id=agent.id, project_id=project.id))
     await session.commit()
 
     return {"org_id": org.id, "user_id": user_id, "org_member_id": om_id, "agent_id": agent.id}
@@ -107,16 +113,19 @@ def _human_auth(user_id: uuid.UUID, org_id: uuid.UUID):
     )
 
 
-async def _events_stream_identity_gate(session, member_id: uuid.UUID, org_id: uuid.UUID, auth_user_id: str) -> int:
-    """events.py:406-414(JWT 분기)의 신원 게이트를 그대로 재현 — SSE 본문(무한 스트림)은 이
-    게이트 뒤라 여기서 멈춘다. 200=통과, 404=Member not found, 403=타인 스트림."""
-    from app.services.member_resolver import resolve_member_identity
+async def _stream_gate_status(session, auth_ctx, member_id: uuid.UUID, org_id: uuid.UUID) -> int:
+    """/events/stream 엔드포인트가 실제로 부르는 신원 게이트(events._resolve_stream_member)를
+    그대로 호출 — 복제 아님(PO CHANGES). SSE 본문(무한 스트림)은 게이트 뒤라 여기서 멈춘다.
+    200=통과, 그 외=게이트가 던진 HTTPException status."""
+    from fastapi import HTTPException
 
-    member_row = await resolve_member_identity(member_id, org_id, session)
-    if member_row is None:
-        return 404
-    if member_row.user_id is None or str(member_row.user_id) != auth_user_id:
-        return 403
+    from app.routers.events import _resolve_stream_member
+
+    try:
+        resolved = await _resolve_stream_member(auth_ctx, member_id, org_id, session)
+    except HTTPException as exc:
+        return exc.status_code
+    assert resolved == member_id
     return 200
 
 
@@ -140,15 +149,12 @@ async def test_human_session_org_member_id_passes_events_stream_gate_member_id_d
         assert payload["member_id"] == str(seeded["user_id"])  # 기존 계약 무변경
         assert payload["org_member_id"] == str(seeded["org_member_id"])
 
+        human = _human_auth(seeded["user_id"], seeded["org_id"])
         async with Session() as s:
             # 버그 재현: 기존 member_id(users.id)로는 404.
-            assert await _events_stream_identity_gate(
-                s, uuid.UUID(payload["member_id"]), seeded["org_id"], str(seeded["user_id"]),
-            ) == 404
+            assert await _stream_gate_status(s, human, uuid.UUID(payload["member_id"]), seeded["org_id"]) == 404
             # 처방: 신설 org_member_id로는 통과.
-            assert await _events_stream_identity_gate(
-                s, uuid.UUID(payload["org_member_id"]), seeded["org_id"], str(seeded["user_id"]),
-            ) == 200
+            assert await _stream_gate_status(s, human, uuid.UUID(payload["org_member_id"]), seeded["org_id"]) == 200
     finally:
         await engine.dispose()
 
@@ -197,5 +203,16 @@ async def test_agent_api_key_session_unchanged_org_member_id_none():
         payload = resp.json().get("data", resp.json())
         assert payload["member_id"] == str(seeded["agent_id"])
         assert payload["org_member_id"] is None
+
+        # 뽑아낸 게이트의 에이전트 경로 무회귀 — member_id 생략이면 키의 멤버로, 남의 id면 403.
+        from fastapi import HTTPException
+
+        from app.routers.events import _resolve_stream_member
+
+        async with Session() as s:
+            assert await _resolve_stream_member(agent_auth, None, seeded["org_id"], s) == seeded["agent_id"]
+            with pytest.raises(HTTPException) as exc:
+                await _resolve_stream_member(agent_auth, uuid.uuid4(), seeded["org_id"], s)
+            assert exc.value.status_code == 403
     finally:
         await engine.dispose()
