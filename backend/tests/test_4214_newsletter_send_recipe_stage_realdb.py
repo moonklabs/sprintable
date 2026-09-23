@@ -308,17 +308,23 @@ def _count_sends(monkeypatch) -> list[str]:
 
 
 def _emit_raises_sql_error_for(monkeypatch, failing_org_ids: set):
-    """레시피 이벤트 발행부가 **실제 SQL 오류를 그대로 던진다**(삼키지 않음) — 지정 org만. 나머지는 실 발행부."""
+    """레시피 이벤트 발행부가 **실제 SQL 오류를 그대로 던진다**(삼키지 않음) — 지정 org만. 나머지는 실 발행부.
+
+    story #4192(통합 · 4573 병합 뒤) — 뉴스레터 경로는 이제 입구 `emit_recipe_published_stage_event`를 **워커 세션을 넘겨** 직접
+    부르고, 격리 세션은 그 입구가 연다(호출자 세션엔 쓰지 않는 계약 — test_4192 `test_emit_never_touches_the_callers_session`).
+    그래서 오류는 입구 **안쪽**, 격리 세션에서 레시피 단계 이벤트를 쓰는 자리(`_emit_recipe_published_stage_event_locked` —
+    레시피 단계 이벤트만 지나는 곳, 셋업의 일반 발행은 안 지난다)에 넣는다. 예전 대역처럼 입구 바깥에서 넘겨받은 세션에 SQL을
+    치면, 운영 코드가 하지 않는 «워커 세션 오염»을 대역이 스스로 만든다."""
     import app.services.channel_posts as channel_posts_module
 
-    real_emit = channel_posts_module.emit_recipe_published_stage_event
+    real_locked = channel_posts_module._emit_recipe_published_stage_event_locked
 
-    async def _emit(db, **kwargs):
+    async def _locked(event_db, **kwargs):
         if kwargs["org_id"] in failing_org_ids:
-            await db.execute(text("SELECT * FROM no_such_table_4214"))
-        return await real_emit(db, **kwargs)
+            await event_db.execute(text("SELECT * FROM no_such_table_4214"))
+        return await real_locked(event_db, **kwargs)
 
-    monkeypatch.setattr(channel_posts_module, "emit_recipe_published_stage_event", _emit)
+    monkeypatch.setattr(channel_posts_module, "_emit_recipe_published_stage_event_locked", _locked)
 
 
 @pytest.mark.anyio
@@ -355,6 +361,16 @@ async def test_first_commands_event_failure_does_not_strand_the_rest_of_the_batc
         _emit_raises_sql_error_for(monkeypatch, {ctx_fail["org_id"]})
         gate_fail, at_fail = await _approve_and_queue(Session, ctx_fail)
         gate_ok, at_ok = await _approve_and_queue(Session, ctx_ok)
+        # story #4192(PO 13:29Z) — 실패하는 명령이 배치의 **첫째**여야 «둘째가 멈추지 않는다»를 잰다. 워커는 명령을
+        # `created_at` 순으로 집는다(publication_command.process_due_publication_commands) — 그 순서를 전제로 박는다.
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+
+            created = dict((await s.execute(
+                select(PublicationCommand.gate_id, PublicationCommand.created_at)
+                .where(PublicationCommand.gate_id.in_([gate_fail.id, gate_ok.id]))
+            )).all())
+        assert created[gate_fail.id] < created[gate_ok.id], created
         counts = await _run_worker(Session, max(at_fail, at_ok) + timedelta(minutes=2))
         assert counts["completed"] == 2 and counts["error"] == 0, counts
         assert await _command_status(Session, gate_fail.id) == "completed"
@@ -362,5 +378,10 @@ async def test_first_commands_event_failure_does_not_strand_the_rest_of_the_batc
         assert await _stage_event_count(Session, ctx_fail, "check") == 0
         assert await _stage_event_count(Session, ctx_ok, "check") == 1
         assert len(sends) == 2, sends
+        # 다음 틱 — 첫째의 발송 기록이 completed로 남았으니 재발송 0(새 세션 재조회로 확인).
+        await _run_worker(Session, max(at_fail, at_ok) + timedelta(minutes=10))
+        assert len(sends) == 2, sends
+        assert await _command_status(Session, gate_fail.id) == "completed"
+        assert await _command_status(Session, gate_ok.id) == "completed"
     finally:
         await engine.dispose()

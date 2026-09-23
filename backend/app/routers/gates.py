@@ -2322,6 +2322,15 @@ async def _transition_gate_endpoint(
         await session.refresh(gate)
         # ccbcd9da(A-1): doc/epic 자동재개 wake — commit(recipient_seq 확정) 후 발화(이중전달 방지).
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
+        # story #4192(까디르 4583 P1) — 레시피 회차 자사 블로그 초안 게이트면 서버 발행은 **승인 커밋 뒤** 격리 세션에서
+        # (발행 실패가 승인을 지우지 않게). 이 세션은 안 쓴다 — 결과(publish_outcome)만 다시 읽어 응답에 싣는다.
+        if gate.status == "approved":
+            from app.services.site_posts import publish_recipe_approved_hosted_site_draft_after_commit
+
+            await publish_recipe_approved_hosted_site_draft_after_commit(
+                session, gate_id=gate.id, resolver_id=gate.resolver_id,
+            )
+            await session.refresh(gate)
         # story #2813 — 사람 승인/반려를 GitHub check-run(success/failure)으로 반영. commit 後
         # 배경 태스크(fail-closed: 실패해도 이미 commit된 gate 상태엔 영향 없음, GitHub 쪽만 stale).
         # merge 게이트 아니면 publish_gate_check 내부에서 조용히 no-op.
@@ -3296,6 +3305,15 @@ async def _override_gate_endpoint(
         await session.refresh(gate)
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
+        # story #4192(까디르 4583 P1) — 레시피 회차 자사 블로그 초안 게이트면 서버 발행은 **승인 커밋 뒤** 격리 세션에서
+        # (발행 실패가 승인을 지우지 않게). 이 세션은 안 쓴다 — 결과(publish_outcome)만 다시 읽어 응답에 싣는다.
+        if gate.status == "approved":
+            from app.services.site_posts import publish_recipe_approved_hosted_site_draft_after_commit
+
+            await publish_recipe_approved_hosted_site_draft_after_commit(
+                session, gate_id=gate.id, resolver_id=gate.resolver_id,
+            )
+            await session.refresh(gate)
         return await to_gate_response(session, org_id, gate)
     except RecipeReviewedDraftChangedError as e:
         # story #4190 — override는 «본 초안 버전»을 싣지 않는다(UI 호출처 없음). 승인 화면에 초안이 있는 레시피 발행

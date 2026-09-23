@@ -1520,6 +1520,10 @@ async def transition_gate(
 
         await publish_recipe_approved_draft(session, gate=gate, resolver_id=resolver_id)
 
+        # story #4192 — 레시피 회차 자사 블로그 초안 게이트의 서버 발행은 여기(승인 트랜잭션 안)서 하지 않는다: 승인이
+        # 커밋된 뒤 라우터가 `site_posts.publish_recipe_approved_hosted_site_draft_after_commit`를 부른다(까디르 4583 P1 —
+        # 발행 실패가 승인 트랜잭션을 깨 승인까지 사라지던 결함).
+
     # story #4139(AC2 반려 동행, 페드루 PO 確定 2026-09-22) — 위 승인 캐스케이드(훅B, #4069)
     # 의 반려 대칭. 레시피 unscoped 게이트가 rejected로 전이되는 순간, 같은 work_item의
     # 단일-목적지 pending scoped 게이트도 같은 승인자·시각·사유로 같이 반려한다(사람이

@@ -1751,7 +1751,15 @@ async def _render_gate_verdict_message(
                 _site_recipe_ctx = await resolve_site_post_recipe_context(
                     db, org_id=org_id, work_item_type=gate_row.work_item_type, work_item_id=gate_row.work_item_id,
                     draft_id=(gate_row.neutral_facts or {}).get("draft_id"),
+                    include_auto_stage=True,
                 )
+            # story #4192(까디르 4583 P2) — 레시피 회차 자사 블로그 서버 발행이 실패했으면(`publish_failed:*`) 그 결과를
+            # 먼저 그린다 — 문맥만 보고 «자동 발행돼요»라고 하면 실패한 발행을 성공처럼 말한다.
+            if (
+                _recipe_auto_publish_line is None and is_site_post and gate_row is not None
+                and (gate_row.publish_outcome or "").startswith("publish_failed:")
+            ):
+                _recipe_auto_publish_line = _recipe_auto_publish_outcome_line(gate_row.publish_outcome, resolved_locale)
             if _recipe_auto_publish_line is not None:
                 lines.append(f"- {_recipe_auto_publish_line}")
             elif _site_recipe_ctx is not None:
@@ -2209,6 +2217,7 @@ async def _find_existing_stage_publish(
 async def resolve_site_post_recipe_context(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
     draft_id: uuid.UUID | str | None,
+    include_auto_stage: bool = False,
 ) -> tuple[str, str] | None:
     """story #4174 — 이 work item이 «다음 단계를 서버가 실제 발행 뒤 내는» 레시피(블로그 — capability kind
     `site_post_auto_publish`)의 바로 앞 단계(발행 승인 대기)에 있는가. 반환 (정의 key, 서버가 낼 다음 stage) · 아니면
@@ -2218,7 +2227,11 @@ async def resolve_site_post_recipe_context(
 
     까디르 P1(4572 CHANGES) — work item의 현재 단계만 보면 버려진 회차·다른 목적지 초안까지 «레시피 문맥»이 된다. 그래서
     그 단계 이벤트 payload의 `RECIPE_SITE_DRAFT_LINK_FIELD`(회차가 연결한 초안 id)가 **이 초안 id와 같을 때만** 문맥이다.
-    `draft_id` 없음·연결 필드 없음·다른 id → None."""
+    `draft_id` 없음·연결 필드 없음·다른 id → None.
+
+    story #4192 — `include_auto_stage=True`는 «이미 서버가 그 단계를 냈다»도 문맥으로 본다. 승인 알림 렌더용: 자사 블로그는
+    승인 트랜잭션 안에서 서버가 발행·`published` 이벤트까지 끝내므로 알림이 렌더될 땐 현재 단계가 이미 그 단계다. 발행·
+    이벤트를 결정하는 쪽(자동 발행·워커)은 기본값(앞 단계만)을 써서 이미 넘어간 run에 두 번 손대지 않는다. 두 경우 모두 연결 대조는 같다 — 서버가 낸 단계 이벤트도 같은 연결을 싣는다(`emit_recipe_published_stage_event`)."""
     from sqlalchemy import String, cast, or_
 
     from app.models.event_definition import EventDefinition
@@ -2240,9 +2253,10 @@ async def resolve_site_post_recipe_context(
             )
             latest_payload = (((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}) if latest is not None else {}
             current = latest_payload.get("stage")
-            if (
-                current is not None and _next_recipe_stage(definition, current) == auto_stage
-                and draft_id is not None and latest_payload.get(RECIPE_SITE_DRAFT_LINK_FIELD) == str(draft_id)
+            linked = draft_id is not None and latest_payload.get(RECIPE_SITE_DRAFT_LINK_FIELD) == str(draft_id)
+            if current is not None and linked and (
+                _next_recipe_stage(definition, current) == auto_stage
+                or (include_auto_stage and current == auto_stage)
             ):
                 return definition.key, auto_stage
     return None

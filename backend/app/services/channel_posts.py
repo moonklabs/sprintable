@@ -20,8 +20,10 @@ story #f8f7cb0f(Phase1·마케팅운영, 페드루 PO 확定 2026-09-03) — 실
 from __future__ import annotations
 
 import asyncio
+import logging
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import cast, func, select
@@ -55,6 +57,10 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
     is_agent_caller,
 )
 from app.services.utm import attach_utm, resolve_utm_campaign
+
+# story #4192(디디 발견) — 이 모듈은 logger.warning/info/exception을 4곳에서 쓰는데 모듈 logger가 없어, side-channel
+# 격리 except(emit_recipe_published_stage_event 등)가 로그 대신 NameError를 던지고 바깥 try가 그걸 삼켰다.
+logger = logging.getLogger(__name__)
 
 _EXTERNAL_PUBLISH_GATE_TYPE = "external_publish"
 # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송 예정시각 축.
@@ -2523,10 +2529,9 @@ async def publish_recipe_approved_draft(
     예약(target_gate.sealed_scheduled_at) 존중 — 기존 `_maybe_create_scheduled_
     publication_command`(gate_service.py)를 재사용해 큐잉만 하고 즉시발행은 하지
     않는다(#4069 자동충족이 `transition_gate()`를 안 거쳐, 이 큐잉 훅이 원래 자동으로는
-    전혀 안 걸리던 두 번째 구멍이었다). ⚠️ 범위 밖 기록 — 예약 경로는 `publish_outcome=
-    "scheduled"`까지만 채운다. 실제 발행은 워커 tick이 나중에 처리하는데, 그 시점에
-    이 레시피의 `published` stage 이벤트를 잇는 코드는 이 스토리 스코프 밖(즉시-발행
-    경로만 AC2 대상, 페드루 PO에 별도 보고)."""
+    전혀 안 걸리던 두 번째 구멍이었다). 예약 경로는 여기서 `publish_outcome="scheduled"`까지만
+    채우고, 워커가 실제로 발행한 순간 `published` stage 이벤트를 낸다(story #4093 —
+    publication_command.py 채널 성공 분기 · 블로그는 story #4192가 같은 함수로)."""
     if gate.gate_type != _EXTERNAL_PUBLISH_GATE_TYPE or (gate.scope_key or "") != "":
         return
 
@@ -2759,7 +2764,9 @@ async def resolve_recipe_context_for_scheduled_publication(
 
 async def emit_recipe_published_stage_event(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
-    definition_key: str, next_stage: str,
+    definition_key: str | None = None, next_stage: str | None = None,
+    resolve: Callable[[AsyncSession], Awaitable[tuple[str, str] | None]] | None = None,
+    extra_payload: dict | None = None,
 ) -> None:
     """story #4090 AC2 + story #4093(공통 훅으로 추출, 페드루 PO 確定 2026-09-21) —
     즉시-발행 경로(`publish_recipe_approved_draft`)·예약-발행 워커 경로(publication_
@@ -2767,44 +2774,86 @@ async def emit_recipe_published_stage_event(
     발행부. `_get_or_create_system_publisher`+`_publish_registry_event_core` 재사용
     (recipe_repeat_scheduler.py 선례 그대로, 새 로직 0).
 
-    **멱등**(story #4093 AC3 "중복 발행 0") — 이 work_item에 이 stage가 이미 발행돼
-    있으면(재시도·겹친 tick 등) 스킵한다. `_find_existing_stage_publish`(story #4075,
-    publish-history와 같은 SSOT)를 그대로 재사용 — 새 중복방지 축 발명 안 함."""
+    story #4192(PO 10:09Z · 까디르 4573 실측) — **이벤트는 호출자 세션이 아니라 별도 세션에서** 낸다(`db` 인자는 호출부
+    호환용으로만 남는다). 호출자 세션(워커 배치 세션 등)에서 이벤트 쪽이 실패해 롤백/SAVEPOINT 롤백이 일어나면 그
+    세션의 ORM 객체가 만료돼, async에서 다음 속성 접근이 `MissingGreenlet`으로 터지고 같은 배치에 `in_progress`로
+    잡힌 다른 명령까지 멈춘다. 호출자 세션은 발행 기록(completed·publish_outcome)을 **이 호출 전에 커밋**하는
+    것까지만 책임진다 — 이벤트 세션은 그 커밋된 상태를 읽는다. 이 함수는 어떤 예외도 밖으로 던지지 않는다
+    (side-channel, story #3337 선례: «발행 자체는 이미 성공했다»를 이벤트 실패가 되돌리면 안 된다).
+
+    **멱등 — 원자적**(story #4093 AC3 · #4192 P2): 이 work_item에 이 stage가 이미 발행돼 있으면 스킵한다
+    (`_find_existing_stage_publish`, publish-history와 같은 SSOT). 예전엔 «조회 후 발행»이라 같은 work item의
+    **서로 다른 명령**이 겹친 tick에 동시에 오면 둘 다 «없음»을 보고 2회 낼 수 있었다 — (org, 정의, work item, stage)
+    키의 **트랜잭션 수준 advisory lock**으로 조회~발행 구간을 한 트랜잭션에 묶어 직렬화한다. 이벤트 저장소가 JSONB 메시지
+    행이라 부분 유일 인덱스보다 이 잠금이 근본이다 — 같은 키를 쓰는 모든 발행 경로가 이 함수 하나를 지난다.
+
+    story #4192(4573 병합 뒤 통합) — 별도 세션은 `isolated_side_effect.run_side_effect_in_own_session`(4214 뉴스레터와 같은
+    헬퍼, 호출자 세션과 같은 엔진)으로 연다 — 세션 격리 코드가 두 벌이면 한쪽만 고쳐지는 자리가 된다.
+    - `resolve`: 다음 단계를 **읽어서** 정하는 호출자(뉴스레터 발송 — 게이트 facts → 정의 → 다음 stage)는 그 읽기도
+      격리 세션 안에서 한다(워커 세션에서 읽다 SQL 오류가 나면 워커 트랜잭션이 aborted). None이면 이벤트 0.
+    - `extra_payload`: 이벤트 payload에 더할 필드. 블로그 레시피는 회차 연결(`site_post_draft_id`)을 서버가 낸 단계
+      이벤트에도 싣는다 — 레시피 문맥 판정(`resolve_site_post_recipe_context(include_auto_stage=True)`)이 그 연결로 가른다."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    async def _work(event_db: AsyncSession) -> None:
+        key, stage = definition_key, next_stage
+        if resolve is not None:
+            resolved = await resolve(event_db)
+            if resolved is None:
+                return
+            key, stage = resolved
+        if not key or not stage:
+            return
+        await _emit_recipe_published_stage_event_locked(
+            event_db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            definition_key=key, next_stage=stage, extra_payload=extra_payload,
+        )
+
+    await run_side_effect_in_own_session(
+        db, _work, describe=f"recipe published stage event work_item={work_item_id} stage={next_stage or '(resolve)'}",
+    )
+
+
+async def _emit_recipe_published_stage_event_locked(
+    event_db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+    definition_key: str, next_stage: str, extra_payload: dict | None = None,
+) -> None:
+    """조회~발행을 한 트랜잭션으로 묶고 그 트랜잭션 수준 advisory lock으로 직렬화한다(커밋·롤백 때 PG가 자동 해제 —
+    세션 수준 잠금은 비동기 세션이 커밋 뒤 연결을 풀에 돌려줄 수 있어 해제가 다른 연결로 갈 위험이 있다). 이 구간의
+    헬퍼(`_get_or_create_system_publisher`·`_publish_registry_event_core`)는 중간 커밋이 없다."""
+    from sqlalchemy import text
+
     from app.routers.events import (
         _find_existing_stage_publish, _get_or_create_system_publisher, _publish_registry_event_core,
     )
 
+    lock_key = f"recipe-stage-publish:{org_id}:{definition_key}:{work_item_type}:{work_item_id}:{next_stage}"
+    await event_db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": lock_key})
     already = await _find_existing_stage_publish(
-        db, org_id=org_id, definition_key=definition_key, work_item_type=work_item_type,
+        event_db, org_id=org_id, definition_key=definition_key, work_item_type=work_item_type,
         work_item_id=str(work_item_id), stage=next_stage,
     )
     if already is not None:
+        await event_db.rollback()
         return
 
     from fastapi import BackgroundTasks
 
     from app.dependencies.auth import AuthContext
 
-    system_member = await _get_or_create_system_publisher(db, org_id)
+    system_member = await _get_or_create_system_publisher(event_db, org_id)
     auth = AuthContext(
         user_id=str(system_member.id), email=None,
         claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
     )
     background_tasks = BackgroundTasks()
-    try:
-        await _publish_registry_event_core(
-            db, org_id, auth, definition_key,
-            {"stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
-            background_tasks,
-        )
-        await background_tasks()
-    except Exception:
-        # story #3337 선례(recipe_repeat_scheduler.py) — «발행 자체는 이미 성공했다»를
-        # 「published stage 알림」 실패가 되돌리면 안 된다(side-channel 실패 격리).
-        logger.warning(
-            "recipe published stage 이벤트 발행 실패(work_item=%s stage=%s)",
-            work_item_id, next_stage, exc_info=True,
-        )
+    await _publish_registry_event_core(
+        event_db, org_id, auth, definition_key,
+        {**(extra_payload or {}), "stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
+        background_tasks,
+    )
+    await event_db.commit()
+    await background_tasks()
 
 
 async def _publish_x_thread_draft(
