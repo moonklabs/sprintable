@@ -38,6 +38,11 @@ COPY ee/ ee/
 # (걷은 뒤 apps/web 비-테스트 전수 재스캔 0건 확認 — 이관이 근본 봉쇄임을 실측).
 WORKDIR /app/apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
+# story #4225(dev 배포 19 실사고, 2026-09-23 build b6c4ff7d) — `pnpm build`가 webpack 컴파일 중 `JavaScript heap out
+# of memory`로 죽었다(123초 · old space 1715/2018MB). Node는 힙 상한을 지정하지 않으면 머신 메모리로 정한다 —
+# Cloud Build E2_HIGHCPU_8(8GB)에선 ≈2GB(node:20-alpine 실측 2096MB)라, 코드가 늘며 그 선에 닿았다. 8GB 머신에서
+# 6GB를 준다. 이 builder 스테이지의 ENV라 아래 runner 이미지엔 안 실린다(런타임 힙은 Cloud Run 메모리 기준 그대로).
+ENV NODE_OPTIONS=--max-old-space-size=6144
 # rewrites()가 빌드 시점에 routes-manifest.json으로 베이크인되므로 ARG로 주입 필요
 ARG NEXT_PUBLIC_FASTAPI_URL
 ENV NEXT_PUBLIC_FASTAPI_URL=${NEXT_PUBLIC_FASTAPI_URL}
