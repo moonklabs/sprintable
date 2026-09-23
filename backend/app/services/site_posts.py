@@ -1214,10 +1214,11 @@ async def publish_recipe_approved_hosted_site_draft(
     except (ValueError, TypeError, AttributeError):
         return
 
-    from app.routers.events import resolve_site_post_recipe_context
+    from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
 
+    # 4572 P1 — 회차가 연결한 초안이 바로 이 초안일 때만 레시피 문맥(버려진 회차·다른 목적지 초안은 사람 클릭 흐름).
     ctx = await resolve_site_post_recipe_context(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id, draft_id=draft_id,
     )
     if ctx is None:
         return
@@ -1252,6 +1253,7 @@ async def publish_recipe_approved_hosted_site_draft(
     await emit_recipe_published_stage_event(
         db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
         definition_key=definition_key, next_stage=next_stage,
+        extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
     )
 
 

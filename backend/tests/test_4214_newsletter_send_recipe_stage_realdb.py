@@ -308,17 +308,23 @@ def _count_sends(monkeypatch) -> list[str]:
 
 
 def _emit_raises_sql_error_for(monkeypatch, failing_org_ids: set):
-    """레시피 이벤트 발행부가 **실제 SQL 오류를 그대로 던진다**(삼키지 않음) — 지정 org만. 나머지는 실 발행부."""
+    """레시피 이벤트 발행부가 **실제 SQL 오류를 그대로 던진다**(삼키지 않음) — 지정 org만. 나머지는 실 발행부.
+
+    story #4192(통합 · 4573 병합 뒤) — 뉴스레터 경로는 이제 입구 `emit_recipe_published_stage_event`를 **워커 세션을 넘겨** 직접
+    부르고, 격리 세션은 그 입구가 연다(호출자 세션엔 쓰지 않는 계약 — test_4192 `test_emit_never_touches_the_callers_session`).
+    그래서 오류는 입구 **안쪽**, 격리 세션에서 레시피 단계 이벤트를 쓰는 자리(`_emit_recipe_published_stage_event_locked` —
+    레시피 단계 이벤트만 지나는 곳, 셋업의 일반 발행은 안 지난다)에 넣는다. 예전 대역처럼 입구 바깥에서 넘겨받은 세션에 SQL을
+    치면, 운영 코드가 하지 않는 «워커 세션 오염»을 대역이 스스로 만든다."""
     import app.services.channel_posts as channel_posts_module
 
-    real_emit = channel_posts_module.emit_recipe_published_stage_event
+    real_locked = channel_posts_module._emit_recipe_published_stage_event_locked
 
-    async def _emit(db, **kwargs):
+    async def _locked(event_db, **kwargs):
         if kwargs["org_id"] in failing_org_ids:
-            await db.execute(text("SELECT * FROM no_such_table_4214"))
-        return await real_emit(db, **kwargs)
+            await event_db.execute(text("SELECT * FROM no_such_table_4214"))
+        return await real_locked(event_db, **kwargs)
 
-    monkeypatch.setattr(channel_posts_module, "emit_recipe_published_stage_event", _emit)
+    monkeypatch.setattr(channel_posts_module, "_emit_recipe_published_stage_event_locked", _locked)
 
 
 @pytest.mark.anyio

@@ -621,10 +621,12 @@ async def _emit_recipe_published_for_site_post_command(db: AsyncSession, command
     gate = await db.get(Gate, command.gate_id)
     if gate is None:
         return
-    from app.routers.events import resolve_site_post_recipe_context
+    from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
 
+    # 4572 P1 — 레시피 문맥은 회차가 연결한 초안(`site_post_draft_id`)이 바로 이 게이트의 초안일 때만.
+    draft_id = (gate.neutral_facts or {}).get("draft_id")
     ctx = await resolve_site_post_recipe_context(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id, draft_id=draft_id,
     )
     if ctx is None:
         return
@@ -634,6 +636,7 @@ async def _emit_recipe_published_for_site_post_command(db: AsyncSession, command
     await emit_recipe_published_stage_event(
         db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
         definition_key=definition_key, next_stage=next_stage,
+        extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
     )
 
 

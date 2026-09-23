@@ -23,6 +23,7 @@ import asyncio
 import logging
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import cast, func, select
@@ -2763,7 +2764,9 @@ async def resolve_recipe_context_for_scheduled_publication(
 
 async def emit_recipe_published_stage_event(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
-    definition_key: str, next_stage: str,
+    definition_key: str | None = None, next_stage: str | None = None,
+    resolve: Callable[[AsyncSession], Awaitable[tuple[str, str] | None]] | None = None,
+    extra_payload: dict | None = None,
 ) -> None:
     """story #4090 AC2 + story #4093(공통 훅으로 추출, 페드루 PO 確定 2026-09-21) —
     즉시-발행 경로(`publish_recipe_approved_draft`)·예약-발행 워커 경로(publication_
@@ -2782,25 +2785,38 @@ async def emit_recipe_published_stage_event(
     (`_find_existing_stage_publish`, publish-history와 같은 SSOT). 예전엔 «조회 후 발행»이라 같은 work item의
     **서로 다른 명령**이 겹친 tick에 동시에 오면 둘 다 «없음»을 보고 2회 낼 수 있었다 — (org, 정의, work item, stage)
     키의 **트랜잭션 수준 advisory lock**으로 조회~발행 구간을 한 트랜잭션에 묶어 직렬화한다. 이벤트 저장소가 JSONB 메시지
-    행이라 부분 유일 인덱스보다 이 잠금이 근본이다 — 같은 키를 쓰는 모든 발행 경로가 이 함수 하나를 지난다."""
-    try:
-        from app.core.database import async_session_factory
+    행이라 부분 유일 인덱스보다 이 잠금이 근본이다 — 같은 키를 쓰는 모든 발행 경로가 이 함수 하나를 지난다.
 
-        async with async_session_factory() as event_db:
-            await _emit_recipe_published_stage_event_locked(
-                event_db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
-                definition_key=definition_key, next_stage=next_stage,
-            )
-    except Exception:
-        logger.warning(
-            "recipe published stage 이벤트 발행 실패(work_item=%s stage=%s)",
-            work_item_id, next_stage, exc_info=True,
+    story #4192(4573 병합 뒤 통합) — 별도 세션은 `isolated_side_effect.run_side_effect_in_own_session`(4214 뉴스레터와 같은
+    헬퍼, 호출자 세션과 같은 엔진)으로 연다 — 세션 격리 코드가 두 벌이면 한쪽만 고쳐지는 자리가 된다.
+    - `resolve`: 다음 단계를 **읽어서** 정하는 호출자(뉴스레터 발송 — 게이트 facts → 정의 → 다음 stage)는 그 읽기도
+      격리 세션 안에서 한다(워커 세션에서 읽다 SQL 오류가 나면 워커 트랜잭션이 aborted). None이면 이벤트 0.
+    - `extra_payload`: 이벤트 payload에 더할 필드. 블로그 레시피는 회차 연결(`site_post_draft_id`)을 서버가 낸 단계
+      이벤트에도 싣는다 — 레시피 문맥 판정(`resolve_site_post_recipe_context(include_auto_stage=True)`)이 그 연결로 가른다."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    async def _work(event_db: AsyncSession) -> None:
+        key, stage = definition_key, next_stage
+        if resolve is not None:
+            resolved = await resolve(event_db)
+            if resolved is None:
+                return
+            key, stage = resolved
+        if not key or not stage:
+            return
+        await _emit_recipe_published_stage_event_locked(
+            event_db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            definition_key=key, next_stage=stage, extra_payload=extra_payload,
         )
+
+    await run_side_effect_in_own_session(
+        db, _work, describe=f"recipe published stage event work_item={work_item_id} stage={next_stage or '(resolve)'}",
+    )
 
 
 async def _emit_recipe_published_stage_event_locked(
     event_db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
-    definition_key: str, next_stage: str,
+    definition_key: str, next_stage: str, extra_payload: dict | None = None,
 ) -> None:
     """조회~발행을 한 트랜잭션으로 묶고 그 트랜잭션 수준 advisory lock으로 직렬화한다(커밋·롤백 때 PG가 자동 해제 —
     세션 수준 잠금은 비동기 세션이 커밋 뒤 연결을 풀에 돌려줄 수 있어 해제가 다른 연결로 갈 위험이 있다). 이 구간의
@@ -2833,7 +2849,7 @@ async def _emit_recipe_published_stage_event_locked(
     background_tasks = BackgroundTasks()
     await _publish_registry_event_core(
         event_db, org_id, auth, definition_key,
-        {"stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
+        {**(extra_payload or {}), "stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
         background_tasks,
     )
     await event_db.commit()

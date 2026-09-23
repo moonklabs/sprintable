@@ -114,7 +114,7 @@ async def _world(Session):
     return {"org_id": org_id, "agent_id": agent_id, "human_id": human_id, "story_id": story_id}
 
 
-async def _publish_stage(Session, w, stage):
+async def _publish_stage(Session, w, stage, *, extra: dict | None = None):
     from app.routers.events import EventPublishRequest, publish_registry_event
     from tests.test_4090_ac2_recipe_auto_publish_realdb import _auth, _fake_request
 
@@ -122,21 +122,23 @@ async def _publish_stage(Session, w, stage):
         await publish_registry_event(
             EventPublishRequest(
                 definition_key=_KEY,
-                payload={"stage": stage, "work_item_type": "story", "work_item_id": str(w["story_id"])},
+                payload={"stage": stage, "work_item_type": "story", "work_item_id": str(w["story_id"]), **(extra or {})},
             ),
             BackgroundTasks(), _fake_request(), db=s, auth=_auth(w["agent_id"], w["org_id"]), org_id=w["org_id"],
         )
         await s.commit()
 
 
-async def _walk_to_pending_approval(Session, w):
-    """블로그 레시피 run을 «발행 승인 대기»까지(기획 승인 게이트는 사람이 승인 — 블로그 초안 제출의 선행 조건)."""
+async def _walk_to_verification(Session, w):
+    """블로그 레시피 run을 «검수»까지(기획 승인 게이트는 사람이 승인 — 블로그 초안 제출의 선행 조건). 4572: 블로그 전용
+    슬러그 planning·writing. 초안은 이 단계에서 제출하고, 그 초안 id를 실어 «발행 승인 대기»로 넘어간다
+    (`_walk_to_pending_approval`)."""
     from sqlalchemy import select
 
     from app.models.gate import Gate
     from app.services.gate_service import transition_gate
 
-    await _publish_stage(Session, w, "draft")
+    await _publish_stage(Session, w, "planning")
     await _publish_stage(Session, w, "concept_confirmed")
     async with Session() as s:
         concept = (await s.execute(
@@ -144,8 +146,19 @@ async def _walk_to_pending_approval(Session, w):
         )).scalar_one()
         await transition_gate(s, w["org_id"], concept.id, "approved", resolver_id=w["human_id"])
         await s.commit()
-    for stage in ("editing", "verification", "pending_approval"):
+    for stage in ("writing", "verification"):
         await _publish_stage(Session, w, stage)
+
+
+async def _walk_to_pending_approval(Session, w, *, draft_id):
+    """4572 P1 — «발행 승인 대기» 발행이 이 회차가 제출한 초안을 명시 연결(`site_post_draft_id`). 레시피 문맥·서버 발행은
+    그 연결이 게이트의 초안과 같을 때만."""
+    from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD
+
+    await _publish_stage(
+        Session, w, "pending_approval",
+        extra={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)} if draft_id is not None else None,
+    )
 
 
 async def _published_events(Session, w) -> int:
@@ -179,10 +192,10 @@ async def _submit_external(app, Session, w, site_url, slug):
         connection_id = await _seed_wordpress_connection(s, w["org_id"], site_url=site_url)
     _setup_org_scoped_app(app, Session, w["org_id"], user_id=w["agent_id"], agent=True)
     async with _client_for(app) as client:
-        _draft_id, gate_id = await _create_and_submit_site_post_draft(
+        draft_id, gate_id = await _create_and_submit_site_post_draft(
             client, org_id=w["org_id"], story_id=w["story_id"], connection_id=connection_id, slug=slug,
         )
-    return gate_id
+    return gate_id, draft_id
 
 
 async def _submit_hosted(app, Session, w, slug):
@@ -199,7 +212,7 @@ async def _submit_hosted(app, Session, w, slug):
         draft_id = r.json()["draft_id"]
         r_submit = await client.post(f"/api/v2/organizations/{w['org_id']}/site-posts/drafts/{draft_id}/submit", json={})
         assert r_submit.status_code == 200, r_submit.text
-        return uuid.UUID(r_submit.json()["gate_id"])
+        return uuid.UUID(r_submit.json()["gate_id"]), uuid.UUID(draft_id)
 
 
 async def _site_posts(Session, w) -> int:
@@ -220,8 +233,9 @@ async def test_external_blog_worker_success_emits_published_exactly_once(live_wo
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
-        gate_id = await _submit_external(app, Session, w, live_wordpress_stub, "ext-ok")
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_external(app, Session, w, live_wordpress_stub, "ext-ok")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
         assert await _published_events(Session, w) == 0
 
         await _approve(Session, w, gate_id)
@@ -248,8 +262,9 @@ async def test_external_blog_worker_failure_emits_nothing():
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
-        gate_id = await _submit_external(app, Session, w, "https://unreachable.invalid", "ext-fail")
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_external(app, Session, w, "https://unreachable.invalid", "ext-fail")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
         await _approve(Session, w, gate_id)
         async with Session() as s:
             counts = await process_due_publication_commands(s)
@@ -272,8 +287,9 @@ async def test_hosted_blog_in_recipe_is_published_by_server_on_approval():
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
-        gate_id = await _submit_hosted(app, Session, w, "hosted-ok")
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_hosted(app, Session, w, "hosted-ok")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
         await _approve(Session, w, gate_id)
 
         assert await _site_posts(Session, w) == 1
@@ -301,8 +317,9 @@ async def test_hosted_blog_publish_failure_keeps_approval_and_shows_failure():
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
-        gate_id = await _submit_hosted(app, Session, w, "hosted-paused")
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_hosted(app, Session, w, "hosted-paused")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
         async with Session() as s:
             await set_external_publish_pause(
                 s, org_id=w["org_id"], paused=True, reason="테스트", actor_member_id=w["human_id"],
@@ -329,7 +346,7 @@ async def test_hosted_blog_outside_recipe_is_not_auto_published():
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        gate_id = await _submit_hosted(app, Session, w, "hosted-plain")
+        gate_id, _draft_id = await _submit_hosted(app, Session, w, "hosted-plain")
         await _approve(Session, w, gate_id)
         assert await _site_posts(Session, w) == 0
         async with Session() as s:
@@ -342,7 +359,7 @@ async def test_hosted_blog_outside_recipe_is_not_auto_published():
 
 async def test_emit_isolation_logs_instead_of_name_error(monkeypatch, caplog):
     """디디 발견 — emit_recipe_published_stage_event의 side-channel 격리 except가 모듈 logger 없이 NameError를 던졌다.
-    이벤트 발행 실패를 흉내 내면 예외 없이 끝나고 경고 로그가 남아야 한다. 뮤테이션: 모듈 logger 제거 → NameError로 RED."""
+    이벤트 발행 실패를 흉내 내면 예외 없이 끝나고 경고 로그가 남아야 한다(이제 격리·경고는 공용 헬퍼 한 곳)."""
     import app.routers.events as events
     from app.services import channel_posts
 
@@ -354,13 +371,17 @@ async def test_emit_isolation_logs_instead_of_name_error(monkeypatch, caplog):
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        caplog.set_level(logging.WARNING, logger="app.services.channel_posts")
+        # 4573 병합 뒤 통합 — 격리는 `isolated_side_effect.run_side_effect_in_own_session` 한 곳이 지고, 경고도 그 헬퍼 logger가
+        # 이 입구의 설명(«recipe published stage event …»)과 함께 남긴다.
+        caplog.set_level(logging.WARNING, logger="app.services.isolated_side_effect")
         async with Session() as s:
             await channel_posts.emit_recipe_published_stage_event(
                 s, org_id=w["org_id"], work_item_type="story", work_item_id=w["story_id"],
                 definition_key=_KEY, next_stage="published",
             )
-        assert any("recipe published stage 이벤트 발행 실패" in r.getMessage() for r in caplog.records), caplog.records
+        assert any(
+            "recipe published stage event" in r.getMessage() and "부수 작업 실패" in r.getMessage() for r in caplog.records
+        ), caplog.records
     finally:
         await engine.dispose()
 
@@ -388,8 +409,9 @@ async def test_site_worker_sql_error_in_event_keeps_completed_and_next_tick_does
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
-        gate_id = await _submit_external(app, Session, w, live_wordpress_stub, "ext-sqlerr")
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_external(app, Session, w, live_wordpress_stub, "ext-sqlerr")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
         await _approve(Session, w, gate_id)
 
         monkeypatch.setattr(events, "_publish_registry_event_core", _broken_event_core)
@@ -496,8 +518,9 @@ async def test_event_raising_does_not_kill_the_worker_batch(monkeypatch, live_wo
         worlds, gates = [], []
         for i in range(2):
             w = await _world(Session)
-            await _walk_to_pending_approval(Session, w)
-            gate_id = await _submit_external(app, Session, w, live_wordpress_stub, f"batch-{i}")
+            await _walk_to_verification(Session, w)
+            gate_id, draft_id = await _submit_external(app, Session, w, live_wordpress_stub, f"batch-{i}")
+            await _walk_to_pending_approval(Session, w, draft_id=draft_id)
             await _approve(Session, w, gate_id)
             worlds.append(w)
             gates.append(gate_id)
@@ -538,7 +561,8 @@ async def test_concurrent_emits_for_same_work_item_publish_once(monkeypatch):
     engine, Session = await _session_factory()
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
+        await _walk_to_verification(Session, w)
+        await _walk_to_pending_approval(Session, w, draft_id=None)
 
         async def one():
             async with Session() as s:
@@ -567,13 +591,43 @@ async def test_emit_never_touches_the_callers_session():
         setattr(caller, name, MagicMock(side_effect=AssertionError(f"호출자 세션 {name} 사용")))
 
     engine, Session = await _session_factory()
+    # 격리 세션은 호출자 세션과 **같은 엔진**에서 연다(`run_side_effect_in_own_session` — 4573 헬퍼). 대역은 엔진만 빌려 주고
+    # 세션 메서드는 전부 터진다 — 이벤트가 정확히 1이면 호출자 세션을 한 번도 안 쓴 것.
+    caller.bind = engine
     try:
         w = await _world(Session)
-        await _walk_to_pending_approval(Session, w)
+        await _walk_to_verification(Session, w)
+        await _walk_to_pending_approval(Session, w, draft_id=None)
         await emit_recipe_published_stage_event(
             caller, org_id=w["org_id"], work_item_type="story", work_item_id=w["story_id"],
             definition_key=_KEY, next_stage="published",
         )
         assert await _published_events(Session, w) == 1
     finally:
+        await engine.dispose()
+
+
+async def test_hosted_blog_not_linked_by_this_run_is_not_auto_published():
+    """4572 P1 연결(4192 발행 경로) — 레시피 회차가 «발행 승인 대기»에 연결한 초안이 이 자사 블로그 초안이 **아니면**(버려진
+    회차·다른 초안) 승인해도 서버가 발행하지 않는다(사람 클릭 흐름) · published 이벤트 0. 양성 짝은
+    `test_hosted_blog_in_recipe_is_published_by_server_on_approval`(연결 == 이 초안 → 발행 1 · 이벤트 1 · 서버가 낸 단계
+    이벤트에도 연결을 실어 승인 알림이 레시피 문맥 문구 — 그 이벤트에서 연결을 빼면 양성 짝이 RED). 뮤테이션: resolver의
+    연결 대조(`linked`)를 빼면 발행 1로 RED(실측)."""
+    from app.main import app
+    from app.models.gate import Gate
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_verification(Session, w)
+        gate_id, _draft_id = await _submit_hosted(app, Session, w, "hosted-unlinked")
+        await _walk_to_pending_approval(Session, w, draft_id=uuid.uuid4())
+        await _approve(Session, w, gate_id)
+
+        assert await _site_posts(Session, w) == 0
+        async with Session() as s:
+            assert (await s.get(Gate, gate_id)).publish_outcome is None
+        assert await _published_events(Session, w) == 0
+    finally:
+        app.dependency_overrides.clear()
         await engine.dispose()

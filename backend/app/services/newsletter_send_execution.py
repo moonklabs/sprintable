@@ -372,27 +372,16 @@ async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: Publi
     (`run_side_effect_in_own_session`)에서 돈다. 같은 트랜잭션이면 이벤트 쪽 SQL 오류가 트랜잭션을 aborted로 만들어 워커 커밋이
     조용히 ROLLBACK → completed 미저장 → 다음 틱 재발송(수신자 이중 발송)이었고, 워커 세션에서 롤백하면 워커의 ORM 객체가 만료돼
     같은 배치의 나머지 명령이 in_progress로 영구 정체였다. 워커 세션은 발송 기록 커밋까지만 책임진다."""
-    from app.services.isolated_side_effect import run_side_effect_in_own_session
+    from app.services.channel_posts import emit_recipe_published_stage_event
 
     # 새 세션은 워커 세션의 ORM 객체를 공유하지 않는다 — 필요한 값을 먼저 잡아 둔다.
-    command_id, gate_id = command.id, gate.id
     org_id, work_item_type, work_item_id = gate.org_id, gate.work_item_type, gate.work_item_id
     facts = dict(gate.neutral_facts or {})
     await db.commit()  # 발송 성공 기록 확정 — 아래 이벤트가 어떻게 실패해도 이것을 되돌릴 수 없게.
 
-    async def _emit(side: AsyncSession) -> None:
-        resolved = await _resolve_recipe_next_stage(side, org_id=org_id, facts=facts)
-        if resolved is None:
-            return
-        definition_key, next_stage = resolved
-        from app.services.channel_posts import emit_recipe_published_stage_event
-
-        await emit_recipe_published_stage_event(
-            side, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
-            definition_key=definition_key, next_stage=next_stage,
-        )
-
-    await run_side_effect_in_own_session(
-        db, _emit,
-        describe=f"recipe next-stage event after newsletter send command_id={command_id} gate_id={gate_id}",
+    # story #4192(통합) — 레시피 단계 이벤트의 유일한 입구. 격리 세션·advisory lock·멱등은 그 함수가 진다(여기서 세션을 따로
+    # 열지 않는다). 다음 단계 판정(정의 읽기)도 그 격리 세션 안에서(`resolve`).
+    await emit_recipe_published_stage_event(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+        resolve=lambda side: _resolve_recipe_next_stage(side, org_id=org_id, facts=facts),
     )
