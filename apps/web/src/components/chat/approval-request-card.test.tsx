@@ -1020,8 +1020,8 @@ describe('ApprovalRequestCard — 저위험 반려는 사유 패널을 거친다
 });
 
 // story #4190(유나 «본 버전 대조» 3 · 자리별 동작) — 채팅 카드: 레시피 발행 게이트의 원탭은 «초안 보고 승인»으로 서명 패널
-// (초안 카드 포함)을 연다. 패널 승인은 본 (draft_id, version)을 싣고, 409 gate_draft_changed면 문장 + 자동 재조회 +
-// «최신 초안 보기» → /gates/{id}.
+// (초안 카드 포함)을 연다. 패널 승인은 본 (draft_id, version)을 싣고, 409 gate_draft_changed면 문장 + 자동 재조회로 패널 카드가
+// 새 버전(유나 PASS 권고 ② — 별도 «최신 초안 보기» 링크는 두지 않는다).
 describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (story #4190)', () => {
   function recipeGate(version: number): GateItem {
     return gate({
@@ -1033,7 +1033,7 @@ describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (
     });
   }
 
-  it('⭐원탭 «초안 보고 승인» → 패널 · 본 버전 전송 · 409면 문장+재조회(v2)+«최신 초안 보기» 링크', async () => {
+  it('⭐원탭 «초안 보고 승인» → 패널 · 본 버전 전송 · 409면 문장+재조회로 패널 카드 v2(별도 링크 없음)', async () => {
     let getCount = 0;
     const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
@@ -1075,7 +1075,7 @@ describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (
     expect(container.textContent).toContain(koMessages.cage.gateDraftChangedError);
     expect(getCount).toBe(2);
     expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
-    const link = container.querySelector('a[href="/gates/g-1"]');
-    expect(link?.textContent).toBe(koMessages.cage.gateDraftChangedViewLatest);
+    // 유나 4564 PASS 권고 ② — 409 뒤엔 패널에 새 버전 카드가 이미 보여 «최신 초안 보기» 링크는 두지 않는다(중복).
+    expect(container.querySelector('a[href="/gates/g-1"]')).toBeNull();
   });
 });

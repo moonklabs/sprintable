@@ -5658,7 +5658,6 @@
     "gateActivityActionAdsBoostAutoPausedCapReached": "자동 중지(광고비 상한 도달)",
     "gateHeadChangedError": "게이트 대상 커밋이 승인 확인 이후 변경됐어요. 최신 내용을 다시 확인한 뒤 승인해 주세요.",
     "gateDraftChangedError": "그 사이 초안이 새 버전으로 바뀌어 승인되지 않았어요. 최신 초안을 확인한 뒤 다시 승인해 주세요.",
-    "gateDraftChangedViewLatest": "최신 초안 보기",
     "gateAlreadyResolvedError": "이미 처리된 결재예요. 되돌리려면 PO에게 재검토를 요청해 주세요."
   },
   "recruiter": {

@@ -125,9 +125,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
-  // story #4190(유나 자리별 동작) — 409 gate_draft_changed였는지. 이 카드는 초안을 보여 주지 않는 자리라 문장 아래에
-  // «최신 초안 보기»(→ /gates/{id}) 링크를 둔다. 다음 승인·반려 때 transitionError와 같이 지운다.
-  const [draftChanged, setDraftChanged] = useState(false);
   // story #2926(P0-F F1) — claim 클릭(제목 미리보기)이 이제 ProofCapsule 셸 소관이라 이
   // state도 그쪽에 맞춰 여기(바깥 컴포넌트)로 끌어올렸다(기존 ApprovalRequestBody 소유였음).
   const [showPreview, setShowPreview] = useState(false);
@@ -217,7 +214,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     setResolving(true);
     setTransitionError(null);
-    setDraftChanged(false);
     try {
       const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
         method: 'POST',
@@ -244,7 +240,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
       if (code === 'gate_head_changed' || code === 'gate_draft_changed' || code === 'gate_already_resolved') {
         await fetchGate();
       }
-      setDraftChanged(code === 'gate_draft_changed');
       setTransitionError(
         code === 'gate_head_changed' ? tCage('gateHeadChangedError')
           : code === 'gate_draft_changed' ? tCage('gateDraftChangedError')
@@ -363,7 +358,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
-            draftChanged={draftChanged}
             onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
             onReject={(reason) => void transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
@@ -395,26 +389,13 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   );
 }
 
-/** story #4190(유나 자리별 동작) — 채팅 카드는 초안을 보여 주지 않는 자리라, 409 gate_draft_changed 문장 아래에 초안
- * 증거가 있는 게이트 상세로 가는 링크 하나. */
-function DraftChangedViewLatestLink({ gateId }: { gateId: string }) {
-  const tCage = useTranslations('cage');
-  return (
-    <a href={`/gates/${gateId}`} className="inline-block text-[11px] text-primary underline underline-offset-2">
-      {tCage('gateDraftChangedViewLatest')}
-    </a>
-  );
-}
-
 function ApprovalRequestBody({
-  gate, resolving, transitionError, draftChanged = false, onApprove, onReject, onDiscuss, onDiscussClick, onUndone,
-  eventDefinitionsByKey, addToast,
+  gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
+  addToast,
 }: {
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
-  /** story #4190 — 직전 거절이 409 gate_draft_changed(«최신 초안 보기» 링크를 그린다). */
-  draftChanged?: boolean;
   onApprove: (reason?: string, evidenceViewed?: boolean) => void;
   onReject: (reason?: string) => void;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
@@ -795,7 +776,6 @@ function ApprovalRequestBody({
               근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈
               길을 남긴다. 고위험(needsFullFlow) 게이트는 이 패널이 유일한 경로라 취소
               버튼이 무의미(숨김). */}
-          {draftChanged ? <DraftChangedViewLatestLink gateId={gate.id} /> : null}
           {!needsFullFlow ? (
             <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => { setRejectPanelOpen(false); setSignPanelOpen(false); }}>
               {tCage('cancel')}
@@ -809,7 +789,6 @@ function ApprovalRequestBody({
               {tCage('gateTransitionError', { reason: transitionError })}
             </p>
           ) : null}
-          {draftChanged ? <DraftChangedViewLatestLink gateId={gate.id} /> : null}
           <div className="flex flex-wrap gap-1.5">
             {/* story #4190(유나 «본 버전 대조» 3) — 레시피 발행 게이트는 원탭으로 승인하지 않고 초안 카드가 있는 서명 패널을
                 연다 — 이름도 «초안 보고 승인». en 라벨이 길어 390에서 줄이 넘치면 flex-wrap으로 다음 줄로. */}
