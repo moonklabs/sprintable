@@ -106,3 +106,41 @@ describe('useActivationStatus — story #3274 AC① 단일 fetch 공유', () => 
     expect(container.querySelector('[data-testid="probe"]')!.textContent).toBe('false');
   });
 });
+
+function SeedProbe({ seed, verify }: { seed?: boolean; verify?: boolean }) {
+  const { allComplete } = useActivationStatus(seed, { verifyInBackground: verify });
+  return <span data-testid="seed">{String(allComplete)}</span>;
+}
+
+describe('useActivationStatus — 표시용 힌트 시드(story #4219 F1 · 힌트는 조언일 뿐)', () => {
+  it('서버 확인 시드(true) → 조회 0 · 완주', async () => {
+    const fetchSpy = stubChecklistFetch(PARTIAL);
+    vi.stubGlobal('fetch', fetchSpy);
+    await act(async () => { root.render(<SeedProbe seed />); });
+    await flush();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="seed"]')!.textContent).toBe('true');
+  });
+
+  it('⭐힌트 시드(true) + 재확인 → 처음엔 완주로(스켈레톤 없음) · 한 번 조회 · 완주가 되돌아갔으면 늦게라도 미완주로', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const fetchSpy = vi.fn(async () => { await gate; return { ok: true, json: async () => ({ data: PARTIAL }) }; });
+    vi.stubGlobal('fetch', fetchSpy);
+    await act(async () => { root.render(<SeedProbe seed verify />); });
+    // 재확인 응답 전 — 완주로 보여 둔다(스켈레톤·배너 0).
+    expect(container.querySelector('[data-testid="seed"]')!.textContent).toBe('true');
+    release();
+    await flush();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="seed"]')!.textContent).toBe('false');
+  });
+
+  it('힌트 시드 재확인에서 미완주면 로컬 완주 플래그도 지운다(다음 세션에 배너가 영영 숨지 않게)', async () => {
+    window.localStorage.setItem(COMPLETE_KEY, '1');
+    vi.stubGlobal('fetch', stubChecklistFetch(PARTIAL));
+    await act(async () => { root.render(<SeedProbe seed verify />); });
+    await flush();
+    expect(window.localStorage.getItem(COMPLETE_KEY)).toBeNull();
+  });
+});

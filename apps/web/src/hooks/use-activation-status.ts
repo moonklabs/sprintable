@@ -41,6 +41,14 @@ function readLocalFlag(key: string): boolean {
   }
 }
 
+function clearLocalFlag(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // 무시 — 다음 조회가 다시 판정
+  }
+}
+
 function writeLocalFlag(key: string): void {
   try {
     window.localStorage.setItem(key, '1');
@@ -91,8 +99,14 @@ export interface UseActivationStatusResult {
 // 없어도(새 기기·시크릿 창·저장소 삭제) 처음부터 완주로 취급해 fetch 자체를 스킵한다 —
 // 그 경로가 없으면 "완주했지만 이 기기는 모른다"는 사용자에게 로딩 스켈레톤이 떴다
 // 접히는 새 흔들림이 생긴다(첫 CHANGES에서 로컬 스토리지만 보던 자리의 결함).
-export function useActivationStatus(initialAllComplete?: boolean): UseActivationStatusResult {
-  const [skip] = useState<boolean>(() => initialAllComplete === true || readLocalFlag(COMPLETE_KEY));
+export function useActivationStatus(
+  initialAllComplete?: boolean,
+  // story #4219 F1 — 완주 시드가 표시용 힌트에서 왔으면 스켈레톤 없이(완주로 보여 둔 채) 한 번 다시 조회해,
+  // 완주가 되돌아간 드문 경우 배너가 늦게라도 뜨게 한다(힌트는 조언일 뿐).
+  options?: { verifyInBackground?: boolean },
+): UseActivationStatusResult {
+  const [seedComplete] = useState<boolean>(() => initialAllComplete === true || readLocalFlag(COMPLETE_KEY));
+  const skip = seedComplete && options?.verifyInBackground !== true;
   const [state, setState] = useState<ActivationState | null>(null);
 
   useEffect(() => {
@@ -103,11 +117,12 @@ export function useActivationStatus(initialAllComplete?: boolean): UseActivation
       if (cancelled || !data) return;
       setState(data);
       if (data.all_complete) writeLocalFlag(COMPLETE_KEY);
+      else clearLocalFlag(COMPLETE_KEY);
     })();
     return () => {
       cancelled = true;
     };
   }, [skip]);
 
-  return { state, allComplete: skip || state?.all_complete === true };
+  return { state, allComplete: state ? state.all_complete === true : seedComplete };
 }

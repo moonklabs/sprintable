@@ -611,6 +611,9 @@ async function resolveAndRespond(
   // 는 현재 경로를 직접 못 읽음).
   const now = Math.floor(Date.now() / 1000);
   const fwdHeaders = new Headers(baseHeaders);
+  // story #4219 D1 — x-resolved-*는 이 proxy가 resolve한 값만 레이아웃·라우트에 닿는다. 클라이언트가 같은 이름으로 보낸
+  // 헤더는 여기서 지운다(예전엔 resolve를 안 타는 flat 경로에서 위조 x-resolved-project-id가 그대로 흘러갔다).
+  stripClientResolvedHeaders(fwdHeaders);
   fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
 
   // story a539c649(S2 최초·S3 일반화) — 이관 완료된 리소스(MIGRATED_RESOURCES)의 옛 flat
@@ -861,10 +864,23 @@ async function resolveWorkspaceProject(
   return { kind: 'set-cache', token };
 }
 
-function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRole: string; projectId?: string }): void {
+function setResolvedHeaders(
+  fwdHeaders: Headers,
+  context: { orgId: string; orgRole: string; orgSlug?: string; projectId?: string; projectSlug?: string },
+): void {
   fwdHeaders.set('x-resolved-org-id', context.orgId);
   fwdHeaders.set('x-resolved-org-role', context.orgRole);
   if (context.projectId) fwdHeaders.set('x-resolved-project-id', context.projectId);
+  // story #4219 D1 — resolve가 이미 준 slug를 넘겨, 레이아웃이 slug만 알려고 /projects/{id}를 다시 부르지 않게.
+  // slug는 ASCII가 아닐 수 있어 인코딩(헤더 값은 ByteString).
+  if (context.orgSlug) fwdHeaders.set('x-resolved-org-slug', encodeURIComponent(context.orgSlug));
+  if (context.projectSlug) fwdHeaders.set('x-resolved-project-slug', encodeURIComponent(context.projectSlug));
+}
+
+export function stripClientResolvedHeaders(fwdHeaders: Headers): void {
+  for (const key of [...fwdHeaders.keys()]) {
+    if (key.toLowerCase().startsWith('x-resolved-')) fwdHeaders.delete(key);
+  }
 }
 
 export const config = {

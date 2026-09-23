@@ -520,6 +520,38 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/goals');
   });
 
+  it('story #4219 D1 — resolve한 org·project slug를 레이아웃행 헤더로(인코딩) 넘긴다', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', project_slug: '장부' }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/%EC%9E%A5%EB%B6%80/goals', { sp_at: token }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-request-x-resolved-project-id')).toBe('proj-1');
+    expect(response.headers.get('x-middleware-request-x-resolved-org-slug')).toBe('moonklabs');
+    expect(decodeURIComponent(response.headers.get('x-middleware-request-x-resolved-project-slug') ?? '')).toBe('장부');
+  });
+
+  it('⭐story #4219 D1 — 클라이언트가 보낸 x-resolved-* 위조 헤더는 레이아웃에 안 닿는다(resolve 안 타는 flat 경로 포함)', async () => {
+    const token = await makeAccessToken();
+    const req = makeRequest('/inbox', { sp_at: token });
+    const spoofed = new NextRequest(req.url, {
+      headers: new Headers({
+        cookie: req.headers.get('cookie') ?? '',
+        'x-resolved-project-id': 'evil-project',
+        'x-resolved-project-slug': 'evil',
+        'X-Resolved-Org-Id': 'evil-org',
+      }),
+    });
+    const response = await middleware(spoofed);
+    expect(response.status).toBe(200);
+    for (const name of ['x-resolved-project-id', 'x-resolved-project-slug', 'x-resolved-org-id']) {
+      expect(response.headers.get(`x-middleware-request-${name}`), name).toBeNull();
+    }
+    expect(response.headers.get('x-middleware-override-headers') ?? '').not.toMatch(/x-resolved-/);
+  });
+
   it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
     const token = await makeAccessToken();
     const cacheToken = await new SignJWT({

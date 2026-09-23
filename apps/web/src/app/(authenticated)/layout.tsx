@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
+import { ACTIVATION_HINT_COOKIE, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
@@ -49,6 +50,8 @@ async function AuthenticatedLayoutBody({
   // ("화면이 그리는 컨텍스트의 정본은 URL" — 유나양 규격 §2093).
   const pathOrgId = hdrs.get('x-resolved-org-id') ?? undefined;
   const pathProjectId = hdrs.get('x-resolved-project-id') ?? undefined;
+  // story #4219 D1 — proxy가 resolve한 project slug(인코딩돼 옴). 있으면 slug만 알려고 /projects/{id}를 다시 부르지 않는다.
+  const pathProjectSlug = decodeHeaderValue(hdrs.get('x-resolved-project-slug'));
 
   // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
   // readNavV3FlagsFromEnv() 한 곳(nav-v3-flags-server.ts)으로 — 이 함수 안에서 세
@@ -120,31 +123,44 @@ async function AuthenticatedLayoutBody({
   // 빌더에 새 클레임을 얹는 대신(org/project 해소 이력 사고가 반복된 자리, 블래스트 반경
   // 과다) 이 레이아웃이 이미 하는 서버조회 패턴을 그대로 재사용한다 — 실패/불명이면
   // undefined로 흘려보내 클라이언트가 기존처럼 알아낸다(과다신뢰 없음).
-  const [projectInfo, activationChecklist] = await Promise.all([
-    projectInfoTargetId
+  // story #4219 F1 — 체크리스트를 첫 문서 임계 경로에서 뺀다(표시용 힌트 쿠키 · lib/activation-hint 참고). 힌트가
+  // 이 org의 것이면 서버 조회를 생략: complete → 배너 0(클라가 임계 경로 밖에서 한 번 다시 확인) · incomplete → 배너가
+  // 자기 스켈레톤(같은 크기)으로 자리를 잡고 클라 조회로 채움. 힌트가 없을 때만 예전처럼 서버에서 기다린다.
+  const activationHint = parseActivationHint(
+    decodeHeaderValue((await cookies()).get(ACTIVATION_HINT_COOKIE)?.value),
+    pathOrgId ?? me?.org_id,
+  );
+  // story #4219 D1 — 경로 프로젝트의 slug는 proxy resolve가 이미 줬고 이름은 멤버십에 있으면 단건 조회 불요.
+  const needProjectInfo = Boolean(projectInfoTargetId)
+    && !(pathProjectId && pathProjectSlug && projectMemberships.some((m) => m.projectId === pathProjectId));
+  const [projectInfo, serverActivationComplete] = await Promise.all([
+    needProjectInfo && projectInfoTargetId
       ? fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
           .then((r) => (r.ok ? r.json() : null))
           .then((json: { name?: string; slug?: string | null } | null) => json)
           .catch(() => null)
       : Promise.resolve(null),
-    fetch(`${fastapiUrl}/api/v2/activation/checklist`, { headers: projectAuthHeader, cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { all_complete?: boolean } | null) => json?.all_complete)
-      .catch(() => undefined),
+    activationHint
+      ? Promise.resolve(undefined)
+      : fetch(`${fastapiUrl}/api/v2/activation/checklist`, { headers: projectAuthHeader, cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json: { all_complete?: boolean } | null) => json?.all_complete)
+          .catch(() => undefined),
   ]);
+  const activationChecklist = activationHint === 'complete' ? true : activationHint === 'incomplete' ? undefined : serverActivationComplete;
   // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 위 단건조회
   // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 사이드바가
   // slug 없는 bare 링크만 만들었다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는
   // 같은 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면 그 자리에서
   // 포기하지 않고 리스트에서 한 번 더 찾는다.
-  const projectInfoFallback = projectInfoTargetId && !projectInfo?.slug
+  const projectInfoFallback = needProjectInfo && projectInfoTargetId && !projectInfo?.slug
     ? await fetch(`${fastapiUrl}/api/v2/projects`, { headers: projectAuthHeader, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((list: Array<{ id?: string; name?: string; slug?: string | null }> | null) =>
           list?.find((p) => p.id === projectInfoTargetId) ?? null)
         .catch(() => null)
     : null;
-  const currentProjectSlug = projectInfo?.slug ?? projectInfoFallback?.slug ?? undefined;
+  const currentProjectSlug = (pathProjectId ? pathProjectSlug : undefined) ?? projectInfo?.slug ?? projectInfoFallback?.slug ?? undefined;
   const projectInfoName = projectInfo?.name ?? projectInfoFallback?.name;
 
   const pathProjectKnown = pathProjectId ? projectMemberships.some((m) => m.projectId === pathProjectId) : true;
@@ -198,6 +214,7 @@ async function AuthenticatedLayoutBody({
       serverResolvedPath={pathProjectId ? currentPath : undefined}
       navV3Flags={navV3Flags}
       initialActivationComplete={activationChecklist}
+      activationSeedFromHint={activationHint === 'complete'}
     >
       <StorageCapacityToastProvider>
         <CrossProjectToastProvider>
@@ -226,3 +243,8 @@ export default async function AuthenticatedLayout(props: Parameters<typeof Authe
   return value;
 }
 
+/** proxy가 인코딩해 실은 헤더·쿠키 값 풀기(잘못된 인코딩이면 없는 것으로). */
+function decodeHeaderValue(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  try { return decodeURIComponent(value); } catch { return undefined; }
+}

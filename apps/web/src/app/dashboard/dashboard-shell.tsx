@@ -92,6 +92,8 @@ interface DashboardContext {
   // 새 흔들림을 만드는" 결함을 닫는다. undefined(조회 실패 등)면 기존처럼 클라이언트가
   // 알아낸다(안전한 폴백, 과다신뢰 없음).
   initialActivationComplete?: boolean;
+  // story #4219 F1 — 위 true가 서버 확인이 아니라 표시용 힌트 쿠키에서 왔다(배너가 임계 경로 밖에서 한 번 다시 확인).
+  activationSeedFromHint?: boolean;
   // story #4017 — v3 플래그 3개를 context에도 노출한다(그동안은 AppSidebar/MobileTabBar
   // 같은 prop 수신처에만 갔다). content/page.tsx류 임의 후손 client 컴포넌트가 본문
   // CTA 주소(/chats·/org-briefing·/organization/channels 등)를 목적지 모듈로 치환하려면
@@ -375,6 +377,7 @@ export function DashboardShell({
   jwtOrgId,
   navV3Flags,
   initialActivationComplete,
+  activationSeedFromHint,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
@@ -505,7 +508,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, navV3Flags }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>

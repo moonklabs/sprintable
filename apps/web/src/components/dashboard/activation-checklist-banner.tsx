@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { writeActivationHint } from '@/lib/activation-hint';
 import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
@@ -49,8 +50,18 @@ const COLLAPSE_KEY = 'sprintable_activation_checklist_collapsed';
 export function ActivationChecklistBanner() {
   const t = useTranslations('activation');
   const router = useRouter();
-  const { projectId, initialActivationComplete } = useDashboardContext();
-  const { state, allComplete } = useActivationStatus(initialActivationComplete);
+  const { projectId, orgId, initialActivationComplete, activationSeedFromHint } = useDashboardContext();
+  const { state, allComplete } = useActivationStatus(initialActivationComplete, { verifyInBackground: activationSeedFromHint });
+  // story #4219 F1 — 받은 결과를 다음 문서 요청의 표시용 힌트로(레이아웃이 체크리스트를 임계 경로에서 기다리지 않게).
+  // 이 org 판정일 때만(scope_is_requested_org === false면 다른 org 판정이라 남기지 않는다).
+  useEffect(() => {
+    if (!orgId) return;
+    if (state) {
+      if (state.scope_is_requested_org !== false) writeActivationHint(orgId, state.all_complete);
+    } else if (initialActivationComplete === true && !activationSeedFromHint) {
+      writeActivationHint(orgId, true); // 서버가 이번 요청에 확인한 완주
+    }
+  }, [orgId, state, initialActivationComplete, activationSeedFromHint]);
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
