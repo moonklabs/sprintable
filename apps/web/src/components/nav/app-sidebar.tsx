@@ -20,7 +20,7 @@ import {
   resolveNavGroups,
   resolveChatCenterItem,
 } from '@/lib/nav-config';
-import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
+import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -156,7 +156,7 @@ export function AppSidebar({
   // extraActivePaths로 WORKSPACE_FRAME_TAB_PATHS(SSOT, 하드코딩 0)를 함께 검사 — 탭을
   // 하나 늘리면 이 판정도 자동으로 늘어난다. href는 여전히 resource(주 진입점) 기준.
   function resourceLink(resource: string, extraActivePaths: readonly string[] = []): { href: string; isActive: boolean } {
-    const href = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+    const href = scopedResourceHref(resource, orgSlug, currentProjectSlug);
     const isActivePath = (p: string) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)
       || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${p}`));
     const isActive = [resource, ...extraActivePaths].some(isActivePath);
@@ -208,7 +208,9 @@ export function AppSidebar({
   // useChatUnreadTotal() 호출 결과를 prop으로 받는다(MobileTabBar와 SSE 연결 중복 제거).
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  // story #4211 — setPaletteOpen은 안정 참조라 동작 무변. React Compiler가 추론한 의존성과 맞춰 컴파일 건너뜀(lint error)을 없앤다
+  // (이 컴포넌트가 scopedResourceHref를 부르며 컴파일러가 이 자리까지 분석하게 되면서 드러난 기존 불일치).
+  const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
 
   // story #f81657f8(IA·S4 후속, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고
   // 접을 수 있게 하면 좋을 것 같다」) — 예전엔 여기서 현재 라우트의 활성 구역+뷰포트 높이를

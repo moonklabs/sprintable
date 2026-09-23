@@ -15,6 +15,7 @@
  * app-sidebar.tsx의 resourceLink, 4004=v3 화면의 동형 헬퍼)가 한다 — 접두 로직 자체는
  * 안 복붙(AC2).
  */
+import { looksLikeWorkspaceSegment } from './reserved-first-segments';
 
 export interface NavV3Flags {
   todayV3Enabled: boolean;
@@ -95,4 +96,58 @@ export function resolveConnectRulesHref(flags: NavV3Flags | undefined, legacyFal
   if (!flags) return legacyFallback;
   const dest = resolveNavV3Destinations(flags);
   return dest.connectRules ? dest.connectRules.path : legacyFallback;
+}
+
+/**
+ * story #4211 — `resource` 목적지(/{ws}/{proj}/{resource})의 링크 한 곳. 사이드바(app-sidebar resourceLink)와 모바일
+ * 탭바가 같은 규칙을 쓴다(따로 두면 한쪽만 bare로 남는다 — 4211이 그 부류: 탭바만 bare `/flow`라 세션 의존 리다이렉트를
+ * 매 탭 타고, 4557 전 301을 캐시한 기기는 옛 프로젝트로 갔다). 두 slug가 다 있을 때만 직접 경로, 하나라도 모르면 bare
+ * `/{resource}`(미들웨어 안전망 — 로그인 직후 등 slug가 아직 없는 찰나).
+ */
+export function scopedResourceHref(resource: string, orgSlug: string | undefined, projectSlug: string | undefined): string {
+  return orgSlug && projectSlug ? `/${orgSlug}/${projectSlug}/${resource}` : `/${resource}`;
+}
+
+/**
+ * story #4211(까디르 QA 2회) — 직접 경로에 쓸 project slug는 **이 탭의 effective 프로젝트**의 것일 때만.
+ * - slug가 가리키는 프로젝트 = `pathProjectId ?? sessionProjectId`(layout.tsx가 그 id로 slug를 조회한다 — 딥링크
+ *   `/{ws}/B/…`면 경로의 B, flat 경로면 세션 me.project_id). 비교 대상은 **그 id**여야 한다 — 세션 id와 비교하면 세션이
+ *   A인 채 B 딥링크를 볼 때 slug B·effective B인데도 slug를 버려 탭바·사이드바가 세션 A로 보냈다(1차 수정 회귀).
+ * - flat 경로 프로젝트 전환(`?p=B` push → `/api/switch-project` → `router.refresh()`) 창에선 slug가 아직 A라 effective
+ *   B와 갈린다 → slug를 버려 bare(서버 307 no-store 해소). refresh 뒤 slug B → 다시 직접 경로.
+ * 탭바·사이드바가 같은 값(대시보드 셸 한 곳)을 받는다.
+ */
+export function slugForEffectiveProject(args: {
+  pathProjectId: string | undefined; sessionProjectId: string | undefined;
+  slug: string | undefined; effectiveProjectId: string | undefined;
+}): string | undefined {
+  const slugProjectId = args.pathProjectId ?? args.sessionProjectId;
+  return args.slug && slugProjectId && args.effectiveProjectId === slugProjectId ? args.slug : undefined;
+}
+
+/**
+ * story #4211(PO 3차) — scoped 경로(`/{ws}/{proj}/…`)에서는 **현재 URL**의 프로젝트 조각이 곧 현재 프로젝트다. `(authenticated)`
+ * 레이아웃은 공유 레이아웃이라 클라이언트 이동(`/{ws}/B/flow` → `/{ws}/C/flow` · 사이드바 Link·전환기 `next` 분기)에서 다시 렌더되지
+ * 않아 서버 prop(pathProjectId·slug)이 둘 다 B로 남는다 — 그 값으로 만들면 URL은 C인데 탭은 `/{ws}/B/…`였다.
+ * 판정 모양은 전환기(`withSwitchedSlugs`)와 같다: 첫 조각 = 현재 org slug이고 조각이 2개 이상. 아니면(flat 경로·다른 org 경로)
+ * undefined → 호출부가 `slugForEffectiveProject` 가드로 간다.
+ */
+export function projectSlugFromScopedPath(pathname: string | null | undefined, currentOrgSlug: string | undefined): string | undefined {
+  const segments = (pathname ?? '').split('/').filter(Boolean);
+  // 첫 조각이 예약 목록(flat 라우트 이름)이면 scoped가 아니다 — slug가 `gates`인 조직이 `/gates/123`(flat 게이트 상세)을
+  // 볼 때 `123`을 프로젝트로 오인하던 자리(까디르 QA). 목록은 proxy와 같은 것(CI 동기 가드 있음).
+  return currentOrgSlug && segments.length >= 2 && segments[0] === currentOrgSlug && looksLikeWorkspaceSegment(segments[0])
+    ? segments[1] : undefined;
+}
+
+/**
+ * 탭바·사이드바가 받는 project slug — 대시보드 셸이 이것 하나만 부른다(한 곳 계산). scoped 경로면 URL 조각,
+ * 아니면 `slugForEffectiveProject` 가드(flat 전환 창 → bare · 딥링크 첫 렌더 → 경로 slug).
+ */
+export function navProjectSlug(args: {
+  pathname: string | null | undefined; currentOrgSlug: string | undefined;
+  pathProjectId: string | undefined; sessionProjectId: string | undefined;
+  slug: string | undefined; effectiveProjectId: string | undefined;
+}): string | undefined {
+  return projectSlugFromScopedPath(args.pathname, args.currentOrgSlug) ?? slugForEffectiveProject(args);
 }
