@@ -13,7 +13,7 @@ import {
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { clearReopenMarker, reopenCurrentUrlOnce } from '@/lib/hard-reload';
+import { clearReopenMarker, reopenCurrentUrlOnce, retryReopenCurrentUrl } from '@/lib/hard-reload';
 import { RouteErrorState } from '@/components/ui/route-error-state';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
@@ -462,10 +462,7 @@ export function DashboardShell({
     if (!pathUnresolved) { clearReopenMarker(); return; }
     if (!reopenCurrentUrlOnce()) startTransition(() => setReopenSpentFor(shellPathname));
   }, [pathUnresolved, shellPathname]);
-  const retryUnresolvedPath = useCallback(() => {
-    clearReopenMarker();
-    reopenCurrentUrlOnce();
-  }, []);
+  const retryUnresolvedPath = useCallback(() => { retryReopenCurrentUrl(); }, []);
   // R2: URL `?p=` = flat 라우트의 탭별 SSOT. 경로 프로젝트(위 livePath)가 있으면 그게 최우선.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships, livePath.kind === 'scoped' ? livePath.projectId : undefined, pathUnresolved);
   // story #4217 — 인터셉터 ref(프로젝트·org)의 수명을 셸에 묶는다. 셸에서 셸 밖 화면(v3 /today·/chat·/connect-rules)으로

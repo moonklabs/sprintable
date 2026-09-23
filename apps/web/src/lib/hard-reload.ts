@@ -25,3 +25,14 @@ export function clearReopenMarker(): void {
   if (typeof window === 'undefined') return;
   try { window.sessionStorage.removeItem(REOPEN_MARKER_KEY); } catch { /* 저장소 막힘 — 표지도 없다 */ }
 }
+
+/**
+ * 사람이 누른 «다시 시도» — 루프 위험이 없으니 표지 기록 성공 여부와 상관없이 **무조건** 전체 이동한다(PO). 저장소가 막힌
+ * 브라우저에선 `reopenCurrentUrlOnce`가 이동 없이 false라, 그 함수만 부르면 버튼을 눌러도 아무 일이 안 일어났다.
+ * 저장소가 되면 표지를 새로 남겨(다시 열어도 못 풀면 다시 오류 상태 — 자동 루프 0).
+ */
+export function retryReopenCurrentUrl(navigate: (url: string) => void = (url) => window.location.replace(url)): void {
+  if (typeof window === 'undefined') return;
+  clearReopenMarker();
+  if (!reopenCurrentUrlOnce(navigate)) navigate(window.location.href);
+}

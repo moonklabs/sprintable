@@ -17,8 +17,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: (u: string) => { nav.search = u.split('?')[1] ?? ''; }, push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
-const { reopenMock, clearMock } = vi.hoisted(() => ({ reopenMock: vi.fn(() => true), clearMock: vi.fn() }));
-vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrlOnce: reopenMock, clearReopenMarker: clearMock }));
+const { reopenMock, clearMock, retryMock } = vi.hoisted(() => ({ reopenMock: vi.fn(() => true), clearMock: vi.fn(), retryMock: vi.fn() }));
+vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrlOnce: reopenMock, clearReopenMarker: clearMock, retryReopenCurrentUrl: retryMock }));
 
 const pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
 const none = () => null;
@@ -209,9 +209,8 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(retry).toBeTruthy();
     expect(container.querySelector('a'), '보조 링크(«로그인으로 이동») 없음').toBeNull();
     expect(since(mark).filter((r) => r.url.startsWith('/api/stories'))).toEqual([]);
-    reopenMock.mockClear(); clearMock.mockClear();
+    retryMock.mockClear();
     await act(async () => { retry!.click(); });
-    expect(clearMock).toHaveBeenCalledTimes(1);
-    expect(reopenMock).toHaveBeenCalledTimes(1);
+    expect(retryMock).toHaveBeenCalledTimes(1); // 무조건 전체 이동(lib/hard-reload 단위 테스트가 저장소 막힘까지 잰다)
   });
 });
