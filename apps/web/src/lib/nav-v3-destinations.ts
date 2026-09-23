@@ -15,6 +15,7 @@
  * app-sidebar.tsx의 resourceLink, 4004=v3 화면의 동형 헬퍼)가 한다 — 접두 로직 자체는
  * 안 복붙(AC2).
  */
+import { looksLikeWorkspaceSegment } from './reserved-first-segments';
 
 export interface NavV3Flags {
   todayV3Enabled: boolean;
@@ -133,7 +134,10 @@ export function slugForEffectiveProject(args: {
  */
 export function projectSlugFromScopedPath(pathname: string | null | undefined, currentOrgSlug: string | undefined): string | undefined {
   const segments = (pathname ?? '').split('/').filter(Boolean);
-  return currentOrgSlug && segments.length >= 2 && segments[0] === currentOrgSlug ? segments[1] : undefined;
+  // 첫 조각이 예약 목록(flat 라우트 이름)이면 scoped가 아니다 — slug가 `gates`인 조직이 `/gates/123`(flat 게이트 상세)을
+  // 볼 때 `123`을 프로젝트로 오인하던 자리(까디르 QA). 목록은 proxy와 같은 것(CI 동기 가드 있음).
+  return currentOrgSlug && segments.length >= 2 && segments[0] === currentOrgSlug && looksLikeWorkspaceSegment(segments[0])
+    ? segments[1] : undefined;
 }
 
 /**

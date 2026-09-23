@@ -96,6 +96,13 @@ describe('navProjectSlug — scoped 경로는 현재 URL 조각(story #4211 PO 3
     expect(navProjectSlug({ pathname: '/flow', currentOrgSlug: 'acme', pathProjectId: undefined, sessionProjectId: 'proj-a', slug: 'alpha', effectiveProjectId: 'proj-b' })).toBeUndefined();
   });
 
+  it('⭐org slug가 예약어(`gates`)인 조직이 flat `/gates/123`을 볼 때 → URL 조각을 안 쓰고 가드로(까디르 QA)', async () => {
+    const { navProjectSlug, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
+    const slug = navProjectSlug({ ...stale, pathname: '/gates/123', currentOrgSlug: 'gates' });
+    expect(slug).toBe('beta');
+    expect(scopedResourceHref('flow', 'gates', slug)).not.toBe('/gates/123/flow');
+  });
+
   it('다른 org 경로(첫 조각 ≠ 현재 org slug)는 URL 조각을 안 쓴다 — 전환기(withSwitchedSlugs)와 같은 판정', async () => {
     const { navProjectSlug } = await import('@/lib/nav-v3-destinations');
     expect(navProjectSlug({ ...stale, pathname: '/other/zeta/flow', currentOrgSlug: 'acme' })).toBe('beta');
