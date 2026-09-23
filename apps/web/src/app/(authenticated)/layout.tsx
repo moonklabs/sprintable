@@ -8,6 +8,7 @@ import { StorageCapacityToastProvider } from '@/components/storage/storage-capac
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 import { AuUsageBanner } from '@/ee/components/billing/au-usage-banner';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 
 interface MemberContext {
   id: string;
@@ -34,7 +35,7 @@ interface OrgMembership {
   timezone?: string | null;
 }
 
-export default async function AuthenticatedLayout({
+async function AuthenticatedLayoutBody({
   children,
 }: {
   children: React.ReactNode;
@@ -213,3 +214,14 @@ export default async function AuthenticatedLayout({
     </DashboardShell>
   );
 }
+
+/**
+ * story #4219 C1 — dev 전용 서버 구간 마커(SERVER_TIMING_MARKERS=true일 때만): 이 레이아웃이 SSR 동안 낸 백엔드 호출별
+ * 시작·시간·연결 재사용 여부를 로그 한 줄로(서버 컴포넌트는 응답 헤더를 못 단다). 이름·시간만. 꺼져 있으면 그대로 통과.
+ */
+export default async function AuthenticatedLayout(props: Parameters<typeof AuthenticatedLayoutBody>[0]) {
+  const { value, spans, totalMs } = await withServerTiming(() => AuthenticatedLayoutBody(props));
+  if (spans.length > 0) logServerTiming('layout', 'ssr', totalMs, spans);
+  return value;
+}
+

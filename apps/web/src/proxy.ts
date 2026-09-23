@@ -15,6 +15,7 @@ import {
   SP_RESOLVE_CACHE_COOKIE,
   verifyResolveCache,
 } from '@/lib/route-resolve';
+import { formatServerTiming, isServerTimingEnabled, logServerTiming, withServerTiming } from '@/lib/server-timing';
 
 // story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고,
 // apps/web/src/i18n/request.ts의 getLocale()(next-intl RSC config, `cookies()`/`headers()`
@@ -705,7 +706,22 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
   if (externalReferrer) response.cookies.set(SIGNUP_ATTRIBUTION_COOKIES.referrer, externalReferrer, base);
 }
 
+/**
+ * story #4219 C1 — dev 전용 서버 구간 마커(SERVER_TIMING_MARKERS=true일 때만). 요청 처리 중 나간 백엔드 호출별 시작·시간·연결
+ * 재사용 여부를 `Server-Timing` 헤더와 로그 한 줄로 — 이름·시간만(경로·id 0). 꺼져 있으면 그대로 통과(동작 변화 0).
+ */
 export async function proxy(request: NextRequest) {
+  if (!isServerTimingEnabled()) return proxyImpl(request);
+  const { value: response, spans, totalMs } = await withServerTiming(() => proxyImpl(request));
+  if (spans.length > 0) {
+    response.headers.set('Server-Timing', formatServerTiming('proxy', totalMs, spans));
+    const pathname = request.nextUrl.pathname;
+    logServerTiming('proxy', pathname === '/glance' ? 'glance' : request.headers.has('rsc') ? 'rsc' : 'document', totalMs, spans);
+  }
+  return response;
+}
+
+async function proxyImpl(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // story #2595 — /connect-guide.txt is locale-branched: rewrite (not redirect, so the URL
