@@ -3,6 +3,7 @@
 import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 import { notifySessionChanged } from '@/lib/native-shell-bridge';
 import { collectRefreshDiagnostics } from '@/lib/auth/refresh-diagnostics';
+import { invalidateMe } from '@/lib/me-client';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   // sp_at/sp_rt 쿠키가 새로 세워졌다는 뜻(각 route.ts가 Set-Cookie) — 네이티브 셸에 즉시
   // 알려 디스크로 내리게 한다(강제종료 시 갱신 쿠키 유실 방지, AC1).
   notifySessionChanged();
+  invalidateMe();
   return { data: json.data as AuthTokens, error: null };
 }
 
@@ -47,6 +49,7 @@ export async function registerUser(email: string, password: string): Promise<Aut
 }
 
 export async function logoutUser(refreshToken?: string): Promise<void> {
+  invalidateMe();
   await fetch('/api/auth/logout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

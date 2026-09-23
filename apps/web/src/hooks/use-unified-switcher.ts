@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { invalidateMe } from '@/lib/me-client';
 
 export interface OrgSwitcherItem {
   orgId: string;
@@ -201,6 +202,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         // 실어 보내 — 새 org엔 없는 프로젝트라 BE가 403(멤버십 검증 실패)을 낸다. 실측:
         // 0-프로젝트 org로 전환 후 "새 프로젝트" 생성 시도가 이 stale 헤더 때문에 조용히 막혔다.
         if (typeof window !== 'undefined') window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+        invalidateMe();
         router.refresh();
       } else {
         setLocalOrgId(prevOrgId);
@@ -233,6 +235,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         setSwitchOrgError(tSwitcher('switcherSwitchOrgError'));
         return;
       }
+      invalidateMe();
       await fetch('/api/switch-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

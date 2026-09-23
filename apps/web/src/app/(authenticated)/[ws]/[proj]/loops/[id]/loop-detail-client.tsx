@@ -13,6 +13,7 @@ import { VariantGallery, type VariantGroup } from '@/components/loops/variant-ga
 import { ContextPackPanel } from '@/components/loops/context-pack-panel';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 /** E-LOOP-LEDGER S7 loop_outcome_attribution.py::attribute_loop_outcome 산출 shape 그대로. */
 interface OutcomeSnapshot {
@@ -80,7 +81,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
 
       const [artifactsRes, meRes] = await Promise.all([
         fetchWithAuth(`/api/loops/${loopId}/artifacts`),
-        fetchWithAuth('/api/me'),
+        fetchMe(),
       ]);
       if (artifactsRes.ok) setGroups((await artifactsRes.json()) as VariantGroup[]);
       if (meRes.ok) {

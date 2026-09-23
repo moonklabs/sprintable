@@ -4,7 +4,8 @@
 // 이게 없으면 401 폴링/SSE 재연결 루프가 세션이 죽은 뒤에도 매 tick마다 refresh를 재시도해
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithAuth, loginWithPassword, refreshAuthTokens, registerUser } from './client';
+import { fetchWithAuth, loginWithPassword, logoutUser, refreshAuthTokens, registerUser } from './client';
+import { fetchMe } from '@/lib/me-client';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
 beforeEach(() => {
@@ -211,5 +212,46 @@ describe('callAuthRoute → notifySessionChanged 브릿지(story #3302 AC1/AC3)'
   it('셸 밖(브라우저)에서 로그인 성공해도 예외 없이 조용하다(AC2)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
     await expect(loginWithPassword('a@b.com', 'pw')).resolves.toMatchObject({ error: null });
+  });
+});
+
+// story #4184 — 로그인·가입·로그아웃 뒤엔 공유해 둔 /api/me를 버리고 다시 부른다(다른 사용자의
+// 정보가 5초 창 동안 남지 않게). 실 me-client로 «프라임 → 동작 → 다음 fetchMe가 네트워크로» 확認.
+describe('로그인/로그아웃 뒤 /api/me 공유 무효화(story #4184)', () => {
+  function stubFetch() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/me') return new Response(JSON.stringify({ data: { id: 'm-1' } }), { status: 200 });
+      if (url === '/api/auth/logout') return new Response(null, { status: 204 });
+      return okAuthResponse();
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return () => fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/me').length;
+  }
+
+  it('공유 창 안에선 재사용하지만, loginWithPassword 성공 뒤엔 다시 부른다', async () => {
+    const meCalls = stubFetch();
+    await fetchMe();
+    await fetchMe();
+    expect(meCalls()).toBe(1);
+    await loginWithPassword('a@b.com', 'pw');
+    await fetchMe();
+    expect(meCalls()).toBe(2);
+  });
+
+  it('registerUser 성공 뒤에도 다시 부른다', async () => {
+    const meCalls = stubFetch();
+    await fetchMe();
+    await registerUser('a@b.com', 'pw');
+    await fetchMe();
+    expect(meCalls()).toBe(2);
+  });
+
+  it('logoutUser 뒤에도 다시 부른다', async () => {
+    const meCalls = stubFetch();
+    await fetchMe();
+    await logoutUser('rt');
+    await fetchMe();
+    expect(meCalls()).toBe(2);
   });
 });

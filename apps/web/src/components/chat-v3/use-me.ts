@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 /**
  * story #3972 — `/chat`은 `/today`(#3962)와 같은 가벼운 셸(=`(authenticated)`
@@ -29,7 +30,7 @@ export function useMe(): { me: Me | null; error: boolean; retry: () => void } {
 
   useEffect(() => {
     let cancelled = false;
-    fetchWithAuth('/api/me')
+    fetchMe({ fresh: reloadNonce > 0 })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: { id?: string; project_id?: string; role?: string } }) => {
         if (cancelled) return;

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 /**
  * story #3964 CHANGES-2(페드루 PO ②, 2026-09-16 16:15Z) — 「보류」는 admin/owner에게만
@@ -15,7 +16,7 @@ export function useMyOrgRole(): 'owner' | 'admin' | 'member' | null {
 
   useEffect(() => {
     let cancelled = false;
-    fetchWithAuth('/api/me')
+    fetchMe()
       .then((res) => (res.ok ? res.json() : null))
       .then((json: { data?: { role?: string } } | null) => {
         if (cancelled) return;

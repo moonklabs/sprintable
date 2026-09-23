@@ -6,6 +6,7 @@ import { ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 // story #3768 — 'unknown'은 'loading'과 렌더는 같지만(둘 다 null) 의미가 다르다: 'loading'은
 // 아직 응답을 안 받은 것, 'unknown'은 /api/me가 실패해 상태를 «모르는» 채로 끝난 것 —
@@ -40,7 +41,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
     // handleSetup(사용자의 「켜기」 클릭)에만 남는다.
     (async () => {
       let res: Response;
-      try { res = await fetchWithAuth('/api/me'); } catch { setState('unknown'); onLoadError?.(); return; }
+      try { res = await fetchMe(); } catch { setState('unknown'); onLoadError?.(); return; }
       if (!res.ok) { setState('unknown'); onLoadError?.(); return; }
       const json = await res.json() as { data?: { totp_enabled?: boolean | null } };
       // 카디르 QA(2026-09-10) — BE MeResponse.totp_enabled는 `bool | None`이라 실제로

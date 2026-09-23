@@ -525,3 +525,40 @@ describe('SettingsPage — story #3789: 조직 탭·삭제 다이얼로그 i18n 
     expect(container.textContent).toContain(koMessages.settings.agentManagementCta);
   });
 });
+
+// story #4184(E-MOBILE-SPEED) AC1 — /settings 한 번 진입에 /api/me가 7회(dev·prod 라이브) 나갔다
+// (페이지 loadContext + 프로필 탭 섹션들 + 알림 채널 + 구성원 절이 각자 fetch). 요청 공유
+// (lib/me-client.ts) 뒤엔 같은 화면이 네트워크 요청 1회를 나눠 쓴다.
+describe('SettingsPage — story #4184: /api/me 요청 공유', () => {
+  it('⭐프로필 탭 진입 — 모든 절이 뜨는데 /api/me 네트워크 호출은 정확히 1회', async () => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=profile'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'm-1', user_id: 'u-1', name: '테스트', email: 't@moonklabs.com', type: 'human', role: 'admin',
+              has_password: true, linked_providers: [], totp_enabled: false,
+            },
+          }),
+        });
+      }
+      if (url.startsWith('/api/team-members/')) return Promise.resolve({ ok: true, json: async () => ({ data: { avatar_url: null } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // 프로필 탭 절들이 실제로 떴는지(요청을 아꼈다고 화면이 빈 게 아닌지) 먼저 확認.
+    expect(container.textContent).toContain('테스트');
+    expect(container.textContent).not.toContain(koMessages.settings.accountInfoLoadError);
+    expect(fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me')).toHaveLength(1);
+  });
+});

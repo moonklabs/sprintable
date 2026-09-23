@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from './use-unified-switcher';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
+import { fetchMe } from '@/lib/me-client';
 import koMessages from '../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -370,5 +371,46 @@ describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
     await act(async () => { result?.setSearchQuery('landing'); });
     await act(async () => { result?.setOpen(true); });
     expect(result?.searchQuery).toBe('landing');
+  });
+});
+
+// story #4184 — org 전환은 클라이언트 이동(router.refresh)이라 모듈 상태가 살아 있다. 전환 뒤
+// 공유해 둔 /api/me(이전 org의 role 등)를 버리고 다시 불러야 한다. 실패 시엔 org가 그대로라
+// 버리지 않는다.
+describe('useUnifiedSwitcher — org 전환 뒤 /api/me 공유 무효화(story #4184)', () => {
+  function stubFetch(switchOk: boolean) {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: true, status: 200, json: async () => ({ data: { id: 'm-1' } }) };
+      return { ok: switchOk, json: async () => ({ data: { ok: switchOk } }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return () => fetchMock.mock.calls.filter((c) => c[0] === '/api/me').length;
+  }
+
+  it('switchOrg 성공 뒤 다음 fetchMe는 네트워크로 간다', async () => {
+    const meCalls = stubFetch(true);
+    await act(async () => { root.render(<TestComp />); });
+    await fetchMe();
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+    await fetchMe();
+    expect(meCalls()).toBe(2);
+  });
+
+  it('switchOrg 실패면 공유 값을 그대로 쓴다', async () => {
+    const meCalls = stubFetch(false);
+    await act(async () => { root.render(<TestComp />); });
+    await fetchMe();
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+    await fetchMe();
+    expect(meCalls()).toBe(1);
+  });
+
+  it('switchOrgAndProject(switch-org 성공) 뒤에도 다음 fetchMe는 네트워크로 간다', async () => {
+    const meCalls = stubFetch(true);
+    await act(async () => { root.render(<TestComp />); });
+    await fetchMe();
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+    await fetchMe();
+    expect(meCalls()).toBe(2);
   });
 });

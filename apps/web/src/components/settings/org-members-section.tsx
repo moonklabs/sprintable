@@ -15,6 +15,7 @@ import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
 import { copyTextSafely } from '@/lib/clipboard';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -95,7 +96,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       fetchWithAuth('/api/org-members').catch(() => null),
       fetchWithAuth(`/api/organizations/${orgId}/invites`).catch(() => null),
       fetchWithAuth('/api/projects').catch(() => null),
-      fetchWithAuth('/api/me').catch(() => null),
+      fetchMe().catch(() => null),
     ]);
     if (meRes?.ok) {
       const json = await meRes.json() as { data?: { user_id?: string | null } };

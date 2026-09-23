@@ -12,6 +12,7 @@ import {
   setEffectiveOrgId,
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
+import { invalidateMe } from '@/lib/me-client';
 import { cn } from '@/lib/utils';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
@@ -424,6 +425,7 @@ export function DashboardShell({
           // 등)는 project는 안 바뀌어 재요청이 안 되고 switch-org 前 확定된 403/404에
           // 고정된다 — bumpOrgSyncVersion()으로 그걸 구독하는 컴포넌트만 재요청시킨다
           // (project-context-client.ts 참고, 전체 fetch 게이트는 스코프 밖).
+          invalidateMe();
           bumpOrgSyncVersion();
           router.refresh();
         }

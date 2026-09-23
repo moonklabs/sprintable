@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 
 type ProviderId = 'google' | 'apple';
 
@@ -51,7 +52,7 @@ export function LinkedAccountsSection({ onLoadError }: LinkedAccountsSectionProp
     // 응답이 아니라) fetchWithAuth가 reject해 이 아래 await가 그대로 throw,
     // `void refresh()`(:44) 밖으로 unhandled rejection이 샜다.
     let res: Response;
-    try { res = await fetchWithAuth('/api/me'); } catch { if (isInitialLoad) onLoadError?.(); return; }
+    try { res = await fetchMe({ fresh: !isInitialLoad }); } catch { if (isInitialLoad) onLoadError?.(); return; }
     if (!res.ok) { if (isInitialLoad) onLoadError?.(); return; }
     const json = await res.json() as { data?: { linked_providers?: ProviderId[]; has_password?: boolean } };
     setLinkedProviders(json.data?.linked_providers ?? []);

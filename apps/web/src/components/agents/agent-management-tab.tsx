@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchMe } from '@/lib/me-client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -169,7 +170,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
         // 이 try/catch 바깥 catch가 setLoadError(true)로 «승격»시켜 에이전트 목록(이
         // 탭의 실제 주 콘텐츠, refreshAgents가 따로 그린다)까지 통째로 못 뜨게 했다.
         const [meRes, projectsRes] = await Promise.all([
-          fetchWithAuth('/api/me').catch(() => null),
+          fetchMe().catch(() => null),
           fetchWithAuth('/api/projects').catch(() => null),
         ]);
         if (meRes?.ok) {
