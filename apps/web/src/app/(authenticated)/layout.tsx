@@ -84,8 +84,8 @@ export default async function AuthenticatedLayout({
 
   const me = (await meRes.json()) as MemberContext | null;
   if (!me?.org_id) redirect('/onboarding');
-  const memberships: { projectId: string; projectName: string; projectSlug?: string | null }[] =
-    membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null }[]) : [];
+  const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
+    membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[]) : [];
   // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.
   let projectMemberships = resolveProjectMemberships(memberships, me);
 
@@ -148,7 +148,7 @@ export default async function AuthenticatedLayout({
 
   const pathProjectKnown = pathProjectId ? projectMemberships.some((m) => m.projectId === pathProjectId) : true;
   if (pathProjectId && !pathProjectKnown && projectInfoName) {
-    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfoName, projectSlug: currentProjectSlug }];
+    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfoName, projectSlug: currentProjectSlug, orgId: pathOrgId ?? me?.org_id ?? null }];
   }
   // PO 리뷰(§확認①) — 위 조회가 실패하면(네트워크·403 등) projectMemberships에 pathProjectId가
   // 안 들어간다. dashboard-shell.tsx가 이 경우 계정 상태의 옛 project_name으로 조용히

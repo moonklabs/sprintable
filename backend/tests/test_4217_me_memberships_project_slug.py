@@ -20,8 +20,8 @@ async def test_memberships_select_and_return_project_slug():
     from app.routers.me import get_my_memberships
 
     rows = [
-        SimpleNamespace(project_id=str(uuid.uuid4()), project_name="Project Beta", project_slug="beta"),
-        SimpleNamespace(project_id=str(uuid.uuid4()), project_name="Project Charlie", project_slug="charlie"),
+        SimpleNamespace(project_id=str(uuid.uuid4()), project_name="Project Beta", project_slug="beta", org_id="org-a"),
+        SimpleNamespace(project_id=str(uuid.uuid4()), project_name="Project Charlie", project_slug="charlie", org_id="org-a"),
     ]
     session = AsyncMock()
     session.execute = AsyncMock(return_value=rows)
@@ -30,8 +30,8 @@ async def test_memberships_select_and_return_project_slug():
     result = await get_my_memberships(session=session, auth=auth)
 
     sql = str(session.execute.await_args.args[0])
-    assert "p.slug AS project_slug" in sql
+    assert "p.slug AS project_slug" in sql and "p.org_id::text AS org_id" in sql
     assert result == [
-        {"projectId": rows[0].project_id, "projectName": "Project Beta", "projectSlug": "beta"},
-        {"projectId": rows[1].project_id, "projectName": "Project Charlie", "projectSlug": "charlie"},
+        {"projectId": rows[0].project_id, "projectName": "Project Beta", "projectSlug": "beta", "orgId": "org-a"},
+        {"projectId": rows[1].project_id, "projectName": "Project Charlie", "projectSlug": "charlie", "orgId": "org-a"},
     ]

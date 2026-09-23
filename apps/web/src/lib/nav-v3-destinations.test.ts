@@ -115,25 +115,36 @@ describe('resolveConnectRulesHref — story #4017 AC3', () => {
   });
 });
 
-describe('livePathProjectId — 셸 경로 프로젝트는 현재 pathname에서(story #4217)', () => {
-  const memberships = [{ projectId: 'b', projectSlug: 'beta' }, { projectId: 'c', projectSlug: 'charlie' }];
-  it('scoped 경로 → 멤버십 slug로 id(서버 prop이 옛 B여도 URL의 C)', async () => {
-    const { livePathProjectId } = await import('./nav-v3-destinations');
-    expect(livePathProjectId({ pathname: '/repro/charlie/flow', currentOrgSlug: 'repro', memberships, serverPathProjectId: 'b', serverSlug: 'beta' })).toBe('c');
+describe('livePathProject — 셸 경로 프로젝트는 현재 pathname에서, 세 갈래(story #4217)', () => {
+  const base = { currentOrgSlug: 'repro', currentOrgId: 'org-r', serverPathProjectId: 'b', serverSlug: 'beta' };
+  const memberships = [
+    { projectId: 'b', projectSlug: 'beta', orgId: 'org-r' },
+    { projectId: 'c', projectSlug: 'charlie', orgId: 'org-r' },
+    { projectId: 'x-c', projectSlug: 'charlie', orgId: 'org-x' },
+  ];
+  it('scoped → 멤버십 org + slug로 id(서버 prop이 옛 B여도 URL의 C · 다른 org의 같은 slug 무시)', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships })).toEqual({ kind: 'scoped', projectId: 'c' });
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships: [memberships[2]!, memberships[1]!] })).toEqual({ kind: 'scoped', projectId: 'c' });
   });
-  it('멤버십에 없는 slug → 서버 prop이 같은 slug를 풀었을 때만 그 id, 아니면 없음', async () => {
-    const { livePathProjectId } = await import('./nav-v3-destinations');
-    expect(livePathProjectId({ pathname: '/repro/delta/flow', currentOrgSlug: 'repro', memberships, serverPathProjectId: 'd', serverSlug: 'delta' })).toBe('d');
-    expect(livePathProjectId({ pathname: '/repro/delta/flow', currentOrgSlug: 'repro', memberships, serverPathProjectId: 'b', serverSlug: 'beta' })).toBeUndefined();
+  it('서버가 같은 slug를 풀었으면 그 값 우선', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/beta/flow', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
   });
-  it('flat·예약 첫 조각·다른 org 경로 → 없음(옛 서버 pathProjectId를 쓰지 않는다)', async () => {
-    const { livePathProjectId } = await import('./nav-v3-destinations');
-    for (const pathname of ['/flow', '/gates/123', '/other/charlie/flow']) {
-      expect(livePathProjectId({ pathname, currentOrgSlug: 'repro', memberships, serverPathProjectId: 'b', serverSlug: 'beta' }), pathname).toBeUndefined();
+  it('워크스페이스 경로인데 못 풂(멤버십에 없음 · 다른 org 경로) → unresolved', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/delta/flow', memberships })).toEqual({ kind: 'unresolved' });
+    expect(livePathProject({ ...base, pathname: '/other/charlie/flow', memberships })).toEqual({ kind: 'unresolved' });
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships: [memberships[2]!] })).toEqual({ kind: 'unresolved' });
+  });
+  it('flat·예약 첫 조각 → flat(옛 서버 pathProjectId를 쓰지 않는다)', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    for (const pathname of ['/flow', '/gates/123', '/']) {
+      expect(livePathProject({ ...base, pathname, memberships }), pathname).toEqual({ kind: 'flat' });
     }
   });
-  it('옛 응답(projectSlug 없음) → 서버 prop 보조만', async () => {
-    const { livePathProjectId } = await import('./nav-v3-destinations');
-    expect(livePathProjectId({ pathname: '/repro/beta/flow', currentOrgSlug: 'repro', memberships: [{ projectId: 'b' }], serverPathProjectId: 'b', serverSlug: 'beta' })).toBe('b');
+  it('멤버십 orgId 없는 옛 응답 → 현재 org로 간주', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/charlie/flow', memberships: [{ projectId: 'c', projectSlug: 'charlie' }] })).toEqual({ kind: 'scoped', projectId: 'c' });
   });
 });

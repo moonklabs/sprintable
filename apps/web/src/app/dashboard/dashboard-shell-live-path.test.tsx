@@ -17,6 +17,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: (u: string) => { nav.search = u.split('?')[1] ?? ''; }, push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
+const { reopenMock } = vi.hoisted(() => ({ reopenMock: vi.fn() }));
+vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrl: reopenMock }));
 
 const pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
 const none = () => null;
@@ -50,9 +52,9 @@ vi.mock('@/components/dashboard/activation-checklist-banner', () => ({ Activatio
 const ORG = 'org-1';
 const A = 'proj-alpha', B = 'proj-beta', C = 'proj-charlie';
 const memberships = [
-  { projectId: A, projectName: 'Project Alpha', projectSlug: 'alpha' },
-  { projectId: B, projectName: 'Project Beta', projectSlug: 'beta' },
-  { projectId: C, projectName: 'Project Charlie', projectSlug: 'charlie' },
+  { projectId: A, projectName: 'Project Alpha', projectSlug: 'alpha', orgId: ORG },
+  { projectId: B, projectName: 'Project Beta', projectSlug: 'beta', orgId: ORG },
+  { projectId: C, projectName: 'Project Charlie', projectSlug: 'charlie', orgId: ORG },
 ];
 // 서버 prop — 하드 로드 B 때 값 그대로(공유 레이아웃이라 클라이언트 이동에서 바뀌지 않는다). 세션 프로젝트는 A.
 const serverProps = {
@@ -88,7 +90,7 @@ beforeAll(async () => {
 
 afterAll(() => { container.remove(); });
 
-async function renderShellAt(pathname: string) {
+async function renderShellAt(pathname: string, overrides: Partial<typeof serverProps> = {}) {
   nav.pathname = pathname;
   const { DashboardShell, useDashboardContext } = await import('./dashboard-shell');
   // 경로마다 새로 마운트되는 «페이지» — 첫 effect에서 읽기 1건 + 칸반 추가와 같은 모양의 쓰기 1건(project_id = 컨텍스트 값).
@@ -103,7 +105,7 @@ async function renderShellAt(pathname: string) {
     return null;
   }
   await act(async () => {
-    root.render(<DashboardShell {...serverProps}><Page key={pathname} /></DashboardShell>);
+    root.render(<DashboardShell {...serverProps} {...overrides}><Page key={pathname} /></DashboardShell>);
   });
   await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
 }
@@ -146,5 +148,41 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
       expect(r.project, r.url).toBeUndefined();
       expect(r.org, r.url).toBeUndefined();
     }
+  });
+
+  it('⭐두 org에 같은 slug(`charlie`) → 현재 org 쪽 프로젝트(X-Org-Id와 범위 일치)', async () => {
+    const OTHER_C = 'proj-other-charlie';
+    const mixed = [{ projectId: OTHER_C, projectName: 'Other Charlie', projectSlug: 'charlie', orgId: 'org-other' }, ...memberships];
+    await renderShellAt('/repro/beta/flow', { projectMemberships: mixed });
+    const mark = sent.length;
+    await renderShellAt('/repro/charlie/flow', { projectMemberships: mixed });
+    expect(seen.at(-1)?.projectId).toBe(C);
+    for (const r of since(mark)) { expect(r.project, r.url).toBe(C); expect(r.org, r.url).toBe(ORG); }
+  });
+
+  it('⭐scoped인데 스냅샷으로 못 풂(멤버십에 C 없음) → 전체 문서 이동 호출 · 그 전 B 헤더·B 본문 요청 0 · `?p=`B로 안 떨어짐', async () => {
+    const withoutC = memberships.filter((m) => m.projectId !== C);
+    await renderShellAt('/repro/beta/flow', { projectMemberships: withoutC });
+    reopenMock.mockClear();
+    const mark = sent.length;
+    nav.search = `p=${B}`;
+    await renderShellAt('/repro/charlie/flow', { projectMemberships: withoutC });
+    expect(reopenMock).toHaveBeenCalledTimes(1);
+    const after = since(mark);
+    expect(after.filter((r) => r.project === B || r.body?.project_id === B)).toEqual([]);
+    // 페이지를 마운트하지 않아 세션 프로젝트로 떨어지는 요청(헤더 없는 쓰기)도 0.
+    expect(after.filter((r) => r.url.startsWith('/api/stories'))).toEqual([]);
+    expect(new URLSearchParams(nav.search).get('p')).toBe(B); // 셸이 다시 쓰지 않았다(전체 이동이 서버 해석으로 교정)
+    // 셸 밖 같은 관문을 지나는 요청도 이 사이엔 헤더 0.
+    await fetch('/api/probe');
+    expect(sent.at(-1)?.project).toBeUndefined();
+    expect(sent.at(-1)?.org).toBeUndefined();
+  });
+
+  it('다른 org 경로로 클라이언트 이동 → 전체 문서 이동(옛 org·프로젝트로 안 떨어짐)', async () => {
+    await renderShellAt('/repro/beta/flow');
+    reopenMock.mockClear();
+    await renderShellAt('/other-org/charlie/flow');
+    expect(reopenMock).toHaveBeenCalledTimes(1);
   });
 });
