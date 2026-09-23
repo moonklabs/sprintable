@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename, resolveVerifyGuideKey } from './recruiter-client';
+import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename, resolveVerifyGuideKey, resolveMcpConfigFilename, buildMcpConfigText } from './recruiter-client';
 import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 import enMessages from '../../../../../../messages/en.json';
@@ -293,6 +293,53 @@ describe('resolveVerifyGuideKey — story #2792 (STEP5 안내문도 showVerifyEx
     const ko = (koMessages as { recruiter: Record<string, string> }).recruiter.verifyGuideMcpStdio;
     expect(en).toBeTruthy();
     expect(ko).toBeTruthy();
+  });
+});
+
+// story #4180(E-PROD-ESC·온보딩) — Codex는 .mcp.json을 읽지 않는다(.codex/config.toml, TOML).
+// resolveMcpConfigFilename은 그 런타임별 분기 — 다른 런타임은 기존 '.mcp.json' 그대로(무회귀),
+// 이 함수 자체가 사라지거나 codex를 걸러내지 못하면(뮤테이션) 아래 두 번째 테스트가 RED.
+describe('resolveMcpConfigFilename — story #4180(Codex는 .mcp.json을 안 읽는다)', () => {
+  it('codex → config.toml', () => {
+    expect(resolveMcpConfigFilename('codex')).toBe('config.toml');
+  });
+
+  it('그 외 런타임(claude-code·gemini·cursor 등)은 .mcp.json 그대로(무회귀)', () => {
+    for (const rt of ['claude-code', 'gemini', 'cursor', 'hermes', 'connector']) {
+      expect(resolveMcpConfigFilename(rt)).toBe('.mcp.json');
+    }
+  });
+
+  it('두 로케일 모두 codexConfigTomlPathNote·파라미터화된 kitOrientingConnectBodyMcp/keyOnceBody를 갖는다', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter;
+    expect(en.codexConfigTomlPathNote).toContain('{path}');
+    expect(ko.codexConfigTomlPathNote).toContain('{path}');
+    expect(en.kitOrientingConnectBodyMcp).toContain('{filename}');
+    expect(ko.kitOrientingConnectBodyMcp).toContain('{filename}');
+    expect(en.keyOnceBody).toContain('{filename}');
+    expect(ko.keyOnceBody).toContain('{filename}');
+  });
+});
+
+// story #4180 AC1/AC2 — STEP4 화면이 실제로 렌더할 텍스트(mcpConfigText가 쓰는 값)를 직접
+// 검증. 파일명 분기(resolveMcpConfigFilename)와 본문 포맷 분기(buildMcpConfigText)가 같은
+// runtime==='codex' 가드를 각자 갖고 있어 한쪽만 깨지는 회귀(파일명은 바뀌었는데 본문은 여전히
+// JSON 등)를 별도로 잡는다.
+describe('buildMcpConfigText — story #4180(runtime===codex면 TOML, 그 외는 기존 JSON 무변)', () => {
+  const bundle = {
+    mcpServers: { 'sprintable-mcp': { type: 'stdio' as const, command: 'uvx', args: ['sprintable'], env: { AGENT_API_KEY: 'sk_live_x' } } },
+  };
+
+  it('codex → 실 파서(smol-toml)로 파싱되는 config.toml 조각(JSON 키 이름 잔존 없음)', () => {
+    const text = buildMcpConfigText(bundle, 'codex');
+    expect(text).toContain('[mcp_servers.sprintable-mcp]');
+    expect(text).toContain('[mcp_servers.sprintable-mcp.env]');
+    expect(text).not.toContain('mcpServers'); // JSON 키 이름 잔존 금지(재조립 확인)
+  });
+
+  it('claude-code(그 외 런타임) → 기존 JSON.stringify와 byte-identical(무회귀)', () => {
+    expect(buildMcpConfigText(bundle, 'claude-code')).toBe(JSON.stringify(bundle, null, 2));
   });
 });
 
