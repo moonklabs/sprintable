@@ -1386,6 +1386,14 @@ async def _tokenize_embedded_entity_refs(db: AsyncSession, *, org_id: uuid.UUID,
     return await _async_regex_sub(_EMBEDDED_HEX8_RE, _replace_prefix, text)
 
 
+def _stage_capability_kind(stage_meta: dict | None) -> str | None:
+    """stage_metadata[stage].capability.kind 읽기 공용 — 멘션 도구 안내(`_CAPABILITY_KIND_HINTS`)·서버 몫 다음 단계 판별
+    (story #4174)·블로그 레시피 문맥 판별(`resolve_site_post_recipe_context`)이 같이 쓴다. capability가 없거나 dict가
+    아니면 None."""
+    capability = (stage_meta or {}).get("capability")
+    return capability.get("kind") if isinstance(capability, dict) else None
+
+
 def _next_recipe_stage(definition, stage: str) -> str | None:
     """story #4076 — `definition.payload_schema.properties.stage.enum`에서 `stage` 바로
     다음 원소. `_render_event_message_content`(사이클 렌더러)·`_render_gate_verdict_message`
@@ -1978,11 +1986,9 @@ async def _render_event_message_content(
     # kind 선언에서만 유도(live_generation.capability.kind=="generate"는 #4058/#4063
     # 기존 선언 그대로, verification/editing.capability.kind=="attach_video"는 이 카드
     # 0389 마이그 신설).
-    current_capability = stage_meta.get("capability")
-    if isinstance(current_capability, dict):
-        _capability_hint_key = _CAPABILITY_KIND_HINTS.get(current_capability.get("kind"))
-        if _capability_hint_key:
-            lines.append(f"- {t(_capability_hint_key, resolved_locale)}")
+    _capability_hint_key = _CAPABILITY_KIND_HINTS.get(_stage_capability_kind(stage_meta))
+    if _capability_hint_key:
+        lines.append(f"- {t(_capability_hint_key, resolved_locale)}")
 
     next_stage = _next_recipe_stage(definition, stage)
 
@@ -2010,8 +2016,7 @@ async def _render_event_message_content(
             lines.append("- 다음 단계: 없음(마지막 stage)")
     elif (
         next_stage is not None
-        and ((definition.stage_metadata.get(next_stage) or {}).get("capability") or {}).get("kind")
-        in _SERVER_DRIVEN_CAPABILITY_KINDS
+        and _stage_capability_kind(definition.stage_metadata.get(next_stage)) in _SERVER_DRIVEN_CAPABILITY_KINDS
     ):
         # story #4174 — 다음 단계는 서버가 실제 발행 뒤 낸다(블로그 발행은 사람 전용 권한 — 에이전트가 그 단계 이벤트를
         # 먼저 내면 발행 안 된 글이 «발행됨»으로 보인다). 발행 예시 대신 대기 안내.
@@ -2193,7 +2198,7 @@ async def resolve_site_post_recipe_context(
     )).scalars().all()
     for definition in candidates:
         for auto_stage, meta in (definition.stage_metadata or {}).items():
-            if ((meta or {}).get("capability") or {}).get("kind") not in _SERVER_DRIVEN_CAPABILITY_KINDS:
+            if _stage_capability_kind(meta) not in _SERVER_DRIVEN_CAPABILITY_KINDS:
                 continue
             latest = await _find_latest_stage_publish(
                 db, org_id=org_id, definition_key=definition.key, work_item_type=work_item_type,
