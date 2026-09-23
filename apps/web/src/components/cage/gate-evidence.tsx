@@ -967,7 +967,8 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
                     // 그대로 grep한다, 이 주석 자체가 그 예시였다 — 재발 방지로 그
                     // 메서드명을 여기 다시 안 적는다). formatMinorCurrency와 동일
                     // 정본(Intl.NumberFormat 직접)으로 정정.
-                    count: new Intl.NumberFormat(locale).format(facts.newsletterEstimatedRecipientCount),
+                    // story #4223 — en 복수형(ICU plural)은 숫자 값이어야 한다(문자열이면 형식 오류). 자리 구분은 ICU `#`가 로케일로 한다.
+                    count: facts.newsletterEstimatedRecipientCount,
                   })
                 : t('newsletterRecipientUnknown')}
             </span>

@@ -5524,7 +5524,7 @@
     "generationBudgetSealedCostCurrencyUnknown": "통화 미확인",
     "generationBudgetStatusLine": "이번 달 예산 · 한도 {limit} · 사용 {spent} · 남음 {remaining}",
     "newsletterEstimatedRecipientLabel": "예상 수신",
-    "newsletterEstimatedRecipientCount": "{count}명",
+    "newsletterEstimatedRecipientCount": "{count, number}명",
     "newsletterRecipientUnknown": "미확인",
     "gateApproveCampaign": "캠페인 승인",
     "gateApproveNewsletterSend": "발송 승인",

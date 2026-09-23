@@ -122,7 +122,8 @@ export function EventDefinitionSummary({
                   <tr key={name} className="border-t border-border">
                     <td className="px-2 py-1 font-mono text-foreground">{name}</td>
                     <td className="px-2 py-1 text-muted-foreground">{fieldTypeLabel(properties[name]!, t)}</td>
-                    <td className="px-2 py-1 text-muted-foreground">
+                    {/* story #4223(유나) — 390 ko에서 «필수»가 «필/수»로 세로 접혔다 · 낱말 줄바꿈 금지(좁으면 다른 열이 양보). */}
+                    <td className="whitespace-nowrap px-2 py-1 text-muted-foreground" data-testid={`event-def-field-required-${name}`}>
                       {required.has(name) ? t('definerFieldRequired') : t('definerFieldOptional')}
                     </td>
                   </tr>
