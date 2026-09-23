@@ -1,6 +1,7 @@
 export interface ProjectMembership {
   projectId: string;
   projectName: string;
+  projectSlug?: string | null;
 }
 
 /**

@@ -151,3 +151,24 @@ export function navProjectSlug(args: {
 }): string | undefined {
   return projectSlugFromScopedPath(args.pathname, args.currentOrgSlug) ?? slugForEffectiveProject(args);
 }
+
+/**
+ * story #4217(critical · 데이터 결함) — 셸의 «경로 프로젝트»를 **현재 pathname**에서 한 곳 계산한다. `(authenticated)` 레이아웃은
+ * 공유 레이아웃이라 클라이언트 이동(`/{ws}/B/flow` → `/{ws}/C/flow` · 사이드바 Link·전환기 `next`)에서 다시 렌더되지 않아 서버
+ * prop `pathProjectId`가 B로 남았고, 그 값이 `?p=`보다 우선이라 effective가 B → 셸이 `?p=B`를 써 넣고 인터셉터가 C 화면의 API
+ * 요청에 `X-Project-Id: B`를 실었다(로컬 실측: C 화면 요청 23/24가 B · 칸반 모양 쓰기가 B 프로젝트에 저장).
+ * - scoped 경로: URL의 프로젝트 slug를 멤버십(`projectSlug`)에서 id로. 멤버십에 없으면 서버 prop이 **같은 slug**를 풀었을 때만 그 id.
+ * - flat 경로(또는 다른 org 경로): undefined — 서버 `pathProjectId`는 이전 scoped 화면의 옛 값일 수 있어 쓰지 않는다
+ *   (`?p=`·탭 저장값·세션 순으로 넘어간다 — 하드 로드와 같은 결과).
+ */
+export function livePathProjectId(args: {
+  pathname: string | null | undefined; currentOrgSlug: string | undefined;
+  memberships: ReadonlyArray<{ projectId: string; projectSlug?: string | null }>;
+  serverPathProjectId: string | undefined; serverSlug: string | undefined;
+}): string | undefined {
+  const slug = projectSlugFromScopedPath(args.pathname, args.currentOrgSlug);
+  if (slug === undefined) return undefined;
+  const hit = args.memberships.find((m) => m.projectSlug === slug)?.projectId;
+  if (hit) return hit;
+  return slug === args.serverSlug ? args.serverPathProjectId : undefined;
+}

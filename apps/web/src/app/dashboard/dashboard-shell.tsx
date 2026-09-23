@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
+import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
@@ -18,7 +18,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, navProjectSlug } from '@/lib/nav-v3-destinations';
+import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProjectId, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -37,6 +37,8 @@ import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 export interface DashboardProjectOption {
   projectId: string;
   projectName: string;
+  // story #4217 — 현재 URL `/{ws}/{proj}`를 id로 푸는 키(`/me/memberships` 가산 필드 · 옛 응답이면 없음).
+  projectSlug?: string | null;
 }
 
 interface DashboardContext {
@@ -435,16 +437,33 @@ export function DashboardShell({
       }
     })();
   }, [pathOrgId, actualTokenOrgId, router]);
-  // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
-  const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
+  // story #4217 — 경로 프로젝트는 서버 prop이 아니라 **현재 pathname**에서(클라이언트 이동 뒤에도 최신 · lib 주석 참고).
+  const shellPathname = usePathname();
+  const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
+  const livePathProject = livePathProjectId({
+    pathname: shellPathname, currentOrgSlug, memberships: projectMemberships,
+    serverPathProjectId: pathProjectId, serverSlug: currentProjectSlug,
+  });
+  // R2: URL `?p=` = flat 라우트의 탭별 SSOT. 경로 프로젝트(위 livePathProject)가 있으면 그게 최우선.
+  const effectiveProjectId = useProjectSsot(projectId, projectMemberships, livePathProject);
+  // story #4217 — 인터셉터 ref(프로젝트·org)의 수명을 셸에 묶는다. 셸에서 셸 밖 화면(v3 /today·/chat·/connect-rules)으로
+  // 클라이언트 이동하면 셸은 언마운트되는데 ref를 안 비워, 그 화면의 API 요청에 옛 프로젝트·org 헤더가 계속 실렸다(로컬 실측
+  // 7~18건/화면 · 하드 로드는 0). 렌더 단계 설정(첫 자식 fetch 커버)은 그대로 두고, layout effect로 같은 값을 다시 설정 +
+  // 언마운트 시 비운다 — layout effect는 자식 passive effect(fetch)보다 먼저 끝나 재렌더·StrictMode 재실행에도 공백 0.
+  useLayoutEffect(() => {
+    setEffectiveProjectId(effectiveProjectId);
+    setEffectiveOrgId(effectiveOrgId);
+    return () => {
+      setEffectiveProjectId(undefined);
+      setEffectiveOrgId(undefined);
+    };
+  }, [effectiveProjectId, effectiveOrgId]);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
   // story #4211(까디르 QA) — currentProjectSlug 는 server prop(me.project_id) 기준이라 탭 effective 프로젝트와 갈리는 창
   // (flat 경로 프로젝트 전환 → router.refresh 전)이 있다. 그 창에 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게
   // slug는 effective 프로젝트와 같을 때만 싣는다(다르면 undefined → bare 안전망). 이 값 하나를 컨텍스트(탭바·⌘K 등)와
   // 사이드바(ShellBody→AppSidebar) 둘 다에 넘긴다 — 한쪽만 막으면 또 갈린다.
   // scoped 경로에선 서버 prop 대신 현재 URL의 프로젝트 조각(클라이언트 이동 뒤에도 최신) — flat 경로만 위 가드로.
-  const shellPathname = usePathname();
-  const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
   const scopedProjectSlug = navProjectSlug({
     pathname: shellPathname, currentOrgSlug,
     pathProjectId, sessionProjectId: projectId, slug: currentProjectSlug, effectiveProjectId,

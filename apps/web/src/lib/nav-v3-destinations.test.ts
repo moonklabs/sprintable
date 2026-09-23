@@ -114,3 +114,26 @@ describe('resolveConnectRulesHref — story #4017 AC3', () => {
     expect(resolveConnectRulesHref(flags, '/organization/content-rules')).toBe('/connect-rules');
   });
 });
+
+describe('livePathProjectId — 셸 경로 프로젝트는 현재 pathname에서(story #4217)', () => {
+  const memberships = [{ projectId: 'b', projectSlug: 'beta' }, { projectId: 'c', projectSlug: 'charlie' }];
+  it('scoped 경로 → 멤버십 slug로 id(서버 prop이 옛 B여도 URL의 C)', async () => {
+    const { livePathProjectId } = await import('./nav-v3-destinations');
+    expect(livePathProjectId({ pathname: '/repro/charlie/flow', currentOrgSlug: 'repro', memberships, serverPathProjectId: 'b', serverSlug: 'beta' })).toBe('c');
+  });
+  it('멤버십에 없는 slug → 서버 prop이 같은 slug를 풀었을 때만 그 id, 아니면 없음', async () => {
+    const { livePathProjectId } = await import('./nav-v3-destinations');
+    expect(livePathProjectId({ pathname: '/repro/delta/flow', currentOrgSlug: 'repro', memberships, serverPathProjectId: 'd', serverSlug: 'delta' })).toBe('d');
+    expect(livePathProjectId({ pathname: '/repro/delta/flow', currentOrgSlug: 'repro', memberships, serverPathProjectId: 'b', serverSlug: 'beta' })).toBeUndefined();
+  });
+  it('flat·예약 첫 조각·다른 org 경로 → 없음(옛 서버 pathProjectId를 쓰지 않는다)', async () => {
+    const { livePathProjectId } = await import('./nav-v3-destinations');
+    for (const pathname of ['/flow', '/gates/123', '/other/charlie/flow']) {
+      expect(livePathProjectId({ pathname, currentOrgSlug: 'repro', memberships, serverPathProjectId: 'b', serverSlug: 'beta' }), pathname).toBeUndefined();
+    }
+  });
+  it('옛 응답(projectSlug 없음) → 서버 prop 보조만', async () => {
+    const { livePathProjectId } = await import('./nav-v3-destinations');
+    expect(livePathProjectId({ pathname: '/repro/beta/flow', currentOrgSlug: 'repro', memberships: [{ projectId: 'b' }], serverPathProjectId: 'b', serverSlug: 'beta' })).toBe('b');
+  });
+});
