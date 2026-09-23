@@ -10,6 +10,7 @@
 시드) 착지 뒤 AC3에서 실제 시드로 한 번 더."""
 from __future__ import annotations
 
+import contextlib
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -289,5 +290,41 @@ async def test_real_newsletter_preset_seed_send_requested_to_send_checked_once()
         await _run_worker(Session, scheduled_at + timedelta(minutes=3))
         assert await _command_status(Session, gate.id) == "completed"
         assert await _stage_event_count(Session, ctx, "send_checked") == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_event_db_error_does_not_undo_send_record_and_next_tick_does_not_resend(monkeypatch):
+    """⭐PR #4573 PO 수정 — 레시피 이벤트 쪽 **실제 SQL 오류**(파이썬 except가 삼켜도 Postgres 트랜잭션은 aborted)가 발송 기록을
+    되돌리지 않는다: 틱 뒤 **새 세션으로 다시 읽어** command=completed · 다음 틱에서 발송 호출 0(수신자 이중 발송 방지)."""
+    import app.services.channel_posts as channel_posts_module
+    import app.services.stibee_sandbox_campaign as sandbox_module
+
+    sends: list[str] = []
+    real_send = sandbox_module.send_campaign
+
+    async def _counting_send(**kwargs):
+        sends.append(kwargs["campaign_id"])
+        return await real_send(**kwargs)
+
+    async def _emit_with_sql_error(db, **_kwargs):
+        # 실 경로처럼 예외는 삼키지만(파이썬) Postgres 트랜잭션은 이미 aborted — 이 상태가 발송 기록을 되돌리면 안 된다.
+        with contextlib.suppress(Exception):
+            await db.execute(text("SELECT * FROM no_such_table_4214"))
+
+    monkeypatch.setattr(sandbox_module, "send_campaign", _counting_send)
+    monkeypatch.setattr(channel_posts_module, "emit_recipe_published_stage_event", _emit_with_sql_error)
+
+    engine, Session = await _session_factory()
+    try:
+        ctx = await _setup(Session)
+        gate, scheduled_at = await _approve_and_queue(Session, ctx)
+        await _run_worker(Session, scheduled_at + timedelta(minutes=2))
+        assert await _command_status(Session, gate.id) == "completed"  # 새 세션 재조회
+        await _run_worker(Session, scheduled_at + timedelta(minutes=3))
+        await _run_worker(Session, scheduled_at + timedelta(minutes=10))
+        assert len(sends) == 1, sends
+        assert await _stage_event_count(Session, ctx, "check") == 0
     finally:
         await engine.dispose()

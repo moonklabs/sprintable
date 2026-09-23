@@ -331,7 +331,7 @@ async def _schedule_snapshots(
     )
 
 
-async def _resolve_recipe_next_stage(db: AsyncSession, gate: Gate) -> tuple[str, str] | None:
+async def _resolve_recipe_next_stage(db: AsyncSession, *, org_id: uuid.UUID, facts: dict) -> tuple[str, str] | None:
     """story #4214 — 이 발송 게이트가 레시피 회차에서 온 것이면 (정의 key, 다음 stage). 레시피 경로 게이트는
     `neutral_facts.triggered_by_event`(정의 key)·`stage`(발송 요청 단계)를 싣는다(recipe_gate_hooks.
     _build_approval_neutral_facts, #4191). 사람이 발송 요청 API로 연 게이트(레시피 무관)는 그 둘이 없어 None.
@@ -342,14 +342,13 @@ async def _resolve_recipe_next_stage(db: AsyncSession, gate: Gate) -> tuple[str,
     from app.models.event_definition import EventDefinition
     from app.routers.events import _next_recipe_stage
 
-    facts = gate.neutral_facts or {}
     definition_key, gate_stage = facts.get("triggered_by_event"), facts.get("stage")
     if not definition_key or not gate_stage:
         return None
     definition = (await db.execute(
         select(EventDefinition).where(
             EventDefinition.key == definition_key, EventDefinition.enabled.is_(True),
-            or_(EventDefinition.org_id == gate.org_id, EventDefinition.org_id.is_(None)),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
         ).order_by(EventDefinition.org_id.is_(None)).limit(1)
     )).scalars().first()
     if definition is None:
@@ -367,20 +366,32 @@ async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: Publi
     - 성공 분기에서만 부른다(실패·차단 분기엔 호출 자체가 없다).
     - 멱등은 `emit_recipe_published_stage_event`의 «이 work item에 이 stage가 이미 발행됐으면 스킵»(#4093 SSOT) —
       재시도·겹친 틱이 다시 와도 이벤트는 1.
-    - 이 블록 실패가 방금 확정된 발송 성공(command completed)을 되돌리면 안 된다 — side-channel 격리."""
+
+    **트랜잭션 경계**(PR #4573 PO 수정): 외부 발송(스티비 reserve·샌드박스 send)은 이미 일어났다. 그 기록(command
+    completed·attempt·activity·스냅샷 예약)을 **먼저 커밋**하고, 레시피 이벤트는 그 뒤 **별도 트랜잭션**에서 돈다. 예전엔
+    같은 트랜잭션이라 이벤트 쪽 DB 오류가 트랜잭션을 중단시키면 워커의 커밋이 실패·롤백돼 completed가 저장되지 않았고,
+    다음 틱이 같은 발송을 다시 실행해 수신자가 같은 메일을 두 번 받을 수 있었다(파이썬 except가 예외를 삼켜도 Postgres
+    트랜잭션은 이미 aborted). 이제 이벤트가 어떻게 실패하든 롤백은 이벤트 작업만 되돌린다."""
+    # 커밋 뒤 ORM 속성 재적재에 기대지 않게 필요한 값을 먼저 잡아 둔다.
+    command_id, gate_id = command.id, gate.id
+    org_id, work_item_type, work_item_id = gate.org_id, gate.work_item_type, gate.work_item_id
+    facts = dict(gate.neutral_facts or {})
+    await db.commit()  # 발송 성공 기록 확정 — 아래 이벤트 실패가 이것을 되돌릴 수 없게.
     try:
-        resolved = await _resolve_recipe_next_stage(db, gate)
+        resolved = await _resolve_recipe_next_stage(db, org_id=org_id, facts=facts)
         if resolved is None:
             return
         definition_key, next_stage = resolved
         from app.services.channel_posts import emit_recipe_published_stage_event
 
         await emit_recipe_published_stage_event(
-            db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
             definition_key=definition_key, next_stage=next_stage,
         )
+        await db.commit()
     except Exception:
+        await db.rollback()
         logger.warning(
             "newsletter send 완료 뒤 레시피 다음 단계 이벤트 연결 실패 command_id=%s gate_id=%s — "
-            "발송 자체는 이미 성공했다(되돌리지 않음)", command.id, gate.id, exc_info=True,
+            "발송 기록은 이미 커밋됐다(되돌리지 않음·재발송 없음)", command_id, gate_id, exc_info=True,
         )
