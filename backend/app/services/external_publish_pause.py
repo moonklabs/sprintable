@@ -101,10 +101,14 @@ async def set_external_publish_pause(
 async def _requeue_paused_commands(db: AsyncSession, *, org_id: uuid.UUID) -> int:
     """해제 시 이 조직이 pause 때문에 `blocked`된 명령만(다른 사유로 blocked된
     connection 복구 대기 명령은 절대 안 건드린다 — failure_kind로 구분) 골라
-    `retry_dead_letter_command`로 하나씩 되돌린다. 멱등키(UNIQUE org_id+
-    destination+approved_version+operation+toggle_seq)가 이미 있어 중복 발행은
-    이 재사용만으로 자동 봉쇄(행 자체가 하나뿐이라 "다시 pending으로" 외에 할 게
-    없다)."""
+    `retry_dead_letter_command`로 하나씩 되돌린다. 같은 행을 pending으로 되돌릴 뿐 새 명령을
+    만들지 않으므로 이 재큐가 명령을 두 벌로 만들지는 않는다(멱등키 UNIQUE org_id+destination+
+    approved_version+operation+toggle_seq가 막는 건 «명령 삽입» 중복이다 — 발행 자체의 중복
+    방지는 워커의 클레임(in_progress)과 게이트 재검증 몫, story #4195 문구 정정).
+
+    ⚠️이 1회 스캔은 호출 순간 이미 blocked/paused인 행만 본다 — 워커가 pause를 읽은 뒤 blocked를
+    커밋하기 전(in_progress)인 명령은 못 본다. 그 경합은 크론 tick마다 도는
+    `requeue_paused_commands_of_unpaused_orgs`가 닫는다(story #4195 ①)."""
     from app.services.publication_command import retry_dead_letter_command
 
     rows = (await db.execute(
@@ -116,7 +120,26 @@ async def _requeue_paused_commands(db: AsyncSession, *, org_id: uuid.UUID) -> in
     )).scalars().all()
     requeued = 0
     for command_id in rows:
-        revived = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
+        revived = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id, only_paused=True)
         if revived is not None:
             requeued += 1
+    return requeued
+
+
+async def requeue_paused_commands_of_unpaused_orgs(db: AsyncSession) -> int:
+    """story #4195 ① — 크론 tick마다: pause가 풀린(external_publish_paused_at IS NULL) 조직의
+    `blocked`·`failure_kind=paused` 명령을 `_requeue_paused_commands`로 되살린다. resume 한 번의 스캔이
+    놓친 명령(차단 커밋 직전 in_progress)도 다음 tick에 복귀한다. 아직 멈춘 조직은 안 건드린다."""
+    org_ids = (await db.execute(
+        select(PublicationCommand.org_id).distinct()
+        .join(Organization, Organization.id == PublicationCommand.org_id)
+        .where(
+            PublicationCommand.status == "blocked",
+            PublicationCommand.failure_kind == FAILURE_KIND_PAUSED,
+            Organization.external_publish_paused_at.is_(None),
+        )
+    )).scalars().all()
+    requeued = 0
+    for org_id in org_ids:
+        requeued += await _requeue_paused_commands(db, org_id=org_id)
     return requeued

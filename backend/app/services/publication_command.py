@@ -247,7 +247,9 @@ def compute_next_attempt_at(
     return now + timedelta(seconds=delay)
 
 
-async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID) -> PublicationCommand | None:
+async def retry_dead_letter_command(
+    db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, only_paused: bool = False,
+) -> PublicationCommand | None:
     """story #3414 AC5 — `dead_letter` **또는 `blocked`**(연결 복구 대기) 상태인 command를
     사람이 다시 큐에 올린다. 페드루 리뷰 블로커B — 원래 `dead_letter`만 받았는데,
     토큰 만료로 `blocked`된 **예약** 명령은 owner가 재인증한 뒤에도 갈 길이 없었다
@@ -266,6 +268,12 @@ async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, comm
         ).with_for_update()
     )).scalar_one_or_none()
     if command is None or command.status not in ("dead_letter", "blocked"):
+        return None
+    # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩
+    # 잠근다. 그 사이 다른 tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면
+    # 사람의 «재시도 필요» 판단을 우회해 되살리면 안 된다 — 잠근 뒤 pause 차단이 맞는지 다시 본다.
+    # 사람이 누르는 재시도(기본값 False)는 예전 그대로.
+    if only_paused and not (command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED):
         return None
     command.status = "pending"
     command.next_attempt_at = None
@@ -305,15 +313,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
 
     paused, pause_reason = await is_external_publish_paused(db, org_id=command.org_id)
     if paused:
-        await record_publication_attempt(
-            db, command=command, approval_check="paused", adapter_called=False,
-            started_at=now, finished_at=now, result_code=None,
-        )
-        command.status = "blocked"
-        command.failure_kind = FAILURE_KIND_PAUSED
-        command.last_error = (
-            f"EXTERNAL_PUBLISH_PAUSED: {pause_reason}" if pause_reason else "EXTERNAL_PUBLISH_PAUSED"
-        )
+        await _block_for_external_publish_pause(db, command, now=now, reason=pause_reason)
         return
 
     if command.content_kind == "site_post":
@@ -365,6 +365,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         get_channel_post_draft,
         publish_channel_post_draft,
     )
+    from app.services.external_publish_pause import ExternalPublishPausedError
     from app.services.generation_budget import GenerationBudgetExceededError
     from app.services.x_publish_budget import API_USAGE_BUDGET_RULE_KEY
     from app.services.youtube_quota import YouTubeQuotaExceededError
@@ -546,6 +547,13 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             error_code, last_error = "CHANNEL_PUBLISH_PROVIDER_ERROR", str(exc)
     except ChannelPublishInProgressError as exc:
         error_code, last_error = "CHANNEL_PUBLISH_IN_PROGRESS", str(exc)
+    except ExternalPublishPausedError as exc:
+        # story #4195 ② — 워커 진입 검사(위 _process_one_command)를 통과한 직후 pause가 켜져
+        # publish_channel_post_draft 안 두 번째 검사에 걸린 경우. 예전엔 여기 절이 없어 아래
+        # 미분류 실패로 떨어져 백오프·attempt 증가 → 길면 dead_letter(resume 대상 밖)였다.
+        # 진입 검사와 같은 분기로 — 어댑터는 안 불렸다.
+        await _block_for_external_publish_pause(db, command, now=now, reason=exc.reason)
+        return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("publication_command 처리 중 미분류 예외 command_id=%s", command.id)
@@ -601,6 +609,7 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
     kind`)를 그대로 재사용 — `site_posts.py::SitePostExternalPublishError.error_code`가
     그 표의 기존 문자열(CHANNEL_CONNECTION_NOT_ACTIVE 등)을 그대로 쓰므로 새 매핑을
     안 만든다."""
+    from app.services.external_publish_pause import ExternalPublishPausedError
     from app.services.site_posts import (
         SitePostExternalPublishError,
         publish_site_post_external_command,
@@ -630,6 +639,12 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+        return
+    except ExternalPublishPausedError as exc:
+        # story #4195(PO 리뷰) — 지금 이 분기가 부르는 publish_site_post_external_command엔 pause 검사가 없어
+        # 실제로는 안 오지만(검사는 즉시-발행 publish_site_post_from_draft에만), 채널 분기와 같은 규칙을 여기도
+        # 둔다 — 나중에 발행 경로 안에 검사가 들어와도 미분류 실패(→dead_letter)로 새지 않게.
+        await _block_for_external_publish_pause(db, command, now=now, reason=exc.reason)
         return
     except SitePostExternalPublishError as exc:
         error_code, last_error = exc.error_code, str(exc)
@@ -992,6 +1007,22 @@ async def _sweep_stuck_container_created_publications(db: AsyncSession, *, now: 
     return queued
 
 
+async def _block_for_external_publish_pause(
+    db: AsyncSession, command: PublicationCommand, *, now: datetime, reason: str | None,
+) -> None:
+    """story #3953/#4195 — 조직 pause로 이 명령을 멈춘다. 워커 진입 검사와 발행 함수 안 두 번째 검사
+    (channel_posts.publish_channel_post_draft) 둘 다 이 한 분기로 간다 — `blocked`·`failure_kind=paused`,
+    attempt_count·백오프는 안 건드린다(실패가 아니라 대기). 해제(resume)와 크론 자가복구 스윕이 이
+    failure_kind만 골라 되살린다."""
+    await record_publication_attempt(
+        db, command=command, approval_check="paused", adapter_called=False,
+        started_at=now, finished_at=now, result_code=None,
+    )
+    command.status = "blocked"
+    command.failure_kind = FAILURE_KIND_PAUSED
+    command.last_error = f"EXTERNAL_PUBLISH_PAUSED: {reason}" if reason else "EXTERNAL_PUBLISH_PAUSED"
+
+
 async def process_due_publication_commands(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3414 AC3 — cron 워커의 유일한 진입점. `scheduled_at`(예약 시각, null=즉시라
     이미 동기 경로가 처리했어야 함 — 여기 남아 있다면 그 동기 경로가 중간에 죽은
@@ -1015,6 +1046,14 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     # 방금 큐잉된 command는 next_attempt_at=+30s라 아래 SELECT엔 안 걸린다(같은
     # tick 즉시완료 특혜 0 — 다음 tick이 잇는다).
     await _sweep_stuck_container_created_publications(db, now=now)
+    # story #4195 ① — pause가 풀린 조직의 `blocked/paused` 명령 자가복구. resume의 1회 스캔은 그 순간
+    # 워커가 들고 있던(pause를 읽고 blocked를 아직 커밋 안 한 in_progress) 명령을 못 본다 — 그 명령은
+    # 해제 뒤에 blocked/paused로 내려앉아 영구 정체였다. 매 tick이 «지금 안 멈춘 조직인데 pause로
+    # 막힌 명령»을 다시 보므로 경합 창이 한 tick 뒤로 닫힌다(재큐는 pending 전환뿐 — 같은 행이라 중복 0).
+    from app.services.external_publish_pause import requeue_paused_commands_of_unpaused_orgs
+
+    await requeue_paused_commands_of_unpaused_orgs(db)
+    await db.commit()
     rows = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.status == "pending",

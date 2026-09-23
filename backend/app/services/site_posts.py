@@ -1094,9 +1094,10 @@ async def publish_site_post_from_draft(
 
     # story #3953(블루프린트 §1-5) — channel_posts.py::publish_channel_post_draft와
     # 동형 위치(게이트 재검증보다 먼저, 어댑터 호출까지 안 가는 검사 중 가장 싸다).
-    # 즉시-발행 라우터·워커(_process_one_site_post_command) 둘 다 이 함수를 그대로
-    # 부르므로 여기 한 번이 두 경로를 동시에 막는다. 예약 자체는 안 막는다(command
-    # 생성 경로엔 이 검사가 없다).
+    # ⚠️story #4195 정정: 이 함수는 즉시-발행 라우터(routers/site_posts.py)만 부른다 — 워커
+    # (_process_one_site_post_command)는 publish_site_post_external_command를 부르고, 그쪽 pause는
+    # 워커 진입 검사(publication_command._process_one_command)가 막는다. 예약 자체는 안 막는다
+    # (command 생성 경로엔 이 검사가 없다).
     from app.services.external_publish_pause import ExternalPublishPausedError, is_external_publish_paused
 
     paused, pause_reason = await is_external_publish_paused(db, org_id=org_id)
