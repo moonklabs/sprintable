@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { isCommentOnlyContent, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
+import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
 import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -432,8 +432,12 @@ export function ChatBubble({
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
-  const isCommentOnly = isCommentOnlyContent(displayContent)
-    && (message.attachments?.length ?? 0) === 0 && (message.references?.length ?? 0) === 0;
+  // story #4197·#4200(유나 결정) — 보여 줄 글자 0(빈 문자열·공백뿐·주석뿐, 단일 술어 hasNoVisibleText)이면 기본 텍스트
+  // 말풍선 자리에서: 첨부가 있으면 말풍선을 생략하고 첨부만, 첨부가 없으면 «표시할 내용이 없는 메시지예요».
+  // references 메타는 조건에 없다 — 참조 카드는 본문 안 entity 토큰이 있어야 그려지고, 토큰이 있으면 글자가 0이 아니다.
+  // 삭제·차단·승인·이벤트·서버 커맨드·HITL·커맨드 분기가 먼저 이긴다(그 메시지는 본문이 비어도 카드로 그려진다).
+  const noVisibleText = hasNoVisibleText(displayContent);
+  const hasAttachments = (message.attachments?.length ?? 0) > 0;
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (message.sender_name || t('team'));
@@ -630,14 +634,6 @@ export function ChatBubble({
                 {t('blockedSenderMessageReveal')}
               </button>
             </div>
-          ) : isCommentOnly ? (
-            // story #4197(유나 확정) — 주석을 걷고 나면 글자가 없고 첨부·참조 카드도 없는 메시지. 빈 말풍선 대신
-            // «삭제된 메시지»와 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
-              isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
-            }`} data-testid="chat-bubble-empty-placeholder">
-              {t('emptyMessagePlaceholder')}
-            </div>
           ) : approvalTarget ? (
             <ApprovalRequestCard
               target={approvalTarget}
@@ -687,12 +683,22 @@ export function ChatBubble({
                 </div>
               )}
             </div>
+          ) : noVisibleText ? (
+            hasAttachments ? null : (
+              // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
+              // 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
+              <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
+                isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+              }`} data-testid="chat-bubble-empty-placeholder">
+                {t('emptyMessagePlaceholder')}
+              </div>
+            )
           ) : (
             /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛
                bg-primary(solid 채색)+text-primary-foreground(흰 글자)를 proof-blue-soft
                (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
+            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-proof-blue-soft'
                 : 'rounded-tl-sm bg-proof-panel'

@@ -70,6 +70,14 @@ export function isCommentOnlyContent(content: string): boolean {
 }
 
 /**
+ * story #4200(유나 결정) — «보여 줄 글자 0»의 단일 술어: 빈 문자열·공백뿐·주석뿐. 말풍선의 두 분기(첨부 있으면
+ * 텍스트 말풍선 생략 · 첨부 없으면 빈 본문 문구)가 이 함수 하나만 부른다 — 따로 두면 판정이 또 갈린다.
+ */
+export function hasNoVisibleText(content: string): boolean {
+  return content.trim() === '' || isCommentOnlyContent(content);
+}
+
+/**
  * 마크다운 문법이 전혀 없는(평문 경로 — whitespace-pre-wrap) 본문에서 주석을 줄 단위로 걷는다. 코드·인용·목록 문법이
  * 없을 때만 쓰므로(호출부가 판정) 원문 정규식이 코드를 해칠 자리가 없다. 유나 design: 주석을 뺀 같은 메시지와 줄 수가
  * 같아야 한다 — 주석만 있던 줄은 줄바꿈까지, 줄 머리·꼬리는 곁 공백까지, 줄 가운데는 공백 하나, 앞뒤 빈 줄은 걷는다.

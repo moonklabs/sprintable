@@ -2407,3 +2407,84 @@ describe('ChatBubble — 본문의 내부 HTML 주석 제거(story #4197)', () =
     expect(text()).not.toContain('undefined');
   });
 });
+
+// story #4200(유나 확정) — 보여 줄 글자 0 + 첨부 있음 → 텍스트 말풍선(빈 16px 알약)을 그리지 않고 첨부만.
+describe('ChatBubble — 첨부 전용 메시지는 텍스트 말풍선 생략(story #4200)', () => {
+  const PDF = { url: 'chat/proj/conv/report.pdf', name: 'report.pdf', content_type: 'application/pdf' };
+  const IMG = { url: 'chat/proj/conv/shot.png', name: 'shot.png', content_type: 'image/png' };
+  async function render(content: string, attachments: ChatMessage['attachments'], isMine = false) {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content, references: [], deleted_at: null, attachments }} isMine={isMine} />));
+    });
+    return container;
+  }
+
+  it.each([
+    ['본문 빈 문자열 + 파일 첨부', '', [PDF]],
+    ['본문 공백뿐 + 이미지 첨부', '  \n ', [IMG]],
+    ['주석만 + 파일 첨부', '<!-- linear-comment-id: abc -->', [PDF]],
+  ])('%s → 텍스트 말풍선 0 · 첨부 1 · 빈 본문 문구 0', async (_n, content, attachments) => {
+    const c = await render(content, attachments as ChatMessage['attachments']);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(0);
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).toBeNull();
+    // 파일은 이름 글자로, 이미지는 로딩 틀·이미지의 aria-label(=이름)로 첨부가 그려졌는지 본다.
+    const name = attachments[0]!.name;
+    expect((c.textContent ?? '').includes(name) || c.querySelector(`[aria-label="${name}"]`) !== null).toBe(true);
+  });
+
+  it('내 메시지(오른쪽 정렬)도 같은 규칙', async () => {
+    const c = await render('', [PDF], true);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(0);
+    expect(c.textContent).toContain('report.pdf');
+  });
+
+  it('음성대조 — 글자 있음 + 첨부 → 텍스트 말풍선 그대로 + 첨부', async () => {
+    const c = await render('보고서 올려요', [PDF]);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(1);
+    expect(c.textContent).toContain('보고서 올려요');
+    expect(c.textContent).toContain('report.pdf');
+  });
+
+  it('음성대조 — 코드 안 주석 + 첨부 → 코드가 보이니 말풍선 유지', async () => {
+    const c = await render('```\n<!-- keep -->\n```', [PDF]);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(1);
+    expect(c.textContent).toContain('<!-- keep -->');
+  });
+});
+
+// story #4200(유나 결정 · PO) — 자리표시 조건 = «보여 줄 글자 0 그리고 첨부 0»(references 메타는 조건 밖). 첨부 0인데 빈
+// 말풍선이 남던 세 경우를 문구로 · 판정은 단일 술어(hasNoVisibleText)라 두 분기가 갈릴 수 없다.
+describe('ChatBubble — 글자 0·첨부 0이면 빈 본문 문구(story #4200 유나 결정)', () => {
+  const REF = [{ entity_type: 'doc', entity_id: 'doc-1', title: '문서' }] as unknown as ChatMessage['references'];
+  async function render(content: string, extra: Partial<ChatMessage> = {}) {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content, references: [], attachments: [], deleted_at: null, ...extra }} isMine={false} />));
+    });
+    return container;
+  }
+  const placeholder = () => container.querySelector('[data-testid="chat-bubble-empty-placeholder"]');
+  const textBubbles = () => container.querySelectorAll('[data-testid="chat-bubble-text"]');
+
+  it.each([
+    ['빈 문자열(16px 알약이던 자리)', '', {}],
+    ['공백뿐(39px 빈 말풍선이던 자리)', '   ', {}],
+    ['주석뿐 + references 메타(16px 알약이던 자리)', '<!-- linear-comment-id: abc -->', { references: REF }],
+  ])('%s → 빈 본문 문구 · 텍스트 말풍선 0', async (_n, content, extra) => {
+    await render(content, extra as Partial<ChatMessage>);
+    expect(placeholder()?.textContent).toBe(koMessages.chats.emptyMessagePlaceholder);
+    expect(textBubbles()).toHaveLength(0);
+  });
+
+  it('음성대조 — 글자 1자면 텍스트 말풍선(문구 0)', async () => {
+    await render('a');
+    expect(placeholder()).toBeNull();
+    expect(textBubbles()).toHaveLength(1);
+  });
+
+  it('음성대조 — 글자 0 + 첨부 1이면 문구도 말풍선도 없이 첨부만', async () => {
+    await render('', { attachments: [{ url: 'chat/p/c/a.pdf', name: 'a.pdf', content_type: 'application/pdf' }] });
+    expect(placeholder()).toBeNull();
+    expect(textBubbles()).toHaveLength(0);
+    expect(container.textContent).toContain('a.pdf');
+  });
+});
