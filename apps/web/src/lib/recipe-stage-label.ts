@@ -23,9 +23,10 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   editing: 'recipeStageLabelEditing',
   pending_approval: 'recipeStageLabelPendingApproval',
   published: 'recipeStageLabelPublished',
-  // story #4175 — 뉴스레터 프리셋(preset.marketing.newsletter) 단계. draft·published는 위 값 재사용.
+  // story #4175 — 뉴스레터 프리셋(preset.marketing.newsletter) 단계. draft는 위 값 재사용.
   collect: 'recipeStageLabelCollect',
   review: 'recipeStageLabelReview',
+  campaign_created: 'recipeStageLabelCampaignCreated',
   send_requested: 'recipeStageLabelSendRequested',
   send_checked: 'recipeStageLabelSendChecked',
 };

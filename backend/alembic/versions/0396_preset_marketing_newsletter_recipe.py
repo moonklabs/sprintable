@@ -4,10 +4,12 @@
 놓는 데이터 마이그레이션뿐이다. 규격은 story #4172 doc(7ca3cab5) §4를 그대로 따른다.
 
 흐름(6단계)과 기대는 메커니즘 — 전부 이미 있는 계약이다:
-  collect(Creator) 소재 모으기
+  collect(Creator) 소재 수집
   → draft(Creator) 초안
   → review(Director, gate=external_publish) 사람이 내용을 검수·승인
-  → published(Publisher, capability publish → channel_connection) 승인된 초안으로 Stibee 캠페인 생성
+  → campaign_created(Publisher, capability publish → channel_connection) 승인된 초안으로 Stibee 캠페인 생성
+    (슬러그를 영상의 `published`와 따로 둔다 — 라벨이 «발행»으로 풀려 발송 승인 앞에서 «이미 나갔다»로 읽혔다,
+    유나 design. 자동 발행은 슬러그가 아니라 다음 단계의 capability.target을 본다)
     (Stibee는 channel post 채널 — 레시피 external_publish 승인과 초안 게이트가 서로 승계되고, 다음
     stage가 channel_connection이면 자동 발행된다. doc §2 «channel post» 행)
   → send_requested(Publisher, gate=newsletter_send) 발송 요청 — 수신 대상·예약 시각을 봉인하고 사람이
@@ -19,8 +21,8 @@
 payload_schema는 additionalProperties=false라 발송 단계의 봉인 필드 3개를 선택 속성으로 연다(필수 여부는
 스키마가 아니라 봉인 필드 검사가 발송 단계에서만 가른다 — 다른 단계 이벤트엔 없어도 된다).
 
-역할은 기존 어휘 재사용(Creator·Director·Publisher — FE stage-role 표에 이미 있음). 새 stage slug 4개
-(collect·review·send_requested·send_checked)는 같은 PR에서 FE recipe-stage-label 표·messages ko/en에 등재
+역할은 기존 어휘 재사용(Creator·Director·Publisher — FE stage-role 표에 이미 있음). 새 stage slug 5개
+(collect·review·campaign_created·send_requested·send_checked)는 같은 PR에서 FE recipe-stage-label 표·messages ko/en에 등재
 (doc §4.7 필수, tests/test_4188_platform_preset_user_copy_guard_realdb.py가 강제).
 
 Revision ID: 0396
@@ -42,7 +44,7 @@ depends_on = None
 
 _KEY = "preset.marketing.newsletter"
 
-_STAGE_SLUGS = ["collect", "draft", "review", "published", "send_requested", "send_checked"]
+_STAGE_SLUGS = ["collect", "draft", "review", "campaign_created", "send_requested", "send_checked"]
 
 _PAYLOAD_SCHEMA = {
     "type": "object",
@@ -71,7 +73,7 @@ _STAGE_METADATA = {
         "role": "Director", "action": "내용 검수 후 캠페인 만들기 승인",
         "gate": {"type": "external_publish", "approver": "org_owner"},
     },
-    "published": {
+    "campaign_created": {
         "role": "Publisher", "action": "승인된 초안으로 Stibee 캠페인 만들기",
         "capability": {"kind": "publish", "target": "channel_connection"},
     },
@@ -97,7 +99,7 @@ _BLOCK_TEMPLATE = {
 
 _NAME = "뉴스레터"
 _DESCRIPTION = (
-    "소재 모으기부터 발송 결과 확인까지 6단계예요. 내용 검수와 발송 두 곳만 사람이 승인하고, "
+    "소재 수집부터 발송 결과 확인까지 6단계예요. 내용 검수와 발송 두 곳만 사람이 승인하고, "
     "나머지는 에이전트가 진행해요."
 )
 

@@ -125,6 +125,21 @@ def test_send_stage_gate_fields_are_open_in_payload_schema():
         assert spec.name in _MIG._PAYLOAD_SCHEMA["properties"], spec.name
 
 
+def test_review_approval_auto_publishes_into_campaign_created_stage():
+    """유나 design(PR #4554) — 캠페인 생성 단계 슬러그를 영상의 `published`에서 `campaign_created`로 갈랐다(라벨
+    «발행»이 발송 승인 앞에서 «이미 나갔다»로 읽혔다). 레시피 자동 발행(channel_posts.publish_recipe_approved_draft)은
+    슬러그가 아니라 «게이트 단계 바로 다음 단계의 capability.target»을 본다 — 그 판정 재료가 그대로인지 고정."""
+    from types import SimpleNamespace
+
+    from app.routers.events import _next_recipe_stage
+
+    definition = SimpleNamespace(key=_KEY, payload_schema=_MIG._PAYLOAD_SCHEMA, stage_metadata=_MIG._STAGE_METADATA)
+    nxt = _next_recipe_stage(definition, "review")
+    assert nxt == "campaign_created"
+    assert _MIG._STAGE_METADATA[nxt]["capability"]["target"] == "channel_connection"
+    assert "published" not in _MIG._STAGE_SLUGS  # 라벨 «발행»(=나감)과 섞이지 않게
+
+
 # ── AC2 멘션 자기설명 ────────────────────────────────────────────────────────────
 
 
@@ -153,7 +168,7 @@ async def test_self_description_names_next_publish_tool_and_payload_at_every_sta
             assert "지금 사람 승인 게이트가 열려 있어요" in rendered[gated]
             assert example not in rendered[gated]
         # ⭐발송 단계로 넘기는 예시 — 봉인 필드 3개와 각 설명(이게 빠지면 에이전트가 봉인 필드를 몰라 422).
-        to_send = rendered["published"]
+        to_send = rendered["campaign_created"]
         assert '"stage": "send_requested"' in to_send
         for field in ("publication_id", "segment_name", "scheduled_at"):
             assert f'"{field}"' in to_send, field
