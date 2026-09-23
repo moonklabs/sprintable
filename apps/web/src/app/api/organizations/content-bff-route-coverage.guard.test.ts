@@ -3,11 +3,17 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * story #3445 — content 화면이 fetchWithAuth로 부르는 `/api/organizations/...` 경로마다
+ * story #3445 — FE가 fetchWithAuth로 부르는 `/api/organizations/...` 경로마다
  * 대응하는 BFF route.ts+메서드가 실제로 존재하는지 소스를 훑어 대조한다. 채널 포스트 상세
  * 단건 GET(drafts/[draftId])이 형제 5개(cancel-scheduled·publish·submit·unpublish·versions)
  * 만 있고 정작 이 라우트가 없어 상세 첫 로드가 항상 404였던 결함 — page.test는 fetchWithAuth를
  * 목킹해 이 클래스의 결함을 원천적으로 못 잡는다(project_built_but_nowhere_to_run_class).
+ *
+ * story #3953 CHANGES(페드루 PO 리뷰, 2026-09-23) — 예전엔 이름 붙인 폴더 목록
+ * (CONTENT_DIRS)만 스캔해서, "목록 밖 새 화면이 목록 밖 라우트를 부르는" 바로 그
+ * 결함 클래스가 가드 밖에 남아 있었다(사람이 목록에 추가하는 걸 잊으면 조용히
+ * 통과). 지금은 `apps/web/src` 전체(테스트 파일 제외)를 스캔한다 — 새 화면·
+ * 컴포넌트를 등재하는 사람 규율에 의존하지 않는다.
  *
  * ⛔이 가드가 못 잡는 것:
  * - fetchWithAuth 호출이 아닌 곳(별도 헬퍼로 감싼 호출, 서버 컴포넌트의 직접 fetch)
@@ -15,36 +21,30 @@ import { describe, expect, it } from 'vitest';
  * - `/api/organizations/` 밖의 BFF 경로(예: `/api/gates`) — 스코프 밖
  * - fetchWithAuth 호출부터 200자 밖에 있는 `method:` 옵션(위양성 방지용 탐색 폭 제한 —
  *   해당 클래스는 지금까지 전부 같은 줄이거나 바로 다음 줄이라 실측상 미발생)
- * - **동적 세그먼트를 리터럴 형제 디렉터리가 전부 흡수하는 경우**(Next.js는 같은
- *   레벨에서 리터럴 이름이 `[bracket]` 동적보다 항상 우선) — `resolveRouteDir`는
- *   이 우선순위를 모델링하지 않아 위양성(RED인데 실은 라이브 정상)을 낸다. 실측
- *   사례: `pasted-secret-connect-card.tsx`의 `channel-connections/${channel}`
- *   POST는 실제로 `channel`이 항상 wordpress|ghost|stibee 중 하나(각각 자기 리터럴
- *   route.ts에 POST 有)라 `[channel]/route.ts` 부재가 라이브 결함이 아니다(2026-09-23
- *   확認, story #3953 CHANGES 작업 중 발견) — 그래서 `components/channel-connect`
- *   디렉터리 전체가 아니라 실제 결함이 있던 파일 하나만 스캔 대상에 추가한다(아래).
+ *
+ * **동적 세그먼트를 리터럴 형제 디렉터리가 전부 흡수하는 경우**(Next.js는 같은
+ * 레벨에서 리터럴 이름이 `[bracket]` 동적보다 항상 우선)는 위양성을 낼 수 있다
+ * (`[channel]`·`[operation]` 자리에 route.ts가 없어도, 실제 값의 우주가 전부
+ * 자기 리터럴 route.ts를 가진 형제 폴더라면 라이브는 정상). 이 가드는 그 우주를
+ * `KNOWN_LITERAL_FANOUTS`에 **명시적으로 선언한 자리에서만** 리터럴 형제로
+ * 대체 검사한다 — 선언 없는 동적 세그먼트는 기본값 그대로 **RED**(닫힌 실패,
+ * 새 호출이 이 구멍에 몰래 올라타는 것 방지). 실측 사례(2026-09-23, `apps/web/src`
+ * 전체 스캔 91곳 중 2곳):
+ *   - `channel-connections/${channel}` POST(pasted-secret-connect-card.tsx) →
+ *     wordpress|ghost|stibee, 각자 자기 route.ts에 POST 有.
+ *   - `ads-boosts/${gateId}/${operation}` POST(boost-execution-control.tsx) →
+ *     start|pause|resume, 각자 자기 route.ts에 POST 有.
  */
 
-const CONTENT_DIRS = [
-  join(__dirname, '../../../app/(authenticated)/content'),
-  join(__dirname, '../../../components/content'),
-  // story #3503(성과 보드 화면, PO 브리프 명시) — 이 화면은 content 밖(organization/
-  // insights-board)에 살지만 같은 클래스(`/api/organizations/...` fetchWithAuth 호출)를
-  // 부른다. 이 배열에 안 넣으면 이 스토리가 새로 만든 BFF 호출부(GET insights-board·
-  // POST publications/{id}/follow-ups)가 이 가드의 스캔 대상에서 그냥 빠진다(가드가
-  // 조용히 통과하지만 실은 아무것도 검사 안 한 것 — 이 파일 상단 스캔 대상 0건 방지
-  // 테스트가 있는 이유와 같은 함정).
-  join(__dirname, '../../../app/(authenticated)/organization/insights-board'),
-  join(__dirname, '../../../components/insights-board'),
-  // story #3953 CHANGES(페드루 PO 실측, 2026-09-23) — `/organization/channels`의
-  // `ExternalPublishPauseCard`(components/channel-connect)가 부르는 BFF 라우트가
-  // 이 배열 밖이라 이 가드가 못 잡고 놓쳤던 결함(GET 404 → catch가 삼켜 카드가
-  // 조용히 안 뜸). 위 insights-board 주석과 같은 함정 — 새 org 화면/컴포넌트
-  // 디렉터리는 반드시 이 배열에 추가한다.
-  join(__dirname, '../../../app/(authenticated)/organization/channels'),
-  join(__dirname, '../../../components/channel-connect/external-publish-pause-card.tsx'),
-];
+const SRC_ROOT = join(__dirname, '../../..');
 const API_ROOT = join(__dirname, '../../../app/api');
+
+/** 키 = 'api' 제외, 변수명을 그대로 살린 세그먼트 경로(마지막 세그먼트가 그
+ * 우주여야 함 — route.ts가 그 리터럴 폴더 바로 안에 있는 경우만 지원). */
+const KNOWN_LITERAL_FANOUTS: Record<string, string[]> = {
+  'organizations/${orgId}/channel-connections/${channel}': ['wordpress', 'ghost', 'stibee'],
+  'organizations/${orgId}/ads-boosts/${gateId}/${operation}': ['start', 'pause', 'resume'],
+};
 
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -58,14 +58,6 @@ function listSourceFiles(dir: string): string[] {
     }
   }
   return out;
-}
-
-/** CONTENT_DIRS 항목은 디렉터리(재귀 스캔)이거나 단일 파일(위 ⛔ 항목처럼 형제
- * 파일의 기지 위양성을 피하려 파일 하나만 콕 집어야 할 때)일 수 있다. */
-function listSourceEntry(path: string): string[] {
-  const st = statSync(path);
-  if (st.isFile()) return /\.tsx?$/.test(path) && !path.includes('.test.') ? [path] : [];
-  return listSourceFiles(path);
 }
 
 interface CallSite {
@@ -90,7 +82,9 @@ function extractCalls(files: string[]): CallSite[] {
   return calls;
 }
 
-/** `${orgId}` 등 인터폴레이션을 dynamic 마커로, 나머지는 리터럴 세그먼트로 쪼갠다. */
+/** `${orgId}` 등 인터폴레이션을 dynamic 마커로, 나머지는 리터럴 세그먼트로 쪼갠다.
+ * dynamic 세그먼트는 `value`에 원문(`${orgId}` 등 변수명 포함)을 그대로 보존한다 —
+ * KNOWN_LITERAL_FANOUTS 조회 키가 이 원문에 의존한다. */
 function templateSegments(template: string): { value: string; dynamic: boolean }[] {
   const withoutQuery = template.split('?')[0];
   return withoutQuery
@@ -115,14 +109,36 @@ function resolveRouteDir(segments: { value: string; dynamic: boolean }[]): strin
   return dir;
 }
 
+/** 마지막 세그먼트가 KNOWN_LITERAL_FANOUTS에 선언된 동적 우주라면, 그 우주의
+ * 리터럴 형제 디렉터리들을 반환한다(선언 없으면 null — 닫힌 실패로 떨어진다). */
+function resolveFanoutDirs(segments: { value: string; dynamic: boolean }[]): string[] | null {
+  const key = segments.slice(1).map((s) => s.value).join('/');
+  const literals = KNOWN_LITERAL_FANOUTS[key];
+  if (!literals) return null;
+  const parentDir = resolveRouteDir(segments.slice(0, -1));
+  if (!parentDir) return null;
+  return literals.map((lit) => join(parentDir, lit));
+}
+
 function exportsMethod(routeTsPath: string, method: string): boolean {
   const src = readFileSync(routeTsPath, 'utf8');
   return new RegExp(`export\\s+async\\s+function\\s+${method}\\b`).test(src)
     || new RegExp(`export\\s+function\\s+${method}\\b`).test(src);
 }
 
-describe('content BFF 경로 커버리지 가드(story #3445)', () => {
-  const files = CONTENT_DIRS.flatMap((d) => listSourceEntry(d));
+function routeTsExistsAndExports(dir: string, method: string): { exists: boolean; exportsIt: boolean; routeTs: string } {
+  const routeTs = join(dir, 'route.ts');
+  let exists = true;
+  try {
+    statSync(routeTs);
+  } catch {
+    exists = false;
+  }
+  return { exists, exportsIt: exists && exportsMethod(routeTs, method), routeTs };
+}
+
+describe('org BFF 경로 커버리지 가드(story #3445, story #3953 CHANGES — apps/web/src 전체)', () => {
+  const files = listSourceFiles(SRC_ROOT);
   const calls = extractCalls(files);
 
   it('스캔 대상이 비어있지 않다(가드 자체가 죽은 채 항상 통과하는 것 방지)', () => {
@@ -139,16 +155,24 @@ describe('content BFF 경로 커버리지 가드(story #3445)', () => {
 
     it(`${call.template} [${call.method}] → route.ts 존재 + 메서드 export (${call.file.split('/src/')[1]})`, () => {
       const dir = resolveRouteDir(segments);
-      expect(dir, `${call.template} 에 대응하는 BFF 디렉터리를 찾지 못함`).not.toBeNull();
-      const routeTs = join(dir as string, 'route.ts');
-      let exists = true;
-      try {
-        statSync(routeTs);
-      } catch {
-        exists = false;
+      if (dir) {
+        const direct = routeTsExistsAndExports(dir, call.method);
+        if (direct.exists) {
+          expect(direct.exportsIt, `${direct.routeTs} 가 ${call.method} export 안 함`).toBe(true);
+          return;
+        }
       }
-      expect(exists, `route.ts 없음: ${routeTs}`).toBe(true);
-      expect(exportsMethod(routeTs, call.method), `${routeTs} 가 ${call.method} export 안 함`).toBe(true);
+
+      // 일반 경로에 route.ts가 없으면(디렉터리 자체 미해소 포함), 선언된
+      // 리터럴 우주로만 구제한다(선언 없으면 아래 not.toBeNull()에서 그대로
+      // RED — 새 호출은 기본이 닫힌 실패).
+      const fanoutDirs = resolveFanoutDirs(segments);
+      expect(fanoutDirs, `${call.template} 에 대응하는 BFF 디렉터리를 찾지 못함(리터럴 우주 선언도 없음)`).not.toBeNull();
+      for (const fdir of fanoutDirs as string[]) {
+        const { exists, exportsIt, routeTs } = routeTsExistsAndExports(fdir, call.method);
+        expect(exists, `route.ts 없음: ${routeTs}`).toBe(true);
+        expect(exportsIt, `${routeTs} 가 ${call.method} export 안 함`).toBe(true);
+      }
     });
   }
 });
