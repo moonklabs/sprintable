@@ -63,6 +63,13 @@ export function presetDescription(def: PresetLike, t: Translate): string {
 // 워크플로우 ko·en = 새 문안(원문의 내부어를 걷음). 같은 문장을 쓰는 워크플로우 단계(배정·제출·검토)는 한 키를 공유한다.
 // BE 짝 가드(test_4202_platform_preset_copy_keys_realdb.py)가 시드의 action 있는 단계 전수 ↔ 이 표를 잰다.
 export const PLATFORM_PRESET_ACTION_KEY: Record<string, string> = {
+  'preset.marketing.blog_article:concept_confirmed': 'blogArticleActionConceptConfirmed',
+  'preset.marketing.blog_article:draft': 'blogArticleActionDraft',
+  'preset.marketing.blog_article:editing': 'blogArticleActionEditing',
+  'preset.marketing.blog_article:pending_approval': 'blogArticleActionPendingApproval',
+  'preset.marketing.blog_article:publish_checked': 'blogArticleActionPublishChecked',
+  'preset.marketing.blog_article:published': 'blogArticleActionPublished',
+  'preset.marketing.blog_article:verification': 'blogArticleActionVerification',
   'preset.marketing.newsletter:campaign_created': 'newsletterActionCampaignCreated',
   'preset.marketing.newsletter:collect': 'newsletterActionCollect',
   'preset.marketing.newsletter:draft': 'newsletterActionDraft',

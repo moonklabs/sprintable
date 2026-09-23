@@ -257,8 +257,12 @@ async def test_every_next_stage_line_is_localized():
             en = await _render_event_message_content(s, org_id=uuid.uuid4(), definition=d, payload=payload, resolved_locale="en")
             assert f"- {en_line}" in en, (stage, en)
             assert "다음 단계" not in en, (stage, en)
+            # PO 12:37Z — 같은 본문의 머리 줄·할 일 줄도 en(유나: en 본문 안 언어 섞임).
+            assert en.startswith("[Event] preset.marketing.blog_article\n"), (stage, en)
+            assert "- To do: " in en and "할 일" not in en and "[이벤트]" not in en, (stage, en)
             ko = await _render_event_message_content(s, org_id=uuid.uuid4(), definition=d, payload=payload, resolved_locale="ko")
             assert f"- {ko_line}" in ko, (stage, ko)
+            assert ko.startswith("[이벤트] preset.marketing.blog_article\n") and "- 할 일: " in ko, (stage, ko)
 
     await _with_session(body)
 
@@ -300,6 +304,71 @@ async def test_verdict_next_action_uses_recipe_line_only_in_recipe_context(monke
                 )
         assert recipe_line in rendered[True], rendered[True]
         assert human_line in rendered[False] and recipe_line not in rendered[False], rendered[False]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_context_e2e():
+    """까디르 P2(4572 CHANGES) — 양성 E2E 한 줄: 에이전트가 블로그 초안을 만들고 제출 → **제출 응답의 `draft_id`**(이 PR이
+    응답에 더함 · 안내 문구가 그 이름을 가리킨다) → 실제 발행 경로(`publish_registry_event`)로 «발행 승인 대기» 단계를 그
+    값의 `site_post_draft_id`와 함께 발행 → `resolve_site_post_recipe_context`가 레시피 문맥을 돌려준다. fail-closed(음성)만
+    재면 «제출 응답에 그 값이 없어 늘 안 걸림»을 못 잡는다. 음성 짝: 연결 없이 발행한 회차는 문맥 None.
+    뮤테이션: 제출 응답의 draft_id 제거 → 응답 키 없음으로 RED."""
+    from fastapi import BackgroundTasks
+    from sqlalchemy import select
+    from starlette.requests import Request as StarletteRequest
+
+    import app.routers.events as events
+    from app.dependencies.auth import AuthContext
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from tests.test_4189_hosted_site_gate_scope_realdb import (
+        _create_and_submit_hosted_draft,
+        _seed,
+        _session_factory,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        _body, submit = await _create_and_submit_hosted_draft(app, Session, seeded)
+        assert "draft_id" in submit, submit
+        draft_id = uuid.UUID(submit["draft_id"])
+
+        auth = AuthContext(
+            user_id=str(seeded["agent_id"]), email=None,
+            claims={"app_metadata": {"api_key_id": str(uuid.uuid4())}}, org_id=str(seeded["org_id"]),
+        )
+
+        async def publish(payload):
+            async with Session() as s:
+                resp = await events.publish_registry_event(
+                    events.EventPublishRequest(definition_key=_KEY, payload=payload),
+                    BackgroundTasks(), StarletteRequest(scope={"type": "http", "headers": []}),
+                    db=s, auth=auth, org_id=seeded["org_id"],
+                )
+                msg = (await s.execute(
+                    select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(resp["message_id"]))
+                )).scalar_one()
+                return msg
+
+        base = {"work_item_type": "story", "work_item_id": str(seeded["story_id"])}
+        # 음성 짝 먼저 — 연결 없이 발행한 회차.
+        await publish({**base, "stage": "pending_approval"})
+        async with Session() as s:
+            assert await events.resolve_site_post_recipe_context(
+                s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=draft_id,
+            ) is None
+
+        msg = await publish({**base, "stage": "pending_approval", events.RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)})
+        assert msg.msg_metadata["event"]["payload"][events.RECIPE_SITE_DRAFT_LINK_FIELD] == str(draft_id)
+        async with Session() as s:
+            got = await events.resolve_site_post_recipe_context(
+                s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=draft_id,
+            )
+        assert got == (_KEY, "published")
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

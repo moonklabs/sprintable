@@ -436,8 +436,8 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Create the blog draft for the same story using create_site_post_draft.",
     },
     "events.capability_hint_submit_site_post": {
-        "ko": "검수를 마친 초안은 submit_site_post_draft로 제출하고, 돌려받은 draft_id를 다음 단계 발행의 site_post_draft_id에 넣어요 — 발행 승인은 사람이 결재함의 그 초안에서 해요.",
-        "en": "Submit the reviewed draft using submit_site_post_draft and put the returned draft_id in site_post_draft_id when you publish the next stage — a person approves publishing on that draft in Approvals.",
+        "ko": "검수를 마친 초안은 submit_site_post_draft로 제출하고, 제출 응답의 draft_id를 다음 단계 발행의 site_post_draft_id에 넣어요 — 발행 승인은 사람이 결재함의 그 초안에서 해요.",
+        "en": "Submit the reviewed draft using submit_site_post_draft and put the draft_id from the submit response in site_post_draft_id when you publish the next stage — a person approves publishing on that draft in Approvals.",
     },
     "events.capability_hint_site_post_auto_publish": {
         "ko": "승인된 초안은 서버가 블로그에 발행했어요. get_site_post_publication으로 공개 주소를 확인해요.",
@@ -448,6 +448,14 @@ _CATALOG: dict[str, dict[str, str]] = {
     "events.stage_next_label": {
         "ko": "다음 단계: {stage}",
         "en": "Next stage: {stage}",
+    },
+    "events.event_line_header": {
+        "ko": "[이벤트] {event_key}",
+        "en": "[Event] {event_key}",
+    },
+    "events.stage_action_label": {
+        "ko": "할 일: {action}",
+        "en": "To do: {action}",
     },
     "events.stage_next_none": {
         "ko": "다음 단계: 없음(마지막 stage)",

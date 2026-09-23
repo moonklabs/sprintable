@@ -1979,10 +1979,11 @@ async def _render_event_message_content(
     # 토큰으로. work_item_ref/*_doc_id와 같은 "실재하는 것만" 원칙(없으면 원문 그대로).
     rendered_action = await _tokenize_embedded_entity_refs(db, org_id=org_id, text=action)
 
+    # story #4174(유나 · PO 12:37Z) — 머리 줄·할 일 줄도 로케일 키(«다음 단계» 줄들과 같은 방식) — en 본문 안에 한국어가 섞이지 않게.
     lines = [
-        f"[이벤트] {definition.key}",
+        t("events.event_line_header", resolved_locale, event_key=definition.key),
         f"- stage: {stage} ({role})",
-        f"- 할 일: {rendered_action}",
+        f"- {t('events.stage_action_label', resolved_locale, action=rendered_action)}",
     ]
 
     # story #4088(E-RECIPE-1, PO 분담조정 2026-09-21 "2/2") — 리허설 1호 실측 구멍 ①②:
@@ -2051,7 +2052,7 @@ async def _render_event_message_content(
         if _after_next is not None and _stage_capability_kind(
             definition.stage_metadata.get(_after_next)
         ) in _SERVER_DRIVEN_CAPABILITY_KINDS:
-            _example_base_payload = {**_example_base_payload, RECIPE_SITE_DRAFT_LINK_FIELD: "<draft_id from submit_site_post_draft>"}
+            _example_base_payload = {**_example_base_payload, RECIPE_SITE_DRAFT_LINK_FIELD: "<draft_id from the submit_site_post_draft response>"}
         example_json = _next_stage_publish_payload_json(definition, next_stage, _example_base_payload)
         lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
         if _next_gate_decl is not None:
