@@ -103,10 +103,18 @@ async def _resolve_publication_and_work_item(
 async def request_newsletter_send(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, segment_name: str,
     scheduled_at: datetime, requester_member_id: uuid.UUID,
+    neutral_facts: dict | None = None, designated_approver_id: uuid.UUID | None = None,
+    expected_work_item_id: uuid.UUID | None = None,
 ) -> Gate:
+    """사람 API(routers/newsletter_send.py)와 레시피 발송 단계(recipe_gate_hooks.py, story
+    #4191) 공용. 뒤의 세 인자는 레시피 경로만 넘긴다(사람 경로 무변): 결재 카드용 neutral_facts·
+    지정 승인자, 그리고 `expected_work_item_id` — 발행물이 그 work item에 걸린 게 아니면 없는
+    발행물과 똑같이 거부한다(다른 스토리의 발행물로 발송 게이트를 여는 경로 차단, 존재 비노출)."""
     publication, work_item_id = await _resolve_publication_and_work_item(
         db, org_id=org_id, publication_id=publication_id,
     )
+    if expected_work_item_id is not None and work_item_id != expected_work_item_id:
+        raise NewsletterPublicationNotFoundError(publication_id)
 
     role_id = await _default_role_id(db, org_id)
     if role_id is None:
@@ -117,6 +125,7 @@ async def request_newsletter_send(
     gate = await create_gate(
         db, org_id, work_item_id, "story", _NEWSLETTER_SEND_GATE_TYPE,
         requester_member_id, role_id, scope_key=str(publication_id),
+        neutral_facts=neutral_facts, designated_approver_id=designated_approver_id,
     )
 
     now = datetime.now(timezone.utc)

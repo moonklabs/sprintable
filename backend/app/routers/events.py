@@ -2314,7 +2314,20 @@ async def _publish_registry_event_core(
     # 먼저 정착시킨다(routing_resolver 호출과 동일 컴포지션 스타일 — 인라인 분기 아님).
     # definition에 이 stage의 gate 선언이 없으면 완전 no-op(AC3 회귀 0).
     from app.services.generation_budget import GenerationBudgetExceededError
+    from app.services.newsletter_send import (
+        NewsletterApproverRoleMissingError,
+        NewsletterPublicationChannelError,
+        NewsletterPublicationNotFoundError,
+        NewsletterPublicationNotPublishedError,
+    )
     from app.services.recipe_gate_hooks import MissingGateSealedFieldError, maybe_create_stage_gate
+
+    _NEWSLETTER_SEND_ERRORS = {
+        NewsletterPublicationNotFoundError: (404, "NEWSLETTER_SEND_PUBLICATION_NOT_FOUND", "newsletter_send.publication_not_found"),
+        NewsletterPublicationChannelError: (422, "NEWSLETTER_SEND_INVALID_CHANNEL", "newsletter_send.invalid_channel"),
+        NewsletterPublicationNotPublishedError: (409, "NEWSLETTER_SEND_NOT_PUBLISHED", "newsletter_send.not_published"),
+        NewsletterApproverRoleMissingError: (409, "NEWSLETTER_SEND_APPROVER_ROLE_MISSING", "newsletter_send.approver_role_missing"),
+    }
 
     try:
         await maybe_create_stage_gate(
@@ -2346,6 +2359,13 @@ async def _publish_registry_event_core(
                     gate_type=e.gate_type, fields=", ".join(e.missing_fields),
                 ),
             },
+        ) from e
+    except tuple(_NEWSLETTER_SEND_ERRORS) as e:
+        # story #4191 — 레시피 발송 단계가 사람 API와 같은 서비스(request_newsletter_send)로 발송
+        # 요청을 연다. 거부도 사람 API(routers/newsletter_send.py)와 같은 코드·상태·문구로 낸다.
+        status_code, code, catalog_key = _NEWSLETTER_SEND_ERRORS[type(e)]
+        raise HTTPException(
+            status_code=status_code, detail={"code": code, "message": t(catalog_key, resolved_locale)},
         ) from e
 
     # story #3337(선생님 4바퀴 실사고) — 위 게이트 훅과 같은 컴포지션 지점, 같은 원칙(정의에
