@@ -1,43 +1,61 @@
-// story #2613(PR #2824 승계) — BE(PR #3096) 구조화 403 계약 파서·메시지 빌더 순수 로직 검증.
+// story #2613(PR #2824 승계, story #4181 CHANGES) — BE(PR #3096) 구조화 403 계약
+// 파서·메시지 빌더 순수 로직 검증. 픽스처는 백엔드가 실제로 만드는 JSON 그대로다 —
+// `HTTPException(detail={code, message, details})`을 main.py::http_exception_handler가
+// `{data: null, error: {code, message, details}, meta: null}`로 펼친 최종 응답 봉투
+// (story #4181: 이전 픽스처는 `{ detail: {...} }`였는데 이건 파서가 실제로 받는 모양이
+// 아니라, 파서 구현과 픽스처가 서로한테만 맞춰져 있어 결함이 로컬 테스트로는 안 잡혔던
+// 원인 그 자체 — project_built_but_nowhere_to_run_class와 같은 급의 함정).
 import { describe, expect, it } from 'vitest';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from './agent-message-policy-error';
 
+/** backend/app/main.py::http_exception_handler의 dict-detail 승격 로직을 그대로
+ * 재현한다 — `raise HTTPException(status_code=403, detail={code, message, details})`가
+ * 최종적으로 FE에 도달하는 JSON 봉투. */
+function httpExceptionEnvelope(detail: { code: string; message: string; details: unknown }) {
+  return { data: null, error: { code: detail.code, message: detail.message, details: detail.details }, meta: null };
+}
+
 describe('parseAgentMessagePolicyDenied', () => {
   it('allowlist_miss — agent_id·member_id 둘 다 있는 정상 계약을 파싱한다', () => {
-    const body = { detail: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', member_id: 'm-1', reason: 'allowlist_miss' } } };
+    const body = httpExceptionEnvelope({ code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', member_id: 'm-1', reason: 'allowlist_miss' } });
     expect(parseAgentMessagePolicyDenied(body)).toEqual({ agent_id: 'a-1', member_id: 'm-1', reason: 'allowlist_miss' });
   });
 
   it('created_by_none — member_id 없어도(agent_id만) 파싱된다', () => {
-    const body = { detail: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'created_by_none' } } };
+    const body = httpExceptionEnvelope({ code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'created_by_none' } });
     expect(parseAgentMessagePolicyDenied(body)).toEqual({ agent_id: 'a-1', member_id: undefined, reason: 'created_by_none' });
   });
 
   it('creator_not_participant도 파싱된다', () => {
-    const body = { detail: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'creator_not_participant' } } };
+    const body = httpExceptionEnvelope({ code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'creator_not_participant' } });
     expect(parseAgentMessagePolicyDenied(body)?.reason).toBe('creator_not_participant');
   });
 
   it('code가 다른 계약(예: invalid_payload)은 null — 다른 4xx와 안 섞인다', () => {
-    const body = { detail: { code: 'invalid_payload', message: 'x', details: {} } };
+    const body = httpExceptionEnvelope({ code: 'invalid_payload', message: 'x', details: {} });
     expect(parseAgentMessagePolicyDenied(body)).toBeNull();
   });
 
   it('reason이 화이트리스트 밖(미지 값)이면 null — 모르는 사유를 아는 척 안 한다', () => {
-    const body = { detail: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'some_future_reason' } } };
+    const body = httpExceptionEnvelope({ code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'some_future_reason' } });
     expect(parseAgentMessagePolicyDenied(body)).toBeNull();
   });
 
-  it('body가 null/문자열/detail 없음이면 전부 null(방어적)', () => {
+  it('body가 null/문자열/error 없음이면 전부 null(방어적)', () => {
     expect(parseAgentMessagePolicyDenied(null)).toBeNull();
     expect(parseAgentMessagePolicyDenied('plain string')).toBeNull();
     expect(parseAgentMessagePolicyDenied({})).toBeNull();
-    expect(parseAgentMessagePolicyDenied({ detail: 'not an object' })).toBeNull();
-    expect(parseAgentMessagePolicyDenied({ detail: { code: 'AGENT_MESSAGE_POLICY_DENIED' } })).toBeNull();
+    expect(parseAgentMessagePolicyDenied({ error: 'not an object' })).toBeNull();
+    expect(parseAgentMessagePolicyDenied({ error: { code: 'AGENT_MESSAGE_POLICY_DENIED' } })).toBeNull();
+  });
+
+  it('옛(잘못된) body.detail 모양은 더 이상 안 통한다(회귀 가드 — 이번 결함 재발 방지)', () => {
+    const body = { detail: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-1', reason: 'created_by_none' } } };
+    expect(parseAgentMessagePolicyDenied(body)).toBeNull();
   });
 
   it('agent_id가 문자열이 아니면 null', () => {
-    const body = { detail: { code: 'AGENT_MESSAGE_POLICY_DENIED', details: { agent_id: 123, reason: 'created_by_none' } } };
+    const body = httpExceptionEnvelope({ code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 123, reason: 'created_by_none' } });
     expect(parseAgentMessagePolicyDenied(body)).toBeNull();
   });
 });
