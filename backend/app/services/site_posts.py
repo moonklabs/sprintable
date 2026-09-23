@@ -1122,7 +1122,7 @@ async def publish_site_post_from_draft(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
-    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
+    # story #3478(0328) — scope_key=목적지(site_post_gate_scope_key — 자사 블로그는 "hosted_site", story #4189).
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
@@ -1350,7 +1350,7 @@ async def request_site_post_external_publish(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
-    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
+    # story #3478(0328) — scope_key=목적지(site_post_gate_scope_key — 자사 블로그는 "hosted_site", story #4189).
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
