@@ -217,5 +217,29 @@ def test_4206_ci_push_branch_uses_push_range_with_fallback():
     __ALL__ 폴백을 유지한다(정적 대조 — 이 배선이 빠지면 develop push가 다시 전 파일 RED 후보)."""
     ci = open(os.path.join(os.path.dirname(__file__), "..", "..", ".github", "workflows", "ci.yml")).read()
     assert "PUSH_BEFORE_SHA: ${{ github.event.before }}" in ci
-    assert 'classify_backend_test_diff_scope.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}"' in ci
+    assert 'classify_backend_test_diff_scope.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}" two-dot' in ci
     assert "grep -qE '^0+$'" in ci
+
+
+def test_4206_rewinding_force_push_two_dot_sees_the_reverted_app_change(tmp_path):
+    """까디르 P2 — 되감는 force push(after가 before의 조상): 세 점은 merge-base=after라 빈 집합(백엔드 변경을 놓침),
+    push 모드(two-dot)는 before→after로 되돌려진 app 코드를 변경으로 본다(__ALL__). 뮤테이션: two-dot 분기를 세 점으로
+    되돌리면 RED."""
+    repo, _base = _init_repo(tmp_path)
+    after = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    _write(repo, "backend/app/routers/other.py", "x = 3\n")
+    _git(repo, "commit", "-q", "-am", "pushed then rewound")
+    before = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    three_dot = subprocess.run(
+        ["bash", "backend/scripts/classify_backend_test_diff_scope.sh", before, after],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    assert _line1(three_dot) == ""  # 옛 판정의 구멍 그대로(대조)
+    two_dot = subprocess.run(
+        ["bash", "backend/scripts/classify_backend_test_diff_scope.sh", before, after, "two-dot"],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    assert two_dot.returncode == 0, two_dot.stderr
+    assert _line1(two_dot) == "__ALL__"
+    assert _line2(two_dot) == "app/routers/other.py"

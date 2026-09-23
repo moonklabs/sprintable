@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -389,12 +390,23 @@ def absolute_slow_threshold_sec(
     return max(weight * multiplier, base_seconds)
 
 
+# story #4206(까디르 P1 · PO 결정 2026-09-23 09:45Z) — 러너 배율 상한. 상한이 없으면 코드발 전역 둔화(conftest·공용
+# 픽스처가 모든 파일을 3·5배 느리게)도 대조군 중앙값을 같이 올려 판정선이 따라 올라가 RED 0이 된다. 1.5 근거: 오늘
+# RED 20건 픽스처는 상한 1.22 이상이면 전부 통과로 유지되고(최대 관측 배율은 2.07이었지만 20건을 막는 데는 1.5로 충분),
+# 상한 밖 전역 둔화는 다시 RED로 잡힌다. ⚠️남는 한계(수치): 판정선 = 등재 weight × 2.5(ABSOLUTE_SLOW_MULTIPLIER) × 배율
+# (≤1.5)라 코드발 전역 둔화는 등재값의 3.75배를 넘어야 RED다 — 그 아래는 이 가드가 못 잡고, 배율이
+# RUNNER_FACTOR_WARN(1.3)을 넘으면 잡 요약에 경고 줄로만 보인다.
+RUNNER_FACTOR_CAP = 1.5
+RUNNER_FACTOR_WARN = 1.3
+
+
 def runner_speed_factor(
     elapsed_by_file: dict[str, float],
     weights: dict[str, float],
     *,
     exclude: frozenset[str] = frozenset(),
     provisional_files: frozenset[str] = frozenset(),
+    cap: float | None = RUNNER_FACTOR_CAP,
 ) -> float:
     """story #4206 — 이 run의 러너 속도 배율. 같은 샤드의 **판정 대상이 아닌** 파일(`exclude` = 변경 파일 밖,
     provisional 제외)을 대조군으로 elapsed/weight 중앙값을 낸다. 절대 임계를 **올리기만** 한다(1.0 미만은 1.0 —
@@ -409,7 +421,8 @@ def runner_speed_factor(
     ratios = weighted_ratios(control, weights)
     if len(ratios) < MIN_RATIO_SAMPLE:
         return 1.0
-    return max(1.0, statistics.median(ratios))
+    factor = max(1.0, statistics.median(ratios))
+    return min(factor, cap) if cap is not None else factor
 
 
 def provisional_files_in(entries: list[dict]) -> frozenset[str]:
@@ -816,6 +829,21 @@ def _save_drift_state(path: Path, *, run_id: str | None, streaks: dict[str, int]
     path.write_text(json.dumps({"run_id": run_id, "streaks": streaks}, indent=2, sort_keys=True))
 
 
+def _warn_runner_factor(raw_factor: float, applied: float) -> None:
+    """story #4206(PO 결정) — 배율이 RUNNER_FACTOR_WARN을 넘으면 크게 보이게: annotation + 잡 요약(GITHUB_STEP_SUMMARY).
+    1.0~1.5배 전역 둔화는 판정선이 흡수하므로(RED 아님) 이 줄이 그 둔화를 사람에게 보이는 유일한 자리다."""
+    message = (
+        f"⚠️ 러너 속도 배율 {raw_factor:.2f}(적용 {applied:.2f}, 상한 {RUNNER_FACTOR_CAP}) — 이 샤드의 무관 파일이 등재값보다 "
+        f"{raw_factor:.2f}배 느렸다. 러너 부하일 수도, 코드발 전역 둔화(conftest·공용 픽스처)일 수도 있다 — "
+        f"{RUNNER_FACTOR_CAP}배 이하 전역 둔화는 이 가드가 RED로 못 잡는다."
+    )
+    print(f"::warning::{message}")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(f"\n## {message}\n")
+
+
 def _check_elapsed_mode(elapsed_path: Path, *, changed_files_path: Path | None = None) -> int:
     """story #4152 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
     호출한다. #3396의 run-relative 중앙값 정규화 대신 `slow_files_absolute`(파일 자신의
@@ -832,10 +860,16 @@ def _check_elapsed_mode(elapsed_path: Path, *, changed_files_path: Path | None =
     runner_factor = runner_speed_factor(
         elapsed_by_file, weights, exclude=changed_files or frozenset(), provisional_files=provisional,
     )
+    raw_factor = runner_speed_factor(
+        elapsed_by_file, weights, exclude=changed_files or frozenset(), provisional_files=provisional, cap=None,
+    )
     print(
-        f"러너 속도 배율(story #4206 — 대조군 elapsed/weight 중앙값, 1.0 미만은 1.0): {runner_factor:.2f}",
+        f"러너 속도 배율(story #4206 — 대조군 elapsed/weight 중앙값, 1.0 미만은 1.0 · 상한 {RUNNER_FACTOR_CAP}): "
+        f"실측 {raw_factor:.2f} → 적용 {runner_factor:.2f}",
         file=sys.stderr,
     )
+    if raw_factor > RUNNER_FACTOR_WARN:
+        _warn_runner_factor(raw_factor, runner_factor)
 
     red, warn = slow_files_absolute(
         elapsed_by_file, weights, provisional_files=provisional, changed_files=changed_files,

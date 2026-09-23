@@ -95,12 +95,12 @@ jobs:
             echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
             echo "gateway_relevant=true" >> "$GITHUB_OUTPUT"
             # story #4206 — 전량 실행(fail-closed)은 그대로 두되, 러너 정규화 가드의 «어느 파일이 이 push의
-            # 변경인가»는 push 범위(before..after)로 판정한다. 예전엔 diff 정보 없음 → __ALL__(전 파일 RED 후보)이라
+            # 변경인가»는 push 범위(before→after, 두 점 diff — 되감는 force push도 잡게, 까디르 P2)로 판정한다. 예전엔 diff 정보 없음 → __ALL__(전 파일 RED 후보)이라
             # develop push마다 러너가 느린 시간대면 무관 파일로 필수 체크가 RED였다(2026-09-23 35829164703·
             # 35833427833). before가 없거나(새 브랜치 0000…) 이력에 없으면 예전 폴백 그대로.
             if [ -n "${PUSH_BEFORE_SHA}" ] && ! printf '%s' "${PUSH_BEFORE_SHA}" | grep -qE '^0+$' \
               && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
-              CLASSIFY_OUTPUT="$(bash backend/scripts/classify_backend_test_diff_scope.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}")"
+              CLASSIFY_OUTPUT="$(bash backend/scripts/classify_backend_test_diff_scope.sh "${PUSH_BEFORE_SHA}" "${PUSH_AFTER_SHA}" two-dot)"
               echo "backend_test_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '1p')" >> "$GITHUB_OUTPUT"
               echo "backend_app_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '2p')" >> "$GITHUB_OUTPUT"
               echo "backend_mixed_test_files_changed=$(printf '%s\n' "${CLASSIFY_OUTPUT}" | sed -n '3p')" >> "$GITHUB_OUTPUT"
