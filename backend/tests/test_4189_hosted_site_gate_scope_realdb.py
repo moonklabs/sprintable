@@ -244,13 +244,14 @@ async def test_publish_does_not_accept_recipe_gate_as_hosted_approval():
         await engine.dispose()
 
 
-async def test_recipe_approval_does_not_cascade_to_unseen_hosted_gate():
-    """AC2 정정(story #4190, PO 판정 2026-09-23) — 초안 먼저 제출 → 레시피 게이트 승인. 자사 블로그 초안은 레시피
-    승인 화면에 안 보이므로(봉인 대상 아님) hosted_site 게이트를 승계하지 않는다 → 승인 전 발행 거부 → 사람이 자사
-    게이트를 승인하면 gate_id 없이 발행 성공(슬롯 분리 뒤 자사 단독 경로 그대로)."""
+async def test_recipe_approval_of_the_shown_hosted_draft_cascades_and_publishes():
+    """AC2 재정정(story #4190, PO 판정 2026-09-23 12:03Z) — 자사 블로그 초안도 이제 레시피 승인 화면의 블로그 초안 카드
+    (`linked_site_draft`)로 보인다. 초안 먼저 제출 → 레시피 게이트를 **화면이 본 버전을 싣고** 승인 → hosted_site 게이트가
+    캐스케이드 승계 → 발행 201. 본 버전 없이 승인하면 409(`RecipeReviewedDraftChangedError`) · 두 게이트 pending."""
     from app.main import app
-    from app.services.gate_service import set_gate_status, transition_gate
     from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+    from app.services.gate_service import RecipeReviewedDraftChangedError, transition_gate
 
     engine, Session = await _session_factory()
     try:
@@ -261,18 +262,23 @@ async def test_recipe_approval_does_not_cascade_to_unseen_hosted_gate():
         hosted_id = uuid.UUID(submit["gate_id"])
 
         async with Session() as s:
-            await transition_gate(s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"])
-            await s.commit()
-
+            with pytest.raises(RecipeReviewedDraftChangedError):
+                await transition_gate(s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"])
+            await s.rollback()
         assert (await _gate(Session, hosted_id)).status == "pending"
-        assert (await _publish(app, Session, seeded, body)).status_code != 201
 
         async with Session() as s:
-            g = await s.get(Gate, hosted_id)
-            set_gate_status(g, "approved", now=datetime.now(timezone.utc))
-            g.resolver_id = seeded["om_id"]
-            g.resolved_at = datetime.now(timezone.utc)
+            screen = await to_gate_response(s, seeded["org_id"], await s.get(Gate, recipe_gate_id))
+        card = screen.linked_site_draft
+        assert card is not None and card.channel is None  # 자사 블로그 — 목적지 줄 없음
+        async with Session() as s:
+            await transition_gate(
+                s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"],
+                reviewed_draft=(card.draft_id, card.version),
+            )
             await s.commit()
+
+        assert (await _gate(Session, hosted_id)).status == "approved"
         r = await _publish(app, Session, seeded, body)
         assert r.status_code == 201, r.text
     finally:
