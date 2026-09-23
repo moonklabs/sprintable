@@ -80,33 +80,35 @@ describe('MobileTabBar — 탭 href에 세션 의존 flat 경로 0(story #4211 A
   });
 });
 
-// story #4211(까디르 QA) — flat 경로 프로젝트 전환(`?p=B` push → /api/switch-project → router.refresh) 창에서 서버 slug는
-// 아직 A라, 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게 slug는 탭 effective 프로젝트와 같을 때만 싣는다.
-describe('slugForEffectiveProject — 전환 창에서 옛 프로젝트 직접 경로 0(story #4211 까디르 QA)', () => {
-  it('전환 창(effective B · 서버 slug A) → slug 없음 → 탭바·사이드바 href 둘 다 bare', async () => {
+// story #4211(까디르 QA 2회) — slug는 «slug를 조회한 프로젝트(경로 ?? 세션)»와 탭 effective 프로젝트가 같을 때만.
+describe('slugForEffectiveProject — 딥링크·전환 창·refresh 뒤(story #4211 까디르 QA)', () => {
+  it('⭐딥링크(세션 A · 경로 B · slug B · effective B) → /{ws}/B/… (세션 A로 보내지 않는다)', async () => {
     const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
-    const slug = slugForEffectiveProject('proj-a', 'alpha', 'proj-b');
+    const slug = slugForEffectiveProject({ pathProjectId: 'proj-b', sessionProjectId: 'proj-a', slug: 'beta', effectiveProjectId: 'proj-b' });
+    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/acme/beta/flow');
+  });
+
+  it('flat 전환 창(경로 없음 · 세션 A · slug A · effective B) → bare', async () => {
+    const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
+    const slug = slugForEffectiveProject({ pathProjectId: undefined, sessionProjectId: 'proj-a', slug: 'alpha', effectiveProjectId: 'proj-b' });
     expect(slug).toBeUndefined();
     expect(scopedResourceHref('flow', 'acme', slug)).toBe('/flow');
   });
 
-  it('refresh 뒤(서버 slug B · effective B) → /{org}/{B}/…', async () => {
+  it('refresh 뒤(세션 B · slug B · effective B) → /{ws}/B/…', async () => {
     const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
-    const slug = slugForEffectiveProject('proj-b', 'beta', 'proj-b');
-    expect(slug).toBe('beta');
+    const slug = slugForEffectiveProject({ pathProjectId: undefined, sessionProjectId: 'proj-b', slug: 'beta', effectiveProjectId: 'proj-b' });
     expect(scopedResourceHref('flow', 'acme', slug)).toBe('/acme/beta/flow');
   });
 
-  it('배선 핀 — 대시보드 셸이 이 값 하나를 컨텍스트(탭바)와 사이드바(ShellBody) 둘 다에 넘긴다', async () => {
+  it('배선 핀 — 대시보드 셸이 경로 id·세션 id를 넘기고, 그 값 하나를 컨텍스트(탭바)와 사이드바(ShellBody) 둘 다에', async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const src = readFileSync(join(__dirname, '..', '..', 'app', 'dashboard', 'dashboard-shell.tsx'), 'utf8');
-    expect(src).toMatch(/const scopedProjectSlug = slugForEffectiveProject\(projectId, currentProjectSlug, effectiveProjectId\);/);
+    expect(src).toMatch(/slugForEffectiveProject\(\{\s*pathProjectId, sessionProjectId: projectId, slug: currentProjectSlug, effectiveProjectId,\s*\}\)/);
     expect(src).toMatch(/currentProjectSlug: scopedProjectSlug,/);
     expect(src).toMatch(/currentProjectSlug=\{scopedProjectSlug\}/);
-    // 원시 서버 slug를 그대로 넘기는 자리가 남아 있으면 안 된다(한쪽만 막으면 갈린다). 남는 1곳은 ShellBody가 **받은**
-    // (이미 걸러진) prop을 AppSidebar로 그대로 넘기는 통로뿐이다.
+    // 원시 서버 slug를 그대로 넘기는 자리는 ShellBody가 **받은**(이미 걸러진) prop을 AppSidebar로 넘기는 통로 1곳뿐.
     expect(src.match(/currentProjectSlug=\{currentProjectSlug\}/g) ?? []).toHaveLength(1);
-    expect(src).not.toMatch(/projectName: effectiveProjectName, currentProjectSlug, /);
   });
 });

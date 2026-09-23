@@ -108,14 +108,18 @@ export function scopedResourceHref(resource: string, orgSlug: string | undefined
 }
 
 /**
- * story #4211(까디르 QA) — 직접 경로에 쓸 project slug는 **이 탭의 effective 프로젝트**의 것일 때만. 서버가 준 slug
- * (`currentProjectSlug`)는 me.project_id 기준이라, flat 경로에서 프로젝트를 바꾸면(`?p=B` push → `/api/switch-project`
- * → `router.refresh()`) refresh가 새 서버 prop을 가져오기 전까지 A의 slug로 남는다 — 그 창에 탭바·사이드바가
- * `/{ws}/A/…`로 **명시적으로 옛 프로젝트**를 가리켰다(bare였다면 쿠키가 이미 B라 B로 풀렸다). 탭 effective 프로젝트와
- * slug의 프로젝트가 다르면 slug를 버려 bare(서버 307 no-store 해소)로 — 탭바·사이드바가 같은 값(대시보드 셸 한 곳)을 받는다.
+ * story #4211(까디르 QA 2회) — 직접 경로에 쓸 project slug는 **이 탭의 effective 프로젝트**의 것일 때만.
+ * - slug가 가리키는 프로젝트 = `pathProjectId ?? sessionProjectId`(layout.tsx가 그 id로 slug를 조회한다 — 딥링크
+ *   `/{ws}/B/…`면 경로의 B, flat 경로면 세션 me.project_id). 비교 대상은 **그 id**여야 한다 — 세션 id와 비교하면 세션이
+ *   A인 채 B 딥링크를 볼 때 slug B·effective B인데도 slug를 버려 탭바·사이드바가 세션 A로 보냈다(1차 수정 회귀).
+ * - flat 경로 프로젝트 전환(`?p=B` push → `/api/switch-project` → `router.refresh()`) 창에선 slug가 아직 A라 effective
+ *   B와 갈린다 → slug를 버려 bare(서버 307 no-store 해소). refresh 뒤 slug B → 다시 직접 경로.
+ * 탭바·사이드바가 같은 값(대시보드 셸 한 곳)을 받는다.
  */
-export function slugForEffectiveProject(
-  serverProjectId: string | undefined, serverProjectSlug: string | undefined, effectiveProjectId: string | undefined,
-): string | undefined {
-  return serverProjectSlug && serverProjectId && effectiveProjectId === serverProjectId ? serverProjectSlug : undefined;
+export function slugForEffectiveProject(args: {
+  pathProjectId: string | undefined; sessionProjectId: string | undefined;
+  slug: string | undefined; effectiveProjectId: string | undefined;
+}): string | undefined {
+  const slugProjectId = args.pathProjectId ?? args.sessionProjectId;
+  return args.slug && slugProjectId && args.effectiveProjectId === slugProjectId ? args.slug : undefined;
 }

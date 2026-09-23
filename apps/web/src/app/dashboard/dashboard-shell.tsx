@@ -442,7 +442,9 @@ export function DashboardShell({
   // (flat 경로 프로젝트 전환 → router.refresh 전)이 있다. 그 창에 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게
   // slug는 effective 프로젝트와 같을 때만 싣는다(다르면 undefined → bare 안전망). 이 값 하나를 컨텍스트(탭바·⌘K 등)와
   // 사이드바(ShellBody→AppSidebar) 둘 다에 넘긴다 — 한쪽만 막으면 또 갈린다.
-  const scopedProjectSlug = slugForEffectiveProject(projectId, currentProjectSlug, effectiveProjectId);
+  const scopedProjectSlug = slugForEffectiveProject({
+    pathProjectId, sessionProjectId: projectId, slug: currentProjectSlug, effectiveProjectId,
+  });
 
   // story #2007(perf·서버부하): GNB 채팅 unread 총합을 AppSidebar+MobileTabBar가 각자
   // useChatUnreadTotal()을 호출해 SSE(EventSource) 연결을 독립적으로 2개 열던 것을 한
