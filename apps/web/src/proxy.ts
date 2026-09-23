@@ -285,7 +285,18 @@ async function redirectLegacyResourcePath(
   const url = request.nextUrl.clone();
   url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
   url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
-  return sessionDependentRedirect(url);
+  const response = sessionDependentRedirect(url);
+  // story #4219 G2(PO 판정) — 이 307이 가리키는 `/{org}/{project}`를 방금 org 소속(단건 조회 = /resolve와 같은 판정)·project
+  // 접근(has_project_access)까지 확인했으니, 그 결과를 기존 sp_resolve_cache(서명·50초 만료) 규칙 그대로 심는다 — 이어지는
+  // 문서 요청의 proxy가 /resolve 왕복(dev 콜드 ≈50ms)을 건너뛴다. 캐시 키가 이 307의 목적지 slug와 같아서 다른 org/project로
+  // 가는 요청엔 안 맞는다(verifyResolveCache가 slug 불일치 = 미스). 역할을 모르면(옛 백엔드) 심지 않는다.
+  if (slugs.orgRole) {
+    const token = await signResolveCache(slugs.orgSlug, slugs.projectSlug, {
+      orgId, orgSlug: slugs.orgSlug, orgRole: slugs.orgRole, projectId, projectSlug: slugs.projectSlug,
+    });
+    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, token, { ...cookieBase(), maxAge: RESOLVE_CACHE_TTL_SECONDS });
+  }
+  return response;
 }
 
 /**

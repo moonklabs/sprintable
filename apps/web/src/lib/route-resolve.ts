@@ -148,7 +148,7 @@ export async function resolveLegacyResourcePath(
   orgId: string,
   projectId: string,
   accessToken: string,
-): Promise<{ orgSlug: string; projectSlug: string } | null> {
+): Promise<{ orgSlug: string; projectSlug: string; orgRole?: string } | null> {
   try {
     const authHeader = { Authorization: `Bearer ${accessToken}` };
     // ⛔카디르 QA 근본 재진단(2026-08-09, 실측 8회 재현) — 이 함수의 project 조회(단건·리스트
@@ -162,7 +162,8 @@ export async function resolveLegacyResourcePath(
       fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { headers: authHeaderWithOrg }),
     ]);
     if (!orgRes.ok) return null;
-    const org = await orgRes.json() as { slug?: string };
+    // story #4219 G2 — role(가산 필드)이 오면 호출부가 /glance 307에 resolve 캐시를 심는다(옛 백엔드면 없음 → 안 심음).
+    const org = await orgRes.json() as { slug?: string; role?: string | null };
     if (!org.slug) return null;
 
     let projectSlug = projRes.ok ? ((await projRes.json() as { slug?: string | null }).slug ?? null) : null;
@@ -179,7 +180,7 @@ export async function resolveLegacyResourcePath(
       }
     }
     if (!projectSlug) return null;
-    return { orgSlug: org.slug, projectSlug };
+    return { orgSlug: org.slug, projectSlug, ...(org.role ? { orgRole: org.role } : {}) };
   } catch {
     return null;
   }

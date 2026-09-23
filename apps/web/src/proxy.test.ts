@@ -936,6 +936,64 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
 
   // story #4170(E-MOBILE-SPEED) — 로그인 상태 셸 진입 `/glance`가 예전엔 `/{ws}/{proj}/glance`(301) →
   // `/{ws}/{proj}/flow`(301) 두 홉이었다(dev 요청 로그: 홉 사이 왕복 0.3~0.45초). 이제 한 홉에 최종 목적지.
+  // story #4219 G2(PO 판정) — /glance 307에 그 목적지 `/{org}/{project}`의 sp_resolve_cache(서명·50초)를 심어, 이어지는 문서
+  // 요청의 /resolve 왕복(dev 콜드 ≈50ms)을 건너뛴다. 조건: 역할을 알 때만(단건 org 조회의 가산 필드) · 다른 목적지엔 안 맞음.
+  describe('story #4219 G2 — /glance 307이 목적지 resolve 캐시를 심는다', () => {
+    function mockLegacy(orgBody: Record<string, unknown>) {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => orgBody });
+        if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+    }
+    const cacheCookie = (res: Response) => (res.headers.get('set-cookie') ?? '').match(/sp_resolve_cache=([^;]+)/)?.[1];
+
+    it('⭐역할을 알면 307과 함께 캐시를 심고 → 그 쿠키로 목적지 문서를 열면 /resolve 호출 0', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs', role: 'admin' });
+      const first = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(first.status).toBe(307);
+      expect(first.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+      const cache = cacheCookie(first);
+      expect(cache).toBeTruthy();
+
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue({ ok: false, status: 500 });
+      const next = await middleware(makeRequest('/moonklabs/sprintable/flow', { sp_at: token, sp_resolve_cache: cache! }));
+      expect(next.status).toBe(200);
+      expect(mockFetch.mock.calls.filter(([u]) => String(u).includes('/api/v2/resolve'))).toEqual([]);
+      expect(next.headers.get('x-middleware-request-x-resolved-project-id')).toBe('proj-1');
+      expect(next.headers.get('x-middleware-request-x-resolved-org-id')).toBe('org-1');
+    });
+
+    it('다른 org/project 문서엔 그 캐시가 안 맞는다(slug 불일치 = /resolve 호출)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs', role: 'admin' });
+      const cache = cacheCookie(await middleware(makeRequest('/glance', { sp_at: token })))!;
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-2', project_slug: 'other' }) });
+      await middleware(makeRequest('/moonklabs/other/flow', { sp_at: token, sp_resolve_cache: cache }));
+      expect(mockFetch.mock.calls.some(([u]) => String(u).includes('/api/v2/resolve'))).toBe(true);
+    });
+
+    it('역할을 모르면(옛 백엔드 응답) 캐시를 안 심는다', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs' });
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.status).toBe(307);
+      expect(cacheCookie(res)).toBeUndefined();
+    });
+
+    it('프로젝트를 못 정해 선택 화면으로 가는 갈래엔 캐시를 안 심는다', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      mockLegacy({ id: 'org-1', slug: 'moonklabs', role: 'admin' });
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.headers.get('location') ?? '').not.toContain('/moonklabs/');
+      expect(cacheCookie(res)).toBeUndefined();
+    });
+  });
+
   describe('story #4170 — 옛 flat 리소스는 한 홉에 최종 목적지', () => {
     function mockResolve() {
       mockFetch.mockImplementation((url: string) => {
