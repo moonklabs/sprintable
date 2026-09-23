@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Bot, TrendingUp, Trophy, Zap, Clock, CheckCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Badge } from '@/components/ui/badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -85,10 +86,14 @@ function formatDuration(ms: number): string {
 
 export function AgentPerformancePanel() {
   const t = useTranslations('agentPerformance');
+  const tc = useTranslations('common');
   const { projectId } = useDashboardContext();
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [velocity, setVelocity] = useState<SprintVelocityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // story #4185(유나 design) — 묶음 호출 자체가 실패하면 전원이 «0»으로 보여 «실적 없음»과 갈리지 않았다.
+  // 실패면 숫자 칸은 «—», 섹션에 안내 한 줄+다시 시도. 묶음은 성공인데 일부 키만 빠지면 그 에이전트만 빈 지표(안내 없음).
+  const [statsLoadFailed, setStatsLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -113,22 +118,24 @@ export function AgentPerformancePanel() {
       const rankMap: Record<string, number> = {};
       sorted.forEach((e, i) => { rankMap[e.member_id] = i + 1; });
 
-      const statsResults = await Promise.allSettled(
-        agentMembers.map((m) =>
-          fetchWithAuth(`/api/analytics/agent-stats?project_id=${projectId}&agent_id=${m.id}`)
-            .then(async (r) => {
-              if (!r.ok) return null;
-              const j = await r.json() as { data: AgentStats | null };
-              return j.data;
-            })
-            .catch(() => null),
-        ),
-      );
+      // story #4185 — 에이전트마다 단건을 따로 부르던 N+1(prod 한 화면 5회+·각 0.5초)을 묶음 1회로.
+      // 실패·누락은 그 에이전트만 null(예전 단건 실패와 같은 표시).
+      let statsById: Record<string, AgentStats> = {};
+      let failed = false;
+      if (agentMembers.length > 0) {
+        const ids = agentMembers.map((m) => m.id).join(',');
+        const batch = await fetchWithAuth(`/api/analytics/agent-stats/batch?project_id=${projectId}&agent_ids=${ids}`)
+          .then(async (r) => (r.ok ? ((await r.json()) as { data: Record<string, AgentStats> | null }).data ?? {} : null))
+          .catch(() => null);
+        failed = batch === null;
+        statsById = batch ?? {};
+      }
+      setStatsLoadFailed(failed);
 
       setAgents(
-        agentMembers.map((m, i) => ({
+        agentMembers.map((m) => ({
           ...m,
-          stats: statsResults[i]?.status === 'fulfilled' ? (statsResults[i] as PromiseFulfilledResult<AgentStats | null>).value : null,
+          stats: statsById[m.id] ?? null,
           rank: rankMap[m.id] ?? null,
           balance: balanceMap[m.id] ?? 0,
         })),
@@ -165,6 +172,12 @@ export function AgentPerformancePanel() {
               <span className="text-sm font-semibold text-foreground">{t('agentStatsTitle')}</span>
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">{t('agentStatsDescription')}</p>
+            {statsLoadFailed ? (
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground" data-testid="agent-stats-load-error">
+                <span className="break-keep">{t('agentStatsLoadError')}</span>
+                <Button variant="outline" size="sm" onClick={() => void load()}>{tc('retry')}</Button>
+              </div>
+            ) : null}
           </SectionCardHeader>
           <SectionCardBody>
             {agents.length === 0 ? (
@@ -191,15 +204,15 @@ export function AgentPerformancePanel() {
                     <div className="flex flex-wrap items-center gap-4 text-xs">
                       <span className="inline-flex items-center gap-1 text-success" title={t('doneStories')}>
                         <CheckCircle className="size-3.5" />
-                        <span className="font-semibold tabular-nums">{agent.stats?.completed ?? 0}</span>
+                        <span className="font-semibold tabular-nums">{statsLoadFailed ? '—' : agent.stats?.completed ?? 0}</span>
                       </span>
                       <span className="inline-flex items-center gap-1 text-primary" title={t('assignedStories')}>
                         <Zap className="size-3.5" />
-                        <span className="font-semibold tabular-nums">{agent.stats?.total_stories ?? 0}</span>
+                        <span className="font-semibold tabular-nums">{statsLoadFailed ? '—' : agent.stats?.total_stories ?? 0}</span>
                       </span>
                       <span className="inline-flex items-center gap-1 text-muted-foreground" title={t('avgLeadTime')}>
                         <Clock className="size-3.5" />
-                        <span className="font-semibold tabular-nums">{formatDuration(agent.stats?.avg_lead_time_ms ?? 0)}</span>
+                        <span className="font-semibold tabular-nums">{statsLoadFailed ? '—' : formatDuration(agent.stats?.avg_lead_time_ms ?? 0)}</span>
                       </span>
                     </div>
                   </div>

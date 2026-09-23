@@ -197,6 +197,38 @@ async def test_get_agent_stats_404():
 
 
 @pytest.mark.anyio
+async def test_get_agent_stats_batch_200_returns_map_by_agent_id():
+    """story #4185 — 묶음 조회: {agent_id: 지표}. 프로젝트 밖 id는 repo가 빼고 온 그대로(응답에 없음)."""
+    client, session, app = await _client()
+    other = uuid.uuid4()
+    try:
+        with patch("app.repositories.analytics.AnalyticsRepository.get_agent_stats_batch", new_callable=AsyncMock) as mock_fn:
+            mock_fn.return_value = {AGENT_ID: {"completed": 3, "total_stories": 4, "done_story_points": 5, "avg_lead_time_ms": 6}}
+            async with client as c:
+                resp = await c.get(f"/api/v2/analytics/agent-stats/batch?project_id={PROJECT_ID}&agent_ids={AGENT_ID},{other},{AGENT_ID}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert list(body) == [str(AGENT_ID)]
+        assert body[str(AGENT_ID)]["completed"] == 3
+        # 중복 id는 한 번만 넘긴다.
+        assert mock_fn.await_args.args[1] == [AGENT_ID, other]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("agent_ids", ["not-a-uuid", " , ", ",".join(str(uuid.uuid4()) for _ in range(201))])
+async def test_get_agent_stats_batch_400_on_bad_or_empty_or_too_many_ids(agent_ids):
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.get(f"/api/v2/analytics/agent-stats/batch?project_id={PROJECT_ID}&agent_ids={agent_ids}")
+        assert resp.status_code == 400, resp.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_get_project_health_200():
     client, session, app = await _client()
     try:
