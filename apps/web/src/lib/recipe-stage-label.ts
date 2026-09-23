@@ -15,6 +15,9 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   concept_confirmed: 'recipeStageLabelConceptConfirmed',
   animatic: 'recipeStageLabelAnimatic',
   structure_passed: 'recipeStageLabelStructurePassed',
+  // story #4176(레시피 4호 SNS) — 영상은 예산 게이트를 structure_passed에 걸었지만 구조 단계가 없는
+  // 레시피용 공통 축 slug.
+  budget_approved: 'recipeStageLabelBudgetApproved',
   live_generation: 'recipeStageLabelLiveGeneration',
   verification: 'recipeStageLabelVerification',
   editing: 'recipeStageLabelEditing',

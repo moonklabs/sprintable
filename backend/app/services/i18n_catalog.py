@@ -425,6 +425,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "영상은 attach_channel_post_video로 초안에 첨부해요.",
         "en": "Attach the video to the draft using attach_channel_post_video.",
     },
+    # story #4176(레시피 4호 SNS) — 이미지 포스트의 첨부 단계. attach_video와 같은 축(에이전트 자기 도구).
+    "events.capability_hint_attach_image": {
+        "ko": "이미지는 attach_channel_post_image로 초안에 첨부해요.",
+        "en": "Attach the images to the draft using attach_channel_post_image.",
+    },
     # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
     # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
     # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야

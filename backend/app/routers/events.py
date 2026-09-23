@@ -1837,6 +1837,7 @@ async def _render_gate_verdict_message(
 # stage가 이미 쓰던 값(#4058/#4063), "attach_video"는 0389 마이그가 신설.
 _CAPABILITY_KIND_HINTS: dict[str, str] = {
     "attach_video": "events.capability_hint_attach_video",
+    "attach_image": "events.capability_hint_attach_image",
     "generate": "events.capability_hint_master_cut_evidence",
 }
 # story #4104(페드루 PO 리뷰, 2026-09-21) — 준비 경고 루프(apply_recipe_role_bindings)가
