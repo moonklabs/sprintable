@@ -247,6 +247,47 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
 // 읽다 실패하면 이유 없이 조용히 사라졌다(3762·3768이 만든 결함이 아니라 드러낸 자리).
 // 탭 한 자리(배너 1개)에서 사유+재시도를 말하고, 재시도가 섹션 넷을 다시 fetch하게
 // 하는지 검증한다.
+// story #4184(배포 18 라이브 PO CDP) — 하드 로드에서 첫 /api/me 응답이 끝난 **뒤에** 설정 청크가 /api/me를 한 번 더
+// 불렀다(«진행 중 공유»만으론 합칠 요청이 없다). jsdom은 절들이 첫 응답 전에 한꺼번에 마운트해 그 순서를 못 만든다 —
+// 그래서 «첫 응답이 다 끝난 뒤 같은 문서에서 설정 화면이 다시 마운트되는» 순서(뒤늦은 절 마운트 · SPA로 돌아옴)로 잰다.
+// 결과 재사용이면 두 번째 마운트는 네트워크 0 → 합계 1회.
+describe('SettingsPage — story #4184: 첫 응답 뒤 다시 마운트해도 /api/me 네트워크 1회', () => {
+  it.each(['profile', 'org-members'])('%s 탭', async (tab) => {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams(`tab=${tab}`),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'm-1', user_id: 'u-1', name: '테스트', email: 't@moonklabs.com', type: 'human', role: 'admin',
+              has_password: true, linked_providers: [], totp_enabled: false,
+            },
+          }),
+        });
+      }
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+    await mount(<SettingsPage />);
+    await settle();
+    const meCalls = () => fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me').length;
+    expect(meCalls()).toBe(1);
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount(<SettingsPage />);
+    await settle();
+    expect(meCalls()).toBe(1);
+  });
+});
+
 describe('SettingsPage — story #3772: 프로필 탭 /api/me 실패 배너', () => {
   it('⭐/api/me가 reject하면 상단 배너 1개(사유+재시도) · 섹션마다 중복 배너 0', async () => {
     vi.doMock('next/navigation', () => ({

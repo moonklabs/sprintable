@@ -2,6 +2,8 @@
 // bare `window.location.href` 대신 이 신호를 쏴 SessionExpiredDialog(React)를 띄운다. 동시 다중 401 은
 // **dedupe**(signaled 플래그) — 한 번만 모달을 연다.
 
+import { invalidateMeCache } from '@/lib/auth/me-invalidation';
+
 type Listener = () => void;
 
 let listener: Listener | null = null;
@@ -17,6 +19,7 @@ export function subscribeSessionExpired(cb: Listener): () => void {
 export function signalSessionExpired(): void {
   if (signaled) return;
   signaled = true;
+  invalidateMeCache(); // story #4184
   listener?.();
 }
 
