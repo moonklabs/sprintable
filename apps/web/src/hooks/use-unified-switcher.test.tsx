@@ -173,6 +173,36 @@ describe('useUnifiedSwitcher — 전환 시 쿼리파라미터 화이트리스�
     setPendingProjectTarget(null);
   });
 
+  it('⭐story #4226 — 대기 중 목표는 전환 이동의 transition이 끝나면 해제(주소가 안 바뀌어도 — 같은 URL 이동이 밀어낸 경우)', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget(null);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    routerPushMock.mockImplementation(() => {}); // 커밋 신호 없음 = 주소 그대로(밀린 이동과 같은 모양)
+    try {
+      await act(async () => { root.render(<TestComp />); });
+      await act(async () => { await result?.switchProject('proj-sprintable'); });
+      expect(getPendingProjectTarget()).toBeNull();
+    } finally {
+      routerPushMock.mockReset();
+    }
+  });
+
+  it('⭐story #4226 — router.push가 던지면 대기 중 목표를 그 자리서 해제(전역 목표가 남지 않음)', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget(null);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    routerPushMock.mockImplementation(() => { throw new Error('push failed'); });
+    try {
+      await act(async () => { root.render(<TestComp />); });
+      let caught: unknown = null;
+      await act(async () => { await result?.switchProject('proj-sprintable').catch((e: unknown) => { caught = e; }); });
+      expect((caught as Error | null)?.message).toBe('push failed'); // 호출부로 전파(develop과 같음)
+      expect(getPendingProjectTarget()).toBeNull();
+    } finally {
+      routerPushMock.mockReset();
+    }
+  });
+
   it('project-agnostic 파라미터가 아예 없으면 p만 실린다(빈 값 오염 없음)', async () => {
     searchParamsValueRef.current = 'story=story-1&epic_id=epic-1';
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));

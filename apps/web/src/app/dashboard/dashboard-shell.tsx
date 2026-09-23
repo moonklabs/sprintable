@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { getPendingProjectTarget, normalizeNavUrl, setPendingProjectTarget, settlePendingProjectTargetOnNavigation } from '@/lib/pending-project-switch';
 import {
   TAB_PROJECT_STORAGE_KEY,
   bumpOrgSyncVersion,
@@ -358,17 +357,9 @@ function useProjectSsot(
   // - flat 탭(결재·대화·더보기 등)은 탭바 링크가 처음부터 `?p={effective}`를 싣고 간다(mobile-tab-bar) → 착지 때 정규화 조건이
   //   안 생긴다. 그 밖의 flat 진입은 여기서 router.replace — develop과 같은 성질이다(Next가 아는 이동이라 refresh 뒤에도 `?p=`가
   //   남지만, 대기 중인 다른 이동을 버릴 수 있다). 링크가 `?p=`를 싣게 해서 이 경로 자체를 줄이는 것이 처방이다.
-  // - 프로젝트 전환 «대기 중 목표»(pending-project-switch)는 실제 프로젝트가 그 목표가 되면 여기서 지운다.
-  // story #4226(PO 23:38Z) — 전환 «대기 중 목표»는 어떤 이동이든 커밋되면(주소가 적을 때와 달라지면) 끝낸다 — 목표로 왔든, 뒤로 가기·다른
-  // 이동이 먼저 커밋돼 끊겼든. 안 그러면 끊긴 전환의 목표가 영영 남아 그 뒤 모든 flat 링크가 뜻하지 않은 프로젝트를 싣는다.
-  useEffect(() => {
-    settlePendingProjectTargetOnNavigation(normalizeNavUrl(pathname, searchParams.toString()));
-  }, [pathname, searchParams]);
-
   useEffect(() => {
     if (!effectiveProjectId || typeof window === 'undefined') return;
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, effectiveProjectId);
-    if (getPendingProjectTarget() === effectiveProjectId) setPendingProjectTarget(null);
     if (pathProjectId || urlProjectId === effectiveProjectId) return;
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
     sp.set('p', effectiveProjectId);
