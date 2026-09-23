@@ -434,6 +434,11 @@ export function ChatBubble({
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
   const isCommentOnly = isCommentOnlyContent(displayContent)
     && (message.attachments?.length ?? 0) === 0 && (message.references?.length ?? 0) === 0;
+  // story #4200(유나 확정) — 보여 줄 글자가 0(빈 문자열·공백뿐·주석뿐)인데 첨부가 있으면 텍스트 말풍선을 아예
+  // 그리지 않고 첨부만(빈 16px 알약 제거). 기본 텍스트 말풍선 분기에만 적용 — 삭제·차단·커맨드·승인·이벤트·서버
+  // 커맨드·HITL 분기는 그대로.
+  const skipTextBubble = (message.attachments?.length ?? 0) > 0
+    && (displayContent.trim() === '' || isCommentOnlyContent(displayContent));
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (message.sender_name || t('team'));
@@ -687,12 +692,12 @@ export function ChatBubble({
                 </div>
               )}
             </div>
-          ) : (
+          ) : skipTextBubble ? null : (
             /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛
                bg-primary(solid 채색)+text-primary-foreground(흰 글자)를 proof-blue-soft
                (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
+            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-proof-blue-soft'
                 : 'rounded-tl-sm bg-proof-panel'

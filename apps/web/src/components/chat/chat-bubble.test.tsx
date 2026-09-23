@@ -2407,3 +2407,47 @@ describe('ChatBubble — 본문의 내부 HTML 주석 제거(story #4197)', () =
     expect(text()).not.toContain('undefined');
   });
 });
+
+// story #4200(유나 확정) — 보여 줄 글자 0 + 첨부 있음 → 텍스트 말풍선(빈 16px 알약)을 그리지 않고 첨부만.
+describe('ChatBubble — 첨부 전용 메시지는 텍스트 말풍선 생략(story #4200)', () => {
+  const PDF = { url: 'chat/proj/conv/report.pdf', name: 'report.pdf', content_type: 'application/pdf' };
+  const IMG = { url: 'chat/proj/conv/shot.png', name: 'shot.png', content_type: 'image/png' };
+  async function render(content: string, attachments: ChatMessage['attachments'], isMine = false) {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content, references: [], deleted_at: null, attachments }} isMine={isMine} />));
+    });
+    return container;
+  }
+
+  it.each([
+    ['본문 빈 문자열 + 파일 첨부', '', [PDF]],
+    ['본문 공백뿐 + 이미지 첨부', '  \n ', [IMG]],
+    ['주석만 + 파일 첨부', '<!-- linear-comment-id: abc -->', [PDF]],
+  ])('%s → 텍스트 말풍선 0 · 첨부 1 · 빈 본문 문구 0', async (_n, content, attachments) => {
+    const c = await render(content, attachments as ChatMessage['attachments']);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(0);
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).toBeNull();
+    // 파일은 이름 글자로, 이미지는 로딩 틀·이미지의 aria-label(=이름)로 첨부가 그려졌는지 본다.
+    const name = attachments[0]!.name;
+    expect((c.textContent ?? '').includes(name) || c.querySelector(`[aria-label="${name}"]`) !== null).toBe(true);
+  });
+
+  it('내 메시지(오른쪽 정렬)도 같은 규칙', async () => {
+    const c = await render('', [PDF], true);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(0);
+    expect(c.textContent).toContain('report.pdf');
+  });
+
+  it('음성대조 — 글자 있음 + 첨부 → 텍스트 말풍선 그대로 + 첨부', async () => {
+    const c = await render('보고서 올려요', [PDF]);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(1);
+    expect(c.textContent).toContain('보고서 올려요');
+    expect(c.textContent).toContain('report.pdf');
+  });
+
+  it('음성대조 — 코드 안 주석 + 첨부 → 코드가 보이니 말풍선 유지', async () => {
+    const c = await render('```\n<!-- keep -->\n```', [PDF]);
+    expect(c.querySelectorAll('[data-testid="chat-bubble-text"]')).toHaveLength(1);
+    expect(c.textContent).toContain('<!-- keep -->');
+  });
+});
