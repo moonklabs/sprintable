@@ -180,6 +180,17 @@ def _validate_lang(lang: str) -> None:
         raise InvalidSitePostInputError(f"lang 형식이 올바르지 않습니다: {lang!r}")
 
 
+# story #4189 — hosted_site(자사 블로그) 초안 게이트의 슬롯. 예전엔 connection_id=None → ""라 레시피
+# external_publish 게이트(unscoped "", recipe_gate_hooks.py)와 같은 멱등 슬롯을 나눠 써서, 초안 제출이
+# 레시피 게이트의 neutral_facts를 덮고 승인을 pending으로 되돌렸다. 목적지마다 자기 슬롯을 갖게 한다
+# (외부 블로그=connection_id, 자사=이 상수) — 이 규칙은 이 함수 하나로만 계산한다.
+HOSTED_SITE_SCOPE_KEY = "hosted_site"
+
+
+def site_post_gate_scope_key(connection_id: uuid.UUID | str | None) -> str:
+    return str(connection_id) if connection_id else HOSTED_SITE_SCOPE_KEY
+
+
 async def _resolve_approved_gate(
     db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, gate_id: uuid.UUID | None,
 ) -> Gate:
@@ -188,7 +199,8 @@ async def _resolve_approved_gate(
     관례상 같은 (work_item, gate_type, scope_key)엔 사실상 행 1개만 산다).
 
     story #3478 카디르 REQUEST_CHANGES(2026-09-05) — 이 함수는 hosted_site(자사 사이트)
-    발행 전용 chokepoint라 scope_key는 항상 ""(외부 목적지 축과 별개)여야 한다. 필터가
+    발행 전용 chokepoint라 scope_key는 항상 hosted_site 슬롯(외부 목적지 축과 별개)이어야 한다
+    (story #4189 전엔 ""였다 — 레시피 unscoped 게이트와 겹쳐 그 게이트를 대신 통과시킬 수 있었다). 필터가
     없으면 같은 work_item에 WordPress·webhook용으로 approved된 게이트(scope_key=
     connection_id)를 이 hosted_site 발행이 대신 통과시켜 버린다 — dual-destination을
     가능케 한 이 스토리 자체가 자신의 목적(목적지별 독립 승인)을 스스로 뚫을 뻔한 지점."""
@@ -200,7 +212,7 @@ async def _resolve_approved_gate(
             gate is None
             or gate.work_item_id != work_item_id
             or gate.gate_type != "external_publish"
-            or gate.scope_key != ""
+            or gate.scope_key != HOSTED_SITE_SCOPE_KEY
             or gate.status not in _APPROVED_STATUSES
         ):
             raise ExternalPublishGateNotApprovedError(
@@ -212,7 +224,7 @@ async def _resolve_approved_gate(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
-            Gate.scope_key == "",
+            Gate.scope_key == HOSTED_SITE_SCOPE_KEY,
         )
         .order_by(Gate.created_at.desc())
         .limit(1)
@@ -498,8 +510,8 @@ async def _reseal_gate_on_new_version(
     # 게이트」다(neutral_facts.draft_id가 정확히 이 draft.id). 다른 draft A가 쥔 approved
     # 게이트가 회수 등으로 "안 쥐고 있다"(None) 판정을 받으면, 이 함수는 B의 목적지
     # 변경만으로 A의 게이트를 건드려선 안 된다 — 건드릴 권한은 "내가 쥔 것"에만 있다.
-    old_scope_key = None if old_connection_id is _NO_PRIOR_VERSION else str(old_connection_id or "")
-    new_scope_key = str(draft.connection_id or "")
+    old_scope_key = None if old_connection_id is _NO_PRIOR_VERSION else site_post_gate_scope_key(old_connection_id)
+    new_scope_key = site_post_gate_scope_key(draft.connection_id)
     if old_scope_key is not None and old_scope_key != new_scope_key:
         old_gate = (await db.execute(
             select(Gate)
@@ -514,7 +526,7 @@ async def _reseal_gate_on_new_version(
             old_gate.requires_human = False
             old_gate.resolution_note = (
                 f"목적지 변경으로 자동 해제(destination changed "
-                f"{old_scope_key or 'hosted_site'} → {new_scope_key or 'hosted_site'}, version {version.version})"
+                f"{old_scope_key} → {new_scope_key}, version {version.version})"
             )
             old_gate.resolved_at = datetime.now(timezone.utc)
 
@@ -526,7 +538,7 @@ async def _reseal_gate_on_new_version(
         select(Gate)
         .where(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
-            Gate.scope_key == str(draft.connection_id or ""),
+            Gate.scope_key == site_post_gate_scope_key(draft.connection_id),
             Gate.status.in_(("pending", "approved")),
         )
         .with_for_update()
@@ -773,7 +785,7 @@ async def list_site_post_drafts(
     return [
         (
             draft, latest_v, origin_v,
-            gates_by_scope.get((draft.work_item_id, str(draft.connection_id or ""))),
+            gates_by_scope.get((draft.work_item_id, site_post_gate_scope_key(draft.connection_id))),
             posts_by_key.get((latest_v.lang, draft.slug)),
         )
         for draft, latest_v, origin_v in page_rows
@@ -890,7 +902,7 @@ async def submit_site_post_draft(
     # webhook 등 여러 목적지로 각각 독립 게이트를 갖는다(work_item당 1건이던 제약의
     # 근본수정 — 그라운딩 대조 결과, 이 슬롯은 channel_post와 공유하는 설계라 두
     # 도메인 다 같은 규칙을 쓴다).
-    scope_key = str(draft.connection_id or "")
+    scope_key = site_post_gate_scope_key(draft.connection_id)
     existing = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None, scope_key=scope_key,
@@ -1111,11 +1123,11 @@ async def publish_site_post_from_draft(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
-    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
+    # story #3478(0328) — scope_key=목적지(site_post_gate_scope_key — 자사 블로그는 "hosted_site", story #4189).
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
-        scope_key=str(draft.connection_id or ""),
+        scope_key=site_post_gate_scope_key(draft.connection_id),
     )
     if gate is None or gate.status != "approved":
         raise ExternalPublishGateNotApprovedError(
@@ -1339,11 +1351,11 @@ async def request_site_post_external_publish(
 
     from app.services.gate_service import find_gate_slot_with_pr_fallback
 
-    # story #3478(0328) — scope_key=목적지. hosted_site(connection_id=None)는 "".
+    # story #3478(0328) — scope_key=목적지(site_post_gate_scope_key — 자사 블로그는 "hosted_site", story #4189).
     gate = await find_gate_slot_with_pr_fallback(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
         gate_type="external_publish", pr_number=None, repo_full_name=None,
-        scope_key=str(draft.connection_id or ""),
+        scope_key=site_post_gate_scope_key(draft.connection_id),
     )
     if gate is None or gate.status != "approved":
         raise ExternalPublishGateNotApprovedError(
@@ -1461,7 +1473,7 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     # 게이트가 어떤 경로로든 살아남으면(void 정리가 정상 동작해도 경합 등으로), 이
     # 자리가 마지막 방어선 — W용 승인으로 H에 실 HTTP를 치기 直前에 막는다(재시도 대상
     # 아님, 사람이 새로 승인하면 새 커맨드가 만들어진다).
-    if gate.scope_key != str(draft.connection_id or ""):
+    if gate.scope_key != site_post_gate_scope_key(draft.connection_id):
         raise SitePostExternalPublishError(
             error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED",
             message=(

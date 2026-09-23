@@ -143,10 +143,13 @@ def _body_sha256(*, title, lang, summary, tags, body_md):
 async def _seed_gate(session, *, org_id, work_item_id, status, reapproval_required=False, sealed_content_sha256=None):
     from app.models.gate import Gate
 
+    from app.services.site_posts import HOSTED_SITE_SCOPE_KEY
+
+    # story #4189 — 자사 블로그 초안 게이트는 hosted_site 슬롯(목록 배치 조회도 그 슬롯으로 찾는다).
     g = Gate(
         id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, work_item_type="story",
         gate_type="external_publish", status=status, reapproval_required=reapproval_required,
-        sealed_content_sha256=sealed_content_sha256,
+        sealed_content_sha256=sealed_content_sha256, scope_key=HOSTED_SITE_SCOPE_KEY,
     )
     session.add(g)
     await session.commit()

@@ -512,8 +512,9 @@ async def find_gate_slot_with_pr_fallback(
 
     scope_key: story #3478(0328) — 멱등 키 네 번째 축(기본값 ""). 거의 모든 호출부는
     안 넘겨 옛 동작 그대로(""는 "" 하나뿐이라 구분력 무변). `external_publish` 게이트만
-    site_posts.py·channel_posts.py가 목적지(`str(draft.connection_id or "")`)를 넘겨
-    같은 work_item의 여러 draft/목적지가 독립 슬롯을 갖는다.
+    site_posts.py·channel_posts.py가 목적지(site post=`site_post_gate_scope_key` — 자사 블로그는
+    "hosted_site", story #4189 · channel post=connection_id)를 넘겨 같은 work_item의 여러 draft/목적지가
+    독립 슬롯을 갖는다. "" 슬롯은 레시피 unscoped 게이트 몫.
 
     **동시성**(story #2932 HIGH2): NULL-슬롯 승격은 read-then-write라 동시 웹훅 2개가
     같은 NULL-슬롯을 서로 다른 PR로 경쟁 승격할 수 있었다(나중 커밋이 조용히 덮어씀).
@@ -783,7 +784,8 @@ async def create_gate(
 
     scope_key: story #3478(0328) — 멱등 키 네 번째 축(기본값 "", 기존 全 호출부
     무회귀). `external_publish`만 site_posts.py·channel_posts.py가 목적지
-    (`str(draft.connection_id or "")`)를 넘겨 같은 work_item의 여러 draft/목적지가
+    (site post=`site_posts.site_post_gate_scope_key` — 자사 블로그는 "hosted_site", story #4189)를
+    넘겨 같은 work_item의 여러 draft/목적지가
     독립 게이트를 갖는다(work_item당 1건 제약의 근본수정 — 그라운딩 참고).
 
     pr_number: story #2893(설계안 §2 A1) — merge-type만 실제로 쓴다(호출부는
