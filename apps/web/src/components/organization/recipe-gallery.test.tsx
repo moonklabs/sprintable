@@ -8,10 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { RecipeCardGrid, RecipeGallery } from './recipe-gallery';
+import { CONNECTION_LABEL_KEY, RecipeCardGrid, RecipeGallery } from './recipe-gallery';
+import { RECIPE_CONNECTION_TARGETS } from '@/lib/recipe-role-slots';
 import { VIDEO_PRODUCTION_RECIPE } from '@/lib/video-production-seed.test.fixture';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -180,5 +182,18 @@ describe('RecipeCardGrid — 역할·연결 행(story #4173)', () => {
   it('역할이 하나도 없으면 역할 행도 «없음»', async () => {
     const card = await renderCards([NO_ROLES]);
     expect(card('signal')).toEqual({ roles: '없음', connections: '없음' });
+  });
+});
+
+// 페드루 PO(PR #4547) — 라벨 표를 가드 친화 모양(Record<string, string>)으로 두면서 tsc가 더는
+// «target이 늘었는데 라벨 키를 빼먹는» 경우를 못 잡는다 — 여기서 빠짐을 대신 잡는다.
+describe('연결 라벨 표 완전성(story #4173)', () => {
+  it('RECIPE_CONNECTION_TARGETS 전부가 라벨 표에 있고, 그 키가 ko·en 문구로 실재한다', () => {
+    for (const { target } of RECIPE_CONNECTION_TARGETS) {
+      const key = CONNECTION_LABEL_KEY[target];
+      expect(key, target).toBeDefined();
+      expect((koMessages.organization as Record<string, string>)[key!], `ko ${key}`).toBeTruthy();
+      expect((enMessages.organization as Record<string, string>)[key!], `en ${key}`).toBeTruthy();
+    }
   });
 });

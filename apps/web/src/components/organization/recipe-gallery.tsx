@@ -24,7 +24,7 @@ function stageCount(def: EventDefinitionResponse): number {
 // 보여준다. 역할 순서는 적용 다이얼로그 자리 순서와 같은 함수(orderedRecipeRoles).
 // 타입을 Record<string, string>으로 둔다 — verify-no-unused-i18n-keys 가드는 정확히 이 모양의
 // 리터럴 테이블 값만 «읽힌 키»로 본다. target이 늘면 이 표 한 곳만 고친다.
-const CONNECTION_LABEL_KEY: Record<string, string> = {
+export const CONNECTION_LABEL_KEY: Record<string, string> = {
   channel_connection: 'recipeCardConnectionChannel',
   generation_connector: 'recipeCardConnectionGenerator',
 };
