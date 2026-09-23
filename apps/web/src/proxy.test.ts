@@ -977,6 +977,22 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       expect(mockFetch.mock.calls.some(([u]) => String(u).includes('/api/v2/resolve'))).toBe(true);
     });
 
+    it('⭐project를 read replica 목록 폴백으로 찾았으면 리다이렉트는 하되 캐시는 안 심는다(까디르 P2)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+        if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs', role: 'admin' }) });
+        if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: false, status: 404 });
+        if (url.endsWith('/api/v2/projects')) return Promise.resolve({ ok: true, json: async () => [{ id: 'proj-1', slug: 'sprintable' }] });
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+      expect(mockFetch.mock.calls.some(([u]) => String(u).endsWith('/api/v2/projects'))).toBe(true);
+      expect(cacheCookie(res)).toBeUndefined();
+    });
+
     it('역할을 모르면(옛 백엔드 응답) 캐시를 안 심는다', async () => {
       const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
       mockLegacy({ id: 'org-1', slug: 'moonklabs' });
