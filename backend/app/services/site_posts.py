@@ -895,7 +895,14 @@ async def submit_site_post_draft(
     from app.services.generation_budget import check_generation_budget_or_raise
     await check_generation_budget_or_raise(db, org_id=org_id, estimated_cost_minor=estimated_cost_minor)
 
-    from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
+    from app.services.gate_service import (
+        RECIPE_AUTO_SATISFIED_NOTE,
+        _maybe_create_scheduled_publication_command,
+        create_gate,
+        find_gate_slot_with_pr_fallback,
+        find_recipe_approval_for_single_destination,
+        resolve_gate_holder_draft_id,
+    )
     from app.services.workflow_line_config import _default_role_id
 
     # story #3478(0328) — scope_key=목적지(connection_id). 같은 work_item이 WordPress·
@@ -998,7 +1005,20 @@ async def submit_site_post_draft(
     # 내용이 달라졌거나 신규라는 뜻이라, 여기서 명시적으로 (재)봉인하는 것이 바로 이번
     # submit() 호출이 의도한 행위다("조용한 갱신"이 아니다).
     gate.neutral_facts = neutral_facts
-    if gate.status != "pending":
+    # story #4190(훅A — channel_posts.submit_channel_post_draft의 #4069와 동형) — 레시피 unscoped
+    # external_publish 게이트가 이미 approved이고 이 work item의 목적지가 이 초안 하나뿐이면, 그 사람 승인을
+    # 이 초안 게이트가 승계한다(레시피 승인 뒤 제출해도 사람이 두 번 승인하지 않게). 목적지가 둘 이상이면
+    # 각자 사람 승인(#3478) — 발행 목적지 자체는 안 바뀐다.
+    auto_satisfied_by = await find_recipe_approval_for_single_destination(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story", scope_key=scope_key,
+    )
+    if auto_satisfied_by is not None:
+        set_gate_status(gate, "approved", now=datetime.now(timezone.utc))
+        gate.requires_human = False
+        gate.resolver_id = auto_satisfied_by.resolver_id
+        gate.resolved_at = auto_satisfied_by.resolved_at
+        gate.resolution_note = RECIPE_AUTO_SATISFIED_NOTE
+    elif gate.status != "pending":
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.requires_human = True
         gate.resolver_id = None
@@ -1023,6 +1043,13 @@ async def submit_site_post_draft(
 
     await db.commit()
     await db.refresh(gate)
+
+    # story #4190 — 승계 승인도 직접 승인과 같은 발행 명령 훅을 탄다(외부 블로그면 publication_command,
+    # 자사 블로그는 그 훅이 원래 no-op — 동기 발행 경로 그대로).
+    if auto_satisfied_by is not None:
+        await _maybe_create_scheduled_publication_command(db, gate, auto_satisfied_by.resolver_id)
+        await db.commit()
+        await db.refresh(gate)
     return gate, target.id
 
 

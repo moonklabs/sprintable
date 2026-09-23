@@ -1165,6 +1165,32 @@ async def find_sole_pending_scoped_external_publish_gate(
     return _scoped_pending[0] if len(_scoped_pending) == 1 else None
 
 
+RECIPE_AUTO_SATISFIED_NOTE = "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
+
+
+async def find_recipe_approval_for_single_destination(
+    session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str, scope_key: str,
+) -> Gate | None:
+    """story #4190(site post 훅A) — 이 work item의 레시피 unscoped external_publish 게이트가 approved이고,
+    다른 목적지(scope_key가 다른 scoped external_publish 게이트, pending·approved)가 없으면 그 레시피 게이트를
+    돌려준다(승계 근거). 목적지 판정은 게이트로 한다 — 훅B(`find_sole_pending_scoped_external_publish_gate`)와
+    같은 축이라 site·channel 초안이 섞여도 양방향이 같은 답을 낸다."""
+    recipe = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+        gate_type="external_publish", pr_number=None, repo_full_name=None, scope_key="",
+    )
+    if recipe is None or recipe.status != "approved":
+        return None
+    other = (await session.execute(
+        select(Gate.id).where(
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.work_item_type == work_item_type,
+            Gate.gate_type == "external_publish", Gate.scope_key != "", Gate.scope_key != scope_key,
+            Gate.status.in_(("pending", "approved")),
+        ).limit(1)
+    )).scalar_one_or_none()
+    return recipe if other is None else None
+
+
 async def find_pending_recipe_external_publish_gate(
     session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
 ) -> Gate | None:
@@ -1268,9 +1294,12 @@ async def transition_gate(
                 _scoped_gate.requires_human = False
                 _scoped_gate.resolver_id = gate.resolver_id
                 _scoped_gate.resolved_at = gate.resolved_at
-                _scoped_gate.resolution_note = (
-                    "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
-                )
+                _scoped_gate.resolution_note = RECIPE_AUTO_SATISFIED_NOTE
+                # story #4190 — 승계 승인도 직접 승인과 같은 발행 명령 훅을 탄다. 예전엔 전이 대상(레시피
+                # 게이트)에만 이 훅이 돌아, 외부 블로그 초안 게이트가 승계 승인돼도 명령이 안 생겼다(«게이트는
+                # 초록인데 글이 안 나감»). 채널 예약 초안은 아래 publish_recipe_approved_draft도 같은 훅을
+                # 부르지만 create_or_get_publication_command가 멱등이라 중복 명령이 생기지 않는다.
+                await _maybe_create_scheduled_publication_command(session, _scoped_gate, resolver_id)
 
         # story #4090 AC2 — 위 승계-승인(있었다면) 직후, 같은 함수 하나로 실제 발행까지
         # 잇는다(channel_posts.py::publish_recipe_approved_draft, 호출 지점 둘 중 하나 —
