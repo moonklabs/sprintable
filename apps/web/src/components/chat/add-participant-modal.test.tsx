@@ -187,9 +187,18 @@ function assertAlertOutsideScroll(footerButtonText: string) {
   // 스크롤 목록(max-h-[60vh] overflow-y-auto)의 자식이 아니다 — 목록 길이와 무관하게 클릭 직후 보인다.
   const scroll = document.body.querySelector('.overflow-y-auto') as HTMLElement;
   expect(scroll.contains(alert)).toBe(false);
-  // 목록과 푸터 사이 고정 줄: 바로 다음 형제가 푸터(주 버튼을 품은 줄)다.
-  expect(alert!.previousElementSibling).toBe(scroll);
+  // 안내와 주 버튼이 같은 푸터 영역(선 하나) — 목록 바로 뒤가 그 영역이고, 안내 바로 다음이 버튼 줄이다(유나 design).
+  const footer = alert!.parentElement!;
+  expect(scroll.nextElementSibling).toBe(footer);
   expect([...alert!.nextElementSibling!.querySelectorAll('button')].some((b) => b.textContent === footerButtonText)).toBe(true);
+  // 선은 푸터 영역 하나에만 — 안내·버튼 줄엔 따로 없다.
+  expect(footer.className).toContain('border-t');
+  expect(alert!.className).not.toContain('border-t');
+  expect(alert!.nextElementSibling!.className).not.toContain('border-t');
+  // 좁은 폭 줄바꿈: 본문은 낱말 단위, 링크는 한 덩어리.
+  expect(alert!.className).toContain('break-keep');
+  const link = alert!.querySelector('a');
+  if (link) expect(link.className).toContain('whitespace-nowrap');
 }
 
 describe('AddParticipantModal — 안내는 스크롤 목록 밖(story #4193)', () => {
