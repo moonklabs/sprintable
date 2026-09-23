@@ -160,23 +160,37 @@ export function navProjectSlug(args: {
  * 세 갈래(PO 결정 — «flat»과 «scoped인데 못 풂»을 한 값으로 뭉개면 못 풀 때 `?p=`·세션(B)으로 조용히 떨어진다):
  * - `flat`: 워크스페이스 경로가 아님(조각 2개 미만 · 첫 조각이 예약 목록) — 서버 `pathProjectId`는 이전 scoped 화면의 옛 값일 수
  *   있어 쓰지 않는다(`?p=`·탭 값·세션 순 — 하드 로드와 같은 결과).
- * - `scoped`: 첫 조각 = 현재 org slug이고 프로젝트 조각을 풀었음. 서버가 같은 slug를 풀었으면 그 값 우선, 아니면 멤버십에서
- *   **org + slug**로(slug는 org 안에서만 유일 — slug만 보면 다른 org의 같은 slug 프로젝트를 고른다).
+ * - `scoped`: ① **서버가 이미 푼 경로**(서버가 pathProjectId를 해석한 요청 경로와 org 조각·project 조각이 **둘 다** 같음)면 그 id
+ *   — org 검사보다 먼저(org 목록 조회가 실패해도 새로고침으로 연 scoped 경로가 되풀이 이동하지 않게 · PO 무한 새로고침 위험).
+ *   두 조각을 다 봐서 `/org-a/x → /org-b/x` 클라이언트 이동에선 옛 org A 서버 값을 받아들이지 않는다. ② 아니면 첫 조각 = 현재
+ *   org slug이고 멤버십에서 **org + slug**로(slug는 org 안에서만 유일 — slug만 보면 다른 org의 같은 slug 프로젝트를 고른다).
+ * 조각은 퍼센트 디코딩 뒤 비교(Next `usePathname`은 인코딩된 경로 — 비ASCII slug면 같은 경로도 달라 보인다).
  * - `unresolved`: 워크스페이스 경로인데 못 풂(레이아웃 뒤 생긴 프로젝트·새 권한·slug 변경 · 다른 org 경로로 클라이언트 이동) —
  *   셸이 현재 주소를 전체 문서 이동으로 다시 연다(서버가 해석). 그 전까지 프로젝트·org 헤더 0 · 페이지 미마운트.
  */
+function decodedSegments(pathname: string | null | undefined): string[] {
+  return (pathname ?? '').split('/').filter(Boolean).map((seg) => {
+    try { return decodeURIComponent(seg); } catch { return seg; }
+  });
+}
+
 export type LivePathProject = { kind: 'flat' } | { kind: 'scoped'; projectId: string } | { kind: 'unresolved' };
 
 export function livePathProject(args: {
   pathname: string | null | undefined; currentOrgSlug: string | undefined; currentOrgId: string | undefined;
   memberships: ReadonlyArray<{ projectId: string; projectSlug?: string | null; orgId?: string | null }>;
-  serverPathProjectId: string | undefined; serverSlug: string | undefined;
+  serverPathProjectId: string | undefined;
+  /** 서버(레이아웃)가 pathProjectId를 해석한 요청 경로(x-pathname). 클라이언트 이동은 이 값을 안 바꾼다. */
+  serverPathname: string | null | undefined;
 }): LivePathProject {
-  const segments = (args.pathname ?? '').split('/').filter(Boolean);
+  const segments = decodedSegments(args.pathname);
   if (segments.length < 2 || !looksLikeWorkspaceSegment(segments[0])) return { kind: 'flat' };
   const [orgSegment, projectSegment] = segments as [string, string];
+  const serverSegments = decodedSegments(args.serverPathname);
+  if (args.serverPathProjectId && serverSegments[0] === orgSegment && serverSegments[1] === projectSegment) {
+    return { kind: 'scoped', projectId: args.serverPathProjectId };
+  }
   if (!args.currentOrgSlug || orgSegment !== args.currentOrgSlug) return { kind: 'unresolved' };
-  if (projectSegment === args.serverSlug && args.serverPathProjectId) return { kind: 'scoped', projectId: args.serverPathProjectId };
   const hit = args.memberships.find((m) => m.projectSlug === projectSegment && (m.orgId ?? args.currentOrgId) === args.currentOrgId);
   return hit ? { kind: 'scoped', projectId: hit.projectId } : { kind: 'unresolved' };
 }

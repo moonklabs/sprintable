@@ -25,6 +25,8 @@
     "create": "Create",
     "optional": "Optional",
     "retry": "Retry",
+    "projectOpenFailedTitle": "Couldn't open this project",
+    "projectOpenFailedDescription": "Please try again. If it still won't open, check the link and your access to this project.",
     "copyFailedSelectManually": "Couldn't copy — please select and copy manually.",
     "goToLogin": "Go to Login",
     "enable_all": "Enable all",

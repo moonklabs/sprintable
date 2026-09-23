@@ -194,6 +194,7 @@ export default async function AuthenticatedLayout({
       orgMemberships={orgMemberships}
       pathOrgId={pathOrgId}
       pathProjectId={pathProjectId}
+      serverResolvedPath={pathProjectId ? currentPath : undefined}
       navV3Flags={navV3Flags}
       initialActivationComplete={activationChecklist}
     >

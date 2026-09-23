@@ -13,7 +13,8 @@ import {
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { reopenCurrentUrl } from '@/lib/hard-reload';
+import { clearReopenMarker, reopenCurrentUrlOnce } from '@/lib/hard-reload';
+import { RouteErrorState } from '@/components/ui/route-error-state';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
@@ -123,6 +124,8 @@ interface DashboardShellProps extends DashboardContext {
   // 이 값을 우선한다. 경로 세그먼트가 없는 flat 라우트(/glance 등)에선 undefined.
   pathOrgId?: string;
   pathProjectId?: string;
+  // story #4217 — 서버가 pathProjectId를 해석한 요청 경로(x-pathname). 클라이언트 이동은 이 값을 안 바꾼다(공유 레이아웃).
+  serverResolvedPath?: string;
   // story #2545(카디르 라이브 재QA) — JWT `app_metadata.org_id` 클레임을 직접 읽은 값
   // (getServerSession, 신규 fetch 0). #2544가 "top-level org_id"라 부른 바로 그 필드
   // (backend/app/dependencies/auth.py의 `jwt_org_id = auth.claims.get("app_metadata",
@@ -366,6 +369,7 @@ export function DashboardShell({
   orgMemberships,
   pathOrgId,
   pathProjectId,
+  serverResolvedPath,
   jwtOrgId,
   navV3Flags,
   initialActivationComplete,
@@ -446,12 +450,22 @@ export function DashboardShell({
   const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
   const livePath = livePathProject({
     pathname: shellPathname, currentOrgSlug, currentOrgId: effectiveOrgId, memberships: projectMemberships,
-    serverPathProjectId: pathProjectId, serverSlug: currentProjectSlug,
+    serverPathProjectId: pathProjectId, serverPathname: serverResolvedPath,
   });
-  // 워크스페이스 경로인데 스냅샷으로 못 풂 → 현재 주소를 전체 문서 이동으로(서버가 해석). 그 전까지 프로젝트 확정 보류
-  // (`?p=`·탭 값·세션으로 떨어지지 않음 · 인터셉터 ref 비움 · 페이지 미마운트 = 옛 프로젝트 요청 0).
+  // 워크스페이스 경로인데 스냅샷으로 못 풂 → 현재 주소를 전체 문서 이동으로(서버가 해석 · 같은 주소 1회만). 그 전(과 1회 뒤에도
+  // 못 풀면 계속) 프로젝트 확정 보류(`?p=`·탭 값·세션으로 떨어지지 않음 · 인터셉터 ref 비움 · 페이지 미마운트 = 옛 프로젝트 요청 0).
   const pathUnresolved = livePath.kind === 'unresolved';
-  useEffect(() => { if (pathUnresolved) reopenCurrentUrl(); }, [pathUnresolved, shellPathname]);
+  const tCommon = useTranslations('common');
+  // 같은 주소 전체 이동은 1회(lib/hard-reload) — 이미 한 번 다시 열었는데도 못 풀면 빈 화면이 아니라 오류 상태 + 다시 시도.
+  const [reopenSpentFor, setReopenSpentFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pathUnresolved) { clearReopenMarker(); return; }
+    if (!reopenCurrentUrlOnce()) startTransition(() => setReopenSpentFor(shellPathname));
+  }, [pathUnresolved, shellPathname]);
+  const retryUnresolvedPath = useCallback(() => {
+    clearReopenMarker();
+    reopenCurrentUrlOnce();
+  }, []);
   // R2: URL `?p=` = flat 라우트의 탭별 SSOT. 경로 프로젝트(위 livePath)가 있으면 그게 최우선.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships, livePath.kind === 'scoped' ? livePath.projectId : undefined, pathUnresolved);
   // story #4217 — 인터셉터 ref(프로젝트·org)의 수명을 셸에 묶는다. 셸에서 셸 밖 화면(v3 /today·/chat·/connect-rules)으로
@@ -515,7 +529,14 @@ export function DashboardShell({
               userName={userName}
               navV3Flags={navV3Flags}
             >
-              {pathUnresolved ? null : children}
+              {pathUnresolved
+                ? (reopenSpentFor === shellPathname ? (
+                  <RouteErrorState
+                    compact breakKeep reset={retryUnresolvedPath}
+                    title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
+                  />
+                ) : null)
+                : children}
             </ShellBody>
             {/* story #3260 — SidebarProvider 안(ShellBody와 형제)에 마운트해야
                 useSidebar()로 실 사이드바 폭을 읽어 데스크톱 겹침을 피할 수 있다(2차 finding,

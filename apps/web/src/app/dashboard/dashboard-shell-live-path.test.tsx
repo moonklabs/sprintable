@@ -17,8 +17,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: (u: string) => { nav.search = u.split('?')[1] ?? ''; }, push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
-const { reopenMock } = vi.hoisted(() => ({ reopenMock: vi.fn() }));
-vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrl: reopenMock }));
+const { reopenMock, clearMock } = vi.hoisted(() => ({ reopenMock: vi.fn(() => true), clearMock: vi.fn() }));
+vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrlOnce: reopenMock, clearReopenMarker: clearMock }));
 
 const pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
 const none = () => null;
@@ -60,7 +60,7 @@ const memberships = [
 const serverProps = {
   currentTeamMemberId: 'tm-1', orgId: ORG, projectId: A, projectName: 'Project Beta', currentProjectSlug: 'beta',
   projectMemberships: memberships, orgMemberships: [{ orgId: ORG, orgName: 'Repro', orgSlug: 'repro' }],
-  pathOrgId: ORG, pathProjectId: B, jwtOrgId: ORG,
+  pathOrgId: ORG, pathProjectId: B, jwtOrgId: ORG, serverResolvedPath: '/repro/beta/flow',
 };
 
 interface Sent { url: string; project?: string; org?: string; body?: Record<string, unknown> }
@@ -183,6 +183,35 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     await renderShellAt('/repro/beta/flow');
     reopenMock.mockClear();
     await renderShellAt('/other-org/charlie/flow');
+    expect(reopenMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐org·프로젝트 멤버십 조회 실패 + 새로고침으로 연 scoped 경로 → 전체 이동 0 · 서버 해석 프로젝트로(무한 새로고침 0)', async () => {
+    await act(async () => { root.render(<></>); }); // 새 문서 = 셸 새로 마운트(서버가 이 경로를 해석 · serverResolvedPath)
+    reopenMock.mockClear();
+    const mark = sent.length;
+    await renderShellAt('/repro/beta/flow', { orgMemberships: [], projectMemberships: [] });
+    expect(reopenMock).not.toHaveBeenCalled();
+    expect(seen.at(-1)?.projectId).toBe(B);
+    for (const r of since(mark).filter((x) => x.url.startsWith('/api/stories'))) expect(r.project, r.url).toBe(B);
+  });
+
+  it('⭐이미 1회 다시 열었는데도 못 풂 → 빈 화면이 아니라 오류 상태 · 다시 시도 = 표지 지우고 전체 이동 · 페이지·헤더 0 유지', async () => {
+    const withoutC = memberships.filter((m) => m.projectId !== C);
+    await renderShellAt('/repro/beta/flow', { projectMemberships: withoutC });
+    reopenMock.mockClear(); clearMock.mockClear();
+    reopenMock.mockReturnValueOnce(false); // 이 주소는 이미 1회 다시 열었다
+    const mark = sent.length;
+    await renderShellAt('/repro/charlie/flow', { projectMemberships: withoutC });
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('retry'));
+    expect(container.textContent).toContain('projectOpenFailedTitle'); // 유나 확정 문안 키
+    expect(container.textContent).toContain('projectOpenFailedDescription');
+    expect(retry).toBeTruthy();
+    expect(container.querySelector('a'), '보조 링크(«로그인으로 이동») 없음').toBeNull();
+    expect(since(mark).filter((r) => r.url.startsWith('/api/stories'))).toEqual([]);
+    reopenMock.mockClear(); clearMock.mockClear();
+    await act(async () => { retry!.click(); });
+    expect(clearMock).toHaveBeenCalledTimes(1);
     expect(reopenMock).toHaveBeenCalledTimes(1);
   });
 });
