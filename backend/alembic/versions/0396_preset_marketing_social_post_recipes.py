@@ -14,8 +14,8 @@
 - 멘션 자기설명은 렌더러가 stage_metadata에서 파생(#4076) · generation_budget 게이트면 예시에
   estimated_cost_minor가 자동으로 실린다(#4085 공유 함수) — 그래서 card_news payload_schema는 그 필드를 연다.
 
-Revision ID: 0395
-Revises: 0394
+Revision ID: 0396
+Revises: 0395
 Create Date: 2026-09-23
 """
 from __future__ import annotations
@@ -26,8 +26,8 @@ import uuid
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0395"
-down_revision = "0394"
+revision = "0396"
+down_revision = "0395"
 branch_labels = None
 depends_on = None
 

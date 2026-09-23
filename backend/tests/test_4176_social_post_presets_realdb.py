@@ -1,4 +1,4 @@
-"""story #4176(E-RECIPE-2·레시피 4호) — SNS 포스트 프리셋 2종(0395 시드)의 실 PG 계약.
+"""story #4176(E-RECIPE-2·레시피 4호) — SNS 포스트 프리셋 2종(0396 시드)의 실 PG 계약.
 
 AC1 시드: org_id NULL로 두 정의가 있고, 레지스트리 검증 함수(event_definition_registry)를 그대로
   통과한다(시드는 raw SQL이라 등록 API의 검증을 안 탄다 — 여기서 같은 검증을 대신 건다).
