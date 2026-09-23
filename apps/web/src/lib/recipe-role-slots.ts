@@ -220,7 +220,15 @@ export function recipeRoleSlots(
   });
 }
 
-/** 불변식 검사 — role이 있는 stage 중 자리에 안 덮였거나 둘 이상에 덮인 stage(흐름 순서).
+// capability.target이 있는 stage는 그 방식의 자리에만 들어갈 수 있다(다른 자리에 들어가면 그
+// 연결 값이 제출에서 빠진다 — 승인 자리는 읽기 전용이라 값이 없다).
+const TARGET_SLOT_KIND: Record<string, RecipeSlotKind> = {
+  channel_connection: 'channel',
+  generation_connector: 'compute',
+};
+
+/** 불변식 검사 — role이 있는 stage 중 ① 자리에 안 덮였거나 ② 둘 이상에 덮였거나 ③ 맞지 않는
+ * 방식의 자리에 덮인(capability.target stage가 그 방식 밖의 자리에 있는) stage(흐름 순서).
  * 비어 있지 않으면 적용 다이얼로그가 제출을 막고 그 stage를 보여준다(fail-closed) — 앞으로
  * 정의 모양이 늘어도 «표시 없이 바인딩에서 빠진 채 제출 성공»이 다시 생기지 않게 하는 안전망. */
 export function uncoveredRecipeStages(
@@ -229,6 +237,14 @@ export function uncoveredRecipeStages(
   slots: readonly RecipeRoleSlot[],
 ): string[] {
   const count = new Map<string, number>();
-  for (const slot of slots) for (const stage of slot.stages) count.set(stage, (count.get(stage) ?? 0) + 1);
-  return stagesInFlowOrder(stageMetadata, flowStages).filter((s) => stageMetadata[s]?.role && count.get(s) !== 1);
+  const wrongKind = new Set<string>();
+  for (const slot of slots) {
+    for (const stage of slot.stages) {
+      count.set(stage, (count.get(stage) ?? 0) + 1);
+      const required = TARGET_SLOT_KIND[stageMetadata[stage]?.capability?.target ?? ''];
+      if (required && slot.kind !== required) wrongKind.add(stage);
+    }
+  }
+  return stagesInFlowOrder(stageMetadata, flowStages)
+    .filter((s) => stageMetadata[s]?.role && (count.get(s) !== 1 || wrongKind.has(s)));
 }

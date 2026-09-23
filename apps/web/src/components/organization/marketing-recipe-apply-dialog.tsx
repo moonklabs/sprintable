@@ -222,14 +222,23 @@ export function MarketingRecipeApplyDialog({
   // 자리 한 줄. 자리 하나인 역할은 지금 모양 그대로(테두리 카드 + 역할 이름 + 배지). 자리가 둘
   // 이상인 역할의 줄(`grouped`)은 역할 이름을 묶음 머리로 올리고 배지 + 맡은 단계 « · » + 선택기만
   // 싣는다 — 줄 사이는 border-t(유나 판정 §9).
+  const badgeFor = (slot: RecipeRoleSlot) => {
+    if (slot.kind === 'approver') return t('recipeApplyV2DirectorBadge');
+    if (slot.kind === 'member') return slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge');
+    if (slot.kind === 'compute') return t('recipeApplyV2ComputeBadge');
+    return t('recipeApplyV2PublisherBadge');
+  };
+
   const renderSlot = (slot: RecipeRoleSlot, grouped = false, first = true) => {
     const title = stageRoleLabel(slot.role, t);
+    // 묶음 안 선택기는 역할 이름만으론 서로 구분이 안 된다(같은 역할 아래 줄 여럿) — 방식 배지를 붙인다.
+    const controlLabel = grouped ? `${title} · ${badgeFor(slot)}` : title;
     const rowClass = grouped
       ? `flex items-center gap-3 p-3${first ? '' : ' border-t border-input'}`
       : 'flex items-center gap-3 rounded-md border border-input p-3';
-    const heading = (badge: string) => (
+    const heading = () => (
       <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-        {grouped ? null : <>{title} </>}<Badge variant="secondary">{badge}</Badge>
+        {grouped ? null : <>{title} </>}<Badge variant="secondary">{badgeFor(slot)}</Badge>
       </div>
     );
     const rowAttrs = { className: rowClass, 'data-role': slot.role, 'data-slot-key': slot.key };
@@ -240,7 +249,7 @@ export function MarketingRecipeApplyDialog({
       return (
         <div key={slot.key} {...rowAttrs} data-testid="slot-director">
           <div className="min-w-0 flex-1 break-keep">
-            {heading(t('recipeApplyV2DirectorBadge'))}
+            {heading()}
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
           </div>
           <div className="shrink-0 text-xs text-muted-foreground" data-testid="director-approver">
@@ -254,7 +263,7 @@ export function MarketingRecipeApplyDialog({
       return (
         <div key={slot.key} {...rowAttrs} data-testid="slot-creator">
           <div className="min-w-0 flex-1 break-keep">
-            {heading(slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge'))}
+            {heading()}
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
           </div>
@@ -263,7 +272,7 @@ export function MarketingRecipeApplyDialog({
             value={selections[slot.key] ?? ''}
             onChange={(e) => select(slot.key, e.target.value)}
             disabled={!projectId || loadingMembers}
-            aria-label={title}
+            aria-label={controlLabel}
             data-testid="creator-agent-select"
           >
             <option value="">{t('eventApplyAgentPlaceholder')}</option>
@@ -276,7 +285,7 @@ export function MarketingRecipeApplyDialog({
       return (
         <div key={slot.key} {...rowAttrs} data-testid="slot-compute">
           <div className="min-w-0 flex-1 break-keep">
-            {heading(t('recipeApplyV2ComputeBadge'))}
+            {heading()}
             <p className="mt-0.5 text-xs text-muted-foreground">{grouped ? stageList(slot) : t('recipeApplyV2ComputeDesc')}</p>
             {/* story #4114 — 3값 우선순위(failed > loaded+0건 > 없음). 연산은 필수가 아니므로
                 (#4110 crew 폴백) 아래 안내 문구가 항상 함께 "비워도 되는" 이유를 설명한다. */}
@@ -300,7 +309,7 @@ export function MarketingRecipeApplyDialog({
             value={selections[slot.key] ?? ''}
             onChange={(e) => select(slot.key, e.target.value)}
             disabled={generationConnectorsStatus !== 'loaded'}
-            aria-label={title}
+            aria-label={controlLabel}
             data-testid="compute-connector-select"
           >
             <option value="">{t('eventApplyGenerationConnectorPlaceholder')}</option>
@@ -314,7 +323,7 @@ export function MarketingRecipeApplyDialog({
     return (
       <div key={slot.key} {...rowAttrs} data-testid="slot-publisher">
         <div className="min-w-0 flex-1 break-keep">
-          {heading(t('recipeApplyV2PublisherBadge'))}
+          {heading()}
           <p className="mt-0.5 text-xs text-muted-foreground">{grouped ? stageList(slot) : t('recipeApplyV2PublisherDesc')}</p>
           {/* story #4103 CHANGES-1 — 로딩 中엔 문구 없음, failed는 재시도, loaded+0건만 empty. */}
           {channelConnectionsStatus === 'failed' ? (
@@ -333,7 +342,7 @@ export function MarketingRecipeApplyDialog({
           value={selections[slot.key] ?? ''}
           onChange={(e) => select(slot.key, e.target.value)}
           disabled={channelConnectionsStatus !== 'loaded'}
-          aria-label={title}
+          aria-label={controlLabel}
           data-testid="publisher-connection-select"
         >
           <option value="">{t('eventApplyChannelPlaceholder')}</option>

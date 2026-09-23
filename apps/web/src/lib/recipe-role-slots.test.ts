@@ -185,6 +185,19 @@ describe('recipeRoleSlots — 역할마다 메커니즘 판별', () => {
     ]);
   });
 
+  // 까디르 재QA(PR #4547 25a02567d) — 사람 역할의 «게이트 달린 채널 단계». 승인 판정이 채널보다
+  // 먼저면 읽기 전용 승인 자리로 가서 채널 바인딩이 조용히 빠진다.
+  it('사람 역할 + 게이트 + channel_connection 단계 → 채널 자리(승인 자리 아님)', () => {
+    const slots = recipeRoleSlots({
+      review: { role: 'Lead', gate: { type: 'doc_approval', approver: 'org_owner' } },
+      published: { role: 'Lead', gate: { type: 'external_publish', approver: 'org_owner' }, capability: { kind: 'publish', target: 'channel_connection' } },
+    }, ['review', 'published'], { Lead: 'human' });
+    expect(slots.map((s) => [s.key, s.stages])).toEqual([
+      ['Lead:approver', ['review']],
+      ['Lead:channel', ['published']],
+    ]);
+  });
+
   it('에이전트 역할의 게이트 stage는 그 에이전트 멤버 자리에 남는다(그 stage를 발행하는 쪽)', () => {
     const slots = recipeRoleSlots(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE.role_actor_kinds);
     expect(slots.find((s) => s.role === 'Creator')!.stages).toContain('animatic');
@@ -199,6 +212,10 @@ describe('uncoveredRecipeStages — 불변식: role이 있는 모든 stage가 �
     ['A', { draft: { role: 'Writer' }, published: { role: 'Writer', capability: { target: 'channel_connection' } } }, ['draft', 'published'], { Writer: 'agent' }],
     ['B', { draft: { role: 'Writer' }, review: { role: 'Editor', gate: { type: 'g', approver: 'org_owner' } } }, ['draft', 'review'], { Writer: 'agent' }],
     ['C', { brief: { role: 'Lead' }, signoff: { role: 'Lead', gate: { type: 'g', approver: 'org_owner' } } }, ['brief', 'signoff'], { Lead: 'human' }],
+    ['사람 역할 게이트 달린 채널 단계', {
+      review: { role: 'Lead', gate: { type: 'g', approver: 'org_owner' } },
+      published: { role: 'Lead', gate: { type: 'g', approver: 'org_owner' }, capability: { target: 'channel_connection' } },
+    }, ['review', 'published'], { Lead: 'human' }],
     ['한 역할 네 방식', {
       a: { role: 'X' }, b: { role: 'X', gate: { type: 'g', approver: 'org_owner' } },
       c: { role: 'X', capability: { target: 'generation_connector' } }, d: { role: 'X', capability: { target: 'channel_connection' } },
@@ -219,6 +236,18 @@ describe('uncoveredRecipeStages — 불변식: role이 있는 모든 stage가 �
     const slots = recipeRoleSlots(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE.role_actor_kinds);
     const doubled: RecipeRoleSlot[] = [...slots, { ...slots[0]!, key: 'dup', stages: ['published'] }];
     expect(uncoveredRecipeStages(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, doubled)).toEqual(['published']);
+  });
+
+  it('연결 target 단계가 맞지 않는 방식의 자리(승인)에 들어가면 덮이지 않은 것과 똑같이 잡힌다', () => {
+    const meta: RecipeStageMetadata = {
+      published: { role: 'Lead', gate: { type: 'g', approver: 'org_owner' }, capability: { target: 'channel_connection' } },
+      gen: { role: 'Lead', capability: { target: 'generation_connector' } },
+    };
+    const wrong: RecipeRoleSlot[] = [
+      { key: 'Lead:approver', role: 'Lead', kind: 'approver', stages: ['published'], memberType: 'human', gateApprovers: ['org_owner'] },
+      { key: 'Lead:member', role: 'Lead', kind: 'member', stages: ['gen'], memberType: 'human', gateApprovers: [] },
+    ];
+    expect(uncoveredRecipeStages(meta, ['published', 'gen'], wrong)).toEqual(['published', 'gen']);
   });
 
   it('role 없는 stage는 불변식 대상이 아니다', () => {

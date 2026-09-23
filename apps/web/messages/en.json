@@ -837,7 +837,7 @@
     "recipeApplyV2StageCoverage": "Executes {count} stages",
     "recipeApplyV2CreatorMembershipError": "The selected agent isn't a member of this project. Please choose again.",
     "recipeApplyV2NoOpError": "Nothing was saved (0 bindings) — the role assignment wasn't actually applied. Please try again or contact an admin.",
-    "recipeApplyV2UncoveredStages": "Some stages aren't covered by any assignment, so this recipe can't be applied: {stages}. Please check the recipe definition.",
+    "recipeApplyV2UncoveredStages": "Some stages aren't covered by any assignment, so this recipe can't be applied: {stages}. Please let your workflow admin know.",
     "recipeApplyV2PersonPlaceholder": "Select a person…",
     "recipeApplyV2WarningsAppliedHeading": "Applied — please check the following.",
     "recipeApplyV2NotConfiguredNote": "This slot isn't wireable yet — a follow-up card connects it.",

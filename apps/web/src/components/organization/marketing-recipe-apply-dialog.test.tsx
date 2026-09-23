@@ -991,6 +991,15 @@ describe('MarketingRecipeApplyDialog — 한 역할에 자리 여럿(A·C)', () 
     expect(document.body.querySelector('[data-testid="marketing-apply-uncovered-stages"]')).toBeNull();
   });
 
+  it('묶음 안 선택기는 aria-label이 서로 다르다(역할 이름 · 방식 배지) — 자리 하나인 역할은 역할 이름 그대로', async () => {
+    await render();
+    const writer = document.body.querySelector<HTMLElement>('[data-testid="slot-group"][data-role="Writer"]')!;
+    const labels = [...writer.querySelectorAll('select')].map((el) => el.getAttribute('aria-label'));
+    const org = koMessages.organization;
+    expect(labels).toEqual([`Writer · ${org.recipeApplyV2CreatorBadge}`, `Writer · ${org.recipeApplyV2PublisherBadge}`]);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
   it('영상 레시피(자리 하나씩)는 묶음 없이 지금 모양 그대로', async () => {
     stubMemberFetch();
     await act(async () => {
@@ -1005,5 +1014,8 @@ describe('MarketingRecipeApplyDialog — 한 역할에 자리 여럿(A·C)', () 
     expect(document.body.querySelector('[data-testid="slot-group"]')).toBeNull();
     expect([...document.body.querySelectorAll<HTMLElement>('[data-slot-key]')].map((e) => e.dataset.slotKey))
       .toEqual(['Director:approver', 'Creator:member', 'Compute:compute', 'Publisher:channel']);
+    // 자리 하나인 역할의 선택기 aria-label은 예전처럼 역할 이름만(배지 안 붙음).
+    const creatorSelect = document.body.querySelector('[data-slot-key="Creator:member"] select')!;
+    expect(creatorSelect.getAttribute('aria-label')).not.toContain(' · ');
   });
 });
