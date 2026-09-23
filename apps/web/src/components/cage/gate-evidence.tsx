@@ -788,12 +788,12 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
     // story #4190(유나 빈 상태 절 · PO 12:17Z) — 대기 문구는 채널·블로그 공용(기존 키 재사용). «없음» 문구는 BE
     // `linked_draft_kind`(레시피 정의 capability 판별)로만 고른다 — 모르는 레시피(null)는 중립 문구.
     const pending = gate.linked_channel_draft_pending || gate.linked_site_draft_pending;
-    const noneKey = gate.linked_draft_kind === 'channel_post'
-      ? 'linkedChannelDraftNone'
-      : gate.linked_draft_kind === 'site_post' ? 'linkedSiteDraftNone' : 'linkedDraftNone';
     return (
       <p className="mt-1.5 text-[11.5px] text-muted-foreground">
-        {pending ? t('linkedChannelDraftPending') : t(noneKey)}
+        {pending ? t('linkedChannelDraftPending')
+          : gate.linked_draft_kind === 'channel_post' ? t('linkedChannelDraftNone')
+          : gate.linked_draft_kind === 'site_post' ? t('linkedSiteDraftNone')
+          : t('linkedDraftNone')}
       </p>
     );
   }
