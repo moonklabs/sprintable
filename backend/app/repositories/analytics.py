@@ -543,57 +543,42 @@ class AnalyticsRepository:
         }
 
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
+        """단건 — 묶음 조회(get_agent_stats_batch) 한 벌의 계산을 그대로 쓴다(story #4185: 단건과 묶음의 수치가
+        갈라질 자리를 없앤다). 그 프로젝트의 에이전트가 아니면 None."""
+        return (await self.get_agent_stats_batch(project_id, [agent_id])).get(agent_id)  # type: ignore[return-value]
+
+    async def get_agent_stats_batch(self, project_id: uuid.UUID, agent_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
+        """story #4185(E-MOBILE-SPEED) — 에이전트 여럿의 성과를 쿼리 2번(멤버 확인·스토리)에 받는다. 에이전트
+        성과 패널이 에이전트마다 단건을 따로 부르던 N+1을 없앤다. 그 프로젝트의 에이전트가 아닌 id는 결과에서
+        빠진다(단건의 None과 같은 판정). 지표 정의는 예전 단건 그대로(stories 기반, is_excluded 제외)."""
+        if not agent_ids:
+            return {}
         member_r = await self.session.execute(
             select(TeamMember.id).where(
-                TeamMember.id == agent_id,
+                TeamMember.id.in_(agent_ids),
                 TeamMember.project_id == project_id,
                 TeamMember.org_id == self.org_id,
                 TeamMember.type == "agent",
             )
         )
-        if member_r.scalar_one_or_none() is None:
-            return None  # type: ignore[return-value]
+        valid_ids = set(member_r.scalars().all())
+        if not valid_ids:
+            return {}
 
         # stories 기반 실제 기여 지표 (is_excluded=true 오염 데이터 제외)
         stories_r = await self.session.execute(
-            select(Story.status, Story.story_points, Story.created_at, Story.updated_at)
+            select(Story.assignee_id, Story.status, Story.story_points, Story.created_at, Story.updated_at)
             .where(
-                Story.assignee_id == agent_id,
+                Story.assignee_id.in_(valid_ids),
                 Story.org_id == self.org_id,
                 Story.deleted_at.is_(None),
                 Story.is_excluded.is_(False),
             )
         )
-        all_stories = stories_r.all()
-        done_stories = [s for s in all_stories if s[0] == "done"]
-
-        done_sp = sum((s[1] or 0) for s in done_stories)
-
-        lead_times_ms: list[int] = []
-        for s in done_stories:
-            created, updated = s[2], s[3]
-            if created and updated:
-                if created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
-                if updated.tzinfo is None:
-                    updated = updated.replace(tzinfo=timezone.utc)
-                delta_ms = int((updated - created).total_seconds() * 1000)
-                if delta_ms > 0:
-                    lead_times_ms.append(delta_ms)
-        avg_lead_time_ms = round(sum(lead_times_ms) / len(lead_times_ms)) if lead_times_ms else 0
-
-        return {
-            "completed": len(done_stories),
-            "total_stories": len(all_stories),
-            "done_story_points": done_sp,
-            "avg_lead_time_ms": avg_lead_time_ms,
-            # 스키마 하위 호환 필드
-            "total_runs": len(all_stories),
-            "failed": 0,
-            "total_tokens": 0,
-            "total_cost_usd": 0.0,
-            "avg_duration_ms": 0,
-        }
+        by_agent: dict[uuid.UUID, list[tuple]] = {aid: [] for aid in valid_ids}
+        for assignee_id, status, points, created, updated in stories_r.all():
+            by_agent[assignee_id].append((status, points, created, updated))
+        return {aid: _agent_stats_from_stories(rows) for aid, rows in by_agent.items()}
 
     async def get_project_health(self, project_id: uuid.UUID) -> dict:
         sprint_r = await self.session.execute(
@@ -909,3 +894,35 @@ class AnalyticsRepository:
             "processed_count": len(processed),
             "skipped_epic_ids": skipped,
         }
+
+
+def _agent_stats_from_stories(all_stories: list[tuple]) -> dict:
+    """(status, story_points, created_at, updated_at) 행들 → 에이전트 성과 지표(단건·묶음 공용 한 벌)."""
+    done_stories = [s for s in all_stories if s[0] == "done"]
+    done_sp = sum((s[1] or 0) for s in done_stories)
+
+    lead_times_ms: list[int] = []
+    for s in done_stories:
+        created, updated = s[2], s[3]
+        if created and updated:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            delta_ms = int((updated - created).total_seconds() * 1000)
+            if delta_ms > 0:
+                lead_times_ms.append(delta_ms)
+    avg_lead_time_ms = round(sum(lead_times_ms) / len(lead_times_ms)) if lead_times_ms else 0
+
+    return {
+        "completed": len(done_stories),
+        "total_stories": len(all_stories),
+        "done_story_points": done_sp,
+        "avg_lead_time_ms": avg_lead_time_ms,
+        # 스키마 하위 호환 필드
+        "total_runs": len(all_stories),
+        "failed": 0,
+        "total_tokens": 0,
+        "total_cost_usd": 0.0,
+        "avg_duration_ms": 0,
+    }

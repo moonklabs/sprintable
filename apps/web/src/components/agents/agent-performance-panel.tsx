@@ -113,22 +113,20 @@ export function AgentPerformancePanel() {
       const rankMap: Record<string, number> = {};
       sorted.forEach((e, i) => { rankMap[e.member_id] = i + 1; });
 
-      const statsResults = await Promise.allSettled(
-        agentMembers.map((m) =>
-          fetchWithAuth(`/api/analytics/agent-stats?project_id=${projectId}&agent_id=${m.id}`)
-            .then(async (r) => {
-              if (!r.ok) return null;
-              const j = await r.json() as { data: AgentStats | null };
-              return j.data;
-            })
-            .catch(() => null),
-        ),
-      );
+      // story #4185 — 에이전트마다 단건을 따로 부르던 N+1(prod 한 화면 5회+·각 0.5초)을 묶음 1회로.
+      // 실패·누락은 그 에이전트만 null(예전 단건 실패와 같은 표시).
+      let statsById: Record<string, AgentStats> = {};
+      if (agentMembers.length > 0) {
+        const ids = agentMembers.map((m) => m.id).join(',');
+        statsById = await fetchWithAuth(`/api/analytics/agent-stats/batch?project_id=${projectId}&agent_ids=${ids}`)
+          .then(async (r) => (r.ok ? ((await r.json()) as { data: Record<string, AgentStats> | null }).data ?? {} : {}))
+          .catch(() => ({}));
+      }
 
       setAgents(
-        agentMembers.map((m, i) => ({
+        agentMembers.map((m) => ({
           ...m,
-          stats: statsResults[i]?.status === 'fulfilled' ? (statsResults[i] as PromiseFulfilledResult<AgentStats | null>).value : null,
+          stats: statsById[m.id] ?? null,
           rank: rankMap[m.id] ?? null,
           balance: balanceMap[m.id] ?? 0,
         })),
