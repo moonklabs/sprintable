@@ -144,16 +144,25 @@ async def test_sealed_fields_of_next_gate_are_open_in_payload_schema():
 
 async def test_budget_stage_publish_example_carries_cost_and_passes_schema():
     """렌더러 두 곳이 공유하는 예시 생성 함수(#4085)를 이 프리셋의 실제 게이트 선언에 걸어, 에이전트가
-    그대로 복사할 예시 payload에 estimated_cost_minor가 실리고 그 payload가 스키마 검증을 통과하는지."""
-    from app.routers.events import _resolve_sealed_field_specs_and_payload
+    그대로 복사할 예시(렌더러가 찍는 JSON 그대로)에 estimated_cost_minor가 실리고 그 payload가 스키마 검증을
+    통과하는지. 이 프리셋에서 예산 예시를 내는 렌더러는 게이트 판정 알림뿐이라(concept_confirmed가 자기
+    게이트를 열어 사이클 렌더러는 예시를 생략) 게이트 행 없이 닿는 공유 함수 + 같은 JSON 조립 함수로 잰다."""
+    import json
+
+    from app.routers.events import _next_stage_publish_payload_json, _resolve_sealed_field_specs_and_payload
     from app.services.event_definition_registry import validate_event_payload
 
     async def body(s):
         d = await _definition(s, _CARD_NEWS)
         base = {"stage": "budget_approved", "work_item_type": "story", "work_item_id": str(uuid.uuid4())}
-        specs, example = _resolve_sealed_field_specs_and_payload(d.stage_metadata["budget_approved"]["gate"], base)
+        specs, example = await _resolve_sealed_field_specs_and_payload(
+            s, uuid.uuid4(), d.stage_metadata["budget_approved"]["gate"], base,
+        )
         assert [sp.name for sp in specs] == ["estimated_cost_minor"]
         assert isinstance(example.get("estimated_cost_minor"), int)
         validate_event_payload(d.payload_schema, example)
+        rendered = _next_stage_publish_payload_json(d, "budget_approved", example)
+        assert "estimated_cost_minor" in rendered
+        assert "estimated_cost_minor" in json.dumps(example)
 
     await _with_session(body)
