@@ -6225,6 +6225,8 @@
     "socialTextPostName": "SNS 텍스트 포스트",
     "socialTextPostDescription": "초안부터 발행까지 5단계예요. 컨셉·최종 발행 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
     "videoProductionName": "영상 제작(릴스·쇼츠)",
-    "videoProductionDescription": "소재 수집부터 발행까지 9단계예요. 컨셉·구조·생성 예산·최종 발행 네 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요."
+    "videoProductionDescription": "소재 수집부터 발행까지 9단계예요. 컨셉·구조·생성 예산·최종 발행 네 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
+    "newsletterName": "뉴스레터",
+    "newsletterDescription": "소재 수집부터 발송 결과 확인까지 6단계예요. 내용 검수와 발송 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요."
   }
 }
