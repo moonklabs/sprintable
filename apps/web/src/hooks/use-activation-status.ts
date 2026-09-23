@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { inActivationScope } from '@/lib/activation-hint';
 
 const COMPLETE_KEY = 'sprintable_activation_checklist_complete';
 
@@ -110,13 +111,17 @@ export function useActivationStatus(
   // story #4219 F1 — 완주 시드가 표시용 힌트에서 왔으면 스켈레톤 없이(완주로 보여 둔 채) 한 번 다시 조회해,
   // 완주가 되돌아간 드문 경우 배너가 늦게라도 뜨게 한다(힌트는 조언일 뿐).
   // orgId: 요청 org(대시보드 컨텍스트의 effective org = 인터셉터가 싣는 X-Org-Id). 캐시·로컬 완주 플래그·결과가 모두 이 org 범위.
-  options?: { verifyInBackground?: boolean; orgId?: string },
+  // seedOrgId: 시드(initialAllComplete)가 판정된 org — 지금 org와 같을 때만 시드를 쓴다(inActivationScope). 없으면 시드는 이 org의 것으로
+  // 간주(호출부가 org를 아는 서버 시드를 넘기면 반드시 함께 넘긴다).
+  options?: { verifyInBackground?: boolean; orgId?: string; seedOrgId?: string },
 ): UseActivationStatusResult {
   const orgId = options?.orgId;
   // 로컬 완주 플래그도 org 범위(story #4219 · 예전엔 전역이라 한 org를 완주하면 다른 org 배너까지 숨었다). org 모르면 안 읽는다.
   const localKey = orgId ? `${COMPLETE_KEY}:${orgId}` : null;
-  const seedComplete = initialAllComplete === true || (localKey ? readLocalFlag(localKey) : false);
-  const skip = seedComplete && options?.verifyInBackground !== true;
+  const seedApplies = options?.seedOrgId === undefined || inActivationScope(options.seedOrgId, orgId);
+  const seedComplete = (seedApplies && initialAllComplete === true) || (localKey ? readLocalFlag(localKey) : false);
+  const verify = seedApplies && options?.verifyInBackground === true;
+  const skip = seedComplete && !verify;
   const [result, setResult] = useState<{ orgId: string | null; data: ActivationState } | null>(null);
 
   useEffect(() => {
@@ -127,9 +132,11 @@ export function useActivationStatus(
       const data = await fetchActivationState(requestOrg ?? '');
       if (cancelled || !data) return;
       setResult({ orgId: requestOrg, data });
-      if (localKey) {
-        if (data.all_complete) writeLocalFlag(localKey);
-        else clearLocalFlag(localKey);
+      // 완주 플래그는 요청 org 키로, **그 org 판정**일 때만(scope_is_requested_org === false = 다른 org 판정이라 안 남김).
+      if (requestOrg && data.scope_is_requested_org !== false) {
+        const key = `${COMPLETE_KEY}:${requestOrg}`;
+        if (data.all_complete) writeLocalFlag(key);
+        else clearLocalFlag(key);
       }
     })();
     return () => {
@@ -138,6 +145,6 @@ export function useActivationStatus(
   }, [skip, orgId, localKey]);
 
   // org가 바뀌면 옛 org 결과는 버린다(렌더 파생 — 다음 조회가 새 org 결과로 채움).
-  const state = result && result.orgId === (orgId ?? null) ? result.data : null;
+  const state = result && (orgId ? inActivationScope(result.orgId, orgId) : result.orgId === null) ? result.data : null;
   return { state, stateOrgId: state ? result!.orgId : null, allComplete: state ? state.all_complete === true : seedComplete };
 }

@@ -9,7 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { writeActivationCollapsed, writeActivationHint } from '@/lib/activation-hint';
+import { inActivationScope, writeActivationCollapsed, writeActivationHint } from '@/lib/activation-hint';
 import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
@@ -52,25 +52,32 @@ export function ActivationChecklistBanner() {
   const {
     projectId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed,
   } = useDashboardContext();
+  // 서버 시드·힌트 시드는 레이아웃이 조회한 org(activationOrgId)의 것 — 지금 org와 다르면(flat 경로·org 전환) 훅이 버리고 이 org를
+  // 새로 조회한다(inActivationScope · A의 «완주»가 B 배너를 숨기던 자리).
   const { state, stateOrgId, allComplete } = useActivationStatus(initialActivationComplete, {
-    verifyInBackground: activationSeedFromHint, orgId,
+    verifyInBackground: activationSeedFromHint, orgId, seedOrgId: activationOrgId,
   });
   // story #4219 F1 — 받은 결과를 다음 문서 요청의 표시용 힌트로(레이아웃이 체크리스트를 임계 경로에서 기다리지 않게).
   // **결과가 판정된 org로만** 기록한다(PO 리뷰: 예전엔 캐시된 옛 org 결과를 현재 org로 기록해 섞였다).
   // - 클라 결과: stateOrgId(요청 org) · scope_is_requested_org === false면 다른 org 판정이라 안 남김.
   // - 서버 시드: 레이아웃이 조회한 org(activationOrgId = pathOrgId ?? me.org_id)로 — 다음 문서가 같은 식으로 읽는다.
   useEffect(() => {
-    if (state && stateOrgId) {
+    if (state && stateOrgId && inActivationScope(stateOrgId, orgId)) {
       if (state.scope_is_requested_org !== false) writeActivationHint(stateOrgId, state.all_complete);
-    } else if (!state && initialActivationComplete === true && !activationSeedFromHint && activationOrgId) {
-      writeActivationHint(activationOrgId, true); // 서버가 이번 요청에 확인한 완주
+    } else if (!state && initialActivationComplete === true && !activationSeedFromHint && activationOrgId && inActivationScope(activationOrgId, orgId)) {
+      writeActivationHint(activationOrgId, true); // 서버가 이번 요청에 확인한 완주(지금 org일 때만)
     }
-  }, [state, stateOrgId, initialActivationComplete, activationSeedFromHint, activationOrgId]);
+  }, [state, stateOrgId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId]);
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
   // story #4219 F1(PO 리뷰 CLS) — 접힘 상태는 서버도 아는 세션 쿠키(lib/activation-hint)가 정본 — 자리 표시(스켈레톤)를 접힌 칩과
   // 같은 크기로 그리려면 서버가 알아야 한다. 서버·클라가 같은 값이라 하이드레이션 차이도 0.
-  const [collapsed, setCollapsed] = useState<boolean>(initialActivationCollapsed === true);
+  // 접힘도 org 범위: 사용자가 이 탭에서 토글한 값은 org별로 기억하고, 없으면 서버가 준 초기값(그 org가 지금 org일 때만).
+  // org가 바뀌면(router.refresh 전 창 포함) 옛 org 값은 범위 밖이라 자연히 펼침으로.
+  const [collapsedByOrg, setCollapsedByOrg] = useState<Record<string, boolean>>({});
+  const collapsed = orgId && orgId in collapsedByOrg
+    ? collapsedByOrg[orgId] === true
+    : inActivationScope(activationOrgId, orgId) && initialActivationCollapsed === true;
 
   // story #3196 ④ — BE steps는 5개(signed_up 포함)인데 이 목록은 4개만 그려 "4/5 완료"
   // 진행률과 눈에 보이는 항목 수가 안 맞았다(5번째가 뭔지 화면이 말 안 함). signed_up은
@@ -150,9 +157,10 @@ export function ActivationChecklistBanner() {
   if (state.scope_is_requested_org === false) return null;
 
   const toggleCollapse = () => {
+    if (!orgId) return;
     const next = !collapsed;
-    setCollapsed(next);
-    if (orgId) writeActivationCollapsed(orgId, next);
+    setCollapsedByOrg((prev) => ({ ...prev, [orgId]: next }));
+    writeActivationCollapsed(orgId, next);
   };
 
   // story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(전 항목 클릭화는 범위 밖·#3196 잔존分

@@ -19,9 +19,11 @@ import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-stat
 let mockInitialActivationComplete: boolean | undefined;
 // story #4219 F1 — 완주 플래그·결과는 org 범위(orgId) · 접힘은 서버도 아는 세션 쿠키(initialActivationCollapsed).
 let mockInitialActivationCollapsed: boolean | undefined;
+// story #4219 F1(PO 리뷰) — 컨텍스트 org(지금 보는 org)와 레이아웃이 시드를 조회한 org(activationOrgId)를 따로 바꿀 수 있게.
+const mockOrg = { orgId: 'org-1', activationOrgId: 'org-1' as string | undefined, seedFromHint: false };
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({
-    projectId: 'proj-1', orgId: 'org-1',
+    projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.activationOrgId, activationSeedFromHint: mockOrg.seedFromHint,
     initialActivationComplete: mockInitialActivationComplete, initialActivationCollapsed: mockInitialActivationCollapsed,
   }),
 }));
@@ -66,6 +68,8 @@ beforeEach(() => {
   _resetActivationStatusCacheForTests();
   mockInitialActivationComplete = undefined;
   mockInitialActivationCollapsed = undefined;
+  mockOrg.orgId = 'org-1'; mockOrg.activationOrgId = 'org-1'; mockOrg.seedFromHint = false;
+  document.cookie = 'sp_activation_hint=; Path=/; Max-Age=0';
   document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -452,5 +456,40 @@ describe('ActivationChecklistBanner — 자리 표시 크기 = 배너 상태(sto
     expect(src).toMatch(/writeActivationHint\(stateOrgId, state\.all_complete\)/);
     expect(src).toMatch(/writeActivationHint\(activationOrgId, true\)/);
     expect(src).not.toMatch(/writeActivationHint\(orgId,/);
+  });
+});
+
+describe('ActivationChecklistBanner — org 범위 판정 하나로 네 곳(story #4219 F1 PO 리뷰)', () => {
+  const hintCookie = () => document.cookie.split('; ').find((c) => c.startsWith('sp_activation_hint='))?.split('=')[1];
+
+  it('⭐A 서버 시드(완주·접힘)가 있는 채로 B로 전환 → B 배너 정상(A 완주로 안 숨음 · A 접힘 안 물려받음) · 힌트·완주 플래그는 B 결과로만', async () => {
+    // A 문서: 서버가 A를 «완주»·«접힘»으로 조회해 둔 상태. 컨텍스트는 이미 B(flat 경로·전환 창).
+    mockOrg.orgId = 'org-b';
+    mockOrg.activationOrgId = 'org-a';
+    mockInitialActivationComplete = true;
+    mockInitialActivationCollapsed = true;
+    window.localStorage.setItem('sprintable_activation_checklist_complete:org-a', '1');
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ data: PARTIAL }) }));
+    vi.stubGlobal('fetch', fetchSpy);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    // ① 서버 시드(A 완주)가 B를 숨기지 않고 B를 조회했다.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // ② A 접힘을 물려받지 않고 펼친 배너.
+    expect(container.querySelector('[data-testid="activation-banner"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="activation-chip"]')).toBeNull();
+    // ③ 힌트는 B 결과로만(A 시드를 B로도 A로도 새로 쓰지 않음).
+    expect(decodeURIComponent(hintCookie() ?? '')).toBe('org-b:incomplete');
+    // ④ 완주 플래그: B 결과(미완주)로 B 키만 · A 키는 그대로(A 값 0 영향).
+    expect(window.localStorage.getItem('sprintable_activation_checklist_complete:org-b')).toBeNull();
+    expect(window.localStorage.getItem('sprintable_activation_checklist_complete:org-a')).toBe('1');
+  });
+
+  it('다른 org 판정 결과(scope_is_requested_org === false)는 힌트·완주 플래그 둘 다 안 남긴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ...PARTIAL, all_complete: true, completed: 5, scope_is_requested_org: false } }) })));
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(hintCookie()).toBeUndefined();
+    expect(window.localStorage.getItem('sprintable_activation_checklist_complete:org-1')).toBeNull();
   });
 });

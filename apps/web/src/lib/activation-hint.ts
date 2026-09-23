@@ -10,6 +10,15 @@
  * - ⛔권한·데이터 판단에 절대 쓰지 않는다 — 배너를 보일지 말지 **표시**에만. 사용자가 조작해도 영향은 배너 표시뿐.
  */
 export const ACTIVATION_HINT_COOKIE = 'sp_activation_hint';
+
+/**
+ * story #4219 F1(PO 리뷰) — 활성화 상태의 **org 범위 판정 하나**. 읽기·쓰기 네 곳(힌트 쿠키 · 로컬 완주 플래그 · 서버 시드 · 접힘)이
+ * 모두 이 함수를 거친다: 값이 판정·기록된 org가 **지금 보는 org**와 같을 때만 쓰고 읽는다. 어느 쪽이든 모르면 범위 밖(안 쓰고 안 읽음).
+ * org가 바뀌면 파생 상태는 이 판정으로 자연히 초기화된다(옛 org 값은 범위 밖이라 무시).
+ */
+export function inActivationScope(valueOrgId: string | null | undefined, currentOrgId: string | null | undefined): boolean {
+  return Boolean(valueOrgId) && Boolean(currentOrgId) && valueOrgId === currentOrgId;
+}
 /** 30일 — 완주는 거의 단조라 길어도 되지만, 되돌아간 드문 경우를 자연히 흘려보내게 무기한은 아님. */
 export const ACTIVATION_HINT_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 

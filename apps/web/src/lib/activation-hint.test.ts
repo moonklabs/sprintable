@@ -40,6 +40,7 @@ describe('writeActivationHint', () => {
     const srcRoot = join(__dirname, '..');
     const users = execSync(`grep -rl "activation-hint'" ${JSON.stringify(srcRoot)} --include=*.ts --include=*.tsx`, { encoding: 'utf8' })
       .trim().split('\n').map((f) => f.slice(srcRoot.length + 1)).filter((f) => !f.includes('.test.')).sort();
-    expect(users).toEqual(['app/(authenticated)/layout.tsx', 'components/dashboard/activation-checklist-banner.tsx']);
+    // 훅은 org 범위 판정(inActivationScope)만 쓴다 — 역시 표시 게이팅(배너·런처)용.
+    expect(users).toEqual(['app/(authenticated)/layout.tsx', 'components/dashboard/activation-checklist-banner.tsx', 'hooks/use-activation-status.ts']);
   });
 });
