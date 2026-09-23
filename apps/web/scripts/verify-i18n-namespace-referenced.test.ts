@@ -13,6 +13,8 @@ function baseInputs(overrides: Partial<NamespaceReferenceInputs> = {}): Namespac
     literalRefFullKeys: new Set(),
     dynamicNamespaces: new Set(),
     unknownNsLiteralWords: new Set(),
+    indirectLookupFullKeys: new Set(),
+    indirectLookupWords: new Set(),
     tableBareKeys: new Set(),
     overlayNamespaces: new Set(),
     leafKeysByNamespace: new Map([['nav', new Set(['dashboard'])]]),
@@ -34,6 +36,15 @@ describe('isNamespaceReferenced — story #3757', () => {
   it("A′: unknown-ns 낱말이 이 ns의 leaf bare와 일치하면 참조됨", () => {
     const inputs = baseInputs({ unknownNsLiteralWords: new Set(['dashboard']) });
     expect(isNamespaceReferenced('nav', inputs)).toBe(true);
+  });
+
+  it('A″: 조회 테이블 값(전체경로)이 이 ns 키를 가리키면 참조됨(story #4202)', () => {
+    expect(isNamespaceReferenced('nav', baseInputs({ indirectLookupFullKeys: new Set(['nav.dashboard']) }))).toBe(true);
+    expect(isNamespaceReferenced('nav', baseInputs({ indirectLookupFullKeys: new Set(['other.dashboard']) }))).toBe(false);
+  });
+
+  it('A″: ns 모르는 조회 테이블 값(낱말)이 이 ns의 leaf bare와 일치하면 참조됨(story #4202)', () => {
+    expect(isNamespaceReferenced('nav', baseInputs({ indirectLookupWords: new Set(['dashboard']) }))).toBe(true);
   });
 
   it('C: 데이터 카탈로그 낱말이 이 ns의 leaf bare와 일치하면 참조됨', () => {
@@ -144,6 +155,29 @@ describe('runScan — 파이프라인 통합(story #3757)', () => {
         }
       `,
     );
+    // A″(story #4202): 번역자를 헬퍼에 넘기고 헬퍼가 Record<string,string> 표 값으로 t(표[key])를 부른다 —
+    // 컴포넌트엔 t() 호출이 없고 헬퍼 번역자는 ns를 모른다. 표 값('presetFooName')이 nsF 리프와 일치.
+    writeFileSync(
+      path.join(srcRoot, 'preset-copy.ts'),
+      `
+        export const NAME_KEY: Record<string, string> = { 'preset.foo': 'presetFooName' };
+        export function presetName(key: string, t: (key: string) => string): string {
+          const k = NAME_KEY[key];
+          return k ? t(k) : key;
+        }
+      `,
+    );
+    writeFileSync(
+      path.join(srcRoot, 'f-widget.tsx'),
+      `
+        import { useTranslations } from 'next-intl';
+        import { presetName } from './preset-copy';
+        export function FWidget() {
+          const tPreset = useTranslations('nsF');
+          return <div>{presetName('preset.foo', tPreset)}</div>;
+        }
+      `,
+    );
     // C: 데이터 카탈로그 리터럴 — nsE의 bare 세그먼트('descFoo')와 일치시킴.
     writeFileSync(
       path.join(srcRoot, 'nav-config.ts'),
@@ -158,6 +192,7 @@ describe('runScan — 파이프라인 통합(story #3757)', () => {
       nsC: { onlyOverlay: '오버레이 전용' }, // D로만 살아남아야 함.
       nsD: { unnamedLabel: '이름 없음' }, // A′로 살아남아야 함.
       nsE: { descFoo: '설명' }, // C로 살아남아야 함.
+      nsF: { presetFooName: '프리셋' }, // A″로 살아남아야 함.
       nsDead: { orphanKey: '아무도 안 씀' }, // 넷 다 없음 — RED 대상.
     };
     writeFileSync(koPath, JSON.stringify(messages));
@@ -177,7 +212,7 @@ describe('runScan — 파이프라인 통합(story #3757)', () => {
       const { deadNamespaces, topLevelNamespaces } = runScan({
         srcRoot: f.srcRoot, koPath: f.koPath, enPath: f.enPath, overlayAllowlistPath: f.overlayAllowlistPath, minExpectedFiles: 1,
       });
-      expect(topLevelNamespaces).toEqual(new Set(['nsA', 'nsB', 'nsC', 'nsD', 'nsE', 'nsDead']));
+      expect(topLevelNamespaces).toEqual(new Set(['nsA', 'nsB', 'nsC', 'nsD', 'nsE', 'nsF', 'nsDead']));
       expect(deadNamespaces).toEqual(['nsDead']);
     } finally {
       rmSync(f.dir, { recursive: true, force: true });
@@ -197,7 +232,7 @@ describe('runScan — 파이프라인 통합(story #3757)', () => {
       // nsDead를 제거한 메시지로 다시 쓰고 재실행 — 이제 dead 후보가 0이어야 한다.
       const messagesWithoutDead = {
         nsA: { label: '라벨' }, nsB: { status_active: '활성' }, nsC: { onlyOverlay: 'x' },
-        nsD: { unnamedLabel: 'x' }, nsE: { descFoo: 'x' },
+        nsD: { unnamedLabel: 'x' }, nsE: { descFoo: 'x' }, nsF: { presetFooName: 'x' },
       };
       writeFileSync(f.koPath, JSON.stringify(messagesWithoutDead));
       writeFileSync(f.enPath, JSON.stringify(messagesWithoutDead));

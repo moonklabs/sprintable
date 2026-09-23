@@ -15,14 +15,16 @@ import { MarketingRecipeApplyDialog } from './marketing-recipe-apply-dialog';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { VIDEO_PRODUCTION_RECIPE } from '@/lib/video-production-seed.test.fixture';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+let LOCALE: 'ko' | 'en' = 'ko';
 function wrap(node: React.ReactNode) {
-  return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
+  return <NextIntlClientProvider locale={LOCALE} messages={LOCALE === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
 }
 
 beforeEach(() => {
@@ -1027,5 +1029,21 @@ describe('발행 자리 배지 문구', () => {
     const en = (await import('../../../messages/en.json')).default;
     expect(koMessages.organization.recipeApplyV2PublisherBadge).toBe('채널');
     expect(en.organization.recipeApplyV2PublisherBadge).toBe('Channel');
+  });
+});
+
+// story #4202(까디르 QA) — 자리별 회귀 핀: 적용 다이얼로그 제목이 플랫폼 프리셋 이름을 로케일 문안으로.
+describe('MarketingRecipeApplyDialog — 제목의 프리셋 이름 로케일(story #4202)', () => {
+  it('en — 제목에 영어 이름(원문 한국어 0)', async () => {
+    stubAll();
+    LOCALE = 'en';
+    try {
+      await mountDialog(RECIPE);
+      const title = document.body.querySelector('[role="dialog"] h2, [data-slot="dialog-title"]')?.textContent ?? '';
+      expect(title).toContain(enMessages.recipePreset.videoProductionName);
+      expect(title).not.toContain(RECIPE.name);
+    } finally {
+      LOCALE = 'ko';
+    }
   });
 });

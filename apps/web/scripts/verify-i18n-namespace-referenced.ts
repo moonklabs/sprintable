@@ -15,6 +15,13 @@
  * 아래 네 신호 중 하나라도 있으면 그 네임스페이스는 "참조됨"(GREEN):
  *   A/A′ — `scanRepo()`의 literalRefs 또는 unknownNsLiteralWords가 그 ns의 리프 키
  *          중 하나라도 가리킴(전체경로 또는 낱말 매치).
+ *   A″   — `scanRepo()`의 indirectLookupRefs(전체경로) 또는 indirectLookupWords(낱말)가 그 ns의
+ *          리프 키를 가리킴 — 번역자 co-argument·`Record<string, string>` 조회 테이블 값(story #3765).
+ *          키 단위 가드(verify-no-unused-i18n-keys.ts)는 이 신호를 이미 «참조됨»으로 본다 — 여기서 안
+ *          보면 두 가드가 갈린다(키는 살아 있는데 그 ns는 죽었다고 판정). story #4202(PR #4562 CI):
+ *          `useTranslations('recipePreset')` 번역자를 lib 헬퍼(presetName)에 넘기고 헬퍼가 표 값으로
+ *          `t(표[key])`를 부르는 모양 — 컴포넌트 쪽엔 t() 호출이 없고 헬퍼 쪽 번역자는 ns를 몰라,
+ *          A/A′/B 어디에도 안 걸렸다. 표 값이 그 ns의 리프 키와 맞으면 참조로 본다(키 가드와 같은 축).
  *   B    — `scanRepo()`의 dynamicNamespaces에 그 ns가 있음(동적 호출 — 「참조됐는지
  *          알 수 없음」이지 「참조 안 됨」이 아니다, 유나 정의).
  *   C    — `KEY_FIELD_NAMES` 데이터 카탈로그 리터럴(`descriptionKey: 'x'`류)이 그 ns
@@ -90,6 +97,9 @@ export interface NamespaceReferenceInputs {
   literalRefFullKeys: Set<string>;
   dynamicNamespaces: Set<string>;
   unknownNsLiteralWords: Set<string>;
+  // A″ — scanRepo().indirectLookupRefs의 전체경로·indirectLookupWords(키 단위 가드와 같은 재료).
+  indirectLookupFullKeys: Set<string>;
+  indirectLookupWords: Set<string>;
   tableBareKeys: Set<string>;
   overlayNamespaces: Set<string>;
   // 각 ns의 leaf 키(bare 세그먼트 포함) — unknownNsLiteralWords/tableBareKeys를 그 ns
@@ -109,6 +119,10 @@ export function isNamespaceReferenced(ns: string, inputs: NamespaceReferenceInpu
   // A′ — unknown-ns 리터럴 낱말이 이 ns의 leaf bare 세그먼트와 일치.
   for (const bare of leaves) {
     if (inputs.unknownNsLiteralWords.has(bare)) return true;
+  }
+  // A″ — 번역자 co-argument·Record<string,string> 조회 테이블 값(전체경로 또는 낱말).
+  for (const bare of leaves) {
+    if (inputs.indirectLookupFullKeys.has(`${ns}.${bare}`) || inputs.indirectLookupWords.has(bare)) return true;
   }
   // C — 데이터 카탈로그 리터럴이 이 ns의 leaf bare 세그먼트와 일치.
   for (const bare of leaves) {
@@ -162,6 +176,8 @@ export function runScan(overrides: {
     literalRefFullKeys,
     dynamicNamespaces: scan.dynamicNamespaces,
     unknownNsLiteralWords: scan.unknownNsLiteralWords,
+    indirectLookupFullKeys: new Set(scan.indirectLookupRefs.map((r) => r.fullKey)),
+    indirectLookupWords: scan.indirectLookupWords,
     tableBareKeys,
     overlayNamespaces,
     leafKeysByNamespace,
@@ -180,7 +196,7 @@ function main(): number {
   );
 
   if (deadNamespaces.length > 0) {
-    console.error(`\nFAIL: 참조 신호가 A/A′/B/C/D 어디에도 없는 네임스페이스 ${deadNamespaces.length}개:`);
+    console.error(`\nFAIL: 참조 신호가 A/A′/A″/B/C/D 어디에도 없는 네임스페이스 ${deadNamespaces.length}개:`);
     for (const ns of deadNamespaces.sort()) console.error(`  ${ns}`);
     console.error(
       '\n→ 이 네임스페이스는 OSS 코드·SaaS 오버레이(정적 스냅샷) 어디서도 안 열린다 — 죽은 ' +
@@ -191,7 +207,7 @@ function main(): number {
     return 1;
   }
 
-  console.log('\nOK: 모든 최상위 네임스페이스가 A/A′/B/C/D 중 하나 이상의 신호로 참조됨.');
+  console.log('\nOK: 모든 최상위 네임스페이스가 A/A′/A″/B/C/D 중 하나 이상의 신호로 참조됨.');
   return 0;
 }
 

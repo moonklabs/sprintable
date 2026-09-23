@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider, createTranslator } from 'next-intl';
 import { ApplyRecipeDialog } from './apply-recipe-dialog';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 // story #4118 — 토스트 count 값이 실제로 문장에 interpolate됐는지 검증하려면 t가
 // row-action-aria-labels.test.ts 선례처럼 진짜 번역기여야 한다(다른 테스트들의
@@ -33,9 +34,10 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
+let LOCALE: 'ko' | 'en' = 'ko';
 function wrap(node: React.ReactNode) {
   return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+    <NextIntlClientProvider locale={LOCALE} messages={LOCALE === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -99,6 +101,19 @@ function stubFetch(applyBody: unknown, capture: { body: unknown }) {
 }
 
 describe('ApplyRecipeDialog', () => {
+  it('story #4202(유나 390) — 제목에 pr-8(닫기 X와 안 겹치게, 공용 dialog 수정 시 걷음)', async () => {
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, { body: null as unknown });
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog target={TARGET} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
+      ));
+    });
+    await flush();
+    const title = [...document.body.querySelectorAll('h2, [data-slot="dialog-title"]')].find((e) => e.textContent?.includes('eventApplyDialogTitle'));
+    expect(title?.className).toContain('pr-8');
+  });
+
   it('프로젝트를 고르기 전엔 역할매핑 select가 안 뜬다(고를 프로젝트가 있어야 agent 후보를 안다)', async () => {
     const capture = { body: null as unknown };
     stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, capture);
@@ -641,5 +656,27 @@ describe('ApplyRecipeDialog', () => {
     await act(async () => { resolveChannels?.(); });
     await flush();
     expect(document.body.querySelector('[data-testid="apply-recipe-channels-empty"]')).toBeTruthy();
+  });
+});
+
+// story #4202(까디르 QA) — 자리별 회귀 핀: 이벤트 적용 다이얼로그 제목의 프리셋 이름.
+describe('ApplyRecipeDialog — 제목의 프리셋 이름 로케일(story #4202)', () => {
+  it('en — 플랫폼 마케팅 프리셋이면 제목 name 값이 영어', async () => {
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, { body: null as unknown });
+    const target = { ...TARGET, key: 'preset.marketing.social_text_post', name: 'SNS 텍스트 포스트' };
+    const t = ((k: string, v?: { name?: string }) => `${k}:${v?.name ?? ''}`) as never;
+    LOCALE = 'en';
+    try {
+      await act(async () => {
+        root.render(wrap(
+          <ApplyRecipeDialog target={target} open onOpenChange={() => {}} t={t} tc={((k: string) => k) as never} addToast={() => {}} />,
+        ));
+      });
+      await flush();
+      expect(document.body.textContent).toContain(`eventApplyDialogTitle:${enMessages.recipePreset.socialTextPostName}`);
+      expect(document.body.textContent).not.toContain('eventApplyDialogTitle:SNS 텍스트 포스트');
+    } finally {
+      LOCALE = 'ko';
+    }
   });
 });

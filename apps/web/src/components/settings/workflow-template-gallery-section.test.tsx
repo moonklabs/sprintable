@@ -11,15 +11,17 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { WorkflowTemplateGallerySection } from './workflow-template-gallery-section';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+let LOCALE: 'ko' | 'en' = 'ko';
 function wrap(node: React.ReactNode) {
   return (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+    <NextIntlClientProvider locale={LOCALE} messages={LOCALE === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -373,5 +375,27 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
     expect(container.textContent).toContain('두 번째 레시피');
     // def-2(성공한 leg)는 배지가 붙고, def-1(실패한 leg)은 배지 없이(정직한 폴백) 목록엔 여전히 뜬다.
     expect(container.textContent).toContain('적용됨');
+  });
+});
+
+// story #4202(까디르 QA) — 자리별 회귀 핀: 설정 템플릿 갤러리 카드 이름(숨은 탭이지만 같은 헬퍼).
+describe('WorkflowTemplateGallerySection — 프리셋 이름 로케일(story #4202)', () => {
+  it('en — 플랫폼 마케팅 프리셋 카드 이름·설명이 영어', async () => {
+    const def = { ...DEFINITION, key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)', description: '원문 설명' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [def] };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    LOCALE = 'en';
+    try {
+      await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+      await flush();
+      expect(container.textContent).toContain(enMessages.recipePreset.videoProductionName);
+      expect(container.textContent).toContain(enMessages.recipePreset.videoProductionDescription);
+      expect(container.textContent).not.toContain('영상 제작(릴스·쇼츠)');
+    } finally {
+      LOCALE = 'ko';
+    }
   });
 });
