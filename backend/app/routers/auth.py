@@ -2218,6 +2218,15 @@ class AuthMeResponse(BaseModel):
     # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
     # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
     email_verified: bool | None = None
+    # story #4178(산티아고 prod 에스컬레이션 1d522e6d) — 사람(JWT) 세션의 `member_id`는
+    # `auth.user_id`(=users.id) 그대로라 `/api/v2/events/stream`의 `resolve_member_identity`
+    # (TeamMember.id/OrgMember.id만 허용)로 검증하면 404가 난다. `member_id` 자체의 의미는
+    # 바꾸지 않는다 — onboarding-form.tsx/verify-email 두 FE 소비처가 "org 유무와 무관하게
+    # 항상 200"이라는 그 필드의 기존 계약(`test_3195_me_email_verified.py`가 핀)에 기대고
+    # 있어, 그 값을 org_member.id로 바꾸면 org 미가입 사용자의 온보딩이 깨진다(그라운딩
+    # 실측). 대신 additive 신규 필드 — 사람 세션 + org 해소 가능일 때만 org_member.id,
+    # 그 외(에이전트 세션·org 미해소)는 email_verified와 같은 안전판으로 None(예외 없음).
+    org_member_id: str | None = None
 
 
 async def _resolve_project_default(
@@ -2257,10 +2266,12 @@ async def get_auth_me(
     ambiguous = False
     accessible_ids: list[str] = []
     email_verified: bool | None = None
+    org_member_id: str | None = None
+    org_id_raw = auth.org_id or meta.get("org_id")
     if meta.get("api_key_id"):
         try:
             member_id = uuid.UUID(auth.user_id)
-            org_id = uuid.UUID(str(auth.org_id or meta.get("org_id")))
+            org_id = uuid.UUID(str(org_id_raw))
             resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)
         except Exception:
             logger.warning("get_auth_me: 신규 project default 판정 실패 — 레거시 필드만 반환", exc_info=True)
@@ -2273,14 +2284,28 @@ async def get_auth_me(
             ).scalar_one_or_none()
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
+        # story #4178 — org 미해소(org_id_raw 없음·OrgMember 행 없음)는 예외가 아니라 None.
+        if org_id_raw:
+            try:
+                row = (await db.execute(
+                    select(OrgMember.id).where(
+                        OrgMember.org_id == uuid.UUID(str(org_id_raw)),
+                        OrgMember.user_id == uuid.UUID(auth.user_id),
+                        OrgMember.deleted_at.is_(None),
+                    )
+                )).scalar_one_or_none()
+                org_member_id = str(row) if row is not None else None
+            except Exception:
+                logger.warning("get_auth_me: org_member_id 조회 실패 — None으로 반환", exc_info=True)
     return AuthMeResponse(
         member_id=auth.user_id,
-        org_id=auth.org_id or meta.get("org_id"),
+        org_id=org_id_raw,
         project_id=meta.get("project_id"),
         resolved_default_project_id=resolved,
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
         email_verified=email_verified,
+        org_member_id=org_member_id,
     )
 
 
