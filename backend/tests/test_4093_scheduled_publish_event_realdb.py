@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from tests.recipe_reviewed_draft import reviewed_draft_body_via, reviewed_draft_for
 from fastapi import BackgroundTasks
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -274,7 +276,7 @@ async def _approve_and_schedule_submit(s, *, org_id, story_id, creator_id, owner
     assert scoped_gate.status == "pending"
     scoped_gate_id = scoped_gate.id
 
-    await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인")
+    await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
     await s.commit()
 
     from app.models.gate import Gate

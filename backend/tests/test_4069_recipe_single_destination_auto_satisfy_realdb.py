@@ -42,6 +42,8 @@ import os
 import uuid
 
 import pytest
+
+from tests.recipe_reviewed_draft import reviewed_draft_body_via, reviewed_draft_for
 from fastapi import BackgroundTasks
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -323,7 +325,7 @@ async def test_single_destination_gate_approved_before_draft_is_not_auto_satisfi
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/gates/{gate_d_id}/transition",
-                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
+                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True, **(await reviewed_draft_body_via(Session, org_id=org_id, work_item_id=story_id))},
             )
             assert r.status_code == 200, r.text
 
@@ -392,7 +394,7 @@ async def test_draft_submitted_before_gate_approval_hook_b_auto_satisfies():
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/gates/{gate_d_id}/transition",
-                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
+                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True, **(await reviewed_draft_body_via(Session, org_id=org_id, work_item_id=story_id))},
             )
             assert r.status_code == 200, r.text
             gate_d_resolver_id = r.json()["resolver_id"]
@@ -448,7 +450,7 @@ async def test_multi_destination_second_gate_not_auto_satisfied():
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/gates/{gate_d_id}/transition",
-                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
+                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True, **(await reviewed_draft_body_via(Session, org_id=org_id, work_item_id=story_id))},
             )
             assert r.status_code == 200, r.text
         async with Session() as s:

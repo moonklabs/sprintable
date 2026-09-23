@@ -1179,6 +1179,17 @@ RECIPE_AUTO_SATISFIED_NOTE = "auto_satisfied_by_recipe_external_publish_gate: si
 RECIPE_APPROVED_DRAFT_FACT = "approved_draft"
 
 
+class RecipeReviewedDraftChangedError(Exception):
+    """story #4190(PO 판정 2026-09-23 11:49Z) — 레시피 external_publish 게이트 승인 요청이 «사람이 본 초안»(draft_id·
+    version)을 싣지 않았거나, 승인 순간(초안 잠금 뒤) 최신과 다르다. 화면을 연 뒤·클릭 전에 새 버전이 커밋되면 옛 화면
+    클릭이 본 적 없는 새 버전을 봉인하던 창을 닫는다 — merge 게이트 `reviewed_head_sha`(#2975)와 같은 fail-closed."""
+
+    def __init__(self, *, current_draft_id: uuid.UUID, current_version: int):
+        super().__init__("recipe reviewed draft changed")
+        self.current_draft_id = current_draft_id
+        self.current_version = current_version
+
+
 def _is_recipe_external_publish_gate(gate: Gate) -> bool:
     facts = gate.neutral_facts or {}
     return (
@@ -1187,14 +1198,20 @@ def _is_recipe_external_publish_gate(gate: Gate) -> bool:
     )
 
 
-async def seal_recipe_approved_draft(session: AsyncSession, gate: Gate) -> tuple[uuid.UUID, int] | None:
+async def seal_recipe_approved_draft(
+    session: AsyncSession, gate: Gate, *, reviewed_draft: tuple[uuid.UUID, int] | None = None,
+) -> tuple[uuid.UUID, int] | None:
     """레시피 게이트 승인 순간 승인 화면이 보여 준 초안의 id·버전을 봉인하고, **봉인한 (draft_id, version)을 돌려준다**
     (보여 준 게 없으면 봉인 0 · None). 캐스케이드는 이 반환값만 쓴다 — 다시 조회하지 않는다.
 
     까디르 QA(4564 CHANGES) — 봉인과 캐스케이드가 `ready[0]`을 따로 두 번 읽으면(READ COMMITTED · 잠금 없음) 그 사이
     다른 요청이 v2를 커밋해 캐스케이드가 봉인(v1)과 대조 없이 v2를 승인할 수 있었다. 그래서 초안 행을 `FOR UPDATE`로
     잠근 **뒤** 최신 버전을 다시 읽어 그 값을 봉인한다(잠금 순서 레시피 게이트 → 초안 → scoped 게이트 — 초안 새 버전
-    경로 `create_channel_post_draft_version`(초안 → scoped 게이트)과 같은 방향이라 교착이 없다)."""
+    경로 `create_channel_post_draft_version`(초안 → scoped 게이트)과 같은 방향이라 교착이 없다).
+
+    «본 버전 대조»(PO 판정 11:49Z): 승인 화면이 보여 준 초안이 있으면 승인 요청이 그 (draft_id, version)을
+    `reviewed_draft`로 실어 와야 하고, 잠금 뒤 최신과 같아야 봉인한다. 미전송·불일치면 `RecipeReviewedDraftChangedError`
+    (라우터 409) — 승인 자체가 진행되지 않는다. 보여 준 초안이 없으면(봉인 0·승계 0) 필드 없이 통과."""
     if not _is_recipe_external_publish_gate(gate):
         return None
     from app.services.channel_posts import find_ready_recipe_channel_drafts, list_channel_post_draft_versions
@@ -1212,6 +1229,8 @@ async def seal_recipe_approved_draft(session: AsyncSession, gate: Gate) -> tuple
     if not versions:
         return None
     latest = versions[-1]
+    if reviewed_draft is None or (str(reviewed_draft[0]), reviewed_draft[1]) != (str(shown_draft.id), latest.version):
+        raise RecipeReviewedDraftChangedError(current_draft_id=shown_draft.id, current_version=latest.version)
     gate.neutral_facts = {
         **(gate.neutral_facts or {}),
         RECIPE_APPROVED_DRAFT_FACT: {
@@ -1355,8 +1374,12 @@ async def transition_gate(
     note: str | None = None,
     *,
     pending_deliveries: list[dict[str, Any]] | None = None,
+    reviewed_draft: tuple[uuid.UUID, int] | None = None,
 ) -> Gate:
     """게이트 상태 전이 — 불법 전이 시 ValueError 발생.
+
+    ``reviewed_draft``(story #4190): 레시피 external_publish 게이트 승인 때 사람이 본 초안 (draft_id, version) —
+    승인 화면에 초안이 있었는데 이 값이 없거나 다르면 ``RecipeReviewedDraftChangedError``.
 
     ``pending_deliveries``(ccbcd9da A-1, additive): 넘기면 line resolution(doc/epic 자동재개)이 만든
     wake/delivery 페이로드를 append — 호출자가 자기 commit 후 wake_agent/webhook 스케줄(#1364 선례
@@ -1420,7 +1443,7 @@ async def transition_gate(
         if gate.gate_type == "external_publish" and (gate.scope_key or "") == "":
             # story #4190 — 승인 화면이 보여 준 초안을 먼저 봉인하고(캐스케이드가 scoped 게이트를 바꾸기 前 —
             # 화면과 같은 판정), 승계 대상은 «대신 결재» 표시와 같은 판정 함수 하나로.
-            _sealed = await seal_recipe_approved_draft(session, gate)
+            _sealed = await seal_recipe_approved_draft(session, gate, reviewed_draft=reviewed_draft)
             _scoped_gate = (
                 await recipe_approval_cascade_target(
                     session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,

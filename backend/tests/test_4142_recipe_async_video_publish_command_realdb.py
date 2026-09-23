@@ -31,6 +31,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from tests.recipe_reviewed_draft import reviewed_draft_body_via, reviewed_draft_for
 from fastapi import BackgroundTasks
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -453,7 +455,7 @@ async def test_ac1_video_approval_creates_pending_command_not_false_published():
         async with Session() as s:
             from app.services.gate_service import transition_gate
 
-            await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인")
+            await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
             await s.commit()
 
         async with Session() as s:
@@ -529,7 +531,7 @@ async def test_ac2_worker_tick_completes_video_publish_and_emits_stage_event_onc
         async with Session() as s:
             from app.services.gate_service import transition_gate
 
-            await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인")
+            await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
             await s.commit()
 
         async with Session() as s:
@@ -599,7 +601,7 @@ async def test_ac2_worker_tick_final_failure_emits_zero_events_and_records_outco
         async with Session() as s:
             from app.services.gate_service import transition_gate
 
-            await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인")
+            await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
             await s.commit()
 
         async with Session() as s:
@@ -679,7 +681,7 @@ async def test_ac4d_text_only_draft_still_completes_synchronously_with_completed
         async with _client_for(app) as client:
             r = await client.post(
                 f"/api/v2/gates/{gate_d_id}/transition",
-                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
+                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True, **(await reviewed_draft_body_via(Session, org_id=org_id, work_item_id=story_id))},
             )
             assert r.status_code == 200, r.text
 

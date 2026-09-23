@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_envelope import human_error
+from app.services.gate_service import RecipeReviewedDraftChangedError
 from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -131,6 +132,12 @@ class GateTransitionRequest(BaseModel):
     # merge 게이트 승인 시의 fail-closed 강제는 transition_gate_endpoint 본문에서(None도 「안 보냄」
     # 취급돼 known SHA와 불일치로 거부됨 — "안 보내면 조용히 통과"라는 구멍 자체가 생기지 않는다).
     reviewed_head_sha: str | None = None
+    # story #4190(PO 판정 2026-09-23 11:49Z) — 레시피 external_publish 게이트 승인 화면이 보여 준 초안
+    # (`linked_channel_draft`의 draft_id·version). 위 reviewed_head_sha와 같은 원리: 화면을 연 뒤·클릭 전에 새 버전이
+    # 커밋되면 옛 화면 클릭이 본 적 없는 새 버전을 봉인하던 창을 닫는다. 보여 준 초안이 있는 승인에서 미전송·불일치면
+    # 409(fail-closed · gate_service.RecipeReviewedDraftChangedError). 다른 gate_type엔 무관(무시).
+    reviewed_draft_id: uuid.UUID | None = None
+    reviewed_draft_version: int | None = None
 
     @field_validator("status")
     @classmethod
@@ -161,6 +168,9 @@ class LinkedChannelDraft(BaseModel):
     실제 자동발행 실행 선택 규칙과 **같은 함수** — 두 표면이 다른 draft를 가리키는
     드리프트 방지)가 고르는 draft만 싣는다."""
     draft_id: uuid.UUID
+    # story #4190 — 화면이 보여 주는 이 초안의 버전. 승인 요청이 `reviewed_draft_id`·`reviewed_draft_version`으로
+    # 그대로 돌려보내고, 서버가 승인 순간(초안 잠금 뒤) 최신과 대조한다(«사람 승인은 본 내용에만»).
+    version: int
     channel: str
     account_id: str
     account_label: str | None = None
@@ -575,7 +585,7 @@ async def _build_linked_channel_draft(
     video_url = public_url_for_object_path(video_row.original_object_path) if video_row is not None else None
 
     return LinkedChannelDraft(
-        draft_id=draft.id, channel=draft.channel,
+        draft_id=draft.id, version=latest.version, channel=draft.channel,
         account_id=connection.account_id if connection is not None else "",
         account_label=connection.account_label if connection is not None else None,
         text=latest.text, image_urls=image_urls, video_url=video_url,
@@ -2194,6 +2204,10 @@ async def _transition_gate_endpoint(
         gate = await transition_gate(
             session, org_id, id, body.status, _resolver_id, body.note,
             pending_deliveries=_pending_deliveries,
+            reviewed_draft=(
+                (body.reviewed_draft_id, body.reviewed_draft_version)
+                if body.reviewed_draft_id is not None and body.reviewed_draft_version is not None else None
+            ),
         )
         # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — anchor(gate.approved_head_sha)를 배경
         # publish 태스크가 뒤늦게 적으면, 승인(SHA A) 직후·태스크 실행 前에 새 커밋(B)의
@@ -2259,6 +2273,16 @@ async def _transition_gate_endpoint(
         # #2027 원래 "N+1 0" 의도 그대로)하고, 그 외 상태(rejected 등, 검증 블록 자체를
         # 안 태움)만 to_gate_response가 자체적으로 1쿼리 한다(AC1이 명시 허용하는 비용).
         return await to_gate_response(session, org_id, gate, posture=_transition_posture)
+    except RecipeReviewedDraftChangedError as e:
+        # story #4190 — 사람 문구는 카탈로그 키(유나 확정 대기 · PO 11:49Z). 코드·현재 초안 버전은 FE 새로고침 안내용.
+        raise HTTPException(
+            status_code=409,
+            detail=human_error(
+                "GATE_DRAFT_CHANGED", "The draft changed after this approval screen was opened.",
+                user_message=t("gates.draft_changed", resolved_locale),
+                current_draft_id=str(e.current_draft_id), current_version=e.current_version,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -3203,5 +3227,16 @@ async def _override_gate_endpoint(
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
         return await to_gate_response(session, org_id, gate)
+    except RecipeReviewedDraftChangedError as e:
+        # story #4190 — override는 «본 초안 버전»을 싣지 않는다(UI 호출처 없음). 승인 화면에 초안이 있는 레시피 발행
+        # 게이트를 override로 승인하면 fail-closed 409(예전 그대로면 새 예외가 ValueError 밖이라 500이었다).
+        raise HTTPException(
+            status_code=409,
+            detail=human_error(
+                "GATE_DRAFT_CHANGED", "Recipe publish approval must carry the reviewed draft — use the approval screen.",
+                user_message=t("gates.draft_changed", resolved_locale),
+                current_draft_id=str(e.current_draft_id), current_version=e.current_version,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

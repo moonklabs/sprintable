@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.recipe_reviewed_draft import reviewed_draft_body_via, reviewed_draft_for
+
 from tests.test_e4fc29fa_site_post_orchestration import (
     _client_for,
     _seed_agent,
@@ -370,7 +372,10 @@ async def _approve_d(Session, c):
     from app.services.gate_service import transition_gate
 
     async with Session() as s:
-        await transition_gate(s, c["org_id"], c["gate_d_id"], "approved", c["owner_member_id"], "발행 승인")
+        reviewed = await reviewed_draft_for(s, org_id=c["org_id"], work_item_id=c["story_id"])
+        await transition_gate(
+            s, c["org_id"], c["gate_d_id"], "approved", c["owner_member_id"], "발행 승인", reviewed_draft=reviewed,
+        )
         await s.commit()
 
 
@@ -555,8 +560,8 @@ async def test_channel_new_version_between_seal_and_cascade_is_not_inherited(mon
         _draft_id, scoped_id = await _channel_draft_and_submit(app_, Session, c, "v1 본문", scheduled_at=scheduled_at)
         real_seal = gs.seal_recipe_approved_draft
 
-        async def seal_then_v2(session, gate):
-            sealed = await real_seal(session, gate)
+        async def seal_then_v2(session, gate, **kw):
+            sealed = await real_seal(session, gate, **kw)
             await create_channel_post_draft_version(
                 session, org_id=c["org_id"], work_item_id=c["story_id"], connection_id=c["connection_id"],
                 text="v2 끼어든 본문", link_url=None, author_member_id=c["creator_id"], author_kind="agent",
@@ -623,3 +628,79 @@ async def test_real_concurrent_edit_waits_for_the_approval_lock(monkeypatch):
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+
+async def test_stale_screen_click_is_409_and_nothing_is_approved():
+    """PO 판정 11:49Z «본 버전 대조» — 승인 화면(v1)을 연 뒤 v2가 커밋되고 v1 화면에서 승인 클릭 → 409 GATE_DRAFT_CHANGED ·
+    레시피 게이트 pending 그대로 · 초안 게이트 승계 0. 화면이 받은 linked_channel_draft에는 version이 실린다(FE가 돌려보낼
+    재료). 뮤테이션: 봉인의 본 버전 대조 제거 → v2 봉인·승계로 RED."""
+    from app.main import app
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _client_for as _ch_client_for
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _setup_org_scoped_app as _ch_setup
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190i")
+        _draft_id, scoped_id = await _channel_draft_and_submit(app, Session, c, "v1 본문")
+        owner_user_id = await _owner_user_id(Session, c)
+        _ch_setup(app, Session, c["org_id"], user_id=owner_user_id, agent=False)
+        async with _ch_client_for(app) as client:
+            screen = (await client.get(f"/api/v2/gates/{c['gate_d_id']}")).json()
+        seen = screen["linked_channel_draft"]
+        assert seen["version"] == 1
+
+        await _channel_draft_and_submit(app, Session, c, "v2 화면 뒤에 바뀐 본문")
+        _ch_setup(app, Session, c["org_id"], user_id=owner_user_id, agent=False)
+        async with _ch_client_for(app) as client:
+            r = await client.post(f"/api/v2/gates/{c['gate_d_id']}/transition", json={
+                "status": "approved", "note": "v1 보고 승인", "evidence_viewed": True,
+                "reviewed_draft_id": seen["draft_id"], "reviewed_draft_version": seen["version"],
+            })
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["code"] == "GATE_DRAFT_CHANGED"
+        assert (await _gate(Session, c["gate_d_id"])).status == "pending"
+        assert (await _gate(Session, scoped_id)).status == "pending"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_approve_without_reviewed_draft_is_409_when_a_draft_is_shown():
+    """fail-closed — 화면에 초안이 있는데 본 버전을 안 싣고 승인하면 409(merge 게이트 reviewed_head_sha 미전송과 같은 규칙).
+    소유자 override(본 버전을 못 싣는 경로)도 500이 아니라 409."""
+    from app.main import app
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _client_for as _ch_client_for
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _setup_org_scoped_app as _ch_setup
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190j")
+        await _channel_draft_and_submit(app, Session, c, "보여 줄 초안")
+        owner_user_id = await _owner_user_id(Session, c)
+        _ch_setup(app, Session, c["org_id"], user_id=owner_user_id, agent=False)
+        async with _ch_client_for(app) as client:
+            r = await client.post(f"/api/v2/gates/{c['gate_d_id']}/transition", json={
+                "status": "approved", "note": "본 버전 없이", "evidence_viewed": True,
+            })
+            assert r.status_code == 409, r.text
+            r_override = await client.post(f"/api/v2/gates/{c['gate_d_id']}/override", json={
+                "decision": "approved", "reason": "강제 승인",
+            })
+        assert r_override.status_code == 409, r_override.text
+        assert r_override.json()["error"]["code"] == "GATE_DRAFT_CHANGED"
+        assert (await _gate(Session, c["gate_d_id"])).status == "pending"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def _owner_user_id(Session, c):
+    from sqlalchemy import select
+
+    from app.models.project import OrgMember
+
+    async with Session() as s:
+        return (await s.execute(select(OrgMember.user_id).where(OrgMember.id == c["owner_member_id"]))).scalar_one()
