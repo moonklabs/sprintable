@@ -48,8 +48,14 @@ describe('en 개수 문구 복수형(story #4223)', () => {
     // 까디르 QA — 복합 주어(«Alice and 1 other»)는 두 분기 모두 are · «{owned} of them»은 owned로 is/are.
     expect(t('chats.othersTyping', { name: 'Alice', count: 1 })).toBe('Alice and 1 other are typing');
     expect(t('chats.othersTyping', { name: 'Alice', count: 2 })).toBe('Alice and 2 others are typing');
+    // 유나 확정 문안(0·1·N) — 한 개면 «of them» 대신 «it».
+    expect(t('flow.nextMakerBacklogLine', { n: 1, owned: 1 })).toBe("1 item not ready yet — it's owned");
+    expect(t('flow.nextMakerBacklogLine', { n: 1, owned: 0 })).toBe('1 item not ready yet — no one owns it yet');
+    expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 0 })).toBe('3 items not ready yet — none of them are owned yet');
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 1 })).toBe('3 items not ready yet — 1 of them is owned');
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 2 })).toBe('3 items not ready yet — 2 of them are owned');
+    expect(t('settings.agentScopeAllProjectsHint', { count: 1 })).toBe('Granted to the only project.');
+    expect(t('settings.agentScopeAllProjectsHint', { count: 4 })).toBe('Granted to all 4 projects.');
   });
 
   it('수신자 수는 숫자로 넘기고 자리 구분은 ICU가 로케일로(en·ko 둘 다 1,234)', () => {
