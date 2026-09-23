@@ -5,10 +5,11 @@ const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args) }));
 
 import { fetchDesignatedPendingCount } from './designated-pending-count-client';
+import { setEffectiveOrgId, setEffectiveProjectId } from '@/lib/project-context-client';
 
 const ok = (count: number) => new Response(JSON.stringify({ count }), { status: 200 });
 
-beforeEach(() => { fetchWithAuthMock.mockReset(); });
+beforeEach(() => { fetchWithAuthMock.mockReset(); setEffectiveOrgId(undefined); setEffectiveProjectId(undefined); });
 
 describe('fetchDesignatedPendingCount', () => {
   it('사이드바·탭바가 동시에 부르면 네트워크 1회를 나눠 쓴다', async () => {
@@ -27,5 +28,20 @@ describe('fetchDesignatedPendingCount', () => {
     fetchWithAuthMock.mockResolvedValueOnce(new Response(null, { status: 500 })).mockRejectedValueOnce(new Error('offline'));
     expect(await fetchDesignatedPendingCount()).toBeNull();
     expect(await fetchDesignatedPendingCount()).toBeNull();
+  });
+
+  it('org 전환 직전에 출발한 요청이 진행 중이어도 전환 뒤 호출은 합류하지 않는다(맥락 키)', async () => {
+    let resolveA!: (r: Response) => void;
+    fetchWithAuthMock
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveA = r; }))
+      .mockResolvedValueOnce(ok(7));
+    setEffectiveOrgId('org-a'); setEffectiveProjectId('p-a');
+    const a = fetchDesignatedPendingCount();
+    setEffectiveOrgId('org-b'); setEffectiveProjectId('p-b');
+    const b = fetchDesignatedPendingCount();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    resolveA(ok(2));
+    expect(await b).toBe(7);
+    expect(await a).toBe(2);
   });
 });

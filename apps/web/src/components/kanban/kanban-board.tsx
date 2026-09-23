@@ -150,6 +150,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [transitionErrorNonce, bumpTransitionErrorNonce] = useRenderNonce();
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [sprints, setSprints] = useState<KanbanSprint[]>([]);
+  // story #4171 — sprints는 첫 그림 뒤에 온다. 그 사이·실패 시 칩이 «전체 스프린트»로 거짓말하지 않게.
+  const [sprintsStatus, setSprintsStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,6 +180,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const fetchRunRef = useRef(0);
 
   const selectedSprintId = searchParams.get('sprint_id') ?? '';
+  // story #4171 — 목록은 이미 selectedSprintId로 필터돼 떠 있다. sprints 목록이 오기 전엔 «불러오는
+  // 중», 실패·목록에 없음이면 «선택한 스프린트»(필터가 걸려 있다는 사실은 그대로 말한다).
+  const sprintChipLabel = !selectedSprintId
+    ? t('allSprints')
+    : sprints.find((s) => s.id === selectedSprintId)?.title
+      ?? (sprintsStatus === 'loading' ? t('sprintChipLoading') : t('sprintChipSelected'));
   const selectedEpicId = searchParams.get('epic_id') ?? '';
   const selectedAssigneeId = searchParams.get('assignee_id') ?? '';
 
@@ -412,6 +420,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     let storyIds: string[] = [];
 
     setLoading(true);
+    setSprintsStatus('loading');
     try {
       // CB-S4: status별 5회 독립 호출
       // story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드의 실제 몸통, 주)와
@@ -441,8 +450,17 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setColumnCursors(newCursors);
       storyIds = allStories.map((s) => s.id);
 
-      if (epicsRes?.ok) { const json = await epicsRes.json(); setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null); }
-      if (membersRes?.ok) { const json = await membersRes.json(); setMembers(json.data); }
+      // 본문 파싱도 await라 그 사이 새 실행(프로젝트·org 전환)이 시작될 수 있다 — 파싱 뒤에도 가드.
+      if (epicsRes?.ok) {
+        const json = await epicsRes.json();
+        if (stale()) return;
+        setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null);
+      }
+      if (membersRes?.ok) {
+        const json = await membersRes.json();
+        if (stale()) return;
+        setMembers(json.data);
+      }
     } finally {
       if (!stale()) setLoading(false);
     }
@@ -450,104 +468,114 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
     // 첫 그림 뒤 — 서로 독립인 부수 데이터를 병렬로(예전엔 순차 6단). 각 갈래는 제 실패만 삼킨다
     // (non-critical, 예전과 같다). 새 fetchData가 시작됐으면 늦게 온 결과로 새 상태를 덮지 않는다.
-    await Promise.all([
-      (async () => {
-        try {
-          const sprintsRes = await fetchWithAuth(`/api/sprints${sprintParams}`);
-          if (sprintsRes.ok) { const json = await sprintsRes.json(); if (!stale()) setSprints(json.data); }
-        } catch {
-          // non-critical — 스프린트 필터 칩 드롭다운만 비어 있다.
-        }
-      })(),
-      (async () => {
-        if (!projectId || storyIds.length === 0) return;
-        try {
-          const summaryParams = new URLSearchParams({ project_id: projectId });
-          for (const sid of storyIds) summaryParams.append('story_ids', sid);
-          const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
-          if (summaryRes.ok) {
-            const summaryJson = await summaryRes.json() as Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
-            if (!stale()) setExecutionMap(summaryJson);
+    // 유나 design(PR #4552) — 카드 높이를 바꾸는 배지(실행 요약·라인 상태·의존·라벨·대기 게이트)는
+    // 갈래마다 따로 반영하면 카드가 여러 번 밀린다(390폭 최대 137px). 전부 모은 뒤 한 번에 반영한다.
+    // 스프린트는 카드가 아니라 필터 칩이라 따로 먼저.
+    const sprintsLeg = (async () => {
+      try {
+        const sprintsRes = await fetchWithAuth(`/api/sprints${sprintParams}`);
+        if (!sprintsRes.ok) { if (!stale()) setSprintsStatus('failed'); return; }
+        const json = await sprintsRes.json();
+        if (!stale()) { setSprints(json.data); setSprintsStatus('loaded'); }
+      } catch {
+        // non-critical — 스프린트 필터 칩 드롭다운만 비어 있다(칩 라벨은 «선택한 스프린트»).
+        if (!stale()) setSprintsStatus('failed');
+      }
+    })();
+
+    const summaryLeg = (async (): Promise<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }> | null> => {
+      if (!projectId || storyIds.length === 0) return null;
+      try {
+        const summaryParams = new URLSearchParams({ project_id: projectId });
+        for (const sid of storyIds) summaryParams.append('story_ids', sid);
+        const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
+        return summaryRes.ok ? await summaryRes.json() : null;
+      } catch {
+        return null; // non-critical — skip silently
+      }
+    })();
+    // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
+    const lineLeg = (async (): Promise<Record<string, LineStatusSummary> | null> => {
+      if (storyIds.length === 0) return null;
+      try {
+        const chunks: string[][] = [];
+        for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
+        const results = await Promise.all(chunks.map((chunk) =>
+          fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
+            .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
+            .catch(() => []),
+        ));
+        const lmap: Record<string, LineStatusSummary> = {};
+        for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
+        return lmap;
+      } catch {
+        return null; // non-critical — line badge 없으면 카드는 기존대로 렌더.
+      }
+    })();
+    const graphLeg = (async (): Promise<Record<string, string[]> | null> => {
+      try {
+        const graphRes = await fetchWithAuth('/api/dependencies/graph?item_type=story');
+        if (!graphRes.ok) return null;
+        const graphJson = await graphRes.json() as { edges?: DependencyEdge[] };
+        const map: Record<string, string[]> = {};
+        for (const edge of graphJson.edges ?? []) {
+          if (edge.dep_type === 'blocks') {
+            if (!map[edge.to_id]) map[edge.to_id] = [];
+            map[edge.to_id].push(edge.from_id);
           }
-        } catch {
-          // non-critical — skip silently
         }
-      })(),
-      // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
-      (async () => {
-        if (storyIds.length === 0) return;
-        try {
-          const chunks: string[][] = [];
-          for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
-          const results = await Promise.all(chunks.map((chunk) =>
-            fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
-              .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
-              .catch(() => []),
-          ));
-          const lmap: Record<string, LineStatusSummary> = {};
-          for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
-          if (!stale()) setStoryLineMap(lmap);
-        } catch {
-          // non-critical — line badge 없으면 카드는 기존대로 렌더.
+        return map;
+      } catch {
+        return null; // non-critical
+      }
+    })();
+    // 라벨 정의와 스토리-라벨 연결은 서로 독립이라 함께 부르고, 짝짓기만 둘 다 온 뒤에 한다.
+    const labelsLeg = (async (): Promise<{ labels: LabelData[]; byStory: Record<string, LabelData[]> | null } | null> => {
+      try {
+        const [labelsRes, ilRes] = await Promise.all([
+          fetchWithAuth('/api/labels'),
+          fetchWithAuth('/api/item-labels?item_type=story').catch(() => null),
+        ]);
+        if (!labelsRes.ok) return null;
+        const labelsJson = await labelsRes.json() as LabelData[];
+        if (!ilRes?.ok) return { labels: labelsJson, byStory: null };
+        const itemLabels = await ilRes.json() as { item_id: string; label_id: string }[];
+        const map: Record<string, LabelData[]> = {};
+        for (const il of itemLabels) {
+          const label = labelsJson.find((l) => l.id === il.label_id);
+          if (label) (map[il.item_id] ??= []).push(label);
         }
-      })(),
-      (async () => {
-        try {
-          const graphRes = await fetchWithAuth('/api/dependencies/graph?item_type=story');
-          if (graphRes.ok) {
-            const graphJson = await graphRes.json() as { edges?: DependencyEdge[] };
-            const map: Record<string, string[]> = {};
-            for (const edge of graphJson.edges ?? []) {
-              if (edge.dep_type === 'blocks') {
-                if (!map[edge.to_id]) map[edge.to_id] = [];
-                map[edge.to_id].push(edge.from_id);
-              }
-            }
-            if (!stale()) setBlockedByMap(map);
-          }
-        } catch {
-          // non-critical
+        return { labels: labelsJson, byStory: map };
+      } catch {
+        return null; // non-critical
+      }
+    })();
+    const gatesLeg = (async (): Promise<Record<string, { id: string; gate_type: string; status: string }[]> | null> => {
+      try {
+        const gatesRes = await fetchWithAuth('/api/gates?status=pending&work_item_type=story');
+        if (!gatesRes.ok) return null;
+        const gatesJson = await gatesRes.json() as GateItem[];
+        const gmap: Record<string, { id: string; gate_type: string; status: string }[]> = {};
+        for (const g of gatesJson) {
+          if (!gmap[g.work_item_id]) gmap[g.work_item_id] = [];
+          gmap[g.work_item_id].push({ id: g.id, gate_type: g.gate_type, status: g.status });
         }
-      })(),
-      (async () => {
-        try {
-          // 라벨 정의와 스토리-라벨 연결은 서로 독립이라 함께 부르고, 짝짓기만 둘 다 온 뒤에 한다.
-          const [labelsRes, ilRes] = await Promise.all([
-            fetchWithAuth('/api/labels'),
-            fetchWithAuth('/api/item-labels?item_type=story').catch(() => null),
-          ]);
-          if (!labelsRes.ok) return;
-          const labelsJson = await labelsRes.json() as LabelData[];
-          if (!stale()) setOrgLabels(labelsJson);
-          if (!ilRes?.ok) return;
-          const itemLabels = await ilRes.json() as { item_id: string; label_id: string }[];
-          const map: Record<string, LabelData[]> = {};
-          for (const il of itemLabels) {
-            const label = labelsJson.find((l) => l.id === il.label_id);
-            if (label) (map[il.item_id] ??= []).push(label);
-          }
-          if (!stale()) setStoryLabelsMap(map);
-        } catch {
-          // non-critical
-        }
-      })(),
-      (async () => {
-        try {
-          const gatesRes = await fetchWithAuth('/api/gates?status=pending&work_item_type=story');
-          if (gatesRes.ok) {
-            const gatesJson = await gatesRes.json() as GateItem[];
-            const gmap: Record<string, { id: string; gate_type: string; status: string }[]> = {};
-            for (const g of gatesJson) {
-              if (!gmap[g.work_item_id]) gmap[g.work_item_id] = [];
-              gmap[g.work_item_id].push({ id: g.id, gate_type: g.gate_type, status: g.status });
-            }
-            if (!stale()) setStoryGatesMap(gmap);
-          }
-        } catch {
-          // non-critical
-        }
-      })(),
-    ]);
+        return gmap;
+      } catch {
+        return null; // non-critical
+      }
+    })();
+
+    const [summary, lineMap, blockedBy, labels, gates] = await Promise.all([summaryLeg, lineLeg, graphLeg, labelsLeg, gatesLeg]);
+    if (!stale()) {
+      // 한 번에(같은 틱의 setState들은 React가 한 렌더로 묶는다) — 카드 높이가 한 번만 바뀐다.
+      if (summary) setExecutionMap(summary);
+      if (lineMap) setStoryLineMap(lineMap);
+      if (blockedBy) setBlockedByMap(blockedBy);
+      if (labels) { setOrgLabels(labels.labels); if (labels.byStory) setStoryLabelsMap(labels.byStory); }
+      if (gates) setStoryGatesMap(gates);
+    }
+    await sprintsLeg;
   }, [projectId, fetchStoriesByStatus]);
 
   // CB-S4: 컬럼별 "더 보기" 핸들러
@@ -1283,7 +1311,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   }`}
                 >
                   <span className="max-w-[80px] truncate">
-                    {selectedSprintId ? (sprints.find((s) => s.id === selectedSprintId)?.title ?? t('allSprints')) : t('allSprints')}
+                    {sprintChipLabel}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
                 </Button>
