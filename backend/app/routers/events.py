@@ -1839,6 +1839,10 @@ _CAPABILITY_KIND_HINTS: dict[str, str] = {
     "attach_video": "events.capability_hint_attach_video",
     "attach_image": "events.capability_hint_attach_image",
     "generate": "events.capability_hint_master_cut_evidence",
+    # story #4174(레시피 2호 블로그) — 블로그 초안·게시는 에이전트가 site post 도구로 직접 한다(채널 자동 발행
+    # 경로 아님 · org 커넥터 준비 검사 대상 아님).
+    "draft_site_post": "events.capability_hint_draft_site_post",
+    "publish_site_post": "events.capability_hint_publish_site_post",
 }
 # story #4104(페드루 PO 리뷰, 2026-09-21) — 준비 경고 루프(apply_recipe_role_bindings)가
 # 같은 딕셔너리를 "이 kind는 에이전트 자기 도구로 처리(org 커넥터 무관)"라는 다른 목적으로
@@ -2020,7 +2024,19 @@ async def _render_event_message_content(
             # 시점 Hook A) 경로를 놓쳤다. gate_type 자체로 유도(stage 이름 하드코딩 0) —
             # external_publish 게이트가 열리는 자리마다 동일하게 뜬다(레시피 1호뿐 아님).
             if _next_gate_decl.get("type") == "external_publish":
-                lines.append(f"- {t('events.gate_hint_external_publish_auto_satisfy', resolved_locale)}")
+                # story #4174 — 채널 초안 안내는 승인 뒤 단계가 채널 자동 발행일 때만 맞다. 그 단계가 블로그
+                # 게시(publish_site_post)면 블로그 초안 제출 안내로(«채널 초안을 만들라»는 오도 방지).
+                _after_gate = _next_recipe_stage(definition, next_stage)
+                _after_kind = (
+                    ((definition.stage_metadata.get(_after_gate) or {}).get("capability") or {}).get("kind")
+                    if _after_gate else None
+                )
+                _gate_hint_key = (
+                    "events.gate_hint_external_publish_site_post"
+                    if _after_kind == "publish_site_post"
+                    else "events.gate_hint_external_publish_auto_satisfy"
+                )
+                lines.append(f"- {t(_gate_hint_key, resolved_locale)}")
     else:
         lines.append("- 다음 단계: 없음(마지막 stage)")
 

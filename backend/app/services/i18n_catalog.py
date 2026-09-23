@@ -430,6 +430,19 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이미지는 attach_channel_post_image로 초안에 첨부해요.",
         "en": "Attach the images to the draft using attach_channel_post_image.",
     },
+    # story #4174(레시피 2호 블로그) — 블로그 초안 작성·게시 단계. attach_*와 같은 축(에이전트 자기 도구).
+    "events.capability_hint_draft_site_post": {
+        "ko": "블로그 초안은 create_site_post_draft로 같은 스토리에 만들어요.",
+        "en": "Create the blog draft for the same story using create_site_post_draft.",
+    },
+    "events.capability_hint_publish_site_post": {
+        "ko": "승인된 초안은 publish_site_post로 게시하고, get_site_post_publication으로 공개 주소를 확인해요.",
+        "en": "Publish the approved draft using publish_site_post, then check the public URL with get_site_post_publication.",
+    },
+    "events.gate_hint_external_publish_site_post": {
+        "ko": "같은 스토리의 블로그 초안을 submit_site_post_draft로 제출해 두면 발행 승인이 그 초안에 걸려요.",
+        "en": "Submit the blog draft for the same story using submit_site_post_draft so the publish approval covers it.",
+    },
     # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
     # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
     # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야
