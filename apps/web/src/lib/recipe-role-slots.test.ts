@@ -2,16 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  expandRoleSlotBindings, groupStagesByRole, orderedRecipeRoles, recipeConnectionTargets, recipeKeyDomain,
-  recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, type RecipeStageMetadata,
+  groupStagesByRole, orderedRecipeRoles, recipeConnectionTargets, recipeKeyDomain,
+  recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
+  type RecipeRoleSlot, type RecipeStageMetadata,
 } from './recipe-role-slots';
 import { VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE } from './video-production-seed.test.fixture';
-
-// PO 判定(2026-09-18, story #4046 AC 업데이트) — 마케팅 레시피의 role_mapping
-// (recipe_role_bindings) 바인딩 대상은 «크리에이터» 하나뿐(표시 문구 — 내부 데이터 키는
-// 아래 참고). 디렉터=게이트 승인 주체(stagesWithGate)·연산=capability(stagesWithCapability)·
-// 발행자=채널 타깃(후속 카드, 이 파일 밖) — 셋 다 role_mapping 축이 아니다.
-const BINDABLE_ROLES = ['Creator'] as const;
 
 // story #4426 P1 교훈 그대로 — 실 seed 모양(영어 role 키)과만 대조한다. story #4173부터는
 // 손으로 옮긴 축소판 대신 dev 실 정의(version 8) 한 벌(video-production-seed.test.fixture.ts)을
@@ -37,46 +32,6 @@ describe('groupStagesByRole — #4039/#4419 실 착지 seed(0381) stage_metadata
   it('한글 표시라벨("크리에이터" 등)은 이 fixture의 어떤 role 키와도 안 맞는다 — #4426 결함이 정확히 이 자리(회귀 pin)', () => {
     const groups = groupStagesByRole(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA);
     expect(groups['크리에이터']).toBeUndefined();
-  });
-});
-
-describe('expandRoleSlotBindings — bindableRoles 화이트리스트 밖 role은 강제로 걸러진다', () => {
-  it('Creator 선택만 그 role의 4 stage를 채운다(유일한 role_mapping-eligible 축) — #4426 핵심 회귀', () => {
-    const roleMapping = expandRoleSlotBindings(
-      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, { Creator: 'member-creator' },
-    );
-    // 수정 前(한글 라벨)이었다면 이 결과가 항상 {}였다 — role_mapping이 실제로 채워지는지가
-    // 이 P1의 근본 pin이다.
-    expect(roleMapping).toEqual({
-      draft: 'member-creator', animatic: 'member-creator',
-      verification: 'member-creator', editing: 'member-creator',
-    });
-  });
-
-  it('Director·Publisher 선택은 bindableRoles에 없으면 조용히 무시된다(PO 判定 2026-09-18)', () => {
-    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, {
-      Director: 'member-director', Creator: 'member-creator', Publisher: 'member-publisher',
-    });
-    expect(Object.keys(roleMapping).sort()).toEqual(['animatic', 'draft', 'editing', 'verification']);
-    expect(roleMapping.concept_confirmed).toBeUndefined();
-    expect(roleMapping.pending_approval).toBeUndefined();
-  });
-
-  it('bindableRoles를 넓히면(호출부가 명시적으로 그렇게 하지 않는 한) 그 role도 펼쳐진다 — 화이트리스트가 유일한 관문', () => {
-    const roleMapping = expandRoleSlotBindings(
-      MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, ['Creator', 'Director'], {
-        Creator: 'member-creator', Director: 'member-director',
-      },
-    );
-    expect(roleMapping.concept_confirmed).toBe('member-director');
-    expect(roleMapping.draft).toBe('member-creator');
-  });
-
-  it('빈 문자열 선택·존재하지 않는 role 키는 무시된다(연산 슬롯을 selections에 줘도 안전)', () => {
-    const roleMapping = expandRoleSlotBindings(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, BINDABLE_ROLES, {
-      Creator: '', Compute: 'member-compute',
-    });
-    expect(roleMapping).toEqual({});
   });
 });
 
@@ -186,7 +141,88 @@ describe('recipeRoleSlots — 역할마다 메커니즘 판별', () => {
 
   it('게이트 없는 사람 역할은 사람 멤버 자리다(읽기 전용이 아니다)', () => {
     const slots = recipeRoleSlots({ draft: { role: 'Writer' } }, ['draft'], { Writer: 'human' });
-    expect(slots).toEqual([{ role: 'Writer', kind: 'member', stages: ['draft'], memberType: 'human', gateApprovers: [] }]);
+    expect(slots).toEqual([{ key: 'Writer:member', role: 'Writer', kind: 'member', stages: ['draft'], memberType: 'human', gateApprovers: [] }]);
+  });
+
+  // 까디르 QA(PR #4547) 재현 A — 한 역할이 일반 단계와 채널 단계를 같이 가지면 예전엔 채널 자리
+  // 하나만 생기고 draft가 표시 없이 바인딩에서 빠졌다. 이제 방식마다 자리가 하나씩.
+  it('A: 일반 단계+채널 단계를 가진 역할 = 멤버 자리(draft) + 채널 자리(published)', () => {
+    const slots = recipeRoleSlots({
+      draft: { role: 'Writer' },
+      published: { role: 'Writer', capability: { kind: 'publish', target: 'channel_connection' } },
+    }, ['draft', 'published'], { Writer: 'agent' });
+    expect(slots.map((s) => [s.key, s.kind, s.stages])).toEqual([
+      ['Writer:member', 'member', ['draft']],
+      ['Writer:channel', 'channel', ['published']],
+    ]);
+  });
+
+  // 재현 B — 선언이 일부 역할에만 있으면 선언 없는 게이트 전용 역할이 에이전트 멤버 자리가 됐다
+  // (선언이 아예 없으면 승인자). 선언 없는 역할은 다른 역할의 선언 여부와 상관없이 같은 규칙.
+  it('B: 선언 없는 게이트 전용 역할은 다른 역할 선언 유무와 상관없이 승인 자리', () => {
+    const meta: RecipeStageMetadata = {
+      draft: { role: 'Writer' },
+      review: { role: 'Editor', gate: { type: 'doc_approval', approver: 'org_owner' } },
+    };
+    const none = recipeRoleSlots(meta, ['draft', 'review'], null);
+    const partial = recipeRoleSlots(meta, ['draft', 'review'], { Writer: 'agent' });
+    expect(none.find((s) => s.role === 'Editor')).toMatchObject({ kind: 'approver', stages: ['review'] });
+    expect(partial.find((s) => s.role === 'Editor')).toMatchObject({ kind: 'approver', stages: ['review'] });
+  });
+
+  // 재현 C — 사람 역할이 일반 작업과 게이트를 같이 가지면 승인 자리만 생겨 작업 단계를 배정할
+  // 길이 없었다. 이제 사람 멤버 자리(작업) + 승인 자리(게이트), 자리 순서는 첫 단계 흐름 순서.
+  it('C: 일반 작업+게이트를 가진 사람 역할 = 사람 멤버 자리(작업) + 승인 자리(게이트)', () => {
+    const slots = recipeRoleSlots({
+      brief: { role: 'Lead' },
+      draft: { role: 'Writer' },
+      signoff: { role: 'Lead', gate: { type: 'doc_approval', approver: 'org_owner' } },
+    }, ['brief', 'draft', 'signoff'], { Lead: 'human', Writer: 'agent' });
+    expect(slots.map((s) => [s.key, s.kind, s.stages, s.memberType])).toEqual([
+      ['Lead:member', 'member', ['brief'], 'human'],
+      ['Lead:approver', 'approver', ['signoff'], 'human'],
+      ['Writer:member', 'member', ['draft'], 'agent'],
+    ]);
+  });
+
+  it('에이전트 역할의 게이트 stage는 그 에이전트 멤버 자리에 남는다(그 stage를 발행하는 쪽)', () => {
+    const slots = recipeRoleSlots(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE.role_actor_kinds);
+    expect(slots.find((s) => s.role === 'Creator')!.stages).toContain('animatic');
+    expect(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA.animatic!.gate).toBeTruthy();
+  });
+});
+
+describe('uncoveredRecipeStages — 불변식: role이 있는 모든 stage가 정확히 한 자리에', () => {
+  const SHAPES: [string, RecipeStageMetadata, string[], Parameters<typeof recipeRoleSlots>[2]][] = [
+    ['영상 레시피(선언)', MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, [...VIDEO_PRODUCTION_FLOW], VIDEO_PRODUCTION_RECIPE.role_actor_kinds],
+    ['영상 레시피(선언 없음)', MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, [...VIDEO_PRODUCTION_FLOW], null],
+    ['A', { draft: { role: 'Writer' }, published: { role: 'Writer', capability: { target: 'channel_connection' } } }, ['draft', 'published'], { Writer: 'agent' }],
+    ['B', { draft: { role: 'Writer' }, review: { role: 'Editor', gate: { type: 'g', approver: 'org_owner' } } }, ['draft', 'review'], { Writer: 'agent' }],
+    ['C', { brief: { role: 'Lead' }, signoff: { role: 'Lead', gate: { type: 'g', approver: 'org_owner' } } }, ['brief', 'signoff'], { Lead: 'human' }],
+    ['한 역할 네 방식', {
+      a: { role: 'X' }, b: { role: 'X', gate: { type: 'g', approver: 'org_owner' } },
+      c: { role: 'X', capability: { target: 'generation_connector' } }, d: { role: 'X', capability: { target: 'channel_connection' } },
+    }, ['a', 'b', 'c', 'd'], { X: 'human' }],
+  ];
+
+  it.each(SHAPES)('%s — 덮이지 않은 stage 0', (_name, meta, flow, kinds) => {
+    expect(uncoveredRecipeStages(meta, flow, recipeRoleSlots(meta, flow, kinds))).toEqual([]);
+  });
+
+  it('자리에서 stage 하나를 빼면 그 stage가 잡힌다', () => {
+    const slots = recipeRoleSlots(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE.role_actor_kinds);
+    const dropped: RecipeRoleSlot[] = slots.map((s) => (s.role === 'Creator' ? { ...s, stages: s.stages.filter((x) => x !== 'draft') } : s));
+    expect(uncoveredRecipeStages(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, dropped)).toEqual(['draft']);
+  });
+
+  it('두 자리에 겹쳐 덮인 stage도 잡힌다', () => {
+    const slots = recipeRoleSlots(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE.role_actor_kinds);
+    const doubled: RecipeRoleSlot[] = [...slots, { ...slots[0]!, key: 'dup', stages: ['published'] }];
+    expect(uncoveredRecipeStages(MARKETING_VIDEO_PRODUCTION_STAGE_METADATA, VIDEO_PRODUCTION_FLOW, doubled)).toEqual(['published']);
+  });
+
+  it('role 없는 stage는 불변식 대상이 아니다', () => {
+    expect(uncoveredRecipeStages({ x: { action: 'no role' } }, ['x'], [])).toEqual([]);
   });
 });
 

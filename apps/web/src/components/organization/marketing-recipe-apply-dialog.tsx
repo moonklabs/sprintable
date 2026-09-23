@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { expandRoleSlotBindings, RECIPE_CONNECTION_TARGETS, recipeRoleSlots, type RecipeRoleSlot } from '@/lib/recipe-role-slots';
+import { RECIPE_CONNECTION_TARGETS, recipeRoleSlots, uncoveredRecipeStages, type RecipeRoleSlot } from '@/lib/recipe-role-slots';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
@@ -16,11 +16,15 @@ import { useRecipeMemberOptions } from '@/hooks/use-recipe-member-options';
 
 // story #4048(E-RECIPE-1 ①) — 레시피 적용 다이얼로그. story #4173(E-RECIPE-2)부터 자리는
 // 정의(stage_metadata·role_actor_kinds·payload_schema 흐름)로 구동한다 — 영상 레시피 4슬롯
-// 고정·레시피 전용 상수 없이, 역할마다 recipeRoleSlots()가 판별한 메커니즘으로 그린다:
+// 고정·레시피 전용 상수 없이, recipeRoleSlots()가 역할의 stage를 방식별 자리로 나눠 그린다
+// (한 역할에 방식이 다른 stage가 있으면 자리가 여럿):
 //   · member = role_binding(팀 멤버) — apply_recipe_role_bindings 제출.
 //   · approver = 게이트 승인 주체 — stage_metadata.gate.approver를 읽기 전용으로.
-//   · compute·channel = 연산 커넥터·채널 연결 — capability.target stage에 직접.
-// 자리 순서는 갤러리 카드와 같은 orderedRecipeRoles()(사람 먼저 → 흐름 순서).
+//   · compute·channel = 연산 커넥터·채널 연결.
+// 어느 자리든 제출 값은 그 자리의 stage에만 꽂힌다(stage→값). 자리에 안 덮인 stage가 있으면
+// 제출을 막고 보여준다(uncoveredRecipeStages, fail-closed). 역할 순서는 갤러리 카드와 같은
+// orderedRecipeRoles()(사람 먼저 → 흐름 순서), 역할 안 자리 순서는 첫 stage 흐름 순서.
+// 자리가 둘 이상인 역할은 역할 이름을 묶음 머리에 한 번, 자리는 그 아래 줄로(유나 판정 §9).
 
 export interface MarketingRecipeApplyDialogProps {
   recipe: (EventDefinitionResponse & { id: string }) | null;
@@ -63,8 +67,8 @@ export function MarketingRecipeApplyDialog({
   // channelLoadFailed 키 재사용(신규 문구 발명 0).
   const tChannel = useTranslations('channelConnect');
   const [projectId, setProjectId] = useState('');
-  // story #4173 — 자리(role)별 선택값. member 자리는 팀 멤버 id, channel은 채널 연결 id,
-  // compute는 연산 커넥터 id. approver 자리는 읽기 전용이라 값이 없다.
+  // story #4173 — 자리(slot.key = 역할+방식)별 선택값. member 자리는 팀 멤버 id, channel은
+  // 채널 연결 id, compute는 연산 커넥터 id. approver 자리는 읽기 전용이라 값이 없다.
   const [selections, setSelections] = useState<Record<string, string>>({});
   // story #4103 — apply-recipe-dialog.tsx와 동형(org 스코프, project 무관, 다이얼로그
   // open 시 1회).
@@ -135,6 +139,7 @@ export function MarketingRecipeApplyDialog({
 
   const flow = recipe.payload_schema.properties?.stage?.enum ?? [];
   const slots = recipeRoleSlots(recipe.stage_metadata, flow, recipe.role_actor_kinds);
+  const uncovered = uncoveredRecipeStages(recipe.stage_metadata, flow, slots);
   const memberSlots = slots.filter((s) => s.kind === 'member');
   const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
   const activeGenerationConnectors = generationConnectors.filter((c) => c.status === 'active');
@@ -144,10 +149,10 @@ export function MarketingRecipeApplyDialog({
     compute: RECIPE_CONNECTION_TARGETS.find((c) => c.target === 'generation_connector')!.optional,
   };
   const requiredSlots = slots.filter((s) => s.kind === 'member' || ((s.kind === 'channel' || s.kind === 'compute') && !optionalByKind[s.kind]));
-  const allRequiredChosen = requiredSlots.every((s) => !!selections[s.role]);
+  const allRequiredChosen = requiredSlots.every((s) => !!selections[s.key]);
   const membersFor = (slot: RecipeRoleSlot) => options.filter((o) => o.type === slot.memberType);
 
-  const select = (role: string, value: string) => setSelections((prev) => ({ ...prev, [role]: value }));
+  const select = (key: string, value: string) => setSelections((prev) => ({ ...prev, [key]: value }));
 
   // 페드루 QA 지적(#4424 qa:changes, 2026-09-19) — 프로젝트 전환 시 이전 멤버 선택이 남아
   // 있으면 <select>는 빈칸으로 보여도 state는 옛 project의 멤버 id를 쥐고 제출된다. 프로젝트가
@@ -156,17 +161,17 @@ export function MarketingRecipeApplyDialog({
     setProjectId(next);
     setSelections((prev) => {
       const kept = { ...prev };
-      for (const s of memberSlots) delete kept[s.role];
+      for (const s of memberSlots) delete kept[s.key];
       return kept;
     });
   };
 
   const submit = async () => {
-    if (!projectId || !allRequiredChosen) return;
+    if (!projectId || !allRequiredChosen || uncovered.length > 0) return;
     // 페드루 QA 지적(#4424 qa:changes) — 전환 시 선택을 비우지만 그 방어 하나에만 기대지
     // 않고 제출 시점에도 소속(멤버십)을 다시 확認한다.
     for (const slot of memberSlots) {
-      if (!membersFor(slot).some((m) => m.id === selections[slot.role])) {
+      if (!membersFor(slot).some((m) => m.id === selections[slot.key])) {
         setError(t('recipeApplyV2CreatorMembershipError'));
         return;
       }
@@ -175,18 +180,14 @@ export function MarketingRecipeApplyDialog({
     setError(null);
     setWarnings([]);
     try {
-      const roleMapping = expandRoleSlotBindings(
-        recipe.stage_metadata,
-        memberSlots.map((s) => s.role),
-        Object.fromEntries(memberSlots.map((s) => [s.role, selections[s.role] ?? ''])),
-      );
-      // 채널·연산 자리는 role 그룹 확장 축이 아니라 해당 capability.target stage에 직접
-      // 꽂는다(apply-recipe-dialog.tsx RecipeRoleMappingFields와 동형 계약 — stage→값).
-      // 연산은 비우면 그 stage를 아예 안 보낸다(빈 문자열은 BE uuid 파싱에서 죽고, 안
-      // 보내야 #4110 crew 폴백이 동작한다).
+      // 자리마다 그 자리의 stage에만 값을 꽂는다(apply-recipe-dialog.tsx RecipeRoleMappingFields와
+      // 동형 계약 — stage→값). 역할 전체로 펼치지 않는다 — 한 역할이 멤버·채널 자리를 같이
+      // 가지면 채널 stage에 멤버 id가 들어가면 안 된다. 연산은 비우면 그 stage를 아예 안
+      // 보낸다(빈 문자열은 BE uuid 파싱에서 죽고, 안 보내야 #4110 crew 폴백이 동작한다).
+      const roleMapping: Record<string, string> = {};
       for (const slot of slots) {
-        if (slot.kind !== 'channel' && slot.kind !== 'compute') continue;
-        const value = selections[slot.role];
+        if (slot.kind === 'approver') continue;
+        const value = selections[slot.key];
         if (!value) continue;
         for (const stage of slot.stages) roleMapping[stage] = value;
       }
@@ -218,18 +219,28 @@ export function MarketingRecipeApplyDialog({
 
   const stageList = (slot: RecipeRoleSlot) => slot.stages.map((s) => recipeStageLabel(s, t)).join(' · ');
 
-  const renderSlot = (slot: RecipeRoleSlot) => {
+  // 자리 한 줄. 자리 하나인 역할은 지금 모양 그대로(테두리 카드 + 역할 이름 + 배지). 자리가 둘
+  // 이상인 역할의 줄(`grouped`)은 역할 이름을 묶음 머리로 올리고 배지 + 맡은 단계 « · » + 선택기만
+  // 싣는다 — 줄 사이는 border-t(유나 판정 §9).
+  const renderSlot = (slot: RecipeRoleSlot, grouped = false, first = true) => {
     const title = stageRoleLabel(slot.role, t);
+    const rowClass = grouped
+      ? `flex items-center gap-3 p-3${first ? '' : ' border-t border-input'}`
+      : 'flex items-center gap-3 rounded-md border border-input p-3';
+    const heading = (badge: string) => (
+      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        {grouped ? null : <>{title} </>}<Badge variant="secondary">{badge}</Badge>
+      </div>
+    );
+    const rowAttrs = { className: rowClass, 'data-role': slot.role, 'data-slot-key': slot.key };
     if (slot.kind === 'approver') {
       // 게이트 승인 주체 — 읽기 전용(role_mapping 축 아님). story #4087 — raw approver 키
       // 대신 gate-approver-label.ts SSOT 사람 낱말, 라벨 기준 dedupe.
       const approvers = Array.from(new Set(slot.gateApprovers.map((a) => gateApproverLabel(t, a))));
       return (
-        <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-director" data-role={slot.role}>
+        <div key={slot.key} {...rowAttrs} data-testid="slot-director">
           <div className="min-w-0 flex-1 break-keep">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              {title} <Badge variant="secondary">{t('recipeApplyV2DirectorBadge')}</Badge>
-            </div>
+            {heading(t('recipeApplyV2DirectorBadge'))}
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
           </div>
           <div className="shrink-0 text-xs text-muted-foreground" data-testid="director-approver">
@@ -241,18 +252,16 @@ export function MarketingRecipeApplyDialog({
     if (slot.kind === 'member') {
       const members = membersFor(slot);
       return (
-        <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-creator" data-role={slot.role}>
+        <div key={slot.key} {...rowAttrs} data-testid="slot-creator">
           <div className="min-w-0 flex-1 break-keep">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              {title} <Badge variant="secondary">{slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge')}</Badge>
-            </div>
+            {heading(slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge'))}
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
           </div>
           <select
             className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            value={selections[slot.role] ?? ''}
-            onChange={(e) => select(slot.role, e.target.value)}
+            value={selections[slot.key] ?? ''}
+            onChange={(e) => select(slot.key, e.target.value)}
             disabled={!projectId || loadingMembers}
             aria-label={title}
             data-testid="creator-agent-select"
@@ -265,12 +274,10 @@ export function MarketingRecipeApplyDialog({
     }
     if (slot.kind === 'compute') {
       return (
-        <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-compute" data-role={slot.role}>
+        <div key={slot.key} {...rowAttrs} data-testid="slot-compute">
           <div className="min-w-0 flex-1 break-keep">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              {title} <Badge variant="secondary">{t('recipeApplyV2ComputeBadge')}</Badge>
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2ComputeDesc')}</p>
+            {heading(t('recipeApplyV2ComputeBadge'))}
+            <p className="mt-0.5 text-xs text-muted-foreground">{grouped ? stageList(slot) : t('recipeApplyV2ComputeDesc')}</p>
             {/* story #4114 — 3값 우선순위(failed > loaded+0건 > 없음). 연산은 필수가 아니므로
                 (#4110 crew 폴백) 아래 안내 문구가 항상 함께 "비워도 되는" 이유를 설명한다. */}
             {generationConnectorsStatus === 'failed' ? (
@@ -290,8 +297,8 @@ export function MarketingRecipeApplyDialog({
           </div>
           <select
             className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            value={selections[slot.role] ?? ''}
-            onChange={(e) => select(slot.role, e.target.value)}
+            value={selections[slot.key] ?? ''}
+            onChange={(e) => select(slot.key, e.target.value)}
             disabled={generationConnectorsStatus !== 'loaded'}
             aria-label={title}
             data-testid="compute-connector-select"
@@ -305,12 +312,10 @@ export function MarketingRecipeApplyDialog({
       );
     }
     return (
-      <div key={slot.role} className="flex items-center gap-3 rounded-md border border-input p-3" data-testid="slot-publisher" data-role={slot.role}>
+      <div key={slot.key} {...rowAttrs} data-testid="slot-publisher">
         <div className="min-w-0 flex-1 break-keep">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            {title} <Badge variant="secondary">{t('recipeApplyV2PublisherBadge')}</Badge>
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2PublisherDesc')}</p>
+          {heading(t('recipeApplyV2PublisherBadge'))}
+          <p className="mt-0.5 text-xs text-muted-foreground">{grouped ? stageList(slot) : t('recipeApplyV2PublisherDesc')}</p>
           {/* story #4103 CHANGES-1 — 로딩 中엔 문구 없음, failed는 재시도, loaded+0건만 empty. */}
           {channelConnectionsStatus === 'failed' ? (
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-load-error">
@@ -325,8 +330,8 @@ export function MarketingRecipeApplyDialog({
         </div>
         <select
           className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          value={selections[slot.role] ?? ''}
-          onChange={(e) => select(slot.role, e.target.value)}
+          value={selections[slot.key] ?? ''}
+          onChange={(e) => select(slot.key, e.target.value)}
           disabled={channelConnectionsStatus !== 'loaded'}
           aria-label={title}
           data-testid="publisher-connection-select"
@@ -336,6 +341,27 @@ export function MarketingRecipeApplyDialog({
             <option key={c.id} value={c.id}>{c.account_label || `${c.channel}(${c.account_id})`}</option>
           ))}
         </select>
+      </div>
+    );
+  };
+
+  // 역할별로 묶는다(slots는 이미 역할 순서 → 역할 안 흐름 순서). 자리 하나면 그 줄 그대로,
+  // 둘 이상이면 role="group" 묶음(머리 제목 aria-labelledby) 아래 줄로.
+  const roleGroups: RecipeRoleSlot[][] = [];
+  for (const slot of slots) {
+    const last = roleGroups[roleGroups.length - 1];
+    if (last && last[0]!.role === slot.role) last.push(slot);
+    else roleGroups.push([slot]);
+  }
+  const renderRoleGroup = (group: RecipeRoleSlot[], index: number) => {
+    if (group.length === 1) return renderSlot(group[0]!);
+    const role = group[0]!.role;
+    // role은 정의 저자가 적는 자유 문자열(공백 등)이라 id엔 순번을 쓴다.
+    const headingId = `recipe-apply-role-group-${index}`;
+    return (
+      <div key={role} role="group" aria-labelledby={headingId} className="rounded-md border border-input" data-testid="slot-group" data-role={role}>
+        <div id={headingId} className="break-keep px-3 pt-3 text-sm font-semibold text-foreground">{stageRoleLabel(role, t)}</div>
+        {group.map((slot, i) => renderSlot(slot, true, i === 0))}
       </div>
     );
   };
@@ -364,8 +390,14 @@ export function MarketingRecipeApplyDialog({
         </div>
 
         <div className="space-y-2.5">
-          {slots.map(renderSlot)}
+          {roleGroups.map(renderRoleGroup)}
         </div>
+
+        {uncovered.length > 0 ? (
+          <p role="alert" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground" data-testid="marketing-apply-uncovered-stages">
+            {t('recipeApplyV2UncoveredStages', { stages: uncovered.map((s) => recipeStageLabel(s, t)).join(' · ') })}
+          </p>
+        ) : null}
 
         {warnings.length > 0 ? (
           <div className="space-y-1 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground" data-testid="marketing-apply-warnings">
@@ -394,7 +426,7 @@ export function MarketingRecipeApplyDialog({
           ) : (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>{tc('cancel')}</Button>
-              <Button onClick={() => void submit()} disabled={submitting || !projectId || !allRequiredChosen}>
+              <Button onClick={() => void submit()} disabled={submitting || !projectId || !allRequiredChosen || uncovered.length > 0}>
                 {submitting ? t('eventApplySubmitting') : t('eventApplySubmit')}
               </Button>
             </>

@@ -903,3 +903,107 @@ describe('submitMarketingRecipeApply — BE 응답 warnings 파싱', () => {
     expect(result.warnings).toBeUndefined();
   });
 });
+
+// 까디르 QA(PR #4547) — 한 역할에 방식이 다른 단계가 섞인 정의(레시피 2호 이후 모양).
+// 역할 이름은 묶음 머리에 한 번, 자리는 그 아래 줄로(유나 판정 §9) · 값은 그 자리 stage에만.
+describe('MarketingRecipeApplyDialog — 한 역할에 자리 여럿(A·C)', () => {
+  const MIXED: EventDefinitionResponse & { id: string } = {
+    id: 'mixed-1', key: 'org.acme.newsletter_cycle', org_id: 'org-1', name: '뉴스레터', description: null,
+    payload_schema: { properties: { stage: { enum: ['brief', 'draft', 'signoff', 'published'] } } },
+    stage_metadata: {
+      brief: { role: 'Lead' },
+      draft: { role: 'Writer' },
+      signoff: { role: 'Lead', gate: { type: 'doc_approval', approver: 'org_owner' } },
+      published: { role: 'Writer', capability: { kind: 'publish', target: 'channel_connection' } },
+    },
+    role_actor_kinds: { Lead: 'human', Writer: 'agent' },
+    enabled: true,
+  };
+
+  function stubFetch() {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) {
+        return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }, { id: 'human-1', name: '윤재', type: 'human' }] };
+      }
+      if (url.startsWith('/api/organizations/org-1/channel-connections')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'conn-1', channel: 'stibee', account_label: '뉴스레터', account_id: 'a1', status: 'active' }] }) };
+      }
+      if (url.startsWith('/api/organizations/org-1/generation-connectors')) {
+        return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+  }
+
+  async function render(onSubmit = vi.fn(async () => ({ ok: true, bindingsUpserted: 3 }))) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={MIXED} open onOpenChange={() => {}}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} orgId="org-1" onSubmit={onSubmit}
+        />,
+      ));
+    });
+    await flush();
+    return onSubmit;
+  }
+
+  const change = async (el: HTMLSelectElement, value: string) => {
+    await act(async () => { el.value = value; el.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+  };
+
+  it('자리가 둘인 역할은 role="group" 묶음 하나 — 역할 이름은 머리에 한 번, 줄은 방식별', async () => {
+    await render();
+    const groups = [...document.body.querySelectorAll<HTMLElement>('[data-testid="slot-group"]')];
+    expect(groups.map((g) => g.dataset.role)).toEqual(['Lead', 'Writer']);
+    for (const g of groups) {
+      expect(g.getAttribute('role')).toBe('group');
+      const heading = document.getElementById(g.getAttribute('aria-labelledby')!);
+      expect(heading && g.contains(heading)).toBe(true);
+    }
+    const lines = (g: HTMLElement) => [...g.querySelectorAll<HTMLElement>('[data-slot-key]')].map((l) => l.dataset.slotKey);
+    expect(lines(groups[0]!)).toEqual(['Lead:member', 'Lead:approver']);
+    expect(lines(groups[1]!)).toEqual(['Writer:member', 'Writer:channel']);
+    // 역할 이름이 줄마다 반복되지 않는다(«왜 작성자가 둘?» 방지) — 묶음 안에 머리 한 번만.
+    const writerLabel = groups[1]!.querySelector('[id]')!.textContent!;
+    expect(groups[1]!.textContent!.split(writerLabel).length - 1).toBe(1);
+  });
+
+  it('A·C: 멤버·채널 값은 각자 자기 stage에만 실린다(채널 stage에 멤버 id가 안 들어감, 사람 작업 단계도 배정)', async () => {
+    const onSubmit = await render();
+    await change(document.body.querySelector<HTMLSelectElement>('#marketing-recipe-apply-project')!, 'proj-1');
+    const memberSelects = [...document.body.querySelectorAll<HTMLSelectElement>('[data-testid="creator-agent-select"]')];
+    expect(memberSelects).toHaveLength(2);
+    await change(memberSelects[0]!, 'human-1'); // Lead 작업(brief) — 사람
+    await change(memberSelects[1]!, 'agent-1'); // Writer 작업(draft) — 에이전트
+    await change(document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!, 'conn-1');
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '적용하기')!;
+    expect(submitBtn.hasAttribute('disabled')).toBe(false);
+    await act(async () => { submitBtn.click(); });
+    await flush();
+    expect(onSubmit).toHaveBeenCalledWith({
+      recipeId: 'mixed-1', projectId: 'proj-1',
+      roleMapping: { brief: 'human-1', draft: 'agent-1', published: 'conn-1' },
+    });
+    expect(document.body.querySelector('[data-testid="marketing-apply-uncovered-stages"]')).toBeNull();
+  });
+
+  it('영상 레시피(자리 하나씩)는 묶음 없이 지금 모양 그대로', async () => {
+    stubMemberFetch();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={{ ...VIDEO_PRODUCTION_RECIPE, id: 'video' }} open onOpenChange={() => {}}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+    expect(document.body.querySelector('[data-testid="slot-group"]')).toBeNull();
+    expect([...document.body.querySelectorAll<HTMLElement>('[data-slot-key]')].map((e) => e.dataset.slotKey))
+      .toEqual(['Director:approver', 'Creator:member', 'Compute:compute', 'Publisher:channel']);
+  });
+});

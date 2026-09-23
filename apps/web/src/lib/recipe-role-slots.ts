@@ -14,10 +14,10 @@
 //     원 docstring은 발행자도 role_binding 대상이라 적었으나 PO가 재판정으로 정정했다 —
 //     미르코 seed apply 계약과 맞물리니 인터페이스 확認 후 후속 카드에서 배선, 이 카드는
 //     크리에이터 축까지만).
-// role 라벨은 recipe 저자가 적는 자유 문자열(고정 enum 아님)이라 구조만 보고 "이 role은
-// 바인딩 대상"을 자동 판별할 수 없다 — expandRoleSlotBindings가 bindableRoles 인자를 강제해
-// 호출부가 "이 role만 바인딩 대상"을 명시하게 만든다(그냥 문서화가 아니라 시그니처로 강제 —
-// #4038 부주의 재발 방지).
+// story #4173(E-RECIPE-2)부터 이 판별은 역할 이름이 아니라 정의의 신호(capability.target·gate·
+// role_actor_kinds)로 stage마다 한다 — recipeRoleSlots 참조(예전 expandRoleSlotBindings의
+// bindableRoles 화이트리스트는 역할 전체를 한 방식으로 펼쳐서, 한 역할에 방식이 다른 stage가
+// 섞이면 틀린 값을 꽂았다 — 제거).
 
 // story #3316 SSOT(EventDefinitionResponse['stage_metadata'], loop-create-dialog.tsx)와
 // 구조적으로 호환되게 optional 필드를 그대로 맞춘다 — import는 안 한다(lib/는 components/에
@@ -50,7 +50,7 @@ export function roleActorKind(role: string | undefined, roleActorKinds: RoleActo
 }
 
 /** stage_metadata를 role 라벨별로 묶는다(정보 그룹핑 — "이 role이 role_mapping 바인딩
- * 대상"이라는 뜻이 아니다, 그건 expandRoleSlotBindings의 bindableRoles가 별도로 판단한다).
+ * 대상"이라는 뜻이 아니다, 그건 recipeRoleSlots가 stage마다 판단한다).
  * role이 없는(신호형/측정형 정의의 빈 stage_metadata 등) stage는 결과에서 빠진다. 순서는
  * stage_metadata의 키 순서(Object.entries, 삽입 순서 = DB에 저장된 JSON 순서 =
  * payload_schema.stage.enum과 보통 일치)를 그대로 따른다. */
@@ -62,29 +62,6 @@ export function groupStagesByRole(stageMetadata: RecipeStageMetadata): Record<st
     (groups[role] ??= []).push(stage);
   }
   return groups;
-}
-
-/** role 라벨 → 담당자(team member id) 선택 중 `bindableRoles`에 명시된 role만 펼쳐
- * POST /events/definitions/{id}/apply의 role_mapping(Record<stage, teamMemberId>) 바디를
- * 만든다. `bindableRoles`에 없는 role 선택은(예: "디렉터"·"발행자") 조용히 무시한다 — 그
- * role들은 이 함수가 만드는 role_mapping 축이 아닌 다른 메커니즘(게이트 승인 주체·
- * generation_budget·채널 타깃)에 속하기 때문(파일 docstring 참조). 호출부가 실수로 모든
- * role 그룹을 다 넘겨도 이 화이트리스트가 잘못된 바인딩을 막는다. */
-export function expandRoleSlotBindings(
-  stageMetadata: RecipeStageMetadata,
-  bindableRoles: readonly string[],
-  selections: Record<string, string>,
-): Record<string, string> {
-  const groups = groupStagesByRole(stageMetadata);
-  const bindableSet = new Set(bindableRoles);
-  const roleMapping: Record<string, string> = {};
-  for (const [role, memberId] of Object.entries(selections)) {
-    if (!memberId || !bindableSet.has(role)) continue;
-    const stages = groups[role];
-    if (!stages) continue;
-    for (const stage of stages) roleMapping[stage] = memberId;
-  }
-  return roleMapping;
 }
 
 export interface RecipeCapabilityStage {
@@ -181,22 +158,40 @@ export function orderedRecipeRoles(
   return [...human, ...seen.filter((r) => !human.includes(r))];
 }
 
-/** 적용 다이얼로그 한 자리. 역할마다 어떤 메커니즘에 꽂히는지를 정의의 신호로 판별한다:
- * - channel: 그 역할 stage가 capability.target=channel_connection → 조직 채널 연결(필수).
+/** 적용 다이얼로그 한 자리. 한 역할의 stage를 «어떤 방식으로 채우는가»별로 나눠, 방식마다
+ * 자리 하나를 낸다(한 역할이 방식이 다른 stage를 가지면 자리가 여럿 — 예: Writer = 멤버
+ * 자리(draft) + 채널 자리(published), 사람 역할 = 멤버 자리(작업) + 승인 자리(게이트)).
+ * stage 하나의 방식:
+ * - channel: capability.target=channel_connection → 조직 채널 연결(필수).
  * - compute: capability.target=generation_connector → 연산 커넥터(선택).
- * - approver: 사람 역할(선언 human, 또는 선언이 없고 모든 stage에 게이트)이면서 게이트가
- *   있다 → 게이트 승인 주체를 읽기 전용으로 보여준다(role_mapping 축 아님).
- * - member: 그 밖 → 그 역할 stage 전부를 팀 멤버(선언 human이면 사람, 아니면 에이전트)에
- *   바인딩(필수).
- * `stages`는 그 자리가 값을 채우는 stage(channel/compute는 해당 target stage만). */
+ * - approver: 사람 역할의 게이트 stage → 게이트 승인 주체를 읽기 전용으로(role_mapping 축 아님).
+ * - member: 그 밖 → 팀 멤버(사람 역할이면 사람, 아니면 에이전트)에 바인딩(필수).
+ * 사람 역할 = role_actor_kinds가 human으로 선언, 또는 선언이 없는 역할이면서 그 역할의 모든
+ * stage가 게이트. 선언 없는 역할은 다른 역할의 선언 여부와 상관없이 이 한 규칙으로 판정한다.
+ * `key`(역할+방식)가 다이얼로그 선택값의 키다. 불변식: role이 있는 모든 stage가 정확히 한
+ * 자리에 덮인다(uncoveredRecipeStages). */
 export type RecipeSlotKind = 'approver' | 'member' | 'compute' | 'channel';
 
 export interface RecipeRoleSlot {
+  key: string;
   role: string;
   kind: RecipeSlotKind;
   stages: string[];
   memberType: 'agent' | 'human';
   gateApprovers: string[];
+}
+
+function isHumanRole(roleStages: string[], stageMetadata: RecipeStageMetadata, declared: 'human' | 'agent' | null): boolean {
+  if (declared !== null) return declared === 'human';
+  return roleStages.length > 0 && roleStages.every((s) => stageMetadata[s]?.gate);
+}
+
+function stageSlotKind(meta: RecipeStageMeta, isHuman: boolean): RecipeSlotKind {
+  const target = meta.capability?.target;
+  if (target === 'channel_connection') return 'channel';
+  if (target === 'generation_connector') return 'compute';
+  if (isHuman && meta.gate) return 'approver';
+  return 'member';
 }
 
 export function recipeRoleSlots(
@@ -205,17 +200,35 @@ export function recipeRoleSlots(
   roleActorKinds: RoleActorKinds | null | undefined,
 ): RecipeRoleSlot[] {
   const flow = stagesInFlowOrder(stageMetadata, flowStages);
-  return orderedRecipeRoles(stageMetadata, flowStages, roleActorKinds).map((role) => {
+  return orderedRecipeRoles(stageMetadata, flowStages, roleActorKinds).flatMap((role) => {
     const roleStages = flow.filter((s) => stageMetadata[s]?.role === role);
-    const withTarget = (target: string) => roleStages.filter((s) => stageMetadata[s]?.capability?.target === target);
-    const gated = roleStages.filter((s) => stageMetadata[s]?.gate);
-    const gateApprovers = gated.map((s) => stageMetadata[s]!.gate!.approver ?? '');
-    const declared = roleActorKind(role, roleActorKinds);
-    const base = { role, memberType: declared === 'human' ? 'human' as const : 'agent' as const, gateApprovers };
-    if (withTarget('channel_connection').length > 0) return { ...base, kind: 'channel', stages: withTarget('channel_connection') };
-    if (withTarget('generation_connector').length > 0) return { ...base, kind: 'compute', stages: withTarget('generation_connector') };
-    const isHuman = declared === 'human' || (declared === null && !roleActorKinds && roleStages.length > 0 && gated.length === roleStages.length);
-    if (isHuman && gated.length > 0) return { ...base, kind: 'approver', stages: gated };
-    return { ...base, kind: 'member', stages: roleStages };
+    const isHuman = isHumanRole(roleStages, stageMetadata, roleActorKind(role, roleActorKinds));
+    // 자리 순서 = 그 자리의 첫 stage 흐름 순서(roleStages가 이미 흐름 순서라 처음 나온 순서).
+    const slots: RecipeRoleSlot[] = [];
+    for (const stage of roleStages) {
+      const meta = stageMetadata[stage]!;
+      const kind = stageSlotKind(meta, isHuman);
+      let slot = slots.find((x) => x.kind === kind);
+      if (!slot) {
+        slot = { key: `${role}:${kind}`, role, kind, stages: [], memberType: isHuman ? 'human' : 'agent', gateApprovers: [] };
+        slots.push(slot);
+      }
+      slot.stages.push(stage);
+      if (kind === 'approver') slot.gateApprovers.push(meta.gate!.approver ?? '');
+    }
+    return slots;
   });
+}
+
+/** 불변식 검사 — role이 있는 stage 중 자리에 안 덮였거나 둘 이상에 덮인 stage(흐름 순서).
+ * 비어 있지 않으면 적용 다이얼로그가 제출을 막고 그 stage를 보여준다(fail-closed) — 앞으로
+ * 정의 모양이 늘어도 «표시 없이 바인딩에서 빠진 채 제출 성공»이 다시 생기지 않게 하는 안전망. */
+export function uncoveredRecipeStages(
+  stageMetadata: RecipeStageMetadata,
+  flowStages: readonly string[],
+  slots: readonly RecipeRoleSlot[],
+): string[] {
+  const count = new Map<string, number>();
+  for (const slot of slots) for (const stage of slot.stages) count.set(stage, (count.get(stage) ?? 0) + 1);
+  return stagesInFlowOrder(stageMetadata, flowStages).filter((s) => stageMetadata[s]?.role && count.get(s) !== 1);
 }
