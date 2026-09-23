@@ -222,7 +222,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
   // 주석이 있던 메시지는 예전엔 `-->` 때문에 늘 마크다운 경로였다 — 목록·들여쓰기 코드 구조가 평문으로 깨지지 않게
   // 그 둘도 마크다운 표지로 친다(주석 없는 메시지의 판정은 그대로).
   const markdownish = /[*_`#\[\]>~]|entity:/.test(detectionText)
-    || (hasComment && (/^(?: {4}|\t)/m.test(rawContent) || /^\s*(?:[-*+]|\d+\.)\s/m.test(detectionText)));
+    || (hasComment && (/^(?: {4}|\t)/m.test(rawContent) || /^\s*(?:[-*+]|\d+[.)])\s/m.test(detectionText)));
   const content = hasComment && !markdownish ? stripHtmlCommentsFromPlainText(rawContent) : rawContent;
   const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = markdownish;

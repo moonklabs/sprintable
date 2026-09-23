@@ -2365,6 +2365,25 @@ describe('ChatBubble — 본문의 내부 HTML 주석 제거(story #4197)', () =
     expect(a).toBe(b);
   });
 
+  // PR #4559 까디르 잔여 1·3 — 판정은 주석 뺀 글로(원문의 `-->` `>`를 인용 표지로 잡으면 평문 메시지가 마크다운
+  // 경로로 새 문단 틀이 바뀐다) · `1)` 번호 목록도 목록 표지.
+  it('마크다운 문법 없는 평문 + 주석 → 평문 경로(<p> 문단 틀 없음)', async () => {
+    const c = await render('<!-- linear-comment-id: abc -->\n평범한 답장이에요.');
+    expect(c.querySelector('p')).toBeNull();
+    expect(c.querySelector('span.whitespace-pre-wrap')?.textContent).toBe('평범한 답장이에요.');
+  });
+
+  it('`1)` 번호 목록 + 주석도 목록 구조 유지(<ol>)', async () => {
+    const c = await render('1) 첫 <!-- s --> 항목\n2) 둘째');
+    expect(c.querySelector('ol')).not.toBeNull();
+    expect(text()).not.toContain('<!--');
+  });
+
+  it('주석 안에 백틱·~~~가 있어도 주석뿐이면 빈 본문 문구', async () => {
+    const c = await render('<!-- 예: `code` ~~~ -->');
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).not.toBeNull();
+  });
+
   // ── 빈 본문 ──
   it('주석뿐인 메시지는 빈 말풍선 대신 «표시할 내용이 없는 메시지예요»', async () => {
     const c = await render('<!-- linear-comment-id: abc -->');

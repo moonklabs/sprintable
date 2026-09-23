@@ -58,7 +58,9 @@ export function remarkStripHtmlComments() {
  */
 export function isCommentOnlyContent(content: string): boolean {
   if (!content.includes('<!--')) return false;
-  if (/`|~~~|^(?: {4}|\t)/m.test(content)) return false;
+  // 빈 줄 뒤(또는 맨 앞)의 들여쓰기 줄은 들여쓰기 코드일 수 있다 — 코드 안 주석을 빈 본문으로 오판하지 않게 판정 안 함.
+  // 주석 «안»의 백틱·`~~~`는 코드가 아니다(PR #4559 까디르 잔여 4) — 표지는 주석을 걷은 나머지에서만 본다.
+  if (/(?:^|\n[ \t]*\n)(?: {4}|\t)/.test(content)) return false;
   return content.replace(COMMENT_RE, '').trim() === '';
 }
 
