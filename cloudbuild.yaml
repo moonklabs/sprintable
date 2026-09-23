@@ -713,6 +713,9 @@ steps:
         # 값이 정확히 "true"일 때만 켜진다(isDesktopDownloadEnabled 판정과 짝).
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_ENABLED=true"
+          # story #4219 C1(PO 판정) — 첫 문서 서버 구간 마커(Server-Timing 헤더·로그 한 줄 · 이름·시간만). dev 분기에서만
+          # 싣고 prod엔 안 실어 미설정 = 꺼짐(값이 정확히 "true"일 때만 켜진다 — lib/server-timing.isServerTimingEnabled).
+          ENV_VARS="$${ENV_VARS},SERVER_TIMING_MARKERS=true"
         fi
         gcloud run deploy sprintable-frontend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA} \
