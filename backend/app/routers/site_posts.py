@@ -221,6 +221,10 @@ class SubmitSitePostDraftRequest(BaseModel):
 
 class SubmitSitePostDraftResponse(BaseModel):
     gate_id: uuid.UUID
+    # story #4174(까디르 P2) — 제출한 초안 id. 블로그 레시피는 이 값을 다음 단계(발행 승인 대기) 발행 payload의
+    # `site_post_draft_id`(events.RECIPE_SITE_DRAFT_LINK_FIELD)에 실어 «이 회차의 초안»을 명시 연결한다 — 에이전트 안내 문구가
+    # 이 필드 이름을 그대로 가리킨다. 필드 추가라 하위 호환.
+    draft_id: uuid.UUID
     version_id: uuid.UUID
     content_sha256: str
     status: str
@@ -744,7 +748,7 @@ async def submit_site_post_draft_endpoint(
         ) from exc
 
     return SubmitSitePostDraftResponse(
-        gate_id=gate.id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
+        gate_id=gate.id, draft_id=draft_id, version_id=version_id, content_sha256=gate.sealed_content_sha256,
         status=gate.status,
     )
 

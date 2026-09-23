@@ -44,6 +44,9 @@ class _FakeGateRow:
         # 폴백까지 그대로 통과한다(기본 None → 조건 거짓 → 회귀 0, 4142 CHANGES-1과
         # 동형 원칙: 목을 실물에 맞춘다).
         self.publish_outcome = publish_outcome
+        # story #4174 — 레시피 문맥 판별(resolve_site_post_recipe_context)이 게이트 행의 work_item_type을 읽는다(실
+        # 컬럼 NOT NULL — 같은 원칙으로 목을 실물에 맞춘다). 이 파일의 게이트는 전부 story 일감.
+        self.work_item_type = "story"
 
 
 class _FakeResult:
@@ -58,6 +61,12 @@ class _FakeResult:
 
     def first(self):
         return self._row
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return [] if self._row is None else [self._row]
 
 
 def _fake_db(
@@ -84,6 +93,9 @@ def _fake_db(
             return _FakeResult(uuid.uuid4() if site_post_draft_exists else None)
         if "publication_commands" in q:
             return _FakeResult(uuid.uuid4() if site_post_command_exists else None)
+        if "event_definitions" in q:
+            # story #4174 — 블로그 레시피 정의 조회(레시피 문맥 판별). 이 파일은 레시피 밖 게이트만 재므로 정의 0건.
+            return _FakeResult(None)
         return _FakeResult(gate_row)
 
     db.execute = AsyncMock(side_effect=_execute)

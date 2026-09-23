@@ -9,6 +9,7 @@ import type { BlockTemplate, BlockTemplateBlock } from '@/lib/block-template';
 // 타입을 Record<string, string>으로 둔다 — verify-no-unused-i18n-keys 가드는 이 모양의 리터럴 테이블 값만 «읽힌 키»로 본다.
 export const PLATFORM_PRESET_NAME_KEY: Record<string, string> = {
   'preset.marketing.newsletter': 'newsletterName',
+  'preset.marketing.blog_article': 'blogArticleName',
   'preset.marketing.social_card_news': 'socialCardNewsName',
   'preset.marketing.social_text_post': 'socialTextPostName',
   'preset.marketing.video_production': 'videoProductionName',
@@ -24,6 +25,7 @@ export const PLATFORM_PRESET_NAME_KEY: Record<string, string> = {
 
 export const PLATFORM_PRESET_DESCRIPTION_KEY: Record<string, string> = {
   'preset.marketing.newsletter': 'newsletterDescription',
+  'preset.marketing.blog_article': 'blogArticleDescription',
   'preset.marketing.social_card_news': 'socialCardNewsDescription',
   'preset.marketing.social_text_post': 'socialTextPostDescription',
   'preset.marketing.video_production': 'videoProductionDescription',
@@ -61,6 +63,13 @@ export function presetDescription(def: PresetLike, t: Translate): string {
 // 워크플로우 ko·en = 새 문안(원문의 내부어를 걷음). 같은 문장을 쓰는 워크플로우 단계(배정·제출·검토)는 한 키를 공유한다.
 // BE 짝 가드(test_4202_platform_preset_copy_keys_realdb.py)가 시드의 action 있는 단계 전수 ↔ 이 표를 잰다.
 export const PLATFORM_PRESET_ACTION_KEY: Record<string, string> = {
+  'preset.marketing.blog_article:concept_confirmed': 'blogArticleActionConceptConfirmed',
+  'preset.marketing.blog_article:planning': 'blogArticleActionPlanning',
+  'preset.marketing.blog_article:pending_approval': 'blogArticleActionPendingApproval',
+  'preset.marketing.blog_article:publish_checked': 'blogArticleActionPublishChecked',
+  'preset.marketing.blog_article:published': 'blogArticleActionPublished',
+  'preset.marketing.blog_article:verification': 'blogArticleActionVerification',
+  'preset.marketing.blog_article:writing': 'blogArticleActionWriting',
   'preset.marketing.newsletter:campaign_created': 'newsletterActionCampaignCreated',
   'preset.marketing.newsletter:collect': 'newsletterActionCollect',
   'preset.marketing.newsletter:draft': 'newsletterActionDraft',

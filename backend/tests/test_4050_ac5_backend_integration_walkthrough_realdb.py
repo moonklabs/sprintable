@@ -122,6 +122,23 @@ def test_capability_field_has_exactly_five_consumers_in_codebase():
     import app.routers.events as events_module
     import app.services.event_definition_registry as registry_module
 
+    def _capability_consumers(module) -> list[str]:
+        """각 "capability" 리터럴을 감싸는 가장 안쪽 함수 이름(정렬). 중첩 함수 안의 리터럴은 바깥 함수에 중복 계산 안 함."""
+        tree = ast.parse(inspect.getsource(module))
+        names: list[str] = []
+
+        def visit(node, owner):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    visit(child, child.name)
+                else:
+                    if isinstance(child, ast.Constant) and child.value == "capability" and owner is not None:
+                        names.append(owner)
+                    visit(child, owner)
+
+        visit(tree, None)
+        return sorted(names)
+
     def _count_capability_subscripts(module) -> int:
         tree = ast.parse(inspect.getsource(module))
         count = 0
@@ -130,13 +147,16 @@ def test_capability_field_has_exactly_five_consumers_in_codebase():
                 count += 1
         return count
 
-    # events.py: `.get("capability")` 5건 — 기존 warning 축(§3317 PR B)·story #4090 AC1
-    # `_is_channel_stage`(target 판별)·같은 스토리 AC3 `_render_gate_verdict_message`
-    # (다음 stage capability.target으로 자동발행 안내 갈래 판별)·story #4088 2/2
-    # `_render_event_message_content`(현재 stage capability.kind로 힌트 갈래 판별)·
-    # story #4110 `get_my_generation_connector`(현재 stage capability.target으로
-    # generation_connector-target 여부 판정).
-    assert _count_capability_subscripts(events_module) == 5
+    # events.py: capability 소비처를 **이름으로** 고정한다(story #4174 — 예전 숫자 단언 «== 5»는 늘었을 때 어느 자리가
+    # 늘었는지 말해 주지 못했다). 각 "capability" 리터럴을 감싸는 가장 안쪽 함수 이름의 목록:
+    # 기존 warning 축(§3317 PR B, `apply_recipe_role_bindings`·그 안의 `_stage_target`)·story #4090 AC3
+    # `_render_gate_verdict_message`(다음 stage capability.target으로 자동발행 안내)·story #4110
+    # `_resolve_crew_scoped_recipe_binding`·story #4174 `_stage_capability_kind`(capability.kind 읽기 공용 — 멘션 도구
+    # 안내·서버 몫 다음 단계·블로그 레시피 문맥 판별이 같이 쓴다. 새 kind 소비처는 이 함수를 거친다).
+    assert _capability_consumers(events_module) == [
+        "_render_gate_verdict_message", "_resolve_crew_scoped_recipe_binding", "_stage_capability_kind",
+        "_stage_target", "apply_recipe_role_bindings",
+    ]
     # event_definition_registry.py: validate_stage_metadata 안의 `meta["capability"]`류 —
     # shape 검증 로직 안에서 "capability" 리터럴이 여러 번 등장(object 검사·에러 메시지 등)
     # 하므로 정확한 개수보다 "0이 아님(소비자가 실존)"만 고정한다.
