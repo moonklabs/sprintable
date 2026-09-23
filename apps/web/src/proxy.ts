@@ -252,7 +252,7 @@ async function redirectLegacyResourcePath(
       const url = request.nextUrl.clone();
       url.pathname = `/${ownSlugs.orgSlug}/${ownSlugs.projectSlug}/${resourceName}${rest}`;
       url.searchParams.delete(RESOLVE_RETRY_PARAM);
-      return NextResponse.redirect(url, 301);
+      return sessionDependentRedirect(url);
     }
   }
 
@@ -282,9 +282,39 @@ async function redirectLegacyResourcePath(
 
   const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
   const url = request.nextUrl.clone();
-  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${resourceName}${rest}`;
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
   url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
-  return NextResponse.redirect(url, 301);
+  return sessionDependentRedirect(url);
+}
+
+/**
+ * story #4170 AC4(PO 리뷰) — 옛 flat 주소(`/glance` 등)의 목적지는 **세션**(현재 org·project 쿠키/토큰)으로
+ * 정해진다. 301(+Cache-Control 없음)이면 브라우저가 디스크에 캐시해 2회차부터 서버에 안 묻는다(크롬 실측
+ * `fromDiskCache: true`) — 프로젝트를 바꾸거나 같은 기기에서 다른 계정으로 들어와도 캐시된 옛 목적지로 간다.
+ * 그래서 307 + `Cache-Control: no-store`. 경로만으로 정해지는 이름 바꿈(`/{ws}/{proj}/board`→`/flow`,
+ * redirectRenamedResourcePath·redirectRetiredResourcePath)은 누구에게나 같으니 301 그대로.
+ * 트레이드오프: 캐시 덕에 2회차부터 0이던 이 홉의 서버 처리(0.12~0.2초)가 매번 한 번 든다 — 정확성이 먼저이고,
+ * 같은 PR이 홉 2→1로 번 왕복(0.3~0.45초)이 그보다 크다.
+ */
+function sessionDependentRedirect(url: URL): NextResponse {
+  const response = NextResponse.redirect(url, 307);
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+}
+
+/**
+ * story #4170(E-MOBILE-SPEED) — 옛 flat 리소스가 이름까지 바뀐 것(RENAMED)·은퇴한 것(RETIRED)이면 org/project를
+ * 채우는 이 301에서 최종 이름까지 한 번에 간다. 예전엔 `/glance` → `/{ws}/{proj}/glance`(301) →
+ * `/{ws}/{proj}/flow`(301) 두 홉이었다 — 로그인 상태 셸 진입마다 왕복 1회(dev 실측 홉 사이 0.3~0.45초)가
+ * 샜다. 두 번째 홉이 하던 규칙을 그대로 쓴다: rename은 하위 경로를 들고 가고(같은 행의 새 이름),
+ * 은퇴는 하위 경로를 버린다(redirectRetiredResourcePath와 같은 이유 — 다른 id 공간).
+ */
+function finalResourcePath(resourceName: string, rest: string): string {
+  const renamed = RENAMED_RESOURCES[resourceName];
+  if (renamed) return `${renamed}${rest}`;
+  const retired = RETIRED_RESOURCES[resourceName];
+  if (retired) return retired;
+  return `${resourceName}${rest}`;
 }
 
 // story #2212 — org-briefing 왕복이 한 번 더 실패했을 때 무한 왕복을 막기 위한 내부 마커(오르테가
@@ -804,7 +834,10 @@ async function resolveWorkspaceProject(
     if (outcome.workspace) nextSegments[0] = outcome.workspace;
     if (outcome.project && nextSegments.length > 1) nextSegments[1] = outcome.project;
     url.pathname = '/' + nextSegments.join('/');
-    return { kind: 'redirect', response: NextResponse.redirect(url, 301) };
+    // story #4170 AC4b(까디르 QA) — 옛 slug → 새 slug. 백엔드 resolve.py가 «옛 slug는 다른 entity에 재점유될 수
+    // 있다 · 긴 캐시 금지»라고 적은 경로라, 캐시된 301이면 재점유 뒤에도 옛 목적지로 간다 — 세션 의존 flat
+    // 리다이렉트와 같은 부류로 307 + no-store.
+    return { kind: 'redirect', response: sessionDependentRedirect(url) };
   }
 
   setResolvedHeaders(fwdHeaders, outcome.context);
