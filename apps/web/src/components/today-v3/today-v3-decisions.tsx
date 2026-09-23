@@ -11,6 +11,7 @@ import { hrefForNeedsMeItem, type TodayNeedsMeItem } from '@/components/org-brie
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { TodayV3ReasonDialog } from './today-v3-reason-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3964(E-UX-OVERHAUL·「오늘」 구현 4/N) — #3962/CHANGES-2가 지은 자리(위험
@@ -191,6 +192,7 @@ function HitlAnswerCard({ item, onDone }: { item: TodayNeedsMeItem; onDone: () =
 function RecipeDraftReviewCard({ item }: { item: TodayNeedsMeItem }) {
   const tOrg = useTranslations('orgBriefing');
   const tCage = useTranslations('cage');
+  const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
   return (
     <Card className="p-3.5" data-testid="today-v3-decision-card">
       <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
@@ -199,7 +201,7 @@ function RecipeDraftReviewCard({ item }: { item: TodayNeedsMeItem }) {
       ) : null}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         <Button asChild size="sm">
-          <Link href={`/gates/${item.id}`} data-testid="today-v3-recipe-review-draft-action">{tCage('gateReviewDraftToApprove')}</Link>
+          <Link href={flatHref(`/gates/${item.id}`)} data-testid="today-v3-recipe-review-draft-action">{tCage('gateReviewDraftToApprove')}</Link>
         </Button>
       </div>
     </Card>

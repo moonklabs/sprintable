@@ -30,6 +30,7 @@ import {
   deriveGateState, gateConversationId, primaryActionLabelKey, riskBadgeVariant, riskSentenceKey,
   type WorkListGate,
 } from './work-list-detail-actions';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface StoryDetail {
   self_reported: boolean | null;
@@ -244,6 +245,7 @@ export function WorkListDetailPanel({
   row, storyId, storyTitle, goalTitle, onClose, className, isHiddenByFilter = false, onClearFilters,
 }: WorkListDetailPanelProps) {
   const t = useTranslations('workList');
+  const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
   const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
   const locale = useLocale();
@@ -570,7 +572,7 @@ export function WorkListDetailPanel({
                     카드가 있는 게이트 상세로 보내는 링크(같은 자리·같은 크기). 여기선 승인이 안 일어나 409 문장도 없다. */}
                 {isRecipePublishGate(gate!) ? (
                   <Button asChild variant="default" size="sm">
-                    <Link href={`/gates/${gate!.id}`} data-testid="panel-primary-action">{tCage('gateReviewDraftToApprove')}</Link>
+                    <Link href={flatHref(`/gates/${gate!.id}`)} data-testid="panel-primary-action">{tCage('gateReviewDraftToApprove')}</Link>
                   </Button>
                 ) : (
                   <Button

@@ -18,6 +18,7 @@ import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -862,6 +863,7 @@ function LinkedDraftVersionLine({ version }: { version: number }) {
  */
 function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
   const t = useTranslations('cage');
+  const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
   const draft = gate.linked_site_draft;
   if (!draft) return null;
   const destinationLabel = draft.channel
@@ -886,7 +888,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
         <p className="line-clamp-4 min-w-0 break-words text-foreground">{draft.body_preview}</p>
       ) : null}
       <a
-        href={`/content/${draft.draft_id}`}
+        href={flatHref(`/content/${draft.draft_id}`)}
         className="inline-block text-[11px] text-primary underline underline-offset-2"
       >
         {t('linkedChannelDraftOpenLink')}
