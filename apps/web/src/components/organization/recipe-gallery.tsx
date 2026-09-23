@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { groupStagesByRole, stagesWithGate } from '@/lib/recipe-role-slots';
+import { orderedRecipeRoles, recipeConnectionTargets, roleActorKind, stagesWithGate } from '@/lib/recipe-role-slots';
+import { stageRoleLabel } from '@/lib/stage-role';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §1) 구현. AC1: 마케팅 레시피
 // 카드(#4046 useMarketingRecipes 위)와 개발 워크플로를 탭으로 분리한다.
@@ -19,8 +20,28 @@ function stageCount(def: EventDefinitionResponse): number {
   return (def.payload_schema.properties?.stage?.enum ?? []).length;
 }
 
-function roleCount(def: EventDefinitionResponse): number {
-  return Object.keys(groupStagesByRole(def.stage_metadata)).length;
+// story #4173(유나 디자인 앵커 2026-09-23) — 카드가 «필요한 역할»·«필요한 연결»을 이름으로
+// 보여준다. 역할 순서는 적용 다이얼로그 자리 순서와 같은 함수(orderedRecipeRoles).
+// 타입을 Record<string, string>으로 둔다 — verify-no-unused-i18n-keys 가드는 정확히 이 모양의
+// 리터럴 테이블 값만 «읽힌 키»로 본다. target이 늘면 이 표 한 곳만 고친다.
+export const CONNECTION_LABEL_KEY: Record<string, string> = {
+  channel_connection: 'recipeCardConnectionChannel',
+  generation_connector: 'recipeCardConnectionGenerator',
+};
+
+function roleNames(def: EventDefinitionResponse, t: (key: string, values?: Record<string, string>) => string): string[] {
+  const flow = def.payload_schema.properties?.stage?.enum ?? [];
+  return orderedRecipeRoles(def.stage_metadata, flow, def.role_actor_kinds).map((role) => {
+    const label = stageRoleLabel(role, t);
+    return roleActorKind(role, def.role_actor_kinds) === 'human' ? t('recipeCardHumanRole', { role: label }) : label;
+  });
+}
+
+function connectionNames(def: EventDefinitionResponse, t: (key: string, values?: Record<string, string>) => string): string[] {
+  return recipeConnectionTargets(def.stage_metadata).map((c) => {
+    const name = t(CONNECTION_LABEL_KEY[c.target]!);
+    return c.optional ? t('recipeCardConnectionOptional', { name }) : name;
+  });
 }
 
 function gateCount(def: EventDefinitionResponse): number {
@@ -35,17 +56,28 @@ function RecipeCard({
   onViewDetail?: (recipe: EventDefinitionResponse) => void;
 }) {
   const t = useTranslations('organization');
+  const roles = roleNames(recipe, t);
+  const connections = connectionNames(recipe, t);
   return (
-    <Card data-testid={`recipe-card-${recipe.id}`}>
-      <CardBody className="flex flex-col gap-2">
+    <Card className="h-full" data-testid={`recipe-card-${recipe.id}`}>
+      <CardBody className="flex h-full flex-col gap-2">
         <h4 className="text-sm font-semibold text-foreground">{recipe.name || recipe.key}</h4>
         {recipe.description ? <p className="min-h-8 text-xs text-muted-foreground">{recipe.description}</p> : null}
         <div className="flex flex-wrap gap-1.5">
           <Badge variant="outline">{t('recipeGalleryStageCountBadge', { count: stageCount(recipe) })}</Badge>
           <Badge variant="outline">{t('recipeGalleryGateCountBadge', { count: gateCount(recipe) })}</Badge>
-          <Badge variant="outline">{t('recipeGalleryRoleCountBadge', { count: roleCount(recipe) })}</Badge>
         </div>
-        <div className="mt-1 flex gap-2">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-border pt-2 text-xs">
+          <dt className="text-muted-foreground">{t('recipeCardRolesLabel')}</dt>
+          <dd className={roles.length > 0 ? 'break-keep text-foreground' : 'break-keep text-muted-foreground'} data-testid="recipe-card-roles">
+            {roles.length > 0 ? roles.join(' · ') : t('recipeCardConnectionNone')}
+          </dd>
+          <dt className="text-muted-foreground">{t('recipeCardConnectionsLabel')}</dt>
+          <dd className={connections.length > 0 ? 'break-keep text-foreground' : 'break-keep text-muted-foreground'} data-testid="recipe-card-connections">
+            {connections.length > 0 ? connections.join(' · ') : t('recipeCardConnectionNone')}
+          </dd>
+        </dl>
+        <div className="mt-auto flex gap-2 pt-1">
           <Button size="sm" onClick={() => onApply?.(recipe)}>{t('recipeGalleryApplyCta')}</Button>
           <Button size="sm" variant="ghost" onClick={() => onViewDetail?.(recipe)}>{t('recipeGalleryDetailCta')}</Button>
         </div>
