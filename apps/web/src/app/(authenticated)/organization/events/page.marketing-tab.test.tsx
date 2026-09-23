@@ -123,7 +123,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     mockFetches();
     await mount();
     await switchToMarketingTab();
-    expect(document.body.textContent).toContain('영상 제작 (릴스·쇼츠)');
+    expect(document.body.textContent).toContain(koMessages.recipePreset.videoProductionName);
   });
 
   it('카드 「적용」 → 4슬롯 다이얼로그 → 크리에이터 제출 → 상세 뷰 도달(AC2 전체 흐름)', async () => {
@@ -162,7 +162,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
 
     // 적용 성공 → 상세 뷰로 이어짐(9단계 스텝퍼 존재로 판별).
     expect(document.body.querySelector('[data-testid="recipe-stepper"]')).not.toBeNull();
-    expect(document.body.textContent).toContain('영상 제작 (릴스·쇼츠)');
+    expect(document.body.textContent).toContain(koMessages.recipePreset.videoProductionName);
   });
 
   // story #4426 P1 잔여(카디르 재QA, 2026-09-19) — 서버가 result.ok=true·bindings_upserted:0을
@@ -321,7 +321,7 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     // 이어져 상세 뷰(9단계 스텝퍼)로 넘어간다.
     expect(document.body.querySelector('[data-testid="marketing-apply-warnings"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="recipe-stepper"]')).not.toBeNull();
-    expect(document.body.textContent).toContain('영상 제작 (릴스·쇼츠)');
+    expect(document.body.textContent).toContain(koMessages.recipePreset.videoProductionName);
   });
 
   // story #4118(라이브 실사고 그라운딩, 2026-09-21) — 토스트 count가 리터럴 1로 고정돼

@@ -63,7 +63,8 @@ describe('RecipeGallery — 마케팅/워크플로 탭 분리(AC1)', () => {
         <RecipeGallery marketingRecipes={[MARKETING_RECIPE]} workflowRecipes={[WORKFLOW_RECIPE]} loading={false} error={null} />,
       ));
     });
-    expect(container.textContent).toContain('영상 제작 (릴스·쇼츠)');
+    // story #4202 — 플랫폼 프리셋은 원문 name이 아니라 messages(recipePreset) 문안으로 그린다.
+    expect(container.textContent).toContain(koMessages.recipePreset.videoProductionName);
     expect(container.textContent).toContain('마케팅 워크플로우');
     expect(container.textContent).toContain('개발 워크플로');
     expect(container.textContent).toMatch(/단계\s*3/);
@@ -195,5 +196,48 @@ describe('연결 라벨 표 완전성(story #4173)', () => {
       expect((koMessages.organization as Record<string, string>)[key!], `ko ${key}`).toBeTruthy();
       expect((enMessages.organization as Record<string, string>)[key!], `en ${key}`).toBeTruthy();
     }
+  });
+});
+
+// story #4202 — 플랫폼 프리셋 이름·설명은 로케일 문안(messages recipePreset), 조직 커스텀 정의는 원문.
+describe('RecipeCardGrid — 플랫폼 프리셋 이름·설명 로케일(story #4202)', () => {
+  async function renderGrid(recipe: EventDefinitionResponse, locale: 'ko' | 'en') {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+          <RecipeCardGrid recipes={[recipe]} loading={false} error={null} emptyMessage="" />
+        </NextIntlClientProvider>,
+      );
+    });
+    return container.textContent ?? '';
+  }
+
+  it('en — 플랫폼 프리셋은 영어 이름·설명(원문 한국어 0)', async () => {
+    const text = await renderGrid(MARKETING_RECIPE, 'en');
+    expect(text).toContain(enMessages.recipePreset.videoProductionName);
+    expect(text).toContain(enMessages.recipePreset.videoProductionDescription);
+    expect(text).not.toContain(MARKETING_RECIPE.name);
+    expect(text).not.toContain(MARKETING_RECIPE.description!);
+  });
+
+  it('ko — 플랫폼 프리셋은 ko 문안(= 시드 원문)', async () => {
+    const text = await renderGrid(MARKETING_RECIPE, 'ko');
+    expect(text).toContain(koMessages.recipePreset.videoProductionName);
+    expect(text).toContain(koMessages.recipePreset.videoProductionDescription);
+  });
+
+  it('조직 커스텀 정의는 같은 key여도 원문 그대로(en에서도)', async () => {
+    const custom = { ...MARKETING_RECIPE, id: 'org-1', org_id: 'org-uuid', name: '우리 팀 영상', description: '우리 팀 설명' };
+    const text = await renderGrid(custom, 'en');
+    expect(text).toContain('우리 팀 영상');
+    expect(text).toContain('우리 팀 설명');
+    expect(text).not.toContain(enMessages.recipePreset.videoProductionName);
+  });
+
+  it('표에 없는 플랫폼 key는 원문 그대로', async () => {
+    const unknown = { ...MARKETING_RECIPE, id: 'x', key: 'preset.marketing.not_yet_keyed', name: '새 프리셋', description: '새 설명' };
+    const text = await renderGrid(unknown, 'en');
+    expect(text).toContain('새 프리셋');
+    expect(text).toContain('새 설명');
   });
 });

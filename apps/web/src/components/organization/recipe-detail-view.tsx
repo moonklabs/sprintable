@@ -12,6 +12,7 @@ import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { roleAccentVar } from '@/lib/role-accent';
+import { presetName } from '@/lib/platform-preset-copy';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §3) 상세 뷰. 이 화면은 레시피
 // «정의»(카탈로그 항목)를 보여주는 것이지 레시피를 적용한 특정 loop 인스턴스의 진행 상태가
@@ -34,6 +35,7 @@ export interface RecipeDetailViewProps {
 export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailViewProps) {
   const t = useTranslations('organization');
   const tDash = useTranslations('dashboard');
+  const tPreset = useTranslations('recipePreset');
 
   const stages = cyclicStages(recipe);
   const roleGroups = groupStagesByRole(recipe.stage_metadata);
@@ -44,7 +46,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
     <div className="space-y-5" data-testid="recipe-detail-view">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">{recipe.name || recipe.key}</h3>
+          <h3 className="text-lg font-semibold text-foreground">{presetName(recipe, tPreset)}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             {t('recipeDetailSummary', { stageCount: stages.length, gateCount: gates.length, roleCount: Object.keys(roleGroups).length })}
           </p>
@@ -84,7 +86,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate }: RecipeDetailV
               text-foreground(고대비 14.5+)로, 강조는 border-brand(비텍스트 3:1 기준 4.0+로
               충분)에만 맡긴다. */}
           <span className="text-foreground text-[10px] font-bold block">{t('recipeFlowWorkflowLabel')}</span>
-          <span className="text-foreground text-xs font-semibold">{recipe.name || recipe.key}</span>
+          <span className="text-foreground text-xs font-semibold">{presetName(recipe, tPreset)}</span>
         </div>
         <span className="text-muted-foreground text-[11.5px]">→</span>
         <div className="flex flex-col">

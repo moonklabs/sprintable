@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { stageRoleLabel } from '@/lib/stage-role';
+import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 
 /** BE _GA4_SUPPORTED_METRICS(backend/app/schemas/story.py)와 동기 — 모르는 지표는 BE가 422. */
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -100,6 +101,7 @@ export function LoopCreateDialog({
   const tc = useTranslations('common');
   const th = useTranslations('hypotheses');
   const tf = useTranslations('flow');
+  const tPreset = useTranslations('recipePreset');
   // story #3773 — stageRoleLabel 정본 키가 organization ns에 있다(trustRoleLabel*와 같은
   // 집, 유나 定 — 워크플로 단계 role 어휘를 org/trust 역할 어휘 옆에 둔다).
   const to = useTranslations('organization');
@@ -327,12 +329,12 @@ export function LoopCreateDialog({
               >
                 <option value="">{t('createLoopRecipeNone')}</option>
                 {definitions.map((d) => (
-                  <option key={d.key} value={d.key}>{d.name}</option>
+                  <option key={d.key} value={d.key}>{presetName(d, tPreset)}</option>
                 ))}
               </select>
               {selectedRecipe ? (
                 <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
-                  {selectedRecipe.description ? <p>{selectedRecipe.description}</p> : null}
+                  {presetDescription(selectedRecipe, tPreset) ? <p>{presetDescription(selectedRecipe, tPreset)}</p> : null}
                   <ol className="list-decimal space-y-0.5 pl-4">
                     {cyclicStages(selectedRecipe).map((stage) => {
                       const meta = selectedRecipe.stage_metadata[stage];

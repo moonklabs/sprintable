@@ -6210,5 +6210,13 @@
     "gatekeeperNotice": "처음 열 때는 파일을 우클릭한 뒤 「열기」를 선택하세요.",
     "downloadCta": "다운로드",
     "unavailable": "지금은 받을 수 없어요."
+  },
+  "recipePreset": {
+    "socialCardNewsName": "SNS 이미지 포스트(카드뉴스)",
+    "socialCardNewsDescription": "기획부터 발행까지 8단계예요. 컨셉·생성 예산·최종 발행 세 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
+    "socialTextPostName": "SNS 텍스트 포스트",
+    "socialTextPostDescription": "초안부터 발행까지 5단계예요. 컨셉·최종 발행 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
+    "videoProductionName": "영상 제작(릴스·쇼츠)",
+    "videoProductionDescription": "소재 수집부터 발행까지 9단계예요. 컨셉·구조·생성 예산·최종 발행 네 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요."
   }
 }

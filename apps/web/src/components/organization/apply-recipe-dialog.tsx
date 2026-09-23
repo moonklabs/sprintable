@@ -11,6 +11,7 @@ import { cyclicStages, type EventDefinitionResponse } from '@/components/loops/l
 import { RecipeRoleMappingFields, type ChannelConnectionOption, type GenerationConnectorOption } from '@/components/organization/recipe-role-mapping-fields';
 import type { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { presetName } from '@/lib/platform-preset-copy';
 
 interface AgentOption {
   id: string;
@@ -37,6 +38,7 @@ export function ApplyRecipeDialog({
   // story #4106(페드루 PO 실측 2026-09-21, PR #4478/#4479 리뷰 계기) — channelConnect ns의
   // 기존 channelLoadFailed 키 재사용(#4103과 동형, 신규 문구 발명 0).
   const tChannel = useTranslations('channelConnect');
+  const tPreset = useTranslations('recipePreset');
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId] = useState('');
   const [agents, setAgents] = useState<AgentOption[]>([]);
@@ -213,7 +215,7 @@ export function ApplyRecipeDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!applying) onOpenChange(next); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('eventApplyDialogTitle', { name: target.name || target.key })}</DialogTitle>
+          <DialogTitle>{t('eventApplyDialogTitle', { name: presetName(target, tPreset) })}</DialogTitle>
           <DialogDescription>{t('eventApplyRoleMappingHint')}</DialogDescription>
         </DialogHeader>
 

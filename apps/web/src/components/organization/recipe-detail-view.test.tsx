@@ -125,7 +125,7 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     expect(text.indexOf('레시피')).toBeLessThan(text.indexOf('워크플로우'));
     expect(text.indexOf('워크플로우')).toBeLessThan(text.indexOf('이벤트'));
     expect(text.indexOf('이벤트')).toBeLessThan(text.indexOf('에이전트'));
-    expect(text).toContain('영상 제작 (릴스·쇼츠)');
+    expect(text).toContain(koMessages.recipePreset.videoProductionName); // story #4202 — 플랫폼 프리셋은 messages 문안
     expect(text).toContain('현재 위치 없음');
     // 4번째 칩 라벨이 실행(run 화면과 층 겹침, PO B안)이 아니라 에이전트인지 직접 확認.
     expect(text).toContain('에이전트');

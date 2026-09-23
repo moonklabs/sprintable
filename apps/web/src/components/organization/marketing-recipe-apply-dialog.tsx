@@ -13,6 +13,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { useRecipeMemberOptions } from '@/hooks/use-recipe-member-options';
+import { presetName } from '@/lib/platform-preset-copy';
 
 // story #4048(E-RECIPE-1 ①) — 레시피 적용 다이얼로그. story #4173(E-RECIPE-2)부터 자리는
 // 정의(stage_metadata·role_actor_kinds·payload_schema 흐름)로 구동한다 — 영상 레시피 4슬롯
@@ -63,6 +64,7 @@ export function MarketingRecipeApplyDialog({
 }: MarketingRecipeApplyDialogProps) {
   const t = useTranslations('organization');
   const tc = useTranslations('common');
+  const tPreset = useTranslations('recipePreset');
   // story #4103 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — channelConnect ns의 기존
   // channelLoadFailed 키 재사용(신규 문구 발명 0).
   const tChannel = useTranslations('channelConnect');
@@ -379,7 +381,7 @@ export function MarketingRecipeApplyDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!submitting) onOpenChange(next); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('recipeApplyV2Title', { name: recipe.name || recipe.key })}</DialogTitle>
+          <DialogTitle>{t('recipeApplyV2Title', { name: presetName(recipe, tPreset) })}</DialogTitle>
           <DialogDescription>{t('recipeApplyV2Description')}</DialogDescription>
         </DialogHeader>
 
