@@ -837,7 +837,7 @@
     "recipeApplyV2StageCoverage": "{count}개 단계 실행",
     "recipeApplyV2CreatorMembershipError": "선택한 에이전트가 이 프로젝트 소속이 아니에요. 다시 선택해 주세요.",
     "recipeApplyV2NoOpError": "저장된 배정이 없어요(0건). 역할 배정이 실제로 반영되지 않았어요 — 다시 시도하거나 관리자에게 알려주세요.",
-    "recipeApplyV2UncoveredStages": "적용 자리에 안 잡힌 단계가 있어 적용할 수 없어요: {stages}. 워크플로우 관리자에게 알려 주세요.",
+    "recipeApplyV2UncoveredStages": "이 워크플로우에는 담당 자리가 정해지지 않은 단계가 있어 적용할 수 없어요: {stages}. 관리자에게 알려 주세요.",
     "recipeApplyV2PersonPlaceholder": "사람 선택…",
     "recipeApplyV2WarningsAppliedHeading": "적용됐어요 — 아래 내용을 확인해 주세요.",
     "recipeApplyV2NotConfiguredNote": "이 자리는 아직 연결할 수 없어요 — 후속 카드에서 배선돼요.",

@@ -786,6 +786,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   //      `t(view.isRepublish ? 'publishRepublishCta' : 'publishCta')` — 안내 속 이름이
   //      실제 버튼 텍스트와 «같은 키»여야 하는 게 목적, #4015 CHANGES 2) — 겹침이 설계다.
   'content.channelPostsPublicationFailedRepublishNotice <-> content.publishCta',
+  'organization.recipeApplyV2PublisherBadge <-> organization.recipeApplyV2UncoveredStages',
+  // story #4173(PR #4547, 유나 design 확정 문안 2026-09-23 — 글자 그대로 요구) — 배지 «담당»이
+  // 미덮임 경고 문장(«담당 자리가 정해지지 않은 단계…»)의 부분 문자열. 경고는 불변식이 깨질
+  // 때만(정의 결함) 뜨는 한 줄 오류 문장이고 배지는 자리 줄 머리의 짧은 방식 표지라, 수와 함께
+  // 서는 두 문구가 나란히 헷갈려 읽히는(#2352·#2365) 모양이 아니다. 문안이 바뀌면 다시 본다.
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
