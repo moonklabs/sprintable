@@ -387,8 +387,7 @@ export default function OrganizationEventsPage() {
       />
 
       <Dialog open={marketingDetailTarget !== null} onOpenChange={(open) => { if (!open) setMarketingDetailTarget(null); }}>
-        {/* story #4202(유나 390 실측) — 국소 수정. 만료 조건: 공용 ui/dialog.tsx가 같은 부류(제목 옆 닫기 버튼 자리 · grid 열 폭 minmax(0,1fr))를 고치면 이 국소 클래스를 걷어 낸다. */}
-        <DialogContent className="max-h-[85vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
           {marketingDetailTarget ? (
             <RecipeDetailView
               recipe={marketingDetailTarget}

@@ -215,7 +215,7 @@ export function ApplyRecipeDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!applying) onOpenChange(next); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="pr-8">{t('eventApplyDialogTitle', { name: presetName(target, tPreset) })}</DialogTitle>
+          <DialogTitle>{t('eventApplyDialogTitle', { name: presetName(target, tPreset) })}</DialogTitle>
           <DialogDescription>{t('eventApplyRoleMappingHint')}</DialogDescription>
         </DialogHeader>
 
