@@ -47,9 +47,16 @@ export function unescapeReferenceLabel(label: string): string {
  * PO CHANGES 1회차(2026-09-16 11:42Z) C1 — 마크다운 이미지 `![alt](url)`도 같은 클래스
  * (문법 기호가 평문 자리에 샘)라 선행 `!` 1글자까지 같이 벗긴다(`!?` — 있으면 소비,
  * 없으면 기존 링크 동작 그대로).
+ *
+ * story #4182(산티아고 prod 에스컬레이션 aca44e0d) — 같은 클래스의 4번째: 내부 HTML
+ * 주석(`<!-- linear-comment-id … -->` 등, 외부 동기화가 본문 앞에 심는 비가시 메타데이터
+ * 마커)이 마크다운 링크가 아니라서 위 치환을 그냥 통과해 미리보기에 원문 그대로 샜다.
+ * HTML 주석은 여기서 통째로 제거한다(`[\s\S]*?` — 개행 포함 비탐욕 매치, 여러 개면
+ * 전부). 렌더 시점 전용 처리(저장 데이터 이관 0), 본문 칩 렌더는 무변.
  */
 export function toPlainPreview(content: string): string {
   return content
+    .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }

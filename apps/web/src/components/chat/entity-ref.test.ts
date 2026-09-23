@@ -71,4 +71,30 @@ describe('toPlainPreview (story #3949)', () => {
     expect(toPlainPreview('![캡처](https://example.com/cap.png)')).toBe('캡처');
     expect(toPlainPreview('참고: ![스크린샷](https://x.png) 확인')).toBe('참고: 스크린샷 확인');
   });
+
+  // story #4182(산티아고 prod 에스컬레이션 aca44e0d) — 외부 동기화(Linear 등)가 본문
+  // 앞에 심는 비가시 HTML 주석 메타데이터 마커가 미리보기에 원문 그대로 새던 결함.
+  it('⭐HTML 주석(linear-comment-id 마커, 실 증상 형태)이 제거되고 본문 텍스트는 보존된다', () => {
+    const raw = '<!-- linear-comment-id: abc-123 -->\n\n댓글 본문 내용입니다';
+    expect(toPlainPreview(raw)).toBe('댓글 본문 내용입니다');
+  });
+
+  it('여러 줄에 걸친 HTML 주석도 통째로 제거된다', () => {
+    const raw = '<!--\n  linear-comment-id: abc-123\n  synced-at: 2026-09-23\n-->\n실제 내용';
+    expect(toPlainPreview(raw)).toBe('실제 내용');
+  });
+
+  it('HTML 주석이 여러 개면 전부 제거된다', () => {
+    const raw = '<!-- a --> 앞부분 <!-- b --> 뒷부분';
+    expect(toPlainPreview(raw)).toBe('앞부분  뒷부분');
+  });
+
+  it('HTML 주석과 마크다운 링크가 섞여도 둘 다 처리된다', () => {
+    const raw = '<!-- linear-comment-id: xyz -->[공지](https://example.com/notice) 확인';
+    expect(toPlainPreview(raw)).toBe('공지 확인');
+  });
+
+  it('HTML 주석이 없는 일반 본문은 무변(회귀 0)', () => {
+    expect(toPlainPreview('그냥 평범한 메시지입니다')).toBe('그냥 평범한 메시지입니다');
+  });
 });
