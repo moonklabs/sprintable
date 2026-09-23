@@ -476,6 +476,30 @@ describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바�
     expect(pushedUrl).toContain('view=flow');
   });
 
+  // ⭐story #4222 — 래더는 뷰포트 훅이 아니라 CSS 중단점으로 가른다: 두 판을 다 그리고 compact는 lg:hidden · 전체판은 hidden lg:block.
+  // useIsMobile()이 서버·첫 렌더에서 false라 390에서 서버가 전체판(120.5px)을 그렸다가 칩열(34.5px)로 줄던 흔들림(CLS 0.36) 0.
+  it('⭐래더 두 판이 뷰포트 판정과 무관하게 같은 DOM으로 그려진다(서버 = 최종) · id 중복 0 · 요청 수 같음', async () => {
+    const counts: number[] = [];
+    const snapshots: string[] = [];
+    for (const mobile of [false, true]) {
+      isMobileMock = mobile;
+      const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      await renderFlowClient();
+      const compactSlot = container.querySelector('[data-testid="scale-ladder-compact-slot"]');
+      const fullSlot = container.querySelector('[data-testid="scale-ladder-full-slot"]');
+      expect(compactSlot?.className.split(/\s+/)).toEqual(['lg:hidden']);
+      expect(fullSlot?.className.split(/\s+/).sort()).toEqual(['hidden', 'lg:block']);
+      snapshots.push(`${compactSlot?.innerHTML}|${fullSlot?.innerHTML}`);
+      const ids = [...container.querySelectorAll('[id]')].map((e) => e.id);
+      expect(new Set(ids).size, 'id 중복').toBe(ids.length);
+      counts.push(fetchSpy.mock.calls.length);
+      vi.unstubAllGlobals();
+    }
+    expect(snapshots[0]).toBe(snapshots[1]);
+    expect(counts[0]).toBe(counts[1]);
+  });
+
   it('모바일이라도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(주소로 갈래 진입 회귀 없음)', async () => {
     isMobileMock = true;
     currentSearch = 'view=flow';
