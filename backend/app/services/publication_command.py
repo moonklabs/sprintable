@@ -428,34 +428,38 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         # 안 냈다 — 같은 함수(`emit_recipe_published_stage_event`)로 격차 처방. 이
         # 블록 실패가 방금 확정된 "completed"(실제 발행 성공)를 되돌리면 안 되므로
         # 별도 try/except로 격리(side-channel, recipe_repeat_scheduler.py 선례 동형).
-        try:
+        #
+        # story #4192(까디르 4583 P1) — «발행 뒤 레시피 처리» 전체(레시피 문맥 읽기 · 레시피 게이트 outcome 기록 · 이벤트)를
+        # **격리 세션**에서. 예전엔 앞 두 단계를 워커 세션에서 해, 거기서 SQL 오류가 나면 워커 트랜잭션이 aborted →
+        # 같은 배치 다음 명령이 망가졌다(4573 부류). 워커 세션은 위 completed 커밋까지만 — 여기선 값만 넘긴다.
+        from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+        _org_id, _work_item_id, _connection_id = command.org_id, draft.work_item_id, draft.connection_id
+
+        async def _recipe_after_channel_publish(side: AsyncSession) -> None:
             from app.services.channel_posts import (
                 emit_recipe_published_stage_event, resolve_recipe_context_for_scheduled_publication,
             )
 
             recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
-                db, org_id=command.org_id, work_item_id=draft.work_item_id,
-                connection_id=draft.connection_id,
+                side, org_id=_org_id, work_item_id=_work_item_id, connection_id=_connection_id,
             )
-            if recipe_ctx is not None:
-                recipe_gate, definition_key, next_stage = recipe_ctx
-                recipe_gate.publish_outcome = "published"
-                work_item_type = recipe_gate.work_item_type
-                # story #4192 — 게이트 결과도 이벤트 전에 커밋(이벤트 쓰기와 같은 트랜잭션에 묶지 않는다).
-                await db.commit()
-                # 페드루 PO REQUIRED(PR #4473) — work_item_type을 하드코딩("story")
-                # 않고 찾은 게이트 행 자신의 값을 그대로 쓴다(SSOT는 행 자신).
-                await emit_recipe_published_stage_event(
-                    db, org_id=command.org_id, work_item_type=work_item_type,
-                    work_item_id=draft.work_item_id, definition_key=definition_key, next_stage=next_stage,
-                )
-                await db.commit()
-        except Exception:
-            logger.warning(
-                "publication command 예약 발행 완료 뒤 레시피 published 이벤트 연결 실패 "
-                "command_id=%s draft_id=%s — 발행 자체는 이미 성공했다(되돌리지 않음)",
-                command.id, draft.id, exc_info=True,
+            if recipe_ctx is None:
+                return
+            recipe_gate, definition_key, next_stage = recipe_ctx
+            recipe_gate.publish_outcome = "published"
+            # 페드루 PO REQUIRED(PR #4473) — work_item_type은 찾은 게이트 행 자신의 값(SSOT는 행 자신).
+            work_item_type = recipe_gate.work_item_type
+            await side.commit()
+            await emit_recipe_published_stage_event(
+                side, org_id=_org_id, work_item_type=work_item_type,
+                work_item_id=_work_item_id, definition_key=definition_key, next_stage=next_stage,
             )
+
+        await run_side_effect_in_own_session(
+            db, _recipe_after_channel_publish,
+            describe=f"recipe after scheduled channel publish command_id={command.id} draft_id={draft.id}",
+        )
         return
     except ChannelImageContainerFailedError as exc:
         error_code, last_error = "CHANNEL_IMAGE_CONTAINER_FAILED", str(exc)
@@ -615,28 +619,39 @@ async def _emit_recipe_published_for_site_post_command(db: AsyncSession, command
     대기» 단계)에서 온 것이면 레시피 `published` 단계 이벤트를 낸다(채널 워커 #4093과 같은 `emit_recipe_published_
     stage_event` — 멱등: 이미 낸 stage면 스킵, 겹친 tick도 중복 0). 실패·무효화(void)·차단 분기는 이 함수에 오지 않는다
     (성공 분기에서만 호출). 레시피 문맥 판별 = `resolve_site_post_recipe_context`(자사 블로그 자동 발행·승인 알림과 같은
-    판정). 이벤트 발행 실패는 발행 성공을 되돌리지 않는다(emit 자체가 side-channel 격리)."""
-    from app.models.gate import Gate
+    판정). 이벤트 발행 실패는 발행 성공을 되돌리지 않는다.
 
-    gate = await db.get(Gate, command.gate_id)
-    if gate is None:
-        return
-    from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
+    까디르 4583 P1 — 게이트 읽기 · 레시피 문맥 조회 · 이벤트를 **전부 격리 세션**에서(워커 세션은 completed 커밋까지만).
+    앞단 조회에서 SQL 오류가 나도 워커 트랜잭션은 멀쩡하다."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
 
-    # 4572 P1 — 레시피 문맥은 회차가 연결한 초안(`site_post_draft_id`)이 바로 이 게이트의 초안일 때만.
-    draft_id = (gate.neutral_facts or {}).get("draft_id")
-    ctx = await resolve_site_post_recipe_context(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id, draft_id=draft_id,
-    )
-    if ctx is None:
-        return
-    definition_key, next_stage = ctx
-    from app.services.channel_posts import emit_recipe_published_stage_event
+    _gate_id = command.gate_id
 
-    await emit_recipe_published_stage_event(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
-        definition_key=definition_key, next_stage=next_stage,
-        extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
+    async def _recipe_after_site_publish(side: AsyncSession) -> None:
+        from app.models.gate import Gate
+        from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
+        from app.services.channel_posts import emit_recipe_published_stage_event
+
+        gate = await side.get(Gate, _gate_id)
+        if gate is None:
+            return
+        # 4572 P1 — 레시피 문맥은 회차가 연결한 초안(`site_post_draft_id`)이 바로 이 게이트의 초안일 때만.
+        draft_id = (gate.neutral_facts or {}).get("draft_id")
+        ctx = await resolve_site_post_recipe_context(
+            side, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            draft_id=draft_id,
+        )
+        if ctx is None:
+            return
+        definition_key, next_stage = ctx
+        await emit_recipe_published_stage_event(
+            side, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            definition_key=definition_key, next_stage=next_stage,
+            extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
+        )
+
+    await run_side_effect_in_own_session(
+        db, _recipe_after_site_publish, describe=f"recipe after site publish command_id={command.id}",
     )
 
 

@@ -1753,6 +1753,13 @@ async def _render_gate_verdict_message(
                     draft_id=(gate_row.neutral_facts or {}).get("draft_id"),
                     include_auto_stage=True,
                 )
+            # story #4192(까디르 4583 P2) — 레시피 회차 자사 블로그 서버 발행이 실패했으면(`publish_failed:*`) 그 결과를
+            # 먼저 그린다 — 문맥만 보고 «자동 발행돼요»라고 하면 실패한 발행을 성공처럼 말한다.
+            if (
+                _recipe_auto_publish_line is None and is_site_post and gate_row is not None
+                and (gate_row.publish_outcome or "").startswith("publish_failed:")
+            ):
+                _recipe_auto_publish_line = _recipe_auto_publish_outcome_line(gate_row.publish_outcome, resolved_locale)
             if _recipe_auto_publish_line is not None:
                 lines.append(f"- {_recipe_auto_publish_line}")
             elif _site_recipe_ctx is not None:

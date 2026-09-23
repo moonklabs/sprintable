@@ -1190,8 +1190,8 @@ async def _resolve_public_url(
     return f"{backend_base_url.rstrip('/')}/api/v2/public/site-posts/{slug}?public_key={public_key}&lang={lang}"
 
 
-async def publish_recipe_approved_hosted_site_draft(
-    db: AsyncSession, *, gate: Gate, resolver_id: uuid.UUID | None,
+async def publish_recipe_approved_hosted_site_draft_after_commit(
+    db: AsyncSession, *, gate_id: uuid.UUID, resolver_id: uuid.UUID | None,
 ) -> None:
     """story #4192(PO 판정 2026-09-23 08:56Z ③) — 레시피 회차(블로그 프리셋 «발행 승인 대기» 단계)의 **자사 블로그**
     초안 게이트가 사람 승인으로 approved가 되면, 서버가 그 봉인 버전을 외부 블로그와 같은 모양으로 발행하고 레시피
@@ -1205,55 +1205,76 @@ async def publish_recipe_approved_hosted_site_draft(
 
     실패는 승인을 되돌리지 않고 `gate.publish_outcome = publish_failed:<닫힌 어휘>`로 보인다(채널 자동 발행
     `publish_recipe_approved_draft`와 같은 처리) · 이벤트 0. 레시피 문맥 판별 = `resolve_site_post_recipe_context`
-    (승인 알림 «다음 행동» 문구와 같은 판정)."""
-    if gate.gate_type != "external_publish" or gate.scope_key != HOSTED_SITE_SCOPE_KEY or gate.status != "approved":
-        return
-    raw_draft_id = (gate.neutral_facts or {}).get("draft_id")
-    try:
-        draft_id = uuid.UUID(str(raw_draft_id))
-    except (ValueError, TypeError, AttributeError):
-        return
+    (승인 알림 «다음 행동» 문구와 같은 판정).
 
-    from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
+    까디르 4583 P1(승인 트랜잭션) — 이 함수는 **승인이 커밋된 뒤** 라우터(`gates.py` 전이·override 엔드포인트)가 부르고,
+    호출자 세션은 쓰지 않는다(`db`는 같은 엔진을 빌려 줄 뿐). 예전엔 `transition_gate` 안에서 승인 트랜잭션으로 직접
+    커밋·발행해, 발행이 DB 오류로 실패하면 aborted 트랜잭션에 실패 기록을 쓰다 커밋이 깨져 **승인 자체가 사라지고 500**이
+    났다. 이제 판별·발행·성공 기록·이벤트는 격리 세션, 실패 기록은 또 다른 새 격리 세션에서 — 승인은 이미 확정돼 있다."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
 
-    # 4572 P1 — 회차가 연결한 초안이 바로 이 초안일 때만 레시피 문맥(버려진 회차·다른 목적지 초안은 사람 클릭 흐름).
-    ctx = await resolve_site_post_recipe_context(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id, draft_id=draft_id,
-    )
-    if ctx is None:
-        return
-    definition_key, next_stage = ctx
+    failure: dict[str, str] = {}
 
-    from app.services.channel_posts import classify_publish_failure_outcome, emit_recipe_published_stage_event
+    async def _publish(side: AsyncSession) -> None:
+        from app.core.config import settings
+        from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, resolve_site_post_recipe_context
+        from app.services.channel_posts import classify_publish_failure_outcome, emit_recipe_published_stage_event
 
-    publisher_member_id = resolver_id or gate.resolver_id
-    if publisher_member_id is None:
-        gate.publish_outcome = "no_resolver"
-        await db.commit()
-        return
-
-    from app.core.config import settings
-
-    try:
-        await publish_site_post_from_draft(
-            db, org_id=gate.org_id, draft_id=draft_id, published_by_member_id=publisher_member_id,
-            backend_base_url=settings.backend_url,
+        gate = await side.get(Gate, gate_id)
+        if (
+            gate is None or gate.gate_type != "external_publish" or gate.scope_key != HOSTED_SITE_SCOPE_KEY
+            or gate.status != "approved"
+        ):
+            return
+        try:
+            draft_id = uuid.UUID(str((gate.neutral_facts or {}).get("draft_id")))
+        except (ValueError, TypeError, AttributeError):
+            return
+        org_id, work_item_type, work_item_id = gate.org_id, gate.work_item_type, gate.work_item_id
+        # 4572 P1 — 회차가 연결한 초안이 바로 이 초안일 때만 레시피 문맥(버려진 회차·다른 목적지 초안은 사람 클릭 흐름).
+        ctx = await resolve_site_post_recipe_context(
+            side, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, draft_id=draft_id,
         )
-    except Exception as exc:
-        logger.warning(
-            "recipe hosted-site auto-publish: 발행 실패(gate=%s draft=%s) — 승인은 되돌리지 않는다",
-            gate.id, draft_id, exc_info=True,
+        if ctx is None:
+            return
+        definition_key, next_stage = ctx
+
+        publisher_member_id = resolver_id or gate.resolver_id
+        if publisher_member_id is None:
+            gate.publish_outcome = "no_resolver"
+            await side.commit()
+            return
+        try:
+            await publish_site_post_from_draft(
+                side, org_id=org_id, draft_id=draft_id, published_by_member_id=publisher_member_id,
+                backend_base_url=settings.backend_url,
+            )
+        except Exception as exc:
+            logger.warning(
+                "recipe hosted-site auto-publish: 발행 실패(gate=%s draft=%s) — 승인은 되돌리지 않는다",
+                gate_id, draft_id, exc_info=True,
+            )
+            failure["outcome"] = f"publish_failed:{classify_publish_failure_outcome(exc)}"
+            raise
+        gate.publish_outcome = "published"
+        await side.commit()
+        await emit_recipe_published_stage_event(
+            side, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            definition_key=definition_key, next_stage=next_stage,
+            extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
         )
-        gate.publish_outcome = f"publish_failed:{classify_publish_failure_outcome(exc)}"
-        await db.commit()
+
+    await run_side_effect_in_own_session(db, _publish, describe=f"recipe hosted-site auto-publish gate={gate_id}")
+    if "outcome" not in failure:
         return
 
-    gate.publish_outcome = "published"
-    await db.commit()
-    await emit_recipe_published_stage_event(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
-        definition_key=definition_key, next_stage=next_stage,
-        extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
+    async def _record_failure(side: AsyncSession) -> None:
+        gate = await side.get(Gate, gate_id)
+        if gate is not None:
+            gate.publish_outcome = failure["outcome"]
+
+    await run_side_effect_in_own_session(
+        db, _record_failure, describe=f"recipe hosted-site auto-publish failure outcome gate={gate_id}",
     )
 
 

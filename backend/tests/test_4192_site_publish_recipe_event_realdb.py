@@ -109,9 +109,9 @@ async def _world(Session):
         await _seed_default_role(s, org_id)
         await _seed_system_publisher_teammember_shim(s, org_id, project_id)
         agent_id = await _seed_agent(s, org_id, project_id)
-        _, human_id = await _seed_human(s, org_id)
+        human_user_id, human_id = await _seed_human(s, org_id)
         story_id = await _seed_story(s, org_id, project_id)
-    return {"org_id": org_id, "agent_id": agent_id, "human_id": human_id, "story_id": story_id}
+    return {"org_id": org_id, "agent_id": agent_id, "human_id": human_id, "human_user_id": human_user_id, "story_id": story_id}
 
 
 async def _publish_stage(Session, w, stage, *, extra: dict | None = None):
@@ -180,11 +180,14 @@ async def _published_events(Session, w) -> int:
 
 
 async def _approve(Session, w, gate_id):
+    """라우터(`gates.py` 전이 엔드포인트)와 같은 순서: 승인 커밋 → 자사 블로그면 커밋 뒤 격리 발행(까디르 4583 P1)."""
     from app.services.gate_service import transition_gate
+    from app.services.site_posts import publish_recipe_approved_hosted_site_draft_after_commit
 
     async with Session() as s:
-        await transition_gate(s, w["org_id"], gate_id, "approved", resolver_id=w["human_id"])
+        gate = await transition_gate(s, w["org_id"], gate_id, "approved", resolver_id=w["human_id"])
         await s.commit()
+        await publish_recipe_approved_hosted_site_draft_after_commit(s, gate_id=gate.id, resolver_id=gate.resolver_id)
 
 
 async def _submit_external(app, Session, w, site_url, slug):
@@ -628,6 +631,218 @@ async def test_hosted_blog_not_linked_by_this_run_is_not_auto_published():
         async with Session() as s:
             assert (await s.get(Gate, gate_id)).publish_outcome is None
         assert await _published_events(Session, w) == 0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+
+def _pg_error_on_first_call_for_org(org_id, real):
+    """실 PG 오류로 트랜잭션을 깨는 대역 — 지정 org의 **첫 호출**만 없는 테이블을 조회한 뒤 진짜 함수로 넘긴다(넘겨받은
+    세션이 워커 세션이면 워커 트랜잭션이 aborted, 격리 세션이면 그 세션만)."""
+    seen = {"n": 0}
+
+    async def _wrapped(db, *a, **kw):
+        if kw.get("org_id") == org_id and seen["n"] == 0:
+            seen["n"] += 1
+            from sqlalchemy import text
+
+            await db.execute(text("SELECT * FROM no_such_table_4192_ctx"))
+        return await real(db, *a, **kw)
+
+    return _wrapped
+
+
+async def test_site_worker_context_lookup_pg_error_does_not_break_the_batch(monkeypatch, live_wordpress_stub):
+    """까디르 4583 P1 — «발행 뒤 레시피 처리»의 **앞단**(레시피 문맥 조회)에서 실 PG 오류가 나도 워커 배치가 산다: 같은 배치
+    외부 블로그 명령 둘 → 둘 다 completed(새 세션 재조회) · 오류 난 쪽 이벤트 0 · 다른 쪽 이벤트 1. 이 배치 결과는 격리를
+    빼도 같게 나온다(워커가 completed를 먼저 커밋 → 깨진 트랜잭션의 COMMIT이 조용한 ROLLBACK) — 격리 자체는
+    `test_site_after_publish_recipe_step_never_touches_the_worker_session`이 가른다(실측)."""
+    import app.routers.events as events
+    from app.main import app
+    from app.models.publication_command import PublicationCommand
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        worlds, gates = [], []
+        for i in range(2):
+            w = await _world(Session)
+            await _walk_to_verification(Session, w)
+            gate_id, draft_id = await _submit_external(app, Session, w, live_wordpress_stub, f"ctx-{i}")
+            await _walk_to_pending_approval(Session, w, draft_id=draft_id)
+            await _approve(Session, w, gate_id)
+            worlds.append(w)
+            gates.append(gate_id)
+
+        monkeypatch.setattr(
+            events, "resolve_site_post_recipe_context",
+            _pg_error_on_first_call_for_org(worlds[0]["org_id"], events.resolve_site_post_recipe_context),
+        )
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+            await s.commit()
+        assert counts["completed"] == 2, counts
+        async with Session() as fresh:
+            statuses = [
+                (await fresh.execute(select(PublicationCommand.status).where(PublicationCommand.gate_id == g))).scalar_one()
+                for g in gates
+            ]
+        assert statuses == ["completed", "completed"]
+        assert await _published_events(Session, worlds[0]) == 0
+        assert await _published_events(Session, worlds[1]) == 1
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_hosted_auto_publish_pg_error_keeps_the_approval_and_records_failure(monkeypatch):
+    """까디르 4583 P1(승인 트랜잭션) + P2 — 레시피 회차 자사 블로그 초안 게이트를 **실 전이 엔드포인트**로 승인하는데 서버
+    발행이 실 PG 오류로 실패해도: 응답 200(500 아님) · 새 세션 재조회로 승인 유지 · `publish_outcome=publish_failed:*` ·
+    공개 글 0 · 이벤트 0 · 승인 알림 «다음 행동»은 «자동 발행돼요»가 아니라 실패 문구(P2). 뮤테이션: 발행을 격리 세션이
+    아니라 호출자 세션에서 하면 RED(500 · 승인 소실)."""
+    import app.services.site_posts as site_posts
+    from app.main import app
+    from app.models.gate import Gate
+    from app.routers.events import _render_gate_verdict_message
+    from app.services.i18n_catalog import t
+
+    async def _broken_publish(db, **kw):
+        from sqlalchemy import text
+
+        await db.execute(text("SELECT * FROM no_such_table_4192_publish"))
+
+    monkeypatch.setattr(site_posts, "publish_site_post_from_draft", _broken_publish)
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_hosted(app, Session, w, "hosted-pgerr")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
+
+        _setup_org_scoped_app(app, Session, w["org_id"], user_id=w["human_user_id"], agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/gates/{gate_id}/transition", json={
+                "status": "approved", "note": "발행 승인", "evidence_viewed": True,
+            })
+        assert r.status_code == 200, r.text
+
+        async with Session() as fresh:
+            gate = await fresh.get(Gate, gate_id)
+            assert gate.status == "approved"
+            assert (gate.publish_outcome or "").startswith("publish_failed:"), gate.publish_outcome
+            rendered = await _render_gate_verdict_message(fresh, org_id=w["org_id"], payload={
+                "work_item_type": "story", "work_item_id": str(w["story_id"]), "gate_type": "external_publish",
+                "verdict": "approved", "resolver_member_id": str(w["human_id"]), "gate_id": str(gate_id),
+            })
+        assert await _site_posts(Session, w) == 0
+        assert await _published_events(Session, w) == 0
+        assert t("events.gate_verdict_next_action_recipe_site_auto_publish", "ko") not in rendered, rendered
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_channel_scheduled_worker_context_lookup_pg_error_keeps_completed(monkeypatch):
+    """까디르 4583 P1(채널 예약 분기) — 채널 예약 발행 성공 뒤 레시피 문맥 조회(`resolve_recipe_context_for_scheduled_
+    publication`)에서 실 PG 오류가 나도: 워커 정상 종료 · 새 세션 재조회 completed · 두 번째 tick 발행 0. 레시피 게이트
+    outcome 기록도 격리 세션이라 워커 트랜잭션을 안 건드린다. 뮤테이션: 조회를 워커 세션에서 하면 RED."""
+    from datetime import datetime, timedelta, timezone
+
+    import app.services.channel_posts as channel_posts
+    from app.models.channel_publication import ChannelPublication
+    from app.models.publication_command import PublicationCommand
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import func, select
+    from tests.conftest import seed_org_with_human_owner
+    from tests.test_4093_scheduled_publish_event_realdb import (
+        _approve_and_schedule_submit,
+        _realdb_session,
+        _seed_agent as _ch_seed_agent,
+        _seed_default_role as _ch_seed_default_role,
+        _seed_definition,
+        _seed_recipe_channel_binding,
+        _seed_sandbox_connection,
+        _seed_story as _ch_seed_story,
+        _seed_system_publisher_teammember_shim,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id = await seed_org_with_human_owner(s, slug="4192cx", org_name="Org4192cx")
+            await _ch_seed_default_role(s, org_id)
+            await _seed_system_publisher_teammember_shim(s, org_id, project_id)
+            creator_id = await _ch_seed_agent(s, org_id, project_id, name="댄")
+            story_id = await _ch_seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+            connection_id = await _seed_sandbox_connection(s, org_id)
+            await _seed_recipe_channel_binding(s, org_id, connection_id)
+            _gate_d, scoped_gate_id, _draft = await _approve_and_schedule_submit(
+                s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
+                connection_id=connection_id,
+            )
+
+        monkeypatch.setattr(
+            channel_posts, "resolve_recipe_context_for_scheduled_publication",
+            _pg_error_on_first_call_for_org(org_id, channel_posts.resolve_recipe_context_for_scheduled_publication),
+        )
+        later = datetime.now(timezone.utc) + timedelta(minutes=10)
+        async with Session() as s:
+            await process_due_publication_commands(s, now=later)
+            await s.commit()
+        async with Session() as fresh:
+            cmd = (await fresh.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == scoped_gate_id)
+            )).scalar_one()
+            assert cmd.status == "completed", cmd.status
+            pubs = (await fresh.execute(
+                select(func.count()).select_from(ChannelPublication).where(ChannelPublication.gate_id == scoped_gate_id)
+            )).scalar_one()
+        async with Session() as s:
+            counts = await process_due_publication_commands(s, now=later + timedelta(minutes=10))
+            await s.commit()
+        assert counts.get("completed", 0) == 0, counts
+        async with Session() as fresh:
+            assert (await fresh.execute(
+                select(func.count()).select_from(ChannelPublication).where(ChannelPublication.gate_id == scoped_gate_id)
+            )).scalar_one() == pubs
+    finally:
+        await engine.dispose()
+
+
+async def test_site_after_publish_recipe_step_never_touches_the_worker_session(live_wordpress_stub):
+    """까디르 4583 P1 — 계약 고정: 외부 블로그 발행 뒤 레시피 처리(`_emit_recipe_published_for_site_post_command`)는 워커
+    세션을 **읽기조차** 하지 않는다. 세션 메서드가 전부 터지는 대역(엔진만 빌려 줌)을 넘겨도 게이트 읽기·문맥 조회·이벤트가
+    격리 세션에서 끝나 이벤트 1. (배치 테스트만으로는 이 경로의 격리를 못 가른다 — 워커가 completed를 먼저 커밋하므로 깨진
+    트랜잭션의 COMMIT이 조용한 ROLLBACK이 돼 배치 결과가 같다.) 뮤테이션: 워커 세션에서 조회 → 대역 폭발로 이벤트 0 RED."""
+    from unittest.mock import MagicMock
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.main import app
+    from app.models.publication_command import PublicationCommand
+    from app.services.publication_command import _emit_recipe_published_for_site_post_command
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_external(app, Session, w, live_wordpress_stub, "contract")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
+        await _approve(Session, w, gate_id)
+        async with Session() as s:
+            command = (await s.execute(select(PublicationCommand).where(PublicationCommand.gate_id == gate_id))).scalar_one()
+
+        worker = MagicMock(spec=AsyncSession)
+        for name in ("execute", "commit", "rollback", "flush", "get", "begin_nested", "scalar", "scalars", "add", "refresh"):
+            setattr(worker, name, MagicMock(side_effect=AssertionError(f"워커 세션 {name} 사용")))
+        worker.bind = engine
+        await _emit_recipe_published_for_site_post_command(worker, command)
+        assert await _published_events(Session, w) == 1
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
