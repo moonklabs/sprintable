@@ -475,3 +475,105 @@ async def test_channel_scheduled_worker_sql_error_in_event_keeps_completed(monke
             )).scalar_one() == pubs
     finally:
         await engine.dispose()
+
+
+async def test_event_raising_does_not_kill_the_worker_batch(monkeypatch, live_wordpress_stub):
+    """PO 10:09Z(까디르 4573 실측) — 이벤트 쪽이 예외를 **던지면**(삼키는 SQL 오류와 달리 롤백 경로를 탄다) 호출자 세션
+    ORM 객체가 만료돼 async에서 MissingGreenlet으로 워커 배치가 죽고, 같은 배치에 in_progress로 잡힌 다른 명령이 영구히
+    멈췄다. 이벤트를 별도 세션에서 내므로: 한 배치의 명령 2개 → 둘 다 completed. 뮤테이션: emit을 호출자 세션+SAVEPOINT
+    로 되돌리면 RED."""
+    import app.routers.events as events
+    from app.main import app
+    from app.models.publication_command import PublicationCommand
+    from app.services.publication_command import process_due_publication_commands
+    from sqlalchemy import select
+
+    async def raising_core(*a, **kw):
+        raise RuntimeError("simulated event failure")
+
+    engine, Session = await _session_factory()
+    try:
+        worlds, gates = [], []
+        for i in range(2):
+            w = await _world(Session)
+            await _walk_to_pending_approval(Session, w)
+            gate_id = await _submit_external(app, Session, w, live_wordpress_stub, f"batch-{i}")
+            await _approve(Session, w, gate_id)
+            worlds.append(w)
+            gates.append(gate_id)
+
+        monkeypatch.setattr(events, "_publish_registry_event_core", raising_core)
+        async with Session() as s:
+            counts = await process_due_publication_commands(s)
+            await s.commit()
+        assert counts["completed"] == 2, counts
+        async with Session() as s:
+            statuses = [
+                (await s.execute(select(PublicationCommand.status).where(PublicationCommand.gate_id == g))).scalar_one()
+                for g in gates
+            ]
+        assert statuses == ["completed", "completed"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_concurrent_emits_for_same_work_item_publish_once(monkeypatch):
+    """PO 10:09Z P2 — «조회 후 발행»은 같은 work item의 서로 다른 명령이 겹친 tick에 동시에 오면 2회 가능했다. 조회와
+    발행 사이에 틈을 벌려도(지연 주입) advisory lock이 직렬화해 이벤트 1. 뮤테이션: 잠금 제거 → 2로 RED."""
+    import asyncio
+
+    import app.routers.events as events
+    from app.services.channel_posts import emit_recipe_published_stage_event
+
+    real_find = events._find_existing_stage_publish
+
+    async def slow_find(*a, **kw):
+        found = await real_find(*a, **kw)
+        await asyncio.sleep(0.5)
+        return found
+
+    monkeypatch.setattr(events, "_find_existing_stage_publish", slow_find)
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_pending_approval(Session, w)
+
+        async def one():
+            async with Session() as s:
+                await emit_recipe_published_stage_event(
+                    s, org_id=w["org_id"], work_item_type="story", work_item_id=w["story_id"],
+                    definition_key=_KEY, next_stage="published",
+                )
+
+        await asyncio.gather(one(), one())
+        assert await _published_events(Session, w) == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_emit_never_touches_the_callers_session():
+    """별도 세션 계약 고정 — 호출자 세션을 어떤 방식으로든 쓰면 터지는 대역을 넘겨도 이벤트는 정확히 1(이벤트 세션이 따로
+    연다). 뮤테이션: emit이 호출자 세션(+SAVEPOINT)으로 이벤트를 내면 대역이 터져 이벤트 0으로 RED."""
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.services.channel_posts import emit_recipe_published_stage_event
+
+    caller = MagicMock(spec=AsyncSession)
+    for name in ("execute", "commit", "rollback", "flush", "get", "begin_nested", "scalar", "scalars", "add"):
+        setattr(caller, name, MagicMock(side_effect=AssertionError(f"호출자 세션 {name} 사용")))
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_pending_approval(Session, w)
+        await emit_recipe_published_stage_event(
+            caller, org_id=w["org_id"], work_item_type="story", work_item_id=w["story_id"],
+            definition_key=_KEY, next_stage="published",
+        )
+        assert await _published_events(Session, w) == 1
+    finally:
+        await engine.dispose()

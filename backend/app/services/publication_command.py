@@ -418,7 +418,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.failure_kind = None
         # story #4192(PO 09:34Z) — 실제 외부 발행 성공(completed)을 레시피 이벤트보다 **먼저** 커밋한다. 예전엔 같은
         # 트랜잭션에서 이벤트까지 냈다가 이벤트 쪽 DB 오류로 트랜잭션이 중단되면 completed가 안 남아 다음 tick이 같은 글을
-        # 외부 채널에 다시 발행할 수 있었다. 이벤트는 커밋 뒤, emit_recipe_published_stage_event 안의 SAVEPOINT에서.
+        # 외부 채널에 다시 발행할 수 있었다. 이벤트는 커밋 뒤, emit_recipe_published_stage_event가 별도 세션에서.
         await db.commit()
 
         # story #4093(#4090 지름길 해소, 페드루 PO 確定 2026-09-21) — 즉시-발행 경로는
