@@ -174,7 +174,7 @@ export function AgentPerformancePanel() {
             <p className="mt-0.5 text-xs text-muted-foreground">{t('agentStatsDescription')}</p>
             {statsLoadFailed ? (
               <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground" data-testid="agent-stats-load-error">
-                <span>{t('agentStatsLoadError')}</span>
+                <span className="break-keep">{t('agentStatsLoadError')}</span>
                 <Button variant="outline" size="sm" onClick={() => void load()}>{tc('retry')}</Button>
               </div>
             ) : null}
