@@ -79,10 +79,6 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit
   if (typeof window !== 'undefined' && isSessionExpiredSignaled()) {
     return new Response(null, { status: 401 });
   }
-  // story #4184 — 쓰기 요청(GET·HEAD 아님)은 `/api/me` 내용을 바꿀 수 있다(프로필·2단계 인증·비밀번호·연결 계정·
-  // 역할 …) — 어떤 쓰기가 그런지 목록으로 관리하지 않고 쓰기는 전부 fetchMe() 결과 재사용을 버린다.
-  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') invalidateMeCache();
   const res = await fetch(input, init);
   if (res.status !== 401) return res;
 

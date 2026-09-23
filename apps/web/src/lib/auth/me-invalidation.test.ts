@@ -25,19 +25,9 @@ afterEach(() => {
 const ok = () => new Response(JSON.stringify({ data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
 
 describe('/api/me 결과 재사용 무효화 신호(story #4184)', () => {
-  it.each(['POST', 'PATCH', 'PUT', 'DELETE'])('fetchWithAuth 쓰기 요청(%s) → 무효화', async (method) => {
-    vi.stubGlobal('fetch', vi.fn(async () => ok()));
-    await fetchWithAuth('/api/me', { method });
-    expect(calls).toBe(1);
-  });
-
-  it('Request 객체로 온 쓰기도 무효화', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ok()));
-    await fetchWithAuth(new Request('http://localhost/api/x', { method: 'POST' }));
-    expect(calls).toBe(1);
-  });
-
-  it('음성대조 — GET·HEAD는 무효화하지 않는다(재사용이 살아 있어야 한다)', async () => {
+  // 쓰기 요청 무효화는 fetch 인터셉터(project-context-client) 한 곳으로 옮겼다 — raw fetch·fetchWithAuth·Request 입력
+  // 전부 그 관문을 지난다. 그 경로는 lib/me-cache-write-invalidation.test.ts가 인터셉터를 실제로 설치해 잰다.
+  it('음성대조 — fetchWithAuth GET·HEAD는 무효화하지 않는다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ok()));
     await fetchWithAuth('/api/x');
     await fetchWithAuth('/api/x', { method: 'HEAD' });

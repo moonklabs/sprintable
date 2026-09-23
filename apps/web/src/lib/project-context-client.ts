@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 
 /**
  * 프로젝트 컨텍스트 SSOT (R2: d802da27 stale context / 85614dd9 멀티탭 독립).
@@ -112,7 +113,32 @@ export function installProjectHeaderInterceptor(): void {
   interceptorInstalled = true;
   const originalFetch = window.fetch.bind(window);
 
+  // story #4184(PR #4565 까디르 재QA · PO 처방) — /api/me 결과 재사용(me-client)의 쓰기 무효화도 이 관문 한 곳에서.
+  // 예전엔 fetchWithAuth의 쓰기만 무효화해, 전역 fetch로 하는 쓰기(2FA 켜기·프로젝트 이름 변경·전환·org 자동 동기 등
+  // ~200곳)는 캐시를 안 버렸다(2FA 켠 뒤 30초 안 «꺼짐»). 이 인터셉터는 raw fetch·fetchWithAuth·Request 입력 모두를
+  // 지나므로 호출부를 옮기지 않고 부류를 닫는다. same-origin `/api/` 쓰기(GET·HEAD 아님)는 **시작**에 무효화(진행 중
+  // /me 떼기·세대 올림)하고 **완료**(성공·실패 무관)에 한 번 더 — 쓰기 도중 출발한 /me 응답이 캐시로 남지 않게.
   window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    let isApiWrite = false;
+    try {
+      const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+      const absolute = /^https?:\/\//.test(rawUrl);
+      const writeSameOrigin = !absolute || new URL(rawUrl).origin === window.location.origin;
+      const writePath = absolute ? new URL(rawUrl).pathname : rawUrl.split('?')[0];
+      isApiWrite = writeSameOrigin && writePath.startsWith('/api/') && method !== 'GET' && method !== 'HEAD';
+    } catch {
+      isApiWrite = false;
+    }
+    if (!isApiWrite) return injectHeaders(input, init);
+    invalidateMeCache();
+    const settle = () => { invalidateMeCache(); };
+    const pending = injectHeaders(input, init);
+    pending.then(settle, settle);
+    return pending;
+  };
+
+  function injectHeaders(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     try {
       if (typeof input === 'string' || input instanceof URL) {
         const url = typeof input === 'string' ? input : input.href;
@@ -138,7 +164,7 @@ export function installProjectHeaderInterceptor(): void {
       // 인터셉터 실패는 원본 fetch 로 폴백 — 네트워크 동작을 절대 깨지 않는다.
     }
     return originalFetch(input, init);
-  };
+  }
 }
 
 /**
