@@ -432,13 +432,16 @@ function EventDefRow({
   const titleLabel = localizedName && localizedName !== def.key ? localizedName : t('eventUnnamedDefinition');
   return (
     <div className="p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
+      {/* story #4212(유나 규격 · 390) — 1024 미만은 제목 덩어리 위·버튼 줄 아래로 쌓는다. 예전엔 한 줄 flex에서 왼쪽
+          flex-1(기준 폭 0)이 거의 0까지 줄어 제목 «Un…»·배지가 버튼과 겹쳤고, shrink-0 버튼 묶음(최대 4개)이 행 밖으로
+          넘쳤다. lg: 이상은 이전 배치 그대로(1440 픽셀 차이 0) — 브레이크포인트는 lg:만(신규 md: 금지 가드). */}
+      <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between" data-testid={`event-def-row-${def.key}`}>
+        <div className="min-w-0 lg:flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={onToggleExpand}
-              className="truncate text-sm text-foreground hover:underline"
+              className="break-words text-left text-sm text-foreground hover:underline lg:truncate"
               data-testid={`event-def-toggle-${def.key}`}
             >
               {titleLabel}
@@ -455,7 +458,7 @@ function EventDefRow({
             {titleLabel !== def.key ? (
               <span
                 data-testid={`event-def-key-subtitle-${def.key}`}
-                className="truncate font-mono text-[11px] text-muted-foreground"
+                className="min-w-0 max-w-full truncate font-mono text-[11px] text-muted-foreground"
               >
                 {def.key}
               </span>
@@ -470,7 +473,7 @@ function EventDefRow({
             버튼 목록에서 어느 이벤트 정의 행인지 못 가른다. customDefs·presetDefs는
             화면상 별개 목록(제목이 다른 SectionCard 둘)이라 순번은 각 목록 안에서
             1부터 다시 센다(호출부 두 곳이 각자 map index를 넘긴다). */}
-        <div className="flex shrink-0 gap-1.5">
+        <div className="flex flex-wrap gap-1.5 lg:shrink-0 lg:flex-nowrap" data-testid={`event-def-actions-${def.key}`}>
           {!readonly && isAdmin ? (
             <Button
               size="sm" variant="ghost" disabled={!def.enabled} onClick={onTestPublish}
