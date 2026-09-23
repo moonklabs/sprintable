@@ -42,9 +42,9 @@ const PRESET = {
   enabled: true, version: 1,
 };
 
-async function renderWorkflowTab() {
+async function renderWorkflowTab(def: typeof PRESET = PRESET) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url === '/api/events/definitions') return { ok: true, json: async () => [PRESET] };
+    if (url === '/api/events/definitions') return { ok: true, json: async () => [def] };
     return { ok: true, json: async () => ({}) };
   }));
   const { default: OrganizationEventsPage } = await import('./page');
@@ -80,6 +80,21 @@ describe('EventDefRow — 390 행 레이아웃(story #4212 유나 규격)', () =
     expect(title.has('break-words')).toBe(true);
     expect(title.has('lg:truncate')).toBe(true);
     expect(title.has('truncate'), '1024 미만 말줄임 0').toBe(false);
+  });
+
+  it('⭐제목 버튼은 줄어들 수 있다(min-w-0) — 공백 없는 60자 제목도 390 행 안에서 낱말 안 줄바꿈(story #4215 까디르 QA)', async () => {
+    // flex 항목은 기본 최소 폭 = 가장 긴 낱말이라, min-w-0이 없으면 break-words가 있어도 공백 없는 제목은 행 밖으로 넘쳤다
+    // (Chromium 390 실측 복제: min-w-0 없음 24px 넘침 → 있음 0 · 1440은 두 경우 같음). jsdom은 폭을 못 재 클래스로 핀한다.
+    const longTitle = 'Supercalifragilisticexpialidocious_workflow_identifier_60chx';
+    expect(longTitle).toHaveLength(60);
+    expect(longTitle).not.toMatch(/\s/);
+    // 로케일 문안 표(platform-preset-copy)에 없는 키 — 표시명이 name 그대로 나오는 자리(표에 있는 키는 표 문안으로 바뀐다).
+    const def = { ...PRESET, key: 'preset.workflow.long_title_fixture', name: longTitle };
+    await renderWorkflowTab(def);
+    const toggle = document.querySelector(`[data-testid="event-def-toggle-${def.key}"]`);
+    expect(toggle?.textContent).toContain(longTitle);
+    const title = classesOf(toggle);
+    for (const c of ['min-w-0', 'break-words', 'lg:truncate']) expect(title.has(c), c).toBe(true);
   });
 
   it('키 부제: 덩어리 폭 안에서만 말줄임', async () => {

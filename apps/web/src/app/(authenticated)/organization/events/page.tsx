@@ -438,10 +438,13 @@ function EventDefRow({
       <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between" data-testid={`event-def-row-${def.key}`}>
         <div className="min-w-0 lg:flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            {/* story #4215(까디르 QA · 4212 잔여) — 제목 버튼은 flex 항목이라 min-w-0이 없으면 최소 폭 = 가장 긴 낱말:
+                공백 없는 긴 제목(합성어·URL 모양·식별자)은 390에서 행 밖으로 넘쳤다. min-w-0으로 줄어들 수 있게 해야 break-words가
+                낱말 안에서 끊고, lg:truncate도 실제로 말줄임한다. */}
             <button
               type="button"
               onClick={onToggleExpand}
-              className="break-words text-left text-sm text-foreground hover:underline lg:truncate"
+              className="min-w-0 break-words text-left text-sm text-foreground hover:underline lg:truncate"
               data-testid={`event-def-toggle-${def.key}`}
             >
               {titleLabel}
