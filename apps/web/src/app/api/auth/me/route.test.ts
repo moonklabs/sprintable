@@ -62,6 +62,22 @@ describe('/api/auth/me — 실경로 계약(story #3195, 카디르 QA)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('브라우저 요청에 X-Org-Id가 실려 와도 BE로는 넘기지 않는다(story #4178 — 비가입 옛 org 헤더 403 회피)', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ member_id: 'm-1', org_id: null }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    const res = await GET(new Request('http://localhost/api/auth/me', {
+      headers: { 'X-Org-Id': 'stale-org', 'X-Project-Id': 'p-1' },
+    }));
+    expect(res.status).toBe(200);
+    const sent = new Headers(fetchMock.mock.calls[0]![1]?.headers);
+    expect(sent.get('x-org-id')).toBeNull();
+    // 다른 전달 헤더는 그대로(떨구는 건 x-org-id 하나뿐).
+    expect(sent.get('x-project-id')).toBe('p-1');
+    expect(sent.get('authorization')).toBe('Bearer token-1');
+  });
+
   it('BE 에러(500)를 그대로 전달한다(삼키지 않음)', async () => {
     global.fetch = vi.fn(async () => new Response('boom', { status: 500 }));
     const res = await GET(new Request('http://localhost/api/auth/me'));
