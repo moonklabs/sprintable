@@ -9,21 +9,29 @@ import { cn } from '@/lib/utils';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 import { fetchDesignatedPendingCount } from '@/lib/designated-pending-count-client';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   DEFAULT_NAV_V3_FLAGS,
   resolveNavV3Destinations,
+  scopedResourceHref,
   type NavV3Destination,
   type NavV3Destinations,
   type NavV3Flags,
 } from '@/lib/nav-v3-destinations';
 
-// story #4016(페드루 PO 確定 2026-09-17) — resource kind는 org/project 접두가 필요한
-// 조각이지만(app-sidebar.tsx의 resourceLink 참고), 이 탭 바는 그 접두 컨텍스트를 안 받는다
-// (기존부터 bare `/flow`만 썼다 — proxy.ts의 bare-path 리다이렉트 안전망이 최종 착지를
-// 보정, TABS 상단 옛 #2224 주석 참고). static kind는 이미 완성 경로라 그대로 쓴다.
-export function destHref(destination: NavV3Destination): string {
-  return destination.kind === 'resource' ? `/${destination.path}` : destination.path;
+// story #4016 — resource kind는 org/project 접두가 필요한 조각이다. static kind는 이미 완성 경로라 그대로 쓴다.
+// story #4211 — 예전엔 이 탭 바가 접두 컨텍스트를 안 받아 bare `/flow`만 썼다(세션 의존 리다이렉트를 매 탭 한 홉 ·
+// 4557 전 301을 캐시한 기기는 탭을 눌러도 옛 프로젝트로 감). 이제 사이드바와 같은 scopedResourceHref로 현재
+// 작업공간·프로젝트 경로를 직접 가리킨다(slug를 모르는 찰나만 bare — 미들웨어 안전망).
+// TABS/V3_TABS의 `href` 필드는 slug 없이 구운 값(기존 단위테스트 계약) — 실제 렌더 href는 MobileTabBar가
+// resolveTabHref(tab, dest, scope)로 매 렌더 다시 구한다.
+export function destHref(destination: NavV3Destination, scope: TabHrefScope = {}): string {
+  return destination.kind === 'resource'
+    ? scopedResourceHref(destination.path, scope.orgSlug, scope.projectSlug)
+    : destination.path;
 }
+
+export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
 
 // story #1958(P2-S2, mobile-p2-p1a-story-breakdown SSOT) — 모바일 4탭 셸. <1024(lg 미만)에서만
 // 렌더되고 데스크톱 GNB(AppSidebar)를 대체한다(P2-S1의 lg:1024 SSOT와 동일 경계 — route 내
@@ -63,7 +71,7 @@ export function destHref(destination: NavV3Destination): string {
 // today가 아니라 work — AC2 "플래그 OFF 바이트 동일"을 만족하는 쪽은 work뿐, 페드루
 // 확認 2026-09-17 14:34Z). href 필드는 DEFAULT_NAV_V3_FLAGS(전부 OFF)로 미리 구운
 // 값이라 기존 테스트(TABS.find(...).href 직접 대조)가 손 안 대고 그대로 GREEN —
-// 플래그 ON의 실제 렌더 href는 MobileTabBar 컴포넌트 안에서 resolveTabHref(tab, dest)로
+// 플래그 ON의 실제 렌더 href는 MobileTabBar 컴포넌트 안에서 resolveTabHref(tab, dest, scope)로
 // 매 렌더 다시 구한다.
 const DEFAULT_DEST = resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS);
 
@@ -105,8 +113,8 @@ export function resolveTabsForFlags(navV3Flags: NavV3Flags): TabConfig {
   return anyV3Enabled ? V3_TABS : TABS;
 }
 
-export function resolveTabHref(tab: TabDef, dest: NavV3Destinations): string {
-  return destHref(dest[tab.destKey]);
+export function resolveTabHref(tab: TabDef, dest: NavV3Destinations, scope: TabHrefScope = {}): string {
+  return destHref(dest[tab.destKey], scope);
 }
 
 // story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
@@ -196,6 +204,13 @@ export function MobileTabBar({
   // story #4016 — app-sidebar.tsx(4386)와 동일하게 플래그별 목적지를 이 모듈에서 재계산
   // (복붙 규칙 0, AC2).
   const dest = useMemo(() => resolveNavV3Destinations(navV3Flags), [navV3Flags]);
+  // story #4211 — 사이드바(app-sidebar resourceLink)와 같은 소스(대시보드 컨텍스트의 현재 org slug·project slug)로
+  // resource 탭을 /{ws}/{proj}/{resource} 직접 경로로. 컨텍스트 밖이거나 slug를 모르면 bare(안전망).
+  const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  const scope = useMemo<TabHrefScope>(() => ({
+    orgSlug: orgMemberships.find((o) => o.orgId === orgId)?.orgSlug,
+    projectSlug: currentProjectSlug,
+  }), [orgMemberships, orgId, currentProjectSlug]);
   // story #3824 CHANGES②(페드루 PO 確定) — "now"·"chat" 탭은 nav 네임스페이스의 zoneNow·
   // chats 키를 그대로 공유(같은 labelKey — 위 TABS 주석 참고).
   const tNav = useTranslations('nav');
@@ -266,7 +281,7 @@ export function MobileTabBar({
     >
       {tabs.map((tab) => {
         const { key, icon: Icon, labelKey, namespace } = tab;
-        const href = resolveTabHref(tab, dest);
+        const href = resolveTabHref(tab, dest, scope);
         const active = key === activeKey;
         // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
         // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).

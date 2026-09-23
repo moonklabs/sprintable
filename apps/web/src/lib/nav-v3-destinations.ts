@@ -96,3 +96,13 @@ export function resolveConnectRulesHref(flags: NavV3Flags | undefined, legacyFal
   const dest = resolveNavV3Destinations(flags);
   return dest.connectRules ? dest.connectRules.path : legacyFallback;
 }
+
+/**
+ * story #4211 — `resource` 목적지(/{ws}/{proj}/{resource})의 링크 한 곳. 사이드바(app-sidebar resourceLink)와 모바일
+ * 탭바가 같은 규칙을 쓴다(따로 두면 한쪽만 bare로 남는다 — 4211이 그 부류: 탭바만 bare `/flow`라 세션 의존 리다이렉트를
+ * 매 탭 타고, 4557 전 301을 캐시한 기기는 옛 프로젝트로 갔다). 두 slug가 다 있을 때만 직접 경로, 하나라도 모르면 bare
+ * `/{resource}`(미들웨어 안전망 — 로그인 직후 등 slug가 아직 없는 찰나).
+ */
+export function scopedResourceHref(resource: string, orgSlug: string | undefined, projectSlug: string | undefined): string {
+  return orgSlug && projectSlug ? `/${orgSlug}/${projectSlug}/${resource}` : `/${resource}`;
+}
