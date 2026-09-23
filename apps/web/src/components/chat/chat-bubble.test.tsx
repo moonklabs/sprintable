@@ -2379,6 +2379,12 @@ describe('ChatBubble — 본문의 내부 HTML 주석 제거(story #4197)', () =
     expect(text()).not.toContain('<!--');
   });
 
+  it('주석 뒤 들여쓰기 주석 줄은 렌더러가 코드로 그린다 — 빈 본문 문구가 코드를 가리지 않는다(PR #4559 까디르)', async () => {
+    const c = await render('<!-- a -->\n    <!-- literal -->');
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).toBeNull();
+    expect(c.querySelector('pre')?.textContent).toContain('<!-- literal -->');
+  });
+
   it('주석 안에 백틱·~~~가 있어도 주석뿐이면 빈 본문 문구', async () => {
     const c = await render('<!-- 예: `code` ~~~ -->');
     expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).not.toBeNull();

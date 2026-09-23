@@ -22,8 +22,14 @@ describe('isCommentOnlyContent', () => {
   it('주석 «안»의 백틱·~~~는 코드가 아니다 — 주석만이면 true(PR #4559 잔여 4)', () => {
     expect(isCommentOnlyContent('<!-- 예: `code` 와 ~~~ -->')).toBe(true);
   });
-  it('코드 표지가 있으면 판정하지 않는다(false) — 코드 안 주석을 빈 본문으로 오판하지 않게', () => {
+  it('코드 노드는 내용이 주석 모양이어도 보이는 것 — false(렌더러와 같은 파서)', () => {
     expect(isCommentOnlyContent('    <!-- indented -->')).toBe(false);
     expect(isCommentOnlyContent('```\n<!-- x -->\n```')).toBe(false);
+    expect(isCommentOnlyContent('<!-- a -->\n    <!-- literal -->')).toBe(false);
+    expect(isCommentOnlyContent('<!-- a -->\n\n    <!-- literal -->')).toBe(false);
+  });
+  it('주석 여러 개·안 닫힌 주석·빈 줄 섞여도 주석뿐이면 true', () => {
+    expect(isCommentOnlyContent('<!-- a -->\n\n<!-- b -->\n')).toBe(true);
+    expect(isCommentOnlyContent('  <!-- a -->  ')).toBe(true);
   });
 });

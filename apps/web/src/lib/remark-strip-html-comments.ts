@@ -1,3 +1,7 @@
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
+
 /**
  * story #4197 — 채팅 말풍선 본문에서 내부 HTML 주석(`<!-- linear-comment-id … -->` 등 외부 동기화가 심는 비가시
  * 마커)만 걷어내는 remark 플러그인. 원문을 정규식으로 자르지 않고 **마크다운 AST에서 html 노드만** 다룬다 —
@@ -52,16 +56,17 @@ export function remarkStripHtmlComments() {
 }
 
 /**
- * 본문에 보일 글자가 남는지(«표시할 내용이 없는 메시지» 판정용). 보수적으로: 주석을 걷은 뒤 공백뿐이고, 코드
- * 표지(백틱·`~~~`·들여쓰기 줄)가 전혀 없을 때만 «비었다». 코드가 섞이면 판정하지 않는다(렌더러에 맡김) —
- * 여기서 틀리면 내용이 있는 메시지를 가리게 되므로 «비었다» 쪽으로만 엄격하다.
+ * 본문에 보일 것이 남는지(«표시할 내용이 없는 메시지» 판정용). 렌더러와 **같은 파서**(remark-parse + gfm +
+ * remarkStripHtmlComments)를 돌린 AST에 노드가 하나도 안 남을 때만 «비었다» — 코드 노드는 내용이 주석 모양이어도
+ * 보이는 것이다. 문자열 규칙으로 파서를 흉내 내면 틈이 생긴다(PR #4559 까디르: 주석 뒤 들여쓰기 줄을 렌더러는
+ * 코드로 그리는데 문자열 판정은 «주석만»이라 보이는 코드를 가렸다). 평문 경로도 주석만이면 같은 결론이다.
  */
+const emptinessProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkStripHtmlComments);
+
 export function isCommentOnlyContent(content: string): boolean {
   if (!content.includes('<!--')) return false;
-  // 빈 줄 뒤(또는 맨 앞)의 들여쓰기 줄은 들여쓰기 코드일 수 있다 — 코드 안 주석을 빈 본문으로 오판하지 않게 판정 안 함.
-  // 주석 «안»의 백틱·`~~~`는 코드가 아니다(PR #4559 까디르 잔여 4) — 표지는 주석을 걷은 나머지에서만 본다.
-  if (/(?:^|\n[ \t]*\n)(?: {4}|\t)/.test(content)) return false;
-  return content.replace(COMMENT_RE, '').trim() === '';
+  const tree = emptinessProcessor.runSync(emptinessProcessor.parse(content)) as MdNode;
+  return (tree.children ?? []).length === 0;
 }
 
 /**
