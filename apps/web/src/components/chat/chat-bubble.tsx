@@ -11,7 +11,7 @@ import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { copyTextSafely } from '@/lib/clipboard';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
-import { parseEntityRef } from '@/components/chat/entity-ref';
+import { parseEntityRef, stripHtmlComments } from '@/components/chat/entity-ref';
 import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
@@ -195,7 +195,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -212,6 +212,10 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
   const codeBg = 'bg-muted text-foreground';
   const border = 'border-border';
 
+  // story #4197 — 내부 HTML 주석(`<!-- linear-comment-id … -->`)은 react-markdown이 글자 그대로 이스케이프
+  // 출력해 본문에 보였다. 렌더 전에 한 번 걷어낸다(코드 펜스·인라인 코드 안 `<!--`는 보존 — entity-ref.ts
+  // stripHtmlComments, 미리보기·서버와 같은 규칙). 아래 판정·평문 경로·마크다운 경로 모두 이 값을 쓴다.
+  const content = stripHtmlComments(rawContent);
   const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
 

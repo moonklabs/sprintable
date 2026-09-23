@@ -2273,3 +2273,34 @@ describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () =>
     expect(container.textContent).not.toContain('서버 집행');
   });
 });
+
+// story #4197 — 말풍선 본문에 내부 HTML 주석(`<!-- linear-comment-id … -->`)이 글자 그대로 보이던 결함.
+// react-markdown이 주석을 이스케이프 출력해서다 — 렌더 전 제거(코드 안 `<!--`는 보존, 4541과 같은 규칙).
+describe('ChatBubble — 본문의 내부 HTML 주석 제거(story #4197)', () => {
+  async function renderContent(content: string) {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content, references: [] }} isMine={false} />));
+    });
+    return container.textContent ?? '';
+  }
+
+  it.each([
+    ['닫힌 주석 + 마크다운', '<!-- linear-comment-id: abc-123 -->\n\n**댓글** 본문', '댓글 본문'],
+    ['본문 중간 주석', '앞 문장 <!-- id --> 뒤 문장이 **이어져요**', '뒤 문장이 이어져요'],
+    ['닫히지 않은 주석(끝까지)', '보이는 부분 **강조** <!-- linear-comment-id: f4', '보이는 부분 강조'],
+    ['마크다운 없는 평문 경로', '<!-- linear-comment-id: abc -->\n평범한 답장', '평범한 답장'],
+  ])('%s — 화면 텍스트에 `<!--` 0, 본문 보존', async (_name, content, kept) => {
+    const text = await renderContent(content);
+    expect(text).not.toContain('<!--');
+    expect(text).not.toContain('linear-comment-id');
+    expect(text).toContain(kept);
+  });
+
+  it('코드 펜스·인라인 코드 안의 리터럴 `<!--`는 그대로 보인다', async () => {
+    const text = await renderContent('인라인 `<!-- keep -->` 예시\n\n```html\n<!-- fenced -->\n<p>x</p>\n```\n\n끝 <!-- hidden -->');
+    expect(text).toContain('<!-- keep -->');
+    expect(text).toContain('<!-- fenced -->');
+    expect(text).not.toContain('hidden');
+    expect(text).toContain('끝');
+  });
+});

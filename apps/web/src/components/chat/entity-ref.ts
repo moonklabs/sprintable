@@ -37,6 +37,16 @@ export function unescapeReferenceLabel(label: string): string {
 const CODE_OR_HTML_COMMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)|<!--[\s\S]*?(?:-->|$)/g;
 
 /**
+ * story #4197 — 내부 HTML 주석(`<!-- linear-comment-id … -->` 등 외부 동기화가 심는 비가시 마커)만 걷어낸다.
+ * 코드 펜스·인라인 코드 안의 리터럴 `<!--`는 그대로 둔다(위 정규식이 코드를 먼저 통째로 매치). 닫히지 않은
+ * `<!--`는 끝까지 주석으로 본다(HTML 규칙과 같다). 줄바꿈·그 밖의 본문은 건드리지 않아 마크다운 렌더 전에
+ * 써도 된다 — 채팅 말풍선 본문(chat-bubble ChatMarkdown)과 아래 toPlainPreview가 같은 규칙을 쓴다.
+ */
+export function stripHtmlComments(content: string): string {
+  return content.replace(CODE_OR_HTML_COMMENT_RE, (_m, code: string | undefined) => code ?? '');
+}
+
+/**
  * story #3949(E-UX-OVERHAUL·customer-zero·§①) — 3888(대화 목록 미리보기 raw 키)·
  * 3903/3940(알림 요약 raw 키)과 같은 「본문 렌더러는 고쳤는데 요약 소비처는 원문」
  * 클래스의 3번째: 마크다운 링크/entity 참조 토큰이 든 «보통» 메시지가 미리보기·요약
@@ -66,8 +76,7 @@ const CODE_OR_HTML_COMMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)|<!--[\s\S]*?(?:-->|$
  * 제거한다(`(?:-->|$)`).
  */
 export function toPlainPreview(content: string): string {
-  return content
-    .replace(CODE_OR_HTML_COMMENT_RE, (_m, code: string | undefined) => code ?? '')
+  return stripHtmlComments(content)
     .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }
