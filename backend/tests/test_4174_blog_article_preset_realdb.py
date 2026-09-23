@@ -239,6 +239,30 @@ async def test_server_driven_next_stage_line_is_localized():
     await _with_session(body)
 
 
+async def test_every_next_stage_line_is_localized():
+    """PO 11:58Z — 같은 렌더러의 «다음 단계» 세 줄(게이트가 이미 열린 단계 · 보통 단계 · 마지막 단계)이 모두 en 로케일에서
+    영어이고 한국어 리터럴이 남지 않는다. ko는 기존 문구 그대로(무회귀)."""
+    from app.routers.events import _render_event_message_content
+
+    cases = {
+        "concept_confirmed": ("Next stage: editing (Creator)", "다음 단계: editing (Creator)"),
+        "draft": ("Next stage: concept_confirmed (Director)", "다음 단계: concept_confirmed (Director)"),
+        "publish_checked": ("Next stage: none (last stage)", "다음 단계: 없음(마지막 stage)"),
+    }
+
+    async def body(s):
+        d = await _definition(s)
+        for stage, (en_line, ko_line) in cases.items():
+            payload = {"stage": stage, "work_item_type": "story", "work_item_id": str(uuid.uuid4())}
+            en = await _render_event_message_content(s, org_id=uuid.uuid4(), definition=d, payload=payload, resolved_locale="en")
+            assert f"- {en_line}" in en, (stage, en)
+            assert "다음 단계" not in en, (stage, en)
+            ko = await _render_event_message_content(s, org_id=uuid.uuid4(), definition=d, payload=payload, resolved_locale="ko")
+            assert f"- {ko_line}" in ko, (stage, ko)
+
+    await _with_session(body)
+
+
 async def test_verdict_next_action_uses_recipe_line_only_in_recipe_context(monkeypatch):
     """승인 알림 «다음 행동»(실 자사 블로그 초안·게이트 행으로 렌더): 레시피 문맥이면 자동 발행 문구 · 레시피 밖이면
     기존 «발행은 휴먼이 화면에서» 그대로(무회귀). 레시피 문맥 판별 자체는 위 테스트가 잰다 — 여기선 그 결과만 바꾼다.

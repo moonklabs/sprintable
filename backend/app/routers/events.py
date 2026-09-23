@@ -2016,9 +2016,9 @@ async def _render_event_message_content(
         )
         if next_stage is not None:
             next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
-            lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+            lines.append(f"- {t('events.stage_next_label', resolved_locale, stage=next_stage)}" + (f" ({next_role})" if next_role else ""))
         else:
-            lines.append("- 다음 단계: 없음(마지막 stage)")
+            lines.append(f"- {t('events.stage_next_none', resolved_locale)}")
     elif (
         next_stage is not None
         and _stage_capability_kind(definition.stage_metadata.get(next_stage)) in _SERVER_DRIVEN_CAPABILITY_KINDS
@@ -2031,7 +2031,7 @@ async def _render_event_message_content(
     elif next_stage is not None:
         next_meta = definition.stage_metadata.get(next_stage) or {}
         next_role = next_meta.get("role")
-        lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+        lines.append(f"- {t('events.stage_next_label', resolved_locale, stage=next_stage)}" + (f" ({next_role})" if next_role else ""))
 
         # story #4085 AC1(리허설 1호 실측) — 다음 stage가 게이트를 여는데 그 gate_type이
         # 봉인 필드를 요구하면(recipe_gate_hooks.py::_GATE_TYPE_SEALED_FIELDS, 검증과 같은
@@ -2066,7 +2066,7 @@ async def _render_event_message_content(
             if _next_gate_decl.get("type") == "external_publish":
                 lines.append(f"- {t('events.gate_hint_external_publish_auto_satisfy', resolved_locale)}")
     else:
-        lines.append("- 다음 단계: 없음(마지막 stage)")
+        lines.append(f"- {t('events.stage_next_none', resolved_locale)}")
 
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")

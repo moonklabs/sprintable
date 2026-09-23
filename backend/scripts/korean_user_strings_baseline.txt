@@ -187,8 +187,6 @@ app/routers/events.py::)는
 app/routers/events.py::)는 human 발행자만 허용합니다.
 app/routers/events.py::** 담당 —
 app/routers/events.py::- 게이트:
-app/routers/events.py::- 다음 단계:
-app/routers/events.py::- 다음 단계: 없음(마지막 stage)
 app/routers/events.py::- 다음 행동:
 app/routers/events.py::- 다음 행동: channel=
 app/routers/events.py::- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈됩니다.

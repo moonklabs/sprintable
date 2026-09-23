@@ -449,6 +449,10 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 단계: {stage}",
         "en": "Next stage: {stage}",
     },
+    "events.stage_next_none": {
+        "ko": "다음 단계: 없음(마지막 stage)",
+        "en": "Next stage: none (last stage)",
+    },
     "events.stage_next_server_driven": {
         "ko": "블로그 발행이 끝나면 서버가 다음 단계로 넘겨요 — 이 단계에서는 publish_event를 부르지 마세요.",
         "en": "The server moves to the next stage once the blog post is published — don't call publish_event from this stage.",
