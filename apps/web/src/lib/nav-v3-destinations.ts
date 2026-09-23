@@ -169,7 +169,8 @@ export function navProjectSlug(args: {
  *   셸이 현재 주소를 전체 문서 이동으로 다시 연다(서버가 해석). 그 전까지 프로젝트·org 헤더 0 · 페이지 미마운트.
  */
 function decodedSegments(pathname: string | null | undefined): string[] {
-  return (pathname ?? '').split('/').filter(Boolean).map((seg) => {
+  // 쿼리·해시는 조각이 아니다 — 서버 경로(x-pathname)는 `pathname + search`라 `/org/proj?x=1`의 두 번째 조각이 `proj?x=1`이 됐다.
+  return (pathname ?? '').split(/[?#]/)[0]!.split('/').filter(Boolean).map((seg) => {
     try { return decodeURIComponent(seg); } catch { return seg; }
   });
 }

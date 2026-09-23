@@ -208,6 +208,9 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(container.textContent).toContain('projectOpenFailedDescription');
     expect(retry).toBeTruthy();
     expect(container.querySelector('a'), '보조 링크(«로그인으로 이동») 없음').toBeNull();
+    // 390 좌우 여백(유나) · 미해결 동안 사이드바 slug 없음 = 못 연 프로젝트로 다시 안 감(유나).
+    expect(container.querySelector('div.px-4 > div.min-h-\\[50vh\\]'), '오류 카드를 감싼 px-4').toBeTruthy();
+    expect(sidebar.slug).toBeUndefined();
     expect(since(mark).filter((r) => r.url.startsWith('/api/stories'))).toEqual([]);
     retryMock.mockClear();
     await act(async () => { retry!.click(); });

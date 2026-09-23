@@ -153,6 +153,11 @@ describe('livePathProject — 셸 경로 프로젝트는 현재 pathname에서, 
     expect(livePathProject({ ...base, pathname: enc, serverPathname: enc, serverPathProjectId: 'jb', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'jb' });
     expect(livePathProject({ ...base, pathname: enc, memberships: [{ projectId: 'jb', projectSlug: '장부', orgId: 'org-r' }] })).toEqual({ kind: 'scoped', projectId: 'jb' });
   });
+  it('서버 경로에 쿼리·해시가 붙어도(`x-pathname` = pathname + search) 조각 비교는 경로만', async () => {
+    const { livePathProject } = await import('./nav-v3-destinations');
+    expect(livePathProject({ ...base, pathname: '/repro/beta', serverPathname: '/repro/beta?x=1', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
+    expect(livePathProject({ ...base, pathname: '/repro/beta#h', serverPathname: '/repro/beta', memberships: [] })).toEqual({ kind: 'scoped', projectId: 'b' });
+  });
   it('flat·예약 첫 조각 → flat(옛 서버 pathProjectId를 쓰지 않는다)', async () => {
     const { livePathProject } = await import('./nav-v3-destinations');
     for (const pathname of ['/flow', '/gates/123', '/']) {

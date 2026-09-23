@@ -56,6 +56,8 @@ interface DashboardContext {
   // story a539c649 S2: 현재 project 의 slug(사이드바/⌘K 가 /{ws}/{proj}/docs 직접 path 를
   // 만드는 데만 사용 — /me/memberships 는 slug 를 안 실어보내 여기 단건 조회로 보강했다).
   currentProjectSlug?: string;
+  // story #4217 — 현재 URL의 프로젝트를 못 풀어 전체 이동 대기·오류 상태. 탭바가 그 경로를 활성으로 표시하지 않게.
+  projectPathUnresolved?: boolean;
   userName?: string;
   role?: string;
   // story #2103 — BE가 여러 write action을 "휴먼 멤버만 가능"으로 명시 거부한다(게이트/HITL
@@ -483,7 +485,8 @@ export function DashboardShell({
   // slug는 effective 프로젝트와 같을 때만 싣는다(다르면 undefined → bare 안전망). 이 값 하나를 컨텍스트(탭바·⌘K 등)와
   // 사이드바(ShellBody→AppSidebar) 둘 다에 넘긴다 — 한쪽만 막으면 또 갈린다.
   // scoped 경로에선 서버 prop 대신 현재 URL의 프로젝트 조각(클라이언트 이동 뒤에도 최신) — flat 경로만 위 가드로.
-  const scopedProjectSlug = navProjectSlug({
+  // 못 푼 경로(전체 이동 대기·오류 상태)면 탭바·사이드바 링크를 그 프로젝트로 다시 보내지 않는다 — bare(유나 QA).
+  const scopedProjectSlug = pathUnresolved ? undefined : navProjectSlug({
     pathname: shellPathname, currentOrgSlug,
     pathProjectId, sessionProjectId: projectId, slug: currentProjectSlug, effectiveProjectId,
   });
@@ -502,7 +505,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, navV3Flags }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -528,10 +531,12 @@ export function DashboardShell({
             >
               {pathUnresolved
                 ? (reopenSpentFor === shellPathname ? (
-                  <RouteErrorState
-                    compact breakKeep reset={retryUnresolvedPath}
-                    title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
-                  />
+                  <div className="px-4">
+                    <RouteErrorState
+                      compact breakKeep reset={retryUnresolvedPath}
+                      title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
+                    />
+                  </div>
                 ) : null)
                 : children}
             </ShellBody>

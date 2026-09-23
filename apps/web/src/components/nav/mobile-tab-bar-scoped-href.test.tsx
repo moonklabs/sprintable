@@ -15,7 +15,7 @@ import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/acme/proj/flow' }));
 
-const ctx = { orgId: 'org-1', orgMemberships: [{ orgId: 'org-1', orgSlug: 'acme' }], currentProjectSlug: 'proj' as string | undefined };
+const ctx = { orgId: 'org-1', orgMemberships: [{ orgId: 'org-1', orgSlug: 'acme' }], currentProjectSlug: 'proj' as string | undefined, projectPathUnresolved: false };
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +28,7 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
   ctx.currentProjectSlug = 'proj';
+  ctx.projectPathUnresolved = false;
 });
 
 async function hrefs(flags?: NavV3Flags): Promise<string[]> {
@@ -140,5 +141,19 @@ describe('slugForEffectiveProject — 딥링크·전환 창·refresh 뒤(story #
     expect(src).toMatch(/currentProjectSlug=\{scopedProjectSlug\}/);
     // 원시 서버 slug를 그대로 넘기는 자리는 ShellBody가 **받은**(이미 걸러진) prop을 AppSidebar로 넘기는 통로 1곳뿐.
     expect(src.match(/currentProjectSlug=\{currentProjectSlug\}/g) ?? []).toHaveLength(1);
+  });
+});
+
+describe('MobileTabBar — 못 푼 프로젝트 경로(story #4217 유나 QA)', () => {
+  it('미해결이면 탭 href에 URL 프로젝트 조각 0 · 활성 탭 0', async () => {
+    ctx.currentProjectSlug = undefined; // 셸이 미해결일 때 넘기는 값
+    ctx.projectPathUnresolved = true;
+    const list = await hrefs();
+    expect(list.some((h) => h.includes('/proj/'))).toBe(false);
+    expect(container.querySelectorAll('[aria-current="page"]').length).toBe(0);
+  });
+  it('대조군 — 풀린 경로(/acme/proj/flow)에선 «지금» 탭이 활성', async () => {
+    await hrefs();
+    expect(container.querySelectorAll('[aria-current="page"]').length).toBe(1);
   });
 });

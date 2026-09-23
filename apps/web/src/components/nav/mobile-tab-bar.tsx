@@ -206,7 +206,7 @@ export function MobileTabBar({
   const dest = useMemo(() => resolveNavV3Destinations(navV3Flags), [navV3Flags]);
   // story #4211 — 사이드바(app-sidebar resourceLink)와 같은 소스(대시보드 컨텍스트의 현재 org slug·project slug)로
   // resource 탭을 /{ws}/{proj}/{resource} 직접 경로로. 컨텍스트 밖이거나 slug를 모르면 bare(안전망).
-  const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  const { orgId, orgMemberships, currentProjectSlug, projectPathUnresolved } = useDashboardContext();
   const scope = useMemo<TabHrefScope>(() => ({
     orgSlug: orgMemberships.find((o) => o.orgId === orgId)?.orgSlug,
     projectSlug: currentProjectSlug,
@@ -266,7 +266,8 @@ export function MobileTabBar({
     };
   }, []);
 
-  const activeKey = getActiveTabKey(pathname, navV3Flags);
+  // story #4217 — 못 푼 프로젝트 경로(오류 상태)에선 어느 탭도 활성 아님(링크는 bare라 그 경로를 가리키지 않는다).
+  const activeKey = projectPathUnresolved ? null : getActiveTabKey(pathname, navV3Flags);
   // story #4006 AC8 — v3(anyV3Enabled)면 4탭이 V3_TABS로 바뀐다(플래그 OFF는 기존 TABS
   // 그대로, 바이트 무변).
   const tabs = resolveTabsForFlags(navV3Flags);
