@@ -333,6 +333,30 @@ describe('KanbanBoard — Promise.all 부수 격리(story #3519)', () => {
   });
 });
 
+// story #4171(E-MOBILE-SPEED) — 첫 화면 호출 폭포. 목록(스토리)은 카드 몸통(stories·goals·members)만
+// 기다려 뜨고, 스프린트·배지용 호출(실행 요약·라인 상태·의존 그래프·라벨·라벨 연결·대기 게이트)은
+// 그 뒤에 한꺼번에 병렬로 나간다(예전엔 sprints가 스켈레톤을 붙잡고 배지 6건이 순차였다).
+describe('KanbanBoard — 첫 그림은 스토리만 기다린다(story #4171)', () => {
+  it('스프린트·배지 호출이 아직 안 끝나도 스토리가 뜨고, 그 호출들은 동시에 나가 있다', async () => {
+    const SECONDARY = ['/api/sprints', '/api/workflow-executions/story-summary', '/api/stories/workflow-line/status',
+      '/api/dependencies/graph', '/api/labels', '/api/item-labels', '/api/gates?'];
+    const fetchMock = vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = status === 'backlog' ? [{ id: 's1', title: '먼저 뜨는 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) });
+      }
+      if (SECONDARY.some((p) => url.startsWith(p))) return new Promise(() => {}); // 영원히 대기
+      return Promise.resolve({ ok: false, json: async () => null });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(container.textContent).toContain('먼저 뜨는 스토리');
+    const called = (p: string) => fetchMock.mock.calls.some(([u]) => String(u).startsWith(p));
+    for (const p of SECONDARY) expect(called(p), p).toBe(true);
+  });
+});
+
 describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', () => {
   it('생성 실패 시 role="alert" aria-live="assertive"로 배너가 렌더된다', async () => {
     stubFetch([]);

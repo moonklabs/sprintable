@@ -44,9 +44,13 @@ async function fetchJson(url: string): Promise<unknown> {
  * (예외 신호). 둘 다 실패에 관대하다(throw 0) — 이 파일엔 더 이상 "필수" 소스가 없다(예전엔
  * 에픽 fetch가 필수였으나 story #3710에서 그 경로 자체를 제거했다).
  */
-export async function loadGlanceData(projectId: string): Promise<GlanceData> {
+export async function loadGlanceData(
+  projectId: string, { includeMembers = true }: { includeMembers?: boolean } = {},
+): Promise<GlanceData> {
+  // story #4171(E-MOBILE-SPEED) — memberMap은 흐름(view=flow) 화면만 쓴다. 기본(목록) 보기의 첫
+  // 화면에선 org 전체 팀원 목록을 부르지 않는다(보드는 자기 /api/members로 담당자 이름을 그린다).
   const [membersJson, attentionJson] = await Promise.all([
-    fetchJson('/api/team-members'),
+    includeMembers ? fetchJson('/api/team-members') : Promise.resolve(undefined),
     // 예외 스트림 실신호(#2097) — project-scope 가드는 BE(404). 실패/미가용은 null→[](정직 빈상태).
     fetchJson(`/api/glance/attention?project_id=${projectId}`),
   ]);
@@ -58,7 +62,7 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   }
 
   const partialErrors: GlanceDataPartialErrors = {
-    members: membersJson === null,
+    members: includeMembers && membersJson === null,
     attention: attentionJson === null,
   };
 

@@ -102,6 +102,8 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   // 카디르 재QA 비차단②(S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을
   // 못 열던 것 fix, 이건 그대로 유지.
   const view = parseView(searchParams.get('view'), searchParams.get('hypothesis') !== null);
+  // story #4171 — org 전체 팀원 목록(memberMap)은 흐름 화면만 쓴다(목록 보기 첫 화면에선 안 부른다).
+  const needsMembers = view === 'flow';
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -116,7 +118,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     setLoading(true);
     void (async () => {
       try {
-        const result = await loadGlanceData(projectId);
+        const result = await loadGlanceData(projectId, { includeMembers: needsMembers });
         if (cancelledRef.cancelled) return;
         setData(result);
       } catch {
@@ -126,7 +128,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         if (!cancelledRef.cancelled) setLoading(false);
       }
     })();
-  }, [projectId]);
+  }, [projectId, needsMembers]);
 
   // story #2545(카디르 라이브 재QA 4단계) — org 불일치 자동교정(switch-org)이 이 fetch *後*
   // 성공하면 projectId는 안 바뀌므로 재요청 트리거가 없었다. 다른 opt-in 컴포넌트들

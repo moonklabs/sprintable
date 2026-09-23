@@ -12,7 +12,7 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { Button } from '@/components/ui/button';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchDesignatedPendingCount } from '@/lib/designated-pending-count-client';
 import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
@@ -298,12 +298,9 @@ export function AppSidebar({
         // 결재자로 지정된 미해소 건이 몇 개인가", room 추론 0)로 교체. #3001부터 카드가
         // 지정 라인 전용으로만 발행되므로 이 좁은 쿼리가 GNB "미확認" 뱃지의 정확한 SSOT다
         // (BE 문서 gates.py::get_designated_pending_count — "AC1이 이 층에서 닫히는 근거").
-        const res = await fetchWithAuth('/api/gates/designated-pending-count');
-        if (!res.ok || cancelled) return;
-        const json = await res.json() as { count?: number };
-        if (!cancelled) {
-          setInboxPendingCount(typeof json.count === 'number' ? json.count : 0);
-        }
+        // story #4171 — 하단 탭바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
+        const count = await fetchDesignatedPendingCount();
+        if (count !== null && !cancelled) setInboxPendingCount(count);
       } catch { /* noop */ }
     };
 
@@ -328,12 +325,8 @@ export function AppSidebar({
   useEffect(() => {
     if (!mux) return;
     const refetch = () => {
-      void fetchWithAuth('/api/gates/designated-pending-count')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((json: { count?: number } | null) => {
-          if (json && typeof json.count === 'number') setInboxPendingCount(json.count);
-        })
-        .catch(() => { /* noop — 다음 정상 이벤트나 30초 폴링으로 자연 회복 */ });
+      // 실패는 null — 다음 정상 이벤트나 30초 폴링으로 자연 회복.
+      void fetchDesignatedPendingCount().then((count) => { if (count !== null) setInboxPendingCount(count); });
     };
     const unsubs = [
       mux.subscribe('conversation.gate_resolved', refetch),

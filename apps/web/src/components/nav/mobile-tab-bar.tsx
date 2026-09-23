@@ -8,7 +8,7 @@ import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'l
 import { cn } from '@/lib/utils';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchDesignatedPendingCount } from '@/lib/designated-pending-count-client';
 import {
   DEFAULT_NAV_V3_FLAGS,
   resolveNavV3Destinations,
@@ -235,10 +235,9 @@ export function MobileTabBar({
         // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(넓은 project-access 질문)를
         // designated-pending-count(순수 "내가 지정 결재자인 미해소 건", room 추론 0)로 교체
         // — app-sidebar.tsx와 동일 SSOT 전환(그 파일 주석 참고).
-        const res = await fetchWithAuth('/api/gates/designated-pending-count');
-        if (!res.ok) return;
-        const json = (await res.json()) as { count?: number };
-        if (!cancelled) setPendingCount(typeof json.count === 'number' ? json.count : 0);
+        // story #4171 — 사이드바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
+        const count = await fetchDesignatedPendingCount();
+        if (count !== null && !cancelled) setPendingCount(count);
       } catch {
         // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
       }
