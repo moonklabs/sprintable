@@ -5,7 +5,8 @@
 1. 사용자 노출 문자열에 내부어 0 — 목록·이유는 아래 _FORBIDDEN(유나 확정 2026-09-23). 해제 조건:
    그 말이 제품 낱말로 채택될 때(유나 확정)만 줄을 지운다. «사용자 노출»의 범위(PR #4188 본문 AC1 표):
    - name: 모든 플랫폼 프리셋(이벤트 카탈로그 행 제목 `events/page.tsx:429`).
-   - description·stage_metadata[*].action: 사이클형(stage enum 있음)만 — 설정 템플릿 갤러리
+   - description: 사이클형 + 마케팅(`preset.marketing.*`, 갤러리가 사이클 여부와 무관하게 그린다).
+   - description·stage_metadata[*].action: 사이클형(stage enum 있음) — 설정 템플릿 갤러리
      (`workflow-template-gallery-section.tsx:271`)·루프 생성 미리보기(`loop-create-dialog.tsx:335,341`)·
      레시피 갤러리(`recipe-gallery.tsx:42`)·카탈로그 단계 목록(`events/page.tsx:530`)이 전부 사이클형 필터
      뒤에 있다. 신호형 프리셋의 description은 사람 화면 렌더 경로가 없다(에이전트 온보딩 가이드
@@ -37,15 +38,23 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _STAGE_LABEL_TS = _REPO_ROOT / "apps/web/src/lib/recipe-stage-label.ts"
 _STAGE_ROLE_TS = _REPO_ROOT / "apps/web/src/lib/stage-role.ts"
 
+# 라틴 약어는 대소문자 무시 + 영숫자 경계(앞뒤가 영문자·숫자가 아닐 때만) — «VOD» 같은 다른 낱말 오탐 방지.
+# 한글과 바로 붙어도(«VO애니매틱») 잡도록 \b 대신 ASCII 영숫자 lookaround(파이썬 \b는 한글을 낱말 문자로 본다).
+def _latin_abbr(word: str) -> str:
+    return rf"(?i)(?<![A-Za-z0-9]){word}(?![A-Za-z0-9])"
+
+
 # (금지 패턴, 이유) — 유나 확정 목록(2026-09-23, story #4188 본문). «게이트»는 제품 화면 낱말이라 넣지 않는다.
 _FORBIDDEN: list[tuple[str, str]] = [
-    (r"BYOA", "내부 전략 약어 — 고객 화면 낱말 아님"),
+    (_latin_abbr("BYOA"), "내부 전략 약어 — 고객 화면 낱말 아님"),
     (r"딸깍", "팀 은어(클릭 한 번) — «승인»으로 쓴다"),
     (r"전이", "팀 은어(상태 전환) — 화면은 «진행·넘어감»"),
     (r"실탄", "팀 은어(유료 생성 비용) — «유료 생성·생성 예산»"),
     (r"발사", "팀 은어(유료 생성 실행) — «실행»"),
     (r"표적", "팀 은어(생성 대상) — «생성 대상»"),
-    (r"i2v", "모델 약어(image-to-video) — «영상»"),
+    (_latin_abbr("i2v"), "모델 약어(image-to-video) — «영상»"),
+    # 까디르 QA(PR 4549): 0395가 푼 «VO»를 되돌려도 통과하던 구멍 — 유나가 action에서 «내레이션»으로 푼 것과 같은 판단.
+    (_latin_abbr("VO"), "영문 약어(voice-over) — «내레이션»"),
     (r"레시피 \d+호", "내부 일련번호"),
     (r"[一-鿿]", "한자 혼용(팀 채팅의 «확定»류)"),
 ]
@@ -99,9 +108,10 @@ def _user_facing_strings(preset: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     if preset.get("name"):
         out.append(("name", preset["name"]))
+    # 마케팅 갤러리(recipe-gallery.tsx:42)는 사이클 여부와 무관하게 description을 그린다(까디르 QA·PO 판단).
+    if preset.get("description") and (_is_cyclic(preset) or preset["key"].startswith("preset.marketing.")):
+        out.append(("description", preset["description"]))
     if _is_cyclic(preset):
-        if preset.get("description"):
-            out.append(("description", preset["description"]))
         for stage, meta in (preset.get("stage_metadata") or {}).items():
             if isinstance(meta, dict) and isinstance(meta.get("action"), str):
                 out.append((f"stage_metadata.{stage}.action", meta["action"]))
@@ -170,3 +180,32 @@ def test_guard_catches_old_video_copy():
     hits = "\n".join(_find_violations([old]))
     for word in ("BYOA", "레시피 1호", "딸깍", "전이", "定"):
         assert word in hits
+
+
+def test_guard_catches_latin_abbreviations_case_insensitively_without_false_positives():
+    """까디르 QA(PR 4549) 구멍 a — 0395가 지운 옛 «VO» 문구 복원을 잡고, 대소문자·한글 붙음도 잡되
+    «VOD»·«NOVO» 같은 다른 낱말은 안 잡는다."""
+    def hits(action: str) -> str:
+        preset = {
+            "key": "preset.marketing.x",
+            "payload_schema": {"properties": {"stage": {"enum": ["s"]}}},
+            "stage_metadata": {"s": {"role": "Creator", "action": action}},
+        }
+        return "\n".join(_find_violations([preset]))
+
+    assert "VO" in hits("무과금 스틸+텍스트+VO 애니매틱 제작 후 구조 판정 요청")
+    assert hits("vo 녹음")
+    assert hits("VO애니매틱")
+    assert hits("I2V 호출")
+    assert hits("byoa 채택")
+    assert hits("VOD 편집") == ""
+    assert hits("NOVO 캠페인") == ""
+
+
+def test_guard_scans_description_of_non_cyclic_marketing_preset():
+    """까디르 QA(PR 4549) 구멍 b — 마케팅 갤러리는 사이클 여부와 무관하게 description을 그린다."""
+    non_cyclic_marketing = {"key": "preset.marketing.y", "name": "이름", "description": "딸깍 한 번이면 끝"}
+    assert "딸깍" in "\n".join(_find_violations([non_cyclic_marketing]))
+    # 대조: 비사이클 신호형(마케팅 아님)의 description은 사람 화면 밖이라 그대로 제외.
+    non_cyclic_signal = {"key": "preset.agent_run.x", "name": "이름", "description": "확定"}
+    assert _find_violations([non_cyclic_signal]) == []
