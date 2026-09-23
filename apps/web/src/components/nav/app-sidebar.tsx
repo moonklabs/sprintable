@@ -38,6 +38,7 @@ import {
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface AppSidebarProps {
   orgId?: string;
@@ -146,6 +147,8 @@ export function AppSidebar({
   const searchParams = useSearchParams();
   // story #4003 — nav-v3-destinations.ts 결정 함수를 그대로 재사용(복붙 규칙 0, AC2).
   const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
+  // story #4226 — static(flat) 항목 링크는 `?p=`를 싣는다(use-flat-href · 셸의 착지 정규화 router.replace 0).
+  const flatHref = useFlatHref();
   const chatCenterItem = useMemo(() => resolveChatCenterItem(navV3Flags), [navV3Flags]);
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
@@ -351,7 +354,7 @@ export function AppSidebar({
   const chatCenterCard = (
     <div className="mx-2.5 mt-2">
       <Link
-        href={chatCenterItem.path}
+        href={flatHref(chatCenterItem.path)}
         // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
@@ -457,7 +460,7 @@ export function AppSidebar({
                   // retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다(story #3844
                   // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
-                    ? { href: item.path, isActive: isActive(item.path) }
+                    ? { href: flatHref(item.path), isActive: isActive(item.path) }
                     : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
@@ -513,7 +516,7 @@ export function AppSidebar({
           const legacyLinkByItemId = new Map(
             legacyGroups.flatMap((group) => group.items).map((item) => [
               item.id,
-              item.kind === 'static' ? { href: item.path, isActive: isActive(item.path) } : resourceLink(item.path),
+              item.kind === 'static' ? { href: flatHref(item.path), isActive: isActive(item.path) } : resourceLink(item.path),
             ]),
           );
           const legacyHasActiveItem = [...legacyLinkByItemId.values()].some((link) => link.isActive);

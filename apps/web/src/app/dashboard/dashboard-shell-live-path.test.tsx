@@ -135,6 +135,17 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(routerReplace).not.toHaveBeenCalled();
   });
 
+  it('⭐story #4226 — 전환 «대기 중 목표»는 실제 프로젝트가 그 목표가 되면 지운다 · 다른 목표면 남긴다', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget('proj-not-yet');
+    await renderShellAt('/repro/charlie/flow');
+    expect(getPendingProjectTarget()).toBe('proj-not-yet');
+    setPendingProjectTarget(C);
+    await renderShellAt('/repro/beta/flow');
+    await renderShellAt('/repro/charlie/flow');
+    expect(getPendingProjectTarget()).toBeNull();
+  });
+
   it('⭐story #4226 — flat 경로의 드문 진입(`?p=` 없음)은 router.replace 한 번 · Next가 새 `p`를 읽은 뒤 재렌더 추가 0', async () => {
     nav.search = '';
     routerReplace.mockClear();

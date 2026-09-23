@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { getPendingProjectTarget, setPendingProjectTarget } from '@/lib/pending-project-switch';
 import {
   TAB_PROJECT_STORAGE_KEY,
   bumpOrgSyncVersion,
@@ -355,11 +356,13 @@ function useProjectSsot(
   // - scoped 경로(`/{ws}/{proj}/…` · pathProjectId 있음): 경로가 프로젝트 SSOT라 `?p=`를 읽는 곳이 없다
   //   (resolveEffectiveProjectId가 pathProjectId를 먼저 반환) → 쓰지 않는다. 착지 RSC 1→0은 이걸로.
   // - flat 탭(결재·대화·더보기 등)은 탭바 링크가 처음부터 `?p={effective}`를 싣고 간다(mobile-tab-bar) → 착지 때 정규화 조건이
-  //   안 생긴다. 그 밖의 드문 flat 진입만 여기서 router.replace — Next가 아는 이동이라 액션 큐 안에서 순서가 지켜지고
-  //   (대기 중인 이동과 경합 0), refresh 뒤에도 `?p=`가 남는다. RSC 1은 그 드문 경우에만.
+  //   안 생긴다. 그 밖의 flat 진입은 여기서 router.replace — develop과 같은 성질이다(Next가 아는 이동이라 refresh 뒤에도 `?p=`가
+  //   남지만, 대기 중인 다른 이동을 버릴 수 있다). 링크가 `?p=`를 싣게 해서 이 경로 자체를 줄이는 것이 처방이다.
+  // - 프로젝트 전환 «대기 중 목표»(pending-project-switch)는 실제 프로젝트가 그 목표가 되면 여기서 지운다.
   useEffect(() => {
     if (!effectiveProjectId || typeof window === 'undefined') return;
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, effectiveProjectId);
+    if (getPendingProjectTarget() === effectiveProjectId) setPendingProjectTarget(null);
     if (pathProjectId || urlProjectId === effectiveProjectId) return;
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
     sp.set('p', effectiveProjectId);

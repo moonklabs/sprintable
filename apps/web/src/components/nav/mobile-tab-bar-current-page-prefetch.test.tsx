@@ -88,6 +88,19 @@ describe('MobileTabBar — flat 탭 링크는 처음부터 `?p={현재 프로젝
     expect(hrefs).toContain('/inbox?tab=gates&p=proj-1'); // 기존 쿼리 보존
   });
 
+  it('⭐전환 대기 중엔 목표 프로젝트를 싣는다(커밋 전 컨텍스트는 아직 옛 프로젝트 — 까디르 QA [P2])', async () => {
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    ctx.projectId = 'proj-A';
+    setPendingProjectTarget('proj-B');
+    try {
+      const hrefs = [...(await renderAt('/inbox')).keys()];
+      expect(hrefs).toContain('/inbox?tab=gates&p=proj-B');
+      expect(hrefs.some((h) => h.includes('p=proj-A'))).toBe(false);
+    } finally {
+      setPendingProjectTarget(null);
+    }
+  });
+
   it('프로젝트를 아직 모르면 붙이지 않는다', async () => {
     const hrefs = [...(await renderAt('/acme/proj/flow')).keys()];
     for (const h of hrefs) expect(h).not.toContain('p=');

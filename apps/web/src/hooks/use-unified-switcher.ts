@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { setPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -254,9 +255,11 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const newOrgSlug = orgs.find((o) => o.orgId === nextOrgId)?.orgSlug;
       const newSlug = newOrgSlug ? await fetchProjectSlug(projectId) : null;
       const switchedPath = newOrgSlug && newSlug ? withSwitchedSlugs(pathname, currentOrg?.orgSlug, newOrgSlug, newSlug) : null;
+      setPendingProjectTarget(projectId); // story #4226 — 커밋 전 탭 링크가 옛 프로젝트를 박지 않게
       router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
       router.refresh();
     } catch {
+      setPendingProjectTarget(null);
       // story #2544 — switchOrg와 동일 함정: orgRes 이후(switch-project/slug 해소/router.push)
       // 어디서든 던지면 org는 이미 전환됐는데 UI만 이전 상태로 안 돌아가는 반쪽짜리 실패가 된다.
       // org 전환 자체는 이미 성공했을 수 있어 prevOrgId로 되돌리지 않는다 — 다음 router.refresh
@@ -291,6 +294,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const orgSlug = currentOrg?.orgSlug;
       const newSlug = orgSlug ? await fetchProjectSlug(nextProjectId) : null;
       const switchedPath = orgSlug && newSlug ? withSwitchedSlugs(pathname, orgSlug, orgSlug, newSlug) : null;
+      setPendingProjectTarget(nextProjectId); // story #4226 — 커밋 전 탭 링크가 옛 프로젝트를 박지 않게
       router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
       await fetch('/api/switch-project', {
         method: 'POST',

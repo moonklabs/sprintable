@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import type { NextMakerHeadline, ZeroStageStats } from './derive-next-maker';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface NextMakerHeaderProps {
   headline: NextMakerHeadline;
@@ -46,6 +47,8 @@ interface NextMakerHeaderProps {
  * 결재)에서 멈춘 것이 없습니다」로 같이 고쳤다 — 한쪽만 고치면 여전히 주어 없이 만난다.
  */
 export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
+  // story #4226 — 결재함(flat) 링크는 `?p=`를 싣는다(use-flat-href).
+  const flatHref = useFlatHref();
   const t = useTranslations('flow');
 
   return (
@@ -65,7 +68,7 @@ export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
       <div className="flex flex-wrap gap-2">
         <ZeroStageCell tone="brand" value={zeroStage.canDo} label={t('nextMakerCanDo')} />
         <ZeroStageCell tone="info" value={zeroStage.unowned} label={t('nextMakerUnowned')} />
-        <ZeroStageCell tone="warn" value={zeroStage.blocked} label={t('nextMakerPendingApproval')} href="/inbox?tab=gates" />
+        <ZeroStageCell tone="warn" value={zeroStage.blocked} label={t('nextMakerPendingApproval')} href={flatHref('/inbox?tab=gates')} />
       </div>
 
       <p className="text-[11px] text-muted-foreground">

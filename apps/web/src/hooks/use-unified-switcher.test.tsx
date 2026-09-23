@@ -159,6 +159,20 @@ describe('useUnifiedSwitcher — 전환 시 쿼리파라미터 화이트리스�
     expect(q.has('assignee_id')).toBe(false);
   });
 
+  it('⭐story #4226 — switchProject·switchOrgAndProject는 이동 시작 때 «대기 중 목표»를 적는다(커밋 전 탭 링크가 옛 프로젝트를 박지 않게)', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    setPendingProjectTarget(null);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    const pendingAtPush: (string | null)[] = [];
+    routerPushMock.mockImplementation(() => { pendingAtPush.push(getPendingProjectTarget()); });
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+    expect(pendingAtPush).toEqual(['proj-sprintable', 'proj-dogfood']);
+    routerPushMock.mockReset();
+    setPendingProjectTarget(null);
+  });
+
   it('project-agnostic 파라미터가 아예 없으면 p만 실린다(빈 값 오염 없음)', async () => {
     searchParamsValueRef.current = 'story=story-1&epic_id=epic-1';
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
