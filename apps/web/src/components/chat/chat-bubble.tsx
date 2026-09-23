@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { isCommentOnlyContent, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
 import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -195,7 +196,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -212,8 +213,19 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
   const codeBg = 'bg-muted text-foreground';
   const border = 'border-border';
 
+  // story #4197 — 내부 HTML 주석(`<!-- linear-comment-id … -->`). 마크다운·코드 문법이 하나라도 있으면(들여쓰기 코드 포함)
+  // 마크다운 경로에서 remarkStripHtmlComments가 AST의 주석 노드만 뺀다(코드 안 `<!--`는 안 건드림). 문법이 전혀 없는
+  // 평문이면 평문 경로(pre-wrap) 그대로 두고 주석을 줄 단위로 걷는다 — 주석 뺀 같은 메시지와 줄 수가 같게(유나 design).
+  const hasComment = rawContent.includes('<!--');
+  // 판정만 주석을 뺀 글로 한다(`-->`의 `>`가 인용 문법으로 잡혀 평문 메시지가 마크다운 경로로 새지 않게) — 렌더엔 안 쓴다.
+  const detectionText = hasComment ? rawContent.replace(/<!--[\s\S]*?(?:-->|$)/g, '') : rawContent;
+  // 주석이 있던 메시지는 예전엔 `-->` 때문에 늘 마크다운 경로였다 — 목록·들여쓰기 코드 구조가 평문으로 깨지지 않게
+  // 그 둘도 마크다운 표지로 친다(주석 없는 메시지의 판정은 그대로).
+  const markdownish = /[*_`#\[\]>~]|entity:/.test(detectionText)
+    || (hasComment && (/^(?: {4}|\t)/m.test(rawContent) || /^\s*(?:[-*+]|\d+[.)])\s/m.test(detectionText)));
+  const content = hasComment && !markdownish ? stripHtmlCommentsFromPlainText(rawContent) : rawContent;
   const hasMention = /@[\w가-힣]+/.test(content);
-  const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
+  const hasMarkdown = markdownish;
 
   // story #2021: react-markdown이 리졸브한 컴포넌트 함수 참조를 그대로 React 엘리먼트 type으로
   // 쓴다(hast-util-to-jsx-runtime `state.components[name]`). 이 객체를 매 렌더 인라인으로 새로
@@ -265,7 +277,8 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
     strong: ({ children }: { children?: React.ReactNode }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
     em: ({ children }: { children?: React.ReactNode }) => <em className={`italic ${text}`}>{children}</em>,
     code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
-      const raw = String(children).replace(/\n$/, '');
+      // story #4197 AC1d — 빈 코드 블록(```` ```\n``` ````·`~~~`)이면 children이 없어 String()이 «undefined»를 냈다.
+      const raw = String(children ?? '').replace(/\n$/, '');
       const inline = !className?.includes('language-') && !raw.includes('\n');
       return (
         <CopyableCode
@@ -368,7 +381,7 @@ export function ChatMarkdown({ content, isMine, references, entityStatusByKey, o
         ) : (
           <ReactMarkdown
             key={idx}
-            remarkPlugins={[remarkGfm, remarkBreaks]}
+            remarkPlugins={[remarkGfm, remarkBreaks, remarkStripHtmlComments]}
             urlTransform={(url) =>
               url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
             }
@@ -419,6 +432,8 @@ export function ChatBubble({
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
+  const isCommentOnly = isCommentOnlyContent(displayContent)
+    && (message.attachments?.length ?? 0) === 0 && (message.references?.length ?? 0) === 0;
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
   const displayName = isMine ? t('you') : (message.sender_name || t('team'));
@@ -614,6 +629,14 @@ export function ChatBubble({
               >
                 {t('blockedSenderMessageReveal')}
               </button>
+            </div>
+          ) : isCommentOnly ? (
+            // story #4197(유나 확정) — 주석을 걷고 나면 글자가 없고 첨부·참조 카드도 없는 메시지. 빈 말풍선 대신
+            // «삭제된 메시지»와 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
+              isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+            }`} data-testid="chat-bubble-empty-placeholder">
+              {t('emptyMessagePlaceholder')}
             </div>
           ) : approvalTarget ? (
             <ApprovalRequestCard

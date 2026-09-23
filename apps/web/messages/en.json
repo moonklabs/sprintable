@@ -4913,6 +4913,7 @@
     "deleteMessageErrorTitle": "Delete failed",
     "deleteMessageErrorBody": "Couldn't delete the message. Please try again.",
     "deletedMessagePlaceholder": "This message was deleted",
+    "emptyMessagePlaceholder": "This message has no content to show",
     "blockedSenderMessagePlaceholder": "Message from a blocked user",
     "blockedSenderMessageReveal": "View",
     "blockedSenderMessageHide": "Hide",

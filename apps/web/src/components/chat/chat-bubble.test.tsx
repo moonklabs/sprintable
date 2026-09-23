@@ -2273,3 +2273,137 @@ describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () =>
     expect(container.textContent).not.toContain('서버 집행');
   });
 });
+
+// story #4197 — 말풍선 본문에 내부 HTML 주석(`<!-- linear-comment-id … -->`)이 글자 그대로 보이던 결함. 마크다운 AST에서
+// html 주석 노드만 빼는 remark 플러그인(lib/remark-strip-html-comments.ts)으로 — 까디르 반례(원문 정규식이 뒷본문 통째
+// 삭제·코드 틀 소실)를 전부 여기서 잰다.
+describe('ChatBubble — 본문의 내부 HTML 주석 제거(story #4197)', () => {
+  async function render(content: string, extra: Partial<ChatMessage> = {}) {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content, references: [], ...extra }} isMine={false} />));
+    });
+    return container;
+  }
+  const text = () => container.textContent ?? '';
+
+  it.each([
+    ['닫힌 주석 + 마크다운', '<!-- linear-comment-id: abc-123 -->\n\n**댓글** 본문', '댓글 본문'],
+    ['본문 중간 주석', '앞 문장 <!-- id --> 뒤 문장이 **이어져요**', '앞 문장 뒤 문장이 이어져요'],
+    ['평문(마크다운 없음) 첫 줄 주석', '<!-- linear-comment-id: abc -->\n평범한 답장', '평범한 답장'],
+  ])('%s — 화면에 주석 0·본문 보존', async (_n, content, kept) => {
+    await render(content);
+    expect(text()).not.toContain('<!--');
+    expect(text()).not.toContain('linear-comment-id');
+    expect(text()).toContain(kept);
+  });
+
+  // ── 까디르 반례 표(PR #4559 QA) ──
+  it('4백틱 펜스 안의 ``` + `<!--` 는 코드 그대로, 뒤 본문도 그대로', async () => {
+    await render('````\n```\n<!-- x\n````\n\n뒤 본문 중요');
+    expect(text()).toContain('<!-- x');
+    expect(text()).toContain('뒤 본문 중요');
+  });
+
+  it('이중 백틱 인라인 코드 안의 `<!--`는 코드 그대로, 뒤 본문도 그대로', async () => {
+    await render('인라인 ``<!--`` 그리고 뒤 본문 중요');
+    expect(text()).toContain('<!--');
+    expect(text()).toContain('그리고 뒤 본문 중요');
+  });
+
+  it('~~~ 펜스·안 닫힌 펜스 안의 `<!--`는 코드 그대로(«undefined» 없음)', async () => {
+    await render('~~~html\n<!-- keep tilde -->\n~~~\n\n```\n<!-- keep open');
+    expect(text()).toContain('<!-- keep tilde -->');
+    expect(text()).toContain('<!-- keep open');
+    expect(text()).not.toContain('undefined');
+  });
+
+  it('들여쓰기 코드 블록 안의 주석은 코드 그대로(코드 틀 유지)', async () => {
+    const c = await render('설명 문단\n\n    <!-- indented -->\n    code()');
+    expect(c.querySelector('pre')).not.toBeNull();
+    expect(text()).toContain('<!-- indented -->');
+  });
+
+  it('안 닫힌 주석은 끝까지 주석(CommonMark·HTML과 같다) — 남는 글자가 없으면 빈 본문 문구', async () => {
+    const c = await render('<!-- linear-comment-id: f4\n\n다음 문단');
+    expect(text()).not.toContain('<!--');
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).not.toBeNull();
+  });
+
+  it('인용·목록 안의 안 닫힌 주석은 그 컨테이너 안에서만 — 바깥 문단은 남는다', async () => {
+    await render('> 인용\n> <!-- x\n\nTAIL 문단\n\n- 항목 <!-- y\n\nLIST TAIL');
+    expect(text()).toContain('인용');
+    expect(text()).toContain('TAIL 문단');
+    expect(text()).toContain('LIST TAIL');
+    expect(text()).not.toContain('<!--');
+  });
+
+  it('목록 안 주석은 목록 구조를 안 깨뜨린다(<ul> 유지)', async () => {
+    const c = await render('- a <!-- s --> b\n- 형제');
+    expect(c.querySelector('ul')).not.toBeNull();
+    expect(c.querySelectorAll('li')).toHaveLength(2);
+    expect(text()).not.toContain('<!--');
+  });
+
+  it('한 html 노드에 주석+뒷글이면 주석 부분만 빠진다', async () => {
+    await render('<!-- s --> TAIL 글');
+    expect(text()).toContain('TAIL 글');
+    expect(text()).not.toContain('<!--');
+  });
+
+  // ── 유나 design(PR #4559): 주석 뺀 같은 메시지와 같은 결과 ──
+  it.each([
+    ['첫 줄 주석', '<!-- linear-comment-id: abc -->\n평범한 답장이에요. 확인했어요.', '평범한 답장이에요. 확인했어요.'],
+    ['가운데 줄 주석', '첫 문단이에요.\n<!-- linear-comment-id: abc -->\n둘째 문단이에요.', '첫 문단이에요.\n둘째 문단이에요.'],
+    ['끝 줄 주석', '평범한 답장이에요.\n<!-- linear-comment-id: abc -->', '평범한 답장이에요.'],
+    ['마크다운 경로 가운데 문단 주석', '**첫** 문단.\n\n<!-- linear-comment-id: abc -->\n\n둘째 문단.', '**첫** 문단.\n\n둘째 문단.'],
+    ['줄 가운데 주석 = 공백 하나', '앞 문장 <!-- id --> 뒤 문장이에요.', '앞 문장 뒤 문장이에요.'],
+  ])('%s — 주석 뺀 메시지와 보이는 글자(줄 수 포함)가 같다', async (_n, withComment, withoutComment) => {
+    await render(withComment);
+    const a = text();
+    await render(withoutComment);
+    const b = text();
+    expect(a).toBe(b);
+  });
+
+  // PR #4559 까디르 잔여 1·3 — 판정은 주석 뺀 글로(원문의 `-->` `>`를 인용 표지로 잡으면 평문 메시지가 마크다운
+  // 경로로 새 문단 틀이 바뀐다) · `1)` 번호 목록도 목록 표지.
+  it('마크다운 문법 없는 평문 + 주석 → 평문 경로(<p> 문단 틀 없음)', async () => {
+    const c = await render('<!-- linear-comment-id: abc -->\n평범한 답장이에요.');
+    expect(c.querySelector('p')).toBeNull();
+    expect(c.querySelector('span.whitespace-pre-wrap')?.textContent).toBe('평범한 답장이에요.');
+  });
+
+  it('`1)` 번호 목록 + 주석도 목록 구조 유지(<ol>)', async () => {
+    const c = await render('1) 첫 <!-- s --> 항목\n2) 둘째');
+    expect(c.querySelector('ol')).not.toBeNull();
+    expect(text()).not.toContain('<!--');
+  });
+
+  it('주석 뒤 들여쓰기 주석 줄은 렌더러가 코드로 그린다 — 빈 본문 문구가 코드를 가리지 않는다(PR #4559 까디르)', async () => {
+    const c = await render('<!-- a -->\n    <!-- literal -->');
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).toBeNull();
+    expect(c.querySelector('pre')?.textContent).toContain('<!-- literal -->');
+  });
+
+  it('주석 안에 백틱·~~~가 있어도 주석뿐이면 빈 본문 문구', async () => {
+    const c = await render('<!-- 예: `code` ~~~ -->');
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).not.toBeNull();
+  });
+
+  // ── 빈 본문 ──
+  it('주석뿐인 메시지는 빈 말풍선 대신 «표시할 내용이 없는 메시지예요»', async () => {
+    const c = await render('<!-- linear-comment-id: abc -->');
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')?.textContent)
+      .toBe(koMessages.chats.emptyMessagePlaceholder);
+  });
+
+  it('첨부가 있으면 빈 본문 문구를 띄우지 않는다', async () => {
+    const c = await render('<!-- only -->', { attachments: [{ name: 'a.png', url: 'https://x/a.png', content_type: 'image/png' }] });
+    expect(c.querySelector('[data-testid="chat-bubble-empty-placeholder"]')).toBeNull();
+  });
+
+  it('AC1d — 빈 코드 블록이 «undefined»로 보이지 않는다', async () => {
+    await render('설명\n\n~~~html\n\n~~~');
+    expect(text()).not.toContain('undefined');
+  });
+});
