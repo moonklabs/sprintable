@@ -536,3 +536,90 @@ async def test_channel_edited_after_approval_is_not_cascaded_until_resubmitted()
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_channel_new_version_between_seal_and_cascade_is_not_inherited(monkeypatch):
+    """까디르 4564 CHANGES — 봉인(v1)과 캐스케이드 대상 계산 사이에 v2가 커밋·재봉인되면(인터리빙) 캐스케이드는 봉인
+    v1과 대조해 승계 0. 결정적 재현: 봉인 직후 같은 흐름에서 v2를 만든다(pending scoped 게이트가 v2로 재봉인).
+    뮤테이션: 캐스케이드가 봉인 반환값 대신 ready[0]을 재조회하고 명시 대조(②)도 빼면 v2를 승계해 RED."""
+    import app.services.gate_service as gs
+    from app.services.channel_posts import create_channel_post_draft_version
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190g")
+        scheduled_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        from app.main import app as app_
+
+        _draft_id, scoped_id = await _channel_draft_and_submit(app_, Session, c, "v1 본문", scheduled_at=scheduled_at)
+        real_seal = gs.seal_recipe_approved_draft
+
+        async def seal_then_v2(session, gate):
+            sealed = await real_seal(session, gate)
+            await create_channel_post_draft_version(
+                session, org_id=c["org_id"], work_item_id=c["story_id"], connection_id=c["connection_id"],
+                text="v2 끼어든 본문", link_url=None, author_member_id=c["creator_id"], author_kind="agent",
+            )
+            return sealed
+
+        monkeypatch.setattr(gs, "seal_recipe_approved_draft", seal_then_v2)
+        await _approve_d(Session, c)
+
+        scoped = await _gate(Session, scoped_id)
+        assert scoped.status == "pending", "봉인 v1 뒤 끼어든 v2를 레시피 승인이 승계했다"
+        assert await _commands(Session, scoped_id, status="pending") == []
+    finally:
+        app_.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_real_concurrent_edit_waits_for_the_approval_lock(monkeypatch):
+    """실 PG 두 세션 — A(레시피 승인)가 봉인에서 초안 행을 잠근 채 멈춘 동안 B(새 버전)는 그 잠금에서 기다린다 · A 커밋 뒤
+    B가 진행해 결과는 순차와 같다(A가 v1 승계 → B의 v2가 승인된 게이트를 재승인 대기로 되돌림 · v1 대기 명령 void).
+    잠금 순서 레시피 게이트 → 초안 → scoped 게이트(B의 경로 초안 → scoped 게이트와 같은 방향 — 교착 없음)."""
+    import asyncio
+
+    import app.services.gate_service as gs
+    from app.main import app
+    from app.services.channel_posts import create_channel_post_draft_version
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _realdb_session
+
+    engine, Session = await _realdb_session()
+    try:
+        c = await _channel_world(Session, "c4190h")
+        scheduled_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        _draft_id, scoped_id = await _channel_draft_and_submit(app, Session, c, "v1 본문", scheduled_at=scheduled_at)
+
+        locked, release = asyncio.Event(), asyncio.Event()
+        real_target = gs.recipe_approval_cascade_target
+
+        async def paused_target(session, **kw):
+            locked.set()
+            await release.wait()
+            return await real_target(session, **kw)
+
+        monkeypatch.setattr(gs, "recipe_approval_cascade_target", paused_target)
+
+        async def edit_v2():
+            async with Session() as s:
+                await create_channel_post_draft_version(
+                    s, org_id=c["org_id"], work_item_id=c["story_id"], connection_id=c["connection_id"],
+                    text="v2 동시 편집", link_url=None, author_member_id=c["creator_id"], author_kind="agent",
+                )
+
+        approve_task = asyncio.create_task(_approve_d(Session, c))
+        await asyncio.wait_for(locked.wait(), timeout=10)
+        edit_task = asyncio.create_task(edit_v2())
+        await asyncio.sleep(0.8)
+        assert not edit_task.done(), "승인이 초안을 잠근 동안 새 버전이 먼저 끝났다(잠금 없음)"
+        release.set()
+        await asyncio.wait_for(approve_task, timeout=20)
+        await asyncio.wait_for(edit_task, timeout=20)
+
+        scoped = await _gate(Session, scoped_id)
+        assert scoped.status == "pending" and scoped.reapproval_required is True
+        assert await _commands(Session, scoped_id, status="pending") == []
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
