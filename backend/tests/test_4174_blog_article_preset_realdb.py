@@ -166,30 +166,75 @@ def test_blog_capability_kinds_are_not_org_connector_readiness_targets():
     assert {"draft_site_post", "submit_site_post", "site_post_auto_publish"} <= set(_AGENT_TOOL_CAPABILITY_KINDS)
 
 
-def _fake_latest(stage: str):
-    return SimpleNamespace(msg_metadata={"event": {"payload": {"stage": stage}}})
+def _fake_latest(stage: str, draft_id: str | None = None):
+    payload = {"stage": stage}
+    if draft_id is not None:
+        payload["site_post_draft_id"] = draft_id
+    return SimpleNamespace(msg_metadata={"event": {"payload": payload}})
 
 
-async def test_recipe_context_is_the_stage_before_server_driven_publish(monkeypatch):
-    """레시피 문맥 = 이 work item의 블로그 레시피 현재 단계가 «서버가 발행 뒤 낼 단계» 바로 앞(발행 승인 대기)일 때만.
-    뮤테이션: 앞 단계 대조를 빼면 draft 단계에서도 문맥으로 잡혀 RED."""
+async def test_recipe_context_requires_the_draft_linked_by_this_run(monkeypatch):
+    """까디르 P1(4572 CHANGES) — 레시피 문맥 = 현재 단계가 «서버가 낼 단계» 바로 앞(발행 승인 대기) **이고** 그 단계 발행이
+    연결한 초안(site_post_draft_id)이 바로 이 초안일 때만. 음성: ① 버려진 회차가 남은 work item의 무관 초안(연결 id가 다름)
+    ② 같은 회차의 다른 목적지 초안(연결 id가 다름) ③ 연결 필드 없음 ④ 초안 id 없음 ⑤ 발행 승인 대기가 아닌 단계.
+    뮤테이션: 연결 대조 제거 → ①②③이 문맥으로 잡혀 RED."""
     import app.routers.events as events
 
+    linked, other = str(uuid.uuid4()), str(uuid.uuid4())
+
     async def body(s):
-        for current, expected in (
-            ("pending_approval", (_KEY, "published")),
-            ("verification", None),
-            ("draft", None),
-            (None, None),
+        for latest, draft_id, expected in (
+            (_fake_latest("pending_approval", linked), linked, (_KEY, "published")),
+            (_fake_latest("pending_approval", linked), other, None),
+            (_fake_latest("pending_approval", other), linked, None),
+            (_fake_latest("pending_approval"), linked, None),
+            (_fake_latest("pending_approval", linked), None, None),
+            (_fake_latest("verification", linked), linked, None),
+            (None, linked, None),
         ):
-            async def fake(db, **kw):
-                return _fake_latest(current) if (current and kw["definition_key"] == _KEY) else None
+            async def fake(db, *, _latest=latest, **kw):
+                return _latest if kw["definition_key"] == _KEY else None
 
             monkeypatch.setattr(events, "_find_latest_stage_publish", fake)
             got = await events.resolve_site_post_recipe_context(
-                s, org_id=uuid.uuid4(), work_item_type="story", work_item_id=uuid.uuid4(),
+                s, org_id=uuid.uuid4(), work_item_type="story", work_item_id=uuid.uuid4(), draft_id=draft_id,
             )
-            assert got == expected, (current, got)
+            assert got == expected, (latest, draft_id, got)
+
+    await _with_session(body)
+
+
+async def test_pending_approval_payload_accepts_the_draft_link_and_example_carries_it():
+    """연결 필드는 스키마에 열려 있고(additionalProperties false라 안 열면 에이전트 발행이 422), 발행 승인 대기로 넘어가는
+    멘션 예시에 그 자리가 실린다(최저 지능 에이전트가 예시만 보고 연결)."""
+    from app.routers.events import RECIPE_SITE_DRAFT_LINK_FIELD, _render_event_message_content
+    from app.services.event_definition_registry import validate_event_payload
+
+    async def body(s):
+        d = await _definition(s)
+        validate_event_payload(d.payload_schema, {
+            "stage": "pending_approval", "work_item_type": "story", "work_item_id": str(uuid.uuid4()),
+            RECIPE_SITE_DRAFT_LINK_FIELD: str(uuid.uuid4()),
+        })
+        content = await _render_event_message_content(s, org_id=uuid.uuid4(), definition=d, payload={
+            "stage": "verification", "work_item_type": "story", "work_item_id": str(uuid.uuid4()),
+        })
+        assert RECIPE_SITE_DRAFT_LINK_FIELD in content, content
+
+    await _with_session(body)
+
+
+async def test_server_driven_next_stage_line_is_localized():
+    """까디르 P2 — 새 «다음 단계» 줄이 en 로케일에서 영어(카탈로그 키)."""
+    from app.routers.events import _render_event_message_content
+
+    async def body(s):
+        d = await _definition(s)
+        content = await _render_event_message_content(s, org_id=uuid.uuid4(), definition=d, payload={
+            "stage": "pending_approval", "work_item_type": "story", "work_item_id": str(uuid.uuid4()),
+        }, resolved_locale="en")
+        assert "Next stage: published" in content, content
+        assert "다음 단계: published" not in content, content
 
     await _with_session(body)
 

@@ -436,14 +436,19 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Create the blog draft for the same story using create_site_post_draft.",
     },
     "events.capability_hint_submit_site_post": {
-        "ko": "검수를 마친 초안은 submit_site_post_draft로 제출해요 — 발행 승인은 사람이 결재함의 그 초안에서 해요.",
-        "en": "Submit the reviewed draft using submit_site_post_draft — a person approves publishing on that draft in Approvals.",
+        "ko": "검수를 마친 초안은 submit_site_post_draft로 제출하고, 돌려받은 draft_id를 다음 단계 발행의 site_post_draft_id에 넣어요 — 발행 승인은 사람이 결재함의 그 초안에서 해요.",
+        "en": "Submit the reviewed draft using submit_site_post_draft and put the returned draft_id in site_post_draft_id when you publish the next stage — a person approves publishing on that draft in Approvals.",
     },
     "events.capability_hint_site_post_auto_publish": {
         "ko": "승인된 초안은 서버가 블로그에 발행했어요. get_site_post_publication으로 공개 주소를 확인해요.",
         "en": "The server published the approved draft to the blog. Check its public URL using get_site_post_publication.",
     },
     # 유나 문안(PO 09:16Z) — 한 문장에 «발행» 두 뜻(블로그/이벤트)이 섞이지 않게 금지 대상을 도구 이름으로.
+    # story #4174(까디르 P2) — 서버 몫 다음 단계 줄의 «다음 단계:» 머리(영문 로케일에서도 한국어로 나가던 것).
+    "events.stage_next_label": {
+        "ko": "다음 단계: {stage}",
+        "en": "Next stage: {stage}",
+    },
     "events.stage_next_server_driven": {
         "ko": "블로그 발행이 끝나면 서버가 다음 단계로 넘겨요 — 이 단계에서는 publish_event를 부르지 마세요.",
         "en": "The server moves to the next stage once the blog post is published — don't call publish_event from this stage.",

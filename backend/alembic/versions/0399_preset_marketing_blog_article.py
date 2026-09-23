@@ -52,6 +52,9 @@ _PAYLOAD_SCHEMA = {
         "stage": {"type": "string", "enum": _STAGES},
         "work_item_type": {"type": "string"},
         "work_item_id": {"type": "string", "format": "uuid"},
+        # 발행 승인 대기 단계가 이 회차의 블로그 초안을 명시적으로 연결하는 자리(events.RECIPE_SITE_DRAFT_LINK_FIELD —
+        # 레시피 문맥 판별은 이 id와 승인된 초안이 같을 때만). 다른 단계에선 없어도 된다.
+        "site_post_draft_id": {"type": "string", "format": "uuid"},
     },
     "additionalProperties": False,
 }
