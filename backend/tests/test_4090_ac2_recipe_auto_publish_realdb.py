@@ -319,10 +319,10 @@ async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, cr
 
 
 @pytest.mark.anyio
-async def test_ac2_order_a_approve_then_submit_auto_publishes_without_manual_click():
-    """순서A(승인 먼저·제출 나중) — ⓓ 승인 뒤 draft 제출만으로(별도 /publish 호출 0)
-    ChannelPublication이 published로 남아야 한다. test_4069의 "sandbox로만 나가는지"
-    직접 단언(permalink prefix)까지 같이 잰다."""
+async def test_ac2_order_a_approve_then_submit_does_not_auto_publish():
+    """순서A(승인 먼저·제출 나중) — 정정(story #4190, PO 판정 2026-09-23 «사람 승인은 그 사람이 본 내용에만
+    유효하다»): ⓓ 승인 화면엔 아직 draft가 없었으므로 그 뒤 제출한 draft는 승계되지 않는다 → scoped 게이트
+    pending(사람 승인) · 자동발행 0 · published stage 이벤트 0. 자동발행은 순서B(아래)로 유지된다."""
     from app.main import app
     from app.models.channel_publication import ChannelPublication
     from app.models.gate import Gate
@@ -354,7 +354,7 @@ async def test_ac2_order_a_approve_then_submit_auto_publishes_without_manual_cli
             assert r.json().get("publish_outcome") is not None, "승인 응답에 publish_outcome이 안 실렸다"
             assert r.json()["publish_outcome"] == "no_submitted_draft", "draft 없음 사유 코드가 승인 응답에 안 실렸다"
 
-        # draft 제출 — 훅A가 승계-승인 + AC2 자동발행까지 잇는다(별도 /publish 호출 0).
+        # draft 제출 — ⓓ 승인이 이 draft를 본 적이 없으므로 승계 0(pending).
         _setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
         async with _client_for(app) as client:
             r_draft = await client.post(
@@ -368,38 +368,25 @@ async def test_ac2_order_a_approve_then_submit_auto_publishes_without_manual_cli
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
             )
             assert r_submit.status_code == 200, r_submit.text
-            assert r_submit.json()["status"] == "approved", "훅A 자동충족이 안 먹었다"
+            assert r_submit.json()["status"] == "pending", "ⓓ 승인 화면에 없던 draft가 승계됐다"
             scoped_gate_id = uuid.UUID(r_submit.json()["gate_id"])
 
         async with Session() as s:
             publication = (await s.execute(
                 select(ChannelPublication).where(ChannelPublication.gate_id == scoped_gate_id)
             )).scalar_one_or_none()
-            assert publication is not None, "AC2 자동발행이 /publish 수동호출 없이 안 일어났다"
-            assert publication.status == "published"
-            assert (publication.permalink or "").startswith("https://sandbox.invalid/"), (
-                f"자동발행이 sandbox 밖으로 샜다: {publication.permalink}"
-            )
+            assert publication is None, "사람이 본 적 없는 draft가 자동발행됐다"
 
             gate_d = await s.get(Gate, gate_d_id)
-            assert gate_d.publish_outcome == "published", (
-                f"레시피 게이트의 publish_outcome이 최종 성공을 반영 안 함: {gate_d.publish_outcome!r}"
-            )
-            assert gate_d.resolution_note == "ⓓ 발행 승인", (
-                "AC2 훅이 승인자 본인 resolution_note를 건드렸다(금지 — publish_outcome 전용 필드여야)"
-            )
+            assert gate_d.resolution_note == "ⓓ 발행 승인"
 
-            # ⛔그라운딩 갭 정정(story #4093 작업 中 발견) — 위 두 단언(ChannelPublication·
-            # publish_outcome)만으로는 「published stage 이벤트가 실제로 났다」를 한 번도
-            # 검증한 적이 없었다(TeamMember shim 없이는 emit이 조용히 실패해도 이 단언들은
-            # 전부 그대로 통과했다) — 이 단언이 그 갭을 직접 닫는다.
             from app.routers.events import _find_existing_stage_publish
 
             published_event = await _find_existing_stage_publish(
                 s, org_id=org_id, definition_key=_KEY, work_item_type="story",
                 work_item_id=str(story_id), stage="published",
             )
-            assert published_event is not None, "AC2 자동발행 뒤 레시피 published stage 이벤트가 안 났다"
+            assert published_event is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

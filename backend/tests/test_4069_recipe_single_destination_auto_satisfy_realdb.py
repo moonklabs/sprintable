@@ -29,7 +29,13 @@ config.py 등)가 승계를 전혀 못 받는 구멍이라 서비스층(`gate_se
 approved 분기)으로 옮겼다 — 지금은 `transition_gate()` 직접호출도 훅B를 그대로 탄다(우회
 불가). 아래 [test_draft_submitted_before_gate_approval_hook_b_auto_satisfies]는 여전히
 ASGI 클라이언트를 쓰지만 이제 필수가 아니다(서비스 직접호출로도 동일하게 재현된다) —
-기존 재현 경로를 그대로 두어 회귀 0(다른 테스트 변경 없음)."""
+기존 재현 경로를 그대로 두어 회귀 0(다른 테스트 변경 없음).
+
+**정정(story #4190, PO 판정 2026-09-23)** — «사람 승인은 그 사람이 본 내용에만 유효하다». ⓓ 승인은 승인
+화면이 보여 준 draft(id·버전)를 봉인하고, 승계는 그 draft·버전에만 걸린다. 그래서 ⓓ를 먼저 승인하고 그 뒤
+만든 draft(위 착지조건 1·4가 가리키던 옛 테스트)는 이제 자동충족되지 않는다 — 그 테스트는
+[test_single_destination_gate_approved_before_draft_is_not_auto_satisfied]로 뒤집었다. 단일목적지 «사람
+클릭 4»는 draft 선제출 순서(훅B)로 유지된다."""
 from __future__ import annotations
 
 import os
@@ -291,10 +297,11 @@ async def _walk_to_pending_approval_with_abc_approved(
 
 
 @pytest.mark.anyio
-async def test_single_destination_gate_approved_before_draft_hook_a_auto_satisfies():
-    """훅A + 착지조건1(sandbox 0-reach 직접 단언)+조건4(사람클릭=4 정확). ⓓ를 먼저
-    승인(ASGI 경유·실 라우트) → 그 뒤 sandbox draft 제출 → draft-scoped 게이트가 승인
-    경유 없이 바로 approved(자동충족)여야 한다."""
+async def test_single_destination_gate_approved_before_draft_is_not_auto_satisfied():
+    """정정(story #4190, PO 판정 2026-09-23 «사람 승인은 그 사람이 본 내용에만 유효하다») — 원래 훅A는 ⓓ를
+    먼저 승인하고 그 뒤 만든 draft를 자동충족했다. ⓓ 승인 화면엔 그 draft가 없었으므로(아직 없었다) 승인이
+    내용에 결속되지 않는다 → 이제 draft-scoped 게이트는 pending(사람 승인). 단일목적지 «사람 클릭 4»(AC5)는
+    draft를 먼저 제출하는 순서(훅B, 아래 테스트)로 유지된다."""
     from app.main import app
     from app.models.gate import Gate
     from sqlalchemy import select
@@ -312,10 +319,6 @@ async def test_single_destination_gate_approved_before_draft_hook_a_auto_satisfi
             )
             connection_id = await _seed_sandbox_connection(s, org_id)
 
-        human_approvals = 0
-
-        # ⓓ 승인 — ASGI 경유(라우터의 훅B 코드경로를 항상 통과하지만, 이 테스트는 draft가
-        # 아직 없으므로 훅B의 "정확히 1개 pending scoped" 조건이 0이라 실질 no-op).
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id, agent=False)
         async with _client_for(app) as client:
             r = await client.post(
@@ -323,10 +326,7 @@ async def test_single_destination_gate_approved_before_draft_hook_a_auto_satisfi
                 json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
             )
             assert r.status_code == 200, r.text
-            gate_d_resolver_id = r.json()["resolver_id"]
-        human_approvals += 1
 
-        # draft 제출 — 훅A가 자동충족해야 한다.
         _setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
         async with _client_for(app) as client:
             r_draft = await client.post(
@@ -335,40 +335,17 @@ async def test_single_destination_gate_approved_before_draft_hook_a_auto_satisfi
             )
             assert r_draft.status_code == 201, r_draft.text
             draft_id = r_draft.json()["draft_id"]
-
             r_submit = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
             )
             assert r_submit.status_code == 200, r_submit.text
-            submit_body = r_submit.json()
-            assert submit_body["status"] == "approved", "훅A 자동충족이 안 먹었다 — 상신이 pending으로 떨어졌다"
-            scoped_gate_id = submit_body["gate_id"]
+            assert r_submit.json()["status"] == "pending", "ⓓ 승인 화면에 없던 draft가 자동충족됐다"
+            scoped_gate_id = uuid.UUID(r_submit.json()["gate_id"])
 
         async with Session() as s:
-            scoped_gate = (await s.execute(select(Gate).where(Gate.id == uuid.UUID(scoped_gate_id)))).scalar_one()
-            assert scoped_gate.status == "approved"
-            assert scoped_gate.requires_human is False
-            assert "auto_satisfied_by_recipe_external_publish_gate" in (scoped_gate.resolution_note or "")
-            assert str(scoped_gate.resolver_id) == gate_d_resolver_id, (
-                "자동충족 게이트의 resolver_id가 ⓓ의 사람승인을 승계하지 않았다 — 감사추적 끊김"
-            )
-            assert scoped_gate.resolved_at is not None
-
-        # — 착지조건4: draft-scoped 게이트는 별도 사람 클릭이 **필요하지 않았다**(0회) —
-        # ⓐⓑⓒ(직접 transition_gate 3회, _walk_... 헬퍼 안) + ⓓ(1회) = 정확히 4.
-        assert human_approvals == 1  # 이 테스트 본문에서 직접 센 것은 ⓓ뿐(ⓐⓑⓒ는 헬퍼 안에서 3회) — 헬퍼+본문 합 4.
-
-        # 착지조건1 — 실제 sandbox 발행까지 관통, 0-reach 도메인 직접 단언.
-        _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id, agent=False)
-        async with _client_for(app) as client:
-            r_publish = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish", json={},
-            )
-            assert r_publish.status_code == 200, r_publish.text
-            permalink = r_publish.json()["permalink"]
-        assert permalink.startswith("https://sandbox.invalid/"), (
-            f"자동충족된 발행이 sandbox 밖으로 샜다 — 목적지 우회 의심: {permalink}"
-        )
+            scoped_gate = (await s.execute(select(Gate).where(Gate.id == scoped_gate_id))).scalar_one()
+            assert scoped_gate.requires_human is True
+            assert scoped_gate.resolution_note is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -433,10 +410,9 @@ async def test_draft_submitted_before_gate_approval_hook_b_auto_satisfies():
 
 @pytest.mark.anyio
 async def test_multi_destination_second_gate_not_auto_satisfied():
-    """멀티목적지 회귀 0 — ⓓ 승인 뒤 draft A(connection 1) 제출은 자동충족되지만, 같은
-    work_item에 draft B(connection 2, 다른 목적지)를 제출하면 "처음이자 유일한 목적지"
-    조건이 깨져 B는 정상 pending으로 남는다(#3478 보호 유지) — A의 승인도 B가 건드리지
-    않는다."""
+    """멀티목적지 회귀 0 — draft A(connection 1)를 먼저 제출하고 ⓓ를 승인하면 A가 승계되고(승인 화면이 보여 준
+    초안 — story #4190 봉인), 같은 work_item에 draft B(connection 2, 다른 목적지)를 제출하면 "처음이자 유일한
+    목적지" 조건이 깨져 B는 정상 pending으로 남는다(#3478 보호 유지) — A의 승인도 B가 건드리지 않는다."""
     from app.main import app
     from app.models.gate import Gate
     from sqlalchemy import select
@@ -455,14 +431,6 @@ async def test_multi_destination_second_gate_not_auto_satisfied():
             connection_a = await _seed_sandbox_connection(s, org_id, account_id="multi-a")
             connection_b = await _seed_sandbox_connection(s, org_id, account_id="multi-b")
 
-        _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id, agent=False)
-        async with _client_for(app) as client:
-            r = await client.post(
-                f"/api/v2/gates/{gate_d_id}/transition",
-                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
-            )
-            assert r.status_code == 200, r.text
-
         _setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
         async with _client_for(app) as client:
             r_draft_a = await client.post(
@@ -474,8 +442,20 @@ async def test_multi_destination_second_gate_not_auto_satisfied():
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_a_id}/submit", json={},
             )
             assert r_submit_a.status_code == 200, r_submit_a.text
-            assert r_submit_a.json()["status"] == "approved", "첫 목적지(A)가 자동충족되지 않았다"
             gate_a_id = uuid.UUID(r_submit_a.json()["gate_id"])
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/gates/{gate_d_id}/transition",
+                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
+            )
+            assert r.status_code == 200, r.text
+        async with Session() as s:
+            assert (await s.get(Gate, gate_a_id)).status == "approved", "첫 목적지(A)가 승계되지 않았다"
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
+        async with _client_for(app) as client:
 
             r_draft_b = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts",

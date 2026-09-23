@@ -185,10 +185,9 @@ async def test_hosted_draft_submit_leaves_recipe_gate_untouched():
         assert "draft_id" not in recipe.neutral_facts
         assert draft_gate.id != recipe.id
         assert draft_gate.scope_key == "hosted_site"
-        # story #4190(훅A) — 레시피 게이트가 먼저 approved이고 목적지가 이 초안 하나뿐이면 초안 게이트가 승계
-        # 승인된다(레시피 행을 공유해서가 아니라 별도 행으로 — 위 단언이 그 분리를 지킨다).
-        assert draft_gate.status == "approved"
-        assert "auto_satisfied_by_recipe_external_publish_gate" in (draft_gate.resolution_note or "")
+        # story #4190(PO 판정 2026-09-23) — 레시피 승인은 승인 화면이 보여 준 초안에만 유효하다. 이 초안은 승인
+        # 뒤에 만들어졌으므로 승계 0 — 별도 행에서 사람 승인을 기다린다.
+        assert draft_gate.status == "pending" and draft_gate.requires_human is True
         assert draft_gate.neutral_facts["destination"] == "hosted_site"
     finally:
         app.dependency_overrides.clear()
@@ -245,11 +244,13 @@ async def test_publish_does_not_accept_recipe_gate_as_hosted_approval():
         await engine.dispose()
 
 
-async def test_recipe_approval_cascades_to_hosted_gate_and_publish_succeeds():
-    """AC2 — 초안 먼저 제출 → 레시피 게이트 승인(transition_gate) → 훅B가 hosted_site 게이트를 승계 승인 →
-    gate_id 없이 발행 성공. 예전(같은 행)에 되던 «레시피 승인 한 번으로 자사 블로그 발행»이 슬롯을 나눈 뒤에도 된다."""
+async def test_recipe_approval_does_not_cascade_to_unseen_hosted_gate():
+    """AC2 정정(story #4190, PO 판정 2026-09-23) — 초안 먼저 제출 → 레시피 게이트 승인. 자사 블로그 초안은 레시피
+    승인 화면에 안 보이므로(봉인 대상 아님) hosted_site 게이트를 승계하지 않는다 → 승인 전 발행 거부 → 사람이 자사
+    게이트를 승인하면 gate_id 없이 발행 성공(슬롯 분리 뒤 자사 단독 경로 그대로)."""
     from app.main import app
-    from app.services.gate_service import transition_gate
+    from app.services.gate_service import set_gate_status, transition_gate
+    from app.models.gate import Gate
 
     engine, Session = await _session_factory()
     try:
@@ -257,13 +258,21 @@ async def test_recipe_approval_cascades_to_hosted_gate_and_publish_succeeds():
             seeded = await _seed(s)
         recipe_gate_id = await _recipe_gate(Session, seeded, approved=False)
         body, submit = await _create_and_submit_hosted_draft(app, Session, seeded)
+        hosted_id = uuid.UUID(submit["gate_id"])
 
         async with Session() as s:
             await transition_gate(s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"])
             await s.commit()
 
-        hosted = await _gate(Session, uuid.UUID(submit["gate_id"]))
-        assert hosted.status == "approved", hosted.resolution_note
+        assert (await _gate(Session, hosted_id)).status == "pending"
+        assert (await _publish(app, Session, seeded, body)).status_code != 201
+
+        async with Session() as s:
+            g = await s.get(Gate, hosted_id)
+            set_gate_status(g, "approved", now=datetime.now(timezone.utc))
+            g.resolver_id = seeded["om_id"]
+            g.resolved_at = datetime.now(timezone.utc)
+            await s.commit()
         r = await _publish(app, Session, seeded, body)
         assert r.status_code == 201, r.text
     finally:

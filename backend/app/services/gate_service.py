@@ -1167,19 +1167,90 @@ async def find_sole_pending_scoped_external_publish_gate(
 
 RECIPE_AUTO_SATISFIED_NOTE = "auto_satisfied_by_recipe_external_publish_gate: single destination (story #4069)"
 
+# story #4190(PO 판정 2026-09-23 07:36Z) — «사람 승인은 그 사람이 본 내용에만 유효하다». 레시피 unscoped
+# external_publish 게이트는 내용을 봉인하지 않으므로, 승인되는 순간 승인 화면이 보여 준 초안
+# (`_enrich_linked_channel_draft`와 같은 `find_ready_recipe_channel_drafts()[0]`)의 id·버전을 neutral_facts
+# 이 키에 봉인한다. 승계(훅A 채널·사이트)와 캐스케이드(훅B)는 봉인된 id·버전과 같은 초안에만 적용 — 승인 뒤
+# 새로 만든 초안·재제출한 새 버전은 scoped 게이트 pending(사람 승인)으로 떨어진다. 사이트 초안은 승인
+# 화면에 안 보이므로 봉인 대상이 아니다(승계 0 · 화면 노출은 후속 카드).
+RECIPE_APPROVED_DRAFT_FACT = "approved_draft"
+
+
+def _is_recipe_external_publish_gate(gate: Gate) -> bool:
+    facts = gate.neutral_facts or {}
+    return (
+        gate.gate_type == "external_publish" and (gate.scope_key or "") == ""
+        and bool(facts.get("triggered_by_event")) and bool(facts.get("stage"))
+    )
+
+
+async def seal_recipe_approved_draft(session: AsyncSession, gate: Gate) -> None:
+    """레시피 게이트 승인 순간 승인 화면이 보여 준 초안의 id·버전을 봉인한다(보여 준 게 없으면 봉인 0)."""
+    if not _is_recipe_external_publish_gate(gate):
+        return
+    from app.services.channel_posts import find_ready_recipe_channel_drafts
+
+    ready, _still_pending = await find_ready_recipe_channel_drafts(
+        session, org_id=gate.org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
+    )
+    if not ready:
+        return
+    draft, _scoped_gate, latest = ready[0]
+    gate.neutral_facts = {
+        **(gate.neutral_facts or {}),
+        RECIPE_APPROVED_DRAFT_FACT: {
+            "kind": "channel_post", "draft_id": str(draft.id), "version": latest.version, "version_id": str(latest.id),
+        },
+    }
+
+
+def recipe_approval_covers(recipe_gate: Gate, *, draft_id: uuid.UUID | str | None, version: int | None) -> bool:
+    """레시피 승인이 이 초안의 이 버전을 봤는가(봉인 대조). 봉인이 없으면 False."""
+    sealed = (recipe_gate.neutral_facts or {}).get(RECIPE_APPROVED_DRAFT_FACT) or {}
+    return (
+        draft_id is not None and version is not None
+        and sealed.get("draft_id") == str(draft_id) and sealed.get("version") == version
+    )
+
+
+def _recipe_approval_covers_scoped_gate(recipe_gate: Gate, scoped_gate: Gate) -> bool:
+    return recipe_approval_covers(
+        recipe_gate, draft_id=(scoped_gate.neutral_facts or {}).get("draft_id"),
+        version=scoped_gate.sealed_content_version,
+    )
+
+
+async def _has_other_live_destination(session: AsyncSession, scoped_gate: Gate) -> bool:
+    """story #4190(까디르 QA P3) — 같은 work item에 다른 목적지(scope_key가 다른 scoped external_publish
+    게이트)가 pending·approved로 살아 있는가. 캐스케이드(훅B)의 «단일 목적지» 판정은 pending만 세서
+    «승인된 목적지 1 + 대기 목적지 1»을 단일로 오판했다 — 훅A(`find_recipe_approval_for_single_destination`)와
+    같은 축(pending·approved 둘 다)으로 맞춘다."""
+    other = (await session.execute(
+        select(Gate.id).where(
+            Gate.org_id == scoped_gate.org_id, Gate.work_item_id == scoped_gate.work_item_id,
+            Gate.work_item_type == scoped_gate.work_item_type, Gate.gate_type == "external_publish",
+            Gate.scope_key != "", Gate.scope_key != scoped_gate.scope_key,
+            Gate.status.in_(("pending", "approved")),
+        ).limit(1)
+    )).scalar_one_or_none()
+    return other is not None
+
 
 async def find_recipe_approval_for_single_destination(
     session: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str, scope_key: str,
+    draft_id: uuid.UUID, version: int,
 ) -> Gate | None:
     """story #4190(site post 훅A) — 이 work item의 레시피 unscoped external_publish 게이트가 approved이고,
-    다른 목적지(scope_key가 다른 scoped external_publish 게이트, pending·approved)가 없으면 그 레시피 게이트를
-    돌려준다(승계 근거). 목적지 판정은 게이트로 한다 — 훅B(`find_sole_pending_scoped_external_publish_gate`)와
-    같은 축이라 site·channel 초안이 섞여도 양방향이 같은 답을 낸다."""
+    그 승인이 이 초안의 이 버전을 봉인했고(`recipe_approval_covers`), 다른 목적지(scope_key가 다른 scoped
+    external_publish 게이트, pending·approved)가 없으면 그 레시피 게이트를 돌려준다(승계 근거). 목적지 판정은
+    게이트로 한다 — 훅B(`find_sole_pending_scoped_external_publish_gate`)와 같은 축."""
     recipe = await find_gate_slot_with_pr_fallback(
         session, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
         gate_type="external_publish", pr_number=None, repo_full_name=None, scope_key="",
     )
     if recipe is None or recipe.status != "approved":
+        return None
+    if not recipe_approval_covers(recipe, draft_id=draft_id, version=version):
         return None
     other = (await session.execute(
         select(Gate.id).where(
@@ -1286,10 +1357,16 @@ async def transition_gate(
         # 구멍이었다(story #4089와 같은 "지목 경로만 막는 fix" 클래스). 라우터 쪽
         # 코드는 삭제(중복 제거, 이 한 곳이 유일한 소유자).
         if gate.gate_type == "external_publish" and (gate.scope_key or "") == "":
+            # story #4190 — 승인 화면이 보여 준 초안을 먼저 봉인하고(캐스케이드가 scoped 게이트를 바꾸기 前 —
+            # 화면과 같은 판정), 승계는 그 봉인과 같은 초안·버전에만.
+            await seal_recipe_approved_draft(session, gate)
             _scoped_gate = await find_sole_pending_scoped_external_publish_gate(
                 session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
             )
-            if _scoped_gate is not None:
+            if (
+                _scoped_gate is not None and _recipe_approval_covers_scoped_gate(gate, _scoped_gate)
+                and not await _has_other_live_destination(session, _scoped_gate)
+            ):
                 set_gate_status(_scoped_gate, "approved", now=datetime.now(timezone.utc))
                 _scoped_gate.requires_human = False
                 _scoped_gate.resolver_id = gate.resolver_id

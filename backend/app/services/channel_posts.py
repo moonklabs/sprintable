@@ -1461,7 +1461,14 @@ async def submit_channel_post_draft(
             db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
             gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None, scope_key="",
         )
-        if recipe_gate is not None and recipe_gate.status == "approved":
+        # story #4190(PO 판정 2026-09-23) — 레시피 승인이 이 초안의 이 버전을 봉인했을 때만(승인 화면이 보여 준
+        # 내용). 승인 뒤 새로 만든 초안·재제출한 새 버전은 사람 승인으로 떨어진다.
+        from app.services.gate_service import recipe_approval_covers
+
+        if (
+            recipe_gate is not None and recipe_gate.status == "approved"
+            and recipe_approval_covers(recipe_gate, draft_id=draft.id, version=target.version)
+        ):
             other_destination = (await db.execute(
                 select(ChannelPostDraft.id).where(
                     ChannelPostDraft.org_id == org_id,
@@ -2562,6 +2569,11 @@ async def publish_recipe_approved_draft(
     ready, still_pending = await find_ready_recipe_channel_drafts(
         db, org_id=gate.org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
     )
+    # story #4190 — ready에는 승인 前 미리보기용 «단일 pending» 초안도 담긴다(#4139). 예전엔 캐스케이드가 그
+    # 게이트를 항상 먼저 승인해 문제가 없었지만, 이제 캐스케이드는 봉인된 초안·버전에만 걸리므로 발행 대상은
+    # scoped 게이트가 approved인 초안뿐이다. pending이 남았으면 사람 승인 대기 — «초안 없음»으로 적지 않는다.
+    still_pending = still_pending or any(g.status != "approved" for _d, g, _v in ready)
+    ready = [r for r in ready if r[1].status == "approved"]
     if not ready:
         if not still_pending:
             gate.publish_outcome = _RECIPE_AUTO_PUBLISH_NO_DRAFT_NOTE

@@ -566,6 +566,11 @@ async def _reseal_gate_on_new_version(
         gate.resolution_note = None
         gate.resolved_at = None
         gate.reapproval_required = True
+        # story #4190(까디르 QA P2) — 옛 승인으로 만든 대기 중 발행 명령을 같은 트랜잭션에서 즉시 무효화한다
+        # (channel_posts의 동형 훅 #3414 추가②와 같은 처방 — 워커의 해시 불일치 무효화를 기다리지 않는다).
+        from app.services.publication_command import void_pending_commands_for_gate
+
+        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code="CONTENT_CHANGED")
         return
     # 아직 한 번도 승인된 적 없는 pending — 결재자가 볼 대상 자체가 그냥 최신본이면 되므로
     # 편집마다 즉시 재봉인(재상신 왕복 불요).
@@ -1005,12 +1010,20 @@ async def submit_site_post_draft(
     # 내용이 달라졌거나 신규라는 뜻이라, 여기서 명시적으로 (재)봉인하는 것이 바로 이번
     # submit() 호출이 의도한 행위다("조용한 갱신"이 아니다).
     gate.neutral_facts = neutral_facts
+    # story #4190(까디르 QA P2) — 이미 승인된 게이트를 재상신이 다시 봉인하면, 그 승인으로 만든 대기 중 발행
+    # 명령(옛 버전)을 같은 트랜잭션에서 즉시 무효화한다 — channel_posts.submit_channel_post_draft의 #3414 추가②와
+    # 같은 방식(워커가 나중에 해시 불일치로 무효화하길 기다리지 않는다).
+    was_approved = gate.status == "approved"
+    content_changed = gate.sealed_content_sha256 != target.body_sha256
+    budget_changed = gate.sealed_estimated_cost_minor != estimated_cost_minor
     # story #4190(훅A — channel_posts.submit_channel_post_draft의 #4069와 동형) — 레시피 unscoped
-    # external_publish 게이트가 이미 approved이고 이 work item의 목적지가 이 초안 하나뿐이면, 그 사람 승인을
-    # 이 초안 게이트가 승계한다(레시피 승인 뒤 제출해도 사람이 두 번 승인하지 않게). 목적지가 둘 이상이면
-    # 각자 사람 승인(#3478) — 발행 목적지 자체는 안 바뀐다.
+    # external_publish 게이트가 이미 approved이고, 그 승인이 이 초안의 이 버전을 봉인했고(승인 화면이 보여 준
+    # 내용 — gate_service.RECIPE_APPROVED_DRAFT_FACT), 이 work item의 목적지가 이 초안 하나뿐이면 그 사람 승인을
+    # 이 초안 게이트가 승계한다. 봉인이 없거나 다르면(승인 뒤 새 초안·재제출) 사람 승인. 블로그 초안은 아직 승인
+    # 화면에 안 보여 봉인되지 않으므로 지금은 승계 0(PO 판정 2026-09-23). 목적지가 둘 이상이면 각자 사람 승인(#3478).
     auto_satisfied_by = await find_recipe_approval_for_single_destination(
         db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story", scope_key=scope_key,
+        draft_id=draft.id, version=target.version,
     )
     if auto_satisfied_by is not None:
         set_gate_status(gate, "approved", now=datetime.now(timezone.utc))
@@ -1040,6 +1053,14 @@ async def submit_site_post_draft(
         db, org_id=org_id, work_item_id=draft.work_item_id, gate=gate,
         requester_id=requester_member_id,
     )
+
+    if was_approved:
+        from app.services.publication_command import void_pending_commands_for_gate
+
+        await void_pending_commands_for_gate(
+            db, gate_id=gate.id,
+            reason_code="BUDGET_CHANGED" if budget_changed and not content_changed else "CONTENT_CHANGED",
+        )
 
     await db.commit()
     await db.refresh(gate)

@@ -658,16 +658,8 @@ async def test_ac4d_text_only_draft_still_completes_synchronously_with_completed
                 s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
             )
 
-        # 순서A(승인 먼저·제출 나중) — #4090 test_ac2_order_a와 동형 시나리오.
-        _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id, agent=False)
-        async with _client_for(app) as client:
-            r = await client.post(
-                f"/api/v2/gates/{gate_d_id}/transition",
-                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
-            )
-            assert r.status_code == 200, r.text
-            assert r.json()["publish_outcome"] == "no_submitted_draft"
-
+        # 순서B(제출 먼저·승인 나중) — 정정(story #4190, PO 판정 2026-09-23): 옛 순서A(승인 먼저)는 ⓓ 승인
+        # 화면에 없던 draft라 이제 승계되지 않는다. 이 테스트가 재는 것은 동기 경로의 command 완료라 순서만 바꾼다.
         _setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
         async with _client_for(app) as client:
             r_draft = await client.post(
@@ -680,8 +672,16 @@ async def test_ac4d_text_only_draft_still_completes_synchronously_with_completed
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={},
             )
             assert r_submit.status_code == 200, r_submit.text
-            assert r_submit.json()["status"] == "approved", "훅A 자동충족이 안 먹었다"
+            assert r_submit.json()["status"] == "pending"
             scoped_gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id, agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/gates/{gate_d_id}/transition",
+                json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True},
+            )
+            assert r.status_code == 200, r.text
 
         async with Session() as s:
             publication = (await s.execute(
