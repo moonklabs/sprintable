@@ -361,6 +361,16 @@ async def test_first_commands_event_failure_does_not_strand_the_rest_of_the_batc
         _emit_raises_sql_error_for(monkeypatch, {ctx_fail["org_id"]})
         gate_fail, at_fail = await _approve_and_queue(Session, ctx_fail)
         gate_ok, at_ok = await _approve_and_queue(Session, ctx_ok)
+        # story #4192(PO 13:29Z) — 실패하는 명령이 배치의 **첫째**여야 «둘째가 멈추지 않는다»를 잰다. 워커는 명령을
+        # `created_at` 순으로 집는다(publication_command.process_due_publication_commands) — 그 순서를 전제로 박는다.
+        async with Session() as s:
+            from app.models.publication_command import PublicationCommand
+
+            created = dict((await s.execute(
+                select(PublicationCommand.gate_id, PublicationCommand.created_at)
+                .where(PublicationCommand.gate_id.in_([gate_fail.id, gate_ok.id]))
+            )).all())
+        assert created[gate_fail.id] < created[gate_ok.id], created
         counts = await _run_worker(Session, max(at_fail, at_ok) + timedelta(minutes=2))
         assert counts["completed"] == 2 and counts["error"] == 0, counts
         assert await _command_status(Session, gate_fail.id) == "completed"
@@ -368,5 +378,10 @@ async def test_first_commands_event_failure_does_not_strand_the_rest_of_the_batc
         assert await _stage_event_count(Session, ctx_fail, "check") == 0
         assert await _stage_event_count(Session, ctx_ok, "check") == 1
         assert len(sends) == 2, sends
+        # 다음 틱 — 첫째의 발송 기록이 completed로 남았으니 재발송 0(새 세션 재조회로 확인).
+        await _run_worker(Session, max(at_fail, at_ok) + timedelta(minutes=10))
+        assert len(sends) == 2, sends
+        assert await _command_status(Session, gate_fail.id) == "completed"
+        assert await _command_status(Session, gate_ok.id) == "completed"
     finally:
         await engine.dispose()
