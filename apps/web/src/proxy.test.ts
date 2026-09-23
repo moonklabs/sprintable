@@ -480,7 +480,9 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
       json: async () => ({ org_id: 'org-1', org_slug: 'new-moonklabs', org_role: 'admin', redirect: { workspace: 'new-moonklabs' } }),
     });
     const response = await middleware(makeRequest('/old-moonklabs/board', { sp_at: token }));
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
+    // story #4170 AC4b — 옛 slug는 재점유될 수 있어 캐시 금지(307 + no-store).
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('location')).toBe('https://app.example.com/new-moonklabs/board');
   });
 
@@ -512,7 +514,9 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
       'http://localhost:8000/api/v2/resolve?workspace=moonklabs&project=%EC%9E%A5%EC%82%AC%EC%99%95',
       expect.any(Object),
     );
-    expect(response.status).toBe(301);
+    expect(response.status).toBe(307);
+    // story #4170 AC4b — 옛 slug는 재점유될 수 있어 캐시 금지(307 + no-store).
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/goals');
   });
 

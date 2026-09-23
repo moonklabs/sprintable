@@ -834,7 +834,10 @@ async function resolveWorkspaceProject(
     if (outcome.workspace) nextSegments[0] = outcome.workspace;
     if (outcome.project && nextSegments.length > 1) nextSegments[1] = outcome.project;
     url.pathname = '/' + nextSegments.join('/');
-    return { kind: 'redirect', response: NextResponse.redirect(url, 301) };
+    // story #4170 AC4b(까디르 QA) — 옛 slug → 새 slug. 백엔드 resolve.py가 «옛 slug는 다른 entity에 재점유될 수
+    // 있다 · 긴 캐시 금지»라고 적은 경로라, 캐시된 301이면 재점유 뒤에도 옛 목적지로 간다 — 세션 의존 flat
+    // 리다이렉트와 같은 부류로 307 + no-store.
+    return { kind: 'redirect', response: sessionDependentRedirect(url) };
   }
 
   setResolvedHeaders(fwdHeaders, outcome.context);
