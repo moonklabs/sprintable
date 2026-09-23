@@ -44,6 +44,21 @@ def _latin_abbr(word: str) -> str:
     return rf"(?i)(?<![A-Za-z0-9]){word}(?![A-Za-z0-9])"
 
 
+# story #4204(까디르 QA · PR 4561) — 한자 판정 범위. 예전 `[一-鿿]`(U+4E00–9FFF)은 호환 한자(U+F900–FAFF — 한글 IME 한자
+# 변환이 내기도 함)·확장 A(U+3400–)·확장 B 이후(U+20000–)를 못 잡았다. 파이썬 `re`엔 `\p{Ideographic}`이 없어(`regex` 모듈은
+# 의존성에 없다 — 가드 하나 때문에 런타임 의존을 늘리지 않는다) CJK 한자 블록을 명시한다. 이 범위가 유니코드 DB의
+# «CJK UNIFIED/COMPATIBILITY IDEOGRAPH» 전부를 덮는지는 test_cjk_ideograph_range_covers_unicode_db가 unicodedata로 잰다.
+_CJK_IDEOGRAPH = (
+    "["
+    "\u3400-\u4DBF"            # 확장 A
+    "\u4E00-\u9FFF"            # 통합 한자
+    "\uF900-\uFAFF"            # 호환 한자
+    "\U00020000-\U0002FA1F"    # 확장 B~F·I · 호환 보충
+    "\U00030000-\U000323AF"    # 확장 G·H
+    "]"
+)
+
+
 # (금지 패턴, 이유) — 유나 확정 목록(2026-09-23, story #4188 본문). «게이트»는 제품 화면 낱말이라 넣지 않는다.
 _FORBIDDEN: list[tuple[str, str]] = [
     (_latin_abbr("BYOA"), "내부 전략 약어 — 고객 화면 낱말 아님"),
@@ -56,7 +71,7 @@ _FORBIDDEN: list[tuple[str, str]] = [
     # 까디르 QA(PR 4549): 0395가 푼 «VO»를 되돌려도 통과하던 구멍 — 유나가 action에서 «내레이션»으로 푼 것과 같은 판단.
     (_latin_abbr("VO"), "영문 약어(voice-over) — «내레이션»"),
     (r"레시피 \d+호", "내부 일련번호"),
-    (r"[一-鿿]", "한자 혼용(팀 채팅의 «확定»류)"),
+    (_CJK_IDEOGRAPH, "한자 혼용(팀 채팅의 «확定»류)"),
 ]
 
 
@@ -209,3 +224,31 @@ def test_guard_scans_description_of_non_cyclic_marketing_preset():
     # 대조: 비사이클 신호형(마케팅 아님)의 description은 사람 화면 밖이라 그대로 제외.
     non_cyclic_signal = {"key": "preset.agent_run.x", "name": "이름", "description": "확定"}
     assert _find_violations([non_cyclic_signal]) == []
+
+
+@pytest.mark.parametrize("sample", ["\uF90A", "\u3400", "\U00020000"], ids=["호환 한자 U+F90A", "확장 A U+3400", "확장 B U+20000"])
+def test_cjk_guard_catches_compat_and_extension_ideographs(sample):
+    """story #4204 — 예전 범위(U+4E00–9FFF)가 놓치던 세 부류를 잡는다."""
+    found = _find_violations([{"key": "preset.x", "name": f"문구 {sample} 끝", "description": None,
+                               "stage_metadata": {}, "block_template": None, "payload_schema": {}}])
+    assert any("한자 혼용" in f for f in found), found
+
+
+def test_cjk_guard_keeps_hangul_and_ascii_clean():
+    """음성대조 — 한글·한글 자모·영문·기호는 걸리지 않는다(기존 통과 문구 무변)."""
+    for text in ("영상 제작(릴스·쇼츠)", "ㄱㄴㄷ 자모", "Video production (Reels, Shorts)", "→ · « » — …"):
+        assert not re.search(_CJK_IDEOGRAPH, text), text
+
+
+def test_cjk_ideograph_range_covers_unicode_db():
+    """범위 완전성 — 파이썬 유니코드 DB가 «CJK UNIFIED/COMPATIBILITY IDEOGRAPH»로 이름 붙인 모든 코드포인트를 이 패턴이 잡는다.
+    새 확장(유니코드 버전 업)이 들어오면 여기서 RED — 범위를 넓히라는 신호."""
+    import sys
+    import unicodedata
+
+    missing = []
+    for cp in range(sys.maxunicode + 1):
+        name = unicodedata.name(chr(cp), "")
+        if name.startswith(("CJK UNIFIED IDEOGRAPH", "CJK COMPATIBILITY IDEOGRAPH")) and not re.match(_CJK_IDEOGRAPH, chr(cp)):
+            missing.append(f"U+{cp:04X}")
+    assert missing == [], f"{len(missing)}개 누락: {missing[:10]}"
