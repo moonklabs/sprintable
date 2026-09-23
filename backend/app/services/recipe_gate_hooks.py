@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime, time, timedelta, timezone
 from typing import NamedTuple
 
 from sqlalchemy import and_, or_, select
@@ -184,6 +185,13 @@ _UNCONFIRMED = "미확認"
 # budget_or_raise)와 기존 컬럼(gate.sealed_estimated_cost_minor, 0333)만 재사용한다.
 _GENERATION_BUDGET_GATE_TYPE = "generation_budget"
 
+# story #4191(E-RECIPE-2 P3, PO 결정 2026-09-23 02:52Z) — 레시피 발송 단계가 뉴스레터 발송
+# *요청*을 만든다(수신 세그먼트·예약 시각 봉인). 승인은 지금처럼 사람만(모든 게이트 승인이
+# gates.py::_authorize_gate_approve_equivalent에서 휴먼 전용 — 이 훅은 승인 경로를 안 건드린다).
+# 게이트 생성·봉인은 사람 API와 같은 서비스 함수(newsletter_send.py::request_newsletter_send)
+# 하나로만 한다 — 봉인 규칙·「변경=재승인」을 두 벌 두지 않는다.
+_NEWSLETTER_SEND_GATE_TYPE = "newsletter_send"
+
 
 class UnknownApproverRoleError(ValueError):
     """approver 역할참조를 실 member_id로 못 풀었음 — 어휘는 등록 시점에 이미 검증됐으므로,
@@ -202,9 +210,14 @@ class SealedFieldSpec(NamedTuple):
     전용, 검증 로직과 분리해 렌더러가 죽어도 검증은 안 죽는다(반대도 마찬가지)."""
 
     name: str
-    example_value: int
+    # kind="datetime"이면 None — 예시는 렌더 시점에 sealed_field_example()이 계산한다(고정 날짜는
+    # 지나면 과거 시각이 되고, 에이전트가 그대로 베끼면 과거 시각 발송 요청이 된다).
+    example_value: int | str | None
     explanation_catalog_key: str
     min_value: int = 0
+    # story #4191 — 값의 모양. "int"(기존, min_value 이상 정수)·"str"(비어 있지 않은 문자열)·
+    # "uuid"(uuid 문자열)·"datetime"(시간대가 붙은 ISO 8601 문자열). 검증은 _sealed_field_ok 한 곳.
+    kind: str = "int"
 
 
 # story #4085(리허설 1호 실측, PO 확定 2026-09-21) — gate_type별 "이 게이트가 봉인에 쓰는
@@ -221,7 +234,61 @@ _GATE_TYPE_SEALED_FIELDS: dict[str, tuple[SealedFieldSpec, ...]] = {
             explanation_catalog_key="events.sealed_field_estimated_cost_minor",
         ),
     ),
+    # story #4191 — 사람 API(`CreateNewsletterSendRequest`)가 받는 두 값 + 대상 발행물. 발행물은
+    # 사람 API에선 URL 경로에 있어 봉인 필드가 아니었지만, 레시피 이벤트엔 경로가 없어 payload로 받는다.
+    _NEWSLETTER_SEND_GATE_TYPE: (
+        SealedFieldSpec(
+            name="publication_id", example_value="00000000-0000-0000-0000-000000000000",
+            explanation_catalog_key="events.sealed_field_newsletter_publication_id", kind="uuid",
+        ),
+        SealedFieldSpec(
+            name="segment_name", example_value="test-recipients",
+            explanation_catalog_key="events.sealed_field_newsletter_segment_name", kind="str",
+        ),
+        SealedFieldSpec(
+            name="scheduled_at", example_value=None,
+            explanation_catalog_key="events.sealed_field_newsletter_scheduled_at", kind="datetime",
+        ),
+    ),
 }
+
+
+def sealed_field_example(spec: SealedFieldSpec, *, org_timezone: str | None, now: datetime | None = None) -> int | str:
+    """자기설명 멘션 발행 예시에 싣는 값. datetime은 «조직 시간대로 내일 09:00»을 그때그때 계산한다
+    (항상 미래 — 예시를 그대로 베껴도 과거 시각 발송 요청이 되지 않는다). 조직 시간대가 없으면 UTC."""
+    if spec.kind == "datetime":
+        from app.services.org_time import org_tz
+
+        tz = org_tz(org_timezone)
+        local_now = (now or datetime.now(timezone.utc)).astimezone(tz)
+        return datetime.combine(local_now.date() + timedelta(days=1), time(9, 0), tzinfo=tz).isoformat()
+    assert spec.example_value is not None, spec.name
+    return spec.example_value
+
+
+def _parse_aware_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _sealed_field_ok(spec: SealedFieldSpec, value: object) -> bool:
+    """story #4085/#4191 — 봉인 필드 하나가 게이트를 열 자격이 있는 값인지. bool은 int의
+    서브클래스라 명시 제외(기존 estimated_cost_minor 방어 그대로). 시간대 없는 시각은 거부 —
+    «언제 보내는지»가 서버 시간대 해석에 따라 갈리면 사람이 승인한 시각과 실제 발송 시각이 다르다."""
+    if spec.kind == "int":
+        return isinstance(value, int) and not isinstance(value, bool) and value >= spec.min_value
+    if spec.kind == "str":
+        return isinstance(value, str) and bool(value.strip())
+    if spec.kind == "uuid":
+        return _parse_work_item_uuid(value) is not None if isinstance(value, str) else False
+    if spec.kind == "datetime":
+        return _parse_aware_datetime(value) is not None
+    raise ValueError(f"unknown SealedFieldSpec.kind: {spec.kind!r}")
 
 
 class MissingGateSealedFieldError(ValueError):
@@ -527,10 +594,7 @@ async def maybe_create_stage_gate(
     # 조건만으로는 걸러지지 않아 음수 예상 비용이 그대로 봉인될 수 있었다.
     _required_sealed_fields = _GATE_TYPE_SEALED_FIELDS.get(gate_decl["type"], ())
     _missing_sealed_fields = [
-        spec.name for spec in _required_sealed_fields
-        if not isinstance(payload.get(spec.name), int)
-        or isinstance(payload.get(spec.name), bool)
-        or payload.get(spec.name) < spec.min_value
+        spec.name for spec in _required_sealed_fields if not _sealed_field_ok(spec, payload.get(spec.name))
     ]
     if _missing_sealed_fields:
         raise MissingGateSealedFieldError(gate_type=gate_decl["type"], missing_fields=_missing_sealed_fields)
@@ -609,6 +673,14 @@ async def maybe_create_stage_gate(
 
     gate_type = gate_decl["type"]
 
+    if gate_type == _NEWSLETTER_SEND_GATE_TYPE:
+        await _open_recipe_newsletter_send_gate(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, stage=stage,
+            payload=payload, requester_member_id=requester_member_id, approver_id=approver_id,
+            neutral_facts=neutral_facts,
+        )
+        return
+
     # 카드 발송 여부 판단은 create_gate() 호출 *전* status로만 가능하다 — 호출 후에는
     # "신규 pending"과 "이미 pending이던 슬롯"이 똑같이 status=="pending"으로 구분이
     # 안 된다(post-call 값만으론 전이를 모른다).
@@ -671,5 +743,65 @@ async def maybe_create_stage_gate(
     except Exception:
         logger.warning(
             "recipe stage gate approval card dispatch failed gate_id=%s (best-effort, swallowed)",
+            gate.id, exc_info=True,
+        )
+
+
+async def _open_recipe_newsletter_send_gate(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID, stage: str,
+    payload: dict, requester_member_id: uuid.UUID, approver_id: uuid.UUID, neutral_facts: dict,
+) -> None:
+    """story #4191 — 레시피 발송 단계 → `newsletter_send` 게이트(발송 요청). 사람 API와 같은
+    `request_newsletter_send`로 연다 — 봉인 3열(세그먼트·시각·버전 id)·「변경=재승인」·발행물
+    검증(org·채널·발행 완료)이 그대로 따라온다. 호출 전 봉인 필드는 maybe_create_stage_gate가
+    이미 검사했다(_sealed_field_ok).
+
+    레시피 경로만의 차이 두 가지:
+    - 발행물이 이 레시피의 work item에 걸린 것이어야 한다(`expected_work_item_id`) — 다른 스토리의
+      발행물을 봉인해 그 스토리에 발송 게이트를 여는 경로를 막는다.
+    - admin이 무효화(voided)한 게이트는 다시 열지 않는다(범용 레시피 게이트와 같은 원칙, 로그만).
+      사람 API는 voided도 재오픈한다 — 사람이 직접 다시 요청한 것이라 무변.
+
+    카드는 신규·rejected 재오픈·approved 재오픈(값이 바뀌어 재승인 필요) 때 보낸다. 이미
+    pending이던 재발행은 값만 재봉인되고 카드는 다시 안 보낸다(같은 요청 반복 스팸 금지)."""
+    from app.services.approval_delivery import dispatch_approval_request_cards
+    from app.services.gate_service import find_gate_slot_with_pr_fallback, resolve_work_item_project_id
+    from app.services.newsletter_send import request_newsletter_send
+
+    publication_id = uuid.UUID(payload["publication_id"])
+    existing = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+        gate_type=_NEWSLETTER_SEND_GATE_TYPE, pr_number=None, repo_full_name=None,
+        scope_key=str(publication_id),
+    )
+    previous_status = existing.status if existing is not None else None
+    if previous_status == "voided":
+        logger.info(
+            "recipe newsletter_send gate stays voided — admin 판단 필요(자동 재오픈 대상 아님) "
+            "gate_id=%s org_id=%s work_item_id=%s stage=%s",
+            existing.id, org_id, work_item_id, stage,
+        )
+        return
+
+    gate = await request_newsletter_send(
+        db, org_id=org_id, publication_id=publication_id, segment_name=payload["segment_name"].strip(),
+        scheduled_at=_parse_aware_datetime(payload["scheduled_at"]), requester_member_id=requester_member_id,
+        neutral_facts=neutral_facts, designated_approver_id=approver_id, expected_work_item_id=work_item_id,
+    )
+
+    if gate.status != "pending" or previous_status not in (None, "rejected", "approved"):
+        return
+
+    project_id = await resolve_work_item_project_id(db, org_id, work_item_type, work_item_id)
+    try:
+        await dispatch_approval_request_cards(
+            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            project_id=project_id, title=neutral_facts["work_item_title"], gate_id=gate.id,
+            gate_type=_NEWSLETTER_SEND_GATE_TYPE, requester_id=requester_member_id, approver_ids=[approver_id],
+            designated_approver_id=approver_id,
+        )
+    except Exception:
+        logger.warning(
+            "recipe newsletter_send gate approval card dispatch failed gate_id=%s (best-effort, swallowed)",
             gate.id, exc_info=True,
         )

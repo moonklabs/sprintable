@@ -7,6 +7,8 @@ PR2)와 거의 완전히 같은 구조 — 신규 판정 로직 0, 새 gate_type
 ## 「변경=재승인」 규칙(ads_boost.py 동형, PO 確定 2026-09-12)
 같은 publication에 이 함수를 다시 부르면(work_item_id가 같아 create_gate가 기존
 게이트를 그대로 반환하는 멱등 경로):
+- 게이트가 `approved`이고 세그먼트·시각이 봉인 값과 같으면 — 아무것도 안 한다(story #4191
+  PR #4550, 값이 안 바뀐 재요청이 승인된 발송을 취소하지 않게).
 - 게이트가 아직 `pending`이면 — 그대로 재봉인(값만 덮어씀, 상태 전이 없음).
 - 게이트가 `approved`였으면 — `pending`으로 재오픈 + `reapproval_required=True` +
   그 게이트에 걸린 대기 중(pending) 명령 voided.
@@ -103,10 +105,18 @@ async def _resolve_publication_and_work_item(
 async def request_newsletter_send(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, segment_name: str,
     scheduled_at: datetime, requester_member_id: uuid.UUID,
+    neutral_facts: dict | None = None, designated_approver_id: uuid.UUID | None = None,
+    expected_work_item_id: uuid.UUID | None = None,
 ) -> Gate:
+    """사람 API(routers/newsletter_send.py)와 레시피 발송 단계(recipe_gate_hooks.py, story
+    #4191) 공용. 뒤의 세 인자는 레시피 경로만 넘긴다(사람 경로 무변): 결재 카드용 neutral_facts·
+    지정 승인자, 그리고 `expected_work_item_id` — 발행물이 그 work item에 걸린 게 아니면 없는
+    발행물과 똑같이 거부한다(다른 스토리의 발행물로 발송 게이트를 여는 경로 차단, 존재 비노출)."""
     publication, work_item_id = await _resolve_publication_and_work_item(
         db, org_id=org_id, publication_id=publication_id,
     )
+    if expected_work_item_id is not None and work_item_id != expected_work_item_id:
+        raise NewsletterPublicationNotFoundError(publication_id)
 
     role_id = await _default_role_id(db, org_id)
     if role_id is None:
@@ -117,7 +127,19 @@ async def request_newsletter_send(
     gate = await create_gate(
         db, org_id, work_item_id, "story", _NEWSLETTER_SEND_GATE_TYPE,
         requester_member_id, role_id, scope_key=str(publication_id),
+        neutral_facts=neutral_facts, designated_approver_id=designated_approver_id,
     )
+
+    # PR #4550 까디르 실측(P2, PO 처방 2026-09-23) — 승인된 게이트에 봉인 값(발행물=scope_key·
+    # 수신 대상·예약 시각)이 같은 요청이 다시 오면 no-op. 「변경=재승인」이지 「재요청=재승인」이
+    # 아니다 — 에이전트의 재시도·중복 발행(레시피)이나 사람의 같은 재요청이 승인된 예약 발송을
+    # 조용히 취소(명령 무효화)하고 재승인을 기다리게 만들면 안 된다. 사람 API·레시피 공용 규칙.
+    if (
+        gate.status == "approved"
+        and gate.sealed_newsletter_segment_name == segment_name
+        and gate.sealed_newsletter_scheduled_at == scheduled_at
+    ):
+        return gate
 
     now = datetime.now(timezone.utc)
     was_approved = gate.status == "approved"

@@ -392,6 +392,25 @@ _CATALOG: dict[str, dict[str, str]] = {
     # story #4085 AC1 — 자기설명 렌더러가 다음 stage 발행 예시에 봉인 필드(예:
     # estimated_cost_minor)를 실값 예시로 채운 뒤, 그 값이 왜 필요한지 바로 아래 한 줄로
     # 붙이는 설명(recipe_gate_hooks.py::SealedFieldSpec.explanation_catalog_key).
+    # story #4191 — newsletter_send 게이트(레시피 발송 단계)의 봉인 필드 3종 설명.
+    "events.sealed_field_newsletter_publication_id": {
+        "ko": "publication_id는 위 예시값이 아니라 이 스토리에서 발행 완료된 뉴스레터 캠페인(스티비)의"
+        " 발행물 id로 바꿔서 채워야 해요 — 무엇을 보낼지가 이 값으로 정해져요.",
+        "en": "Replace the example above with the publication id of this story's published newsletter"
+        " campaign (Stibee) for publication_id — it decides what gets sent.",
+    },
+    "events.sealed_field_newsletter_segment_name": {
+        "ko": "segment_name은 실제로 보낼 수신 대상(스티비 세그먼트 이름)으로 바꿔서 채워야 해요 —"
+        " 승인 카드에 «누구에게»로 봉인돼요.",
+        "en": "Replace segment_name with the actual recipients (the Stibee segment name) — it is sealed"
+        " onto the approval card as who receives it.",
+    },
+    "events.sealed_field_newsletter_scheduled_at": {
+        "ko": "scheduled_at은 실제 발송 예정 시각(시간대를 붙인 ISO 8601)으로 바꿔서 채워야 해요 —"
+        " 승인 카드에 «언제»로 봉인되고, 사람이 승인하면 이 시각에 발송돼요.",
+        "en": "Replace scheduled_at with the actual send time (ISO 8601 with a time zone) — it is sealed"
+        " onto the approval card as when, and the send goes out at this time once a person approves.",
+    },
     "events.sealed_field_estimated_cost_minor": {
         "ko": "estimated_cost_minor는 위 예시값이 아니라 실제 예상 비용(정수, 조직 통화의"
         " 최소 단위)으로 바꿔서 채워야 해요 — 이 값이 승인 카드에 예상 비용으로 봉인돼요.",
