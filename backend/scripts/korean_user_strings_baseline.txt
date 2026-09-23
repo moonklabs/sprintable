@@ -196,8 +196,6 @@ app/routers/events.py::- 단계 `
 app/routers/events.py::- 대상 산출물:
 app/routers/events.py::- 사유:
 app/routers/events.py::Cursor: ISO 8601 created_at, fetch after this time(오래된순 정렬 forward-cursor)
-app/routers/events.py::[이벤트]
-app/routers/events.py::[이벤트] preset.gate.verdict
 app/routers/events.py::extra_broadcast_member_ids에 이 org의 실존 회원이 아닌 id가 있습니다:
 app/routers/events.py::name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)
 app/routers/events.py::name은 비울 수 없습니다(공백뿐인 값도 안 됨)

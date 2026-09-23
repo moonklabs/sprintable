@@ -10,6 +10,7 @@
     "type-check": "tsc --noEmit",
     "runtime:worker": "tsx scripts/background-runtime-worker.ts",
     "dispatch:slack-outbound": "tsx scripts/slack-outbound-dispatcher.ts",
+    "gen:recipe-preset-actions": "tsx scripts/generate-recipe-preset-actions.ts",
     "verify:build-schema-integrity": "tsx scripts/verify-build-schema-integrity.ts",
     "verify:no-new-md-breakpoint": "tsx scripts/verify-no-new-md-breakpoint.ts",
     "verify:no-alpha-focus-ring": "tsx scripts/verify-no-alpha-focus-ring.ts",

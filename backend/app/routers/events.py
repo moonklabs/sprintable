@@ -42,6 +42,8 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
 from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.org_locale import resolve_org_locale
+from app.services.recipe_preset_actions import localized_preset_action
 from app.services.i18n_catalog import t
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
@@ -1076,11 +1078,12 @@ async def _get_or_create_event_conversation(
     )
 
 
-def _generic_event_message_lines(definition_key: str, payload: dict) -> list[str]:
+def _generic_event_message_lines(definition_key: str, payload: dict, resolved_locale: str) -> list[str]:
     """P2(story #2637)의 block_template 렌더러가 상륙하기 전 제네릭 폴백 — model.py docstring의
     "템플릿 없으면 제네릭 카드"와 동형 원칙을 메시지 본문 레벨에서 지금 구현. 필드 순서는
-    payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다."""
-    lines = [f"[이벤트] {definition_key}"]
+    payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다.
+    story #4224 — 머리 줄은 stage 렌더와 같은 로케일 키(en 본문에 «[이벤트]»가 남던 자리). 필드 줄은 payload 원값."""
+    lines = [t("events.event_line_header", resolved_locale, event_key=definition_key)]
     lines += [f"- {k}: {v}" for k, v in payload.items()]
     return lines
 
@@ -1542,7 +1545,8 @@ async def _render_gate_verdict_message(
         except (ValueError, AttributeError, TypeError):
             work_item_id = None
 
-    lines = ["[이벤트] preset.gate.verdict"]
+    # story #4224 — 머리 줄도 로케일 키(아래 줄들은 이미 resolved_locale · en 본문에 «[이벤트]»가 남던 자리).
+    lines = [t("events.event_line_header", resolved_locale, event_key="preset.gate.verdict")]
 
     work_item_ref: str | None = None
     if work_item_type and work_item_id is not None:
@@ -1981,13 +1985,13 @@ async def _render_event_message_content(
     if definition.key == "preset.gate.verdict":
         return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
     if not definition.stage_metadata:
-        return "\n".join(_generic_event_message_lines(definition.key, payload))
+        return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 
     stage = payload.get("stage")
     stage_meta = definition.stage_metadata.get(stage) if stage else None
     if stage_meta is None:
         # stage가 payload에 없거나 stage_metadata에 등재 안 됨 — 지어내지 않고 기존 폴백.
-        return "\n".join(_generic_event_message_lines(definition.key, payload))
+        return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 
     # PO 리뷰(페드루, 2026-09-02) — validate_stage_metadata의 role/action 필수 검증은
     # 2026-08-19 이후 "쓰기 시점" 가드라, 그 전에 저장된 정의는 role/action이 누락된 채
@@ -1997,10 +2001,15 @@ async def _render_event_message_content(
     role = stage_meta.get("role")
     action = stage_meta.get("action")
     if not role or not action:
-        return "\n".join(_generic_event_message_lines(definition.key, payload))
+        return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 
     # story #3329 — action 문구 안에 박힌 doc/story UUID(전체 또는 8자 prefix)를 참조
     # 토큰으로. work_item_ref/*_doc_id와 같은 "실재하는 것만" 원칙(없으면 원문 그대로).
+    # story #4224 — 플랫폼 프리셋이면 로케일 문안(FE 원천의 생성 파생물 · ko는 시드 원문 그대로). 커스텀 정의는 원문.
+    action = localized_preset_action(
+        definition_key=definition.key, org_id=definition.org_id, stage=stage,
+        raw_action=action, locale=resolved_locale,
+    )
     rendered_action = await _tokenize_embedded_entity_refs(db, org_id=org_id, text=action)
 
     # story #4174(유나 · PO 12:37Z) — 머리 줄·할 일 줄도 로케일 키(«다음 단계» 줄들과 같은 방식) — en 본문 안에 한국어가 섞이지 않게.
@@ -2161,7 +2170,11 @@ async def publish_registry_event(
     10여 곳이 이 함수를 HTTP 경유 없이 직접 호출하는데, `request`는 이미 실
     Starlette Request라 `.headers`가 항상 안전하게 동작한다 — `Header()` 마커였다면
     그 호출부 전부가 깨졌을 것)."""
-    resolved_locale = resolve_locale_from_request(locale, request.headers.get("accept-language"))
+    # story #4224 — 요청에 로케일이 전혀 없으면(명시값·Accept-Language 둘 다 없음) core가 org 기준 언어로 푼다.
+    _accept_language = request.headers.get("accept-language")
+    resolved_locale = (
+        resolve_locale_from_request(locale, _accept_language) if (locale or _accept_language) else None
+    )
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
@@ -2319,13 +2332,18 @@ async def _publish_registry_event_core(
     # preset_event, HTTP 요청 컨텍스트 없음 — 이 함수 docstring 참조)은 이 인자를
     # 안 넘겨 기본값 "ko"로 떨어진다(회귀 0) — HTTP 진입점(publish_registry_event)만
     # Header()로 실제 값을 풀어 넘긴다.
-    resolved_locale: str = "ko",
+    # story #4224(PO 판단 22:35Z) — 기본값을 "ko" 고정에서 None(= org 기준 언어 · `resolve_org_locale`)으로. 서버 자동 발행
+    # 3곳(판정 알림 publish_preset_event · recipe_repeat_scheduler · channel_posts published stage)과 요청 로케일이 없는 HTTP
+    # 발행이 en org에서 한국어 본문을 내던 자리. 요청 로케일이 있으면 그대로 우선(행동 변화 0).
+    resolved_locale: str | None = None,
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
     풀어 기존 단일 판정 파이프(route_message/DeliveryDecision, AC2)로 전달한다. HTTP 전용
     폴백(`request`가 있을 때만 쓰는 `resolve_required_project_id`)만 옵션 처리 — 자동발행
     호출부는 항상 payload에 work_item/goal 참조를 실어 이 폴백에 안 걸린다."""
+    if resolved_locale is None:
+        resolved_locale = await resolve_org_locale(db, org_id)
     from app.services.member_resolver import resolve_member
 
     sender = await resolve_member(auth, org_id, db)

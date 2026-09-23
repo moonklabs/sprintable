@@ -1,0 +1,238 @@
+{
+  "preset.marketing.blog_article:concept_confirmed": {
+    "ko": "컨셉 승인(주제·키워드·구성 확인)",
+    "en": "Approve the concept (check the topic, keywords, and outline)"
+  },
+  "preset.marketing.blog_article:pending_approval": {
+    "ko": "제출한 초안이 발행 승인을 받을 때까지 기다리기(승인은 결재함의 초안에서)",
+    "en": "Wait until the submitted draft is approved for publishing (approve it on the draft in Approvals)"
+  },
+  "preset.marketing.blog_article:planning": {
+    "ko": "주제·키워드 기획(제목 후보와 글 구성)",
+    "en": "Plan the topic and keywords (title ideas and outline)"
+  },
+  "preset.marketing.blog_article:publish_checked": {
+    "ko": "공개 주소로 발행 결과 확인",
+    "en": "Check the published post at its public URL"
+  },
+  "preset.marketing.blog_article:published": {
+    "ko": "승인된 초안을 블로그에 자동 발행(에이전트 할 일 없음)",
+    "en": "The approved draft is published to the blog automatically (nothing for the agent to do)"
+  },
+  "preset.marketing.blog_article:verification": {
+    "ko": "콘텐츠 규칙 검수 후 초안 제출",
+    "en": "Check the draft against the content rules, then submit it"
+  },
+  "preset.marketing.blog_article:writing": {
+    "ko": "블로그 초안 작성",
+    "en": "Write the blog draft"
+  },
+  "preset.marketing.newsletter:campaign_created": {
+    "ko": "승인된 초안으로 Stibee 캠페인 만들기",
+    "en": "Create the Stibee campaign from the approved draft"
+  },
+  "preset.marketing.newsletter:collect": {
+    "ko": "뉴스레터에 담을 소재 모으기",
+    "en": "Gather material for the newsletter"
+  },
+  "preset.marketing.newsletter:draft": {
+    "ko": "뉴스레터 초안 작성",
+    "en": "Write the newsletter draft"
+  },
+  "preset.marketing.newsletter:review": {
+    "ko": "내용 검수 후 캠페인 만들기 승인",
+    "en": "Review the content and approve creating the campaign"
+  },
+  "preset.marketing.newsletter:send_checked": {
+    "ko": "발송 결과 확인",
+    "en": "Check the send results"
+  },
+  "preset.marketing.newsletter:send_requested": {
+    "ko": "받는 사람과 보낼 시각을 정해 발송 승인 요청",
+    "en": "Set the recipients and send time, then request send approval"
+  },
+  "preset.marketing.social_card_news:budget_approved": {
+    "ko": "생성할 이미지와 예산을 정해 유료 생성 승인",
+    "en": "Choose the images and budget, then approve paid generation"
+  },
+  "preset.marketing.social_card_news:concept_confirmed": {
+    "ko": "컨셉 승인(메시지와 카드 구성 확인)",
+    "en": "Approve the concept (check the message and card layout)"
+  },
+  "preset.marketing.social_card_news:draft": {
+    "ko": "기획 초안 작성(주제·메시지·카드 구성)",
+    "en": "Write the plan draft (topic, message, card layout)"
+  },
+  "preset.marketing.social_card_news:editing": {
+    "ko": "이미지 첨부와 캡션 작성",
+    "en": "Attach images and write the caption"
+  },
+  "preset.marketing.social_card_news:live_generation": {
+    "ko": "유료 이미지 생성 실행",
+    "en": "Run paid image generation"
+  },
+  "preset.marketing.social_card_news:pending_approval": {
+    "ko": "최종 발행 승인(외부 발행 직전)",
+    "en": "Approve final publishing (right before it goes out)"
+  },
+  "preset.marketing.social_card_news:published": {
+    "ko": "승인된 채널에 게시",
+    "en": "Post to the approved channel"
+  },
+  "preset.marketing.social_card_news:verification": {
+    "ko": "검증 시트 작성(이미지 속 글자·브랜드 표기 확인)",
+    "en": "Fill in the verification sheet (check text in images and brand names)"
+  },
+  "preset.marketing.social_text_post:concept_confirmed": {
+    "ko": "컨셉 승인(메시지와 말투 확인)",
+    "en": "Approve the concept (check the message and tone)"
+  },
+  "preset.marketing.social_text_post:draft": {
+    "ko": "글 초안 작성(주제·메시지)",
+    "en": "Write the post draft (topic, message)"
+  },
+  "preset.marketing.social_text_post:editing": {
+    "ko": "글 다듬기(길이·해시태그·링크 정리)",
+    "en": "Polish the post (length, hashtags, links)"
+  },
+  "preset.marketing.social_text_post:pending_approval": {
+    "ko": "최종 발행 승인(외부 발행 직전)",
+    "en": "Approve final publishing (right before it goes out)"
+  },
+  "preset.marketing.social_text_post:published": {
+    "ko": "승인된 채널에 게시",
+    "en": "Post to the approved channel"
+  },
+  "preset.marketing.video_production:animatic": {
+    "ko": "애니매틱 제작(무료 스틸·자막·내레이션) 후 구조 검토 요청",
+    "en": "Make the animatic (free stills, subtitles, narration), then request a structure review"
+  },
+  "preset.marketing.video_production:concept_confirmed": {
+    "ko": "컨셉 승인(이야기와 제품 가치가 맞는지 확인)",
+    "en": "Approve the concept (check the story fits the product's value)"
+  },
+  "preset.marketing.video_production:draft": {
+    "ko": "로그라인·컨셉 초안 작성",
+    "en": "Write the logline and concept draft"
+  },
+  "preset.marketing.video_production:editing": {
+    "ko": "편집 마무리(색·배경음·자막 크기 맞추기)",
+    "en": "Finish the edit (color, background music, subtitle size)"
+  },
+  "preset.marketing.video_production:live_generation": {
+    "ko": "유료 생성 실행(키 컷·영상·음성·립싱크)",
+    "en": "Run paid generation (key cuts, video, voice, lip sync)"
+  },
+  "preset.marketing.video_production:pending_approval": {
+    "ko": "최종 발행 승인(외부 발행 직전)",
+    "en": "Approve final publishing (right before it goes out)"
+  },
+  "preset.marketing.video_production:published": {
+    "ko": "승인된 채널에 게시",
+    "en": "Post to the approved channel"
+  },
+  "preset.marketing.video_production:structure_passed": {
+    "ko": "구조 확인 후 생성 대상과 예산을 정해 유료 생성 승인",
+    "en": "Check the structure, choose what to generate and the budget, then approve paid generation"
+  },
+  "preset.marketing.video_production:verification": {
+    "ko": "검증 시트 작성(프레임·자막 받아쓰기로 화면과 소리 확인)",
+    "en": "Fill in the verification sheet (check picture and sound with frames and a subtitle transcript)"
+  },
+  "preset.workflow.agent_solo:execute": {
+    "ko": "작업을 하고 결과 만들기",
+    "en": "Do the work and produce the result"
+  },
+  "preset.workflow.agent_solo:received": {
+    "ko": "이벤트를 받고 맥락 파악",
+    "en": "Receive the event and understand the context"
+  },
+  "preset.workflow.agent_solo:report": {
+    "ko": "결과를 요약해 채팅으로 보고",
+    "en": "Summarize the result and report it in chat"
+  },
+  "preset.workflow.kanban:assign_step_1": {
+    "ko": "담당자 배정",
+    "en": "Assign an owner"
+  },
+  "preset.workflow.kanban_simple:done_check": {
+    "ko": "완료 기준을 채웠는지 확인",
+    "en": "Check that the completion criteria are met"
+  },
+  "preset.workflow.kanban_simple:in_progress": {
+    "ko": "작업하면서 진행 상황 남기기",
+    "en": "Do the work and post progress updates"
+  },
+  "preset.workflow.kanban_simple:task_created": {
+    "ko": "백로그에서 작업을 골라 맡기",
+    "en": "Pick a task from the backlog and take it"
+  },
+  "preset.workflow.loop_agency:brief_doc_approval": {
+    "ko": "실행 계획을 브리프 문서로 쓰고 문서 결재 받기",
+    "en": "Write the plan as a brief and get it approved"
+  },
+  "preset.workflow.loop_agency:execute": {
+    "ko": "고른 실행안 실행(캠페인 발행·배포 등)",
+    "en": "Run the chosen option (publish a campaign, deploy, etc.)"
+  },
+  "preset.workflow.loop_agency:generate_variants": {
+    "ko": "브리프를 바탕으로 실행안 여러 개 만들기",
+    "en": "Draft several options from the brief"
+  },
+  "preset.workflow.loop_agency:goal_hypothesis": {
+    "ko": "목표·가설·측정 지표 정하기",
+    "en": "Set the goal, hypothesis, and metric"
+  },
+  "preset.workflow.loop_agency:loop_decision": {
+    "ko": "실행안 하나를 고르고, 고른 이유와 뺀 이유 남기기",
+    "en": "Pick one option and note why, and why the others were dropped"
+  },
+  "preset.workflow.loop_agency:track_and_learn": {
+    "ko": "성과(GA4 등)를 재고, 고른 이유와 결과를 다음 실험의 참고로 남기기",
+    "en": "Measure results (e.g., GA4) and keep the choice, reasons, and results for the next cycle"
+  },
+  "preset.workflow.scrum_3step:implementation": {
+    "ko": "코드를 쓰고 PR 올리기",
+    "en": "Write the code and open a PR"
+  },
+  "preset.workflow.scrum_3step:kickoff": {
+    "ko": "기능 명세와 완료 조건 쓰기",
+    "en": "Write the spec and acceptance criteria"
+  },
+  "preset.workflow.scrum_3step:qa_review": {
+    "ko": "완료 조건대로 확인하고 승인 또는 반려",
+    "en": "Check against the acceptance criteria, then approve or reject"
+  },
+  "preset.workflow.solo:assign_step_1": {
+    "ko": "담당자 배정",
+    "en": "Assign an owner"
+  },
+  "preset.workflow.three_step:assign_step_1": {
+    "ko": "담당자 배정",
+    "en": "Assign an owner"
+  },
+  "preset.workflow.three_step:review_step_2": {
+    "ko": "검토",
+    "en": "Review"
+  },
+  "preset.workflow.three_step:review_step_3": {
+    "ko": "승인",
+    "en": "Approve"
+  },
+  "preset.workflow.three_step:submit_step_1": {
+    "ko": "제출",
+    "en": "Submit"
+  },
+  "preset.workflow.two_step:assign_step_1": {
+    "ko": "담당자 배정",
+    "en": "Assign an owner"
+  },
+  "preset.workflow.two_step:review_step_2": {
+    "ko": "검토",
+    "en": "Review"
+  },
+  "preset.workflow.two_step:submit_step_1": {
+    "ko": "제출",
+    "en": "Submit"
+  }
+}
