@@ -205,6 +205,9 @@ export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'onboarding.roleQa', 'organization.stageRoleLabelPo', 'organization.stageRoleLabelQa',
   'organization.trustRoleLabelDevops', 'organization.trustRoleLabelPo',
   'organization.trustRoleLabelQa',
+  // story #4209(유나 확정 문안) — 워크플로우 «3단계 스크럼» 단계 라벨 qa_review=«QA». 위 role-badge 패밀리와 같은 낱말
+  // (stageRoleLabelQa와 같은 값·4203 설명 «기획 → 개발 → QA»와 같은 흐름 낱말) — 같은 PO 判定(2026-09-15) 범위로 등재.
+  'organization.recipeStageLabelQaReview',
 
   // 이 제품 자체의 고유 기능명(coined term, 축1의 BYOA/BYOM/BYO와 동일 패밀리) —
   // agentRuns.billingMode_managed(대응짝)는 일반 영단어라 "관리형"으로 한국어 전환.

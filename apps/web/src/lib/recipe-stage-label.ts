@@ -29,6 +29,26 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   campaign_created: 'recipeStageLabelCampaignCreated',
   send_requested: 'recipeStageLabelSendRequested',
   send_checked: 'recipeStageLabelSendChecked',
+  // story #4209(유나 확정) — 워크플로우 프리셋(preset.workflow.*) 단계 슬러그. 채팅 이벤트 카드 본문이 {{payload.stage}}
+  // 원문(`assign_step_1`)을 그리던 자리를 이 표로 푼다. 낱말은 4203 설명의 흐름 낱말과 같다. 마케팅 슬러그와 겹침 0.
+  received: 'recipeStageLabelReceived',
+  execute: 'recipeStageLabelExecute',
+  report: 'recipeStageLabelReport',
+  assign_step_1: 'recipeStageLabelAssignStep1',
+  submit_step_1: 'recipeStageLabelSubmitStep1',
+  review_step_2: 'recipeStageLabelReviewStep2',
+  review_step_3: 'recipeStageLabelReviewStep3',
+  task_created: 'recipeStageLabelTaskCreated',
+  in_progress: 'recipeStageLabelInProgress',
+  done_check: 'recipeStageLabelDoneCheck',
+  kickoff: 'recipeStageLabelKickoff',
+  implementation: 'recipeStageLabelImplementation',
+  qa_review: 'recipeStageLabelQaReview',
+  goal_hypothesis: 'recipeStageLabelGoalHypothesis',
+  brief_doc_approval: 'recipeStageLabelBriefDocApproval',
+  generate_variants: 'recipeStageLabelGenerateVariants',
+  loop_decision: 'recipeStageLabelLoopDecision',
+  track_and_learn: 'recipeStageLabelTrackAndLearn',
 };
 
 export function recipeStageLabel(stage: string, t: (key: string) => string): string {

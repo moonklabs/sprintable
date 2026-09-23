@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { stageRoleLabel } from '@/lib/stage-role';
-import { presetDescription, presetName } from '@/lib/platform-preset-copy';
+import { presetAction, presetDescription, presetName } from '@/lib/platform-preset-copy';
 
 /** BE _GA4_SUPPORTED_METRICS(backend/app/schemas/story.py)와 동기 — 모르는 지표는 BE가 422. */
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -340,7 +340,7 @@ export function LoopCreateDialog({
                       const meta = selectedRecipe.stage_metadata[stage];
                       return (
                         <li key={stage} className="break-words">
-                          <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
+                          <span className="font-medium text-foreground">{presetAction(selectedRecipe, stage, meta?.action, tPreset)}</span>
                           {meta?.role ? <> ({stageRoleLabel(meta.role, to)})</> : null}
                         </li>
                       );
