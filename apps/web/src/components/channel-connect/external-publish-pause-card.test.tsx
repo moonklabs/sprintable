@@ -194,4 +194,49 @@ describe('ExternalPublishPauseCard', () => {
     expect(container.querySelector('[data-testid="external-publish-pause-error"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('정상');
   });
+
+  it('story #3953 CHANGES — 최초 GET 실패(404 등) 시 카드가 조용히 안 사라지고 로드-실패 문구+다시 시도가 뜬다', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')?.textContent).toBe(
+      '상태를 불러오지 못했어요 — 다시 시도해 주세요.',
+    );
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-load-retry"]')).not.toBeNull();
+  });
+
+  it('story #3953 CHANGES — GET 자체가 throw(네트워크 오류)해도 로드-실패 문구가 뜬다', async () => {
+    mockFetchWithAuth.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')).not.toBeNull();
+  });
+
+  it('story #3953 CHANGES — 로드-실패 뒤 「다시 시도」를 누르면 재조회해 정상 카드로 전환된다', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')).not.toBeNull();
+
+    mockFetchWithAuth.mockResolvedValueOnce(
+      jsonResponse({ paused: false, paused_at: null, paused_by: null, reason: null }),
+    );
+    const retry = container.querySelector('[data-testid="external-publish-pause-load-retry"]') as HTMLButtonElement;
+    await act(async () => {
+      retry.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="external-publish-pause-load-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="external-publish-pause-status-pill"]')?.textContent).toBe('정상');
+  });
 });

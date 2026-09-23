@@ -2476,6 +2476,8 @@
     "externalPublishPauseReasonPlaceholder": "멈추는 이유를 한 줄로 적어 주세요 — 감사 로그에 남아요. (예: 오발행 확인 중·토큰 점검)",
     "externalPublishResumeReasonPlaceholder": "푸는 이유를 적어 주세요 — 감사 로그에 남아요.",
     "externalPublishPauseActionFailed": "처리하지 못했어요 — 다시 시도해 주세요.",
+    "externalPublishPauseLoadFailed": "상태를 불러오지 못했어요 — 다시 시도해 주세요.",
+    "externalPublishPauseLoadRetryCta": "다시 시도",
     "channelThreads": "Threads",
     "channelLabelHostedSite": "Sprintable 블로그",
     "channelLabelWordpress": "WordPress",

@@ -15,6 +15,14 @@ import { describe, expect, it } from 'vitest';
  * - `/api/organizations/` 밖의 BFF 경로(예: `/api/gates`) — 스코프 밖
  * - fetchWithAuth 호출부터 200자 밖에 있는 `method:` 옵션(위양성 방지용 탐색 폭 제한 —
  *   해당 클래스는 지금까지 전부 같은 줄이거나 바로 다음 줄이라 실측상 미발생)
+ * - **동적 세그먼트를 리터럴 형제 디렉터리가 전부 흡수하는 경우**(Next.js는 같은
+ *   레벨에서 리터럴 이름이 `[bracket]` 동적보다 항상 우선) — `resolveRouteDir`는
+ *   이 우선순위를 모델링하지 않아 위양성(RED인데 실은 라이브 정상)을 낸다. 실측
+ *   사례: `pasted-secret-connect-card.tsx`의 `channel-connections/${channel}`
+ *   POST는 실제로 `channel`이 항상 wordpress|ghost|stibee 중 하나(각각 자기 리터럴
+ *   route.ts에 POST 有)라 `[channel]/route.ts` 부재가 라이브 결함이 아니다(2026-09-23
+ *   확認, story #3953 CHANGES 작업 중 발견) — 그래서 `components/channel-connect`
+ *   디렉터리 전체가 아니라 실제 결함이 있던 파일 하나만 스캔 대상에 추가한다(아래).
  */
 
 const CONTENT_DIRS = [
@@ -28,6 +36,13 @@ const CONTENT_DIRS = [
   // 테스트가 있는 이유와 같은 함정).
   join(__dirname, '../../../app/(authenticated)/organization/insights-board'),
   join(__dirname, '../../../components/insights-board'),
+  // story #3953 CHANGES(페드루 PO 실측, 2026-09-23) — `/organization/channels`의
+  // `ExternalPublishPauseCard`(components/channel-connect)가 부르는 BFF 라우트가
+  // 이 배열 밖이라 이 가드가 못 잡고 놓쳤던 결함(GET 404 → catch가 삼켜 카드가
+  // 조용히 안 뜸). 위 insights-board 주석과 같은 함정 — 새 org 화면/컴포넌트
+  // 디렉터리는 반드시 이 배열에 추가한다.
+  join(__dirname, '../../../app/(authenticated)/organization/channels'),
+  join(__dirname, '../../../components/channel-connect/external-publish-pause-card.tsx'),
 ];
 const API_ROOT = join(__dirname, '../../../app/api');
 
@@ -43,6 +58,14 @@ function listSourceFiles(dir: string): string[] {
     }
   }
   return out;
+}
+
+/** CONTENT_DIRS 항목은 디렉터리(재귀 스캔)이거나 단일 파일(위 ⛔ 항목처럼 형제
+ * 파일의 기지 위양성을 피하려 파일 하나만 콕 집어야 할 때)일 수 있다. */
+function listSourceEntry(path: string): string[] {
+  const st = statSync(path);
+  if (st.isFile()) return /\.tsx?$/.test(path) && !path.includes('.test.') ? [path] : [];
+  return listSourceFiles(path);
 }
 
 interface CallSite {
@@ -99,7 +122,7 @@ function exportsMethod(routeTsPath: string, method: string): boolean {
 }
 
 describe('content BFF 경로 커버리지 가드(story #3445)', () => {
-  const files = CONTENT_DIRS.flatMap((d) => listSourceFiles(d));
+  const files = CONTENT_DIRS.flatMap((d) => listSourceEntry(d));
   const calls = extractCalls(files);
 
   it('스캔 대상이 비어있지 않다(가드 자체가 죽은 채 항상 통과하는 것 방지)', () => {
