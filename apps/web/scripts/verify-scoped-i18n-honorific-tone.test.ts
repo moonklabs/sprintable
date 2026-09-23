@@ -453,6 +453,13 @@ describe('findPersonaAdnominalTerminal — 순수 판정 함수(axis ②)', () =
     expect(findPersonaAdnominalTerminal(ko, ['p.d'])).toEqual([{ key: 'p.d', value: ko.p.d }]);
   });
 
+  it.each(['그 사람은 회원인.', '이건 지원인.', '결과가 명확인.'])(
+    "까디르 QA(PR #4566) — 명사 예외는 낱말 전체 일치만: %s(관형형 «~인.»)는 잡는다",
+    (value) => {
+      expect(findPersonaAdnominalTerminal({ p: { x: value } }, ['p.x'])).toEqual([{ key: 'p.x', value }]);
+    },
+  );
+
   it("'…되돌리는.'·'…엣지인.'(관형형+마침표 종결)를 잡는다", () => {
     const findings = findPersonaAdnominalTerminal(
       { p: { a: '연결을 되돌리는.', b: '이건 엣지인.' } },

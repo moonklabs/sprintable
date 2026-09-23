@@ -356,14 +356,14 @@ const ADNOMINAL_TERMINAL_RE = /([가-힣]+)(는|인)\.(\s|$)/g;
 
 // story #4203(유나 확정 문안 «할 일 → 진행 중 → 완료 확인.»·«제출 → 검토 → 승인.») — «확인»·«승인»은 관형형
 // 어미 '인'이 아니라 '인'으로 끝나는 한자어 명사다(명사형 종결은 이 제품의 설명 두 마디 꼴 «흐름. ~에 적합.»).
-// 정규식이 글자만 보고 명사까지 관형형으로 잡던 오탐 — '인'으로 끝나는 명사를 낱말 단위로만 뺀다(관형형 «~엣지인.»·
-// «~되돌리는.»은 그대로 잡힌다). 새 명사가 필요하면 이 표에 한 줄(사유: 명사형 종결 문안).
-const NOUNS_ENDING_IN_IN = new Set(['확인', '승인', '원인', '요인']);
+// 예외는 **낱말 전체 일치**로만 — 까디르 QA(PR #4566): 끝 두 글자만 보면 «회원인.»·«지원인.»·«명확인.» 같은 진짜 관형형
+// «~인.»이 «원인»·«확인»에 걸려 통과했다. 새 명사가 필요하면 이 표에 한 줄(사유: 명사형 종결 문안).
+const NOUNS_ENDING_IN_IN = new Set(['확인', '승인', '재승인', '미확인']);
 
 function hasAdnominalTerminal(value: string): boolean {
   for (const m of value.matchAll(ADNOMINAL_TERMINAL_RE)) {
     const word = m[1]! + m[2]!;
-    if (m[2] === '인' && NOUNS_ENDING_IN_IN.has(word.slice(-2))) continue;
+    if (m[2] === '인' && NOUNS_ENDING_IN_IN.has(word)) continue;
     return true;
   }
   return false;
