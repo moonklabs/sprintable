@@ -122,3 +122,18 @@ def test_literal_comment_opener_in_inline_code_does_not_eat_following_text():
 def test_plain_text_preview_keeps_code_but_strips_comment_outside_code():
     assert plain_text_preview("<!-- meta -->코드 `<!--` 는 남는다 <!-- tail", 80) == "코드 `<!--` 는 남는다"
 
+
+
+# ── PR #4541 까디르 재QA 뒤 같은 부류 2곳 ─────────────────────────────────────────
+
+def test_asset_source_title_from_message_uses_plain_text_preview():
+    # 스토리지 자산 «출처» 제목(삭제 다이얼로그 등) — 메시지 원문 80자.
+    assert 'title = plain_text_preview(content, _SNIPPET) or "메시지"' in _src("routers/assets.py")
+
+
+def test_discord_forward_strips_comment_but_keeps_body():
+    from app.services.discord_webhook import to_discord_message_payload
+
+    out = to_discord_message_payload({"content": "<!-- linear-comment-id: abc -->\n첫 줄\n둘째 줄", "conversation_id": "c-1", "message_id": "m-1"})
+    assert "<!--" not in out["content"] and "linear-comment-id" not in out["content"]
+    assert "첫 줄\n둘째 줄" in out["content"]

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 
+from app.services.text_preview import strip_html_comments
+
 _DISCORD_URL_PATTERNS = ("discord.com/api/webhooks", "discordapp.com/api/webhooks")
 
 
@@ -23,7 +25,9 @@ def to_discord_message_payload(payload: dict) -> dict:
 
     (conversation_webhook._to_discord_payload 에서 이전 — 채팅 전달 거동 byte-동형 유지.)
     """
-    content_text = (payload.get("content") or "")[:500]
+    # story #4182 — Discord는 HTML 주석을 숨기지 않아 외부 동기화 마커(<!-- linear-comment-id … -->)가
+    # 그대로 보인다. 절삭 전에 주석만 벗긴다(본문 나머지·줄바꿈은 그대로 — 미리보기 아님).
+    content_text = strip_html_comments(payload.get("content") or "")[:500]
     conversation_id = payload.get("conversation_id", "")
     # 정합 버그 fix(story ebd5cf18 크럭스 부수 발견, PO 승인): 예전엔 payload["thread_id"]를
     # "message_id"로 오라벨했다 — 루트 메시지는 thread_id가 항상 None(자기 자신이 스레드
