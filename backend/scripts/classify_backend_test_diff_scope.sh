@@ -15,7 +15,11 @@
 #   - 그 외(backend/ 변경이 테스트 파일뿐이거나 0건 — FE-only PR 포함) →
 #     backend/tests/*.py 변경분만 공백 구분 한 줄로(0건이면 빈 문자열).
 #
-# 사용법: classify_backend_test_diff_scope.sh <base_sha> [<head_sha>=HEAD]
+# 사용법: classify_backend_test_diff_scope.sh <base_sha> [<head_sha>=HEAD] [two-dot]
+#   세 번째 인자 `two-dot`(story #4206 · 까디르 P2): push 범위 판정용. PR은 base…head(세 점 — merge-base 기준,
+#   base 쪽에만 있는 변경은 PR 것이 아니다)가 맞지만, push는 «before에서 after로 무엇이 바뀌었나» 자체가 질문이라
+#   두 점(before after)이어야 한다 — 되감는 force push(after가 before의 조상)에서 세 점은 merge-base=after라 빈
+#   집합이 나와 백엔드 코드가 바뀌었는데도 «변경 없음»으로 판정됐다.
 # 출력(stdout 3줄, story #4163 확장):
 #   줄1(기존 계약 그대로) — `__ALL__` 또는 `tests/test_a.py tests/test_b.py`(0건이면 빈 줄).
 #   줄2(신규) — 줄1이 `__ALL__`(코드/의존성 변경 사유)일 때만: 변경된
@@ -37,6 +41,7 @@ set -uo pipefail
 
 BASE_SHA="${1:-}"
 HEAD_SHA="${2:-HEAD}"
+DIFF_MODE="${3:-three-dot}"
 
 if [ -z "${BASE_SHA}" ]; then
     echo "__ALL__"
@@ -45,7 +50,11 @@ if [ -z "${BASE_SHA}" ]; then
     exit 0
 fi
 
-CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1)"
+if [ "${DIFF_MODE}" = "two-dot" ]; then
+    CHANGED="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" 2>&1)"
+else
+    CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1)"
+fi
 DIFF_RC=$?
 if [ "${DIFF_RC}" -ne 0 ]; then
     echo "__ALL__"
