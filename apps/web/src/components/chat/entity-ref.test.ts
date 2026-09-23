@@ -105,3 +105,18 @@ describe('toPlainPreview (story #3949)', () => {
     expect(toPlainPreview(raw)).toBe('본문 앞부분');
   });
 });
+
+// PR #4541 까디르 QA ② — 코드 안의 리터럴 `<!--`는 주석이 아니다(서버와 같은 규칙).
+describe('toPlainPreview — 코드 속 리터럴 주석 여는 기호(story #4182)', () => {
+  it('인라인 코드 안의 `<!--`는 뒷본문을 삼키지 않는다', () => {
+    expect(toPlainPreview('Use `<!--` literally. After it comes the decision')).toBe('Use `<!--` literally. After it comes the decision');
+  });
+
+  it('펜스 코드 안의 `<!--`는 뒷본문을 삼키지 않는다', () => {
+    expect(toPlainPreview('Before\n```html\n<!--\n```\nAfter')).toBe('Before\n```html\n<!--\n```\nAfter');
+  });
+
+  it('코드 밖 주석은 여전히 지워진다', () => {
+    expect(toPlainPreview('<!-- meta -->코드 `<!--` 는 남는다 <!-- tail')).toBe('코드 `<!--` 는 남는다');
+  });
+});

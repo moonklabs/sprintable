@@ -31,6 +31,11 @@ export function unescapeReferenceLabel(label: string): string {
   return label.replace(/\\(.)/g, '$1');
 }
 
+// 코드(펜스·인라인) 안의 리터럴 `<!--`는 주석이 아니다 — 코드를 먼저 통째로 매치해 그대로
+// 두고 코드 밖 주석만 지운다(서버 text_preview.strip_html_comments와 같은 규칙, PR #4541
+// 까디르 QA: 코드 속 `<!--`가 뒷본문을 전부 삼키던 회귀).
+const CODE_OR_HTML_COMMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)|<!--[\s\S]*?(?:-->|$)/g;
+
 /**
  * story #3949(E-UX-OVERHAUL·customer-zero·§①) — 3888(대화 목록 미리보기 raw 키)·
  * 3903/3940(알림 요약 raw 키)과 같은 「본문 렌더러는 고쳤는데 요약 소비처는 원문」
@@ -62,7 +67,7 @@ export function unescapeReferenceLabel(label: string): string {
  */
 export function toPlainPreview(content: string): string {
   return content
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+    .replace(CODE_OR_HTML_COMMENT_RE, (_m, code: string | undefined) => code ?? '')
     .replace(/!?\[((?:\\.|[^[\]\\])*)\]\([^)]*\)/g, (_m, label: string) => unescapeReferenceLabel(label))
     .trim();
 }

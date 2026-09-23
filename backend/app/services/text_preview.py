@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import re
 
-# 코멘트 알림(comment.created) body 길이 — stories·visual_artifacts 공용.
-COMMENT_NOTIFICATION_PREVIEW_MAX = 200
+# 사용자 본문으로 만드는 알림 body 길이(채팅 멘션·새 메시지·코멘트·에이전트 배정) 공용.
+NOTIFICATION_BODY_PREVIEW_MAX = 200
 
-# 닫히지 않은 `<!--`(원문 자체가 잘려 들어온 경우)는 문자열 끝까지 제거한다.
-_HTML_COMMENT_RE = re.compile(r"<!--[\s\S]*?(?:-->|$)")
+# 코드(펜스·인라인) 안의 리터럴 `<!--`는 주석이 아니다 — 먼저 코드를 통째로 매치해 그대로
+# 돌려주고, 코드 밖의 주석만 지운다(까디르 QA: 펜스/인라인 코드 속 `<!--`가 뒷본문을 전부
+# 삼키던 회귀). 닫히지 않은 `<!--`(원문 자체가 잘려 들어온 경우)는 문자열 끝까지 제거한다.
+_CODE_OR_COMMENT_RE = re.compile(r"(```[\s\S]*?```|`[^`\n]*`)|<!--[\s\S]*?(?:-->|$)")
 
 
 def strip_html_comments(text: str) -> str:
-    return _HTML_COMMENT_RE.sub("", text)
+    return _CODE_OR_COMMENT_RE.sub(lambda m: m.group(1) or "", text)
 
 
 def plain_text_preview(text: str | None, max_len: int) -> str:

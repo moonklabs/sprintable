@@ -461,7 +461,7 @@ async def _build_approval_neutral_facts(
     else:
         doc_id, doc_title, doc_content, draft_author_id = draft
         facts["draft_doc_reference_token"] = build_reference_token("doc", doc_id, doc_title) or _UNCONFIRMED
-        facts["draft_doc_summary"] = strip_html_comments(doc_content)[:300] or _UNCONFIRMED
+        facts["draft_doc_summary"] = strip_html_comments(doc_content).strip()[:300] or _UNCONFIRMED
         # story #3370(Phase0·마케팅운영 S5) AC1 — 초안 원작성자(대개 담롱류 고객 에이전트)를
         # 판정 통지 수신자 집합에 합류시킨다(gate_service.py::_publish_gate_verdict_
         # notification이 이 키를 읽어 payload.gate_draft_author_member_id로 싣고,

@@ -44,7 +44,7 @@ from app.services.notification_dispatch import dispatch_notification
 from app.services.story_assignee_events import emit_story_assignee_changed
 from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
-from app.services.text_preview import COMMENT_NOTIFICATION_PREVIEW_MAX, plain_text_preview
+from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 from app.services.workflow_line_status import (
     LineStatusSummary,
     WorkflowLineStatusResponse,
@@ -2931,7 +2931,7 @@ async def add_comment(
             event_type="comment.created",
             target_member_ids=target_member_ids,
             title=f"새 코멘트: {story.title}",
-            body=plain_text_preview(content, COMMENT_NOTIFICATION_PREVIEW_MAX),
+            body=plain_text_preview(content, NOTIFICATION_BODY_PREVIEW_MAX),
             reference_type="story",
             reference_id=story.id,
             source_project_id=story.project_id,

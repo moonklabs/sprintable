@@ -23,6 +23,7 @@ from app.services.activity_stream import extract_activities_best_effort
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import resolve_member_identity
 from app.services.notification_dispatch import dispatch_notification
+from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 from app.services.workflow_readiness_matrix import READINESS_MATRIX
 
 # S21/S27: dispatch 가능 엔티티는 readiness matrix 의 dispatch_capable SSOT 에서 도출.
@@ -307,7 +308,7 @@ async def dispatch_entity_to_assignee(
         payload=payload,
         content=content,
         title=f"[{entity_type}] {title}",
-        message=message or (description or "")[:200] or None,
+        message=message or plain_text_preview(description, NOTIFICATION_BODY_PREVIEW_MAX) or None,
         commit=commit,
         hypothesis_anchor=hypothesis_anchor,
         context_pack=context_pack,
