@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_envelope import human_error
+from app.services.gate_service import RecipeReviewedDraftChangedError
 from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -131,6 +132,12 @@ class GateTransitionRequest(BaseModel):
     # merge 게이트 승인 시의 fail-closed 강제는 transition_gate_endpoint 본문에서(None도 「안 보냄」
     # 취급돼 known SHA와 불일치로 거부됨 — "안 보내면 조용히 통과"라는 구멍 자체가 생기지 않는다).
     reviewed_head_sha: str | None = None
+    # story #4190(PO 판정 2026-09-23 11:49Z) — 레시피 external_publish 게이트 승인 화면이 보여 준 초안
+    # (`linked_channel_draft`의 draft_id·version). 위 reviewed_head_sha와 같은 원리: 화면을 연 뒤·클릭 전에 새 버전이
+    # 커밋되면 옛 화면 클릭이 본 적 없는 새 버전을 봉인하던 창을 닫는다. 보여 준 초안이 있는 승인에서 미전송·불일치면
+    # 409(fail-closed · gate_service.RecipeReviewedDraftChangedError). 다른 gate_type엔 무관(무시).
+    reviewed_draft_id: uuid.UUID | None = None
+    reviewed_draft_version: int | None = None
 
     @field_validator("status")
     @classmethod
@@ -161,6 +168,9 @@ class LinkedChannelDraft(BaseModel):
     실제 자동발행 실행 선택 규칙과 **같은 함수** — 두 표면이 다른 draft를 가리키는
     드리프트 방지)가 고르는 draft만 싣는다."""
     draft_id: uuid.UUID
+    # story #4190 — 화면이 보여 주는 이 초안의 버전. 승인 요청이 `reviewed_draft_id`·`reviewed_draft_version`으로
+    # 그대로 돌려보내고, 서버가 승인 순간(초안 잠금 뒤) 최신과 대조한다(«사람 승인은 본 내용에만»).
+    version: int
     channel: str
     account_id: str
     account_label: str | None = None
@@ -169,6 +179,22 @@ class LinkedChannelDraft(BaseModel):
     video_url: str | None = None
     # scoped(초안 자체) external_publish 게이트 상태 — "approved"(승인하면 즉시 자동발행)
     # | "pending"(#4069 자동충족 대기 中, 이 unscoped 게이트 승인과 함께 승계-승인된다).
+    scoped_gate_status: str
+    sealed_scheduled_at: datetime | None = None
+
+
+class LinkedSiteDraft(BaseModel):
+    """story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `LinkedChannelDraft`의 블로그(site) 짝. 레시피 게이트
+    승인 화면이 그리는 블로그 초안(`gate_service.find_recipe_shown_draft`가 고른 것 — 봉인·캐스케이드와 같은 답).
+    목적지 연결 필드(channel·account_*)는 외부 블로그일 때만 값이 있다 — 자사(호스팅) 블로그면 None(카드가 그 줄을 생략).
+    `body_preview`는 마크다운 기호를 걷은 평문 앞부분(`text_preview.markdown_plain_text_preview`) — FE는 파싱하지 않는다."""
+    draft_id: uuid.UUID
+    version: int
+    title: str
+    body_preview: str
+    channel: str | None = None
+    account_id: str | None = None
+    account_label: str | None = None
     scoped_gate_status: str
     sealed_scheduled_at: datetime | None = None
 
@@ -265,6 +291,14 @@ class GateResponse(BaseModel):
     # 승인과 함께 승계-승인된다)인지 FE가 갈라야 해서 별도 플래그(같은 조회 한 번의
     # 부산물, 새 쿼리 0 — find_ready_recipe_channel_drafts의 still_pending 그대로).
     linked_channel_draft_pending: bool = False
+    # story #4190(PO 판정 2026-09-23 12:03Z) — 레시피 게이트가 보여 주는 초안이 블로그(site)일 때의 카드. 채널 카드와
+    # 둘 중 하나만 채워진다(어느 카드인지 BE가 가른다 — `find_recipe_shown_draft`). `_pending`은 채널 짝과 같은 뜻
+    # (제출은 됐지만 멀티목적지 pending이라 이 승인이 승계하지 않음).
+    linked_site_draft: "LinkedSiteDraft | None" = None
+    linked_site_draft_pending: bool = False
+    # story #4190(PO 12:16Z · 유나 빈 상태 절) — 보여 줄 초안이 **없을 때만** 채운다: 레시피 정의 capability로 가른 초안 종류
+    # (`events.recipe_draft_kind`). FE는 빈 상태 문구 고르기에만 쓴다(channel_post → 채널 · site_post → 블로그 · null → 중립).
+    linked_draft_kind: Literal["channel_post", "site_post"] | None = None
     # story #4135(PO 실측 2026-09-22) — concept_approval·structure_approval 게이트의
     # «확定 대상 실물». `_enrich_linked_evidence()`가 매 응답마다 배선(linked_channel_draft와
     # 동일 선례) — 그 gate_type이 아니거나(_GATE_TYPE_EXPECTED_EVIDENCE_KINDS 미등재)
@@ -485,7 +519,7 @@ async def _enrich_deferred_to_gate_id(
 
     from app.services.gate_service import (
         find_pending_recipe_external_publish_gate,
-        find_sole_pending_scoped_external_publish_gate,
+        recipe_approval_cascade_target,
     )
 
     recipe_gate = await find_pending_recipe_external_publish_gate(
@@ -493,10 +527,12 @@ async def _enrich_deferred_to_gate_id(
     )
     if recipe_gate is None:
         return
-    sole_pending = await find_sole_pending_scoped_external_publish_gate(
+    # story #4190 — «대신 결재»는 레시피 승인이 실제로 캐스케이드할 게이트뿐 — 캐스케이드(transition_gate)와 같은 판정
+    # 함수. 블로그 초안(승인 화면에 없음)·다른 목적지가 살아 있는 게이트를 숨기면 레시피 승인 뒤에도 사람이 못 찾는다.
+    target = await recipe_approval_cascade_target(
         session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
     )
-    if sole_pending is not None and sole_pending.id == gate.id:
+    if target is not None and target.id == gate.id:
         resp.deferred_to_gate_id = recipe_gate.id
 
 
@@ -535,19 +571,65 @@ async def _enrich_linked_channel_draft(
     if gate.status != "pending":
         return
 
-    from app.services.channel_posts import find_ready_recipe_channel_drafts
+    from app.services.gate_service import find_recipe_shown_draft
 
-    ready, still_pending = await find_ready_recipe_channel_drafts(
+    # story #4190 — 채널·블로그 중 어느 카드를 그릴지는 봉인·캐스케이드와 같은 판정 하나(`find_recipe_shown_draft`).
+    shown, channel_pending, site_pending = await find_recipe_shown_draft(
         session, org_id=org_id, work_item_id=gate.work_item_id, work_item_type=gate.work_item_type,
     )
-    if not ready:
-        resp.linked_channel_draft_pending = still_pending
+    if shown is None:
+        resp.linked_channel_draft_pending = channel_pending
+        resp.linked_site_draft_pending = site_pending
+        resp.linked_draft_kind = await _recipe_draft_kind_for_gate(session, org_id, facts.get("triggered_by_event"))
         return
-
-    draft, scoped_gate, latest = ready[0]
+    if shown.kind == "site_post":
+        resp.linked_site_draft = await _build_linked_site_draft(
+            session, draft=shown.draft, latest=shown.latest,
+            scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
+        )
+        return
     resp.linked_channel_draft = await _build_linked_channel_draft(
-        session, draft=draft, latest=latest,
-        scoped_gate_status=scoped_gate.status, sealed_scheduled_at=scoped_gate.sealed_scheduled_at,
+        session, draft=shown.draft, latest=shown.latest,
+        scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
+    )
+
+
+async def _recipe_draft_kind_for_gate(session: AsyncSession, org_id: uuid.UUID, definition_key) -> str | None:
+    """레시피 게이트 `neutral_facts.triggered_by_event`(= 정의 key)로 정의를 찾아 초안 종류를 가른다. 조직 정의가 같은 key의
+    플랫폼 정의보다 앞선다. 못 찾으면 None(중립 문구)."""
+    if not isinstance(definition_key, str) or not definition_key:
+        return None
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+    from app.routers.events import recipe_draft_kind
+
+    rows = (await session.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == definition_key,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalars().all()
+    if not rows:
+        return None
+    definition = next((d for d in rows if d.org_id is not None), rows[0])
+    return recipe_draft_kind(definition)
+
+
+async def _build_linked_site_draft(
+    session: AsyncSession, *, draft, latest, scoped_gate_status: str, sealed_scheduled_at,
+) -> "LinkedSiteDraft":
+    from app.models.channel_connection import ChannelConnection
+    from app.services.text_preview import SITE_DRAFT_BODY_PREVIEW_MAX, markdown_plain_text_preview
+
+    connection = await session.get(ChannelConnection, draft.connection_id) if draft.connection_id else None
+    return LinkedSiteDraft(
+        draft_id=draft.id, version=latest.version, title=latest.title,
+        body_preview=markdown_plain_text_preview(latest.body_md, SITE_DRAFT_BODY_PREVIEW_MAX),
+        channel=connection.channel if connection is not None else None,
+        account_id=connection.account_id if connection is not None else None,
+        account_label=connection.account_label if connection is not None else None,
+        scoped_gate_status=scoped_gate_status, sealed_scheduled_at=sealed_scheduled_at,
     )
 
 
@@ -573,7 +655,7 @@ async def _build_linked_channel_draft(
     video_url = public_url_for_object_path(video_row.original_object_path) if video_row is not None else None
 
     return LinkedChannelDraft(
-        draft_id=draft.id, channel=draft.channel,
+        draft_id=draft.id, version=latest.version, channel=draft.channel,
         account_id=connection.account_id if connection is not None else "",
         account_label=connection.account_label if connection is not None else None,
         text=latest.text, image_urls=image_urls, video_url=video_url,
@@ -2192,6 +2274,10 @@ async def _transition_gate_endpoint(
         gate = await transition_gate(
             session, org_id, id, body.status, _resolver_id, body.note,
             pending_deliveries=_pending_deliveries,
+            reviewed_draft=(
+                (body.reviewed_draft_id, body.reviewed_draft_version)
+                if body.reviewed_draft_id is not None and body.reviewed_draft_version is not None else None
+            ),
         )
         # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — anchor(gate.approved_head_sha)를 배경
         # publish 태스크가 뒤늦게 적으면, 승인(SHA A) 직후·태스크 실행 前에 새 커밋(B)의
@@ -2257,6 +2343,16 @@ async def _transition_gate_endpoint(
         # #2027 원래 "N+1 0" 의도 그대로)하고, 그 외 상태(rejected 등, 검증 블록 자체를
         # 안 태움)만 to_gate_response가 자체적으로 1쿼리 한다(AC1이 명시 허용하는 비용).
         return await to_gate_response(session, org_id, gate, posture=_transition_posture)
+    except RecipeReviewedDraftChangedError as e:
+        # story #4190 — 사람 문구는 카탈로그 키(유나 확정 대기 · PO 11:49Z). 코드·현재 초안 버전은 FE 새로고침 안내용.
+        raise HTTPException(
+            status_code=409,
+            detail=human_error(
+                "gate_draft_changed", "The draft changed after this approval screen was opened.",
+                user_message=t("gates.draft_changed", resolved_locale),
+                current_draft_id=str(e.current_draft_id), current_version=e.current_version,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -3201,5 +3297,16 @@ async def _override_gate_endpoint(
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
         return await to_gate_response(session, org_id, gate)
+    except RecipeReviewedDraftChangedError as e:
+        # story #4190 — override는 «본 초안 버전»을 싣지 않는다(UI 호출처 없음). 승인 화면에 초안이 있는 레시피 발행
+        # 게이트를 override로 승인하면 fail-closed 409(예전 그대로면 새 예외가 ValueError 밖이라 500이었다).
+        raise HTTPException(
+            status_code=409,
+            detail=human_error(
+                "gate_draft_changed", "Recipe publish approval must carry the reviewed draft — use the approval screen.",
+                user_message=t("gates.draft_changed", resolved_locale),
+                current_draft_id=str(e.current_draft_id), current_version=e.current_version,
+            ),
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

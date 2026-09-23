@@ -19,6 +19,22 @@ describe('buildGateTransitionBody — approvals-queue.tsx와 byte-동일 계약'
   });
 });
 
+describe('buildGateTransitionBody — story #4190 본 초안 버전', () => {
+  it('reviewedDraft가 있으면 reviewed_draft_id·reviewed_draft_version으로 실린다', () => {
+    expect(buildGateTransitionBody({
+      status: 'approved', evidenceViewed: true, reviewedDraft: { id: 'd-1', version: 3 },
+    })).toEqual({
+      status: 'approved', note: null, evidence_viewed: true, reviewed_head_sha: null,
+      reviewed_draft_id: 'd-1', reviewed_draft_version: 3,
+    });
+  });
+  it('reviewedDraft가 null이면 키 자체가 안 실린다(다른 게이트 바디 byte-동일)', () => {
+    expect(Object.keys(buildGateTransitionBody({ status: 'approved', reviewedDraft: null }))).toEqual([
+      'status', 'note', 'evidence_viewed', 'reviewed_head_sha',
+    ]);
+  });
+});
+
 describe('buildHitlDecisionBody — response_text 미전달 시 키 자체가 안 실린다', () => {
   it('responseText 없음 → {status}만(approvals-queue.tsx 기존 호출과 byte-동일)', () => {
     expect(buildHitlDecisionBody({ status: 'approved' })).toEqual({ status: 'approved' });
@@ -34,6 +50,9 @@ describe('buildHitlDecisionBody — response_text 미전달 시 키 자체가 �
 describe('classifyGateTransitionErrorCode', () => {
   it('gate_head_changed → head_changed', () => {
     expect(classifyGateTransitionErrorCode('gate_head_changed')).toBe('head_changed');
+  });
+  it('gate_draft_changed → draft_changed(story #4190)', () => {
+    expect(classifyGateTransitionErrorCode('gate_draft_changed')).toBe('draft_changed');
   });
   it('gate_already_resolved → already_resolved', () => {
     expect(classifyGateTransitionErrorCode('gate_already_resolved')).toBe('already_resolved');

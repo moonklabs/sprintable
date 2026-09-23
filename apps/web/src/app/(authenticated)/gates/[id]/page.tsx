@@ -15,7 +15,8 @@ import { BoostExecutionControl } from '@/components/cage/boost-execution-control
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isDecisionGate, deriveDecisionFacts, reviewedDraftOf } from '@/components/cage/gate-risk';
+import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
@@ -257,10 +258,13 @@ export default function GateDetailPage() {
         // story #2975(PO 설계 확定 2026-08-24): reviewed_head_sha — 지금 이 화면이 보여주는
         // gate.github_check_run_sha를 「내가 review한 SHA」로 실어 보낸다. merge 게이트가 아니면
         // BE가 무시(SHA 개념 자체가 없는 gate_type)하므로 gate_type 분기 없이 항상 보낸다.
-        body: JSON.stringify({
-          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
-          reviewed_head_sha: gate.github_check_run_sha ?? null,
-        }),
+        // story #4190(PO 판정 2026-09-23) — 레시피 발행 게이트면 이 화면의 초안 카드가 그린 (draft_id, version)을 싣는다
+        // (reviewedDraftOf — 카드가 없으면 키 자체를 안 싣는다). 그 사이 새 버전이면 BE가 409 gate_draft_changed.
+        body: JSON.stringify(buildGateTransitionBody({
+          status, note, evidenceViewed,
+          reviewedHeadSha: gate.github_check_run_sha ?? null,
+          reviewedDraft: reviewedDraftOf(gate),
+        })),
       });
       // story #1990: push()는 콜드-진입 합성 스택([parentTab, target])에 세번째 엔트리를
       // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
@@ -285,6 +289,7 @@ export default function GateDetailPage() {
       // 정상 표시). 그 외 code는 기존대로 BE message 그대로 통과.
       const code = body?.error?.code;
       const reason = code === 'gate_head_changed' ? t('gateHeadChangedError')
+        : code === 'gate_draft_changed' ? t('gateDraftChangedError')
         : code === 'gate_already_resolved' ? t('gateAlreadyResolvedError')
         : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
       setTransitionError(reason);
@@ -294,7 +299,8 @@ export default function GateDetailPage() {
       // 거부당한다 — 최신 상태로 재조회해 실제 현재 상태(resolved 카드 등)로 재렌더되게
       // 한다(gates/[id]/page.tsx의 needsAction 분기가 이미 status!=='pending'을 올바르게
       // 읽지 못하는 액션-숨김 표시로 처리하므로, 재조회만 하면 AC1이 자동으로 성립한다).
-      if (code === 'gate_head_changed' || code === 'gate_already_resolved') {
+      // story #4190(유나) — gate_draft_changed도 같은 부류: 재조회하면 같은 화면의 초안 카드가 최신 버전으로 바뀐다(버튼 없음).
+      if (code === 'gate_head_changed' || code === 'gate_draft_changed' || code === 'gate_already_resolved') {
         void fetchGate();
       }
     } finally {
@@ -581,7 +587,8 @@ export default function GateDetailPage() {
             const signatureBlock = (
               <div className="space-y-2">
                 <GateSignatureApproval
-                  key={gate.github_check_run_sha}
+                  // story #4190 — 초안 버전이 바뀌어도(409 gate_draft_changed 뒤 재조회) 같은 리셋.
+                  key={`${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
                   gate={gate}
                   resolving={resolving}
                   error={transitionError}

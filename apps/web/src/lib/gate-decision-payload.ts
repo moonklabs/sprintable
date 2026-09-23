@@ -10,6 +10,9 @@ export interface GateTransitionBody {
   note: string | null;
   evidence_viewed: boolean;
   reviewed_head_sha: string | null;
+  // story #4190 — 레시피 발행 게이트 승인 화면이 그린 초안(카드가 있을 때만 키가 실린다 — 그 밖의 호출 바디는 byte-동일).
+  reviewed_draft_id?: string;
+  reviewed_draft_version?: number;
 }
 
 export function buildGateTransitionBody(params: {
@@ -17,13 +20,19 @@ export function buildGateTransitionBody(params: {
   note?: string | null;
   evidenceViewed?: boolean;
   reviewedHeadSha?: string | null;
+  reviewedDraft?: { id: string; version: number } | null;
 }): GateTransitionBody {
-  return {
+  const body: GateTransitionBody = {
     status: params.status,
     note: params.note?.trim() || null,
     evidence_viewed: params.evidenceViewed ?? false,
     reviewed_head_sha: params.reviewedHeadSha ?? null,
   };
+  if (params.reviewedDraft) {
+    body.reviewed_draft_id = params.reviewedDraft.id;
+    body.reviewed_draft_version = params.reviewedDraft.version;
+  }
+  return body;
 }
 
 export interface HitlDecisionBody {
@@ -42,12 +51,14 @@ export function buildHitlDecisionBody(params: {
   return body;
 }
 
-/** gates.py의 기존 에러 코드 2종(gate_head_changed·gate_already_resolved) — 문구는
- * 각 소비처가 자기 i18n 네임스페이스로 번역한다(여기선 코드 판별만). */
-export type GateTransitionErrorKind = 'head_changed' | 'already_resolved' | 'generic';
+/** gates.py의 에러 코드(gate_head_changed·gate_draft_changed·gate_already_resolved) — 문구는
+ * 각 소비처가 자기 i18n 네임스페이스로 번역한다(여기선 코드 판별만). story #4190 — gate_draft_changed는
+ * «화면이 본 상태와 서버가 어긋남» 부류(head_changed 형제, 유나 확정). */
+export type GateTransitionErrorKind = 'head_changed' | 'draft_changed' | 'already_resolved' | 'generic';
 
 export function classifyGateTransitionErrorCode(code: string | undefined | null): GateTransitionErrorKind {
   if (code === 'gate_head_changed') return 'head_changed';
+  if (code === 'gate_draft_changed') return 'draft_changed';
   if (code === 'gate_already_resolved') return 'already_resolved';
   return 'generic';
 }

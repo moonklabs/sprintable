@@ -566,6 +566,11 @@ async def _reseal_gate_on_new_version(
         gate.resolution_note = None
         gate.resolved_at = None
         gate.reapproval_required = True
+        # story #4190(까디르 QA P2) — 옛 승인으로 만든 대기 중 발행 명령을 같은 트랜잭션에서 즉시 무효화한다
+        # (channel_posts의 동형 훅 #3414 추가②와 같은 처방 — 워커의 해시 불일치 무효화를 기다리지 않는다).
+        from app.services.publication_command import void_pending_commands_for_gate
+
+        await void_pending_commands_for_gate(db, gate_id=gate.id, reason_code="CONTENT_CHANGED")
         return
     # 아직 한 번도 승인된 적 없는 pending — 결재자가 볼 대상 자체가 그냥 최신본이면 되므로
     # 편집마다 즉시 재봉인(재상신 왕복 불요).
@@ -670,6 +675,72 @@ async def list_site_post_draft_versions(db: AsyncSession, *, draft_id: uuid.UUID
         .order_by(SitePostVersion.version.asc())
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def find_ready_recipe_site_drafts(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID, work_item_type: str,
+) -> tuple[list[tuple[SitePostDraft, Gate, SitePostVersion]], bool]:
+    """story #4190(PO 판정 2026-09-23 12:03Z · 유나 site 초안 카드) — `channel_posts.find_ready_recipe_channel_drafts`
+    의 블로그(site) 짝. 레시피 게이트 승인 화면이 그리는 블로그 초안 카드·승인 순간 봉인·캐스케이드가 같은 답을 쓴다
+    (`gate_service.find_recipe_shown_draft`). 규칙은 채널과 같다 — 최신 초안부터, scoped 게이트가 이 work item의 유일한
+    pending이면(레시피 승인이 승계할 대상) 포함, approved면 아직 발행 안 된 것만, 그 밖의 pending은 still_pending
+    (멀티목적지 — 각자 사람 승인). 발행 판정: 자사 블로그는 그 게이트의 공개 글(내리지 않은 것), 외부 블로그는 그 게이트·
+    최신 버전의 발행 명령 completed."""
+    drafts = (await db.execute(
+        select(SitePostDraft).where(
+            SitePostDraft.org_id == org_id, SitePostDraft.work_item_id == work_item_id,
+            SitePostDraft.deleted_at.is_(None),
+        ).order_by(SitePostDraft.created_at.desc())
+    )).scalars().all()
+    if not drafts:
+        return [], False
+
+    from app.models.publication_command import PublicationCommand
+    from app.services.gate_service import (
+        find_gate_slot_with_pr_fallback,
+        find_sole_pending_scoped_external_publish_gate,
+    )
+
+    sole_pending = await find_sole_pending_scoped_external_publish_gate(
+        db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+    )
+    ready: list[tuple[SitePostDraft, Gate, SitePostVersion]] = []
+    still_pending = False
+    for draft in drafts:
+        scoped_gate = await find_gate_slot_with_pr_fallback(
+            db, org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+            gate_type="external_publish", pr_number=None, repo_full_name=None,
+            scope_key=site_post_gate_scope_key(draft.connection_id),
+        )
+        if scoped_gate is None or (scoped_gate.neutral_facts or {}).get("draft_id") != str(draft.id):
+            continue
+        if scoped_gate.status == "pending":
+            if sole_pending is not None and sole_pending.id == scoped_gate.id:
+                versions = await list_site_post_draft_versions(db, draft_id=draft.id)
+                if versions:
+                    ready.append((draft, scoped_gate, versions[-1]))
+            else:
+                still_pending = True
+            continue
+        if scoped_gate.status != "approved":
+            continue
+        versions = await list_site_post_draft_versions(db, draft_id=draft.id)
+        if not versions:
+            continue
+        latest = versions[-1]
+        hosted_live = (await db.execute(
+            select(SitePost.id).where(SitePost.gate_id == scoped_gate.id, SitePost.unpublished_at.is_(None)).limit(1)
+        )).first()
+        external_done = (await db.execute(
+            select(PublicationCommand.id).where(
+                PublicationCommand.gate_id == scoped_gate.id, PublicationCommand.approved_version == latest.id,
+                PublicationCommand.status == "completed",
+            ).limit(1)
+        )).first()
+        if hosted_live is not None or external_done is not None:
+            continue
+        ready.append((draft, scoped_gate, latest))
+    return ready, still_pending
 
 
 async def list_site_post_drafts(
@@ -895,7 +966,14 @@ async def submit_site_post_draft(
     from app.services.generation_budget import check_generation_budget_or_raise
     await check_generation_budget_or_raise(db, org_id=org_id, estimated_cost_minor=estimated_cost_minor)
 
-    from app.services.gate_service import create_gate, find_gate_slot_with_pr_fallback, resolve_gate_holder_draft_id
+    from app.services.gate_service import (
+        RECIPE_AUTO_SATISFIED_NOTE,
+        _maybe_create_scheduled_publication_command,
+        create_gate,
+        find_gate_slot_with_pr_fallback,
+        find_recipe_approval_for_single_destination,
+        resolve_gate_holder_draft_id,
+    )
     from app.services.workflow_line_config import _default_role_id
 
     # story #3478(0328) — scope_key=목적지(connection_id). 같은 work_item이 WordPress·
@@ -998,7 +1076,29 @@ async def submit_site_post_draft(
     # 내용이 달라졌거나 신규라는 뜻이라, 여기서 명시적으로 (재)봉인하는 것이 바로 이번
     # submit() 호출이 의도한 행위다("조용한 갱신"이 아니다).
     gate.neutral_facts = neutral_facts
-    if gate.status != "pending":
+    # story #4190(까디르 QA P2) — 이미 승인된 게이트를 재상신이 다시 봉인하면, 그 승인으로 만든 대기 중 발행
+    # 명령(옛 버전)을 같은 트랜잭션에서 즉시 무효화한다 — channel_posts.submit_channel_post_draft의 #3414 추가②와
+    # 같은 방식(워커가 나중에 해시 불일치로 무효화하길 기다리지 않는다).
+    was_approved = gate.status == "approved"
+    content_changed = gate.sealed_content_sha256 != target.body_sha256
+    budget_changed = gate.sealed_estimated_cost_minor != estimated_cost_minor
+    # story #4190(훅A — channel_posts.submit_channel_post_draft의 #4069와 동형) — 레시피 unscoped
+    # external_publish 게이트가 이미 approved이고, 그 승인이 이 초안의 이 버전을 봉인했고(승인 화면이 보여 준
+    # 내용 — gate_service.RECIPE_APPROVED_DRAFT_FACT), 이 work item의 목적지가 이 초안 하나뿐이면 그 사람 승인을
+    # 이 초안 게이트가 승계한다. 봉인이 없거나 다르면(승인 뒤 새 초안·재제출) 사람 승인. 블로그 초안은 승인 화면의
+    # 블로그 초안 카드(`linked_site_draft`)로 보이고 그 버전이 봉인된다(PO 판정 2026-09-23 12:03Z). 목적지가 둘 이상이면
+    # 각자 사람 승인(#3478).
+    auto_satisfied_by = await find_recipe_approval_for_single_destination(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story", scope_key=scope_key,
+        draft_id=draft.id, version=target.version,
+    )
+    if auto_satisfied_by is not None:
+        set_gate_status(gate, "approved", now=datetime.now(timezone.utc))
+        gate.requires_human = False
+        gate.resolver_id = auto_satisfied_by.resolver_id
+        gate.resolved_at = auto_satisfied_by.resolved_at
+        gate.resolution_note = RECIPE_AUTO_SATISFIED_NOTE
+    elif gate.status != "pending":
         set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.requires_human = True
         gate.resolver_id = None
@@ -1021,8 +1121,23 @@ async def submit_site_post_draft(
         requester_id=requester_member_id,
     )
 
+    if was_approved:
+        from app.services.publication_command import void_pending_commands_for_gate
+
+        await void_pending_commands_for_gate(
+            db, gate_id=gate.id,
+            reason_code="BUDGET_CHANGED" if budget_changed and not content_changed else "CONTENT_CHANGED",
+        )
+
     await db.commit()
     await db.refresh(gate)
+
+    # story #4190 — 승계 승인도 직접 승인과 같은 발행 명령 훅을 탄다(외부 블로그면 publication_command,
+    # 자사 블로그는 그 훅이 원래 no-op — 동기 발행 경로 그대로).
+    if auto_satisfied_by is not None:
+        await _maybe_create_scheduled_publication_command(db, gate, auto_satisfied_by.resolver_id)
+        await db.commit()
+        await db.refresh(gate)
     return gate, target.id
 
 

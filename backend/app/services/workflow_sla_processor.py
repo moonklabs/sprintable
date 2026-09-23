@@ -118,7 +118,15 @@ async def _maybe_auto_approve(session: AsyncSession, sr: WorkflowLineStepRun) ->
         story_points = getattr(story, "story_points", None)
     if not _auto_approve_allowed(sr, story_points):
         return False
-    from app.services.gate_service import transition_gate
+    from app.services.gate_service import _is_recipe_external_publish_gate, transition_gate
+
+    # story #4190(까디르 4564 CHANGES ②) — «사람 승인은 그 사람이 본 내용에만». 레시피 발행 게이트는 승인 화면이 그린
+    # 초안 버전을 싣고 사람이 승인해야 한다(없으면 transition_gate가 409 예외 → process_sla 배치가 끊긴다) — 시스템 자동
+    # 승인 대상이 아니다. 건너뛰고 한 줄 남긴 뒤 호출부의 기존 폴백(escalate / keep_pending)으로 간다.
+    # (항목별 실패 격리 자체는 story #4228 — 배치를 한 세션에서 잠그는 구조라 SAVEPOINT로는 못 닫는다.)
+    if _is_recipe_external_publish_gate(gate):
+        _record_event(session, sr, "auto_approve_skipped", payload={"reason": "requires_human_reviewed_draft"})
+        return False
     # ⭐resolver_id=None: system 자동승인은 사람 결정이 아니므로 trust 환류 차단(AC⑤).
     await transition_gate(session, sr.org_id, sr.gate_id, "approved", resolver_id=None)
     _record_event(session, sr, "auto_approved", payload={"reason": "sla_timeout_auto_approve"})

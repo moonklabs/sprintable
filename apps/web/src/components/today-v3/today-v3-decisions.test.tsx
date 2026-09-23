@@ -44,7 +44,7 @@ afterEach(async () => {
 const base: TodayNeedsMeItem = {
   id: 'g1', source: 'gate', state: 'signature', risk: 'high',
   workItemType: 'channel_post', workItemId: 'w1', workItemTitle: '블로그 글 발행',
-  requestedByName: null, reason: null, createdAt: '2026-09-17T00:00:00Z', conversationId: null,
+  requestedByName: null, reason: null, createdAt: '2026-09-17T00:00:00Z', conversationId: null, recipePublish: false,
 };
 
 async function mount(items: TodayNeedsMeItem[], opts?: { isAdminOrOwner?: boolean; onActionSuccess?: () => void }) {
@@ -236,5 +236,39 @@ describe('TodayV3Decisions — 저위험 모아 승인(순차 전이·부분 실
     await act(async () => { btn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+// story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트(recipePublish)는 저위험 일괄에서 빠지고 «저위험 {count}건»도 뺀
+// 뒤의 수 · 개별 카드(«초안 보고 승인» → /gates/{id}, «고위험» 태그·변경 요청·보류 없음) · 일괄 승인은 그 게이트를 안 건드린다.
+describe('TodayV3Decisions — 레시피 발행 게이트 일괄 제외 (story #4190)', () => {
+  const low = (id: string, recipePublish: boolean): TodayNeedsMeItem => ({
+    ...base, id, state: 'approval', risk: 'low', workItemTitle: `항목 ${id}`, recipePublish,
+  });
+
+  it('⭐일괄 줄 수는 레시피 게이트를 뺀 수 · 레시피는 개별 카드 링크 · 모아 승인은 레시피를 전이하지 않는다', async () => {
+    await mount([low('g-a', false), low('g-b', false), low('g-recipe', true)]);
+    const row = container.querySelector('[data-testid="today-v3-low-risk-row"]');
+    expect(row?.textContent).toContain(koMessages.todayV3.lowRiskGroupedLine.replace('{count}', '2'));
+
+    const link = container.querySelector('[data-testid="today-v3-recipe-review-draft-action"]');
+    expect(link?.getAttribute('href')).toBe('/gates/g-recipe');
+    expect(link?.textContent).toBe(koMessages.cage.gateReviewDraftToApprove);
+    const recipeCard = link?.closest('[data-testid="today-v3-decision-card"]');
+    expect(recipeCard?.querySelector('[data-testid="today-v3-decision-tag"]')).toBeNull();
+    expect(recipeCard?.querySelector('[data-testid="today-v3-request-changes-action"]')).toBeNull();
+    expect(recipeCard?.querySelector('[data-testid="today-v3-hold-action"]')).toBeNull();
+
+    const btn = container.querySelector('[data-testid="today-v3-bulk-approve-action"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const transitioned = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith('/transition'));
+    expect(transitioned.sort()).toEqual(['/api/gates/g-a/transition', '/api/gates/g-b/transition']);
+  });
+
+  it('레시피 게이트만 있으면 일괄 줄 자체가 없다', async () => {
+    await mount([low('g-recipe', true)]);
+    expect(container.querySelector('[data-testid="today-v3-low-risk-row"]')).toBeNull();
+    expect(container.querySelector('[data-testid="today-v3-recipe-review-draft-action"]')).not.toBeNull();
   });
 });

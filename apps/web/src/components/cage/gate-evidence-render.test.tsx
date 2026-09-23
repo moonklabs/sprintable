@@ -353,6 +353,48 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
   // story #4098([E-RECIPE-1], 2026-09-21) — 「이 승인으로 발행될 채널 초안」 카드,
   // 3상태(콘텐츠 있음·초안 없음·scoped 게이트 pending) 렌더.
+  // story #4190(PO 판정 2026-09-23 · 유나 site 초안 카드) — 채널 카드의 형제. BE linked_site_draft만 읽는다.
+  describe('linked_site_draft 카드(story #4190)', () => {
+    const site = (over: Partial<NonNullable<GateItem['linked_site_draft']>> = {}): NonNullable<GateItem['linked_site_draft']> => ({
+      draft_id: 'site-1', version: 2, title: '아주 긴 블로그 제목입니다', body_preview: '마크다운 기호를 걷은 본문 앞부분',
+      channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      ...over,
+    });
+
+    it('⭐자사 블로그 — 버전·제목·본문 앞부분·«초안 열기»(/content/{id})가 나오고 목적지 줄은 없다 · 채널 카드·빈 문구 없음', async () => {
+      const gate = recipeApprovalGate({ stage: 'pending_approval' }, { scope_key: '', linked_site_draft: site() });
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      const card = container.querySelector('[data-testid="linked-site-draft"]');
+      expect(card).toBeTruthy();
+      expect(card?.querySelector('[data-testid="linked-draft-version"]')?.textContent).toBe(`${koMessages.cage.linkedDraftVersionLabel} · v2`);
+      expect(card?.textContent).toContain('아주 긴 블로그 제목입니다');
+      const body = [...(card?.querySelectorAll('p') ?? [])].find((p) => p.textContent === '마크다운 기호를 걷은 본문 앞부분');
+      expect(body?.className).toContain('line-clamp-4');
+      expect(body?.className).toContain('break-words');
+      expect(card?.querySelector('a[href="/content/site-1"]')?.textContent).toBe(koMessages.cage.linkedChannelDraftOpenLink);
+      expect(card?.textContent).not.toContain(koMessages.cage.linkedChannelDraftDestinationLabel);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedDraftNone);
+    });
+
+    it('외부 블로그면 목적지 줄(계정 이름, 없으면 연결종류(계정 id))을 그린다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval' },
+        { scope_key: '', linked_site_draft: site({ channel: 'wordpress', account_id: 'https://b.example.com', account_label: null }) },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('wordpress(https://b.example.com)');
+    });
+  });
+
   describe('linked_channel_draft 카드(story #4098)', () => {
     it('콘텐츠가 있으면 본문·목적지·「초안 열기」 링크가 실제 DOM에 나타난다', async () => {
       const gate = recipeApprovalGate(
@@ -360,7 +402,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
         {
           scope_key: '',
           linked_channel_draft: {
-            draft_id: 'draft-1', channel: 'sandbox', account_id: 'acct-1', account_label: '공식 계정',
+            draft_id: 'draft-1', version: 1, channel: 'sandbox', account_id: 'acct-1', account_label: '공식 계정',
             text: '발행될 본문입니다', image_urls: [], video_url: null,
             scoped_gate_status: 'approved', sealed_scheduled_at: null,
           },
@@ -384,7 +426,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
         {
           scope_key: '',
           linked_channel_draft: {
-            draft_id: 'draft-2', channel: 'sandbox', account_id: 'acct-1', account_label: null,
+            draft_id: 'draft-2', version: 1, channel: 'sandbox', account_id: 'acct-1', account_label: null,
             text: null, image_urls: [], video_url: 'https://storage.example/video.mp4',
             scoped_gate_status: 'approved', sealed_scheduled_at: null,
           },
@@ -406,9 +448,10 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     });
 
     it('제출된 초안이 없으면(linked_channel_draft=null·pending=false) «제출된 초안 없음» 문구', async () => {
+      // story #4190 — «없음» 문구는 BE linked_draft_kind로 고른다(채널 레시피 = channel_post).
       const gate = recipeApprovalGate(
         { stage: 'pending_approval', channel: 'sandbox' },
-        { scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false },
+        { scope_key: '', linked_channel_draft: null, linked_channel_draft_pending: false, linked_draft_kind: 'channel_post' },
       );
       container = document.createElement('div');
       document.body.appendChild(container);
@@ -416,6 +459,60 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    // story #4190(유나 빈 상태 절 · PO 12:17Z) — «없음» 세 갈래: channel_post → 채널 문구 · site_post → 블로그 문구 ·
+    // null(모르는 레시피) → 중립 문구. 채널 문구를 블로그 레시피에 빌려 쓰지 않는다.
+    it.each([
+      ['site_post', 'linkedSiteDraftNone'],
+      [null, 'linkedDraftNone'],
+    ] as const)('linked_draft_kind=%s면 «없음» 문구가 %s', async (kind, key) => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval' },
+        { scope_key: '', linked_channel_draft: null, linked_site_draft: null, linked_draft_kind: kind },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage[key]);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedChannelDraftNone);
+    });
+
+    it('블로그 초안이 승계 대기면(linked_site_draft_pending=true) 공용 대기 문구', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval' },
+        { scope_key: '', linked_site_draft: null, linked_site_draft_pending: true, linked_draft_kind: 'site_post' },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.textContent).toContain(koMessages.cage.linkedChannelDraftPending);
+      expect(container.textContent).not.toContain(koMessages.cage.linkedSiteDraftNone);
+    });
+
+    it('채널 카드에도 «버전 · v{n}» 줄이 있다', async () => {
+      const gate = recipeApprovalGate(
+        { stage: 'pending_approval', channel: 'sandbox' },
+        {
+          scope_key: '',
+          linked_channel_draft: {
+            draft_id: 'draft-1', version: 3, channel: 'sandbox', account_id: 'acct-1', account_label: '공식 계정',
+            text: '본문', image_urls: [], video_url: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+          },
+        },
+      );
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+      expect(container.querySelector('[data-testid="linked-draft-version"]')?.textContent).toBe(
+        `${koMessages.cage.linkedDraftVersionLabel} · v3`,
+      );
     });
 
     it('scoped 게이트가 아직 pending이면(linked_channel_draft_pending=true) 승계 승인 문구', async () => {
@@ -913,7 +1010,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
     it('⭐영상 편입 — <video controls>가 실제 DOM에 나타난다(src=서명 URL)', async () => {
       const gate = scopedChannelGate({
-        draft_id: 'draft-1', channel: 'instagram_sandbox', account_id: 'acct-1', account_label: '인스타 샌드박스',
+        draft_id: 'draft-1', version: 1, channel: 'instagram_sandbox', account_id: 'acct-1', account_label: '인스타 샌드박스',
         text: '릴스 캡션', image_urls: [], video_url: 'https://storage.test/signed/video.mp4',
         scoped_gate_status: 'pending', sealed_scheduled_at: null,
       });
@@ -930,7 +1027,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
 
     it('⭐이미지만 편입(영상 0) — 썸네일 <img>가 실제 DOM에 나타난다', async () => {
       const gate = scopedChannelGate({
-        draft_id: 'draft-2', channel: 'instagram_sandbox', account_id: 'acct-1', account_label: null,
+        draft_id: 'draft-2', version: 1, channel: 'instagram_sandbox', account_id: 'acct-1', account_label: null,
         text: null, image_urls: ['https://storage.test/img1.png', 'https://storage.test/img2.png'], video_url: null,
         scoped_gate_status: 'pending', sealed_scheduled_at: null,
       });

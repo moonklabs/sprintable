@@ -185,7 +185,9 @@ async def test_hosted_draft_submit_leaves_recipe_gate_untouched():
         assert "draft_id" not in recipe.neutral_facts
         assert draft_gate.id != recipe.id
         assert draft_gate.scope_key == "hosted_site"
-        assert draft_gate.status == "pending"
+        # story #4190(PO 판정 2026-09-23) — 레시피 승인은 승인 화면이 보여 준 초안에만 유효하다. 이 초안은 승인
+        # 뒤에 만들어졌으므로 승계 0 — 별도 행에서 사람 승인을 기다린다.
+        assert draft_gate.status == "pending" and draft_gate.requires_human is True
         assert draft_gate.neutral_facts["destination"] == "hosted_site"
     finally:
         app.dependency_overrides.clear()
@@ -242,11 +244,14 @@ async def test_publish_does_not_accept_recipe_gate_as_hosted_approval():
         await engine.dispose()
 
 
-async def test_recipe_approval_cascades_to_hosted_gate_and_publish_succeeds():
-    """AC2 — 초안 먼저 제출 → 레시피 게이트 승인(transition_gate) → 훅B가 hosted_site 게이트를 승계 승인 →
-    gate_id 없이 발행 성공. 예전(같은 행)에 되던 «레시피 승인 한 번으로 자사 블로그 발행»이 슬롯을 나눈 뒤에도 된다."""
+async def test_recipe_approval_of_the_shown_hosted_draft_cascades_and_publishes():
+    """AC2 재정정(story #4190, PO 판정 2026-09-23 12:03Z) — 자사 블로그 초안도 이제 레시피 승인 화면의 블로그 초안 카드
+    (`linked_site_draft`)로 보인다. 초안 먼저 제출 → 레시피 게이트를 **화면이 본 버전을 싣고** 승인 → hosted_site 게이트가
+    캐스케이드 승계 → 발행 201. 본 버전 없이 승인하면 409(`RecipeReviewedDraftChangedError`) · 두 게이트 pending."""
     from app.main import app
-    from app.services.gate_service import transition_gate
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+    from app.services.gate_service import RecipeReviewedDraftChangedError, transition_gate
 
     engine, Session = await _session_factory()
     try:
@@ -254,13 +259,26 @@ async def test_recipe_approval_cascades_to_hosted_gate_and_publish_succeeds():
             seeded = await _seed(s)
         recipe_gate_id = await _recipe_gate(Session, seeded, approved=False)
         body, submit = await _create_and_submit_hosted_draft(app, Session, seeded)
+        hosted_id = uuid.UUID(submit["gate_id"])
 
         async with Session() as s:
-            await transition_gate(s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"])
+            with pytest.raises(RecipeReviewedDraftChangedError):
+                await transition_gate(s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"])
+            await s.rollback()
+        assert (await _gate(Session, hosted_id)).status == "pending"
+
+        async with Session() as s:
+            screen = await to_gate_response(s, seeded["org_id"], await s.get(Gate, recipe_gate_id))
+        card = screen.linked_site_draft
+        assert card is not None and card.channel is None  # 자사 블로그 — 목적지 줄 없음
+        async with Session() as s:
+            await transition_gate(
+                s, seeded["org_id"], recipe_gate_id, "approved", resolver_id=seeded["om_id"],
+                reviewed_draft=(card.draft_id, card.version),
+            )
             await s.commit()
 
-        hosted = await _gate(Session, uuid.UUID(submit["gate_id"]))
-        assert hosted.status == "approved", hosted.resolution_note
+        assert (await _gate(Session, hosted_id)).status == "approved"
         r = await _publish(app, Session, seeded, body)
         assert r.status_code == 201, r.text
     finally:

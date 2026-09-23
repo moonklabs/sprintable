@@ -1,0 +1,1 @@
+{"file": "tests/test_4190_site_post_recipe_hooks_realdb.py", "sec": 28.0, "provisional": true, "source": "story #4190 신규 — 잠정값(CI 실측 전). 로컬 실측 14.1s(4 tests, DB 준비 제외)에 CI 배율 2배 안팎을 얹은 추정. 첫 CI shard-durations 산출물이 나오면 실측으로 교체."}

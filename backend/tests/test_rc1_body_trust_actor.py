@@ -91,7 +91,7 @@ async def test_transition_forces_resolver_ignoring_body():
     forged = uuid.uuid4()  # 타인 UUID
     captured = {}
 
-    async def _fake_transition(session, org_id, gate_id, status, resolver_id, note, *, pending_deliveries=None):
+    async def _fake_transition(session, org_id, gate_id, status, resolver_id, note, *, pending_deliveries=None, reviewed_draft=None):
         captured["resolver_id"] = resolver_id
         # story #2837 — 예전엔 이 자리가 SimpleNamespace 손수 필드나열이라 gates.py가 새 Gate
         # 필드를 읽을 때마다 AttributeError로 깨졌다(#2832의 github_check_run_sha가 그 사례).

@@ -79,7 +79,8 @@ export interface GateItem {
   // (scope_key="")를 승인하면 #4090 AC2가 자동발행하는 그 채널 초안의 실물(본문·이미지·
   // 영상·목적지·예약 시각). 다른 gate_type·scoped 게이트는 항상 null.
   linked_channel_draft?: {
-    draft_id: string; channel: string; account_id: string; account_label: string | null;
+    // story #4190 — 카드가 그린 버전(«본 버전»). 승인 요청이 reviewed_draft_version으로 돌려보낸다.
+    draft_id: string; version: number; channel: string; account_id: string; account_label: string | null;
     text: string | null; image_urls: string[]; video_url: string | null;
     scoped_gate_status: string; sealed_scheduled_at: string | null;
   } | null;
@@ -87,6 +88,18 @@ export interface GateItem {
   // 아직 pending"(이 게이트 승인과 함께 승계-승인됨), false/undefined면 "제출된 초안
   // 자체가 없음".
   linked_channel_draft_pending?: boolean;
+  // story #4190(PO 판정 2026-09-23 · 유나 site 초안 카드) — 레시피 게이트가 보여 주는 초안이 블로그(site)일 때의 카드.
+  // linked_channel_draft와 둘 중 하나만 채워진다(어느 카드인지 BE가 가른다). channel·account_*는 외부 블로그일 때만.
+  // body_preview는 BE가 마크다운 기호를 걷은 평문(300자 안쪽) — FE는 파싱하지 않는다.
+  linked_site_draft?: {
+    draft_id: string; version: number; title: string; body_preview: string;
+    channel: string | null; account_id: string | null; account_label: string | null;
+    scoped_gate_status: string; sealed_scheduled_at: string | null;
+  } | null;
+  linked_site_draft_pending?: boolean;
+  // story #4190(PO 12:16Z) — 레시피 정의 capability로 BE가 판별한 이 레시피의 초안 종류. **빈 상태 문구 고르기에만**
+  // 쓴다(카드 분기는 linked_*_draft). null = 모르는 레시피(중립 문구).
+  linked_draft_kind?: 'channel_post' | 'site_post' | null;
   // story #4139([E-RECIPE-1] Phase3 폴리시) — 이 게이트(draft-scoped external_publish)가
   // 레시피 unscoped 게이트에 「대신 결재」되는 대상이면 그 레시피 게이트 id(파생값, BE
   // `_enrich_deferred_to_gate_id`가 매 응답마다 계산·저장 컬럼 0). 있으면 액션 버튼을

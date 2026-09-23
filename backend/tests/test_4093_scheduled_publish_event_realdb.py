@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from tests.recipe_reviewed_draft import reviewed_draft_body_via, reviewed_draft_for
 from fastapi import BackgroundTasks
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -251,20 +253,17 @@ async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, cr
 
 
 async def _approve_and_schedule_submit(s, *, org_id, story_id, creator_id, owner_member_id, connection_id):
-    """ⓓ 승인(즉시 draft 없음) → 채널 포스트 초안 생성+**예약 제출**(scheduled_at=+5분)
-    → 훅A 자동충족(#4069)+AC2 훅이 예약 큐잉(gate.publish_outcome="scheduled")까지.
-    반환: (gate_d_id, scoped_gate_id, draft_id)."""
-    from sqlalchemy import select
+    """채널 포스트 초안 생성+**예약 제출**(scheduled_at=+5분) → ⓓ 승인 → 캐스케이드 승계(훅B)+AC2 훅이 예약
+    큐잉(gate.publish_outcome="scheduled")까지. 반환: (gate_d_id, scoped_gate_id, draft_id).
 
-    from app.models.gate import Gate
+    정정(story #4190, PO 판정 2026-09-23) — 옛 순서(ⓓ 먼저 승인 → 초안 제출, 훅A 자동충족)는 ⓓ 승인 화면에 없던
+    초안이라 이제 승계되지 않는다. 이 파일이 재는 것은 워커 경로(#4093)라 승계 순서만 draft 선제출로 바꾼다."""
     from app.services.channel_posts import create_channel_post_draft_version, submit_channel_post_draft
     from app.services.gate_service import transition_gate
 
     gate_d_id = await _walk_to_pending_approval_with_abc_approved(
         s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
     )
-    await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인")
-    await s.commit()
 
     version, _channel, _violations = await create_channel_post_draft_version(
         s, org_id=org_id, work_item_id=story_id, connection_id=connection_id,
@@ -274,8 +273,18 @@ async def _approve_and_schedule_submit(s, *, org_id, story_id, creator_id, owner
         s, org_id=org_id, draft_id=version.draft_id, version_id=None, requester_member_id=creator_id,
         scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=5),
     )
-    assert scoped_gate.status == "approved", "훅A 자동충족이 안 먹었다"
-    return gate_d_id, scoped_gate.id, version.draft_id
+    assert scoped_gate.status == "pending"
+    scoped_gate_id = scoped_gate.id
+
+    await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
+    await s.commit()
+
+    from app.models.gate import Gate
+
+    scoped_gate = await s.get(Gate, scoped_gate_id)
+    await s.refresh(scoped_gate)
+    assert scoped_gate.status == "approved", "캐스케이드 승계가 안 먹었다"
+    return gate_d_id, scoped_gate_id, version.draft_id
 
 
 @pytest.mark.anyio

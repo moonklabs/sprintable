@@ -688,3 +688,62 @@ describe('WorkListDetailPanel — 발행물 탭(story #3988)', () => {
     expect(container.querySelector('[data-testid="panel-publications-error"]')).not.toBeNull();
   });
 });
+
+// story #4190(유나 «본 버전 대조» 1) — 레시피 발행 게이트: 평문(저위험) 자리는 초안 카드를 안 그리므로 승인 대신 «초안 보고
+// 승인» 링크(→ /gates/{id}) · 서명 흐름은 게이트 상세와 같게(본 버전 전송 · 409면 문장 + loadGate 재조회 → 카드 새 버전).
+describe('WorkListDetailPanel — 레시피 발행 게이트 본 초안 버전 (story #4190)', () => {
+  function recipeGate(risk: 'low' | 'high', version: number) {
+    return {
+      id: 'g1', gate_type: 'external_publish', scope_key: '', risk_grade: risk, status: 'pending',
+      work_item_id: 'task-1', work_item_type: 'task',
+      neutral_facts: { stage: 'pending_approval', triggered_by_event: 'e-1' },
+      linked_site_draft: {
+        draft_id: 'site-d1', version, title: `제목 v${version}`, body_preview: '본문',
+        channel: null, account_id: null, account_label: null, scoped_gate_status: 'pending', sealed_scheduled_at: null,
+      },
+    };
+  }
+
+  it('⭐평문 자리 — 승인 버튼 대신 «초안 보고 승인» 링크(/gates/g1)', async () => {
+    mockFetchRoutes({ gates: [recipeGate('low', 1)] });
+    await mountPanel();
+    const action = container.querySelector('[data-testid="panel-primary-action"]');
+    expect(action?.tagName).toBe('A');
+    expect(action?.getAttribute('href')).toBe('/gates/g1');
+    expect(action?.textContent).toBe(koMessages.cage.gateReviewDraftToApprove);
+  });
+
+  it('⭐서명 흐름 — 본 버전 전송 · 409면 문장 + 재조회로 카드가 v2', async () => {
+    let gateFetches = 0;
+    const bodies: Record<string, unknown>[] = [];
+    mockFetchRoutes({});
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST' && url.includes('/transition')) {
+        bodies.push(JSON.parse(String(init.body)));
+        return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
+      }
+      if (url.startsWith('/api/gates')) { gateFetches += 1; return jsonResponse([recipeGate('high', gateFetches === 1 ? 1 : 2)]); }
+      return base(url, init);
+    });
+    await mountPanel();
+    const flow = container.querySelector('[data-testid="panel-signature-flow"]') as HTMLElement;
+    expect(flow.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v1');
+    const checkbox = flow.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = flow.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'v1 봤음');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const approveBtn = [...flow.querySelectorAll('button')].at(-1) as HTMLButtonElement;
+    await act(async () => { approveBtn.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(bodies[0]).toMatchObject({ reviewed_draft_id: 'site-d1', reviewed_draft_version: 1 });
+    expect(container.textContent).toContain(koMessages.cage.gateDraftChangedError);
+    expect(gateFetches).toBe(2);
+    expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
+  });
+});
