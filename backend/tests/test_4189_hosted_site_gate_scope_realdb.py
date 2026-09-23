@@ -185,7 +185,10 @@ async def test_hosted_draft_submit_leaves_recipe_gate_untouched():
         assert "draft_id" not in recipe.neutral_facts
         assert draft_gate.id != recipe.id
         assert draft_gate.scope_key == "hosted_site"
-        assert draft_gate.status == "pending"
+        # story #4190(훅A) — 레시피 게이트가 먼저 approved이고 목적지가 이 초안 하나뿐이면 초안 게이트가 승계
+        # 승인된다(레시피 행을 공유해서가 아니라 별도 행으로 — 위 단언이 그 분리를 지킨다).
+        assert draft_gate.status == "approved"
+        assert "auto_satisfied_by_recipe_external_publish_gate" in (draft_gate.resolution_note or "")
         assert draft_gate.neutral_facts["destination"] == "hosted_site"
     finally:
         app.dependency_overrides.clear()
