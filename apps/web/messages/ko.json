@@ -5177,6 +5177,7 @@
     "loading": "퍼포먼스 데이터를 불러오는 중…",
     "agentStatsTitle": "에이전트 통계",
     "agentStatsDescription": "에이전트별 완료 스토리, 배정 스토리, 평균 리드타임이에요.",
+    "agentStatsLoadError": "통계를 불러오지 못했어요 — 다시 시도해 주세요.",
     "velocityTitle": "팀 벨로시티",
     "velocityDescription": "스프린트별 완료 스토리 포인트 (최근 5 스프린트).",
     "noSprintData": "스프린트 데이터가 없어요.",

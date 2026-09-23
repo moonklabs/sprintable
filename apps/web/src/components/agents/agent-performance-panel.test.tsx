@@ -59,3 +59,45 @@ it('에이전트 0명이면 agent-stats를 아예 안 부른다', async () => {
   await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
   expect(fetchWithAuthMock.mock.calls.some(([u]) => String(u).includes('agent-stats'))).toBe(false);
 });
+
+// 유나 design(PR #4560) — 묶음 호출 실패와 «실적 없음(0)»을 갈라 보인다.
+function mockWith(batch: 'fail' | Record<string, unknown>) {
+  fetchWithAuthMock.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/team-members')) return ok(AGENTS.slice(0, 2));
+    if (url.startsWith('/api/analytics/velocity-history')) return ok([]);
+    if (url.startsWith('/api/rewards/leaderboard')) return ok([]);
+    if (url.startsWith('/api/analytics/agent-stats/batch')) return batch === 'fail' ? { ok: false, status: 500, json: async () => ({}) } : ok(batch);
+    return { ok: false, json: async () => ({}) };
+  });
+}
+
+async function renderPanel() {
+  await act(async () => {
+    root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentPerformancePanel /></NextIntlClientProvider>);
+  });
+  await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+}
+
+it('묶음 500 → 숫자 칸은 «—»(«0» 없음)·안내 한 줄·다시 시도 누르면 묶음 재호출', async () => {
+  mockWith('fail');
+  await renderPanel();
+  const notice = container.querySelector('[data-testid="agent-stats-load-error"]');
+  expect(notice?.textContent).toContain(koMessages.agentPerformance.agentStatsLoadError);
+  const cells = [...container.querySelectorAll('span.tabular-nums')].map((e) => e.textContent);
+  expect(cells.length).toBeGreaterThan(0);
+  expect(cells.every((c) => c === '—')).toBe(true);
+
+  const batchCalls = () => fetchWithAuthMock.mock.calls.filter(([u]) => String(u).startsWith('/api/analytics/agent-stats/batch')).length;
+  expect(batchCalls()).toBe(1);
+  const retry = [...notice!.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry)!;
+  await act(async () => { retry.click(); });
+  await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  expect(batchCalls()).toBe(2);
+});
+
+it('묶음은 성공인데 일부 에이전트만 빠지면 안내 없음(그 에이전트만 빈 지표)', async () => {
+  mockWith({ [AGENTS[0]!.id]: { completed: 4, total_stories: 5, done_story_points: 0, avg_lead_time_ms: 0 } });
+  await renderPanel();
+  expect(container.querySelector('[data-testid="agent-stats-load-error"]')).toBeNull();
+  expect(container.textContent).toContain('4');
+});
