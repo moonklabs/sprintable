@@ -14,7 +14,9 @@ export const FORBIDDEN: [RegExp, string][] = [
   [/실탄/, '팀 은어(유료 생성 비용) — «유료»'],
   [/무과금/, '게임 은어 — «무료»'],
   [/딸깍/, '팀 은어(클릭 한 번) — «승인»'],
-  [/[一-鿿]/, '한자 혼용(팀 채팅의 «확定»류)'],
+  // 까디르 QA(PR #4561): U+4E00–9FFF만 보면 호환 한자(U+F900–FAFF — 한글 IME 한자 변환이 내기도 함)·확장 A·B를
+  // 놓친다 — 유니코드 Ideographic 속성 전체로.
+  [/\p{Ideographic}/u, '한자 혼용(팀 채팅의 «확定»류)'],
 ];
 
 function* strings(obj: unknown, path = ''): Generator<[string, string]> {
@@ -41,5 +43,14 @@ describe('사용자 화면 문구에 내부어 0(story #4201)', () => {
     expect(findJargon({ a: 'BYOA를 허용하면' })).toHaveLength(1);
     expect(findJargon({ a: '실탄 예산' })).toHaveLength(1);
     expect(findJargon({ a: 'BYOAX 아님' })).toHaveLength(0);
+  });
+
+  it.each([
+    ['기본 한자', '確'],
+    ['호환 한자 U+F90A', '\uF90A'],
+    ['확장 A U+3400', '\u3400'],
+    ['확장 B U+20000', '\u{20000}'],
+  ])('한자 가드 범위 — %s', (_n, word) => {
+    expect(findJargon({ a: `문구 ${word} 끝` })).toHaveLength(1);
   });
 });
