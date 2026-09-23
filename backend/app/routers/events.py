@@ -2052,7 +2052,7 @@ async def _render_event_message_content(
         if _after_next is not None and _stage_capability_kind(
             definition.stage_metadata.get(_after_next)
         ) in _SERVER_DRIVEN_CAPABILITY_KINDS:
-            _example_base_payload = {**_example_base_payload, RECIPE_SITE_DRAFT_LINK_FIELD: "<draft_id from the submit_site_post_draft response>"}
+            _example_base_payload = {**_example_base_payload, RECIPE_SITE_DRAFT_LINK_FIELD: "<draft_id you passed to submit_site_post_draft>"}
         example_json = _next_stage_publish_payload_json(definition, next_stage, _example_base_payload)
         lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
         if _next_gate_decl is not None:

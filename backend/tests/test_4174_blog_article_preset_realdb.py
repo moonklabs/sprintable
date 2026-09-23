@@ -311,7 +311,7 @@ async def test_verdict_next_action_uses_recipe_line_only_in_recipe_context(monke
 
 async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_context_e2e():
     """까디르 P2(4572 CHANGES) — 양성 E2E 한 줄: 에이전트가 블로그 초안을 만들고 제출 → **제출 응답의 `draft_id`**(이 PR이
-    응답에 더함 · 안내 문구가 그 이름을 가리킨다) → 실제 발행 경로(`publish_registry_event`)로 «발행 승인 대기» 단계를 그
+    응답에 더함 — 에이전트가 제출에 넣은 값과 같다 · PO 12:44Z: 안내 문구는 플러그인 배포 전에도 참이도록 «제출한 초안의 draft_id») → 실제 발행 경로(`publish_registry_event`)로 «발행 승인 대기» 단계를 그
     값의 `site_post_draft_id`와 함께 발행 → `resolve_site_post_recipe_context`가 레시피 문맥을 돌려준다. fail-closed(음성)만
     재면 «제출 응답에 그 값이 없어 늘 안 걸림»을 못 잡는다. 음성 짝: 연결 없이 발행한 회차는 문맥 None.
     뮤테이션: 제출 응답의 draft_id 제거 → 응답 키 없음으로 RED."""
