@@ -25,8 +25,8 @@ payload_schema는 additionalProperties=false라 발송 단계의 봉인 필드 3
 (collect·review·campaign_created·send_requested·send_checked)는 같은 PR에서 FE recipe-stage-label 표·messages ko/en에 등재
 (doc §4.7 필수, tests/test_4188_platform_preset_user_copy_guard_realdb.py가 강제).
 
-Revision ID: 0396
-Revises: 0395
+Revision ID: 0398
+Revises: 0397
 Create Date: 2026-09-23
 """
 from __future__ import annotations
@@ -37,8 +37,8 @@ import uuid
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0396"
-down_revision = "0395"
+revision = "0398"
+down_revision = "0397"
 branch_labels = None
 depends_on = None
 

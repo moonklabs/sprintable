@@ -1,4 +1,4 @@
-"""story #4175(E-RECIPE-2) — «뉴스레터» 프리셋(preset.marketing.newsletter, 0396 시드).
+"""story #4175(E-RECIPE-2) — «뉴스레터» 프리셋(preset.marketing.newsletter, 0398 시드).
 
 - 등록 검증: 시드 값이 정의 등록 때 거치는 검증(key·payload_schema·routing·block_template·stage_metadata·
   role_actor_kinds)을 그대로 통과한다.
@@ -9,7 +9,7 @@
   승인 전 발송 명령을 워커에 태워도 reserve_email 0회·차단, 사람이 승인하면 1회(양성 대조).
 
 세팅은 test_4191_recipe_newsletter_send_realdb.py·test_3813_newsletter_send_gate.py 하네스를 그대로 쓴다.
-create_all DB엔 시드가 없어 0396 모듈의 값으로 같은 행을 넣는다(test_4085 관례)."""
+create_all DB엔 시드가 없어 0398 모듈의 값으로 같은 행을 넣는다(test_4085 관례)."""
 from __future__ import annotations
 
 import importlib.util
@@ -36,8 +36,8 @@ pytestmark = [
 
 
 def _load_migration():
-    path = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "0396_preset_marketing_newsletter_recipe.py")
-    spec = importlib.util.spec_from_file_location("_m0396_4175", path)
+    path = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "0398_preset_marketing_newsletter_recipe.py")
+    spec = importlib.util.spec_from_file_location("_m0398_4175", path)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
@@ -73,7 +73,7 @@ def _configure_secrets(monkeypatch):
 
 
 async def _ensure_preset(Session):
-    """0396 upgrade()와 같은 INSERT(ON CONFLICT DO NOTHING) — alembic head DB면 이미 있어 no-op."""
+    """0398 upgrade()와 같은 INSERT(ON CONFLICT DO NOTHING) — alembic head DB면 이미 있어 no-op."""
     import json
 
     async with Session() as s:
