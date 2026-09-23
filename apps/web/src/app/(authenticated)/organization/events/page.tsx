@@ -30,7 +30,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { publishHistorySenderLabel } from '@/lib/member-display';
 import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
-import { presetName } from '@/lib/platform-preset-copy';
+import { presetAction, presetName } from '@/lib/platform-preset-copy';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -533,7 +533,7 @@ function EventDefRow({
                   const meta = def.stage_metadata[stage];
                   return (
                     <li key={stage} className="break-words">
-                      <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
+                      <span className="font-medium text-foreground">{presetAction(def, stage, meta?.action, tPreset)}</span>
                       {meta?.role ? <> ({stageRoleLabel(meta.role, t)})</> : null}
                       {meta?.gate ? <div>{t('eventStageMetaGateLabel', { type: meta.gate.type ?? '' })}</div> : null}
                       {meta?.capability ? <div>{t('eventStageMetaCapabilityLabel', { kind: meta.capability.kind ?? '' })}</div> : null}

@@ -10,6 +10,10 @@ en 화면의 한국어다 — 그래서:
 3. 마케팅(`preset.marketing.*`)만: ko 값 == 시드 원문(name·description) — 시드 문안이 바뀌면 ko 화면도 같이
    바뀌어야 한다(두 곳이 갈리지 않게). 워크플로우는 시드가 언어가 섞여 있어(«Kanban Flow»·«칸반 심플») ko·en 모두
    유나 확정 새 문안이 기준이다 — 시드 원문 동일성을 걸지 않는다(#4203 카드).
+4. (#4209) 단계 설명: 시드에서 action이 있는 (key·stage) 전수 ↔ PLATFORM_PRESET_ACTION_KEY(양방향) · messages ko·en ·
+   마케팅 ko == 시드 action 원문. 모든 stage slug가 단계 라벨 표(recipe-stage-label.ts)에 있다(카드 본문 «{단계}»).
+5. (#4209) 채팅 카드 block_template 모양: header 1 · 단계 자리(`{{label.stage}}`/`{{payload.stage}}`)가 든 text · 필드면 라벨 «대상»
+   — FE localizePresetBlockTemplate가 덮는 모양. 새 프리셋 시드가 다른 모양이면 RED(규칙이 조용히 못 덮는 것을 막는다).
 범위: 사이클형 `preset.*`(#4202 만료 조건대로 #4203에서 넓힘). 신호형 프리셋(stage enum 없음 — `preset.gate.verdict`
 등)은 제외: 이 짝 가드가 여는 화면(갤러리·적용·실행 만들기)은 사이클형만 그린다.
 """
@@ -30,6 +34,9 @@ pytestmark = [
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _COPY_TS = _REPO_ROOT / "apps/web/src/lib/platform-preset-copy.ts"
+_STAGE_LABEL_TS = _REPO_ROOT / "apps/web/src/lib/recipe-stage-label.ts"
+_STAGE_PLACEHOLDER = re.compile(r"\{\{\s*(label|payload)\.stage\s*\}\}")
+_SEED_TARGET_LABEL = "대상"
 _MESSAGES = {lang: _REPO_ROOT / f"apps/web/messages/{lang}.json" for lang in ("ko", "en")}
 _NAMESPACE = "recipePreset"
 _SEED_IS_KO_SOURCE_PREFIX = "preset.marketing."
@@ -56,7 +63,7 @@ async def _cyclic_platform_presets() -> dict[str, dict]:
     try:
         async with engine.connect() as conn:
             rows = (await conn.execute(text(
-                "SELECT key, name, description FROM event_definitions "
+                "SELECT key, name, description, stage_metadata, block_template, payload_schema FROM event_definitions "
                 "WHERE org_id IS NULL AND key LIKE 'preset.%' "
                 "AND jsonb_typeof(payload_schema->'properties'->'stage'->'enum') = 'array' ORDER BY key"
             ))).mappings().all()
@@ -65,11 +72,12 @@ async def _cyclic_platform_presets() -> dict[str, dict]:
     return {r["key"]: dict(r) for r in rows}
 
 
-def _ts_table(table_name: str) -> dict[str, str]:
-    src = _COPY_TS.read_text(encoding="utf-8")
+def _ts_table(table_name: str, path: Path = _COPY_TS) -> dict[str, str]:
+    src = path.read_text(encoding="utf-8")
     m = re.search(rf"const {table_name}: Record<string, string> = \{{(.*?)\n\}};", src, re.S)
     assert m, f"{_COPY_TS.name}에서 {table_name} 표를 못 찾음 — 표 이름/형태가 바뀌었으면 이 파서를 같이 고쳐라"
-    table = dict(re.findall(r"^\s*'([^']+)'\s*:\s*'([^']+)'\s*,?\s*$", m.group(1), re.M))
+    # 한 줄 단위로만(주석 줄은 건너뛴다) — `\s`는 줄바꿈까지 먹어 주석이 다음 키에 붙는다.
+    table = dict(re.findall(r"^[ \t]*'?([A-Za-z0-9_.:-]+)'?[ \t]*:[ \t]*'([^']+)'[ \t]*,?[ \t]*$", m.group(1), re.M))
     assert table, f"{table_name} 파싱 결과가 비었다"
     return table
 
@@ -139,3 +147,71 @@ def test_find_gaps_catches_each_failure_mode():
     wf_msgs = {"ko": {"wName": "칸반 알림", "wDescription": "새 설명"}, "en": {"wName": "Kanban alerts", "wDescription": "New"}}
     assert find_gaps(wf, wf_names, wf_descs, wf_msgs) == []
     assert any("preset.workflow.w: PLATFORM_PRESET_NAME_KEY에 행 없음" in g for g in find_gaps(wf, {}, wf_descs, wf_msgs))
+
+
+def find_action_and_card_gaps(presets: dict[str, dict], actions: dict[str, str], stage_labels: set[str],
+                              messages: dict[str, dict]) -> list[str]:
+    """#4209 — 단계 설명 짝·단계 라벨·카드 템플릿 모양."""
+    gaps: list[str] = []
+    seeded: dict[str, str] = {}
+    for key, row in presets.items():
+        for stage, meta in (row.get("stage_metadata") or {}).items():
+            if isinstance(meta, dict) and isinstance(meta.get("action"), str):
+                seeded[f"{key}:{stage}"] = meta["action"]
+        enum = (((row.get("payload_schema") or {}).get("properties") or {}).get("stage") or {}).get("enum") or []
+        gaps += [f"{key}: stage `{s}` 단계 라벨 표(recipe-stage-label.ts)에 없음 — 카드 본문에 slug 원문" for s in enum if s not in stage_labels]
+        blocks = (row.get("block_template") or {}).get("blocks") or []
+        headers = [b for b in blocks if isinstance(b, dict) and b.get("type") == "header"]
+        stage_texts = [b for b in blocks if isinstance(b, dict) and b.get("type") == "text" and _STAGE_PLACEHOLDER.search(str(b.get("text", "")))]
+        field_labels = [f.get("label") for b in blocks if isinstance(b, dict) and b.get("type") == "fields" for f in (b.get("fields") or [])]
+        if len(headers) != 1:
+            gaps.append(f"{key}: block_template header가 1개가 아님({len(headers)}) — 카드 머리말 규칙이 못 덮음")
+        if not stage_texts:
+            gaps.append(f"{key}: block_template에 단계 자리가 든 text 없음 — 카드 본문 규칙이 못 덮음")
+        gaps += [f"{key}: 필드 라벨 {lbl!r}(«{_SEED_TARGET_LABEL}» 아님) — 카드 필드 라벨 규칙이 못 덮음" for lbl in field_labels if lbl != _SEED_TARGET_LABEL]
+    table = {k: v for k, v in actions.items() if k.startswith("preset.")}
+    gaps += [f"{k}: PLATFORM_PRESET_ACTION_KEY에 행 없음(en 화면에 원문 단계 설명)" for k in sorted(set(seeded) - set(table))]
+    gaps += [f"{k}: PLATFORM_PRESET_ACTION_KEY 행이 시드에 없음(낡은 행)" for k in sorted(set(table) - set(seeded))]
+    for k, msg_key in table.items():
+        for lang, ns in messages.items():
+            v = ns.get(msg_key)
+            if not isinstance(v, str) or not v.strip():
+                gaps.append(f"{k}: messages/{lang}.json {_NAMESPACE}.{msg_key} 없음/빈 값")
+        if k.startswith(_SEED_IS_KO_SOURCE_PREFIX) and k in seeded and messages.get("ko", {}).get(msg_key) not in (None, seeded[k]):
+            gaps.append(f"{k}: 마케팅 단계 설명 ko가 시드 원문과 다름 — 시드 {seeded[k]!r}")
+    return gaps
+
+
+@pytest.mark.anyio
+async def test_cyclic_preset_actions_stage_labels_and_card_shape_on_real_seed():
+    presets = await _cyclic_platform_presets()
+    assert presets, "시드가 비면 가드가 공허하게 통과한다"
+    gaps = find_action_and_card_gaps(
+        presets, _ts_table("PLATFORM_PRESET_ACTION_KEY"),
+        set(_ts_table("STAGE_LABEL_KEYS", _STAGE_LABEL_TS)),
+        {lang: _messages(lang) for lang in _MESSAGES},
+    )
+    assert gaps == [], "\n".join(gaps)
+
+
+def test_find_action_and_card_gaps_catches_each_failure_mode():
+    """가드 자체 — 행 누락·낡은 행·messages 누락·마케팅 ko drift·단계 라벨 누락·카드 모양 3종."""
+    good_tpl = {"blocks": [{"type": "header", "text": "H"}, {"type": "text", "text": "**{{label.stage}}** 단계"},
+                           {"type": "fields", "fields": [{"label": "대상", "value": "v"}]}]}
+    row = {"stage_metadata": {"draft": {"action": "초안"}}, "block_template": good_tpl,
+           "payload_schema": {"properties": {"stage": {"enum": ["draft"]}}}}
+    presets = {"preset.marketing.a": row}
+    actions = {"preset.marketing.a:draft": "aDraft"}
+    msgs = {"ko": {"aDraft": "초안"}, "en": {"aDraft": "Draft"}}
+    assert find_action_and_card_gaps(presets, actions, {"draft"}, msgs) == []
+    assert any("ACTION_KEY에 행 없음" in g for g in find_action_and_card_gaps(presets, {}, {"draft"}, msgs))
+    assert any("낡은 행" in g for g in find_action_and_card_gaps(presets, {**actions, "preset.marketing.a:gone": "x"}, {"draft"}, msgs))
+    assert any("en.json" in g for g in find_action_and_card_gaps(presets, actions, {"draft"}, {"ko": msgs["ko"], "en": {}}))
+    assert any("시드 원문과 다름" in g for g in find_action_and_card_gaps(presets, actions, {"draft"}, {"ko": {"aDraft": "다른"}, "en": msgs["en"]}))
+    assert any("단계 라벨 표" in g for g in find_action_and_card_gaps(presets, actions, set(), msgs))
+    for bad in (
+        {"blocks": [good_tpl["blocks"][1], good_tpl["blocks"][2]]},
+        {"blocks": [good_tpl["blocks"][0], {"type": "text", "text": "단계 없음"}, good_tpl["blocks"][2]]},
+        {"blocks": [good_tpl["blocks"][0], good_tpl["blocks"][1], {"type": "fields", "fields": [{"label": "Target", "value": "v"}]}]},
+    ):
+        assert find_action_and_card_gaps({"preset.marketing.a": {**row, "block_template": bad}}, actions, {"draft"}, msgs), bad

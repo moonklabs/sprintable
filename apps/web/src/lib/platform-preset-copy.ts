@@ -1,3 +1,5 @@
+import type { BlockTemplate, BlockTemplateBlock } from '@/lib/block-template';
+
 // story #4202·#4203 — 플랫폼 사이클형 프리셋(event_definitions.org_id IS NULL · `preset.marketing.*`·`preset.workflow.*`)의
 // 이름·설명을 로케일별로. 마케팅은 ko = 시드 원문, 워크플로우는 ko·en 모두 유나 확정 새 문안(시드는 언어가 섞여
 // 있어 원문이 기준이 아니다 — ko 화면에 «Kanban Flow», en 화면에 «칸반 심플»). 시드는 한 언어뿐이라
@@ -54,3 +56,96 @@ export function presetDescription(def: PresetLike, t: Translate): string {
   const k = platformKey(PLATFORM_PRESET_DESCRIPTION_KEY, def);
   return k ? t(k) : def.description ?? '';
 }
+
+// story #4209(유나 확정 문안) — 단계 설명(stage_metadata[stage].action). 키 = «프리셋 key:stage». 마케팅 ko = 시드 원문,
+// 워크플로우 ko·en = 새 문안(원문의 내부어를 걷음). 같은 문장을 쓰는 워크플로우 단계(배정·제출·검토)는 한 키를 공유한다.
+// BE 짝 가드(test_4202_platform_preset_copy_keys_realdb.py)가 시드의 action 있는 단계 전수 ↔ 이 표를 잰다.
+export const PLATFORM_PRESET_ACTION_KEY: Record<string, string> = {
+  'preset.marketing.social_card_news:budget_approved': 'socialCardNewsActionBudgetApproved',
+  'preset.marketing.social_card_news:concept_confirmed': 'socialCardNewsActionConceptConfirmed',
+  'preset.marketing.social_card_news:draft': 'socialCardNewsActionDraft',
+  'preset.marketing.social_card_news:editing': 'socialCardNewsActionEditing',
+  'preset.marketing.social_card_news:live_generation': 'socialCardNewsActionLiveGeneration',
+  'preset.marketing.social_card_news:pending_approval': 'socialCardNewsActionPendingApproval',
+  'preset.marketing.social_card_news:published': 'socialCardNewsActionPublished',
+  'preset.marketing.social_card_news:verification': 'socialCardNewsActionVerification',
+  'preset.marketing.social_text_post:concept_confirmed': 'socialTextPostActionConceptConfirmed',
+  'preset.marketing.social_text_post:draft': 'socialTextPostActionDraft',
+  'preset.marketing.social_text_post:editing': 'socialTextPostActionEditing',
+  'preset.marketing.social_text_post:pending_approval': 'socialTextPostActionPendingApproval',
+  'preset.marketing.social_text_post:published': 'socialTextPostActionPublished',
+  'preset.marketing.video_production:animatic': 'videoProductionActionAnimatic',
+  'preset.marketing.video_production:concept_confirmed': 'videoProductionActionConceptConfirmed',
+  'preset.marketing.video_production:draft': 'videoProductionActionDraft',
+  'preset.marketing.video_production:editing': 'videoProductionActionEditing',
+  'preset.marketing.video_production:live_generation': 'videoProductionActionLiveGeneration',
+  'preset.marketing.video_production:pending_approval': 'videoProductionActionPendingApproval',
+  'preset.marketing.video_production:published': 'videoProductionActionPublished',
+  'preset.marketing.video_production:structure_passed': 'videoProductionActionStructurePassed',
+  'preset.marketing.video_production:verification': 'videoProductionActionVerification',
+  'preset.workflow.agent_solo:execute': 'workflowAgentSoloActionExecute',
+  'preset.workflow.agent_solo:received': 'workflowAgentSoloActionReceived',
+  'preset.workflow.agent_solo:report': 'workflowAgentSoloActionReport',
+  'preset.workflow.kanban:assign_step_1': 'workflowActionAssign',
+  'preset.workflow.kanban_simple:done_check': 'workflowKanbanSimpleActionDoneCheck',
+  'preset.workflow.kanban_simple:in_progress': 'workflowKanbanSimpleActionInProgress',
+  'preset.workflow.kanban_simple:task_created': 'workflowKanbanSimpleActionTaskCreated',
+  'preset.workflow.loop_agency:brief_doc_approval': 'workflowLoopAgencyActionBriefDocApproval',
+  'preset.workflow.loop_agency:execute': 'workflowLoopAgencyActionExecute',
+  'preset.workflow.loop_agency:generate_variants': 'workflowLoopAgencyActionGenerateVariants',
+  'preset.workflow.loop_agency:goal_hypothesis': 'workflowLoopAgencyActionGoalHypothesis',
+  'preset.workflow.loop_agency:loop_decision': 'workflowLoopAgencyActionLoopDecision',
+  'preset.workflow.loop_agency:track_and_learn': 'workflowLoopAgencyActionTrackAndLearn',
+  'preset.workflow.scrum_3step:implementation': 'workflowScrum3StepActionImplementation',
+  'preset.workflow.scrum_3step:kickoff': 'workflowScrum3StepActionKickoff',
+  'preset.workflow.scrum_3step:qa_review': 'workflowScrum3StepActionQaReview',
+  'preset.workflow.solo:assign_step_1': 'workflowActionAssign',
+  'preset.workflow.three_step:assign_step_1': 'workflowActionAssign',
+  'preset.workflow.three_step:review_step_2': 'workflowActionReview',
+  'preset.workflow.three_step:review_step_3': 'workflowThreeStepActionReviewStep3',
+  'preset.workflow.three_step:submit_step_1': 'workflowActionSubmit',
+  'preset.workflow.two_step:assign_step_1': 'workflowActionAssign',
+  'preset.workflow.two_step:review_step_2': 'workflowActionReview',
+  'preset.workflow.two_step:submit_step_1': 'workflowActionSubmit',
+};
+
+/** 단계 설명. 플랫폼 프리셋이고 표에 있으면 messages 문안, 아니면 원문 action, 그것도 없으면 stage slug(기존 `action ?? stage`). */
+export function presetAction(def: PresetLike, stage: string, rawAction: string | null | undefined, t: Translate): string {
+  const k = def.org_id === null ? PLATFORM_PRESET_ACTION_KEY[`${def.key}:${stage}`] : undefined;
+  return k ? t(k) : rawAction ?? stage;
+}
+
+/** 플랫폼 사이클형 프리셋인지(이름 표에 있는 key · org_id null) — 채팅 이벤트 카드 문안을 로케일로 바꿀 대상. */
+export function isLocalizedPlatformPreset(def: PresetLike | null | undefined): def is PresetLike {
+  return !!def && def.org_id === null && Object.hasOwn(PLATFORM_PRESET_NAME_KEY, def.key);
+}
+
+/**
+ * story #4209(유나 확정) — 플랫폼 마케팅·워크플로우 프리셋의 채팅 이벤트 카드 문안을 로케일로. 시드 block_template은 한
+ * 언어뿐이고(«영상 제작 워크플로우»·«**{{label.stage}}** 단계로 넘어갔습니다»·«Kanban Flow»·«{{payload.stage}}» 원문) 모양은 모두
+ * 같다(header · 단계가 든 text · «대상» 필드 — BE 짝 가드가 이 모양을 핀). 조직 커스텀 정의는 원문 그대로.
+ * - header → «{이름} 워크플로우»(이름 = presetName, 새 문안 대신 규칙 하나)
+ * - 단계 자리(`{{label.stage}}`·`{{payload.stage}}`)가 든 text → 한 템플릿(단계 = 단계 라벨)
+ * - 필드 라벨 «대상» → 로케일 «대상/Target»(값 자리는 그대로)
+ */
+export function localizePresetBlockTemplate(
+  template: BlockTemplate,
+  def: PresetLike | null | undefined,
+  strings: { header: string; body: string | null; targetLabel: string },
+): BlockTemplate {
+  if (!isLocalizedPlatformPreset(def)) return template;
+  return {
+    blocks: template.blocks.map((block): BlockTemplateBlock => {
+      if (block.type === 'header') return { ...block, text: strings.header };
+      // 단계 값이 없으면(body null) 원문 그대로 — 빈 굵은 글씨를 만들지 않는다.
+      if (block.type === 'text' && strings.body !== null && /\{\{\s*(label|payload)\.stage\s*\}\}/.test(block.text)) return { ...block, text: strings.body };
+      if (block.type === 'fields') {
+        return { ...block, fields: block.fields.map((f) => (f.label === SEED_TARGET_LABEL ? { ...f, label: strings.targetLabel } : f)) };
+      }
+      return block;
+    }),
+  };
+}
+
+/** 시드 block_template의 대상 필드 라벨(한국어 시드 원문) — 이 값일 때만 로케일 라벨로 바꾼다. */
+export const SEED_TARGET_LABEL = '대상';

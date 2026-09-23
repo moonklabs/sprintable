@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from '@/lib/block-template';
+import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock, type EventDefinitionSummary } from '@/lib/block-template';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
@@ -15,6 +15,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
+import { isLocalizedPlatformPreset, localizePresetBlockTemplate, presetName } from '@/lib/platform-preset-copy';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
 // INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
@@ -75,6 +76,9 @@ interface EventBlockCardProps {
     | null
     | { found: boolean; token?: string; type?: string; name?: string }
   >;
+  /** story #4209 — 이 이벤트의 정의(key·org_id·name). 플랫폼 마케팅·워크플로우 프리셋이면 카드 머리말·본문·필드
+   * 라벨을 로케일 문안으로 바꾼다(localizePresetBlockTemplate). 없거나 조직 정의면 템플릿 원문 그대로. */
+  definition?: EventDefinitionSummary | null;
 }
 
 // story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
@@ -190,7 +194,7 @@ function renderTextWithMissingMarkers(text: string): React.ReactNode {
  * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
  * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
-export function EventBlockCard({ template, payload, refs }: EventBlockCardProps) {
+export function EventBlockCard({ template, payload, refs, definition }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const tBoard = useTranslations('board');
   const tCage = useTranslations('cage');
@@ -199,6 +203,7 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
   const tEventCard = useTranslations('eventCard');
   const tOutcomeLoop = useTranslations('outcomeLoop');
   const tHypotheses = useTranslations('hypotheses');
+  const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
   const { currentMemberType, role, orgId } = useDashboardContext();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -384,7 +389,17 @@ export function EventBlockCard({ template, payload, refs }: EventBlockCardProps)
       if (typeof value === 'string' || value === null) refsForTemplate[key] = value;
     }
   }
-  const blocks = renderBlockTemplate(template, payload, refsForTemplate, labels, translations);
+  // story #4209(유나 확정) — 플랫폼 마케팅·워크플로우 프리셋은 시드 block_template(한 언어·옛 이름·합니다체·워크플로우는
+  // stage slug 원문)을 로케일 문안으로: 머리말 «{이름} 워크플로우» · 본문 «**{단계 라벨}** 단계로 넘어갔어요» · «대상» 필드
+  // 라벨. 조직 정의·정의 모름은 원문 그대로(isLocalizedPlatformPreset).
+  const localizedTemplate = isLocalizedPlatformPreset(definition)
+    ? localizePresetBlockTemplate(template, definition, {
+      header: tPreset('headerTemplate', { name: presetName(definition, tPreset) }),
+      body: typeof labels['stage'] === 'string' ? tPreset('stageMovedBody', { stage: labels['stage'] }) : null,
+      targetLabel: tEventCard('targetLabel'),
+    })
+    : template;
+  const blocks = renderBlockTemplate(localizedTemplate, payload, refsForTemplate, labels, translations);
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">

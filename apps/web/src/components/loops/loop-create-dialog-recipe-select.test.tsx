@@ -109,9 +109,11 @@ describe('LoopCreateDialog 레시피 선택 (story #2792 — event_definitions �
     });
     await flush();
 
-    expect(document.body.textContent).toContain('기능 명세 및 AC 작성');
+    // story #4209 — 플랫폼 워크플로우 프리셋의 단계 설명은 원문(내부어 «AC»·«APPROVE/REJECT») 대신 로케일 문안.
+    expect(document.body.textContent).toContain(koMessages.recipePreset.workflowScrum3StepActionKickoff);
     expect(document.body.textContent).toContain('PO');
-    expect(document.body.textContent).toContain('AC 체크리스트 검증 후 APPROVE/REJECT');
+    expect(document.body.textContent).toContain(koMessages.recipePreset.workflowScrum3StepActionQaReview);
+    expect(document.body.textContent).not.toContain('APPROVE/REJECT');
   });
 
   it('제출 시 recipe_slug 필드에 선택된 정의의 key 값을 싣는다(필드명 유지, 값만 신규 key)', async () => {

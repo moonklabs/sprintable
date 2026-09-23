@@ -645,6 +645,7 @@ export function ChatBubble({
               template={eventBlockTemplate}
               payload={eventTarget.payload}
               refs={eventTarget.refs}
+              definition={eventDefinitionsByKey?.[eventTarget.event_key] ?? null}
             />
           ) : serverCommand ? (
             <ServerCommandResultCard
