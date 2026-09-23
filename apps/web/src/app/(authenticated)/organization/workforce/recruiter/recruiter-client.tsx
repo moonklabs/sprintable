@@ -24,6 +24,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { copyTextSafely } from '@/lib/clipboard';
+import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -116,6 +117,29 @@ export function resolveVerifyGuideKey(
 ): 'verifyGuideConnector' | 'verifyGuideMcp' | 'verifyGuideMcpStdio' {
   if (!hasMcpConfig) return 'verifyGuideConnector';
   return transport === 'http' ? 'verifyGuideMcp' : 'verifyGuideMcpStdio';
+}
+
+/**
+ * story #4180(E-PROD-ESC·온보딩) — Codex CLI는 `.mcp.json`을 읽지 않는다(`.codex/config.toml`
+ * TOML, learn.chatgpt.com/docs/extend/mcp?surface=cli 실측 2026-09-23). BE `mcp_config`는 여전히
+ * JSON(SSOT, `agent_onboarding_config.py`)이라 값 생성은 그대로 두고, 이 화면(채용 결과 카드)이
+ * 렌더할 때만 파일명·포맷을 런타임별로 가른다 — 다른 런타임은 이 함수 반환값이 그대로
+ * `.mcp.json`(기존과 byte-identical)이라 무회귀.
+ */
+export function resolveMcpConfigFilename(runtime: string): string {
+  return runtime === 'codex' ? 'config.toml' : '.mcp.json';
+}
+
+// 유나 design·PO 처방(PR 4542) — 에이전트 전용 키가 든 조각이라 전역(~/.codex) 경로는 안내하지
+// 않는다. 신뢰 버튼명은 Codex 앱·버전마다 달라(CLI 0.153.4 실측 «Yes, continue») 이름 대신
+// 행동으로 쓴다 — 버튼명을 i18n에 박지 말 것.
+const CODEX_PATH_NOTE_PARAMS = { path: '.codex/config.toml' };
+
+/** resolveMcpConfigFilename과 같은 가드(runtime==='codex') — 파일명·본문 포맷이 한 조건에서
+ * 갈라지므로 한쪽만 바뀌는 회귀(파일명은 config.toml인데 본문은 여전히 JSON 등)를 막기 위해
+ * 별도 함수로 뽑아 직접 테스트한다(이 파일 컴포넌트 전체 마운트 테스트는 없다는 기존 관례). */
+export function buildMcpConfigText(mcpConfig: McpConfigBundle, runtime: string): string {
+  return runtime === 'codex' ? buildCodexConfigToml(mcpConfig) : JSON.stringify(mcpConfig, null, 2);
 }
 
 export interface RoleGroup {
@@ -376,7 +400,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [equipError, setEquipError] = useState<string | null>(null);
   const [equipResult, setEquipResult] = useState<{
     name: string;
-    mcp_config: Record<string, unknown> | null;
+    mcp_config: McpConfigBundle | null;
     api_key: string | null;
   } | null>(null);
   const [equipMcpCopied, setEquipMcpCopied] = useState(false);
@@ -407,7 +431,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { id?: string; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+          data?: { id?: string; mcp_config?: McpConfigBundle | null; api_key?: string | null };
         };
         const agentId = json.data?.id;
         if (agentId) {
@@ -444,7 +468,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   const handleCopyEquipMcp = async () => {
     if (!equipResult?.mcp_config) return;
-    const result = await copyTextSafely(JSON.stringify(equipResult.mcp_config, null, 2));
+    const result = await copyTextSafely(buildMcpConfigText(equipResult.mcp_config, runtime));
     if (!result.ok) {
       setEquipMcpCopyFailed(true);
       setTimeout(() => setEquipMcpCopyFailed(false), 3000);
@@ -827,9 +851,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     }
   };
 
+  // story #4180 — Codex는 TOML(`.codex/config.toml`), 그 외 런타임은 기존 JSON(`.mcp.json`)
+  // 그대로. BE mcp_config 값 자체는 무변경 — 이 화면의 재직렬화(포맷)만 runtime으로 가른다.
+  const mcpConfigFilename = resolveMcpConfigFilename(runtime);
   const mcpConfigText = useMemo(
-    () => (recruitResult ? JSON.stringify(recruitResult.mcp_config, null, 2) : ''),
-    [recruitResult],
+    () => (recruitResult ? buildMcpConfigText(recruitResult.mcp_config, runtime) : ''),
+    [recruitResult, runtime],
   );
 
   // story d82c1092: equip-skip은 3단계(직무·스코프·완료)만 쓴다 — STEP3을 "완료"로 재라벨.
@@ -1237,14 +1264,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 {equipResult.mcp_config ? (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-foreground">{t('equipMcpConfigLabel')}</p>
+                      {/* story #4180(카디르 QA CHANGES) — equip-skip도 같은 renderRuntimePicker를
+                          렌더해(#2433 B) Codex 선택이 가능하다 — STEP4와 같은 파일명·포맷 분기. */}
+                      <p className="text-xs font-medium text-foreground">
+                        {t('equipMcpConfigLabel')} <span className="font-mono font-normal text-foreground">{mcpConfigFilename}</span>
+                      </p>
                       <Button variant="glass" size="sm" onClick={() => void handleCopyEquipMcp()}>
                         {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>
                     </div>
                     {equipMcpCopyFailed ? <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p> : null}
+                    {runtime === 'codex' && (
+                      <p className="text-xs text-foreground">
+                        {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
+                      </p>
+                    )}
                     <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                      {JSON.stringify(equipResult.mcp_config, null, 2)}
+                      {buildMcpConfigText(equipResult.mcp_config, runtime)}
                     </pre>
                   </div>
                 ) : null}
@@ -1295,7 +1331,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {recruitResult.mcp_config
                           ? (RUNTIME_CONNECT_CLI[runtime]
                               ? <ConnectCliBody command={RUNTIME_CONNECT_CLI[runtime]} />
-                              : t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName }))
+                              : t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName, filename: mcpConfigFilename }))
                           : t('kitOrientingConnectBodyConnector')}
                       </p>
                     </div>
@@ -1374,7 +1410,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               <Alert variant="warning">
                 <AlertDescription className="flex items-start gap-2">
                   <span aria-hidden>🔑</span>
-                  <span><b>{t('keyOnceTitle')}</b> {recruitResult.mcp_config ? t('keyOnceBody') : t('keyOnceBodyNoMcp')}</span>
+                  <span><b>{t('keyOnceTitle')}</b> {recruitResult.mcp_config ? t('keyOnceBody', { filename: mcpConfigFilename }) : t('keyOnceBodyNoMcp')}</span>
                 </AlertDescription>
               </Alert>
 
@@ -1384,10 +1420,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               {recruitResult.mcp_config ? (
                 <div className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
-                    <span className="font-mono text-xs text-foreground">📄 .mcp.json <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
+                    <span className="font-mono text-xs text-foreground">📄 {mcpConfigFilename} <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
                     <CopyDownloadButtons
                       content={mcpConfigText}
-                      filename=".mcp.json"
+                      filename={mcpConfigFilename}
                       copied={copiedMcp}
                       onCopied={() => {
                         setCopiedMcp(true);
@@ -1397,6 +1433,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       }}
                     />
                   </div>
+                  {/* story #4180 — 다운로드 filename은 브라우저가 경로 구분자를 못 담아(Blob
+                      다운로드가 "/"를 살리지 못함) "config.toml" 평문으로만 받는다. 실제 저장
+                      위치(.codex/config.toml)는 별도 문장으로 명시 — AC1(공식 스키마·경로 안내). */}
+                  {runtime === 'codex' && (
+                    <p className="border-b border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-foreground">
+                      {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
+                    </p>
+                  )}
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
               ) : (
