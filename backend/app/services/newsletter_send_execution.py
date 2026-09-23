@@ -367,31 +367,32 @@ async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: Publi
     - 멱등은 `emit_recipe_published_stage_event`의 «이 work item에 이 stage가 이미 발행됐으면 스킵»(#4093 SSOT) —
       재시도·겹친 틱이 다시 와도 이벤트는 1.
 
-    **트랜잭션 경계**(PR #4573 PO 수정): 외부 발송(스티비 reserve·샌드박스 send)은 이미 일어났다. 그 기록(command
-    completed·attempt·activity·스냅샷 예약)을 **먼저 커밋**하고, 레시피 이벤트는 그 뒤 **별도 트랜잭션**에서 돈다. 예전엔
-    같은 트랜잭션이라 이벤트 쪽 DB 오류가 트랜잭션을 중단시키면 워커의 커밋이 실패·롤백돼 completed가 저장되지 않았고,
-    다음 틱이 같은 발송을 다시 실행해 수신자가 같은 메일을 두 번 받을 수 있었다(파이썬 except가 예외를 삼켜도 Postgres
-    트랜잭션은 이미 aborted). 이제 이벤트가 어떻게 실패하든 롤백은 이벤트 작업만 되돌린다."""
-    # 커밋 뒤 ORM 속성 재적재에 기대지 않게 필요한 값을 먼저 잡아 둔다.
+    **트랜잭션 경계**(PR #4573 PO 수정 2회): 외부 발송(스티비 reserve·샌드박스 send)은 이미 일어났다. 그 기록(command
+    completed·attempt·activity·스냅샷 예약)을 워커 세션에서 **먼저 커밋**하고, 레시피 이벤트는 **별도 세션**
+    (`run_side_effect_in_own_session`)에서 돈다. 같은 트랜잭션이면 이벤트 쪽 SQL 오류가 트랜잭션을 aborted로 만들어 워커 커밋이
+    조용히 ROLLBACK → completed 미저장 → 다음 틱 재발송(수신자 이중 발송)이었고, 워커 세션에서 롤백하면 워커의 ORM 객체가 만료돼
+    같은 배치의 나머지 명령이 in_progress로 영구 정체였다. 워커 세션은 발송 기록 커밋까지만 책임진다."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    # 새 세션은 워커 세션의 ORM 객체를 공유하지 않는다 — 필요한 값을 먼저 잡아 둔다.
     command_id, gate_id = command.id, gate.id
     org_id, work_item_type, work_item_id = gate.org_id, gate.work_item_type, gate.work_item_id
     facts = dict(gate.neutral_facts or {})
-    await db.commit()  # 발송 성공 기록 확정 — 아래 이벤트 실패가 이것을 되돌릴 수 없게.
-    try:
-        resolved = await _resolve_recipe_next_stage(db, org_id=org_id, facts=facts)
+    await db.commit()  # 발송 성공 기록 확정 — 아래 이벤트가 어떻게 실패해도 이것을 되돌릴 수 없게.
+
+    async def _emit(side: AsyncSession) -> None:
+        resolved = await _resolve_recipe_next_stage(side, org_id=org_id, facts=facts)
         if resolved is None:
             return
         definition_key, next_stage = resolved
         from app.services.channel_posts import emit_recipe_published_stage_event
 
         await emit_recipe_published_stage_event(
-            db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
+            side, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
             definition_key=definition_key, next_stage=next_stage,
         )
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        logger.warning(
-            "newsletter send 완료 뒤 레시피 다음 단계 이벤트 연결 실패 command_id=%s gate_id=%s — "
-            "발송 기록은 이미 커밋됐다(되돌리지 않음·재발송 없음)", command_id, gate_id, exc_info=True,
-        )
+
+    await run_side_effect_in_own_session(
+        db, _emit,
+        describe=f"recipe next-stage event after newsletter send command_id={command_id} gate_id={gate_id}",
+    )

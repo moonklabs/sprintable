@@ -10,7 +10,6 @@
 시드) 착지 뒤 AC3에서 실제 시드로 한 번 더."""
 from __future__ import annotations
 
-import contextlib
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -294,11 +293,7 @@ async def test_real_newsletter_preset_seed_send_requested_to_send_checked_once()
         await engine.dispose()
 
 
-@pytest.mark.anyio
-async def test_event_db_error_does_not_undo_send_record_and_next_tick_does_not_resend(monkeypatch):
-    """⭐PR #4573 PO 수정 — 레시피 이벤트 쪽 **실제 SQL 오류**(파이썬 except가 삼켜도 Postgres 트랜잭션은 aborted)가 발송 기록을
-    되돌리지 않는다: 틱 뒤 **새 세션으로 다시 읽어** command=completed · 다음 틱에서 발송 호출 0(수신자 이중 발송 방지)."""
-    import app.services.channel_posts as channel_posts_module
+def _count_sends(monkeypatch) -> list[str]:
     import app.services.stibee_sandbox_campaign as sandbox_module
 
     sends: list[str] = []
@@ -308,23 +303,64 @@ async def test_event_db_error_does_not_undo_send_record_and_next_tick_does_not_r
         sends.append(kwargs["campaign_id"])
         return await real_send(**kwargs)
 
-    async def _emit_with_sql_error(db, **_kwargs):
-        # 실 경로처럼 예외는 삼키지만(파이썬) Postgres 트랜잭션은 이미 aborted — 이 상태가 발송 기록을 되돌리면 안 된다.
-        with contextlib.suppress(Exception):
-            await db.execute(text("SELECT * FROM no_such_table_4214"))
-
     monkeypatch.setattr(sandbox_module, "send_campaign", _counting_send)
-    monkeypatch.setattr(channel_posts_module, "emit_recipe_published_stage_event", _emit_with_sql_error)
+    return sends
 
+
+def _emit_raises_sql_error_for(monkeypatch, failing_org_ids: set):
+    """레시피 이벤트 발행부가 **실제 SQL 오류를 그대로 던진다**(삼키지 않음) — 지정 org만. 나머지는 실 발행부."""
+    import app.services.channel_posts as channel_posts_module
+
+    real_emit = channel_posts_module.emit_recipe_published_stage_event
+
+    async def _emit(db, **kwargs):
+        if kwargs["org_id"] in failing_org_ids:
+            await db.execute(text("SELECT * FROM no_such_table_4214"))
+        return await real_emit(db, **kwargs)
+
+    monkeypatch.setattr(channel_posts_module, "emit_recipe_published_stage_event", _emit)
+
+
+@pytest.mark.anyio
+async def test_event_raising_sql_error_keeps_send_record_worker_finishes_and_next_tick_does_not_resend(monkeypatch):
+    """⭐PR #4573 PO 수정 ① — 이벤트 발행부가 실제 SQL 오류를 **던져도**: 워커는 정상 종료(예외 밖으로 0) · 틱 뒤 **새 세션
+    재조회** command=completed · 이어지는 두 틱에서 발송 호출 총 1(수신자 이중 발송 0) · 이벤트 0."""
+    sends = _count_sends(monkeypatch)
     engine, Session = await _session_factory()
     try:
         ctx = await _setup(Session)
+        _emit_raises_sql_error_for(monkeypatch, {ctx["org_id"]})
         gate, scheduled_at = await _approve_and_queue(Session, ctx)
-        await _run_worker(Session, scheduled_at + timedelta(minutes=2))
+        counts = await _run_worker(Session, scheduled_at + timedelta(minutes=2))
+        assert counts["completed"] == 1 and counts["error"] == 0, counts
         assert await _command_status(Session, gate.id) == "completed"  # 새 세션 재조회
         await _run_worker(Session, scheduled_at + timedelta(minutes=3))
         await _run_worker(Session, scheduled_at + timedelta(minutes=10))
         assert len(sends) == 1, sends
         assert await _stage_event_count(Session, ctx, "check") == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_first_commands_event_failure_does_not_strand_the_rest_of_the_batch(monkeypatch):
+    """⭐PR #4573 PO 수정 ② — 한 배치에 명령 2개, 첫 번째의 이벤트가 SQL 오류로 실패해도 두 번째 명령도 completed · 두 번째의
+    이벤트 1 · 워커 결과 카운트 {completed 2 · error 0}. 이벤트를 워커 세션에서 돌리면(롤백이 워커 ORM 객체를 만료) 두 번째가
+    in_progress로 영구 정체 — 이 테스트가 RED."""
+    sends = _count_sends(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        ctx_fail = await _setup(Session)
+        ctx_ok = await _setup(Session)
+        _emit_raises_sql_error_for(monkeypatch, {ctx_fail["org_id"]})
+        gate_fail, at_fail = await _approve_and_queue(Session, ctx_fail)
+        gate_ok, at_ok = await _approve_and_queue(Session, ctx_ok)
+        counts = await _run_worker(Session, max(at_fail, at_ok) + timedelta(minutes=2))
+        assert counts["completed"] == 2 and counts["error"] == 0, counts
+        assert await _command_status(Session, gate_fail.id) == "completed"
+        assert await _command_status(Session, gate_ok.id) == "completed"
+        assert await _stage_event_count(Session, ctx_fail, "check") == 0
+        assert await _stage_event_count(Session, ctx_ok, "check") == 1
+        assert len(sends) == 2, sends
     finally:
         await engine.dispose()
