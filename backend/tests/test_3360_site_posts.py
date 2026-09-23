@@ -140,9 +140,13 @@ async def _seed_gate(
             tags=seal_for["tags"], body_md=seal_for["body_md"],
         )
 
+    from app.services.site_posts import HOSTED_SITE_SCOPE_KEY
+
+    # story #4189 — 자사 블로그 발행 게이트는 hosted_site 슬롯에 산다("" 슬롯은 레시피 unscoped 게이트 몫).
     gate = Gate(
         id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, work_item_type="story",
         gate_type=gate_type, status=status, sealed_content_sha256=sealed_content_sha256,
+        scope_key=HOSTED_SITE_SCOPE_KEY if gate_type == "external_publish" else "",
     )
     session.add(gate)
     await session.commit()

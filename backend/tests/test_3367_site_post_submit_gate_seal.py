@@ -779,9 +779,10 @@ async def test_publish_with_approved_but_unsealed_gate_fails_closed_409_seal_mis
 
             from app.models.gate import Gate
             from datetime import datetime, timezone
+            from app.services.site_posts import HOSTED_SITE_SCOPE_KEY
             gate = Gate(
                 id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
-                gate_type="external_publish", status="approved",
+                gate_type="external_publish", status="approved", scope_key=HOSTED_SITE_SCOPE_KEY,
                 resolver_id=uuid.uuid4(), resolved_at=datetime.now(timezone.utc),
             )
             s.add(gate)

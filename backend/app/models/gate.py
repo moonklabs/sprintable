@@ -79,7 +79,8 @@ class Gate(Base):
     # story #3478(0328) — 멱등 키 세 번째 축. 대부분의 gate_type(merge·HITL ask·doc
     # approval 등)은 이 컬럼이 항상 ""(공유 UNIQUE 인덱스 셋에 이 컬럼을 끼워 넣어도
     # ""뿐이라 구분력 무변, 회귀 0). `external_publish`만 site_posts.py·channel_posts.py
-    # 호출부가 목적지(`str(draft.connection_id or "")`)를 채운다 — 같은 work_item이
+    # 호출부가 목적지(site post=`site_posts.site_post_gate_scope_key` — 자사 블로그는 "hosted_site",
+    # story #4189)를 채운다 — 같은 work_item이
     # WordPress·webhook 등 여러 목적지로 각각 독립 게이트를 갖게 된다(work_item당 1건
     # 제약이 site_post의 dual-destination AC를 구조적으로 막던 것의 근본수정).
     scope_key: Mapped[str] = mapped_column(Text, nullable=False, server_default="")

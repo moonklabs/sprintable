@@ -783,7 +783,8 @@ async def create_gate(
 
     scope_key: story #3478(0328) — 멱등 키 네 번째 축(기본값 "", 기존 全 호출부
     무회귀). `external_publish`만 site_posts.py·channel_posts.py가 목적지
-    (`str(draft.connection_id or "")`)를 넘겨 같은 work_item의 여러 draft/목적지가
+    (site post=`site_posts.site_post_gate_scope_key` — 자사 블로그는 "hosted_site", story #4189)를
+    넘겨 같은 work_item의 여러 draft/목적지가
     독립 게이트를 갖는다(work_item당 1건 제약의 근본수정 — 그라운딩 참고).
 
     pr_number: story #2893(설계안 §2 A1) — merge-type만 실제로 쓴다(호출부는
