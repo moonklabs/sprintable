@@ -7,6 +7,8 @@ PR2)와 거의 완전히 같은 구조 — 신규 판정 로직 0, 새 gate_type
 ## 「변경=재승인」 규칙(ads_boost.py 동형, PO 確定 2026-09-12)
 같은 publication에 이 함수를 다시 부르면(work_item_id가 같아 create_gate가 기존
 게이트를 그대로 반환하는 멱등 경로):
+- 게이트가 `approved`이고 세그먼트·시각이 봉인 값과 같으면 — 아무것도 안 한다(story #4191
+  PR #4550, 값이 안 바뀐 재요청이 승인된 발송을 취소하지 않게).
 - 게이트가 아직 `pending`이면 — 그대로 재봉인(값만 덮어씀, 상태 전이 없음).
 - 게이트가 `approved`였으면 — `pending`으로 재오픈 + `reapproval_required=True` +
   그 게이트에 걸린 대기 중(pending) 명령 voided.
@@ -127,6 +129,17 @@ async def request_newsletter_send(
         requester_member_id, role_id, scope_key=str(publication_id),
         neutral_facts=neutral_facts, designated_approver_id=designated_approver_id,
     )
+
+    # PR #4550 까디르 실측(P2, PO 처방 2026-09-23) — 승인된 게이트에 봉인 값(발행물=scope_key·
+    # 수신 대상·예약 시각)이 같은 요청이 다시 오면 no-op. 「변경=재승인」이지 「재요청=재승인」이
+    # 아니다 — 에이전트의 재시도·중복 발행(레시피)이나 사람의 같은 재요청이 승인된 예약 발송을
+    # 조용히 취소(명령 무효화)하고 재승인을 기다리게 만들면 안 된다. 사람 API·레시피 공용 규칙.
+    if (
+        gate.status == "approved"
+        and gate.sealed_newsletter_segment_name == segment_name
+        and gate.sealed_newsletter_scheduled_at == scheduled_at
+    ):
+        return gate
 
     now = datetime.now(timezone.utc)
     was_approved = gate.status == "approved"

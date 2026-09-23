@@ -1390,8 +1390,8 @@ def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: 
     return json.dumps({"definition_key": definition.key, "payload": next_payload}, ensure_ascii=False)
 
 
-def _resolve_sealed_field_specs_and_payload(
-    next_gate_decl: dict | None, base_payload: dict,
+async def _resolve_sealed_field_specs_and_payload(
+    db: AsyncSession, org_id: uuid.UUID, next_gate_decl: dict | None, base_payload: dict,
 ) -> tuple[tuple, dict]:
     """story #4085 AC1 공유 — 자기설명 사이클 렌더러(`_render_event_message_content`)·
     게이트 판정 렌더러(`_render_gate_verdict_message`) 둘 다 "다음 stage가 게이트를
@@ -1404,13 +1404,22 @@ def _resolve_sealed_field_specs_and_payload(
     구성을 각자 인라인으로 복제했다가(사이클 쪽만 실제로 착지) 판정 렌더러 쪽이
     빠진 채 merge돼 2호 실측에서 재발했다 — 공유 함수 하나로 합쳐 드리프트 자체를
     구조로 막는다."""
-    from app.services.recipe_gate_hooks import _GATE_TYPE_SEALED_FIELDS
+    from app.services.recipe_gate_hooks import _GATE_TYPE_SEALED_FIELDS, sealed_field_example
 
     specs = _GATE_TYPE_SEALED_FIELDS.get(next_gate_decl["type"], ()) if next_gate_decl is not None else ()
     if not specs:
         return specs, base_payload
+    # story #4191 — 시각 예시는 조직 시간대로 계산한다(시각 필드가 있을 때만 조회).
+    org_timezone = None
+    if any(spec.kind == "datetime" for spec in specs):
+        from app.services.org_time import get_org_timezone
+
+        org_timezone = await get_org_timezone(db, org_id)
     enriched_payload = {
-        **{spec.name: spec.example_value for spec in specs if spec.name not in base_payload},
+        **{
+            spec.name: sealed_field_example(spec, org_timezone=org_timezone)
+            for spec in specs if spec.name not in base_payload
+        },
         **base_payload,
     }
     return specs, enriched_payload
@@ -1770,8 +1779,8 @@ async def _render_gate_verdict_message(
                     # (사람이 그 게이트를 승인한 직후 댄이 받는 멘션)에서만 나온다 —
                     # 2호가 실제로 이 경로였다(구조 승인→예산 게이트 봉인 필드 안내 0).
                     # 같은 SSOT를 공유 헬퍼로 재사용(드리프트 재발 방지, 새 로직 0).
-                    _sealed_specs, _example_base_payload = _resolve_sealed_field_specs_and_payload(
-                        _next_meta.get("gate"), _base_payload,
+                    _sealed_specs, _example_base_payload = await _resolve_sealed_field_specs_and_payload(
+                        db, org_id, _next_meta.get("gate"), _base_payload,
                     )
                     _example_json = _next_stage_publish_payload_json(_recipe_definition, _next_stage, _example_base_payload)
                     # story #4090 AC3(페드루 PO 確定 2026-09-21) — 다음 stage가 채널
@@ -1976,7 +1985,9 @@ async def _render_event_message_content(
         # stage용으로 실은 값이 있을 리는 없지만 — payload는 "지금 stage"의 값이라
         # 안전하게 덮어도 되나, 혹시 모를 우연한 동명 키 보존이 더 정직하다).
         _next_gate_decl = next_meta.get("gate")
-        _sealed_specs, _example_base_payload = _resolve_sealed_field_specs_and_payload(_next_gate_decl, payload)
+        _sealed_specs, _example_base_payload = await _resolve_sealed_field_specs_and_payload(
+            db, org_id, _next_gate_decl, payload,
+        )
         example_json = _next_stage_publish_payload_json(definition, next_stage, _example_base_payload)
         lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
         if _next_gate_decl is not None:

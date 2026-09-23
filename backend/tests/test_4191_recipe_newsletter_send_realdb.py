@@ -344,3 +344,102 @@ async def test_human_send_request_api_unchanged_by_recipe_path():
         assert gates[0].designated_approver_id is None
     finally:
         await engine.dispose()
+
+
+async def _seed_pending_command(Session, ctx, gate):
+    from app.models.publication_command import PublicationCommand
+
+    async with Session() as s:
+        cmd = PublicationCommand(
+            id=uuid.uuid4(), org_id=ctx["org_id"], gate_id=gate.id, destination=ctx["pub"].connection_id,
+            approved_version=gate.sealed_newsletter_version_id, requested_by_member_id=ctx["owner_member_id"],
+            operation="send", content_kind="newsletter_send", status="pending",
+        )
+        s.add(cmd)
+        await s.commit()
+        return cmd.id
+
+
+async def _command_status(Session, cmd_id):
+    from app.models.publication_command import PublicationCommand
+
+    async with Session() as s:
+        return (await s.execute(select(PublicationCommand.status).where(PublicationCommand.id == cmd_id))).scalar_one()
+
+
+@pytest.mark.anyio
+async def test_same_values_republish_after_approval_is_noop_keeps_scheduled_send():
+    """PR #4550 까디르 P2 — 승인 뒤 같은 값으로 다시 발행(재시도·중복)하면 아무것도 안 바뀐다:
+    승인 유지 · 재승인 표시 없음 · 버전 그대로 · 대기 중 발송 명령 유지."""
+    engine, Session = await _session_factory()
+    try:
+        ctx = await _setup(Session)
+        scheduled_at = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        payload = _send_payload(ctx, scheduled_at=scheduled_at)
+        await _publish(Session, ctx, payload)
+        gate = (await _newsletter_gates(Session, ctx))[0]
+        async with Session() as s:
+            await _approve_gate(s, gate.id, ctx["owner_member_id"])
+        cmd_id = await _seed_pending_command(Session, ctx, gate)
+
+        await _publish(Session, ctx, payload)
+
+        after = (await _newsletter_gates(Session, ctx))[0]
+        assert after.status == "approved"
+        assert after.reapproval_required is False
+        assert after.sealed_newsletter_version_id == gate.sealed_newsletter_version_id
+        assert await _command_status(Session, cmd_id) == "pending"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_changed_time_after_approval_reopens_and_voids_command():
+    """대조 — 값 하나(예약 시각)만 바뀌어도 기존 「변경=재승인」: pending + 재승인 + 명령 무효화."""
+    engine, Session = await _session_factory()
+    try:
+        ctx = await _setup(Session)
+        await _publish(Session, ctx, _send_payload(ctx, scheduled_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()))
+        gate = (await _newsletter_gates(Session, ctx))[0]
+        async with Session() as s:
+            await _approve_gate(s, gate.id, ctx["owner_member_id"])
+        cmd_id = await _seed_pending_command(Session, ctx, gate)
+
+        await _publish(Session, ctx, _send_payload(ctx, scheduled_at=(datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()))
+
+        after = (await _newsletter_gates(Session, ctx))[0]
+        assert after.status == "pending"
+        assert after.reapproval_required is True
+        assert await _command_status(Session, cmd_id) == "voided"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_human_api_same_values_after_approval_is_noop_too():
+    """같은 규칙이 사람 API에도 — 승인된 발송을 같은 값으로 다시 요청해도 취소되지 않는다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        ctx = await _setup(Session)
+        body = {"segment_name": "전체 구독자", "scheduled_at": (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()}
+        url = f"/api/v2/organizations/{ctx['org_id']}/publications/{ctx['pub'].id}/newsletter-sends"
+        _setup_org_scoped_app(app, Session, ctx["org_id"], user_id=ctx["owner_user_id"])
+        try:
+            async with _client_for(app) as client:
+                r1 = await client.post(url, json=body)
+            gate = (await _newsletter_gates(Session, ctx))[0]
+            async with Session() as s:
+                await _approve_gate(s, gate.id, ctx["owner_member_id"])
+            cmd_id = await _seed_pending_command(Session, ctx, gate)
+            async with _client_for(app) as client:
+                r2 = await client.post(url, json=body)
+        finally:
+            app.dependency_overrides.clear()
+        assert r1.status_code == 201 and r2.status_code == 201, (r1.text, r2.text)
+        assert r2.json()["status"] == "approved"
+        assert r2.json()["reapproval_required"] is False
+        assert await _command_status(Session, cmd_id) == "pending"
+    finally:
+        await engine.dispose()

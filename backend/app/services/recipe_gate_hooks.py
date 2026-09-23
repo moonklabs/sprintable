@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
 from typing import NamedTuple
 
 from sqlalchemy import and_, or_, select
@@ -209,7 +209,9 @@ class SealedFieldSpec(NamedTuple):
     전용, 검증 로직과 분리해 렌더러가 죽어도 검증은 안 죽는다(반대도 마찬가지)."""
 
     name: str
-    example_value: int | str
+    # kind="datetime"이면 None — 예시는 렌더 시점에 sealed_field_example()이 계산한다(고정 날짜는
+    # 지나면 과거 시각이 되고, 에이전트가 그대로 베끼면 과거 시각 발송 요청이 된다).
+    example_value: int | str | None
     explanation_catalog_key: str
     min_value: int = 0
     # story #4191 — 값의 모양. "int"(기존, min_value 이상 정수)·"str"(비어 있지 않은 문자열)·
@@ -239,15 +241,28 @@ _GATE_TYPE_SEALED_FIELDS: dict[str, tuple[SealedFieldSpec, ...]] = {
             explanation_catalog_key="events.sealed_field_newsletter_publication_id", kind="uuid",
         ),
         SealedFieldSpec(
-            name="segment_name", example_value="테스트 수신 목록",
+            name="segment_name", example_value="test-recipients",
             explanation_catalog_key="events.sealed_field_newsletter_segment_name", kind="str",
         ),
         SealedFieldSpec(
-            name="scheduled_at", example_value="2026-10-01T09:00:00+09:00",
+            name="scheduled_at", example_value=None,
             explanation_catalog_key="events.sealed_field_newsletter_scheduled_at", kind="datetime",
         ),
     ),
 }
+
+
+def sealed_field_example(spec: SealedFieldSpec, *, org_timezone: str | None, now: datetime | None = None) -> int | str:
+    """자기설명 멘션 발행 예시에 싣는 값. datetime은 «조직 시간대로 내일 09:00»을 그때그때 계산한다
+    (항상 미래 — 예시를 그대로 베껴도 과거 시각 발송 요청이 되지 않는다). 조직 시간대가 없으면 UTC."""
+    if spec.kind == "datetime":
+        from app.services.org_time import org_tz
+
+        tz = org_tz(org_timezone)
+        local_now = (now or datetime.now(timezone.utc)).astimezone(tz)
+        return datetime.combine(local_now.date() + timedelta(days=1), time(9, 0), tzinfo=tz).isoformat()
+    assert spec.example_value is not None, spec.name
+    return spec.example_value
 
 
 def _parse_aware_datetime(value: object) -> datetime | None:
