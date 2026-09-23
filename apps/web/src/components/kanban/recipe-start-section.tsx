@@ -12,6 +12,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
+import { presetName } from '@/lib/platform-preset-copy';
 
 // story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts에 미등재된 slug는
 // raw 노출 대신 「단계 n/9」로 자리표시한다(recipeStageLabel 자신의 기존 pass-through
@@ -43,6 +44,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   // story #4082(유나 design CHANGES) — role/stage 정본 낱말표는 organization 네임스페이스
   // (recipe-detail-view.tsx가 이미 쓰는 그 SSOT, 적용 다이얼로그와 화면 간 낱말 통일).
   const tOrg = useTranslations('organization');
+  const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const { candidates, loading, error: loadError, refresh } = useRecipeStartCandidates(projectId, 'story', storyId);
@@ -130,7 +132,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   // («stage» 내부어 대신 정의 저자가 시드한 role 낱말을 우선 노출, 유나 낱말 표 v5.1).
   const progressLines = (c: RecipeStartCandidate) => (
     <div key={c.key} className="flex flex-col gap-1">
-      {active.length > 1 && <p className="text-sm font-medium text-foreground">{c.name}</p>}
+      {active.length > 1 && <p className="text-sm font-medium text-foreground">{presetName(c, tPreset)}</p>}
       {c.current_stage && (
         <p className="text-xs font-medium text-foreground">
           {t('recipeCurrentStageLabel')}: {displayStageLabel(c.current_stage, c.current_stage_position, c.total_stages, tOrg, t)}
@@ -183,7 +185,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
                 // 관례와 동형, 여긴 Tailwind arbitrary-value 유틸).
                 className="accent-[var(--primary)]"
               />
-              {c.name}
+              {presetName(c, tPreset)}
             </label>
           ))}
         </div>
