@@ -7,6 +7,7 @@ const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args) }));
 
 import { fetchMe } from './me-client';
+import { setEffectiveOrgId, setEffectiveProjectId } from '@/lib/project-context-client';
 
 function okMe(id = 'm-1') {
   return new Response(JSON.stringify({ data: { id } }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -14,6 +15,8 @@ function okMe(id = 'm-1') {
 
 beforeEach(() => {
   fetchWithAuthMock.mockReset();
+  setEffectiveOrgId(undefined);
+  setEffectiveProjectId(undefined);
 });
 
 describe('fetchMe — 진행 중 /api/me 요청 공유(story #4184)', () => {
@@ -30,6 +33,28 @@ describe('fetchMe — 진행 중 /api/me 요청 공유(story #4184)', () => {
     expect(await (await fetchMe()).json()).toEqual({ data: { id: 'before' } });
     expect(await (await fetchMe()).json()).toEqual({ data: { id: 'after' } });
     expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('전환 직전에 출발한 요청이 진행 중이어도 전환 뒤 호출은 합류하지 않고 새로 보낸다(맥락 키)', async () => {
+    let resolveOld!: (r: Response) => void;
+    fetchWithAuthMock
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveOld = r; }))
+      .mockResolvedValueOnce(okMe('after-switch'));
+    setEffectiveOrgId('org-a'); setEffectiveProjectId('proj-a');
+    const before = fetchMe();
+    setEffectiveProjectId('proj-b'); // 프로젝트 전환(인터셉터가 싣는 맥락이 바뀜)
+    const after = fetchMe();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    resolveOld(okMe('before-switch'));
+    expect(await (await after).json()).toEqual({ data: { id: 'after-switch' } });
+    expect(await (await before).json()).toEqual({ data: { id: 'before-switch' } });
+  });
+
+  it('맥락이 같으면 그대로 합류한다', async () => {
+    fetchWithAuthMock.mockResolvedValue(okMe());
+    setEffectiveOrgId('org-a'); setEffectiveProjectId('proj-a');
+    await Promise.all([fetchMe(), fetchMe()]);
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
   });
 
   it('실패 응답은 그대로 돌려주고, 다음 호출은 다시 부른다', async () => {
