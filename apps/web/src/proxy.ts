@@ -282,9 +282,24 @@ async function redirectLegacyResourcePath(
 
   const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
   const url = request.nextUrl.clone();
-  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${resourceName}${rest}`;
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
   url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
   return NextResponse.redirect(url, 301);
+}
+
+/**
+ * story #4170(E-MOBILE-SPEED) — 옛 flat 리소스가 이름까지 바뀐 것(RENAMED)·은퇴한 것(RETIRED)이면 org/project를
+ * 채우는 이 301에서 최종 이름까지 한 번에 간다. 예전엔 `/glance` → `/{ws}/{proj}/glance`(301) →
+ * `/{ws}/{proj}/flow`(301) 두 홉이었다 — 로그인 상태 셸 진입마다 왕복 1회(dev 실측 홉 사이 0.3~0.45초)가
+ * 샜다. 두 번째 홉이 하던 규칙을 그대로 쓴다: rename은 하위 경로를 들고 가고(같은 행의 새 이름),
+ * 은퇴는 하위 경로를 버린다(redirectRetiredResourcePath와 같은 이유 — 다른 id 공간).
+ */
+function finalResourcePath(resourceName: string, rest: string): string {
+  const renamed = RENAMED_RESOURCES[resourceName];
+  if (renamed) return `${renamed}${rest}`;
+  const retired = RETIRED_RESOURCES[resourceName];
+  if (retired) return retired;
+  return `${resourceName}${rest}`;
 }
 
 // story #2212 — org-briefing 왕복이 한 번 더 실패했을 때 무한 왕복을 막기 위한 내부 마커(오르테가
