@@ -123,3 +123,27 @@ export function slugForEffectiveProject(args: {
   const slugProjectId = args.pathProjectId ?? args.sessionProjectId;
   return args.slug && slugProjectId && args.effectiveProjectId === slugProjectId ? args.slug : undefined;
 }
+
+/**
+ * story #4211(PO 3차) — scoped 경로(`/{ws}/{proj}/…`)에서는 **현재 URL**의 프로젝트 조각이 곧 현재 프로젝트다. `(authenticated)`
+ * 레이아웃은 공유 레이아웃이라 클라이언트 이동(`/{ws}/B/flow` → `/{ws}/C/flow` · 사이드바 Link·전환기 `next` 분기)에서 다시 렌더되지
+ * 않아 서버 prop(pathProjectId·slug)이 둘 다 B로 남는다 — 그 값으로 만들면 URL은 C인데 탭은 `/{ws}/B/…`였다.
+ * 판정 모양은 전환기(`withSwitchedSlugs`)와 같다: 첫 조각 = 현재 org slug이고 조각이 2개 이상. 아니면(flat 경로·다른 org 경로)
+ * undefined → 호출부가 `slugForEffectiveProject` 가드로 간다.
+ */
+export function projectSlugFromScopedPath(pathname: string | null | undefined, currentOrgSlug: string | undefined): string | undefined {
+  const segments = (pathname ?? '').split('/').filter(Boolean);
+  return currentOrgSlug && segments.length >= 2 && segments[0] === currentOrgSlug ? segments[1] : undefined;
+}
+
+/**
+ * 탭바·사이드바가 받는 project slug — 대시보드 셸이 이것 하나만 부른다(한 곳 계산). scoped 경로면 URL 조각,
+ * 아니면 `slugForEffectiveProject` 가드(flat 전환 창 → bare · 딥링크 첫 렌더 → 경로 slug).
+ */
+export function navProjectSlug(args: {
+  pathname: string | null | undefined; currentOrgSlug: string | undefined;
+  pathProjectId: string | undefined; sessionProjectId: string | undefined;
+  slug: string | undefined; effectiveProjectId: string | undefined;
+}): string | undefined {
+  return projectSlugFromScopedPath(args.pathname, args.currentOrgSlug) ?? slugForEffectiveProject(args);
+}

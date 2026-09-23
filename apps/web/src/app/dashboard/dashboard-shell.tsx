@@ -18,7 +18,7 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, slugForEffectiveProject } from '@/lib/nav-v3-destinations';
+import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
@@ -442,7 +442,11 @@ export function DashboardShell({
   // (flat 경로 프로젝트 전환 → router.refresh 전)이 있다. 그 창에 탭바·사이드바가 옛 프로젝트 직접 경로를 내지 않게
   // slug는 effective 프로젝트와 같을 때만 싣는다(다르면 undefined → bare 안전망). 이 값 하나를 컨텍스트(탭바·⌘K 등)와
   // 사이드바(ShellBody→AppSidebar) 둘 다에 넘긴다 — 한쪽만 막으면 또 갈린다.
-  const scopedProjectSlug = slugForEffectiveProject({
+  // scoped 경로에선 서버 prop 대신 현재 URL의 프로젝트 조각(클라이언트 이동 뒤에도 최신) — flat 경로만 위 가드로.
+  const shellPathname = usePathname();
+  const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
+  const scopedProjectSlug = navProjectSlug({
+    pathname: shellPathname, currentOrgSlug,
     pathProjectId, sessionProjectId: projectId, slug: currentProjectSlug, effectiveProjectId,
   });
 
