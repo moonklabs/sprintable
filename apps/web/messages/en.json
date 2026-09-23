@@ -348,7 +348,8 @@
     "ccGateTypeSupportEscalationReview": "support review",
     "ccGateTypeConceptApproval": "concept approval",
     "ccGateTypeAdsBoost": "boost",
-    "ccGateTypeGenerationBudget": "budget approval"
+    "ccGateTypeGenerationBudget": "budget approval",
+    "ccGateTypeNewsletterSend": "newsletter send"
   },
   "proofCapsule": {
     "claim": {
@@ -866,6 +867,10 @@
     "recipeStageLabelEditing": "Editing",
     "recipeStageLabelPendingApproval": "Pending approval",
     "recipeStageLabelPublished": "Published",
+    "recipeStageLabelCollect": "Gather material",
+    "recipeStageLabelReview": "Review",
+    "recipeStageLabelSendRequested": "Send approval",
+    "recipeStageLabelSendChecked": "Check send results",
     "definerTabBasic": "Basic",
     "definerTabAdvanced": "Advanced (JSON)",
     "definerAdvancedOnlyBadge": "Advanced only",

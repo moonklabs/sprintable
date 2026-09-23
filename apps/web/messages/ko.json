@@ -348,7 +348,8 @@
     "ccGateTypeSupportEscalationReview": "고객지원 검토",
     "ccGateTypeConceptApproval": "컨셉 결재",
     "ccGateTypeAdsBoost": "홍보",
-    "ccGateTypeGenerationBudget": "예산 승인"
+    "ccGateTypeGenerationBudget": "예산 승인",
+    "ccGateTypeNewsletterSend": "뉴스레터 발송"
   },
   "proofCapsule": {
     "claim": {
@@ -866,6 +867,10 @@
     "recipeStageLabelEditing": "편집",
     "recipeStageLabelPendingApproval": "승인 대기",
     "recipeStageLabelPublished": "발행",
+    "recipeStageLabelCollect": "소재 모으기",
+    "recipeStageLabelReview": "검수",
+    "recipeStageLabelSendRequested": "발송 승인",
+    "recipeStageLabelSendChecked": "발송 결과 확인",
     "definerTabBasic": "기본",
     "definerTabAdvanced": "고급 (JSON)",
     "definerAdvancedOnlyBadge": "고급 전용",

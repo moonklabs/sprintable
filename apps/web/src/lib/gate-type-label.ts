@@ -48,6 +48,9 @@ export const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
   // GateResponse에 sealed_estimated_cost_minor 자체가 없어 값도 못 봤지만(BE fix),
   // 라벨도 이 표에 없어 배지가 일반 "게이트"로 떨어지고 있었다 — 같이 등재.
   generation_budget: 'ccGateTypeGenerationBudget',
+  // story #4175 — 뉴스레터 발송 승인(services/newsletter_send.py, 레시피 발송 단계·사람 API 공용).
+  // 뉴스레터 프리셋이 이 게이트를 결재함·채팅 카드에 올리므로 «게이트» 폴백 대신 이름을 준다.
+  newsletter_send: 'ccGateTypeNewsletterSend',
 };
 
 /**
