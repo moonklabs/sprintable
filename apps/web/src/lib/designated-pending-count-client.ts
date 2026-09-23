@@ -1,0 +1,29 @@
+import { fetchWithAuth } from '@/lib/db/client';
+import { getRequestContextKey } from '@/lib/project-context-client';
+
+/**
+ * story #4171(E-MOBILE-SPEED) — `GET /api/gates/designated-pending-count` 진행 중 요청 공유.
+ * 모바일 첫 화면에서 사이드바(닫힌 시트라도 hook은 돈다)와 하단 탭바가 마운트 때 각자 불러 같은
+ * 요청이 2번 나갔다. 동시에 부른 호출은 요청 하나를 나눠 쓰고, 응답이 오면 공유를 끝낸다(저장하는
+ * 값 없음 — 폴링·포커스·SSE 재조회는 매번 새로 묻는다). 실패·예외는 null.
+ * 합류는 요청 맥락(인터셉터가 싣는 org·project)이 같을 때만 — org 전환 직전에 출발한 요청에 전환 뒤
+ * 호출이 붙어 이전 org의 수를 받지 않게(lib/me-client.ts와 같은 규칙).
+ */
+let inFlight: { key: string; promise: Promise<number | null> } | null = null;
+
+export function fetchDesignatedPendingCount(): Promise<number | null> {
+  const key = getRequestContextKey();
+  if (!inFlight || inFlight.key !== key) {
+    const promise = fetchWithAuth('/api/gates/designated-pending-count')
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const json = await res.json() as { count?: number };
+        return typeof json.count === 'number' ? json.count : 0;
+      })
+      .catch(() => null);
+    const current = { key, promise };
+    inFlight = current;
+    void promise.then(() => { if (inFlight === current) inFlight = null; });
+  }
+  return inFlight.promise;
+}

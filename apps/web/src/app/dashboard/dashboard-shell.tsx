@@ -220,11 +220,14 @@ function ScrollShell({
   const workingCount = items.filter((i) => i.working).length;
   // story #2852(2836 FE 조각) — presence 패널은 전역 상시 마운트라 「인증 실패」 뱃지 원자료도
   // 여기서 함께 폴한다(org-briefing 진입과 무관하게 늘 최신).
-  const authFailureByMember = useAgentAuthFailures(true);
+  // story #4171(E-MOBILE-SPEED) — 뱃지는 패널 안에만 뜬다. 패널이 닫혀 있으면(<2xl 첫 화면의
+  // 닫힌 drawer) my-actions를 부르지 않고, 열리는 순간 곧바로 불러 60초 폴을 시작한다.
+  const panelVisible = panel.inlinePanelOpen || panel.drawerOpen;
+  const authFailureByMember = useAgentAuthFailures(panelVisible);
 
   return (
     <ReleaseNotesProvider userId={currentTeamMemberId}>
-    <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panel.inlinePanelOpen || panel.drawerOpen }}>
+    <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panelVisible }}>
     <SidebarInset className="relative flex flex-col overflow-hidden">
       <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
         {showTopBar && (

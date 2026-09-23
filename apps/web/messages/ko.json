@@ -1202,6 +1202,8 @@
     "boardEmptyDescription": "보드는 사람과 AI가 맡은 일이 지금 흐르는 곳이에요.",
     "boardEmptyCta": "첫 스토리 만들기",
     "allSprints": "전체 스프린트",
+    "sprintChipLoading": "불러오는 중…",
+    "sprintChipSelected": "선택한 스프린트",
     "allEpics": "전체 목표",
     "allAssignees": "전체 담당자",
     "noTasks": "태스크가 없어요",

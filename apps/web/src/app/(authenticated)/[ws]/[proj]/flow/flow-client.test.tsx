@@ -682,3 +682,18 @@ describe('FlowPageClient — TopBar 타이틀 Heading 무게(story #2969 PR-5)',
     expect(h1?.className).toContain('font-extrabold');
   });
 });
+
+// story #4171(E-MOBILE-SPEED) — org 전체 팀원 목록은 흐름 화면만 쓴다. 기본(목록) 첫 화면에선 안 부른다.
+describe('FlowPageClient — team-members는 흐름 보기에서만(story #4171)', () => {
+  it('기본(목록) 보기 → includeMembers:false', async () => {
+    currentSearch = '';
+    await renderFlowClient();
+    expect(loadGlanceDataMock).toHaveBeenCalledWith('p1', { includeMembers: false });
+  });
+
+  it('흐름 보기 → includeMembers:true', async () => {
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+    expect(loadGlanceDataMock).toHaveBeenCalledWith('p1', { includeMembers: true });
+  });
+});

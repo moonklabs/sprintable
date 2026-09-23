@@ -105,4 +105,15 @@ describe('loadGlanceData (§10 데이터 소스 2종 단순 1회 fetch — dedup
     // story #3710: 고정 엔드포인트 수가 4→2로 줄었다(에픽+overview 제거).
     expect(vi.mocked(fetch).mock.calls.length).toBe(4); // 2 endpoints × 2 calls
   });
+
+  // story #4171 — 목록 보기 첫 화면은 org 전체 팀원 목록을 안 부른다(흐름 보기만 memberMap을 쓴다).
+  it('includeMembers:false면 team-members를 부르지 않고, 그걸 실패로도 세지 않는다', async () => {
+    const fetchMock = mockEmptyFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const data = await loadGlanceData('proj-list', { includeMembers: false });
+    const calledUrls = fetchMock.mock.calls.map(([u]) => u as string);
+    expect(calledUrls.some((u) => u.startsWith('/api/team-members'))).toBe(false);
+    expect(calledUrls.some((u) => u.startsWith('/api/glance/attention'))).toBe(true);
+    expect(data.partialErrors).toEqual({ members: false, attention: false });
+  });
 });

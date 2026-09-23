@@ -13,9 +13,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
+// story #4171 — 스프린트 칩 라벨 테스트가 ?sprint_id를 싣는다(기본은 빈 쿼리 — 기존 테스트 무변).
+const { searchRef } = vi.hoisted(() => ({ searchRef: { current: '' } }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(searchRef.current),
 }));
 
 vi.mock('@/components/nav/top-bar-slot', () => ({
@@ -161,6 +163,7 @@ beforeEach(() => {
   });
   capturedDragEndHandlers.length = 0;
   isMobileMock = false;
+  searchRef.current = '';
 });
 
 afterEach(async () => {
@@ -330,6 +333,124 @@ describe('KanbanBoard — Promise.all 부수 격리(story #3519)', () => {
     }));
     await mount();
     expect(container.textContent).toContain('살아남은 스토리');
+  });
+});
+
+// story #4171(E-MOBILE-SPEED) — 첫 화면 호출 폭포. 목록(스토리)은 카드 몸통(stories·goals·members)만
+// 기다려 뜨고, 스프린트·배지용 호출(실행 요약·라인 상태·의존 그래프·라벨·라벨 연결·대기 게이트)은
+// 그 뒤에 한꺼번에 병렬로 나간다(예전엔 sprints가 스켈레톤을 붙잡고 배지 6건이 순차였다).
+describe('KanbanBoard — 첫 그림은 스토리만 기다린다(story #4171)', () => {
+  it('스프린트·배지 호출이 아직 안 끝나도 스토리가 뜨고, 그 호출들은 동시에 나가 있다', async () => {
+    const SECONDARY = ['/api/sprints', '/api/workflow-executions/story-summary', '/api/stories/workflow-line/status',
+      '/api/dependencies/graph', '/api/labels', '/api/item-labels', '/api/gates?'];
+    const fetchMock = vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = status === 'backlog' ? [{ id: 's1', title: '먼저 뜨는 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) });
+      }
+      if (SECONDARY.some((p) => url.startsWith(p))) return new Promise(() => {}); // 영원히 대기
+      return Promise.resolve({ ok: false, json: async () => null });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(container.textContent).toContain('먼저 뜨는 스토리');
+    const called = (p: string) => fetchMock.mock.calls.some(([u]) => String(u).startsWith(p));
+    for (const p of SECONDARY) expect(called(p), p).toBe(true);
+  });
+});
+
+describe('KanbanBoard — 스프린트 칩 라벨이 거짓말하지 않는다(story #4171 까디르 QA a)', () => {
+  function stubWithSprints(sprints: 'pending' | 'fail' | Array<{ id: string; title: string }>) {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { total: 0, nextCursor: null } }) });
+      if (url.startsWith('/api/sprints')) {
+        if (sprints === 'pending') return new Promise(() => {});
+        if (sprints === 'fail') return Promise.resolve({ ok: false, json: async () => null });
+        return Promise.resolve({ ok: true, json: async () => ({ data: sprints }) });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+  const b = koMessages.board;
+
+  it('?sprint_id가 있고 sprints가 아직이면 «불러오는 중»(«전체 스프린트» 아님)', async () => {
+    searchRef.current = 'sprint_id=spr-1';
+    stubWithSprints('pending');
+    await mount();
+    expect(container.textContent).toContain(b.sprintChipLoading);
+    expect(container.textContent).not.toContain(b.allSprints);
+  });
+
+  it('sprints 실패면 «선택한 스프린트»', async () => {
+    searchRef.current = 'sprint_id=spr-1';
+    stubWithSprints('fail');
+    await mount();
+    expect(container.textContent).toContain(b.sprintChipSelected);
+    expect(container.textContent).not.toContain(b.allSprints);
+  });
+
+  it('sprints가 오면 그 스프린트 이름', async () => {
+    searchRef.current = 'sprint_id=spr-1';
+    stubWithSprints([{ id: 'spr-1', title: '9월 2주차' }]);
+    await mount();
+    expect(container.textContent).toContain('9월 2주차');
+  });
+});
+
+describe('KanbanBoard — 늦게 온 이전 실행 결과는 버린다(story #4171 까디르 QA c)', () => {
+  it('프로젝트 전환 뒤 이전 프로젝트 goals가 늦게 파싱돼도 새 goals를 덮지 않는다', async () => {
+    let resolveOldGoals!: (v: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const u = new URL(url, 'http://localhost');
+      const pid = u.searchParams.get('project_id');
+      if (url.startsWith('/api/stories?')) {
+        const data = u.searchParams.get('status') === 'backlog'
+          ? [{ id: `s-${pid}`, title: `스토리 ${pid}`, status: 'backlog', priority: 'medium', trust_stage: 'queued', epic_id: 'e1' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/goals')) {
+        if (pid === 'proj-old') return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveOldGoals = r; }) });
+        return Promise.resolve({ ok: true, json: async () => ({ data: [{ id: 'e1', title: '새 목표' }], meta: {} }) });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+    const { KanbanBoard } = await import('./kanban-board');
+    const { ToastProvider } = await import('@/components/ui/toast');
+    const render = (projectId: string) => root.render(wrap(
+      <ToastProvider><KanbanBoard projectId={projectId} wsSlug="ws-1" projSlug="p" /></ToastProvider>,
+    ));
+    await act(async () => { render('proj-old'); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { render('proj-new'); });
+    await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('새 목표');
+    await act(async () => { resolveOldGoals({ data: [{ id: 'e1', title: '옛 목표' }], meta: {} }); for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('새 목표');
+    expect(container.textContent).not.toContain('옛 목표');
+  });
+});
+
+describe('KanbanBoard — 카드 높이 바꾸는 배지는 한 번에(story #4171 유나 design)', () => {
+  it('라벨이 먼저 와도 대기 게이트가 올 때까지 카드에 안 붙고, 마지막이 오면 함께 붙는다', async () => {
+    let resolveGates!: (v: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const data = status === 'backlog' ? [{ id: 's1', title: '배지 스토리', status: 'backlog', priority: 'medium', trust_stage: 'queued' }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/labels')) return Promise.resolve({ ok: true, json: async () => [{ id: 'l1', name: '먼저온라벨', color: '#ff0000' }] });
+      if (url.startsWith('/api/item-labels')) return Promise.resolve({ ok: true, json: async () => [{ item_id: 's1', label_id: 'l1' }] });
+      if (url.startsWith('/api/gates?')) return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveGates = r; }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+    await mount();
+    await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('배지 스토리');
+    expect(container.textContent).not.toContain('먼저온라벨');
+    await act(async () => { resolveGates([]); for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('먼저온라벨');
   });
 });
 

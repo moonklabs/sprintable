@@ -1202,6 +1202,8 @@
     "boardEmptyDescription": "This is where the work people and AI have taken on flows through, right now.",
     "boardEmptyCta": "Create your first story",
     "allSprints": "All Sprints",
+    "sprintChipLoading": "Loading…",
+    "sprintChipSelected": "Selected sprint",
     "allEpics": "All Goals",
     "allAssignees": "All Assignees",
     "noTasks": "No tasks",
