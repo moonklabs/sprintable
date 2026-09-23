@@ -31,6 +31,7 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -79,11 +80,25 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
   if (state === null) {
     if (!loadFailed) return null;
     return (
-      <Card className="p-4 space-y-2" data-testid="external-publish-pause-card">
-        <p className="text-xs text-destructive" data-testid="external-publish-pause-load-error">
-          {t('externalPublishPauseLoadFailed')}
-        </p>
-        <Button variant="outline" size="sm" data-testid="external-publish-pause-load-retry" onClick={() => load()}>
+      <Card className="p-4 space-y-3" data-testid="external-publish-pause-card">
+        <div>
+          <p className="text-sm font-medium text-foreground">{t('externalPublishPauseCardTitle')}</p>
+          <p className="text-xs text-destructive" data-testid="external-publish-pause-load-error">
+            {t('externalPublishPauseLoadFailed')}
+          </p>
+        </div>
+        <Button
+          variant="outline" size="sm" disabled={retrying} aria-busy={retrying}
+          data-testid="external-publish-pause-load-retry"
+          onClick={async () => {
+            setRetrying(true);
+            try {
+              await load();
+            } finally {
+              setRetrying(false);
+            }
+          }}
+        >
           {t('externalPublishPauseLoadRetryCta')}
         </Button>
       </Card>

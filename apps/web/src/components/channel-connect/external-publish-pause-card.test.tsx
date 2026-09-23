@@ -209,6 +209,40 @@ describe('ExternalPublishPauseCard', () => {
     expect(container.querySelector('[data-testid="external-publish-pause-load-retry"]')).not.toBeNull();
   });
 
+  it('story #3953 CHANGES(유나 design 리뷰) — 로드-실패 상태에서도 카드 제목이 보인다(채널 연결 상태로 오해되지 않도록)', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.textContent).toContain('외부 발행 일시 중지');
+  });
+
+  it('story #3953 CHANGES(유나 design 리뷰) — 재시도 중엔 버튼이 disabled+aria-busy', async () => {
+    mockFetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    await act(async () => {
+      root.render(wrap(<ExternalPublishPauseCard orgId="org-1" isOwnerStrict={true} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    let resolveRetry: (v: unknown) => void = () => {};
+    mockFetchWithAuth.mockReturnValueOnce(new Promise((resolve) => { resolveRetry = resolve; }));
+    const retry = container.querySelector('[data-testid="external-publish-pause-load-retry"]') as HTMLButtonElement;
+    await act(async () => {
+      retry.click();
+      await Promise.resolve();
+    });
+
+    expect(retry.disabled).toBe(true);
+    expect(retry.getAttribute('aria-busy')).toBe('true');
+
+    await act(async () => {
+      resolveRetry({ ok: false, json: async () => ({}) });
+      await Promise.resolve();
+    });
+  });
+
   it('story #3953 CHANGES — GET 자체가 throw(네트워크 오류)해도 로드-실패 문구가 뜬다', async () => {
     mockFetchWithAuth.mockRejectedValueOnce(new Error('network down'));
     await act(async () => {
