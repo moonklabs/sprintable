@@ -85,8 +85,8 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     expect(panel).not.toBeNull();
     const text = panel.textContent ?? '';
     // 순서: 스토리보드 관련 텍스트가 애니매틱보다 먼저, 애니매틱이 검증보다 먼저.
-    expect(text.indexOf('오프닝')).toBeLessThan(text.indexOf('무과금'));
-    expect(text.indexOf('무과금')).toBeLessThan(text.indexOf('자막 싱크'));
+    expect(text.indexOf('오프닝')).toBeLessThan(text.indexOf(koMessages.cage.productionWorkbenchCostTierNoCharge));
+    expect(text.indexOf(koMessages.cage.productionWorkbenchCostTierNoCharge)).toBeLessThan(text.indexOf('자막 싱크'));
     // 실 데이터 값 확認(지어낸 값 아님).
     expect(text).toContain('와이드');
     expect(text).toContain('호기심');
@@ -114,7 +114,7 @@ describe('ProductionWorkbenchEvidencePanel', () => {
     await flush();
 
     const panel = container.querySelector('[data-testid="production-workbench-evidence"]')!;
-    expect(panel.textContent).toContain('실탄');
+    expect(panel.textContent).toContain(koMessages.cage.productionWorkbenchCostTierPaid);
     expect(panel.querySelector('svg.lucide-circle-dollar-sign')).not.toBeNull();
     // warning variant는 bg-warning-tint 클래스를 낸다 — 그 클래스가 이 배지엔 없어야 한다.
     const badges = [...panel.querySelectorAll('[class*="bg-warning-tint"]')];

@@ -88,8 +88,9 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    실측: "PR 리뷰"·"CI · 납품"·"AC {met}/{total} 충족"·"웹 UI 사용"·"PC 화면에서만"·
 //    "SNS에 나가는 글"·"우선 큐 · SSO" 등 전부 Korean 문장 안에 자연 삽입된 기술 용어
 //    (§⑤ 대상인 "말투/낱말"이 아니라 업계 공통 이니셜리즘).
-//  - 이 제품 자체의 고유 기능명(coined term, 브랜드명과 동형): BYOA·BYOM·BYO(Bring
-//    Your Own *) — flow.guidedExampleByoa="BYOA 채택" 등, 기능 고유명사.
+//  - 이 제품 자체의 고유 기능명(coined term, 브랜드명과 동형): BYOM·BYO(Bring Your Own *).
+//    ⚠️story #4201(PO·유나) — BYOA는 사용자 화면에 쓰지 않는 내부 전략 약어로 판정돼 목록에서 뺐다
+//    (verify-no-internal-jargon.test.ts가 금지 — 되살리면 거기서 RED).
 //  - board.backlinksExcludePrSid="PR/커밋의 [SID:XXX] 텍스트 관례"의 SID·XXX — 이
 //    프로젝트 자체 PR 제목 관례([SID:XXX], CLAUDE.md에 명문화)를 설명하는 플레이스홀더
 //    표기 — 번역 대상 낱말이 아니라 구문 표기.
@@ -113,7 +114,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //    전환 — 값이 사라져 이 축엔 안 남음.
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
-  'BYOA', 'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
+  'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
   'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
   'QA', 'PO', 'PM', 'AU',
 ]);
