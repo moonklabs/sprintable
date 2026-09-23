@@ -37,7 +37,7 @@ afterEach(async () => {
 const MARKETING_TEMPLATE = { blocks: [
   { type: 'header' as const, text: '영상 제작 워크플로우' },
   { type: 'text' as const, text: '**{{label.stage}}** 단계로 넘어갔습니다' },
-  { type: 'fields' as const, fields: [{ label: '대상', value: '{{payload.work_item_id}}' }] },
+  { type: 'fields' as const, fields: [{ label: '대상', value: '{{label.work_item_target}}' }] },
 ] };
 const WORKFLOW_TEMPLATE = { blocks: [
   { type: 'header' as const, text: 'Kanban Flow' },
@@ -48,11 +48,11 @@ const def = (key: string, org_id: string | null, name: string) => ({
   key, org_id, name, payload_schema: {}, routing: {}, block_template: null, enabled: true, version: 1,
 });
 
-async function render(locale: 'ko' | 'en', template: typeof MARKETING_TEMPLATE, payload: Record<string, unknown>, definition: ReturnType<typeof def> | null) {
+async function render(locale: 'ko' | 'en', template: typeof MARKETING_TEMPLATE, payload: Record<string, unknown>, definition: ReturnType<typeof def> | null, refs?: Record<string, unknown>) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <EventBlockCard template={template} payload={payload} definition={definition} />
+        <EventBlockCard template={template} payload={payload} definition={definition} refs={refs as never} />
       </NextIntlClientProvider>,
     );
   });
@@ -76,6 +76,21 @@ describe('EventBlockCard — 플랫폼 프리셋 카드 문안 로케일(story #
     expect(text).not.toContain('Kanban Flow');
     expect(text).not.toContain('assign_step_1');
     expect(text).not.toContain('넘어갔습니다');
+  });
+
+  it('⭐워크플로우 «대상» — `story <UUID>` 원문 0 · 일감 라벨(유나 반려 · PR #4575)', async () => {
+    const uuid = '6f1c2e0a-1b2c-4d5e-8f90-123456789abc';
+    const text = await render('ko', WORKFLOW_TEMPLATE, { stage: 'assign_step_1', work_item_type: 'story', work_item_id: uuid },
+      def('preset.workflow.kanban', null, 'Kanban Flow'), { work_item: { found: true, type: 'story', token: `[로그인 개선](entity:story:${uuid})` } });
+    expect(text).not.toContain(uuid);
+    expect(text).not.toMatch(/story [0-9a-f-]{36}/);
+    expect(text).toContain('로그인 개선');
+  });
+
+  it('⭐알려진 시드 모양 밖(단계 문장에 사유가 붙음) → 원문 그대로 · 사유 문구 보존(PR #4575)', async () => {
+    const tpl = { blocks: [WORKFLOW_TEMPLATE.blocks[0]!, { type: 'text' as const, text: '**{{payload.stage}}** 로 넘어갔습니다; 사유 {{payload.reason}}' }, WORKFLOW_TEMPLATE.blocks[2]!] };
+    const text = await render('ko', tpl as typeof MARKETING_TEMPLATE, { stage: 'assign_step_1', reason: '재배정 요청', work_item_type: 'story', work_item_id: 'W-1' }, def('preset.workflow.kanban', null, 'Kanban Flow'));
+    expect(text).toContain('재배정 요청');
   });
 
   it('조직 정의는 같은 모양이어도 원문 그대로', async () => {

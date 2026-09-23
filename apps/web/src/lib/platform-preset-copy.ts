@@ -134,20 +134,36 @@ export function isLocalizedPlatformPreset(def: PresetLike | null | undefined): d
  * - 단계 자리(`{{label.stage}}`·`{{payload.stage}}`)가 든 text → 한 템플릿(단계 = 단계 라벨)
  * - 필드 라벨 «대상» → 로케일 «대상/Target»(값 자리는 그대로)
  */
+// PR #4575 까디르·유나 QA — 플랫폼 프리셋 시드(마케팅 0398 계열·워크플로우 0260)의 카드 모양은 두 가지뿐이다: [머리말 1 ·
+// 단계 문장 1 · «대상» 필드 1]. 그 **정확한 모양**일 때만 통째로 로케일 문안으로 바꾸고, 아니면 원문 그대로 둔다 — 예전엔
+// 머리말 전부·단계 자리가 든 text 전부를 바꿔, 시드 본문에 다른 문구가 같이 있으면(`… ; 사유 {{payload.reason}}`) 조용히
+// 사라졌다. BE 짝 가드(test_4202)가 시드 전수가 이 모양인지 같은 목록으로 잰다(모양 밖 새 시드 = RED).
+export const SEED_STAGE_TEXTS: readonly string[] = ['**{{label.stage}}** 단계로 넘어갔습니다', '**{{payload.stage}}** 로 넘어갔습니다'];
+// 워크플로우 시드의 «대상» 값은 `story <UUID>` 원문을 그렸다(유나 반려) — 마케팅과 같은 일감 라벨(제목 링크)로 바꾼다.
+export const SEED_TARGET_VALUES: readonly string[] = ['{{label.work_item_target}}', '{{payload.work_item_type}} {{payload.work_item_id}}'];
+const TARGET_VALUE = '{{label.work_item_target}}';
+
+function isKnownSeedCardShape(template: BlockTemplate): boolean {
+  const [header, text, fields, ...rest] = template.blocks;
+  return rest.length === 0
+    && header?.type === 'header'
+    && text?.type === 'text' && SEED_STAGE_TEXTS.includes(text.text)
+    && fields?.type === 'fields' && fields.fields.length === 1
+    && fields.fields[0]!.label === SEED_TARGET_LABEL && SEED_TARGET_VALUES.includes(fields.fields[0]!.value);
+}
+
 export function localizePresetBlockTemplate(
   template: BlockTemplate,
   def: PresetLike | null | undefined,
   strings: { header: string; body: string | null; targetLabel: string },
 ): BlockTemplate {
-  if (!isLocalizedPlatformPreset(def)) return template;
+  if (!isLocalizedPlatformPreset(def) || !isKnownSeedCardShape(template)) return template;
   return {
     blocks: template.blocks.map((block): BlockTemplateBlock => {
       if (block.type === 'header') return { ...block, text: strings.header };
       // 단계 값이 없으면(body null) 원문 그대로 — 빈 굵은 글씨를 만들지 않는다.
-      if (block.type === 'text' && strings.body !== null && /\{\{\s*(label|payload)\.stage\s*\}\}/.test(block.text)) return { ...block, text: strings.body };
-      if (block.type === 'fields') {
-        return { ...block, fields: block.fields.map((f) => (f.label === SEED_TARGET_LABEL ? { ...f, label: strings.targetLabel } : f)) };
-      }
+      if (block.type === 'text') return strings.body !== null ? { ...block, text: strings.body } : block;
+      if (block.type === 'fields') return { ...block, fields: block.fields.map((f) => ({ ...f, label: strings.targetLabel, value: TARGET_VALUE })) };
       return block;
     }),
   };

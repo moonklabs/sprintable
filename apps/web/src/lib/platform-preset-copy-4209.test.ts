@@ -21,22 +21,37 @@ describe('presetAction', () => {
   });
 });
 
-describe('localizePresetBlockTemplate', () => {
+describe('localizePresetBlockTemplate — 알려진 시드 카드 모양일 때만 통째로(PR #4575)', () => {
+  // 워크플로우 시드(0260) 모양 그대로.
   const tpl = { blocks: [
     { type: 'header' as const, text: 'Kanban Flow' },
     { type: 'text' as const, text: '**{{payload.stage}}** 로 넘어갔습니다' },
-    { type: 'text' as const, text: '단계 없는 다른 문장' },
-    { type: 'fields' as const, fields: [{ label: '대상', value: '{{payload.work_item_id}}' }, { label: '기타', value: 'v' }] },
+    { type: 'fields' as const, fields: [{ label: '대상', value: '{{payload.work_item_type}} {{payload.work_item_id}}' }] },
   ] };
   const strings = { header: 'H', body: 'B', targetLabel: 'Target' };
-  it('플랫폼 프리셋 → 머리말·단계 text·«대상» 라벨만 바꾼다', () => {
+  it('워크플로우 시드 모양 → 머리말·본문·«대상» 라벨 + 값은 일감 라벨(`story <UUID>` 원문 대신)', () => {
     const out = localizePresetBlockTemplate(tpl, platform('preset.workflow.kanban'), strings);
     expect(out.blocks).toEqual([
       { type: 'header', text: 'H' },
       { type: 'text', text: 'B' },
-      { type: 'text', text: '단계 없는 다른 문장' },
-      { type: 'fields', fields: [{ label: 'Target', value: '{{payload.work_item_id}}' }, { label: '기타', value: 'v' }] },
+      { type: 'fields', fields: [{ label: 'Target', value: '{{label.work_item_target}}' }] },
     ]);
+  });
+  it('마케팅 시드 모양 → 같은 규칙', () => {
+    const mk = { blocks: [
+      { type: 'header' as const, text: '영상 제작 워크플로우' },
+      { type: 'text' as const, text: '**{{label.stage}}** 단계로 넘어갔습니다' },
+      { type: 'fields' as const, fields: [{ label: '대상', value: '{{label.work_item_target}}' }] },
+    ] };
+    expect(localizePresetBlockTemplate(mk, platform('preset.marketing.video_production'), strings).blocks[1]).toEqual({ type: 'text', text: 'B' });
+  });
+  it('⭐모양 밖(단계 문장에 다른 문구 · 모르는 «대상» 값 · 블록 추가) → 원문 그대로(문구 증발 0)', () => {
+    const withReason = { blocks: [tpl.blocks[0], { type: 'text' as const, text: '**{{payload.stage}}** 로 넘어갔습니다; 사유 {{payload.reason}}' }, tpl.blocks[2]] };
+    const otherValue = { blocks: [tpl.blocks[0], tpl.blocks[1], { type: 'fields' as const, fields: [{ label: '대상', value: '{{payload.title}}' }] }] };
+    const extraBlock = { blocks: [...tpl.blocks, { type: 'text' as const, text: '덧붙임' }] };
+    for (const t of [withReason, otherValue, extraBlock]) {
+      expect(localizePresetBlockTemplate(t, platform('preset.workflow.kanban'), strings)).toBe(t);
+    }
   });
   it('조직 정의·표 밖 key → 그대로', () => {
     expect(localizePresetBlockTemplate(tpl, { key: 'preset.workflow.kanban', org_id: 'org-1' }, strings)).toBe(tpl);

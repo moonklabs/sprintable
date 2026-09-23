@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { EventBlockCard } from '@/components/chat/event-block-card';
-import type { BlockTemplate } from '@/lib/block-template';
+import type { BlockTemplate, EventDefinitionSummary as EventDefinitionSummaryDef } from '@/lib/block-template';
 
 // story #2677 — 정의 상세보기(펼침) 기본 뷰를 사람 언어로. PO review_changes(head cbb0ff0c) —
 // 최초안은 필드 표·routing 요약·미리보기까지 전부 tryReverseParse(정의기 3서식 폼이 만들
@@ -62,12 +62,14 @@ function isDefaultLeg(leg: { kind?: string; target?: string } | undefined): bool
 }
 
 export function EventDefinitionSummary({
-  payloadSchema, routing, actionAuth, blockTemplate,
+  payloadSchema, routing, actionAuth, blockTemplate, definition,
 }: {
   payloadSchema: Record<string, unknown>;
   routing: Record<string, unknown>;
   actionAuth: Record<string, unknown> | null | undefined;
   blockTemplate: Record<string, unknown> | null;
+  /** PR #4575 까디르 QA — 실물 카드 미리보기도 채팅과 같은 로케일 문안으로(플랫폼 프리셋 판별에 key·org_id·name). */
+  definition?: EventDefinitionSummaryDef | null;
 }) {
   const t = useTranslations('organization');
   const properties = (payloadSchema.properties ?? {}) as Record<string, SchemaProperty>;
@@ -134,7 +136,7 @@ export function EventDefinitionSummary({
       {blockTemplate ? (
         <div>
           <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{t('definerPreviewLabel')}</p>
-          <EventBlockCard template={blockTemplate as unknown as BlockTemplate} payload={samplePayload} />
+          <EventBlockCard template={blockTemplate as unknown as BlockTemplate} payload={samplePayload} definition={definition} />
         </div>
       ) : null}
 

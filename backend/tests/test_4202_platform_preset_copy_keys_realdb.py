@@ -35,10 +35,16 @@ pytestmark = [
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _COPY_TS = _REPO_ROOT / "apps/web/src/lib/platform-preset-copy.ts"
 _STAGE_LABEL_TS = _REPO_ROOT / "apps/web/src/lib/recipe-stage-label.ts"
-_STAGE_PLACEHOLDER = re.compile(r"\{\{\s*(label|payload)\.stage\s*\}\}")
 _SEED_TARGET_LABEL = "대상"
 _MESSAGES = {lang: _REPO_ROOT / f"apps/web/messages/{lang}.json" for lang in ("ko", "en")}
 _NAMESPACE = "recipePreset"
+
+
+def _ts_string_list(name: str, path: Path = _COPY_TS) -> list[str]:
+    """FE `export const NAME: readonly string[] = [ ... ];`의 문자열 목록 — 카드 모양 판정이 FE와 같은 목록을 쓰게(한 곳)."""
+    m = re.search(rf"export const {name}: readonly string\[\] = \[(.*?)\];", path.read_text(encoding="utf-8"), re.DOTALL)
+    assert m, f"{name} 목록을 {path.name}에서 못 찾음"
+    return re.findall(r"'([^']*)'", m.group(1))
 _SEED_IS_KO_SOURCE_PREFIX = "preset.marketing."
 
 
@@ -150,8 +156,11 @@ def test_find_gaps_catches_each_failure_mode():
 
 
 def find_action_and_card_gaps(presets: dict[str, dict], actions: dict[str, str], stage_labels: set[str],
-                              messages: dict[str, dict]) -> list[str]:
-    """#4209 — 단계 설명 짝·단계 라벨·카드 템플릿 모양."""
+                              messages: dict[str, dict], *, stage_texts: list[str] | None = None,
+                              target_values: list[str] | None = None) -> list[str]:
+    """#4209 — 단계 설명 짝·단계 라벨·카드 템플릿 모양(모양 목록은 FE platform-preset-copy.ts에서)."""
+    stage_texts = stage_texts if stage_texts is not None else _ts_string_list("SEED_STAGE_TEXTS")
+    target_values = target_values if target_values is not None else _ts_string_list("SEED_TARGET_VALUES")
     gaps: list[str] = []
     seeded: dict[str, str] = {}
     for key, row in presets.items():
@@ -160,15 +169,20 @@ def find_action_and_card_gaps(presets: dict[str, dict], actions: dict[str, str],
                 seeded[f"{key}:{stage}"] = meta["action"]
         enum = (((row.get("payload_schema") or {}).get("properties") or {}).get("stage") or {}).get("enum") or []
         gaps += [f"{key}: stage `{s}` 단계 라벨 표(recipe-stage-label.ts)에 없음 — 카드 본문에 slug 원문" for s in enum if s not in stage_labels]
+        # PR #4575 — FE는 [머리말 · 단계 문장 · «대상» 필드 1]의 **정확한 모양**일 때만 카드를 로케일 문안으로 바꾸고 아니면
+        # 원문 그대로 둔다(다른 문구 증발 방지). 그러니 시드 전수가 그 모양이어야 en 화면이 한국어로 새지 않는다.
         blocks = (row.get("block_template") or {}).get("blocks") or []
-        headers = [b for b in blocks if isinstance(b, dict) and b.get("type") == "header"]
-        stage_texts = [b for b in blocks if isinstance(b, dict) and b.get("type") == "text" and _STAGE_PLACEHOLDER.search(str(b.get("text", "")))]
-        field_labels = [f.get("label") for b in blocks if isinstance(b, dict) and b.get("type") == "fields" for f in (b.get("fields") or [])]
-        if len(headers) != 1:
-            gaps.append(f"{key}: block_template header가 1개가 아님({len(headers)}) — 카드 머리말 규칙이 못 덮음")
-        if not stage_texts:
-            gaps.append(f"{key}: block_template에 단계 자리가 든 text 없음 — 카드 본문 규칙이 못 덮음")
-        gaps += [f"{key}: 필드 라벨 {lbl!r}(«{_SEED_TARGET_LABEL}» 아님) — 카드 필드 라벨 규칙이 못 덮음" for lbl in field_labels if lbl != _SEED_TARGET_LABEL]
+        shape_ok = (
+            len(blocks) == 3
+            and all(isinstance(b, dict) for b in blocks)
+            and blocks[0].get("type") == "header"
+            and blocks[1].get("type") == "text" and blocks[1].get("text") in stage_texts
+            and blocks[2].get("type") == "fields" and len(blocks[2].get("fields") or []) == 1
+            and (blocks[2]["fields"][0] or {}).get("label") == _SEED_TARGET_LABEL
+            and (blocks[2]["fields"][0] or {}).get("value") in target_values
+        )
+        if not shape_ok:
+            gaps.append(f"{key}: block_template이 FE가 아는 시드 카드 모양(머리말·단계 문장·«대상» 필드 1)이 아님 — 카드가 원문 그대로 나감: {blocks!r}")
     table = {k: v for k, v in actions.items() if k.startswith("preset.")}
     gaps += [f"{k}: PLATFORM_PRESET_ACTION_KEY에 행 없음(en 화면에 원문 단계 설명)" for k in sorted(set(seeded) - set(table))]
     gaps += [f"{k}: PLATFORM_PRESET_ACTION_KEY 행이 시드에 없음(낡은 행)" for k in sorted(set(table) - set(seeded))]
@@ -196,8 +210,8 @@ async def test_cyclic_preset_actions_stage_labels_and_card_shape_on_real_seed():
 
 def test_find_action_and_card_gaps_catches_each_failure_mode():
     """가드 자체 — 행 누락·낡은 행·messages 누락·마케팅 ko drift·단계 라벨 누락·카드 모양 3종."""
-    good_tpl = {"blocks": [{"type": "header", "text": "H"}, {"type": "text", "text": "**{{label.stage}}** 단계"},
-                           {"type": "fields", "fields": [{"label": "대상", "value": "v"}]}]}
+    good_tpl = {"blocks": [{"type": "header", "text": "H"}, {"type": "text", "text": "**{{label.stage}}** 단계로 넘어갔습니다"},
+                           {"type": "fields", "fields": [{"label": "대상", "value": "{{label.work_item_target}}"}]}]}
     row = {"stage_metadata": {"draft": {"action": "초안"}}, "block_template": good_tpl,
            "payload_schema": {"properties": {"stage": {"enum": ["draft"]}}}}
     presets = {"preset.marketing.a": row}
@@ -212,6 +226,10 @@ def test_find_action_and_card_gaps_catches_each_failure_mode():
     for bad in (
         {"blocks": [good_tpl["blocks"][1], good_tpl["blocks"][2]]},
         {"blocks": [good_tpl["blocks"][0], {"type": "text", "text": "단계 없음"}, good_tpl["blocks"][2]]},
-        {"blocks": [good_tpl["blocks"][0], good_tpl["blocks"][1], {"type": "fields", "fields": [{"label": "Target", "value": "v"}]}]},
+        {"blocks": [good_tpl["blocks"][0], good_tpl["blocks"][1], {"type": "fields", "fields": [{"label": "Target", "value": "{{label.work_item_target}}"}]}]},
+        # PR #4575 — 정확한 모양만: 단계 문장에 다른 문구가 붙음 · 모르는 «대상» 값 · 블록이 하나 더.
+        {"blocks": [good_tpl["blocks"][0], {"type": "text", "text": "**{{payload.stage}}** 로 넘어갔습니다; 사유 {{payload.reason}}"}, good_tpl["blocks"][2]]},
+        {"blocks": [good_tpl["blocks"][0], good_tpl["blocks"][1], {"type": "fields", "fields": [{"label": "대상", "value": "{{payload.title}}"}]}]},
+        {"blocks": [*good_tpl["blocks"], {"type": "text", "text": "덧붙임"}]},
     ):
         assert find_action_and_card_gaps({"preset.marketing.a": {**row, "block_template": bad}}, actions, {"draft"}, msgs), bad

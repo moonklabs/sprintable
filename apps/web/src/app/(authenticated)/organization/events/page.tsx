@@ -520,6 +520,7 @@ function EventDefRow({
             routing={def.routing}
             actionAuth={def.action_auth}
             blockTemplate={def.block_template}
+            definition={def}
           />
           {/* story #3316 — 사이클형 정의의 stage_metadata(role/action/gate/capability)를
               카탈로그 상세에도 노출한다(loop-create-dialog.tsx:295-310 렌더 패턴 재사용) —
