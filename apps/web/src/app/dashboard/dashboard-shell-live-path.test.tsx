@@ -135,15 +135,35 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(routerReplace).not.toHaveBeenCalled();
   });
 
-  it('⭐story #4226 — 전환 «대기 중 목표»는 실제 프로젝트가 그 목표가 되면 지운다 · 다른 목표면 남긴다', async () => {
+  it('⭐story #4226 — 전환 «대기 중 목표»: 이동이 커밋되지 않은 동안은 유지 · 목표 프로젝트로 오면 지움', async () => {
     const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
-    setPendingProjectTarget('proj-not-yet');
-    await renderShellAt('/repro/charlie/flow');
-    expect(getPendingProjectTarget()).toBe('proj-not-yet');
-    setPendingProjectTarget(C);
     await renderShellAt('/repro/beta/flow');
+    setPendingProjectTarget('proj-not-yet', '/repro/beta/flow');
+    await renderShellAt('/repro/beta/flow'); // 같은 주소 재렌더 = 아직 커밋된 이동 없음
+    expect(getPendingProjectTarget()).toBe('proj-not-yet');
+    setPendingProjectTarget(C, '/repro/beta/flow');
     await renderShellAt('/repro/charlie/flow');
     expect(getPendingProjectTarget()).toBeNull();
+  });
+
+  it('⭐story #4226(PO 23:38Z) — 전환이 커밋 전에 끊기면(뒤로 가기가 먼저 커밋) 목표를 지우고 flat 링크는 다시 현재 프로젝트', async () => {
+    const { getPendingProjectTarget, setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    const { useFlatHref } = await import('@/hooks/use-flat-href');
+    function FlatLinkProbe() { return <a data-testid="flat-probe" href={useFlatHref()('/inbox?tab=gates')} />; }
+    nav.search = '';
+    const { DashboardShell } = await import('./dashboard-shell');
+    const render = async (pathname: string) => {
+      nav.pathname = pathname;
+      await act(async () => { root.render(<DashboardShell {...serverProps}><FlatLinkProbe /></DashboardShell>); });
+      await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    };
+    await render('/repro/beta/flow');
+    setPendingProjectTarget(C, '/repro/beta/flow'); // 전환기가 charlie로 이동 시작
+    await render('/repro/beta/flow');
+    expect(container.querySelector('[data-testid="flat-probe"]')?.getAttribute('href')).toBe(`/inbox?tab=gates&p=${C}`);
+    await render('/repro/beta/goals'); // 전환 커밋 전 다른 이동(뒤로 가기 등)이 먼저 커밋 — 여전히 beta
+    expect(getPendingProjectTarget()).toBeNull();
+    expect(container.querySelector('[data-testid="flat-probe"]')?.getAttribute('href')).toBe(`/inbox?tab=gates&p=${B}`);
   });
 
   it('⭐story #4226 — flat 경로의 드문 진입(`?p=` 없음)은 router.replace 한 번 · Next가 새 `p`를 읽은 뒤 재렌더 추가 0', async () => {
