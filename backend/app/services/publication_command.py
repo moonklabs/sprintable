@@ -247,7 +247,9 @@ def compute_next_attempt_at(
     return now + timedelta(seconds=delay)
 
 
-async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID) -> PublicationCommand | None:
+async def retry_dead_letter_command(
+    db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, only_paused: bool = False,
+) -> PublicationCommand | None:
     """story #3414 AC5 — `dead_letter` **또는 `blocked`**(연결 복구 대기) 상태인 command를
     사람이 다시 큐에 올린다. 페드루 리뷰 블로커B — 원래 `dead_letter`만 받았는데,
     토큰 만료로 `blocked`된 **예약** 명령은 owner가 재인증한 뒤에도 갈 길이 없었다
@@ -266,6 +268,12 @@ async def retry_dead_letter_command(db: AsyncSession, *, org_id: uuid.UUID, comm
         ).with_for_update()
     )).scalar_one_or_none()
     if command is None or command.status not in ("dead_letter", "blocked"):
+        return None
+    # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩
+    # 잠근다. 그 사이 다른 tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면
+    # 사람의 «재시도 필요» 판단을 우회해 되살리면 안 된다 — 잠근 뒤 pause 차단이 맞는지 다시 본다.
+    # 사람이 누르는 재시도(기본값 False)는 예전 그대로.
+    if only_paused and not (command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED):
         return None
     command.status = "pending"
     command.next_attempt_at = None

@@ -120,7 +120,7 @@ async def _requeue_paused_commands(db: AsyncSession, *, org_id: uuid.UUID) -> in
     )).scalars().all()
     requeued = 0
     for command_id in rows:
-        revived = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
+        revived = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id, only_paused=True)
         if revived is not None:
             requeued += 1
     return requeued

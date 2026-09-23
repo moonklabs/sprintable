@@ -249,3 +249,39 @@ async def test_site_post_branch_maps_pause_raised_inside_publish_to_blocked_paus
         assert cmd.next_attempt_at is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.parametrize(("status", "failure_kind"), [("blocked", "connection"), ("dead_letter", "needs_check")])
+async def test_self_heal_rechecks_after_lock_and_skips_commands_changed_in_between(status, failure_kind):
+    """AC2b(까디르 QA) — 자가복구가 blocked/paused id를 모은 뒤 잠그기 전에, 다른 tick이 그 명령을 처리해
+    `blocked/connection`·`dead_letter/needs_check`가 됐다 → 되살리지 않는다(사람의 재시도 필요 판단 우회 금지)."""
+    import app.services.publication_command as pc
+    from app.models.publication_command import PublicationCommand
+    from app.services.external_publish_pause import requeue_paused_commands_of_unpaused_orgs
+
+    engine, Session = await _session_factory()
+    try:
+        _org_id, _owner_id, command_id = await _setup_command(Session)
+        async with Session() as s:
+            cmd = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == command_id))).scalar_one()
+            cmd.status, cmd.failure_kind = "blocked", "paused"  # 스냅샷 시점엔 자가복구 대상
+            await s.commit()
+
+        original = pc.retry_dead_letter_command
+
+        async def other_tick_wins_then_lock(db, **kwargs):
+            async with Session() as other:  # 스냅샷과 잠금 사이에 다른 tick이 커밋
+                row = (await other.execute(select(PublicationCommand).where(PublicationCommand.id == command_id))).scalar_one()
+                row.status, row.failure_kind = status, failure_kind
+                await other.commit()
+            return await original(db, **kwargs)
+
+        with patch.object(pc, "retry_dead_letter_command", other_tick_wins_then_lock):
+            async with Session() as s:
+                requeued = await requeue_paused_commands_of_unpaused_orgs(s)
+                await s.commit()
+        assert requeued == 0
+        after = await _command(Session, command_id)
+        assert (after.status, after.failure_kind) == (status, failure_kind)
+    finally:
+        await engine.dispose()
