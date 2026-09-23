@@ -108,7 +108,7 @@ async function mount(userName?: string, navV3Flags?: { todayV3Enabled: boolean; 
 // 연결의 형제 화면 「연산 커넥터」를 그 사이에 신설, 3항목으로) — 나머지 3(오늘·일감·결과)은 항목
 // 하나뿐인 헤더리스 그룹(옛 'settings' 그룹과 동형 관례, 접기 토글 없음). 「대화」는 이
 // 배열 밖 CHAT_CENTER_ITEM 그대로(라벨만 "채팅"→"대화"). 나머지 17항목(goals·loops·
-// standup·retro·docs·artifacts·storage·activity·org-trust·org-memory·content·channel-
+// standup·retro·docs·artifacts·storage·activity·org-trust·org-memory(#4183에서 제거)·content·channel-
 // posts·org-members·org-workforce·org-roles·org-events·inbox·settings)은 사이드바에서
 // 빠지고 LEGACY_NAV_ITEMS로 이관(커맨드 팔레트·모바일 /more 「그 밖의 화면」이 1급
 // 진입점, 별도 스위트에서 검증) — path는 전부 불변(북마크·딥링크 무손상).

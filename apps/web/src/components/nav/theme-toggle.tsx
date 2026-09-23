@@ -19,7 +19,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
   useEffect(() => { startTransition(() => setMounted(true)); }, []);
 
   return (
-    <div className={`flex items-center gap-1 ${className}`.trim()}>
+    <div role="group" aria-label={t('tabAppearance')} className={`flex items-center gap-1 ${className}`.trim()}>
       {THEMES.map(({ value, Icon, labelKey }) => {
         const isActive = mounted && theme === value;
         return (

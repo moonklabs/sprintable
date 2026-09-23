@@ -17,7 +17,7 @@ import { LEGACY_NAV_ITEMS, VISIBLE_LEGACY_NAV_ITEMS, groupVisibleLegacyByTarget,
 const EXPECTED_TARGET_BY_ID: Record<string, AbsorbTarget> = {
   goals: 'work', loops: 'work', content: 'work', 'channel-posts': 'work',
   'org-trust': 'connect', 'org-members': 'settings', 'org-workforce': 'connect', 'org-roles': 'settings', 'org-events': 'connect',
-  docs: 'knowledge', artifacts: 'knowledge', storage: 'knowledge', 'org-memory': 'knowledge',
+  docs: 'knowledge', artifacts: 'knowledge', storage: 'knowledge',
   activity: 'history',
   settings: 'settings',
   // inbox는 MOBILE_HUB_EXCLUDE_IDS로 VISIBLE_LEGACY_NAV_ITEMS에서 걸러져 groupVisibleLegacyByTarget

@@ -33,8 +33,9 @@ describe('NAV_GROUPS descriptionKey 완전성 — story #fddd0e6b AC2', () => {
   // 아니라 진짜 감소, story #3824의 "이동만 있었지 증감 없었다"와는 다른 클래스).
   // story #4116(2026-09-21) — org-generation-connectors 신설(연결·규칙 그룹, 채널 연결의
   // 형제 화면)로 21→22. 가드가 신규 항목을 설계대로 잡은 것(파서 결함 아님).
-  it('항목이 정확히 22개다(NAV_GROUPS 5 + LEGACY_NAV_ITEMS 16, story #4116 org-generation-connectors 신설로 21→22)', () => {
-    expect(allNavGroupItems()).toHaveLength(22);
+  // story #4183(2026-09-23, 유나 확認) — «준비 중» 화면뿐이던 org-memory를 걷어 22→21.
+  it('항목이 정확히 21개다(NAV_GROUPS 5 + LEGACY_NAV_ITEMS 15, story #4183 org-memory 제거로 22→21)', () => {
+    expect(allNavGroupItems()).toHaveLength(21);
   });
 
   it('⭐23개 전부가 descriptionKey를 갖는다(빈 문자열 아님) — board·inbox도 예약값을 가진다', () => {

@@ -206,11 +206,11 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('⭐찾기 — 입력값이 설명에만 매치해도 걸린다(이름+설명 둘 다 부분일치)', async () => {
     await mount();
-    // '기억'(org-memory) 설명 = "에이전트가 쌓은 것 — 사람이 안 씀" — '쌓은'은 설명에만 있다.
-    await typeQuery('쌓은');
+    // '문서'(docs) 설명 = "우리가 쓴 글 — 규격·회의록·정본" — '회의록'은 설명에만 있다.
+    await typeQuery('회의록');
     const links = [...container.querySelectorAll('a')];
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toContain('기억');
+    expect(links[0]?.textContent).toContain('문서');
   });
 
   it('⭐찾기 — 0건이면 「「{q}」에 맞는 화면이 없어요」 한 줄만 뜨고 카드는 0장', async () => {

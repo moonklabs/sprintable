@@ -68,9 +68,10 @@ describe('실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS — story #2684 AC3 판별자, sto
   // story #3845(§①④, 2026-09-14) — retro·standup이 「일감」 탭으로 흡수되며 LEGACY_NAV_
   // ITEMS 18→16, 총량 23→21(nav-config-descriptions.test.ts와 동일 축, 동일 사유).
   // story #4116(2026-09-21) — org-generation-connectors 신설로 21→22(동일 축 동일 사유).
-  it('전 22항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // story #4183(2026-09-23) — org-memory 걷힘으로 22→21(동일 축 동일 사유).
+  it('전 21항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
-    expect(entries).toHaveLength(22);
+    expect(entries).toHaveLength(21);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
 

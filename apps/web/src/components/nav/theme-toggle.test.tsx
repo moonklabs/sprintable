@@ -46,4 +46,13 @@ describe('ThemeToggle aria-label (story #4183)', () => {
   it('EN 로케일에서 영어로 읽힌다', async () => {
     expect(await labelsFor('en', enMessages as typeof koMessages)).toEqual(['Light mode', 'Dark mode', 'System setting']);
   });
+
+  // 유나 design 확認(2026-09-23) — «시스템 설정» 버튼이 단독으로 읽히면 설정 화면 이동처럼
+  // 들린다. 그룹 라벨(«테마»)이 붙어 있어야 «테마 › 시스템 설정»으로 뜻이 선다.
+  it('세 버튼이 «테마» 그룹 라벨 아래 묶인다', async () => {
+    await labelsFor('ko', koMessages);
+    const group = container.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('테마');
+    expect(group?.querySelectorAll('button')).toHaveLength(3);
+  });
 });
