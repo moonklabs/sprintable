@@ -31,6 +31,7 @@ from app.routers.events import _push_to_agent
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
+from app.services.text_preview import plain_text_preview
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.services.command_classifier import classify_command
@@ -552,9 +553,7 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     이벤트명(`conversation.message_created`)이 노출됐다. 발신자+미리보기로 "무슨 일인지" 1초 노출.
     """
     name = sender_name or "Someone"
-    preview = " ".join((content or "").split())  # 개행/연속공백 정규화
-    if len(preview) > _SUMMARY_PREVIEW_MAX:
-        preview = preview[:_SUMMARY_PREVIEW_MAX].rstrip() + "…"
+    preview = plain_text_preview(content, _SUMMARY_PREVIEW_MAX)
     if not preview:
         preview = "📎" if has_attachment else ""
     return f"{name}: {preview}" if preview else name
@@ -3305,7 +3304,7 @@ async def send_message(
             entity_id=conversation_id,
             context={
                 "message_id": str(msg.id),
-                "content_preview": msg.content[:80] if msg.content else "",
+                "content_preview": plain_text_preview(msg.content, _SUMMARY_PREVIEW_MAX),
             },
         )
 

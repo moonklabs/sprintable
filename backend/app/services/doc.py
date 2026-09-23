@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
 from app.models.gate import Gate, set_gate_status
 from app.services.member_resolver import ResolvedMember
+from app.services.text_preview import strip_html_comments
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ _MD_WHITESPACE = re.compile(r"\s+")
 def _doc_excerpt(content: str, limit: int = _DOC_SUMMARY_LIMIT) -> str:
     """카드 본문용 거친 발췌 — 마크다운 크롬(코드펜스·헤딩·링크·강조)만 벗기고 공백을
     접는다. 빈 문서는 빈 문자열(지어내지 않음 — FE가 그 자리에서 렌더를 건너뛴다)."""
-    stripped = _MD_CODE_FENCE.sub(" ", content)
+    stripped = _MD_CODE_FENCE.sub(" ", strip_html_comments(content))
     stripped = _MD_HEADING.sub("", stripped)
     stripped = _MD_LINK.sub(r"\1", stripped)
     stripped = _MD_EMPHASIS.sub("", stripped)

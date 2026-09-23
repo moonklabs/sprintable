@@ -193,6 +193,7 @@ from app.models.reference import Reference
 from app.models.visual_artifact import VisualArtifact
 from app.services.conversation_auth import conversation_readable_predicate
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids
+from app.services.text_preview import plain_text_preview
 from app.services.project_auth import (
     org_admin_valid_correlated,
     project_access_valid_correlated,
@@ -205,10 +206,7 @@ _SNIPPET_MAX = 160
 def build_content_snippet(text_value: str, max_len: int = _SNIPPET_MAX) -> str:
     """공백/개행 정규화 후 max_len 글자로 절삭(+ ellipsis). read-time 계산(순수 함수) —
     mentions 테이블에 저장하지 않는다(§8④ no permanent snippet denormalization)."""
-    normalized = " ".join((text_value or "").split())
-    if len(normalized) <= max_len:
-        return normalized
-    return normalized[:max_len].rstrip() + "…"
+    return plain_text_preview(text_value, max_len)
 
 
 def _chat_message_event_summary(

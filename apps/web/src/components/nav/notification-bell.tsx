@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -320,7 +321,7 @@ function NotificationPanel({
                         !n.read_at && 'font-medium',
                       )}
                     >
-                      {n.payload?.summary ?? getEventTypeCopy(t, n.event_type)}
+                      {plainSummary(n.payload?.summary, getEventTypeCopy(t, n.event_type))}
                     </p>
                     {n.payload?.sender_name ? (
                       <p className="truncate text-xs text-muted-foreground">
@@ -358,6 +359,12 @@ function NotificationPanel({
   );
 }
 
+
+// story #4182 — summary는 서버가 만든 미리보기지만 이미 저장된 옛 행엔 내부 HTML 주석이 남아 있다.
+// 렌더에서도 평문화하고, 비면(주석뿐이던 경우) 이벤트 타입 문구로 폴백한다.
+function plainSummary(summary: string | null | undefined, fallback: string): string {
+  return (summary ? toPlainPreview(summary) : '') || fallback;
+}
 export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
@@ -406,7 +413,7 @@ export function NotificationBell() {
     // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
     // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
     // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
-    const summary = incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type);
+    const summary = plainSummary(incoming.payload?.summary, getEventTypeCopy(t, incoming.event_type));
     if (hasDesktopNotifyBridge()) {
       const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
       void notifyViaDesktopBridge({

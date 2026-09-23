@@ -86,3 +86,16 @@ describe('ChatV3ThreadRail — 접근 이름·설명(story #3972 CI 후속)', ()
     expect(desc).toContain('리뷰 부탁해요');
   });
 });
+
+// story #4182(#4187 흡수) — v3 레일 미리보기도 내부 HTML 주석·마크다운 링크 원문을 안 보인다.
+describe('ChatV3ThreadRail — 미리보기 평문화(story #4182)', () => {
+  it('latest_message의 <!-- … --> 마커와 링크 문법이 미리보기에 안 보인다', async () => {
+    const thread: ChatV3Thread = { ...HUMAN_THREAD, latest_message: { content: '<!-- linear-comment-id: abc -->[공지](https://example.com) 확인해요', created_at: '2026-09-23T01:00:00Z' } };
+    await act(async () => {
+      root.render(wrap(<ChatV3ThreadRail threads={[thread]} meId="me-1" selectedId={null} onSelect={() => {}} />));
+    });
+    const row = container.querySelector('[data-testid="chat-v3-thread-row"]')!;
+    expect(row.textContent).not.toContain('<!--');
+    expect(row.textContent).toContain('공지 확인해요');
+  });
+});

@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ArrowLeft, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { normalizeToMessage } from '@/hooks/use-chat-sse';
+import { toPlainPreview } from './entity-ref';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -25,8 +26,7 @@ const EMPTY_THREAD_MESSAGES: ChatMessage[] = [];
 // 라벨만 남기고, 기본 강조 마커는 지운 뒤 공백을 접는다 — 시안이 요구하는 "≤15ch truncate"는
 // CSS(max-w+truncate, ReadingPanel과 동일 패턴)가 처리하므로 여기선 자르지 않는다.
 function plainPreview(content: string): string {
-  return content
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  return toPlainPreview(content)
     .replace(/[*_`#]/g, '')
     .replace(/\s+/g, ' ')
     .trim();

@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 
 export interface ChatV3ThreadParticipant {
   member_id: string;
@@ -79,7 +80,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                           aria-describedby로 다시 잇는다. */}
                       {isAgent ? <span id={roleId ?? undefined} className="shrink-0 text-[10px] text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
                     </div>
-                    <p id={previewId} className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ?? ''}</p>
+                    <p id={previewId} className="mt-0.5 truncate text-xs text-muted-foreground">{toPlainPreview(thread.latest_message?.content ?? '')}</p>
                   </div>
                   {thread.unread_count > 0 ? (
                     <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" data-testid="chat-v3-unread-dot" />
