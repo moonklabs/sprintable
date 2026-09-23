@@ -7,7 +7,6 @@ import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { groupVisibleLegacyByTarget, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
 
@@ -25,7 +24,6 @@ import { pickEunNeunJosa } from '@/lib/korean-particle';
 export default function MorePage() {
   const t = useTranslations('nav');
   const tMore = useTranslations('mobileTabBar');
-  const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
 
   // story #3855(customer-zero·셸, 선생님 07:07Z 지적 → 페드루 PO 판정 2026-09-14 07:34Z,
@@ -98,8 +96,10 @@ export default function MorePage() {
         </p>
         {/* story #fddd0e6b(AC1②) — 탭 바가 실제로 있을 때만(useIsMobile() true) 이 문장을
             그린다. 데스크톱 폭에선 탭 바 자체가 없어 「아래 탭에 있다」가 거짓이 된다. */}
-        {isMobile ? (
-          <p className="text-xs text-muted-foreground" data-testid="more-tab-hint">
+        {/* story #4222 — useIsMobile()로 렌더를 가르면 서버·첫 렌더엔 없다가 하이드레이션 뒤 모바일에서 한 줄이 생겨 아래가 밀렸다.
+            늘 그리고 lg:(탭 바가 없는 폭 · 훅의 1024)에서만 숨긴다(display:none — 데스크톱 스크린리더에도 안 읽힘). */}
+        {(
+          <p className="text-xs text-muted-foreground lg:hidden" data-testid="more-tab-hint">
             {t('moreTabHint', {
               board: t('board'), inbox: t('inbox'), chats: t('chats'),
               // story #3824 — nav.chats 값이 바뀌어도(받침 유무 무관) 항상 맞는 조사.
@@ -112,7 +112,7 @@ export default function MorePage() {
               now: t('zoneNow'), approvals: tMore('approvals'), chat: t('chats'),
             })}
           </p>
-        ) : null}
+        )}
       </div>
       <div className="relative mb-5">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />

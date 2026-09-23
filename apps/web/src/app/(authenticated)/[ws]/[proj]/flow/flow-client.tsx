@@ -10,7 +10,6 @@ import { ExceptionStream } from '@/components/glance/exception-stream';
 import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
@@ -95,7 +94,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   // 탭이 그 자리를 대신함). CSS로 숨기면 DOM에 둘 다 남아 스크린리더·탭 순서가 겹친다(#2225
   // AC3와 같은 규율) — useIsMobile로 렌더 자체를 가른다. `?view=`는 모바일에서도 URL 정본
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
-  const isMobile = useIsMobile();
   // story #3101 — 기본값(파라미터 없음)이 이제 데스크톱/모바일 무관 'list' 하나로 고정돼
   // parseView가 isMobile을 더는 받지 않는다(#2531 시절의 기기별 분기 fix는 여기서 소멸 —
   // 애초에 「기본값이 기기마다 다르다」는 전제가 이번 정합으로 사라졌다). hasHypothesisParam은
@@ -251,7 +249,17 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. story #3112 — 클릭
             배선(렌즈 전환·목표 이동·작업 비활성)은 컴포넌트 자체가 갖는다(scale-ladder.tsx). */}
         {view !== 'hypothesis' ? (
-          <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact={isMobile} />
+          // story #4222 — `compact={isMobile}`는 useIsMobile()이 서버·첫 렌더에서 false라 390에서 서버가 전체판(120.5px)을 그리고
+          // 하이드레이션 뒤 칩열(34.5px)로 줄어 그 아래가 밀렸다(배너 0에서 CLS 0.36). 두 판을 다 그리고 CSS 중단점(lg = 훅의 1024)으로
+          // 가른다 — 서버 출력이 곧 최종 높이. 숨은 판은 display:none이라 포커스·스크린리더에서 빠지고, 래더는 데이터 요청이 없다.
+          <>
+            <div className="lg:hidden" data-testid="scale-ladder-compact-slot">
+              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact />
+            </div>
+            <div className="hidden lg:block" data-testid="scale-ladder-full-slot">
+              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} />
+            </div>
+          </>
         ) : null}
 
         {view === 'hypothesis' ? (

@@ -2,7 +2,6 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -57,7 +56,6 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
   // 즉시 읽히게" 시각 위계 승격. PR#3358(유나 QA)이 세운 「상위 프레임=underline·내부 뷰
   // 탭=rounded pill」구분 자체는 유효한 규율이라 유지(pill로 갈아타지 않음 — 재규격이 아니라
   // <lg에서만 이 underline 계열 안에서 텍스트·인디케이터 두께를 키운다).
-  const isMobile = useIsMobile();
 
   return (
     // 유나 QA 블로커(PR#3358, 2026-08-22) — flow-client 내부 3탭(가설/갈래/칸반)과 스타일이
@@ -75,9 +73,10 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
           onClick={() => router.push(`/${params.ws}/${params.proj}/${tab.path}`)}
           className={cn(
             'font-semibold transition',
-            isMobile
-              ? `-mb-px border-b-[3px] px-1 pb-2.5 text-base ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`
-              : `-mb-px border-b-2 px-1 pb-2 text-sm ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`,
+            // story #4222 — 예전엔 useIsMobile()로 클래스를 갈라 서버·첫 렌더(=데스크톱 클래스 · 30px)와 하이드레이션 뒤(모바일 · 37px)
+            // 높이가 달라 390에서 밀렸다. 모바일 기본 + lg:(훅의 1024) 덮어쓰기로 서버 출력이 곧 최종.
+            '-mb-px border-b-[3px] px-1 pb-2.5 text-base lg:border-b-2 lg:pb-2 lg:text-sm',
+            active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
           )}
         >
           {t(tab.key)}

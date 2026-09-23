@@ -140,20 +140,16 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
   // 즉시 읽히게" 시각 위계 승격. PR#3358 규율(상위=underline·내부=pill)은 유지하고 그 안에서
   // <lg만 텍스트·인디케이터를 키운다.
   describe('<lg 시각 위계 승격', () => {
-    it('모바일이면 탭 텍스트가 더 커진다(text-base) — 데스크톱은 text-sm 그대로', async () => {
-      isMobileMock = true;
+    // story #4222 — 크기 분기는 JS(useIsMobile)가 아니라 CSS 중단점: 모바일 기본(text-base·pb-2.5·border-b-[3px]) + lg:(1024) 덮어쓰기.
+    // 서버·첫 렌더와 하이드레이션 뒤 클래스가 같아 390에서 탭 높이가 30→37px로 바뀌던 흔들림 0.
+    it('모바일 기본 text-base · lg에서 text-sm — 뷰포트 판정과 무관하게 같은 클래스(서버 = 최종)', async () => {
       const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
-      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
-      const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
-      expect(boardTab?.className).toContain('text-base');
-      expect(boardTab?.className).not.toContain('text-sm');
-    });
-
-    it('데스크톱(기본값)이면 기존 text-sm 그대로다(회귀 없음)', async () => {
-      const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
-      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
-      const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
-      expect(boardTab?.className).toContain('text-sm');
+      for (const mobile of [true, false]) {
+        isMobileMock = mobile;
+        await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+        const cls = ([...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드')?.className ?? '').split(/\s+/);
+        for (const c of ['text-base', 'pb-2.5', 'border-b-[3px]', 'lg:text-sm', 'lg:pb-2', 'lg:border-b-2']) expect(cls, `${mobile} ${c}`).toContain(c);
+      }
     });
 
     it('모바일에서도 라우팅·aria-selected 동작은 회귀 없다', async () => {

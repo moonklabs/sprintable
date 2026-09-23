@@ -186,10 +186,13 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(hint?.textContent).toBe('보드·알림·대화는 아래 「오늘」·「결재」·「대화」 탭에 있어 여기엔 없어요');
   });
 
-  it('⭐데스크톱 폭(useIsMobile() false)에선 탭 문장이 아예 없다(탭 바 자체가 없어 거짓이 되므로)', async () => {
+  it('⭐데스크톱 폭(lg 이상)에선 탭 문장이 보이지 않는다(탭 바 자체가 없어 거짓이 되므로) — story #4222: JS 분기 대신 lg:hidden', async () => {
+    // 서버·첫 렌더와 하이드레이션 뒤가 같아야(흔들림 0) 늘 그리고 CSS로 숨긴다 — display:none이라 데스크톱 스크린리더에도 안 읽힌다.
     isMobileMock = false;
     await mount();
-    expect(container.querySelector('[data-testid="more-tab-hint"]')).toBeNull();
+    const hint = container.querySelector('[data-testid="more-tab-hint"]');
+    expect(hint).not.toBeNull();
+    expect(hint!.className.split(/\s+/)).toContain('lg:hidden');
   });
 
   // story #3845(§①④, 2026-09-14) — retro·standup이 LEGACY_NAV_ITEMS에서 빠지며(각각
