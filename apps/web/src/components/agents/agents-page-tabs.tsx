@@ -12,7 +12,6 @@ import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/re
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';

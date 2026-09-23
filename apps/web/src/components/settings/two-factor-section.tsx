@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 
 // story #3768 — 'unknown'은 'loading'과 렌더는 같지만(둘 다 null) 의미가 다르다: 'loading'은

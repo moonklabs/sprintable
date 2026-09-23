@@ -25,9 +25,9 @@ beforeEach(() => {
   })) as unknown as typeof window.matchMedia;
 });
 
-// story #4184 — lib/me-client.ts의 `/api/me` 공유 창(5초)이 같은 파일 안 테스트 사이로 새지
+// story #4184 — lib/me-client.ts의 진행 중 `/api/me` 요청이 같은 파일 안 테스트 사이로 새지
 // 않게 매 테스트 전에 비운다(모듈이 로드된 파일에서만 등록돼 있다 — 그 파일 이유는 me-client.ts).
 beforeEach(() => {
-  const invalidate = (globalThis as Record<symbol, unknown>)[Symbol.for('sprintable.invalidateMe')];
-  if (typeof invalidate === 'function') invalidate();
+  const reset = (globalThis as Record<symbol, unknown>)[Symbol.for('sprintable.resetMeClient')];
+  if (typeof reset === 'function') reset();
 });

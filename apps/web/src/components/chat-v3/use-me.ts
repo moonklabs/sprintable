@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 
 /**
@@ -30,7 +29,7 @@ export function useMe(): { me: Me | null; error: boolean; retry: () => void } {
 
   useEffect(() => {
     let cancelled = false;
-    fetchMe({ fresh: reloadNonce > 0 })
+    fetchMe()
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((json: { data?: { id?: string; project_id?: string; role?: string } }) => {
         if (cancelled) return;

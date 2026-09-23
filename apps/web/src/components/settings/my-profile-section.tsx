@@ -9,7 +9,7 @@ import { TrustScoreCard } from '@/components/cage/trust-score-card';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { fetchMe, invalidateMe } from '@/lib/me-client';
+import { fetchMe } from '@/lib/me-client';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { memberDisplayLabel } from '@/lib/member-display';
 
@@ -89,7 +89,6 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
         setError(t('profileSaveError'));
         return;
       }
-      invalidateMe();
       const json = await res.json() as { data: MyProfile };
       setProfile(json.data);
       setEditing(false);
