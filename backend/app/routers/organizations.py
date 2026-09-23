@@ -20,6 +20,7 @@ from app.schemas.organization import (
     DeleteOrganization,
     MyOrganizationResponse,
     OrgImpactResponse,
+    OrganizationDetailResponse,
     OrganizationResponse,
     UpdateOrganization,
 )
@@ -137,12 +138,12 @@ async def resolve_organization_by_slug(
     )
 
 
-@router.get("/{id}", response_model=OrganizationResponse)
+@router.get("/{id}", response_model=OrganizationDetailResponse)
 async def get_organization(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     repo: OrganizationRepository = Depends(_get_repo),
-) -> OrganizationResponse:
+) -> OrganizationDetailResponse:
     """단일 Organization 조회 — 소속 멤버만."""
     role = await repo.get_member_role(org_id=id, user_id=uuid.UUID(auth.user_id))
     if role is None:
@@ -150,7 +151,8 @@ async def get_organization(
     org = await repo.get(id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
-    return OrganizationResponse.model_validate(org)
+    # story #4219 G2 — 소속 판정에 이미 구한 역할을 같이(가산 필드 · 새 조회 0).
+    return OrganizationDetailResponse(**OrganizationResponse.model_validate(org).model_dump(), role=role)
 
 
 @router.patch("/{id}", response_model=OrganizationResponse)

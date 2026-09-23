@@ -148,7 +148,7 @@ export async function resolveLegacyResourcePath(
   orgId: string,
   projectId: string,
   accessToken: string,
-): Promise<{ orgSlug: string; projectSlug: string } | null> {
+): Promise<{ orgSlug: string; projectSlug: string; orgRole?: string; primaryVerified: boolean } | null> {
   try {
     const authHeader = { Authorization: `Bearer ${accessToken}` };
     // ⛔카디르 QA 근본 재진단(2026-08-09, 실측 8회 재현) — 이 함수의 project 조회(단건·리스트
@@ -162,10 +162,15 @@ export async function resolveLegacyResourcePath(
       fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { headers: authHeaderWithOrg }),
     ]);
     if (!orgRes.ok) return null;
-    const org = await orgRes.json() as { slug?: string };
+    // story #4219 G2 — role(가산 필드)이 오면 호출부가 /glance 307에 resolve 캐시를 심는다(옛 백엔드면 없음 → 안 심음).
+    const org = await orgRes.json() as { slug?: string; role?: string | null };
     if (!org.slug) return null;
 
     let projectSlug = projRes.ok ? ((await projRes.json() as { slug?: string | null }).slug ?? null) : null;
+    // story #4219 G2(까디르 P2) — org 단건·project 단건은 primary(get_db)라 그 판정으로만 resolve 캐시를 서명할 수 있다. 아래 목록
+    // 폴백(GET /projects)은 read replica(get_read_db)라, 권한 회수 직후 replica 지연 동안 primary(/resolve)가 거절할 문맥을
+    // 50초 캐시로 발급할 수 있다 → 폴백으로 찾은 결과는 primaryVerified=false(리다이렉트는 그대로 · 캐시만 안 심음).
+    const primaryVerified = Boolean(projectSlug);
     // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 단건조회
     // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 이 자리가
     // dead-end 404였다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는 같은
@@ -179,7 +184,7 @@ export async function resolveLegacyResourcePath(
       }
     }
     if (!projectSlug) return null;
-    return { orgSlug: org.slug, projectSlug };
+    return { orgSlug: org.slug, projectSlug, primaryVerified, ...(org.role ? { orgRole: org.role } : {}) };
   } catch {
     return null;
   }
