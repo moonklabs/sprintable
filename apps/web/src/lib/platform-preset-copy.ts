@@ -5,12 +5,14 @@
 // tests/test_4202_platform_preset_copy_keys_realdb.py가 key 전수·ko 동일성을 잰다 — 새 프리셋 시드가 이 표 없이 들어오면 RED).
 // 타입을 Record<string, string>으로 둔다 — verify-no-unused-i18n-keys 가드는 이 모양의 리터럴 테이블 값만 «읽힌 키»로 본다.
 export const PLATFORM_PRESET_NAME_KEY: Record<string, string> = {
+  'preset.marketing.newsletter': 'newsletterName',
   'preset.marketing.social_card_news': 'socialCardNewsName',
   'preset.marketing.social_text_post': 'socialTextPostName',
   'preset.marketing.video_production': 'videoProductionName',
 };
 
 export const PLATFORM_PRESET_DESCRIPTION_KEY: Record<string, string> = {
+  'preset.marketing.newsletter': 'newsletterDescription',
   'preset.marketing.social_card_news': 'socialCardNewsDescription',
   'preset.marketing.social_text_post': 'socialTextPostDescription',
   'preset.marketing.video_production': 'videoProductionDescription',

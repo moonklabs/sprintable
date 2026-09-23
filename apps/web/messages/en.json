@@ -348,7 +348,8 @@
     "ccGateTypeSupportEscalationReview": "support review",
     "ccGateTypeConceptApproval": "concept approval",
     "ccGateTypeAdsBoost": "boost",
-    "ccGateTypeGenerationBudget": "budget approval"
+    "ccGateTypeGenerationBudget": "budget approval",
+    "ccGateTypeNewsletterSend": "newsletter send"
   },
   "proofCapsule": {
     "claim": {
@@ -866,6 +867,11 @@
     "recipeStageLabelEditing": "Editing",
     "recipeStageLabelPendingApproval": "Pending approval",
     "recipeStageLabelPublished": "Published",
+    "recipeStageLabelCollect": "Sourcing",
+    "recipeStageLabelReview": "Review",
+    "recipeStageLabelCampaignCreated": "Campaign created",
+    "recipeStageLabelSendRequested": "Send approval",
+    "recipeStageLabelSendChecked": "Results check",
     "definerTabBasic": "Basic",
     "definerTabAdvanced": "Advanced (JSON)",
     "definerAdvancedOnlyBadge": "Advanced only",
@@ -6219,6 +6225,8 @@
     "socialTextPostName": "Social text post",
     "socialTextPostDescription": "5 stages from draft to publishing. People approve only the concept and final publish; agents handle the rest.",
     "videoProductionName": "Video production (Reels, Shorts)",
-    "videoProductionDescription": "9 stages from sourcing to publishing. People approve only the concept, structure, generation budget, and final publish; agents handle the rest."
+    "videoProductionDescription": "9 stages from sourcing to publishing. People approve only the concept, structure, generation budget, and final publish; agents handle the rest.",
+    "newsletterName": "Newsletter",
+    "newsletterDescription": "6 stages from sourcing to the results check. People approve only the content review and the send; agents handle the rest."
   }
 }

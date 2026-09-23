@@ -65,7 +65,7 @@ function RecipeCard({
     <Card className="h-full" data-testid={`recipe-card-${recipe.id}`}>
       <CardBody className="flex h-full flex-col gap-2">
         <h4 className="text-sm font-semibold text-foreground">{presetName(recipe, tPreset)}</h4>
-        {description ? <p className="min-h-8 text-xs text-muted-foreground">{description}</p> : null}
+        {description ? <p className="min-h-8 break-keep text-xs text-muted-foreground">{description}</p> : null}
         <div className="flex flex-wrap gap-1.5">
           <Badge variant="outline">{t('recipeGalleryStageCountBadge', { count: stageCount(recipe) })}</Badge>
           <Badge variant="outline">{t('recipeGalleryGateCountBadge', { count: gateCount(recipe) })}</Badge>
