@@ -6227,6 +6227,22 @@
     "videoProductionName": "영상 제작(릴스·쇼츠)",
     "videoProductionDescription": "소재 수집부터 발행까지 9단계예요. 컨셉·구조·생성 예산·최종 발행 네 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
     "newsletterName": "뉴스레터",
-    "newsletterDescription": "소재 수집부터 발송 결과 확인까지 6단계예요. 내용 검수와 발송 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요."
+    "newsletterDescription": "소재 수집부터 발송 결과 확인까지 6단계예요. 내용 검수와 발송 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
+    "workflowAgentSoloName": "에이전트 단독",
+    "workflowAgentSoloDescription": "에이전트 하나가 접수·실행·보고를 모두 처리. 간단한 자동화 작업에 적합.",
+    "workflowSoloName": "1인 작업",
+    "workflowSoloDescription": "한 사람이 배정부터 완료까지 맡음. 혼자 하는 일에 적합.",
+    "workflowKanbanName": "칸반 알림",
+    "workflowKanbanDescription": "상태가 바뀔 때마다 팀에 알림. 역할을 나누지 않는 팀에 적합.",
+    "workflowKanbanSimpleName": "3단계 칸반",
+    "workflowKanbanSimpleDescription": "할 일 → 진행 중 → 완료 확인. 꾸준히 배포하는 팀에 적합.",
+    "workflowScrum3StepName": "3단계 스크럼",
+    "workflowScrum3StepDescription": "기획 → 개발 → QA. 작은·중간 규모 스프린트에 적합.",
+    "workflowTwoStepName": "제출·검토",
+    "workflowTwoStepDescription": "제출 → 검토. 코드 리뷰·원고 편집처럼 한 번 검토하는 일에 적합.",
+    "workflowThreeStepName": "제출·검토·승인",
+    "workflowThreeStepDescription": "제출 → 검토 → 승인. 작성·편집·발행처럼 두 번 확인하는 일에 적합.",
+    "workflowLoopAgencyName": "반복 실험",
+    "workflowLoopAgencyDescription": "목표·가설 → 브리프 → 실행안 → 사람이 고름 → 실행 → 결과 학습. 카피·캠페인처럼 되풀이하는 실험에 적합."
   }
 }

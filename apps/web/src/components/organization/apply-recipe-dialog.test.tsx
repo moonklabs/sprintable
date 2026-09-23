@@ -667,3 +667,25 @@ describe('ApplyRecipeDialog — 제목의 프리셋 이름 로케일(story #4202
     }
   });
 });
+
+// story #4203 — 이벤트 적용 다이얼로그 제목: 워크플로우 프리셋도 로케일 문안(ko 화면에 시드 «Kanban Flow» 0).
+describe('ApplyRecipeDialog — 워크플로우 프리셋 제목 로케일(story #4203)', () => {
+  it.each([['ko', koMessages], ['en', enMessages]] as const)('%s', async (locale, messages) => {
+    stubFetch({ ok: true, bindings_upserted: 0, warnings: [] }, { body: null as unknown });
+    const target = { ...TARGET, key: 'preset.workflow.kanban', name: 'Kanban Flow' };
+    const t = ((k: string, v?: { name?: string }) => `${k}:${v?.name ?? ''}`) as never;
+    LOCALE = locale;
+    try {
+      await act(async () => {
+        root.render(wrap(
+          <ApplyRecipeDialog target={target} open onOpenChange={() => {}} t={t} tc={((k: string) => k) as never} addToast={() => {}} />,
+        ));
+      });
+      await flush();
+      expect(document.body.textContent).toContain(`eventApplyDialogTitle:${messages.recipePreset.workflowKanbanName}`);
+      expect(document.body.textContent).not.toContain('eventApplyDialogTitle:Kanban Flow');
+    } finally {
+      LOCALE = 'ko';
+    }
+  });
+});
