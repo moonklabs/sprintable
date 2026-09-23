@@ -217,3 +217,37 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     }
   });
 });
+
+// story #4174(레시피 2호 블로그) — 발행 승인은 블로그 초안 게이트 하나라(PO 판정 (a)) «발행 승인 대기» 단계에는
+// 게이트가 없다. 그 뒤에 게이트 마커가 서면 결재자가 없는 승인 버튼을 찾게 된다(유나 AC).
+const BLOG_RECIPE: EventDefinitionResponse = {
+  id: 'mkt-blog', key: 'preset.marketing.blog_article', org_id: null,
+  name: '블로그 글', description: null,
+  payload_schema: {
+    properties: {
+      stage: {
+        enum: ['draft', 'concept_confirmed', 'editing', 'verification', 'pending_approval', 'published', 'publish_checked'],
+      },
+    },
+  },
+  stage_metadata: {
+    draft: { role: 'Creator' },
+    concept_confirmed: { role: 'Director', gate: { type: 'concept_approval', approver: 'org_owner' } },
+    editing: { role: 'Creator', capability: { kind: 'draft_site_post' } },
+    verification: { role: 'Creator', capability: { kind: 'submit_site_post' } },
+    pending_approval: { role: 'Director' },
+    published: { role: 'Publisher', capability: { kind: 'site_post_auto_publish' } },
+    publish_checked: { role: 'Publisher' },
+  },
+} as EventDefinitionResponse;
+
+describe('RecipeDetailView — 블로그 글(story #4174)', () => {
+  it('게이트 마커는 기획 승인 자리 하나뿐 — 발행 승인 대기 뒤에는 서지 않고, 새 단계 라벨이 원시 slug로 안 뜬다', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={BLOG_RECIPE} />)); });
+    expect(container.querySelector('[data-testid="gate-marker-concept_confirmed"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="gate-marker-pending_approval"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid^="gate-marker-"]').length).toBe(1);
+    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelPublishChecked);
+    expect(container.textContent).not.toContain('publish_checked');
+  });
+});

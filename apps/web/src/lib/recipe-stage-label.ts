@@ -49,6 +49,8 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   generate_variants: 'recipeStageLabelGenerateVariants',
   loop_decision: 'recipeStageLabelLoopDecision',
   track_and_learn: 'recipeStageLabelTrackAndLearn',
+  // story #4174(레시피 2호 블로그) — 서버가 발행한 뒤 에이전트가 공개 주소를 확인하는 단계(유나 문안 «발행 확인»).
+  publish_checked: 'recipeStageLabelPublishChecked',
 };
 
 export function recipeStageLabel(stage: string, t: (key: string) => string): string {

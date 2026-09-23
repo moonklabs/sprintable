@@ -1720,8 +1720,17 @@ async def _render_gate_verdict_message(
                         _recipe_auto_publish_line = _recipe_auto_publish_outcome_line(
                             _recipe_gate.publish_outcome, resolved_locale,
                         )
+            # story #4174 — 블로그 레시피의 «발행 승인 대기» 단계에서 초안 게이트가 승인됐으면: 서버가 발행하고 레시피가
+            # 다음 단계로 넘어간다(발행·이벤트는 story #4192). 판별은 resolve_site_post_recipe_context(4192와 같은 판정).
+            _site_recipe_ctx = None
+            if is_site_post and gate_row is not None:
+                _site_recipe_ctx = await resolve_site_post_recipe_context(
+                    db, org_id=org_id, work_item_type=gate_row.work_item_type, work_item_id=gate_row.work_item_id,
+                )
             if _recipe_auto_publish_line is not None:
                 lines.append(f"- {_recipe_auto_publish_line}")
+            elif _site_recipe_ctx is not None:
+                lines.append(f"- {t('events.gate_verdict_next_action_recipe_site_auto_publish', resolved_locale)}")
             elif is_site_post and site_post_command_exists:
                 lines.append(f"- {t('events.gate_verdict_next_action_publish_command_created', resolved_locale)}")
             else:
@@ -1839,11 +1848,15 @@ _CAPABILITY_KIND_HINTS: dict[str, str] = {
     "attach_video": "events.capability_hint_attach_video",
     "attach_image": "events.capability_hint_attach_image",
     "generate": "events.capability_hint_master_cut_evidence",
-    # story #4174(레시피 2호 블로그) — 블로그 초안·게시는 에이전트가 site post 도구로 직접 한다(채널 자동 발행
-    # 경로 아님 · org 커넥터 준비 검사 대상 아님).
+    # story #4174(레시피 2호 블로그) — 초안 작성·제출은 에이전트가 site post 도구로, 발행은 서버가(블로그 발행은
+    # 사람 전용 권한 · 승인된 초안을 서버가 발행 — story #4192). 셋 다 org 커넥터 준비 검사 대상 아님.
     "draft_site_post": "events.capability_hint_draft_site_post",
-    "publish_site_post": "events.capability_hint_publish_site_post",
+    "submit_site_post": "events.capability_hint_submit_site_post",
+    "site_post_auto_publish": "events.capability_hint_site_post_auto_publish",
 }
+# story #4174 — 이 kind의 단계는 에이전트가 아니라 서버가 이벤트를 낸다(실제 발행 뒤). 그 앞 단계 멘션은 발행 예시
+# 대신 대기 안내를 싣는다(_render_event_message_content).
+_SERVER_DRIVEN_CAPABILITY_KINDS = frozenset({"site_post_auto_publish"})
 # story #4104(페드루 PO 리뷰, 2026-09-21) — 준비 경고 루프(apply_recipe_role_bindings)가
 # 같은 딕셔너리를 "이 kind는 에이전트 자기 도구로 처리(org 커넥터 무관)"라는 다른 목적으로
 # 재사용한다 — 이름을 붙여 그 의도를 다음 사람이 안 물어도 되게 한다(값은 여전히 하나뿐,
@@ -1995,6 +2008,16 @@ async def _render_event_message_content(
             lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
         else:
             lines.append("- 다음 단계: 없음(마지막 stage)")
+    elif (
+        next_stage is not None
+        and ((definition.stage_metadata.get(next_stage) or {}).get("capability") or {}).get("kind")
+        in _SERVER_DRIVEN_CAPABILITY_KINDS
+    ):
+        # story #4174 — 다음 단계는 서버가 실제 발행 뒤 낸다(블로그 발행은 사람 전용 권한 — 에이전트가 그 단계 이벤트를
+        # 먼저 내면 발행 안 된 글이 «발행됨»으로 보인다). 발행 예시 대신 대기 안내.
+        next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
+        lines.append(f"- 다음 단계: {next_stage}" + (f" ({next_role})" if next_role else ""))
+        lines.append(f"- {t('events.stage_next_server_driven', resolved_locale)}")
     elif next_stage is not None:
         next_meta = definition.stage_metadata.get(next_stage) or {}
         next_role = next_meta.get("role")
@@ -2024,19 +2047,7 @@ async def _render_event_message_content(
             # 시점 Hook A) 경로를 놓쳤다. gate_type 자체로 유도(stage 이름 하드코딩 0) —
             # external_publish 게이트가 열리는 자리마다 동일하게 뜬다(레시피 1호뿐 아님).
             if _next_gate_decl.get("type") == "external_publish":
-                # story #4174 — 채널 초안 안내는 승인 뒤 단계가 채널 자동 발행일 때만 맞다. 그 단계가 블로그
-                # 게시(publish_site_post)면 블로그 초안 제출 안내로(«채널 초안을 만들라»는 오도 방지).
-                _after_gate = _next_recipe_stage(definition, next_stage)
-                _after_kind = (
-                    ((definition.stage_metadata.get(_after_gate) or {}).get("capability") or {}).get("kind")
-                    if _after_gate else None
-                )
-                _gate_hint_key = (
-                    "events.gate_hint_external_publish_site_post"
-                    if _after_kind == "publish_site_post"
-                    else "events.gate_hint_external_publish_auto_satisfy"
-                )
-                lines.append(f"- {t(_gate_hint_key, resolved_locale)}")
+                lines.append(f"- {t('events.gate_hint_external_publish_auto_satisfy', resolved_locale)}")
     else:
         lines.append("- 다음 단계: 없음(마지막 stage)")
 
@@ -2159,6 +2170,40 @@ async def _find_existing_stage_publish(
         .order_by(ConversationMessage.created_at.desc())
         .limit(1)
     )).scalars().first()
+
+
+async def resolve_site_post_recipe_context(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> tuple[str, str] | None:
+    """story #4174 — 이 work item이 «다음 단계를 서버가 실제 발행 뒤 내는» 레시피(블로그 — capability kind
+    `site_post_auto_publish`)의 바로 앞 단계(발행 승인 대기)에 있는가. 반환 (정의 key, 서버가 낼 다음 stage) · 아니면
+    None(레시피 밖 블로그 — 승인 뒤 사람 클릭 흐름 그대로). 레시피 문맥 판별의 유일한 자리 — 승인 알림의 «다음 행동»
+    문구(여기)와 실제 발행 뒤 이벤트·레시피 문맥 자동 발행(story #4192)이 같이 쓴다. 현재 단계 = 이 정의로 이 work
+    item에 발행된 가장 최근 stage 이벤트(`_find_latest_stage_publish`, publish-history와 같은 SSOT)."""
+    from sqlalchemy import String, cast, or_
+
+    from app.models.event_definition import EventDefinition
+
+    candidates = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+            cast(EventDefinition.stage_metadata, String).contains("site_post_auto_publish"),
+        )
+    )).scalars().all()
+    for definition in candidates:
+        for auto_stage, meta in (definition.stage_metadata or {}).items():
+            if ((meta or {}).get("capability") or {}).get("kind") not in _SERVER_DRIVEN_CAPABILITY_KINDS:
+                continue
+            latest = await _find_latest_stage_publish(
+                db, org_id=org_id, definition_key=definition.key, work_item_type=work_item_type,
+                work_item_id=str(work_item_id),
+            )
+            current = ((((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}).get("stage")
+                       if latest is not None else None)
+            if current is not None and _next_recipe_stage(definition, current) == auto_stage:
+                return definition.key, auto_stage
+    return None
 
 
 async def _find_latest_stage_publish(

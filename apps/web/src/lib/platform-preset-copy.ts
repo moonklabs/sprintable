@@ -9,6 +9,7 @@ import type { BlockTemplate, BlockTemplateBlock } from '@/lib/block-template';
 // 타입을 Record<string, string>으로 둔다 — verify-no-unused-i18n-keys 가드는 이 모양의 리터럴 테이블 값만 «읽힌 키»로 본다.
 export const PLATFORM_PRESET_NAME_KEY: Record<string, string> = {
   'preset.marketing.newsletter': 'newsletterName',
+  'preset.marketing.blog_article': 'blogArticleName',
   'preset.marketing.social_card_news': 'socialCardNewsName',
   'preset.marketing.social_text_post': 'socialTextPostName',
   'preset.marketing.video_production': 'videoProductionName',
@@ -24,6 +25,7 @@ export const PLATFORM_PRESET_NAME_KEY: Record<string, string> = {
 
 export const PLATFORM_PRESET_DESCRIPTION_KEY: Record<string, string> = {
   'preset.marketing.newsletter': 'newsletterDescription',
+  'preset.marketing.blog_article': 'blogArticleDescription',
   'preset.marketing.social_card_news': 'socialCardNewsDescription',
   'preset.marketing.social_text_post': 'socialTextPostDescription',
   'preset.marketing.video_production': 'videoProductionDescription',

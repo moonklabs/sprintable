@@ -2,24 +2,24 @@
 
 규격: doc «레시피 프리셋 추가 규격 + 발행 표면별 게이트 경로 대조»(story #4172, 7ca3cab5) §4.
 
-흐름(7단계):
+흐름(7단계 — 설명 문구 «7단계»와 테스트로 대조):
   draft(Creator) 주제·키워드 기획
   → concept_confirmed(Director, gate=concept_approval) 기획 승인 — 미승인이면 블로그 초안 제출이 막힌다
     (site_posts 제출의 concept_approval 검사, doc §2)
   → editing(Creator, capability=draft_site_post) 블로그 초안 작성
-  → verification(Creator) 콘텐츠 규칙 검수 후 제출 — 제출이 규칙 검사(lint)를 다시 돈다
-  → pending_approval(Director, gate=external_publish) 최종 발행 승인
-  → published(Publisher, capability=publish_site_post) 승인된 블로그에 게시
-  → publish_checked(Publisher) 공개 주소로 게시 결과 확인
+  → verification(Creator, capability=submit_site_post) 콘텐츠 규칙 검수 후 초안 제출(제출이 규칙 검사를 다시 돈다)
+  → pending_approval(Director, 게이트 없음) 발행 승인 대기 — 발행 승인은 내용이 봉인된 **초안 게이트** 하나다
+    (PO 판정 2026-09-23 08:49Z (a): 레시피 게이트는 블로그 내용을 못 보여 줘 승인이 아니다 — story #4190 봉인 원칙)
+  → published(Publisher, capability=site_post_auto_publish) 서버가 실제 발행 뒤 이 단계 이벤트를 낸다(에이전트 할 일
+    없음 — 블로그 발행은 사람 전용 권한이라 에이전트는 발행하지 않는다. 이벤트 발행은 story #4192)
+  → publish_checked(Publisher) 공개 주소로 발행 결과 확인
 
-발행 단계 capability는 `channel_connection`이 아니다 — 그 target은 승인 즉시 채널 초안을 자동 발행하는
-경로(`publish_recipe_approved_draft`)라 블로그 초안을 찾지 못한다. 블로그는 게이트 승인 뒤 Publisher가
-publish_site_post로 게시한다(자사 블로그는 동기 발행 · 외부 블로그는 승인 시 이미 만들어진 발행 명령을
-그대로 돌려받는다 — story #4190). 두 kind(draft_site_post·publish_site_post)는 에이전트 자기 도구
-kind라 멘션에 도구 안내가 붙고, 적용 화면 준비 경고의 org 커넥터 검사 대상이 아니다
-(events._AGENT_TOOL_CAPABILITY_KINDS).
+capability kind 셋은 모두 에이전트 자기 도구/서버 몫이라(events._AGENT_TOOL_CAPABILITY_KINDS) 적용 화면 준비 경고의
+org 커넥터 검사 대상이 아니다. site_post_auto_publish는 «다음 단계를 에이전트가 발행하지 않는다»는 표지이기도 하다 —
+멘션 렌더러가 그 앞 단계에서 발행 예시 대신 대기 안내를 싣는다.
 
-역할 3종·게이트 2종 재사용(코드 0). 새 stage slug `publish_checked`는 같은 PR에서 FE 라벨 등록.
+역할 3종·게이트 1종 재사용(코드 0). 새 stage slug `publish_checked`는 같은 PR에서 FE 라벨 등록. 이름·설명은
+유나 문안(ko = 시드 원문, story #4202 짝 가드).
 
 Revision ID: 0399
 Revises: 0398
@@ -76,24 +76,24 @@ _STAGE_METADATA = {
         "role": "Creator", "action": "블로그 초안 작성",
         "capability": {"kind": "draft_site_post"},
     },
-    "verification": {"role": "Creator", "action": "콘텐츠 규칙 검수 후 초안 제출"},
+    "verification": {
+        "role": "Creator", "action": "콘텐츠 규칙 검수 후 초안 제출",
+        "capability": {"kind": "submit_site_post"},
+    },
     "pending_approval": {
-        "role": "Director", "action": "최종 발행 승인(외부 발행 직전)",
-        "gate": {"type": "external_publish", "approver": _OWNER},
+        "role": "Director", "action": "제출한 초안이 발행 승인을 받을 때까지 기다리기(승인은 결재함의 초안에서)",
     },
     "published": {
-        "role": "Publisher", "action": "승인된 블로그에 게시",
-        "capability": {"kind": "publish_site_post"},
+        "role": "Publisher", "action": "승인된 초안을 블로그에 자동 발행(에이전트 할 일 없음)",
+        "capability": {"kind": "site_post_auto_publish"},
     },
-    "publish_checked": {"role": "Publisher", "action": "공개 주소로 게시 결과 확인"},
+    "publish_checked": {"role": "Publisher", "action": "공개 주소로 발행 결과 확인"},
 }
 
 _ROLE_ACTOR_KINDS = {"Creator": "agent", "Director": "human", "Publisher": "agent"}
 
 _NAME = "블로그 글"
-_DESCRIPTION = (
-    "주제 기획부터 게시 확인까지 7단계예요. 기획과 최종 발행 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요."
-)
+_DESCRIPTION = "기획부터 발행 확인까지 7단계예요. 기획과 발행 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요."
 
 
 def upgrade() -> None:

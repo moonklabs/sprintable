@@ -874,6 +874,7 @@
     "recipeStageLabelCampaignCreated": "Campaign created",
     "recipeStageLabelSendRequested": "Send approval",
     "recipeStageLabelSendChecked": "Results check",
+    "recipeStageLabelPublishChecked": "Publish check",
     "definerTabBasic": "Basic",
     "definerTabAdvanced": "Advanced (JSON)",
     "definerAdvancedOnlyBadge": "Advanced only",
@@ -6241,6 +6242,8 @@
     "unavailable": "Not available right now."
   },
   "recipePreset": {
+    "blogArticleName": "Blog post",
+    "blogArticleDescription": "7 stages from planning to the publish check. People approve only the plan and the publish; agents handle the rest.",
     "socialCardNewsName": "Social image post (carousel)",
     "socialCardNewsDescription": "8 stages from planning to publishing. People approve only the concept, generation budget, and final publish; agents handle the rest.",
     "socialTextPostName": "Social text post",

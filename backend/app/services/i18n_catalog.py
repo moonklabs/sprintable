@@ -430,18 +430,28 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이미지는 attach_channel_post_image로 초안에 첨부해요.",
         "en": "Attach the images to the draft using attach_channel_post_image.",
     },
-    # story #4174(레시피 2호 블로그) — 블로그 초안 작성·게시 단계. attach_*와 같은 축(에이전트 자기 도구).
+    # story #4174(레시피 2호 블로그) — 에이전트 멘션 안내(도구 이름은 에이전트용 식별자).
     "events.capability_hint_draft_site_post": {
         "ko": "블로그 초안은 create_site_post_draft로 같은 스토리에 만들어요.",
         "en": "Create the blog draft for the same story using create_site_post_draft.",
     },
-    "events.capability_hint_publish_site_post": {
-        "ko": "승인된 초안은 publish_site_post로 게시하고, get_site_post_publication으로 공개 주소를 확인해요.",
-        "en": "Publish the approved draft using publish_site_post, then check the public URL with get_site_post_publication.",
+    "events.capability_hint_submit_site_post": {
+        "ko": "검수를 마친 초안은 submit_site_post_draft로 제출해요 — 발행 승인은 사람이 결재함의 그 초안에서 해요.",
+        "en": "Submit the reviewed draft using submit_site_post_draft — a person approves publishing on that draft in Approvals.",
     },
-    "events.gate_hint_external_publish_site_post": {
-        "ko": "같은 스토리의 블로그 초안을 submit_site_post_draft로 제출해 두면 발행 승인이 그 초안에 걸려요.",
-        "en": "Submit the blog draft for the same story using submit_site_post_draft so the publish approval covers it.",
+    "events.capability_hint_site_post_auto_publish": {
+        "ko": "승인된 초안은 서버가 블로그에 발행했어요. get_site_post_publication으로 공개 주소를 확인해요.",
+        "en": "The server published the approved draft to the blog. Check its public URL using get_site_post_publication.",
+    },
+    "events.stage_next_server_driven": {
+        "ko": "다음 단계는 서버가 실제 발행 뒤 넘겨요 — 이 단계에서는 다음 단계 이벤트를 발행하지 마세요.",
+        "en": "The server moves to the next stage after it actually publishes — do not publish the next stage event from this stage.",
+    },
+    # story #4174 — 승인 뒤 에이전트가 받는 판정 알림의 «다음 행동»(레시피 문맥 블로그) · 유나 문안 6 정정본.
+    # — «바로»가 없는 것은 예약 시각이 봉인된 초안은 그 시각에 발행되기 때문.
+    "events.gate_verdict_next_action_recipe_site_auto_publish": {
+        "ko": "다음 행동: 할 일 없음 — 자동으로 발행되고, 발행이 끝나면 워크플로우가 다음 단계로 넘어가요.",
+        "en": "Next action: nothing — it publishes automatically, and the workflow moves to the next stage once publishing finishes.",
     },
     # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
     # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins

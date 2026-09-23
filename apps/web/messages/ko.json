@@ -874,6 +874,7 @@
     "recipeStageLabelCampaignCreated": "캠페인 생성",
     "recipeStageLabelSendRequested": "발송 승인",
     "recipeStageLabelSendChecked": "발송 결과 확인",
+    "recipeStageLabelPublishChecked": "발행 확인",
     "definerTabBasic": "기본",
     "definerTabAdvanced": "고급 (JSON)",
     "definerAdvancedOnlyBadge": "고급 전용",
@@ -6241,6 +6242,8 @@
     "unavailable": "지금은 받을 수 없어요."
   },
   "recipePreset": {
+    "blogArticleName": "블로그 글",
+    "blogArticleDescription": "기획부터 발행 확인까지 7단계예요. 기획과 발행 두 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
     "socialCardNewsName": "SNS 이미지 포스트(카드뉴스)",
     "socialCardNewsDescription": "기획부터 발행까지 8단계예요. 컨셉·생성 예산·최종 발행 세 곳만 사람이 승인하고, 나머지는 에이전트가 진행해요.",
     "socialTextPostName": "SNS 텍스트 포스트",
