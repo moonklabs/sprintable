@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { inActivationScope } from '@/lib/activation-hint';
 
 const COMPLETE_KEY = 'sprintable_activation_checklist_complete';
 
@@ -41,6 +42,14 @@ function readLocalFlag(key: string): boolean {
   }
 }
 
+function clearLocalFlag(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // 무시 — 다음 조회가 다시 판정
+  }
+}
+
 function writeLocalFlag(key: string): void {
   try {
     window.localStorage.setItem(key, '1');
@@ -52,16 +61,19 @@ function writeLocalFlag(key: string): void {
 // 모듈 스코프 in-flight 캐시 — 여러 컴포넌트가 같은 렌더 사이클에 훅을 호출해도 실
 // fetchWithAuth 호출은 1회로 수렴한다(React 컴포넌트 트리와 무관한 공유, 페이지 세션
 // 동안 유지 — activation은 단조 증가라 재조회할 이유가 없다).
-let sharedFetchPromise: Promise<ActivationState | null> | null = null;
+// story #4219 F1(PO 리뷰) — **org별**. 체크리스트는 요청 org(X-Org-Id) 판정이라, org를 바꾼 뒤 옛 org 결과를 재사용하면
+// 다른 org의 완주 여부를 보여 주고 힌트 쿠키에도 섞여 기록됐다.
+const sharedFetchPromises = new Map<string, Promise<ActivationState | null>>();
 
 // firebase-session.ts::_resetKeyCacheForTests()와 동일 컨벤션 — 모듈 스코프 캐시는 테스트
 // 파일 간(그리고 한 파일의 it() 블록 간) 격리가 필요하다, 안 그러면 앞 테스트의 stub된
 // fetch 응답이 캐시로 남아 뒤 테스트에 새지 않도록 test setup에서 명시 호출한다.
 export function _resetActivationStatusCacheForTests(): void {
-  sharedFetchPromise = null;
+  sharedFetchPromises.clear();
 }
 
-async function fetchActivationState(): Promise<ActivationState | null> {
+async function fetchActivationState(orgKey: string): Promise<ActivationState | null> {
+  let sharedFetchPromise = sharedFetchPromises.get(orgKey);
   if (!sharedFetchPromise) {
     sharedFetchPromise = (async () => {
       try {
@@ -73,13 +85,16 @@ async function fetchActivationState(): Promise<ActivationState | null> {
         return null;
       }
     })();
+    sharedFetchPromises.set(orgKey, sharedFetchPromise);
   }
   return sharedFetchPromise;
 }
 
 export interface UseActivationStatusResult {
-  /** 조회 완료 전이거나 조회 실패면 null. */
+  /** 조회 완료 전이거나 조회 실패면 null. 다른 org의 결과는 절대 싣지 않는다(org가 바뀌면 null로 돌아감). */
   state: ActivationState | null;
+  /** state가 판정된 org(요청 org). state가 null이면 null. */
+  stateOrgId: string | null;
   /** 완주 여부 — localStorage에 이미 기록된 경우(과거 세션에 완주 관측)도 true(fetch 자체를
    * 건너뛰므로 state는 null로 남지만 "온보딩 단계 아님"은 확定적으로 참이다). */
   allComplete: boolean;
@@ -91,23 +106,45 @@ export interface UseActivationStatusResult {
 // 없어도(새 기기·시크릿 창·저장소 삭제) 처음부터 완주로 취급해 fetch 자체를 스킵한다 —
 // 그 경로가 없으면 "완주했지만 이 기기는 모른다"는 사용자에게 로딩 스켈레톤이 떴다
 // 접히는 새 흔들림이 생긴다(첫 CHANGES에서 로컬 스토리지만 보던 자리의 결함).
-export function useActivationStatus(initialAllComplete?: boolean): UseActivationStatusResult {
-  const [skip] = useState<boolean>(() => initialAllComplete === true || readLocalFlag(COMPLETE_KEY));
-  const [state, setState] = useState<ActivationState | null>(null);
+export function useActivationStatus(
+  initialAllComplete?: boolean,
+  // story #4219 F1 — 완주 시드가 표시용 힌트에서 왔으면 스켈레톤 없이(완주로 보여 둔 채) 한 번 다시 조회해,
+  // 완주가 되돌아간 드문 경우 배너가 늦게라도 뜨게 한다(힌트는 조언일 뿐).
+  // orgId: 요청 org(대시보드 컨텍스트의 effective org = 인터셉터가 싣는 X-Org-Id). 캐시·로컬 완주 플래그·결과가 모두 이 org 범위.
+  // seedOrgId: 시드(initialAllComplete)가 판정된 org — 지금 org와 같을 때만 시드를 쓴다(inActivationScope). 없으면 시드는 이 org의 것으로
+  // 간주(호출부가 org를 아는 서버 시드를 넘기면 반드시 함께 넘긴다).
+  options?: { verifyInBackground?: boolean; orgId?: string; seedOrgId?: string },
+): UseActivationStatusResult {
+  const orgId = options?.orgId;
+  // 로컬 완주 플래그도 org 범위(story #4219 · 예전엔 전역이라 한 org를 완주하면 다른 org 배너까지 숨었다). org 모르면 안 읽는다.
+  const localKey = orgId ? `${COMPLETE_KEY}:${orgId}` : null;
+  const seedApplies = options?.seedOrgId === undefined || inActivationScope(options.seedOrgId, orgId);
+  const seedComplete = (seedApplies && initialAllComplete === true) || (localKey ? readLocalFlag(localKey) : false);
+  const verify = seedApplies && options?.verifyInBackground === true;
+  const skip = seedComplete && !verify;
+  const [result, setResult] = useState<{ orgId: string | null; data: ActivationState } | null>(null);
 
   useEffect(() => {
     if (skip) return;
     let cancelled = false;
+    const requestOrg = orgId ?? null;
     void (async () => {
-      const data = await fetchActivationState();
+      const data = await fetchActivationState(requestOrg ?? '');
       if (cancelled || !data) return;
-      setState(data);
-      if (data.all_complete) writeLocalFlag(COMPLETE_KEY);
+      setResult({ orgId: requestOrg, data });
+      // 완주 플래그는 요청 org 키로, **그 org 판정**일 때만(scope_is_requested_org === false = 다른 org 판정이라 안 남김).
+      if (requestOrg && data.scope_is_requested_org !== false) {
+        const key = `${COMPLETE_KEY}:${requestOrg}`;
+        if (data.all_complete) writeLocalFlag(key);
+        else clearLocalFlag(key);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [skip]);
+  }, [skip, orgId, localKey]);
 
-  return { state, allComplete: skip || state?.all_complete === true };
+  // org가 바뀌면 옛 org 결과는 버린다(렌더 파생 — 다음 조회가 새 org 결과로 채움).
+  const state = result && (orgId ? inActivationScope(result.orgId, orgId) : result.orgId === null) ? result.data : null;
+  return { state, stateOrgId: state ? result!.orgId : null, allComplete: state ? state.all_complete === true : seedComplete };
 }

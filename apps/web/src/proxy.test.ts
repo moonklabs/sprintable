@@ -520,6 +520,67 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/goals');
   });
 
+  it('story #4219 D1 — resolve한 org·project slug를 레이아웃행 헤더로(인코딩) 넘긴다', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', project_slug: '장부' }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/%EC%9E%A5%EB%B6%80/goals', { sp_at: token }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-request-x-resolved-project-id')).toBe('proj-1');
+    expect(response.headers.get('x-middleware-request-x-resolved-org-slug')).toBe('moonklabs');
+    expect(decodeURIComponent(response.headers.get('x-middleware-request-x-resolved-project-slug') ?? '')).toBe('장부');
+  });
+
+  // ⭐story #4219 D1(PO 리뷰) — 위조 x-resolved-*는 입구에서 한 번 지우고, 모든 갈래가 그 헤더만 넘긴다. 갈래별로 위조 헤더가
+  // 아래로 0인지 + 원래 넘기던 다른 헤더(쿠키 등)를 잃지 않는지.
+  function spoofed(path: string, cookies: Record<string, string>): NextRequest {
+    const base = makeRequest(path, cookies);
+    return new NextRequest(base.url, {
+      headers: new Headers({
+        cookie: base.headers.get('cookie') ?? '',
+        'x-custom-keep': 'kept',
+        'x-resolved-project-id': 'evil-project',
+        'X-Resolved-Org-Id': 'evil-org',
+      }),
+    });
+  }
+  function expectNoSpoof(response: Response) {
+    for (const name of ['x-resolved-project-id', 'x-resolved-org-id']) {
+      expect(response.headers.get(`x-middleware-request-${name}`) ?? '', name).not.toMatch(/evil/);
+    }
+    expect(response.headers.get('x-middleware-request-x-custom-keep')).toBe('kept');
+  }
+
+  it.each([
+    ['기본 resolve 갈래(flat 페이지)', '/inbox', 'token'],
+    ['공개 경로 통과', '/refund-policy', 'none'],
+    ['API 통과(토큰 없음)', '/api/whatever', 'none'],
+    ['토큰 갱신 뒤 API', '/api/whatever', 'refresh'],
+    // 갱신 뒤 페이지 두 갈래(:591 resolve · :592 새 토큰 검증 실패) 중 :592는 refreshMatchesActive가 먼저 막아 도달 불가 —
+    // 둘 다 같은 입구 정제 요청의 헤더(buildRefreshedHeaders)라 :591로 잰다.
+    ['토큰 갱신 뒤 페이지', '/inbox', 'refresh'],
+  ] as const)('⭐위조 x-resolved-* 차단 — %s', async (_n, path, auth) => {
+    const cookies: Record<string, string> = {};
+    if (auth === 'token') cookies['sp_at'] = await makeAccessToken();
+    if (auth === 'refresh') {
+      cookies['sp_rt'] = 'valid-rt';
+      const newAt = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) + 900 });
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }) });
+    }
+    const response = await middleware(spoofed(path, cookies));
+    expect(response.status).toBe(200);
+    expectNoSpoof(response);
+    if (auth === 'token') expect(response.headers.get('x-middleware-request-cookie')).toContain('sp_at=');
+  });
+
+  it('⭐위조 x-resolved-* 차단 — connect-guide rewrite 갈래', async () => {
+    const response = await middleware(spoofed('/connect-guide.txt', {}));
+    expect(response.headers.get('x-middleware-rewrite')).toMatch(/connect-guide\.(ko|en)\.txt/);
+    expectNoSpoof(response);
+  });
+
   it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
     const token = await makeAccessToken();
     const cacheToken = await new SignJWT({

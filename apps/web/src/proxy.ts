@@ -1,5 +1,5 @@
 import { jwtVerify } from 'jose';
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
@@ -721,7 +721,11 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-async function proxyImpl(request: NextRequest) {
+async function proxyImpl(incoming: NextRequest) {
+  // story #4219 D1(PO 리뷰) — x-resolved-*는 이 proxy가 resolve한 값만 레이아웃·라우트에 닿아야 한다. 클라이언트가 같은
+  // 이름으로 보낸 위조 헤더를 **입구에서 한 번** 지운 요청으로 바꿔, 아래 모든 갈래(API 통과 · 토큰 갱신 뒤 두 곳 · 공개 경로
+  // 통과 · rewrite · 기본 resolve)가 이 요청의 헤더만 넘긴다(원본 요청 전달 0). 위조 헤더가 없으면 원본 그대로(동작 변화 0).
+  const request = withoutClientResolvedHeaders(incoming);
   const pathname = request.nextUrl.pathname;
 
   // story #2595 — /connect-guide.txt is locale-branched: rewrite (not redirect, so the URL
@@ -732,7 +736,8 @@ async function proxyImpl(request: NextRequest) {
     const locale = resolveConnectGuideLocale(request);
     const url = request.nextUrl.clone();
     url.pathname = `/connect-guide.${locale}.txt`;
-    return NextResponse.rewrite(url);
+    // rewrite는 request 옵션이 없으면 들어온 원본 헤더를 넘긴다 — 입구에서 지운 헤더로 명시.
+    return NextResponse.rewrite(url, { request: { headers: request.headers } });
   }
 
   const isPublicPath =
@@ -861,10 +866,31 @@ async function resolveWorkspaceProject(
   return { kind: 'set-cache', token };
 }
 
-function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRole: string; projectId?: string }): void {
+function setResolvedHeaders(
+  fwdHeaders: Headers,
+  context: { orgId: string; orgRole: string; orgSlug?: string; projectId?: string; projectSlug?: string },
+): void {
   fwdHeaders.set('x-resolved-org-id', context.orgId);
   fwdHeaders.set('x-resolved-org-role', context.orgRole);
   if (context.projectId) fwdHeaders.set('x-resolved-project-id', context.projectId);
+  // story #4219 D1 — resolve가 이미 준 slug를 넘겨, 레이아웃이 slug만 알려고 /projects/{id}를 다시 부르지 않게.
+  // slug는 ASCII가 아닐 수 있어 인코딩(헤더 값은 ByteString).
+  if (context.orgSlug) fwdHeaders.set('x-resolved-org-slug', encodeURIComponent(context.orgSlug));
+  if (context.projectSlug) fwdHeaders.set('x-resolved-project-slug', encodeURIComponent(context.projectSlug));
+}
+
+export function stripClientResolvedHeaders(fwdHeaders: Headers): void {
+  for (const key of [...fwdHeaders.keys()]) {
+    if (key.toLowerCase().startsWith('x-resolved-')) fwdHeaders.delete(key);
+  }
+}
+
+/** 클라이언트가 보낸 x-resolved-*를 지운 요청. 없으면 원본 그대로(새 객체 0 · 동작 변화 0). */
+export function withoutClientResolvedHeaders(request: NextRequest): NextRequest {
+  if (![...request.headers.keys()].some((k) => k.toLowerCase().startsWith('x-resolved-'))) return request;
+  const headers = new Headers(request.headers);
+  stripClientResolvedHeaders(headers);
+  return new NextRequest(request, { headers });
 }
 
 export const config = {
