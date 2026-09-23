@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
-import { notifyContentPainted, isAppleLoginEligible } from '@/lib/native-shell-bridge';
+import { isAppleLoginEligible } from '@/lib/native-shell-bridge';
 import { LegalFooter } from '@/components/legal/legal-footer';
 
 export default function LoginPage() {
@@ -40,12 +40,6 @@ export default function LoginPage() {
   );
   const [loading, setLoading] = useState(false);
   const [firebaseLoading, setFirebaseLoading] = useState(false);
-
-  // #2310(e-mobile-content-painted-contract): 이 화면은 서버 데이터 조회 없이 첫 렌더에
-  // 폼이 그대로 나온다(스켈레톤 단계 없음) — 마운트 직후가 "첫 유의미한 페인트"로 정확하다.
-  useEffect(() => {
-    notifyContentPainted();
-  }, []);
 
   // story #3118 AC0 — 기본값 false(SSR과 하이드레이션 첫 프레임 모두 비노출, fail-closed).
   // 마운트 후에만 셸 신호를 읽어 iOS/macOS로 확認되면 true로 올라간다 — 신호가 없거나
