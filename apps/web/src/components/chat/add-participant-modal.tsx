@@ -141,23 +141,25 @@ export function AddParticipantModal({
               ))}
             </ul>
           )}
-
-          {/* story #2105 2차 — handleAdd이 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
-              시도마다 언마운트→리마운트된다. */}
-          {error && (
-            <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">
-              {error.message}
-              {error.kind === 'policy' ? (
-                <>
-                  {' · '}
-                  <Link href={`/organization/workforce/${error.agentId}`} className="text-primary underline">
-                    {t('policyDeniedManageLink')}
-                  </Link>
-                </>
-              ) : null}
-            </p>
-          )}
         </div>
+
+        {/* story #4193 — 거부/실패 안내는 스크롤 목록 «밖» 고정 줄(목록과 푸터 사이). 목록 안 맨 끝에 있으면
+            멤버가 많을 때 «대화 시작» 직후 보이는 영역 아래(라이브 380~414px)에 묻혀 «눌렀는데 아무 일도 없음»이 된다. */}
+        {/* story #2105 2차 — handleAdd이 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
+            시도마다 언마운트→리마운트된다. */}
+        {error && (
+          <p role="alert" aria-live="assertive" aria-atomic="true" className="border-t border-border px-4 py-2 text-xs text-destructive">
+            {error.message}
+            {error.kind === 'policy' ? (
+              <>
+                {' · '}
+                <Link href={`/organization/workforce/${error.agentId}`} className="text-primary underline">
+                  {t('policyDeniedManageLink')}
+                </Link>
+              </>
+            ) : null}
+          </p>
+        )}
 
         {/* Footer */}
         <div className="flex justify-end gap-2 border-t border-border px-4 py-3">

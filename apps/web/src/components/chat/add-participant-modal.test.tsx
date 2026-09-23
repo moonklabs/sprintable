@@ -166,3 +166,48 @@ describe('AddParticipantModal — story #3049(AgentIdentity 헤어라인+신호 
     expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
   });
 });
+
+// story #4193 — 거부/실패 안내가 스크롤 목록 맨 끝이 아니라 목록 밖 고정 줄(목록과 푸터 사이)에 뜬다.
+const MANY_MEMBERS = [
+  ...Array.from({ length: 20 }, (_, i) => ({ id: `m-${i}`, name: `멤버${i + 1}`, type: 'human' })),
+  { id: 'a-bot', name: '점검봇', type: 'agent' },
+];
+const POLICY_DENIED = {
+  ok: false, status: 403,
+  json: async () => ({
+    data: null,
+    error: { code: 'AGENT_MESSAGE_POLICY_DENIED', message: 'x', details: { agent_id: 'a-bot', member_id: 'm-0', reason: 'allowlist_miss' } },
+    meta: null,
+  }),
+};
+
+function assertAlertOutsideScroll(footerButtonText: string) {
+  const alert = document.body.querySelector('[role="alert"]') as HTMLElement | null;
+  expect(alert).not.toBeNull();
+  // 스크롤 목록(max-h-[60vh] overflow-y-auto)의 자식이 아니다 — 목록 길이와 무관하게 클릭 직후 보인다.
+  const scroll = document.body.querySelector('.overflow-y-auto') as HTMLElement;
+  expect(scroll.contains(alert)).toBe(false);
+  // 목록과 푸터 사이 고정 줄: 바로 다음 형제가 푸터(주 버튼을 품은 줄)다.
+  expect(alert!.previousElementSibling).toBe(scroll);
+  expect([...alert!.nextElementSibling!.querySelectorAll('button')].some((b) => b.textContent === footerButtonText)).toBe(true);
+}
+
+describe('AddParticipantModal — 안내는 스크롤 목록 밖(story #4193)', () => {
+  function manyFetch(post: () => unknown) {
+    return vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: MANY_MEMBERS }) };
+      if (url === `/api/conversations/${CONV_ID}/participants` && init?.method === 'POST') return post();
+      return { ok: true, json: async () => ({}) };
+    });
+  }
+
+  it('멤버 20명 — 정책 거부 안내가 목록 밖, 푸터 바로 위', async () => {
+    await mountAndSelectBot(manyFetch(() => POLICY_DENIED));
+    assertAlertOutsideScroll(koMessages.chats.addParticipants);
+  });
+
+  it('일반 실패 안내도 같은 자리', async () => {
+    await mountAndSelectBot(manyFetch(() => ({ ok: false, status: 500, json: async () => ({ data: null, error: { code: 'HTTP_500', message: 'boom' }, meta: null }) })));
+    assertAlertOutsideScroll(koMessages.chats.addParticipants);
+  });
+});
