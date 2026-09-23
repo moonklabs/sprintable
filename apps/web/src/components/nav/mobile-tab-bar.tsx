@@ -137,6 +137,19 @@ function isResourcePath(pathname: string, resourceFragment: string): boolean {
   return segments[2] === resourceFragment;
 }
 
+/**
+ * story #4226(PO 판단) — flat(static kind) 탭 링크는 처음부터 `?p={현재 프로젝트}`를 싣는다. 착지한 flat 화면에서 셸이 `?p=`를
+ * 다시 채우려 router.replace(= 현재 페이지 RSC 재요청)를 부르던 조건 자체가 안 생긴다(탭 이동 RSC 2→1). scoped(resource kind)
+ * 탭은 경로가 프로젝트를 싣고 있어 붙이지 않는다. 프로젝트를 아직 모르면 그대로.
+ */
+export function withTabProjectParam(href: string, dest: { kind: 'static' | 'resource' } | null | undefined, projectId: string | undefined): string {
+  if (!projectId || dest?.kind !== 'static') return href;
+  const [path, query = ''] = href.split('?');
+  const sp = new URLSearchParams(query);
+  sp.set('p', projectId);
+  return `${path}?${sp.toString()}`;
+}
+
 // static kind 목적지의 쿼리 부분을 뗀다 — usePathname()은 쿼리스트링을 안 싣는다.
 function staticPathOnly(staticPath: string): string {
   return staticPath.split('?')[0]!;
@@ -206,7 +219,7 @@ export function MobileTabBar({
   const dest = useMemo(() => resolveNavV3Destinations(navV3Flags), [navV3Flags]);
   // story #4211 — 사이드바(app-sidebar resourceLink)와 같은 소스(대시보드 컨텍스트의 현재 org slug·project slug)로
   // resource 탭을 /{ws}/{proj}/{resource} 직접 경로로. 컨텍스트 밖이거나 slug를 모르면 bare(안전망).
-  const { orgId, orgMemberships, currentProjectSlug, projectPathUnresolved } = useDashboardContext();
+  const { orgId, orgMemberships, currentProjectSlug, projectPathUnresolved, projectId } = useDashboardContext();
   const scope = useMemo<TabHrefScope>(() => ({
     orgSlug: orgMemberships.find((o) => o.orgId === orgId)?.orgSlug,
     projectSlug: currentProjectSlug,
@@ -282,7 +295,7 @@ export function MobileTabBar({
     >
       {tabs.map((tab) => {
         const { key, icon: Icon, labelKey, namespace } = tab;
-        const href = resolveTabHref(tab, dest, scope);
+        const href = withTabProjectParam(resolveTabHref(tab, dest, scope), dest[tab.destKey], projectId);
         const active = key === activeKey;
         // story #4226 — 지금 보는 바로 그 페이지를 가리키는 탭은 프리패치하지 않는다(로컬 prod 빌드 실측: 착지 ≈1.4초 뒤
         // 현재 페이지 RSC 데이터 프리패치 1건 — 이미 떠 있는 화면이라 쓸 곳이 없다). «활성»이 아니라 «경로 일치»로 가른다 —

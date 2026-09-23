@@ -11,12 +11,9 @@ import { act, type ReactNode, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const nav = { pathname: '/repro/beta/flow', search: '' };
-// story #4226 — 셸의 `?p=` 정규화는 Next 라우터를 거치지 않는다(router.replace = 현재 페이지 RSC 재요청 · 라우터 디스패치 =
-// 대기 중인 이동과 경합). scoped 경로는 쓰지 않고, flat 경로는 지금 항목의 Next 상태(`__NA`)를 실어 replaceState(Next 패치가
-// 내부 호출로 통과 · 디스패치 0). 여기선 주소 변화를 nav.search로 비추고, 호출마다 URL·실어 보낸 상태를 기록한다.
-const routerReplace = vi.fn();
-const replaceStateUrls: string[] = [];
-const replaceStateData: unknown[] = [];
+// story #4226 — scoped 경로는 `?p=` 정규화를 안 한다(경로가 SSOT) · flat 경로의 드문 진입만 router.replace(Next가 아는 이동 →
+// useSearchParams 반영). router.replace는 호출을 기록하고 nav.search를 갱신해 Next 동작을 비춘다.
+const routerReplace = vi.fn((u: string) => { nav.search = u.split('?')[1] ?? ''; });
 vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
   useSearchParams: () => new URLSearchParams(nav.search),
@@ -86,15 +83,6 @@ beforeAll(async () => {
     });
     return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
-  const nativeReplaceState = window.history.replaceState.bind(window.history);
-  window.history.replaceState = ((data: unknown, unused: string, url?: string | URL | null) => {
-    // `__NA` 실은 호출은 Next가 라우터에 반영하지 않는다(useSearchParams 무변 · pin 테스트 참고) → nav.search를 안 건드린다.
-    if (url != null) {
-      replaceStateUrls.push(String(url)); replaceStateData.push(data);
-      if (!(data as { __NA?: boolean } | null)?.__NA) nav.search = String(url).split('?')[1] ?? '';
-    }
-    nativeReplaceState(data, unused, url);
-  }) as typeof window.history.replaceState;
   // 앱 루트 관문(FetchGateInstaller, PR #4565) — 셸 유무와 무관하게 상주.
   const { installProjectHeaderInterceptor } = await import('@/lib/project-context-client');
   installProjectHeaderInterceptor();
@@ -133,9 +121,7 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(seen.at(-1)?.projectId).toBe(B);
 
     const mark = sent.length;
-    // Next 항목 상태를 깔아 둔다 — scoped 갈래가 `__NA` 가드가 아니라 «경로가 SSOT» 조건으로 안 쓰는지만 보게.
-    window.history.replaceState({ __NA: true }, '', '/repro/beta/flow');
-    const replaceMark = replaceStateUrls.length;
+    routerReplace.mockClear();
     await renderShellAt('/repro/charlie/flow');
     expect(seen.at(-1)).toEqual({ name: 'Project Charlie', projectId: C });
     expect(sidebar.slug).toBe('charlie');
@@ -145,34 +131,18 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     // ⭐쓰기 — C 화면에서 만든 스토리가 C로(수정 전 로컬 실측은 B에 저장).
     const write = after.find((r) => r.body);
     expect(write?.body?.project_id).toBe(C);
-    // ⭐story #4226 — scoped 경로는 경로가 프로젝트 SSOT라 `?p=`를 쓰지 않는다(서버 왕복·history 조작 둘 다 0).
+    // ⭐story #4226 — scoped 경로는 경로가 프로젝트 SSOT라 `?p=`를 쓰지 않는다(현재 페이지 RSC 재요청 0).
     expect(routerReplace).not.toHaveBeenCalled();
-    expect(replaceStateUrls.slice(replaceMark)).toEqual([]);
   });
 
-  it('⭐story #4226 — flat 경로는 지금 항목의 Next 상태(`__NA`)를 실어 즉시 한 번 · 재렌더 추가 0 · Next 항목이 아니면 안 씀', async () => {
-    window.history.replaceState(null, '', '/inbox');
+  it('⭐story #4226 — flat 경로의 드문 진입(`?p=` 없음)은 router.replace 한 번 · Next가 새 `p`를 읽은 뒤 재렌더 추가 0', async () => {
     nav.search = '';
-    const mark = replaceStateUrls.length;
+    routerReplace.mockClear();
     await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
-    expect(replaceStateUrls.slice(mark)).toEqual([]); // history.state에 __NA 없음 → 건드리지 않음
-
-    const nextState = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: 'inbox' } };
-    window.history.replaceState(nextState, '', '/inbox');
-    replaceStateUrls.length = mark; replaceStateData.length = mark;
-    nav.search = '';
+    expect(routerReplace).toHaveBeenCalledTimes(1);
+    expect(routerReplace.mock.calls[0]![0]).toMatch(/^\/inbox\?p=/);
     await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
-    const written = replaceStateUrls.slice(mark);
-    expect(written).toHaveLength(1);
-    expect(written[0]).toMatch(/^\/inbox\?p=/);
-    // Next 패치는 `__NA` 호출을 내부 호출로 보고 디스패치 없이 통과 — 대기 중인 이동을 ACTION_RESTORE로 덮지 않는다.
-    expect(replaceStateData.slice(mark)[0]).toBe(nextState);
-    expect(routerReplace).not.toHaveBeenCalled();
-    // Next는 이 `?p=`를 모르니(nav.search 그대로 빈 값) 재렌더마다 «다르다»로 보인다 — 주소창 판정으로 다시 안 쓴다.
-    expect(new URLSearchParams(nav.search).get('p')).toBeNull();
-    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
-    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
-    expect(replaceStateUrls.slice(mark)).toHaveLength(1);
+    expect(routerReplace).toHaveBeenCalledTimes(1);
   });
 
   it('scoped → flat 클라이언트 이동은 옛 서버 pathProjectId(B)를 쓰지 않는다 — `?p=`(탭 값) 기준(하드 로드와 같음)', async () => {

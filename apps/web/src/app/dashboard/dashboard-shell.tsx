@@ -321,6 +321,7 @@ function useProjectSsot(
   // story #4217 — 경로 프로젝트를 못 풀어 전체 문서 이동을 기다리는 중이면 확정 보류(undefined · `?p=`·탭 저장 안 씀).
   suspended = false,
 ): string | undefined {
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get('p');
@@ -332,7 +333,7 @@ function useProjectSsot(
   // effectiveProjectId 값이 바뀔 수 있다. 그 값이 서버 렌더 결과와 다르면 하이드레이션 직후
   // useEffect가 즉시 다른 URL로 replace를 걸어 자식(GlanceBoard 등) subtree를 다시 흔든다.
   // hydrated로 한 틱 미뤄 첫 렌더(서버+첫 클라이언트 둘 다)를 항상 동일하게 만들면 이 잦은
-  // 재-replace 근원 하나가 사라진다 — `?p=` 정규화 자체(2번째 소스)는 여전히 필요하면 실행(story #4226부터 서버 왕복 없는 history).
+  // 재-replace 근원 하나가 사라진다 — router.replace 자체(2번째 소스)는 여전히 필요하면 실행(story #4226부터 flat 경로의 드문 진입만).
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { startTransition(() => setHydrated(true)); }, []);
 
@@ -350,28 +351,20 @@ function useProjectSsot(
   // 탭별 backstop 영속 + URL 정규화(`?p=` 누락/불일치 시 effective 로 replace → 링크 드롭에도 stale 방지).
   // story #4226(E-MOBILE-SPEED) — `?p=`는 이 셸(클라)만 읽는다(서버 컴포넌트·proxy 소비 0). 그런데 router.replace는 현재 페이지 RSC를
   // 다시 받아 왔다: 착지마다 같은 페이지 RSC 1건 + 라우터 트리가 바뀌어 탭·링크 프리패치 한 바퀴 더, 탭 이동마다 같은 ms에 RSC 2건
-  // (로컬 prod 빌드 · 요청별 history/헤더 실측). 주소창만 고치면 되므로 Next 라우터를 거치지 않는다:
+  // (로컬 prod 빌드 · 요청별 history/헤더 실측). PO 판단(까디르 QA 2회 뒤) — 주소를 Next 몰래 고치지 않는다:
   // - scoped 경로(`/{ws}/{proj}/…` · pathProjectId 있음): 경로가 프로젝트 SSOT라 `?p=`를 읽는 곳이 없다
-  //   (resolveEffectiveProjectId가 pathProjectId를 먼저 반환) → 쓰지 않는다.
-  // - flat 경로: 지금 history 항목의 Next 상태(`__NA`)를 그대로 실어 replaceState — Next 패치는 `__NA` 호출을 내부 호출로 보고
-  //   그대로 통과시킨다(ACTION_RESTORE 디스패치 0). 디스패치하면(까디르 QA · 4585 1차) 그 사이 대기 중인 router.push/replace를
-  //   RESTORE가 덮어 옛 화면에 남길 수 있었다. 라우터 상태를 안 건드리니 대기 이동과 경합 자체가 없고, 항목의 Next 상태가 남아
-  //   뒤로/앞으로 가기도 그대로. Next 항목이 아니면(`__NA` 없음) 건드리지 않는다.
-  //   ⛔Next 비공개 내부 동작 의존(16.2.2 확인) — 걸림 테스트 `next-history-na-passthrough.pin.test.ts`가 설치된 next의 실제 패치
-  //   코드로 «`__NA` 호출 = 디스패치 0»을 단언한다(Next를 올리면 거기가 먼저 RED).
-  //   대가: Next의 useSearchParams는 이 `?p=`를 모른다 — flat 경로의 탭별 값은 위 sessionStorage 백스톱이 이미 같은 값이라 무해.
-  //   그래서 «이미 주소창에 같은 `?p=`»면 다시 쓰지 않는다(Next 쪽 값만 보면 매번 다르게 보이니 주소창으로 판정).
+  //   (resolveEffectiveProjectId가 pathProjectId를 먼저 반환) → 쓰지 않는다. 착지 RSC 1→0은 이걸로.
+  // - flat 탭(결재·대화·더보기 등)은 탭바 링크가 처음부터 `?p={effective}`를 싣고 간다(mobile-tab-bar) → 착지 때 정규화 조건이
+  //   안 생긴다. 그 밖의 드문 flat 진입만 여기서 router.replace — Next가 아는 이동이라 액션 큐 안에서 순서가 지켜지고
+  //   (대기 중인 이동과 경합 0), refresh 뒤에도 `?p=`가 남는다. RSC 1은 그 드문 경우에만.
   useEffect(() => {
     if (!effectiveProjectId || typeof window === 'undefined') return;
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, effectiveProjectId);
     if (pathProjectId || urlProjectId === effectiveProjectId) return;
-    if (new URLSearchParams(window.location.search).get('p') === effectiveProjectId) return;
-    const state = window.history.state as { __NA?: boolean } | null;
-    if (!state?.__NA) return;
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
     sp.set('p', effectiveProjectId);
-    window.history.replaceState(state, '', `${pathname}?${sp.toString()}`);
-  }, [effectiveProjectId, urlProjectId, pathProjectId, pathname, searchParams]);
+    router.replace(`${pathname}?${sp.toString()}`);
+  }, [effectiveProjectId, urlProjectId, pathProjectId, pathname, searchParams, router]);
 
   return effectiveProjectId;
 }
