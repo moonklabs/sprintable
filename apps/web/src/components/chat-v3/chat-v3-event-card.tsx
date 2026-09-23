@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { buildGateTransitionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
+import { toPlainPreview } from '@/components/chat/entity-ref';
 
 /**
  * story #3972 AC1 그라운딩(페드루 PO 확認 2026-09-16 17:07Z) — 이 카드는 옛
@@ -70,7 +71,9 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
   return (
     <Card className="max-w-md border-warning-border bg-warning-tint p-3.5" data-testid="chat-v3-event-card">
       <Badge variant="warning" className="mb-1.5">{t('eventCardBadge')}</Badge>
-      <p className="text-sm font-medium text-foreground">{content}</p>
+      {/* story #4187 — 카드 제목 자리(메시지 원문을 옮긴 한 줄 요약)도 미리보기 변환을 거친다 — 내부 HTML 주석·
+          마크다운 링크 문법이 제목에 새지 않게(스레드 레일 미리보기와 같은 규칙, entity-ref.ts SSOT). */}
+      <p className="text-sm font-medium text-foreground">{toPlainPreview(content)}</p>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {isInTodayQueue ? (
           <Button asChild size="sm">
