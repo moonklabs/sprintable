@@ -11,10 +11,12 @@ import { act, type ReactNode, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const nav = { pathname: '/repro/beta/flow', search: '' };
-// story #4226 — 셸의 `?p=` 정규화는 서버 왕복(router.replace = 현재 페이지 RSC 재요청) 없이 네이티브 history.replaceState로 한다.
-// Next가 그 호출을 useSearchParams에 동기화하는 몫을 여기선 nav.search 갱신으로 흉내 낸다 · router.replace는 호출 여부만 센다.
+// story #4226 — 셸의 `?p=` 정규화는 Next 라우터를 거치지 않는다(router.replace = 현재 페이지 RSC 재요청 · 라우터 디스패치 =
+// 대기 중인 이동과 경합). scoped 경로는 쓰지 않고, flat 경로는 지금 항목의 Next 상태(`__NA`)를 실어 replaceState(Next 패치가
+// 내부 호출로 통과 · 디스패치 0). 여기선 주소 변화를 nav.search로 비추고, 호출마다 URL·실어 보낸 상태를 기록한다.
 const routerReplace = vi.fn();
 const replaceStateUrls: string[] = [];
+const replaceStateData: unknown[] = [];
 vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
   useSearchParams: () => new URLSearchParams(nav.search),
@@ -86,7 +88,11 @@ beforeAll(async () => {
   }) as typeof fetch;
   const nativeReplaceState = window.history.replaceState.bind(window.history);
   window.history.replaceState = ((data: unknown, unused: string, url?: string | URL | null) => {
-    if (url != null) { replaceStateUrls.push(String(url)); nav.search = String(url).split('?')[1] ?? ''; }
+    // `__NA` 실은 호출은 Next가 라우터에 반영하지 않는다(useSearchParams 무변 · pin 테스트 참고) → nav.search를 안 건드린다.
+    if (url != null) {
+      replaceStateUrls.push(String(url)); replaceStateData.push(data);
+      if (!(data as { __NA?: boolean } | null)?.__NA) nav.search = String(url).split('?')[1] ?? '';
+    }
     nativeReplaceState(data, unused, url);
   }) as typeof window.history.replaceState;
   // 앱 루트 관문(FetchGateInstaller, PR #4565) — 셸 유무와 무관하게 상주.
@@ -99,7 +105,7 @@ beforeAll(async () => {
 
 afterAll(() => { container.remove(); });
 
-async function renderShellAt(pathname: string, overrides: Partial<typeof serverProps> = {}, { flushTimers = true } = {}) {
+async function renderShellAt(pathname: string, overrides: Partial<typeof serverProps> = {}) {
   nav.pathname = pathname;
   const { DashboardShell, useDashboardContext } = await import('./dashboard-shell');
   // 경로마다 새로 마운트되는 «페이지» — 첫 effect에서 읽기 1건 + 칸반 추가와 같은 모양의 쓰기 1건(project_id = 컨텍스트 값).
@@ -117,8 +123,6 @@ async function renderShellAt(pathname: string, overrides: Partial<typeof serverP
     root.render(<DashboardShell {...serverProps} {...overrides}><Page key={pathname} /></DashboardShell>);
   });
   await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
-  // story #4226 — `?p=` 정규화는 한 틱 미뤄진다(Next history 패치 설치 뒤) → 매크로태스크 한 번 흘려보낸다.
-  if (flushTimers) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
 const since = (n: number) => sent.slice(n);
@@ -129,12 +133,10 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(seen.at(-1)?.projectId).toBe(B);
 
     const mark = sent.length;
+    // Next 항목 상태를 깔아 둔다 — scoped 갈래가 `__NA` 가드가 아니라 «경로가 SSOT» 조건으로 안 쓰는지만 보게.
+    window.history.replaceState({ __NA: true }, '', '/repro/beta/flow');
     const replaceMark = replaceStateUrls.length;
-    // ⭐story #4226 — 커밋 안에서는 부르지 않는다(Next가 AppRouter effect에서 history 패치를 설치하기 전이면 내부 상태가 빠진
-    // 항목이 남아 뒤로 가기가 깨진다 · 로컬 실측) → 한 틱 뒤 한 번.
-    await renderShellAt('/repro/charlie/flow', {}, { flushTimers: false });
-    expect(replaceStateUrls.slice(replaceMark)).toEqual([]);
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await renderShellAt('/repro/charlie/flow');
     expect(seen.at(-1)).toEqual({ name: 'Project Charlie', projectId: C });
     expect(sidebar.slug).toBe('charlie');
     const after = since(mark);
@@ -143,13 +145,34 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     // ⭐쓰기 — C 화면에서 만든 스토리가 C로(수정 전 로컬 실측은 B에 저장).
     const write = after.find((r) => r.body);
     expect(write?.body?.project_id).toBe(C);
-    expect(new URLSearchParams(nav.search).get('p')).toBe(C);
-    // ⭐story #4226 — `?p=` 정규화가 서버 왕복(router.replace → 현재 페이지 RSC)을 부르지 않고 같은 경로 history 한 번으로 끝난다.
+    // ⭐story #4226 — scoped 경로는 경로가 프로젝트 SSOT라 `?p=`를 쓰지 않는다(서버 왕복·history 조작 둘 다 0).
     expect(routerReplace).not.toHaveBeenCalled();
-    expect(replaceStateUrls.slice(replaceMark)).toEqual([`/repro/charlie/flow?p=${C}`]);
-    // 새 `p`를 읽은 뒤 effect가 다시 쓰지 않는다(루프 0) — 같은 경로로 한 번 더 렌더해도 추가 호출 없음.
-    await renderShellAt('/repro/charlie/flow');
-    expect(replaceStateUrls.slice(replaceMark)).toHaveLength(1);
+    expect(replaceStateUrls.slice(replaceMark)).toEqual([]);
+  });
+
+  it('⭐story #4226 — flat 경로는 지금 항목의 Next 상태(`__NA`)를 실어 즉시 한 번 · 재렌더 추가 0 · Next 항목이 아니면 안 씀', async () => {
+    window.history.replaceState(null, '', '/inbox');
+    nav.search = '';
+    const mark = replaceStateUrls.length;
+    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
+    expect(replaceStateUrls.slice(mark)).toEqual([]); // history.state에 __NA 없음 → 건드리지 않음
+
+    const nextState = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: 'inbox' } };
+    window.history.replaceState(nextState, '', '/inbox');
+    replaceStateUrls.length = mark; replaceStateData.length = mark;
+    nav.search = '';
+    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
+    const written = replaceStateUrls.slice(mark);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatch(/^\/inbox\?p=/);
+    // Next 패치는 `__NA` 호출을 내부 호출로 보고 디스패치 없이 통과 — 대기 중인 이동을 ACTION_RESTORE로 덮지 않는다.
+    expect(replaceStateData.slice(mark)[0]).toBe(nextState);
+    expect(routerReplace).not.toHaveBeenCalled();
+    // Next는 이 `?p=`를 모르니(nav.search 그대로 빈 값) 재렌더마다 «다르다»로 보인다 — 주소창 판정으로 다시 안 쓴다.
+    expect(new URLSearchParams(nav.search).get('p')).toBeNull();
+    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
+    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
+    expect(replaceStateUrls.slice(mark)).toHaveLength(1);
   });
 
   it('scoped → flat 클라이언트 이동은 옛 서버 pathProjectId(B)를 쓰지 않는다 — `?p=`(탭 값) 기준(하드 로드와 같음)', async () => {

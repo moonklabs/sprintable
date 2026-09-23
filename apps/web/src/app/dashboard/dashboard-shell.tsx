@@ -350,21 +350,28 @@ function useProjectSsot(
   // 탭별 backstop 영속 + URL 정규화(`?p=` 누락/불일치 시 effective 로 replace → 링크 드롭에도 stale 방지).
   // story #4226(E-MOBILE-SPEED) — `?p=`는 이 셸(클라)만 읽는다(서버 컴포넌트·proxy 소비 0). 그런데 router.replace는 현재 페이지 RSC를
   // 다시 받아 왔다: 착지마다 같은 페이지 RSC 1건 + 라우터 트리가 바뀌어 탭·링크 프리패치 한 바퀴 더, 탭 이동마다 같은 ms에 RSC 2건
-  // (로컬 prod 빌드 · 요청별 history/헤더 실측). 주소창만 고치면 되므로 네이티브 history.replaceState — Next(14.1+)가 이를
-  // useSearchParams/usePathname에 동기화하고 서버 왕복은 없다.
-  // ⛔한 틱 미룬다: Next는 그 동기화 패치(history.replaceState 가로채기 → 내부 상태 복사 + 라우터 반영)를 AppRouter의 useEffect에서
-  // 설치하는데, 부모 effect는 자식(이 셸) effect보다 늦게 돈다. 하이드레이션 커밋에서 바로 부르면 패치 전이라 history 항목이 Next
-  // 내부 상태 없이 남고(뒤로 가기로 이 항목에 오면 Next popstate가 무시 → 주소만 바뀌고 화면은 그대로 · 로컬 실측) 라우터도 `?p=`를 모른다.
+  // (로컬 prod 빌드 · 요청별 history/헤더 실측). 주소창만 고치면 되므로 Next 라우터를 거치지 않는다:
+  // - scoped 경로(`/{ws}/{proj}/…` · pathProjectId 있음): 경로가 프로젝트 SSOT라 `?p=`를 읽는 곳이 없다
+  //   (resolveEffectiveProjectId가 pathProjectId를 먼저 반환) → 쓰지 않는다.
+  // - flat 경로: 지금 history 항목의 Next 상태(`__NA`)를 그대로 실어 replaceState — Next 패치는 `__NA` 호출을 내부 호출로 보고
+  //   그대로 통과시킨다(ACTION_RESTORE 디스패치 0). 디스패치하면(까디르 QA · 4585 1차) 그 사이 대기 중인 router.push/replace를
+  //   RESTORE가 덮어 옛 화면에 남길 수 있었다. 라우터 상태를 안 건드리니 대기 이동과 경합 자체가 없고, 항목의 Next 상태가 남아
+  //   뒤로/앞으로 가기도 그대로. Next 항목이 아니면(`__NA` 없음) 건드리지 않는다.
+  //   ⛔Next 비공개 내부 동작 의존(16.2.2 확인) — 걸림 테스트 `next-history-na-passthrough.pin.test.ts`가 설치된 next의 실제 패치
+  //   코드로 «`__NA` 호출 = 디스패치 0»을 단언한다(Next를 올리면 거기가 먼저 RED).
+  //   대가: Next의 useSearchParams는 이 `?p=`를 모른다 — flat 경로의 탭별 값은 위 sessionStorage 백스톱이 이미 같은 값이라 무해.
+  //   그래서 «이미 주소창에 같은 `?p=`»면 다시 쓰지 않는다(Next 쪽 값만 보면 매번 다르게 보이니 주소창으로 판정).
   useEffect(() => {
     if (!effectiveProjectId || typeof window === 'undefined') return;
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, effectiveProjectId);
-    if (urlProjectId === effectiveProjectId) return;
+    if (pathProjectId || urlProjectId === effectiveProjectId) return;
+    if (new URLSearchParams(window.location.search).get('p') === effectiveProjectId) return;
+    const state = window.history.state as { __NA?: boolean } | null;
+    if (!state?.__NA) return;
     const sp = new URLSearchParams(Array.from(searchParams.entries()));
     sp.set('p', effectiveProjectId);
-    const url = `${pathname}?${sp.toString()}`;
-    const timer = window.setTimeout(() => { window.history.replaceState(null, '', url); }, 0);
-    return () => window.clearTimeout(timer);
-  }, [effectiveProjectId, urlProjectId, pathname, searchParams]);
+    window.history.replaceState(state, '', `${pathname}?${sp.toString()}`);
+  }, [effectiveProjectId, urlProjectId, pathProjectId, pathname, searchParams]);
 
   return effectiveProjectId;
 }
