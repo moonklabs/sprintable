@@ -601,6 +601,7 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
     kind`)를 그대로 재사용 — `site_posts.py::SitePostExternalPublishError.error_code`가
     그 표의 기존 문자열(CHANNEL_CONNECTION_NOT_ACTIVE 등)을 그대로 쓰므로 새 매핑을
     안 만든다."""
+    from app.services.external_publish_pause import ExternalPublishPausedError
     from app.services.site_posts import (
         SitePostExternalPublishError,
         publish_site_post_external_command,
@@ -630,6 +631,12 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
         command.status = "completed"
         command.last_error = None
         command.failure_kind = None
+        return
+    except ExternalPublishPausedError as exc:
+        # story #4195(PO 리뷰) — 지금 이 분기가 부르는 publish_site_post_external_command엔 pause 검사가 없어
+        # 실제로는 안 오지만(검사는 즉시-발행 publish_site_post_from_draft에만), 채널 분기와 같은 규칙을 여기도
+        # 둔다 — 나중에 발행 경로 안에 검사가 들어와도 미분류 실패(→dead_letter)로 새지 않게.
+        await _block_for_external_publish_pause(db, command, now=now, reason=exc.reason)
         return
     except SitePostExternalPublishError as exc:
         error_code, last_error = exc.error_code, str(exc)

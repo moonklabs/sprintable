@@ -212,3 +212,40 @@ async def test_self_heal_leaves_still_paused_orgs_alone():
         assert blocked.status == "blocked" and blocked.failure_kind == "paused"
     finally:
         await engine.dispose()
+
+
+async def test_site_post_branch_maps_pause_raised_inside_publish_to_blocked_paused():
+    """PO 리뷰 — 사이트(블로그) 명령 분기도 같은 규칙: 진입 검사를 통과한 뒤 발행 함수 안에서 pause가 나면
+    blocked·paused·attempt 불변(미분류 실패로 새지 않게). 지금 분기가 부르는 publish_site_post_external_command엔
+    pause 검사가 없어 그 함수가 pause를 던지게 바꿔 끼워 경로를 강제한다."""
+    from datetime import datetime, timezone
+
+    from app.services.external_publish_pause import ExternalPublishPausedError
+    from app.services.publication_command import _process_one_command, create_or_get_publication_command
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id = await _seed_org(s)
+            owner_id = await _seed_human(s, org_id, role="owner")
+            cmd, _ = await create_or_get_publication_command(
+                s, org_id=org_id, gate_id=uuid.uuid4(), destination=uuid.uuid4(), approved_version=uuid.uuid4(),
+                requested_by_member_id=owner_id, scheduled_at=None, content_kind="site_post",
+            )
+            cmd.status = "in_progress"
+            await s.commit()
+            attempts_before = cmd.attempt_count
+
+            with patch(
+                "app.services.site_posts.publish_site_post_external_command",
+                AsyncMock(side_effect=ExternalPublishPausedError(reason="t")),
+            ):
+                await _process_one_command(s, cmd, now=datetime.now(timezone.utc))
+                await s.commit()
+            await s.refresh(cmd)
+        assert cmd.status == "blocked"
+        assert cmd.failure_kind == "paused"
+        assert cmd.attempt_count == attempts_before
+        assert cmd.next_attempt_at is None
+    finally:
+        await engine.dispose()
