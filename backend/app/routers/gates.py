@@ -296,6 +296,9 @@ class GateResponse(BaseModel):
     # (제출은 됐지만 멀티목적지 pending이라 이 승인이 승계하지 않음).
     linked_site_draft: "LinkedSiteDraft | None" = None
     linked_site_draft_pending: bool = False
+    # story #4190(PO 12:16Z · 유나 빈 상태 절) — 보여 줄 초안이 **없을 때만** 채운다: 레시피 정의 capability로 가른 초안 종류
+    # (`events.recipe_draft_kind`). FE는 빈 상태 문구 고르기에만 쓴다(channel_post → 채널 · site_post → 블로그 · null → 중립).
+    linked_draft_kind: Literal["channel_post", "site_post"] | None = None
     # story #4135(PO 실측 2026-09-22) — concept_approval·structure_approval 게이트의
     # «확定 대상 실물». `_enrich_linked_evidence()`가 매 응답마다 배선(linked_channel_draft와
     # 동일 선례) — 그 gate_type이 아니거나(_GATE_TYPE_EXPECTED_EVIDENCE_KINDS 미등재)
@@ -577,6 +580,7 @@ async def _enrich_linked_channel_draft(
     if shown is None:
         resp.linked_channel_draft_pending = channel_pending
         resp.linked_site_draft_pending = site_pending
+        resp.linked_draft_kind = await _recipe_draft_kind_for_gate(session, org_id, facts.get("triggered_by_event"))
         return
     if shown.kind == "site_post":
         resp.linked_site_draft = await _build_linked_site_draft(
@@ -588,6 +592,28 @@ async def _enrich_linked_channel_draft(
         session, draft=shown.draft, latest=shown.latest,
         scoped_gate_status=shown.scoped_gate.status, sealed_scheduled_at=shown.scoped_gate.sealed_scheduled_at,
     )
+
+
+async def _recipe_draft_kind_for_gate(session: AsyncSession, org_id: uuid.UUID, definition_key) -> str | None:
+    """레시피 게이트 `neutral_facts.triggered_by_event`(= 정의 key)로 정의를 찾아 초안 종류를 가른다. 조직 정의가 같은 key의
+    플랫폼 정의보다 앞선다. 못 찾으면 None(중립 문구)."""
+    if not isinstance(definition_key, str) or not definition_key:
+        return None
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+    from app.routers.events import recipe_draft_kind
+
+    rows = (await session.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == definition_key,
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalars().all()
+    if not rows:
+        return None
+    definition = next((d for d in rows if d.org_id is not None), rows[0])
+    return recipe_draft_kind(definition)
 
 
 async def _build_linked_site_draft(

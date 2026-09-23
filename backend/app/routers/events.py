@@ -1394,6 +1394,22 @@ def _stage_capability_kind(stage_meta: dict | None) -> str | None:
     return capability.get("kind") if isinstance(capability, dict) else None
 
 
+# story #4190(PO 12:16Z) — 이 레시피가 다루는 초안 종류. 레시피 게이트 승인 화면의 **빈 상태 문구 고르기에만** 쓴다(카드 분기는
+# 게이트 응답의 `linked_*_draft`). 판별은 `_stage_capability_kind` 하나(두 번째 판별 금지) — 블로그 단계 kind가 있으면 site_post,
+# 채널 발행 kind(`publish`)가 있으면 channel_post, 둘 다 없으면 None(모르는 레시피 → 중립 문구).
+_SITE_POST_CAPABILITY_KINDS = frozenset({"draft_site_post", "submit_site_post", "site_post_auto_publish"})
+_CHANNEL_POST_CAPABILITY_KINDS = frozenset({"publish"})
+
+
+def recipe_draft_kind(definition) -> str | None:
+    kinds = {_stage_capability_kind(meta) for meta in (definition.stage_metadata or {}).values()}
+    if kinds & _SITE_POST_CAPABILITY_KINDS:
+        return "site_post"
+    if kinds & _CHANNEL_POST_CAPABILITY_KINDS:
+        return "channel_post"
+    return None
+
+
 def _next_recipe_stage(definition, stage: str) -> str | None:
     """story #4076 — `definition.payload_schema.properties.stage.enum`에서 `stage` 바로
     다음 원소. `_render_event_message_content`(사이클 렌더러)·`_render_gate_verdict_message`

@@ -782,3 +782,81 @@ async def test_today_marks_recipe_publish_gate_so_low_risk_bulk_can_exclude_it()
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_empty_recipe_gate_names_the_draft_kind_from_the_recipe_definition():
+    """PO 12:16Z · 유나 빈 상태 절 — 보여 줄 초안이 없을 때 게이트 응답 `linked_draft_kind`가 레시피 정의 capability로 초안 종류를
+    가른다(FE 빈 상태 문구: 블로그 레시피 → «블로그 초안 없음» · 채널 레시피 → «채널 초안 없음» · 모르는 레시피 → 중립).
+    실 시드 정의로: 블로그(0399) → site_post · SNS 글(0396, capability publish) → channel_post · 없는 key → None.
+    초안이 보이면(카드가 있으면) 이 값은 채우지 않는다(카드 분기는 `linked_*_draft`). 뮤테이션: `recipe_draft_kind`의 블로그
+    분기 제거 → 블로그가 None으로 RED."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.routers.gates import to_gate_response
+    from app.services.gate_service import create_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            w = await _seed_site_world(s)
+            # 이 파일은 destructive(create_all)라 마이그레이션 시드 행이 없다 — 실 시드의 stage_metadata를 그 마이그레이션
+            # 모듈에서 그대로 읽어 같은 key의 플랫폼 정의(org_id NULL — `preset.*` key는 플랫폼 전용)로 넣는다.
+            await _seed_definition_from_migration(s, w["org_id"], "0399_preset_marketing_blog_article.py", "preset.marketing.blog_article")
+            await _seed_definition_from_migration(s, w["org_id"], "0396_preset_marketing_social_post_recipes.py", "preset.marketing.social_text_post")
+        got = {}
+        for key in ("preset.marketing.blog_article", "preset.marketing.social_text_post", "preset.nope.unknown"):
+            async with Session() as s:
+                story_id = await _seed_story(s, w["org_id"], (await _project_of(s, w["story_id"])))
+                gate = await create_gate(
+                    s, w["org_id"], story_id, "story", "external_publish", w["agent_id"], w["role_id"],
+                    neutral_facts={"triggered_by_event": key, "stage": "pending_approval"}, notify=False,
+                )
+                await s.commit()
+                resp = await to_gate_response(s, w["org_id"], await s.get(Gate, gate.id))
+                assert resp.linked_channel_draft is None and resp.linked_site_draft is None
+                got[key] = resp.linked_draft_kind
+        assert got == {
+            "preset.marketing.blog_article": "site_post",
+            "preset.marketing.social_text_post": "channel_post",
+            "preset.nope.unknown": None,
+        }, got
+
+        # 카드가 있으면 채우지 않는다.
+        wp = None
+        async with Session() as s:
+            wp = await _seed_wordpress_connection(s, w["org_id"], site_url="https://k.example.com")
+        recipe_id = await _recipe_gate(Session, w)
+        await _submit_site(app, Session, w, await _post_site_version(app, Session, w, wp, "kind-card"))
+        async with Session() as s:
+            resp = await to_gate_response(s, w["org_id"], await s.get(Gate, recipe_id))
+        assert resp.linked_site_draft is not None and resp.linked_draft_kind is None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def _project_of(s, story_id):
+    from app.models.pm import Story
+
+    return (await s.get(Story, story_id)).project_id
+
+
+async def _seed_definition_from_migration(s, _org_id, filename: str, key: str) -> None:
+    import importlib.util
+    from pathlib import Path
+
+    from app.models.event_definition import EventDefinition
+
+    path = Path(__file__).resolve().parents[1] / "alembic/versions" / filename
+    spec = importlib.util.spec_from_file_location(f"_mig_{filename[:4]}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if hasattr(mod, "_PRESETS"):
+        preset = next(p for p in mod._PRESETS if p["key"] == key)
+        stage_metadata, payload_schema = preset["stage_metadata"], preset["payload_schema"]
+    else:
+        stage_metadata, payload_schema = mod._STAGE_METADATA, mod._PAYLOAD_SCHEMA
+    s.add(EventDefinition(
+        key=key, org_id=None, name=key, payload_schema=payload_schema, routing={}, stage_metadata=stage_metadata,
+    ))
+    await s.commit()
