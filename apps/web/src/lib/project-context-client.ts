@@ -86,6 +86,24 @@ export function useOrgSyncVersion(): number {
 let interceptorInstalled = false;
 
 /**
+ * story #4184(PR #4565 PO 위험 (b)) — `/api/me` 재사용 무효화의 **제외 목록**: 사용자 손 없이 자주 나가고 `/me` 내용
+ * (역할·멤버십·프로필·2단계 인증·연결 계정·비밀번호)을 바꿀 수 없는 쓰기. 채팅 읽음 표시는 열린 대화에 새 메시지가 올
+ * 때마다 자동으로 나가(chat-view markRead) 그 «완료 시 무효화»가, 채팅 중 설정으로 가면 첫 fetchMe 캐시를 지워 2회가 됐다.
+ * 허용 목록(«`/me`를 바꾸는 쓰기만 무효화»)이 아니라 제외 목록인 이유: 새 엔드포인트가 목록에서 빠지면 허용 목록은 옛 값을
+ * 내고(정확성 결함) 제외 목록은 한 번 더 부를 뿐이다(성능). 여기 더할 때는 «이 쓰기가 /me를 바꿀 수 없다»를 한 줄로 적는다.
+ */
+const ME_INVALIDATION_EXEMPT_WRITES: readonly RegExp[] = [
+  // 채팅 읽음 표시(/api/chats·/api/conversations 두 prefix) — 대화 참여자의 읽음 위치만 바꾼다.
+  /^\/api\/(?:chats|conversations)\/[^/]+\/read$/,
+];
+
+export function isMeInvalidatingWrite(path: string, method: string): boolean {
+  const m = method.toUpperCase();
+  if (m === 'GET' || m === 'HEAD' || !path.startsWith('/api/')) return false;
+  return !ME_INVALIDATION_EXEMPT_WRITES.some((re) => re.test(path));
+}
+
+/**
  * same-origin `/api/*` 요청에 `X-Project-Id`+`X-Org-Id`(탭 effective project/org)를
  * 주입하는 단일 chokepoint. 호출부 전수 마이그레이션 대신 window.fetch 1점 패치 —
  * raw fetch 호출까지 빠짐없이 커버.
@@ -126,7 +144,7 @@ export function installProjectHeaderInterceptor(): void {
       const absolute = /^https?:\/\//.test(rawUrl);
       const writeSameOrigin = !absolute || new URL(rawUrl).origin === window.location.origin;
       const writePath = absolute ? new URL(rawUrl).pathname : rawUrl.split('?')[0];
-      isApiWrite = writeSameOrigin && writePath.startsWith('/api/') && method !== 'GET' && method !== 'HEAD';
+      isApiWrite = writeSameOrigin && isMeInvalidatingWrite(writePath, method);
     } catch {
       isApiWrite = false;
     }

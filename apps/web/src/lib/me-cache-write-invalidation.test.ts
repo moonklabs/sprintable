@@ -127,6 +127,21 @@ describe('/api/me 재사용 무효화 — 전역 fetch 쓰기(story #4184 까디
 // ③ 가드(PO 처방의 취지 — «raw 쓰기가 조용히 새지 않게») — 쓰기 무효화는 인터셉터 한 곳이라, 새 raw fetch 쓰기는 이미
 // 자동으로 덮인다. 대신 그 관문이 **설치돼 있다**는 사실 자체를 핀한다: 대시보드 셸이 렌더 단계에서(자식 fetch보다 먼저)
 // installProjectHeaderInterceptor()를 부른다. 이 줄이 빠지거나 effect로 옮겨지면 raw 쓰기 무효화가 통째로 꺼진다.
+describe('가드 — 쓰기 관문(fetch 인터셉터)이 앱 루트에서 설치된다(셸 밖 화면까지 · PO 위험 (a))', () => {
+  it('루트 layout이 body 안 첫 자리(children보다 앞)에 FetchGateInstaller를 렌더하고, 설치기가 렌더 단계에서 관문을 연다', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const layout = readFileSync(join(__dirname, '..', 'app', 'layout.tsx'), 'utf8');
+    const iInstaller = layout.indexOf('<FetchGateInstaller />');
+    const iChildren = layout.indexOf('{children}');
+    expect(iInstaller, '루트 설치기가 없다').toBeGreaterThan(-1);
+    expect(iInstaller).toBeLessThan(iChildren);
+    const installer = readFileSync(join(__dirname, '..', 'components', 'providers', 'fetch-gate-installer.tsx'), 'utf8');
+    expect(installer).toMatch(/^\s*installProjectHeaderInterceptor\(\);\s*$/m);
+    expect(installer).not.toMatch(/useEffect/);
+  });
+});
+
 describe('가드 — 쓰기 관문(fetch 인터셉터)이 대시보드 셸 렌더에서 설치된다', () => {
   it('dashboard-shell.tsx가 렌더 본문에서 installProjectHeaderInterceptor()를 부른다(useEffect 안이 아님)', async () => {
     const { readFileSync } = await import('node:fs');
@@ -140,5 +155,64 @@ describe('가드 — 쓰기 관문(fetch 인터셉터)이 대시보드 셸 렌�
     const openEffects = (before.match(/useEffect\(/g) ?? []).length;
     const closedEffects = (before.match(/\}, \[/g) ?? []).length;
     expect(openEffects - closedEffects, 'useEffect 안에서 설치하면 첫 로드 fetch가 관문을 안 지난다').toBeLessThanOrEqual(0);
+  });
+});
+
+// PO 위험 (b) — 재사용률. «설정 화면 열기 + 채팅 1회 보내기» 순서의 /api/me 네트워크 수를 잰다(설정 한 번 = 절 7곳이
+// fetchMe: 동시 5 + 첫 응답 뒤 순차 2 — 배포 18 CDP에서 본 모양). 주기적 non-GET은 없다(setInterval 콜백 전수: 쓰기 0 —
+// inbox 15초 새로고침은 GET). 사용자 손 없이 나가는 쓰기는 채팅 읽음 표시(/read, 열린 대화에 새 메시지가 올 때 1회·up_to 멱등).
+describe('재사용률 — 설정 열기·채팅 보내기 순서의 /api/me 수(PO 위험 (b))', () => {
+  async function openSettings(fetchMe: () => Promise<Response>) {
+    await Promise.all([fetchMe(), fetchMe(), fetchMe(), fetchMe(), fetchMe()]);
+    await fetchMe();
+    await fetchMe();
+  }
+  beforeEach(() => {
+    handler = async (url) => (url === '/api/me' ? meResponse(false) : new Response(null, { status: 200 }));
+  });
+
+  it('설정 열기 → 30초 안 다시 열기(쓰기 없음) = 1회', async () => {
+    const { fetchMe } = await load();
+    await openSettings(fetchMe);
+    await openSettings(fetchMe);
+    expect(meCalls()).toBe(1);
+  });
+
+  it('설정 열기 → 채팅 1회 보내기(POST) → 다시 열기 = 2회(쓰기 뒤 한 번만 새로)', async () => {
+    const { fetchMe } = await load();
+    await openSettings(fetchMe);
+    await window.fetch('/api/conversations/c1/messages', { method: 'POST', body: '{}' });
+    await openSettings(fetchMe);
+    expect(meCalls()).toBe(2);
+  });
+
+  it('⭐채팅 읽음 표시(/read, 자동·고빈도)는 제외 — 읽음 POST가 진행 중이어도 설정 진입은 /me 1회(PO 위험 (b))', async () => {
+    let releaseRead!: () => void;
+    let firstRead = true;
+    handler = async (url) => {
+      if (url === '/api/me') return meResponse(false);
+      if (url.endsWith('/read') && firstRead) {
+        firstRead = false;
+        await new Promise<void>((r) => { releaseRead = r; });
+      }
+      return new Response(null, { status: 200 });
+    };
+    const { fetchMe } = await load();
+    const read = window.fetch('/api/conversations/c1/read', { method: 'POST', body: '{}' });
+    await openSettings(fetchMe);
+    releaseRead();
+    await read;
+    for (let i = 0; i < 5; i++) await window.fetch('/api/chats/c1/read', { method: 'POST', body: '{}' });
+    await openSettings(fetchMe);
+    expect(meCalls()).toBe(1);
+  });
+
+  it('제외 목록은 읽음 경로만 — 같은 대화의 메시지 보내기(/messages)는 여전히 무효화', async () => {
+    const { isMeInvalidatingWrite } = await import('@/lib/project-context-client');
+    expect(isMeInvalidatingWrite('/api/conversations/c1/read', 'POST')).toBe(false);
+    expect(isMeInvalidatingWrite('/api/chats/c1/read', 'POST')).toBe(false);
+    expect(isMeInvalidatingWrite('/api/conversations/c1/messages', 'POST')).toBe(true);
+    expect(isMeInvalidatingWrite('/api/conversations/c1/read/extra', 'POST')).toBe(true);
+    expect(isMeInvalidatingWrite('/api/conversations/c1/read', 'GET')).toBe(false);
   });
 });
