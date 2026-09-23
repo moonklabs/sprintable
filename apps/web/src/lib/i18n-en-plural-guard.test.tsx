@@ -45,6 +45,11 @@ describe('en 개수 문구 복수형(story #4223)', () => {
     expect(t('organization.recipeGalleryGateCountBadge', { count: 2 })).toBe('2 gates');
     expect(t('flow.nextMakerHeadline', { needsNext: 1, total: 1 })).toBe('1 of 1 goal has no "next" set');
     expect(t('chats.referenceDropNoticeCount', { count: 1 })).toBe("1 link wasn't saved");
+    // 까디르 QA — 복합 주어(«Alice and 1 other»)는 두 분기 모두 are · «{owned} of them»은 owned로 is/are.
+    expect(t('chats.othersTyping', { name: 'Alice', count: 1 })).toBe('Alice and 1 other are typing');
+    expect(t('chats.othersTyping', { name: 'Alice', count: 2 })).toBe('Alice and 2 others are typing');
+    expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 1 })).toBe('3 items not ready yet — 1 of them is owned');
+    expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 2 })).toBe('3 items not ready yet — 2 of them are owned');
   });
 
   it('수신자 수는 숫자로 넘기고 자리 구분은 ICU가 로케일로(en·ko 둘 다 1,234)', () => {
