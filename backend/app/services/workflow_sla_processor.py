@@ -7,7 +7,6 @@ pending human-gate 가 방치되지 않게 **reminder → escalation → timeout
 story_points>=8/trust-unresolved 에서 금지 · ⭐system timeout transition 은 ``resolver_id=None``
 (사람 결정이 아니므로 trust 환류 차단). SKIP LOCKED 로 cron 겹침 시 중복 reminder/escalation 방지.
 """
-import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,8 +20,6 @@ from app.models.workflow_line import (
     WorkflowLineStepRun,
     WorkflowLineStepRunEvent,
 )
-
-logger = logging.getLogger(__name__)
 
 # SLA 가 독촉하는 미해소 human-gate 대기 상태.
 _SLA_GATE_STATUSES = ("gate_pending", "waiting_gate", "waiting_parallel", "reminded", "escalated", "held")
@@ -124,8 +121,9 @@ async def _maybe_auto_approve(session: AsyncSession, sr: WorkflowLineStepRun) ->
     from app.services.gate_service import _is_recipe_external_publish_gate, transition_gate
 
     # story #4190(까디르 4564 CHANGES ②) — «사람 승인은 그 사람이 본 내용에만». 레시피 발행 게이트는 승인 화면이 그린
-    # 초안 버전을 싣고 사람이 승인해야 한다(없으면 transition_gate가 409 예외) — 시스템 자동 승인 대상이 아니다.
-    # 건너뛰고 한 줄 남긴 뒤 호출부의 기존 폴백(escalate / keep_pending)으로 간다.
+    # 초안 버전을 싣고 사람이 승인해야 한다(없으면 transition_gate가 409 예외 → process_sla 배치가 끊긴다) — 시스템 자동
+    # 승인 대상이 아니다. 건너뛰고 한 줄 남긴 뒤 호출부의 기존 폴백(escalate / keep_pending)으로 간다.
+    # (항목별 실패 격리 자체는 story #4228 — 배치를 한 세션에서 잠그는 구조라 SAVEPOINT로는 못 닫는다.)
     if _is_recipe_external_publish_gate(gate):
         _record_event(session, sr, "auto_approve_skipped", payload={"reason": "requires_human_reviewed_draft"})
         return False
@@ -147,87 +145,72 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
     )).scalars().all()
 
     counts = {"reminded": 0, "escalated": 0, "auto_approved": 0, "kept_pending": 0,
-              "unresolved": 0, "skipped": 0, "error": 0}
+              "unresolved": 0, "skipped": 0}
     for sr in rows:
-        # story #4190(까디르 4564 CHANGES ②) — 한 항목의 실패가 배치를 끊지 않게 항목마다 SAVEPOINT. 실패하면 그 항목만
-        # 되돌리고(로그 · error 카운트) 다음 항목으로 — 4214의 «부수 실패가 배치를 죽임»과 같은 부류의 처방.
-        sr_id = sr.id
-        try:
-            async with session.begin_nested():
-                await _process_one_step_run(session, sr, now, counts)
-        except Exception:
-            logger.warning("SLA 처리 실패 — 이 step_run만 건너뜀(step_run=%s)", sr_id, exc_info=True)
-            counts["error"] += 1
+        # ⭐S31 hold = SLA pause: held step_run 은 reminder/escalation/timeout 일시정지(skip). admin 이
+        # 수동 unhold(→gate_pending) 하면 다음 스캔서 정상 처리 재개. ⚠️held 가 이미 _SLA_GATE_STATUSES
+        # 라 스캔엔 들어오므로 여기서 per-step skip. (held_until 만료 자동 재개는 S13 통합 followup —
+        # 그때 여기서 now>=held_until 이면 gate_pending 복귀시켜 처리.)
+        if sr.status == "held":
+            counts["skipped"] += 1
+            continue
+        policy = await _resolve_sla_policy(session, sr)
+        timeout_h = policy.get("timeout_hours")
+        if not timeout_h:
+            counts["skipped"] += 1
+            continue
+        elapsed_h = (now - sr.started_at).total_seconds() / 3600.0
+
+        # ── 1) timeout ───────────────────────────────────────────────────────
+        if elapsed_h >= timeout_h:
+            on_timeout = policy.get("on_timeout", "keep_pending")
+            if on_timeout == "auto_approve" and await _maybe_auto_approve(session, sr):
+                counts["auto_approved"] += 1
+                continue
+            # keep_pending(기본) 또는 auto_approve 금지 → 보수적: escalate 1회 후 pending 유지.
+            escalate_to = policy.get("escalate_to")
+            if escalate_to and sr.escalated_to_member_id is None:
+                target = await _resolve_escalation(session, sr, escalate_to, now)
+                if target is not None:
+                    sr.escalated_to_member_id = target
+                    sr.status = "escalated"
+                    _record_event(session, sr, "escalated", target_id=target,
+                                  payload={"reason": "sla_timeout"})
+                    await _notify(session, sr, target, "gate_escalated", "Gate escalated — SLA timeout")
+                    counts["escalated"] += 1
+                    continue
+                # ⭐S14 fold-in: escalate_to(role/deputy)가 해소 안 되면 silent keep_pending 금지 →
+                # unresolved_assignee 로 가시화(board badge·silent prison 아님·S14 AC⑥).
+                # ⭐멱등(산티아고 SME·S8 동류): cron 재실행마다 append-only escalated(unresolved) event
+                # 중복 기록 방지 — 이미 unresolved 표시됐으면 재기록/재카운트 skip.
+                if sr.delivery_status != "unresolved_assignee":
+                    sr.delivery_status = "unresolved_assignee"
+                    _record_event(session, sr, "escalated",
+                                  payload={"reason": "sla_timeout", "unresolved": True})
+                    counts["unresolved"] += 1
+                else:
+                    counts["kept_pending"] += 1  # 이미 가시화됨·중복 event 0
+                continue
+            counts["kept_pending"] += 1  # ⭐방치 아님·gate 유지(이미 escalate or escalate_to 없음)
+            continue
+
+        # ── 2) reminder ──────────────────────────────────────────────────────
+        reminder_after = policy.get("reminder_after_hours")
+        max_reminders = policy.get("max_reminders", 0)
+        if (reminder_after is not None and elapsed_h >= reminder_after
+                and sr.reminder_count < max_reminders
+                and (sr.next_reminder_at is None or now >= sr.next_reminder_at)):
+            _record_event(session, sr, "reminded", payload={"reminder_count": sr.reminder_count + 1})
+            await _notify(session, sr, sr.resolved_member_id, "gate_reminder", "Gate reminder — still pending")
+            sr.reminder_count += 1
+            every = policy.get("reminder_every_hours") or reminder_after
+            sr.next_reminder_at = now + timedelta(hours=every)
+            if sr.status != "escalated":
+                sr.status = "reminded"
+            counts["reminded"] += 1
 
     await session.commit()
     return counts
-
-
-async def _process_one_step_run(
-    session: AsyncSession, sr: WorkflowLineStepRun, now: datetime, counts: dict[str, int],
-) -> None:
-    """`process_sla`의 한 항목(reminder / escalation / timeout). 호출부가 항목마다 SAVEPOINT로 감싼다."""
-    # ⭐S31 hold = SLA pause: held step_run 은 reminder/escalation/timeout 일시정지(skip). admin 이
-    # 수동 unhold(→gate_pending) 하면 다음 스캔서 정상 처리 재개. ⚠️held 가 이미 _SLA_GATE_STATUSES
-    # 라 스캔엔 들어오므로 여기서 per-step skip. (held_until 만료 자동 재개는 S13 통합 followup —
-    # 그때 여기서 now>=held_until 이면 gate_pending 복귀시켜 처리.)
-    if sr.status == "held":
-        counts["skipped"] += 1
-        return
-    policy = await _resolve_sla_policy(session, sr)
-    timeout_h = policy.get("timeout_hours")
-    if not timeout_h:
-        counts["skipped"] += 1
-        return
-    elapsed_h = (now - sr.started_at).total_seconds() / 3600.0
-
-    # ── 1) timeout ───────────────────────────────────────────────────────
-    if elapsed_h >= timeout_h:
-        on_timeout = policy.get("on_timeout", "keep_pending")
-        if on_timeout == "auto_approve" and await _maybe_auto_approve(session, sr):
-            counts["auto_approved"] += 1
-            return
-        # keep_pending(기본) 또는 auto_approve 금지 → 보수적: escalate 1회 후 pending 유지.
-        escalate_to = policy.get("escalate_to")
-        if escalate_to and sr.escalated_to_member_id is None:
-            target = await _resolve_escalation(session, sr, escalate_to, now)
-            if target is not None:
-                sr.escalated_to_member_id = target
-                sr.status = "escalated"
-                _record_event(session, sr, "escalated", target_id=target,
-                              payload={"reason": "sla_timeout"})
-                await _notify(session, sr, target, "gate_escalated", "Gate escalated — SLA timeout")
-                counts["escalated"] += 1
-                return
-            # ⭐S14 fold-in: escalate_to(role/deputy)가 해소 안 되면 silent keep_pending 금지 →
-            # unresolved_assignee 로 가시화(board badge·silent prison 아님·S14 AC⑥).
-            # ⭐멱등(산티아고 SME·S8 동류): cron 재실행마다 append-only escalated(unresolved) event
-            # 중복 기록 방지 — 이미 unresolved 표시됐으면 재기록/재카운트 skip.
-            if sr.delivery_status != "unresolved_assignee":
-                sr.delivery_status = "unresolved_assignee"
-                _record_event(session, sr, "escalated",
-                              payload={"reason": "sla_timeout", "unresolved": True})
-                counts["unresolved"] += 1
-            else:
-                counts["kept_pending"] += 1  # 이미 가시화됨·중복 event 0
-            return
-        counts["kept_pending"] += 1  # ⭐방치 아님·gate 유지(이미 escalate or escalate_to 없음)
-        return
-
-    # ── 2) reminder ──────────────────────────────────────────────────────
-    reminder_after = policy.get("reminder_after_hours")
-    max_reminders = policy.get("max_reminders", 0)
-    if (reminder_after is not None and elapsed_h >= reminder_after
-            and sr.reminder_count < max_reminders
-            and (sr.next_reminder_at is None or now >= sr.next_reminder_at)):
-        _record_event(session, sr, "reminded", payload={"reminder_count": sr.reminder_count + 1})
-        await _notify(session, sr, sr.resolved_member_id, "gate_reminder", "Gate reminder — still pending")
-        sr.reminder_count += 1
-        every = policy.get("reminder_every_hours") or reminder_after
-        sr.next_reminder_at = now + timedelta(hours=every)
-        if sr.status != "escalated":
-            sr.status = "reminded"
-        counts["reminded"] += 1
 
 
 async def _resolve_escalation(
