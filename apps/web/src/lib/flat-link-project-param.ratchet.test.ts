@@ -5,7 +5,8 @@
 //   `window.location.href/assign` · 다른 이름 prop(`targetRoute`·`conversationHref`·`secondaryHref`) · 상수로 만든 목적지를 못 셌다(≈30곳).
 //   이제는 **flat 리터럴이 어디에 있든 센다**(템플릿은 머리 글자 · 조건식은 갈래마다). 세지 않는 것은 셋뿐이다:
 //   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)` 호출 안.
-//   ①' 리터럴이 스스로 프로젝트를 싣는 자리 — 고정 글자에 `?p=`/`&p=`가 있음(예: 결재 자기 프로젝트로 가는 `/gates/${id}?p=${projectId}` · #4241).
+//   ①' 리터럴이 스스로 프로젝트를 싣는 자리 — 해시(#) 앞 쿼리에 `p` **키**가 있음(예: 결재 자기 프로젝트로 가는 `/gates/${id}?p=${projectId}` · #4241).
+//       글자가 아니라 키로 본다 — `?q=?p=x`(q의 값) · `#?p=x`(해시 안)는 런타임이 p를 붙이는 자리라 그대로 센다(까디르 QA P3).
 //   ② 이동이 아닌 자리 — 구조로 판정(비교 연산 · `case` · `startsWith`류 판정 · 탭 정체성 인자 · 정적 파일 fetch)하거나,
 //      아래 EXEMPT 표에 **이유와 함께** 적은 자리(파일 + 리터럴/속성). 표는 늘리지 않는 것이 원칙이다(새 예외는 PO 판단).
 // 이 수는 **문법 전수**(소스에 쓰인 flat 리터럴)이지 런타임 링크 전수가 아니다(한 리터럴이 여러 링크를 그릴 수 있고, 조건 갈래는 따로 센다).
@@ -60,12 +61,15 @@ function literalText(node: ts.Node): string | null {
   return null;
 }
 
-/** 리터럴의 고정 글자(템플릿은 머리 + 각 조각 꼬리)에 `?p=`/`&p=`가 있어 스스로 프로젝트를 싣는지. */
+/** 리터럴이 해시(#) 앞 쿼리에 `p` 키를 스스로 싣는지(템플릿은 머리 + 각 조각 꼬리 · 치환 자리는 \u0000). 키 판정은 withProjectParam과 같은 뜻. */
 function carriesOwnProject(node: ts.Node): boolean {
   const fixed = ts.isTemplateExpression(node)
-    ? node.head.text + node.templateSpans.map((sp) => sp.literal.text).join('\u0000')
+    ? node.head.text + node.templateSpans.map((sp) => '\u0000' + sp.literal.text).join('')
     : (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : '';
-  return /[?&]p=/.test(fixed);
+  const beforeHash = fixed.split('#')[0];
+  const q = beforeHash.indexOf('?');
+  if (q < 0) return false;
+  return beforeHash.slice(q + 1).split('&').some((pair) => pair.split('=')[0] === 'p');
 }
 
 function isWrapperCall(node: ts.Node): boolean {
@@ -119,7 +123,7 @@ function isExempt(rel: string, text: string, prop: string | null): boolean {
 }
 
 export function countBareFlatLinksInSource(fileName: string, text: string, routes: string[], rel = fileName): number {
-  const flatRe = new RegExp(`^/(${routes.map((r) => r.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')).join('|')})(?=[/?]|$)`);
+  const flatRe = new RegExp(`^/(${routes.map((r) => r.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')).join('|')})(?=[/?#]|$)`);
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   let n = 0;
   const visit = (node: ts.Node) => {
@@ -191,6 +195,11 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count('const h = `/gates/${id}?pp=${x}`;')).toBe(1);
     expect(count('const h = `/gates/${id}?tab=p=${x}`;')).toBe(1);
     expect(count('const h = `/chats/${id}?q=${p}`;')).toBe(1);
+    // 까디르 QA P3 — 글자가 아니라 키: 다른 키의 값 안 · 해시 안의 `?p=`는 실은 게 아니다(런타임이 p를 붙이는 자리).
+    expect(count("const h = '/chats?q=?p=placeholder';")).toBe(1);
+    expect(count('const h = `/chats?tab=x#?p=${pid}`;')).toBe(1);
+    expect(count("const h = '/chats#section?p=x';")).toBe(1);
+    expect(count("const h = '/chats#section';")).toBe(1); // 해시로 바로 이어지는 flat 목적지도 센다(경계 [/?#])
   });
 
   it('예외 표 — 파일·리터럴·속성이 모두 맞을 때만(같은 파일의 다른 모양은 그대로 센다)', () => {
