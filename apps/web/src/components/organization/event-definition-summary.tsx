@@ -39,6 +39,16 @@ function sampleValueForProperty(def: SchemaProperty, name: string): unknown {
   return `예시 ${name}`;
 }
 
+/** story #4246(유나 design · 390) — 식별자(필드 이름 · enum 값)는 `_` 뒤에서만 줄을 바꿀 수 있게 `<wbr>`. 코드 칩은 한 덩어리라
+ * `break-words`로는 표 열 최소 폭이 안 줄어 긴 이름이 표를 넓혔다. 복사되는 텍스트는 그대로(`<wbr>`은 글자가 아니다).
+ * `overflow-wrap: anywhere`는 형식 칸을 한 글자 폭으로 무너뜨려 쓰지 않는다. */
+export function breakableIdentifier(value: string): ReactNode {
+  const parts = value.split('_');
+  return parts.map((part, i) => (
+    <Fragment key={i}>{part}{i < parts.length - 1 ? <>_<wbr /></> : null}</Fragment>
+  ));
+}
+
 function valueTypeLabel(type: string, format: string | undefined, t: ReturnType<typeof useTranslations>): string {
   if (type === 'string' && format === 'date-time') return t('definerFieldTypeDate');
   if (type === 'string') return t('definerFieldTypeString');
@@ -61,7 +71,7 @@ function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslation
       <>
         {t('definerFieldTypeEnum')}{' '}
         {values.map((value, i) => (
-          <Fragment key={value}>{i > 0 ? ', ' : null}<code className="rounded bg-muted px-1 font-mono text-[11px]">{value}</code></Fragment>
+          <Fragment key={value}>{i > 0 ? ', ' : null}<code className="rounded bg-muted px-1 font-mono text-[11px]">{breakableIdentifier(value)}</code></Fragment>
         ))}
       </>
     );
@@ -70,7 +80,9 @@ function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslation
   // 전부를 «또는»으로 잇는다(첫 것만 쓰면 조직 정의에서 거짓 라벨). 시드엔 null 빼면 형식 하나인 유니언뿐이다.
   const labels = Array.from(new Set(valueTypes(def).map((type) => valueTypeLabel(type, def.format, t))));
   if (labels.length === 0) return t('definerFieldTypeAny'); // 형식 없음 = 아무 값이나 받는다
-  return new Intl.ListFormat(locale, { type: 'disjunction' }).format(labels);
+  // 유나 확정 — en은 문장 속이라 첫 낱말만 대문자(«Text or number» · «Text, number, or boolean»). ko는 그대로.
+  const parts = locale.startsWith('en') ? labels.map((label, i) => (i === 0 ? label : label.toLocaleLowerCase(locale))) : labels;
+  return new Intl.ListFormat(locale, { type: 'disjunction' }).format(parts);
 }
 
 // noRecipientLabel — 「받는 사람」(broadcast) 축과 「즉시 알림」(escalation) 축은 "없음"의
@@ -157,7 +169,7 @@ export function EventDefinitionSummary({
               <tbody>
                 {fieldNames.map((name) => (
                   <tr key={name} className="border-t border-border">
-                    <td className="px-2 py-1 font-mono text-foreground">{name}</td>
+                    <td className="px-2 py-1 font-mono text-foreground" data-testid={`event-def-field-name-${name}`}>{breakableIdentifier(name)}</td>
                     <td className="break-words px-2 py-1 text-muted-foreground" data-testid={`event-def-field-type-${name}`}>{fieldTypeLabel(properties[name]!, t, locale)}</td>
                     {/* story #4223(유나) — 390 ko에서 «필수»가 «필/수»로 세로 접혔다 · 낱말 줄바꿈 금지(좁으면 다른 열이 양보). */}
                     <td className="whitespace-nowrap px-2 py-1 text-muted-foreground" data-testid={`event-def-field-required-${name}`}>

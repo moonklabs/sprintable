@@ -46,6 +46,7 @@ const PAYLOAD_SCHEMA = {
     weird: { type: 'uuid-ish' },
     tagsNullable: { type: ['array', 'null'] },
     multi: { type: ['string', 'number', 'null'] },
+    story_author_member_id: { enum: ['review_changes', 'approved'] },
   },
   required: ['verdict'],
 };
@@ -82,6 +83,7 @@ describe('EventDefinitionSummary 필드 형식 칸(story #4246)', () => {
       tagsNullable: o.definerFieldTypeList,
       // 까디르 4603 QA ① — null 아닌 형식이 여럿이면 전부(첫 것만이면 거짓 라벨).
       multi: `${o.definerFieldTypeString} 또는 ${o.definerFieldTypeNumber}`,
+      story_author_member_id: `${o.definerFieldTypeEnum} review_changes, approved`,
     });
     const text = container.querySelector('table')?.textContent ?? '';
     for (const raw of ['stringnull', 'enum(', 'integer', 'array', 'object', 'null']) expect(text).not.toContain(raw);
@@ -91,7 +93,8 @@ describe('EventDefinitionSummary 필드 형식 칸(story #4246)', () => {
     const o = enMessages.organization;
     const types = await renderTypes('en');
     expect(types.reason_note).toBe(o.definerFieldTypeString);
-    expect(types.multi).toBe(`${o.definerFieldTypeString} or ${o.definerFieldTypeNumber}`);
+    // 유나 확정 — en은 첫 낱말만 대문자.
+    expect(types.multi).toBe(`${o.definerFieldTypeString} or ${o.definerFieldTypeNumber.toLowerCase()}`);
     expect(types.verdict).toBe(`${o.definerFieldTypeEnum} approved, rejected`);
   });
 });
@@ -126,5 +129,18 @@ describe('EventDefinitionSummary 미리보기 예시값(story #4246 · 까디르
     expect(text).toContain('V[approved]');
     expect(text).not.toContain('V[예시');
     expect(text).not.toContain('V[]');
+  });
+});
+
+// 유나 design(390) — 식별자는 `_` 뒤에서만 줄바꿈(<wbr>) · 글자는 그대로.
+describe('EventDefinitionSummary 식별자 줄바꿈 자리(story #4246 · 유나 design)', () => {
+  it('필드 이름과 enum 값의 `_` 뒤마다 <wbr> · 텍스트는 원문 그대로', async () => {
+    await renderTypes('ko');
+    const nameCell = container.querySelector('[data-testid="event-def-field-name-story_author_member_id"]')!;
+    expect(nameCell.textContent).toBe('story_author_member_id');
+    expect(nameCell.querySelectorAll('wbr')).toHaveLength(3);
+    const code = container.querySelector('[data-testid="event-def-field-type-story_author_member_id"] code')!;
+    expect(code.textContent).toBe('review_changes');
+    expect(code.querySelectorAll('wbr')).toHaveLength(1);
   });
 });
