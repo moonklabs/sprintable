@@ -234,3 +234,27 @@ describe('묶음 알림 행도 표시 변환(story #4281)', () => {
     expect(container.textContent!.split('[story] 결재 화면 숫자').length - 1).toBe(3);
   });
 });
+
+describe('묶음 펼침 칩도 사람 낱말(story #4281 · 유나)', () => {
+  it('hypothesis 참조 칩 «가설» · epic 참조 칩 «목표» — 원문 «hypothesis» · «epic» 0', async () => {
+    const epicNotif = (id: string, refId: string) => ({
+      ...dispatchedHeuristicNotif(id, refId), title: '[epic] 결재 흐름 개편', body: 'epic 마감까지 30h 남음(임계 72h)', reference_type: 'epic',
+    });
+    stubFetch([
+      dispatchedHeuristicNotif('h1', 'hyp-aaaa1111'), dispatchedHeuristicNotif('h2', 'hyp-bbbb2222'),
+      epicNotif('e1', 'epic-cccc3333'), epicNotif('e2', 'epic-dddd4444'),
+    ]);
+    const { default: InboxPage } = await import('./page');
+    await mount(InboxPage);
+    const chevrons = [...container.querySelectorAll('button')].filter((b) => b.getAttribute('aria-label')?.includes('펼치기'));
+    expect(chevrons).toHaveLength(2);
+    for (const c of chevrons) {
+      await act(async () => { c.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+    const chips = [...container.querySelectorAll('span.font-mono.rounded')].map((el) => el.textContent);
+    expect(chips.filter((c) => c === '가설')).toHaveLength(2);
+    expect(chips.filter((c) => c === '목표')).toHaveLength(2);
+    expect(chips).not.toContain('hypothesis');
+    expect(chips).not.toContain('epic');
+  });
+});

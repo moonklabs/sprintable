@@ -3695,6 +3695,8 @@
     "referenceTypeDoc": "문서",
     "referenceTypeDocComment": "댓글",
     "referenceTypeSprint": "스프린트",
+    "referenceTypeHypothesis": "가설",
+    "referenceTypeGoal": "목표",
     "justNow": "방금",
     "minutesAgo": "분 전",
     "dateToday": "오늘",

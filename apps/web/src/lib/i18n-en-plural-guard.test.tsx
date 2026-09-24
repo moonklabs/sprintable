@@ -31,7 +31,8 @@ const ALLOWED_BARE_COUNT: Record<string, string> = {
 // 오류 폴백(키 경로)으로 떨어진다(값을 넘기는 순간 터지는 잠복 결함). 알려진 예외 목록 없음.
 
 // «{x} is»처럼 인자 뒤가 동사·기능어면 개수 문구가 아니다.
-const NOT_A_COUNT_NOUN = new Set(['is', 'was', 'has', 'as', 'needs', 'stays', 'does', 'goes', 'gets', 'says', 'its', 'this', 'plus', 'yes', 'us']);
+// story #4281 — `status`는 s로 끝나는 단수 명사(«{kind} status changed», {kind}는 «Story» 같은 종류 낱말)라 개수 문구가 아니다.
+const NOT_A_COUNT_NOUN = new Set(['is', 'was', 'has', 'as', 'needs', 'stays', 'does', 'goes', 'gets', 'says', 'its', 'this', 'plus', 'yes', 'us', 'status']);
 
 function bareCountInElements(elements: MessageFormatElement[]): string[] {
   const out: string[] = [];

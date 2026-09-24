@@ -3695,6 +3695,8 @@
     "referenceTypeDoc": "Doc",
     "referenceTypeDocComment": "Comment",
     "referenceTypeSprint": "Sprint",
+    "referenceTypeHypothesis": "Hypothesis",
+    "referenceTypeGoal": "Goal",
     "justNow": "Just now",
     "minutesAgo": "m ago",
     "dateToday": "Today",

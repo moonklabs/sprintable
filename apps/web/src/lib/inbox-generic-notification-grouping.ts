@@ -55,6 +55,9 @@ const REFERENCE_TYPE_LABEL_KEYS: Record<string, string> = {
   doc: 'referenceTypeDoc',
   doc_comment: 'referenceTypeDocComment',
   sprint: 'referenceTypeSprint',
+  // story #4281(유나) — 사람에게 가는 dispatched 묶음 칩이 원문 «hypothesis»로 보였다. epic은 화면 낱말 «목표»(v3 `nav.goals`).
+  hypothesis: 'referenceTypeHypothesis',
+  epic: 'referenceTypeGoal',
 };
 
 /** reference_type → 짧은 표시 라벨. i18n 키가 없는(미상) reference_type은 원문 그대로
