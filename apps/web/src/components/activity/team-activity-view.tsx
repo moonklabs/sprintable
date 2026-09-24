@@ -12,6 +12,7 @@ import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notificatio
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { withProjectParam } from '@/lib/with-project-param';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -123,7 +124,10 @@ function FeedRow({
   deliveredLabel: string | null;
 }) {
   const label = objectLabel(item);
-  const href = item.object_type && item.object_id ? getEntityHref(item.object_type, item.object_id) : null;
+  // story #4231 3차(PO 02:34Z) — 활동 항목은 자기 프로젝트(item.project_id)를 싣는다(4241과 같은 규칙).
+  const href = item.object_type && item.object_id
+    ? getEntityHref(item.object_type, item.object_id, (h) => withProjectParam(h, item.project_id))
+    : null;
 
   return (
     <li className="flex items-start gap-3 rounded-lg px-3 py-2.5 transition hover:bg-muted/50">

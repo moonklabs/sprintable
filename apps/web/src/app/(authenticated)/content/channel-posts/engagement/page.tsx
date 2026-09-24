@@ -470,7 +470,7 @@ export default function ChannelPostsEngagementPage() {
                       <p className="line-clamp-2 whitespace-pre-wrap text-foreground">{item.text}</p>
                       {item.linked_story_id ? (
                         <a
-                          href={getEntityHref('story', item.linked_story_id) ?? '#'}
+                          href={getEntityHref('story', item.linked_story_id, flatHref) ?? '#'}
                           className="mt-1 inline-block text-xs text-primary underline underline-offset-4"
                           data-testid="engagement-view-task-link"
                         >

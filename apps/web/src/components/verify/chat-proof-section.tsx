@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChatProofEmbed } from './chat-proof-embed';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ProofSnapshotMessage {
   message_id: string;
@@ -103,6 +104,7 @@ interface ChatProofSectionProps {
  * 쪽을 택했다(없는 것을 지어내지 않음). 후속 슬라이스에서 memberMap을 받아 채운다.
  */
 export function ChatProofSection({ storyId }: ChatProofSectionProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('verify');
   const [refs, setRefs] = useState<StoryProofReference[] | null>(null);
   const [skippedCount, setSkippedCount] = useState(0);
@@ -170,7 +172,7 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
         <ChatProofEmbed
           key={ref.id}
           sourceLabel={`${t('chatProofSectionTitle')} · ${formatCitationDate(ref.createdAt)}`}
-          conversationHref={`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`}
+          conversationHref={flatHref(`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`)}
           quotedAt={formatCitationDate(ref.createdAt)}
           status={ref.stillExists === false ? 'deleted' : 'normal'}
           messages={ref.snapshot.map((m) => ({ id: m.message_id, senderName: '', content: m.content }))}

@@ -808,6 +808,33 @@ describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 
     await mountWithReferences({ data: [] });
     expect(container.textContent).toContain('연결된 대화 없음');
   });
+  // story #4231 3차(b) — 4595 보강: 대화 근거 링크는 목적지만 state에 담고 href는 useMemo로 만든다(프로젝트가 바뀌어도 references를
+  // 다시 받지 않는다). 4595 병합 코드에 빠져 있던 «재fetch 0» 테스트.
+  it('⭐프로젝트 전환(전환 대기 목표 변경)에 references를 다시 받지 않고, 링크만 새 목표 프로젝트를 싣는다', async () => {
+    await mountWithReferences({
+      data: [{
+        id: 'ref-1', created_at: '2026-08-20T00:00:00Z', form: 'proof', target_type: 'chat_message', still_exists: true,
+        proof_payload: {
+          conversation_id: 'conv-1', start_message_id: 'msg-1',
+          snapshot: [{ message_id: 'msg-1', author_id: 'a1', content: 'hi', created_at: '2026-08-20T00:00:00Z' }],
+        },
+      }],
+    });
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const refCalls = () => fetchMock.mock.calls.filter(([u]) => typeof u === 'string' && u.includes('/references?direction=outgoing')).length;
+    const before = refCalls();
+    expect(before).toBeGreaterThan(0);
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    try {
+      await act(async () => { setPendingProjectTarget('proj-B'); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(refCalls()).toBe(before);
+      const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes('대화 근거 1건 보기'));
+      expect(link?.getAttribute('href')).toBe('/chats/conv-1?messageId=msg-1&p=proj-B');
+    } finally {
+      await act(async () => { setPendingProjectTarget(null); });
+    }
+  });
 });
 
 // story #3169(P2·prod 실사용·선생님 제보) — prod 실사고 재현: DELETE 200(성공) 4초 뒤 같은

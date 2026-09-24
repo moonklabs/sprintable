@@ -349,7 +349,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
       // auth 토큰 갱신 raw fetch 호출을 그대로 베끼지 않고, 같은 목적의 기존 헬퍼
       // (lib/db/client.ts의 refreshAuthTokens, callAuthRoute 경유)를 재사용한다.
       await refreshAuthTokens().catch(() => null);
-      window.location.href = `/chats/${convId}`;
+      window.location.href = withProjectParam(`/chats/${convId}`, projectId); // story #4231 3차 — 온보딩 프로젝트를 싣는다
     } catch {
       onFinish();
     } finally {

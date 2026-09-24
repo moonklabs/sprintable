@@ -16,6 +16,7 @@ import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -86,6 +87,7 @@ function parseView(raw: string | null, hasHypothesisParam: boolean): FlowView {
  * 이름만 "막힘"과 안 겹치게 갈고, «수»(N)는 라벨에서 뺀다(영역은 남고 수만 안 보인다).
  */
 export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPageClientProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('flow');
   const tGlance = useTranslations('glance');
   const router = useRouter();
@@ -206,8 +208,8 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         merge_ready: tGlance('exceptionActionMergeReady'),
       },
     };
-    return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels);
-  }, [data, tGlance]);
+    return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels, flatHref);
+  }, [data, tGlance, flatHref]);
 
   // story #2354 후속(2026-07-31) — 예전엔 view를 'list'로 함께 갈아 끼워 KanbanBoard(그
   // 안의 StoryDetailPanel)를 마운트시켰는데, 그 view 전환 자체가 «갈래 캔버스를

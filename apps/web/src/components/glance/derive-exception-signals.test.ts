@@ -6,6 +6,9 @@ import {
   type ExceptionLabels,
 } from './derive-exception-signals';
 
+// story #4231 3차 — withProject(필수)는 이 테스트에선 주소 그대로.
+const same = (href: string) => href;
+
 const LABELS: ExceptionLabels = {
   kind: { gate_pending: '승인 대기', blocked: '막힘', merge_ready: '병합 대기' },
   action: { gate_pending: '검토', blocked: '조율', merge_ready: '병합' },
@@ -88,7 +91,7 @@ describe('toExceptionQueueItems — 렌더 shape 매핑 + 정렬', () => {
   ];
 
   it('maps each kind to its label, proofState, tone and href', () => {
-    const items = toExceptionQueueItems(signals, LABELS);
+    const items = toExceptionQueueItems(signals, LABELS, same);
     const byKind = Object.fromEntries(items.map((i) => [i.kind, i]));
 
     expect(byKind['gate_pending']!.kindLabel).toBe('승인 대기');
@@ -103,19 +106,19 @@ describe('toExceptionQueueItems — 렌더 shape 매핑 + 정렬', () => {
   });
 
   it('sorts amber signals (gate_pending·blocked) before green (merge_ready)', () => {
-    const items = toExceptionQueueItems(signals, LABELS);
+    const items = toExceptionQueueItems(signals, LABELS, same);
     expect(items[items.length - 1]!.kind).toBe('merge_ready');
     expect(items.slice(0, 2).map((i) => i.kind).sort()).toEqual(['blocked', 'gate_pending']);
   });
 
   it('actor is null (엔드포인트가 assignee 미포함 — 지어내지 않음) and sortKey 0 (타임스탬프 없음)', () => {
-    const items = toExceptionQueueItems(signals, LABELS);
+    const items = toExceptionQueueItems(signals, LABELS, same);
     expect(items.every((i) => i.actor === null)).toBe(true);
     expect(items.every((i) => i.sortKey === 0)).toBe(true);
   });
 
   it('produces stable unique ids', () => {
-    const items = toExceptionQueueItems(signals, LABELS);
+    const items = toExceptionQueueItems(signals, LABELS, same);
     const ids = items.map((i) => i.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain('gate-ap1');
@@ -124,6 +127,6 @@ describe('toExceptionQueueItems — 렌더 shape 매핑 + 정렬', () => {
   });
 
   it('empty in → empty out (정직 빈 상태)', () => {
-    expect(toExceptionQueueItems([], LABELS)).toEqual([]);
+    expect(toExceptionQueueItems([], LABELS, same)).toEqual([]);
   });
 });

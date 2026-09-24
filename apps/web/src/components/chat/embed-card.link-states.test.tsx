@@ -69,7 +69,7 @@ async function flush(times = 4) {
 
 describe('AC1 — epic 링크가 은퇴한 /epics/ 대신 실재 라우트로 간다', () => {
   it('getEntityHref("epic", id)가 /goals/{id}를 반환한다(404였던 /epics/ 아님)', () => {
-    expect(getEntityHref('epic', 'e1')).toBe('/goals/e1');
+    expect(getEntityHref('epic', 'e1', (h) => h)).toBe('/goals/e1');
   });
 });
 

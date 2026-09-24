@@ -9,6 +9,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from 
 import { createRoot, type Root } from 'react-dom/client';
 import { FileText, AlertCircle } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // ─── WikiLink Node View ───────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ interface WikiLinkDoc {
 }
 
 function WikiLinkView({ node, editor }: ReactNodeViewProps) {
+  const flatHref = useFlatHref(); // story #4231 — 문서 사이 이동은 현재 프로젝트(`?p=`)를 싣는다
   // story #3776(1층A) — "문서를 찾을 수 없습니다" 문구, docs ns의 기존 notFound 키 재사용.
   const t = useTranslations('docs');
   const title = node.attrs.title as string;
@@ -47,8 +49,8 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
   const handleClick = useCallback(() => {
     if (!slug) return;
     if (onNavigate) { onNavigate(slug); return; }
-    window.location.href = `/docs/${slug}`;
-  }, [slug, onNavigate]);
+    window.location.href = flatHref(`/docs/${slug}`);
+  }, [slug, onNavigate, flatHref]);
 
   const isNotFound = exists === false;
 

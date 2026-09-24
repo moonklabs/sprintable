@@ -4,7 +4,7 @@
 // story #4231 3차(PO 02:02Z) — 예전 셈법은 «이동 자리 모양»(JSX href · router.push/replace · `href:`/`path:`)만 봐서, href 헬퍼의 `return` ·
 //   `window.location.href/assign` · 다른 이름 prop(`targetRoute`·`conversationHref`·`secondaryHref`) · 상수로 만든 목적지를 못 셌다(≈30곳).
 //   이제는 **flat 리터럴이 어디에 있든 센다**(템플릿은 머리 글자 · 조건식은 갈래마다). 세지 않는 것은 셋뿐이다:
-//   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)` 호출 안.
+//   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)`·`withProject(…)`·`useConnectRulesHref(…)` 호출 안(아래 WRAPPERS).
 //   ①' 리터럴이 스스로 프로젝트를 싣는 자리 — 해시(#) 앞 쿼리에 `p` **키**가 있음(예: 결재 자기 프로젝트로 가는 `/gates/${id}?p=${projectId}` · #4241).
 //       글자가 아니라 키로 본다 — `?q=?p=x`(q의 값) · `#?p=x`(해시 안)는 런타임이 p를 붙이는 자리라 그대로 센다(까디르 QA P3).
 //   ② 이동이 아닌 자리 — 구조로 판정(비교 연산 · `case` · `startsWith`류 판정 · 탭 정체성 인자 · 정적 파일 fetch)하거나,
@@ -16,11 +16,14 @@ import path from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-const BASELINE = 41;
+const BASELINE = 10;
 
 const SRC = path.resolve(__dirname, '..');
 const AUTH = path.join(SRC, 'app/(authenticated)');
-const WRAPPERS = new Set(['flatHref', 'withProjectParam']);
+// 프로젝트를 싣는 함수 — flatHref(useFlatHref) · withProjectParam(lib) · withProject(헬퍼가 **필수 인자**로 받는 «프로젝트를 싣는 함수» —
+// 프로젝트 단위 소비처는 useFlatHref를, 조직 전체 목록은 «항목 자신의 프로젝트를 싣는 함수»를 넘긴다 · #4231 3차 PO 02:34Z) ·
+// useConnectRulesHref(결과에 현재 프로젝트를 싣는 훅).
+const WRAPPERS = new Set(['flatHref', 'withProjectParam', 'withProject', 'useConnectRulesHref']);
 // 이동이 아닌 호출의 인자(구조 판정) — 탭 정체성(useSyntheticParentTabHistory: 어느 탭 소속인지 표시 · 이동 아님) · 정적 파일 fetch.
 const NON_NAV_CALLEES = new Set(['useSyntheticParentTabHistory', 'fetch']);
 const PREDICATE_METHODS = new Set(['startsWith', 'endsWith', 'includes', 'indexOf', 'match', 'test']);
@@ -32,6 +35,8 @@ export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: str
   { file: 'hooks/use-account-switcher.ts', reason: '다른 조직으로 전환하는 하드 이동 — 현재 프로젝트를 실으면 틀린 p(PO 02:02Z 예외)' },
   { file: 'app/dashboard/dashboard-shell.tsx', texts: ['/inbox', '/chats', '/more'], reason: 'TAB_ROOT_PREFIXES — 경로 접두 판정 표(이동 아님)' },
   { file: 'proxy.ts', reason: '미들웨어 경로 판정(이동 링크 아님)' },
+  { file: 'lib/nav-v3-destinations.ts', texts: ['/chats'], reason: 'resolveChatsHref 플래그 없을 때의 대화 목적지 — 앱 안 CTA는 useChatsHref가 감싸고, 나머지 호출처는 서버(session-redirect)·문맥 전 착지(mfa·invite·onboarding)' },
+  { file: 'components/content/content-rule-violation.tsx', texts: ['/organization/content-rules'], reason: 'BE settings_path와 맞대는 비교 기준 상수 — 이동은 useConnectRulesHref(감쌈)로만' },
   // 아래 예외는 «p를 실으면 안 된다»가 아니라 «이 자리엔 실을 목표 프로젝트 값이 없다(클라이언트 훅 밖)»는 뜻이다.
   { file: 'app/api/oauth-channel/authorize/route.ts', reason: '서버 리다이렉트(로그인 뒤 돌아올 next) — 서버엔 클라이언트의 목표 프로젝트가 없다(들어온 주소의 p는 이어질 수 있음)' },
   { file: 'app/auth/link/route.ts', reason: '서버 리다이렉트(로그인 뒤 돌아올 next) — 서버엔 클라이언트의 목표 프로젝트가 없다(들어온 주소의 p는 이어질 수 있음)' },

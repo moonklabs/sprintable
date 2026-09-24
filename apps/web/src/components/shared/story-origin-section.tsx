@@ -12,6 +12,7 @@ import type { BacklinkItem } from './entity-backlinks-section';
 import { deriveStoryOrigin } from './derive-story-origin';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2267(C-9) AC4 — 이 컴포넌트는 EntityBacklinksSection과 같은 엔드포인트
 // (GET /api/stories/{id}/backlinks)를 별도로 부른다. 두 섹션이 응답을 나눠 쓰도록
@@ -48,12 +49,13 @@ function sourceLabel(item: BacklinkItem): string | undefined {
 
 // getEntityHref는 doc/story만 안다(embed-card.tsx) — chat_message/meeting은 그 라우팅
 // 관례가 아니라 이 파일에서 직접 구성한다(#2277 ade2d6d5 딥링크 관례: /chats/{id}?messageId=).
-function sourceHref(item: BacklinkItem): string | null {
+/** withProject — flat 목적지(대화)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처(StoryOriginSection)는 useFlatHref()를 넘긴다. */
+function sourceHref(item: BacklinkItem, withProject: (href: string) => string): string | null {
   switch (item.source_type) {
-    case 'doc': return item.doc ? getEntityHref('doc', item.doc.id) : null;
-    case 'story': return item.story ? getEntityHref('story', item.story.id) : null;
+    case 'doc': return item.doc ? getEntityHref('doc', item.doc.id, withProject) : null;
+    case 'story': return item.story ? getEntityHref('story', item.story.id, withProject) : null;
     case 'chat_message':
-      return item.message ? `/chats/${encodeURIComponent(item.message.conversation_id)}?messageId=${encodeURIComponent(item.message.id)}` : null;
+      return item.message ? withProject(`/chats/${encodeURIComponent(item.message.conversation_id)}?messageId=${encodeURIComponent(item.message.id)}`) : null;
     // story #3167(IA 정리 통 A, 유나 design:changes) — /meetings/[id] 페이지 자체가
     // notFound 스텁으로 폐기됐다(meeting 데이터·API는 유지 — 카드 자체는 실재 가능).
     // 링크를 계속 만들면 클릭 시 100% 404라 링크가 아니라 아래 origin ? ... : <span>
@@ -124,6 +126,7 @@ async function findOriginAcrossPages(storyId: string, signal: { cancelled: boole
  * (originNotCollected) — AC7 계약대로 분기하지 않는다.
  */
 export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('board');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
@@ -153,7 +156,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
         (() => {
           const Icon = sourceIcon(origin.source_type);
           const label = sourceLabel(origin);
-          const href = sourceHref(origin);
+          const href = sourceHref(origin, flatHref);
           const creatorName = origin.created_by?.name;
           const content = (
             <span className="flex items-start gap-2 text-xs">

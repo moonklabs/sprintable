@@ -87,8 +87,8 @@ const TONE_BY_KIND: Record<ExceptionKind, AttentionQueueItem['actionTone']> = {
  * GateInbox가 진짜 승인 경로·개별 게이트 딥링크는 doc 게이트만 가능), story 기반 신호는 보드의
  * 해당 스토리. story_id 없는 방어 케이스는 보드 루트로.
  */
-function hrefFor(sig: BeAttentionSignal): string {
-  if (sig.kind === 'gate_pending') return '/inbox?tab=gates';
+function hrefFor(sig: BeAttentionSignal, withProject: (href: string) => string): string {
+  if (sig.kind === 'gate_pending') return withProject('/inbox?tab=gates');
   return sig.story_id ? `/board?story=${sig.story_id}` : '/board';
 }
 
@@ -106,9 +106,11 @@ function idFor(sig: BeAttentionSignal, idx: number): string {
  * 지어내지 않음)·sortKey=0(BE 타임스탬프 없음 — 위조 최신순 금지). buildAttentionQueue로 amber
  * (gate_pending·blocked) → green(merge_ready) 정렬만 재사용(cap=전량이라 drop 0).
  */
+/** withProject — flat 목적지(결재함)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처는 useFlatHref()를 넘긴다. */
 export function toExceptionQueueItems(
   signals: BeAttentionSignal[],
   labels: ExceptionLabels,
+  withProject: (href: string) => string,
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = signals.map((sig, idx) => ({
     id: idFor(sig, idx),
@@ -121,7 +123,7 @@ export function toExceptionQueueItems(
     actor: null,
     actionLabel: labels.action[sig.kind],
     actionTone: TONE_BY_KIND[sig.kind],
-    href: hrefFor(sig),
+    href: hrefFor(sig, withProject),
     // story #2249: 이 엔드포인트(BeAttentionSignal)는 entered_state_at 자체를 안 실어(exception-stream
     // 설계 자체가 "활동량/타임스탬프 0") null이 정확한 값 — 위조 금지.
     enteredStateAtMs: null,

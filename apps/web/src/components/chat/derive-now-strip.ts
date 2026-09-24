@@ -60,12 +60,14 @@ export function nowStripItemKey(item: AttentionItem): string {
  * AttentionRow와 동일 한계). §1a 표는 「무엇에 도달하나」만 규정하지 「어느 프로젝트로」는
  * 이 스토리 범위 밖(크로스 프로젝트 정합은 후속 표면 작업 몫).
  */
-export function nowStripItemHref(item: AttentionItem): string {
+/** withProject — flat 목적지에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 여기 flat 목적지는 조직 단위 화면(결재함 · 에이전트 상세)이라
+ * 호출처는 현재 프로젝트를 싣는 useFlatHref를 넘긴다(보드 같은 워크스페이스 경로는 flat이 아니라 그대로). */
+export function nowStripItemHref(item: AttentionItem, withProject: (href: string) => string): string {
   switch (item.type) {
     case 'agent_stuck':
-      return item.entity_type === 'story' ? `/board?story=${item.entity_id}` : '/inbox?tab=gates';
+      return item.entity_type === 'story' ? `/board?story=${item.entity_id}` : withProject('/inbox?tab=gates');
     case 'agent_auth_failure':
-      return `/organization/workforce/${item.member_id}`;
+      return withProject(`/organization/workforce/${item.member_id}`);
     case 'unanswered_blocker':
       return `/board?story=${item.blocked_story_id}`;
     case 'hypothesis_falsified':
@@ -93,6 +95,7 @@ export interface NowStripItem {
 export function buildNowStripItems(
   items: AttentionItem[],
   t: ReturnType<typeof useTranslations>,
+  withProject: (href: string) => string,
   resolveName: (id: string | null | undefined) => string | null = () => null,
   epicTitles: Record<string, string> = {},
 ): NowStripItem[] {
@@ -102,7 +105,7 @@ export function buildNowStripItems(
     severity: normalizeSeverity(item.severity),
     title: attentionEntityLabel(item, resolveName, epicTitles),
     detail: attentionDetailText(t, item),
-    href: nowStripItemHref(item),
+    href: nowStripItemHref(item, withProject),
   }));
   return out.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
 }

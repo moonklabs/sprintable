@@ -22,6 +22,7 @@ import { CreateOrganizationDialog } from '@/components/nav/create-organization-d
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -57,6 +58,7 @@ function OrgInitial({ name, className }: { name: string; className?: string }) {
  * 공존한다. 구 경로 제거는 이 칩이 배포·라이브 확認된 뒤 별도 후속으로 진행한다.
  */
 export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProjectId, userName }: ContextSwitcherChipProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
   const tSettings = useTranslations('settings');
@@ -118,7 +120,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             <Button
               type="button"
               variant="ghost"
-              onClick={() => { window.location.href = '/settings?tab=organization'; }}
+              onClick={() => { window.location.href = flatHref('/settings?tab=organization'); }}
               className="size-11 min-h-0 min-w-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={t('switcherOrgSettingsAria')}
             >

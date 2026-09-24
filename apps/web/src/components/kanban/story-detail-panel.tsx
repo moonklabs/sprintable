@@ -296,6 +296,7 @@ export function DescriptionViewer({
   references?: OutgoingReference[];
   bareNumberTargets?: Record<string, string>;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const components = useMemo(() => ({
     ...descriptionViewerComponents,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
@@ -315,7 +316,7 @@ export function DescriptionViewer({
               entityType="story"
               entityId={targetId}
               label={`#${number}`}
-              href={targetId ? getEntityHref('story', targetId) : null}
+              href={targetId ? getEntityHref('story', targetId, flatHref) : null}
               ghost={!targetId}
             />
           </span>
@@ -332,13 +333,13 @@ export function DescriptionViewer({
         return (
           // 긴급 정정(2026-07-28) 재발 방지 — 부모 div의 편집모드 진입 onClick으로 버블링 금지.
           <span onClick={(e) => e.stopPropagation()}>
-            <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId)} ghost={ghost} />
+            <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId, flatHref)} ghost={ghost} />
           </span>
         );
       }
       return descriptionViewerComponents.a({ href, children });
     },
-  }), [references, bareNumberTargets]);
+  }), [references, bareNumberTargets, flatHref]);
 
   // bareNumberTargets가 아직 없으면(미로드) 치환을 보류 — #<번호>는 그대로 평문(#2622와
   // 동일 폴백 원칙, 미판정을 유령으로 지어내지 않는다).
