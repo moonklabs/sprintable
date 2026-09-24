@@ -4,6 +4,7 @@
 // event_definition_registry.py)과 반드시 일치해야 게이트를 통과한다(그라운딩: 두 정규식·
 // routing 2택·action_auth 화이트리스트 전부 그 파일 직접 대조).
 import type { BlockTemplate, BlockTemplateBlock } from '@/lib/block-template';
+import { LEGACY_UNNAMED_HEADER } from '@/lib/platform-preset-copy';
 
 export type DefinerFormat = 'cycle' | 'signal' | 'measure';
 
@@ -176,8 +177,8 @@ function buildFieldsBlock(fields: DefinerField[]): BlockTemplateBlock | null {
 
 /** story #4257 — 폼이 만드는 기본 단계 문장 = 플랫폼 씨앗 문장(platform-preset-copy.ts SEED_STAGE_TEXTS의 payload.stage 문장). */
 export const FORM_DEFAULT_STAGE_TEXT = '**{{payload.stage}}** 로 넘어갔습니다';
-/** story #4257 전 머리말을 비운 채 저장하면 남던 자리 표시(역파싱만 알아본다 · 새로 저장하지 않는다). */
-export const LEGACY_UNNAMED_HEADER = '(이름 없음)';
+/** story #4257 전 머리말을 비운 채 저장하면 남던 자리 표시 — 정의는 lib/platform-preset-copy.ts(표시 층도 같은 값을 안다). */
+export { LEGACY_UNNAMED_HEADER } from '@/lib/platform-preset-copy';
 
 /** story #4257 — 미리보기 예시 문자열(«예시 {name}» · 로케일 문구 `organization.definerSampleValue`). 순수 함수라 호출부(t 보유)가 넘긴다 —
  * 필수 인자라 한국어 고정 문자열로 조용히 떨어지는 기본값이 없다. */

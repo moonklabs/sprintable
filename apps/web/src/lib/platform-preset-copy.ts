@@ -207,3 +207,15 @@ export function localizeSeedStageTextBlocks(template: BlockTemplate, body: strin
   if (body === null || !template.blocks.some((b) => b.type === 'text' && SEED_STAGE_TEXTS.includes(b.text))) return template;
   return { blocks: template.blocks.map((b): BlockTemplateBlock => (b.type === 'text' && SEED_STAGE_TEXTS.includes(b.text) ? { ...b, text: body } : b)) };
 }
+
+/** story #4257 전 조직 정의 폼이 머리말을 비운 채 저장하면 남던 **플랫폼 자리 표시**(조직이 쓴 글이 아니다). 새로는 저장되지 않는다. */
+export const LEGACY_UNNAMED_HEADER = '(이름 없음)';
+
+/**
+ * story #4257(PO 12:59Z · 유나 측정) — 이미 저장된 옛 머리말 `'(이름 없음)'`은 플랫폼이 넣은 자리 표시라, 기본 단계 문장과 같은 원칙으로 **표시할 때**
+ * 정의 이름(없으면 로케일 자리 표시)으로 바꾼다. 저장된 데이터는 건드리지 않는다(마이그레이션 없음 · 역파싱은 그대로 알아본다).
+ * 머리말 글자가 정확히 그 자리 표시일 때만 — 조직이 직접 쓴 머리말은 원문 그대로.
+ */
+export function localizeLegacyUnnamedHeader(template: BlockTemplate, name: string): BlockTemplate {
+  return { blocks: template.blocks.map((b): BlockTemplateBlock => (b.type === 'header' && b.text === LEGACY_UNNAMED_HEADER ? { ...b, text: name } : b)) };
+}

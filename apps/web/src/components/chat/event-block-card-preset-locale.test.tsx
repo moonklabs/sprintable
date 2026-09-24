@@ -139,3 +139,29 @@ describe('조직 정의 — 플랫폼 기본 단계 문장만 text 블록 단위
     expect(text).toContain('단계로 넘어갔어요');
   });
 });
+
+// story #4257(PO 12:59Z · 유나 측정) — 이미 저장된 옛 머리말 '(이름 없음)'은 플랫폼 자리 표시 → 표시할 때 정의 이름(없으면 로케일 자리 표시).
+describe('조직 정의 — 옛 자리 표시 머리말 «(이름 없음)»은 정의 이름으로(#4257)', () => {
+  const tpl = (header: string) => ({ blocks: [
+    { type: 'header' as const, text: header },
+    { type: 'text' as const, text: '**{{payload.stage}}** 로 넘어갔습니다' },
+  ] }) as unknown as typeof MARKETING_TEMPLATE;
+
+  it('⭐en 뷰어 — 옛 머리말 대신 정의 이름', async () => {
+    const text = await render('en', tpl('(이름 없음)'), { stage: 'draft' }, def('org.acme.flow', 'org-1', 'Release flow'));
+    expect(text).toContain('Release flow');
+    expect(text).not.toContain('(이름 없음)');
+  });
+
+  it('정의를 모르면(구 캐시) 로케일 자리 표시(en «(Untitled)»)', async () => {
+    const text = await render('en', tpl('(이름 없음)'), { stage: 'draft' }, null);
+    expect(text).toContain(enMessages.organization.definerUnnamedPreview);
+    expect(text).not.toContain('(이름 없음)');
+  });
+
+  it('조직이 직접 쓴 머리말은 원문 그대로(자리 표시와 글자가 다르면 안 바꾼다)', async () => {
+    const text = await render('en', tpl('우리 릴리즈'), { stage: 'draft' }, def('org.acme.flow', 'org-1', 'Release flow'));
+    expect(text).toContain('우리 릴리즈');
+    expect(text).not.toContain('Release flow');
+  });
+});

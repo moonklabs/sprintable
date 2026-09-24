@@ -15,7 +15,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
-import { isLocalizedPlatformPreset, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
+import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
@@ -401,7 +401,11 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       body: stageMovedBody,
       targetLabel: tEventCard('targetLabel'),
     })
-    : localizeSeedStageTextBlocks(template, stageMovedBody);
+    : localizeLegacyUnnamedHeader(
+      localizeSeedStageTextBlocks(template, stageMovedBody),
+      // story #4257(PO 12:59Z) — 옛 자리 표시 머리말은 정의 이름(필수값) · 이름을 모르면(정의 모름 · 구 캐시) 로케일 자리 표시.
+      definition?.name?.trim() || tOrg('definerUnnamedPreview'),
+    );
   const blocks = renderBlockTemplate(localizedTemplate, payload, refsForTemplate, labels, translations);
 
   return (
