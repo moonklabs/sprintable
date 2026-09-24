@@ -104,6 +104,9 @@ interface DashboardContext {
   // CTA 주소(/chats·/org-briefing·/organization/channels 등)를 목적지 모듈로 치환하려면
   // process.env를 못 읽는 client 컴포넌트 입장에서 이 context가 유일한 경로다.
   navV3Flags?: NavV3Flags;
+  // story #4231 다음 조각(래칫 맹점 ①) — 이 값을 준 것이 DashboardShell인가(셸 밖 화면 · /today · (v3)/chat · /connect-rules는 기본값 = 없음).
+  // useFlatHref가 셸 밖에서만 탭 프로젝트(URL ?p= · sessionStorage)를 읽는 판정용.
+  inShell?: boolean;
 }
 
 const DashboardCtx = createContext<DashboardContext>({
@@ -529,7 +532,7 @@ export function DashboardShell({
 
   return (
     <ToastProvider>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
