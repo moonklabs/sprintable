@@ -1,3 +1,4 @@
+import { withProjectParam } from '@/lib/with-project-param';
 /**
  * story #3831(UX-v3·FE 3·오늘) — 「오늘」 화면 본문. BE 계약 SSOT = story #3823
  * `GET /api/v2/today`(backend/app/services/today_service.py 직접 실측, 자체 집계 0).
@@ -146,11 +147,15 @@ export function deriveNeedsMeState(kind: unknown, risk: unknown): NeedsMeState {
 
 /** source='gate'는 canonical 상세(/gates/{id})로, 그 외(hitl·workflow_step)는 기존
  * 결재함 큐(/inbox?tab=gates)로 — 둘 다 기존 라우트 재사용(새 API 0).
- * story #4241 — 게이트 상세는 그 결재의 프로젝트(`projectId`)를 `?p=`로 싣는다(다른 프로젝트 결재를 열면 셸·본문 두 세계 방지).
- * 결재함 큐는 조직 단위라 여기선 p를 싣지 않고, 소비처의 useFlatHref가 현재 프로젝트를 싣는다(이미 실은 p는 보존). */
-export function hrefForNeedsMeItem(item: { source: string; id: string; projectId?: string | null }): string {
-  if (item.source !== 'gate') return '/inbox?tab=gates';
-  return item.projectId ? `/gates/${item.id}?p=${encodeURIComponent(item.projectId)}` : `/gates/${item.id}`;
+ * story #4241 — 게이트 상세는 그 결재의 프로젝트(`projectId`)를 `?p=`로 싣는다(다른 프로젝트 결재를 열면 셸·본문 두 세계 방지). 프로젝트가
+ * 없는 게이트(조직 단위)는 현재 프로젝트(4241 유나 design · «project-less gates keep the current project» — 조직 단위라 틀린 셸이 아니다).
+ * story #4231 4차 — 결재함 큐는 조직 단위 화면이라 현재 프로젝트를 싣는 함수(`withProject` · 필수 · 호출처는 useFlatHref)를 거친다. */
+export function hrefForNeedsMeItem(
+  item: { source: string; id: string; projectId?: string | null },
+  withProject: (href: string) => string,
+): string {
+  if (item.source !== 'gate') return withProject('/inbox?tab=gates');
+  return item.projectId ? withProjectParam(`/gates/${item.id}`, item.projectId) : withProject(`/gates/${item.id}`);
 }
 
 function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {

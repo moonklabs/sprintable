@@ -17,7 +17,7 @@ import ts from 'typescript';
 import { MIGRATED_RESOURCES } from './legacy-resource-tables';
 import { describe, expect, it } from 'vitest';
 
-const BASELINE = 6;
+const BASELINE = 4;
 
 const SRC = path.resolve(__dirname, '..');
 const AUTH = path.join(SRC, 'app/(authenticated)');

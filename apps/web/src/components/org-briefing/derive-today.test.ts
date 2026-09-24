@@ -22,22 +22,25 @@ describe('deriveNeedsMeState — 낱말 표 §① 상태 3어(PO 確定 2026-09-
 });
 
 describe('hrefForNeedsMeItem — 기존 라우트 재사용(새 API 0)', () => {
-  it('source=gate → /gates/{id}(canonical 상세)', () => {
-    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1' })).toBe('/gates/g1');
+  // story #4231 4차 — 결재함 큐(조직 단위 화면)는 넘긴 withProject(현재 p)를 거치고, 게이트 상세는 결재 자기 프로젝트만(현재 p 아님).
+  const cur = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=CURRENT`;
+
+  it('source=gate → /gates/{id}(canonical 상세) · 프로젝트 없는(조직 단위) 결재는 현재 p(4241)', () => {
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1' }, cur)).toBe('/gates/g1?p=CURRENT');
   });
 
-  it('source=hitl → /inbox?tab=gates(전용 상세 없음)', () => {
-    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1' })).toBe('/inbox?tab=gates');
+  it('source=hitl → /inbox?tab=gates(전용 상세 없음) · 현재 p', () => {
+    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1' }, cur)).toBe('/inbox?tab=gates&p=CURRENT');
   });
 
-  it('source=workflow_step → /inbox?tab=gates(전용 상세 없음)', () => {
-    expect(hrefForNeedsMeItem({ source: 'workflow_step', id: 'w1' })).toBe('/inbox?tab=gates');
+  it('source=workflow_step → /inbox?tab=gates(전용 상세 없음) · 현재 p', () => {
+    expect(hrefForNeedsMeItem({ source: 'workflow_step', id: 'w1' }, cur)).toBe('/inbox?tab=gates&p=CURRENT');
   });
 
-  it('story #4241 — 게이트 상세는 결재 자신의 프로젝트를 싣는다 · 프로젝트 모르면 그대로 · 결재함 큐엔 싣지 않음', () => {
-    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: 'proj-C' })).toBe('/gates/g1?p=proj-C');
-    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: null })).toBe('/gates/g1');
-    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1', projectId: 'proj-C' })).toBe('/inbox?tab=gates');
+  it('⭐story #4241 · #4231 4차 — 게이트 상세는 결재 자신의 프로젝트 · 결재함 큐는 현재 p(항목 p 아님)', () => {
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: 'proj-C' }, cur)).toBe('/gates/g1?p=proj-C');
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: null }, cur)).toBe('/gates/g1?p=CURRENT');
+    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1', projectId: 'proj-C' }, cur)).toBe('/inbox?tab=gates&p=CURRENT');
   });
 });
 

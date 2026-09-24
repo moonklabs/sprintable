@@ -40,7 +40,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
   const t = useTranslations('orgBriefing');
   const meta = STATE_META[item.state];
   const Icon = meta.icon;
-  const href = flatHref(hrefForNeedsMeItem(item));
+  const href = hrefForNeedsMeItem(item, flatHref);
   return (
     <div className="flex items-start gap-3 border-t border-border px-3 py-3 first:border-t-0">
       <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
