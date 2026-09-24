@@ -8,8 +8,8 @@
   (marketing-recipe-apply-dialog: approver · approval_elsewhere 자리 제외).
 - 시작: 사람이 스토리에서 첫 단계를 발행한다(FE «레시피 시작»과 같은 `POST /api/v2/events/publish`).
 - 에이전트 단계: 직전 멘션(단계 이벤트 본문 또는 게이트 승인 알림)의 `publish_event({...})` 예시를 **그대로** 발행한다.
-  테스트가 예시를 새로 쓰지 않는다(최저 지능 기준). 예외 1곳만 이름 붙여 둔다 — 블로그 `pending_approval` 예시의
-  `site_post_draft_id` 자리 표시를 제출한 초안 id로 바꾸는 치환(`_SITE_DRAFT_PLACEHOLDER_SUBSTITUTIONS`).
+  테스트가 예시를 새로 쓰지 않는다(최저 지능 기준). 블로그 `pending_approval` 예시의 `site_post_draft_id`는 story #4256 뒤 서버가
+  실제 초안 id로 채우므로 치환이 0이다(`_SITE_DRAFT_PLACEHOLDER_SUBSTITUTIONS` — 자리 표시로 돌아가면 RED).
 - 게이트: 테스트 사람 멤버가 실 전이 엔드포인트로 승인한다.
 - 발행: 0-reach 어댑터(블로그 WordPress 스텁 · 뉴스레터 stibee_sandbox · SNS sandbox). 실 채널 · 실 도메인 · 실 수신자 0.
 - 끝: 마지막 단계 이벤트 정확히 1.
@@ -68,9 +68,9 @@ _VERSIONS_DIR = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 # 이 세 레시피의 시드 행을 만들거나 바꾸는 마이그레이션 — 리비전 순서 그대로.
 _SEED_MIGRATIONS = ("0396", "0398", "0399", "0400", "0401", "0402")
 
-# 블로그 `verification` 멘션의 `pending_approval` 예시는 `site_post_draft_id`를 자리 표시로 싣는다(events.py — 그 멘션을
-# 그리는 시점엔 아직 제출된 초안이 없다). 체인이 예시를 고치는 곳은 이 한 곳뿐이다.
-_SITE_DRAFT_PLACEHOLDER_SUBSTITUTIONS = 1
+# story #4256 — 블로그 `verification` 멘션의 `pending_approval` 예시는 이 스토리의 초안이 하나면 그 실제 id를 싣는다(events.py ·
+# 발행 전 초안 1건 → 실제 id · 0건/2건 이상 → 자리 표시). 이 체인은 작성 단계가 초안 하나를 만드므로 예시를 고칠 곳이 없다.
+_SITE_DRAFT_PLACEHOLDER_SUBSTITUTIONS = 0
 
 
 @pytest.fixture
@@ -419,7 +419,7 @@ async def test_blog_article_seed_runs_start_to_publish_checked(live_wordpress_st
         await _publish(app, Session, w, actor="creator_id", body=example)
         await _assert_reaches(Session, w, _BLOG, "verification", creator)
         # PO 판정 자료(자리 표시가 필요한가) — 검수 멘션을 그리는 시점에 이 스토리의 블로그 초안은 이미 하나 있다(작성 단계가 만든 것 ·
-        # 아직 제출 전). 멘션은 그 초안 id 대신 자리 표시를 싣는다.
+        # 아직 제출 전). story #4256 — 멘션은 그 초안의 실제 id를 싣는다(아래에서 단언).
         async with Session() as s:
             from sqlalchemy import select
 
@@ -430,7 +430,7 @@ async def test_blog_article_seed_runs_start_to_publish_checked(live_wordpress_st
             )).all()
         assert [(d.id, d.status) for d in drafts_at_render] == [(draft_id, "draft")], drafts_at_render
 
-        # 검수 단계 일: 초안을 제출한다(submit_site_post). 예시의 초안 자리 표시는 제출한 초안 id로 바꾼다(유일한 치환).
+        # 검수 단계 일: 초안을 제출한다(submit_site_post). 예시에 자리 표시가 남아 있으면 제출한 초안 id로 바꾼다(#4256 뒤로는 0회).
         site_gate_id = await _submit_site_draft(app, Session, w, draft_id)
         example = _publish_example((await _stage_message(Session, w, _BLOG, "verification")).content)
         substitutions = 0
@@ -438,6 +438,7 @@ async def test_blog_article_seed_runs_start_to_publish_checked(live_wordpress_st
             example["payload"][RECIPE_SITE_DRAFT_LINK_FIELD] = str(draft_id)
             substitutions += 1
         assert substitutions == _SITE_DRAFT_PLACEHOLDER_SUBSTITUTIONS
+        assert example["payload"][RECIPE_SITE_DRAFT_LINK_FIELD] == str(draft_id)  # 서버가 채운 값이 제출한 그 초안
         await _publish(app, Session, w, actor="creator_id", body=example)
         assert await _stage_event_count(Session, w, _BLOG, "pending_approval") == 1
         await _assert_approval_card_reaches(Session, w, site_gate_id, owner)
