@@ -483,6 +483,21 @@ describe('ApprovalsQueue', () => {
     expect(pushMock).toHaveBeenCalledWith('/gates/g-tap');
   });
 
+  it.each([
+    ['다른 프로젝트 결재 → 그 결재의 프로젝트', 'proj-C', '/gates/g-own?p=proj-C'],
+    ['같은 프로젝트 결재 → 지금과 같음', 'proj-A', '/gates/g-own?p=proj-A'],
+    ['프로젝트 무관 대상(null) → 현재 프로젝트', null, '/gates/g-own?p=proj-A'],
+  ])('story #4241 — 행 링크는 결재 자신의 프로젝트: %s', async (_label, projectId, expected) => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [],
+      currentMemberType: 'human', currentTeamMemberId: 'member-1', projectId: 'proj-A',
+    });
+    mockFetches([{ ...gate({ id: 'g-own' }), project_id: projectId }], []);
+    await mount();
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenLastCalledWith(expected);
+  });
+
   it('story #4231 — 항목 탭은 현재 프로젝트(`?p=`)를 싣고 · 프로젝트 전환 대기 중이면 그 목표를 싣는다(4585와 같은 동작)', async () => {
     useDashboardContextMock.mockReturnValue({
       orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [],

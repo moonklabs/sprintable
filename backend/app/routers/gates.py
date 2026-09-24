@@ -1626,6 +1626,8 @@ class HitlInboxItem(BaseModel):
     work_type: str | None = None
     created_at: datetime
     expires_at: datetime | None = None
+    # story #4241 — 결재함은 조직 전체 목록이라 행 링크가 «현재 프로젝트»가 아니라 이 요청의 프로젝트를 싣게(GateResponse.project_id와 짝).
+    project_id: uuid.UUID | None = None
 
 
 # gate_enforce.py:22/gate_metrics.py:24 선례(cross-module import 대신 로컬 재선언) — HitlRequest 중
@@ -1664,6 +1666,7 @@ def _hitl_item_from_row(r: HitlRequest) -> HitlInboxItem:
         work_type=meta.get("work_type"),
         created_at=r.created_at,
         expires_at=r.expires_at,
+        project_id=r.project_id,
     )
 
 

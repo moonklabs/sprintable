@@ -142,6 +142,10 @@ function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTrans
 
 export function ApprovalsQueue() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  // story #4241 — 결재함은 조직 전체 목록이다. 행 링크는 «현재 프로젝트»가 아니라 결재 자신의 프로젝트를 싣는다(다른 프로젝트 결재를 열면
+  // 셸도 그 프로젝트로 — 셸·본문 두 세계 방지). 프로젝트 무관 대상(null)은 지금처럼 현재 프로젝트. flatHref는 이미 실은 p를 보존한다.
+  const gateHref = (gate: GateItem) =>
+    flatHref(gate.project_id ? `/gates/${gate.id}?p=${encodeURIComponent(gate.project_id)}` : `/gates/${gate.id}`);
   const t = useTranslations('cage');
   // story #3565 — ccGateType*/ccGateGeneric 키는 Command Center가 처음 세운
   // 'dashboard' 네임스페이스에 산다(공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는
@@ -648,7 +652,7 @@ export function ApprovalsQueue() {
               <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
                 <button
                   type="button"
-                  onClick={() => router.push(flatHref(`/gates/${gate.id}`))}
+                  onClick={() => router.push(gateHref(gate))}
                   className="flex w-full flex-col items-start gap-1 text-left"
                 >
                   {gateBody}
@@ -667,7 +671,7 @@ export function ApprovalsQueue() {
                       {t(resolved === 'approved' ? 'queueResolvedApproved' : 'queueResolvedRejected')}
                     </span>
                   </span>
-                  <Link href={flatHref(`/gates/${gate.id}`)} className="text-xs font-medium text-primary hover:underline">
+                  <Link href={gateHref(gate)} className="text-xs font-medium text-primary hover:underline">
                     {t('queueViewRecord')}
                   </Link>
                 </div>
@@ -704,7 +708,7 @@ export function ApprovalsQueue() {
             <button
               key={gate.id}
               type="button"
-              onClick={() => router.push(flatHref(`/gates/${gate.id}`))}
+              onClick={() => router.push(gateHref(gate))}
               className="block w-full text-left"
             >
               <ProofCapsule
@@ -760,7 +764,7 @@ export function ApprovalsQueue() {
           <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
             <button
               type="button"
-              onClick={() => router.push(flatHref(`/gates/${gate.id}`))}
+              onClick={() => router.push(gateHref(gate))}
               className="flex w-full flex-col items-start gap-1 text-left"
             >
               {gateBody}
