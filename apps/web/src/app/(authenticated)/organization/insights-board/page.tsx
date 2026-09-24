@@ -364,6 +364,9 @@ export default function InsightsBoardPage() {
       if (value === null || value === '') qs.delete(key);
       else qs.set(key, value);
     }
+    // 까디르 QA(d5b64e7dc [P2]) — 현재 주소를 복사한 쿼리엔 지금 프로젝트의 `p`가 들어 있어, flatHref의 «이미 실은 p 보존» 규칙이 전환 대기
+    // 목표 대신 옛 p를 박는다. 복사본의 p는 지우고 목표 프로젝트는 flatHref가 싣는다.
+    qs.delete('p');
     const query = qs.toString();
     router.replace(flatHref(`/organization/insights-board${query ? `?${query}` : ''}`), { scroll: false });
   }

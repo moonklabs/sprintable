@@ -201,3 +201,36 @@ describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHA
     expect(container.textContent).not.toContain('수신 계약 요약');
   });
 });
+
+// story #4231 2차 · 까디르 QA(d5b64e7dc) — flat 링크 `?p=`를 싣느라 로드 효과가 프로젝트 전환마다 다시 돌면 안 된다(재fetch 0) ·
+// 실패 시 되돌리는 주소는 그 순간의 목표 프로젝트를 싣는다(요청 전에 읽어 둔 옛 값 아님).
+describe('AgentDetailPage — 프로젝트 전환과 flat 링크(story #4231)', () => {
+  it('⭐프로젝트 전환(전환 대기 목표 변경)에도 에이전트를 다시 받지 않는다(fetch 횟수 불변)', async () => {
+    stubFetch();
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const agentCalls = () => fetchMock.mock.calls.filter(([u]) => u === '/api/team-members/agent-1').length;
+    const before = agentCalls();
+    expect(before).toBeGreaterThan(0);
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    await act(async () => { setPendingProjectTarget('proj-B'); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(agentCalls()).toBe(before);
+    await act(async () => { setPendingProjectTarget(null); });
+  });
+
+  it('⭐조회 실패 되돌리기 — 요청 중 전환됐으면 되돌리는 순간의 목표 프로젝트를 싣는다', async () => {
+    let resolveAgent!: (v: unknown) => void;
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1'
+      ? new Promise((r) => { resolveAgent = r; })
+      : base(url))));
+    await mount();
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    await act(async () => { setPendingProjectTarget('proj-B'); });
+    await act(async () => { resolveAgent({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
+    expect(routerReplaceMock).toHaveBeenCalledWith('/organization/workforce?tab=manage&p=proj-B');
+    await act(async () => { setPendingProjectTarget(null); });
+  });
+});

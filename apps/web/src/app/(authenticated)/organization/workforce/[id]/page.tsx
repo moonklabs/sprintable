@@ -152,10 +152,10 @@ export default function AgentDetailPage() {
   useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
 
   const fetchAgent = useCallback(async () => {
-    const flatHref = flatHrefRef.current;
     const res = await fetchWithAuth(`/api/team-members/${id}`);
     // story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2 원칙, gate/chat/goal/loop과 동일).
-    if (!res.ok) { router.replace(flatHref('/organization/workforce?tab=manage')); return; }
+    // 까디르 QA(d5b64e7dc [P2]) — ref는 되돌리는 **그 순간**에 읽는다(요청 전에 읽어 두면 요청 중 전환 시 옛 프로젝트로 돌아간다).
+    if (!res.ok) { const flatHref = flatHrefRef.current; router.replace(flatHref('/organization/workforce?tab=manage')); return; }
     const json = await res.json() as { data: AgentMember };
     setAgent(json.data);
   }, [id, router]);
