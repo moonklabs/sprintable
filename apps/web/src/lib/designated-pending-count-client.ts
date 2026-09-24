@@ -61,3 +61,22 @@ export function fetchDesignatedPendingCount(): Promise<number | null> {
   }
   return inFlight.promise;
 }
+
+/** story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 모바일 탭바가 같은 목록 · 같은 판정을 쓴다. */
+export const DESIGNATED_PENDING_COUNT_EVENTS = ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_tossed'] as const;
+
+/**
+ * story #4263 AC2 — 결재 대기 수의 라이브 갱신 한 곳(예전엔 app-sidebar에만 있었다). 위 이벤트마다 다시 묻되, 연결 직후 백필 중 마지막 수에
+ * 이미 보였던 이벤트는 건너뛴다(#4245 워터마크 · isEventReflectedInLastCount). 반환 = 구독 해지.
+ */
+export function subscribeDesignatedPendingCount(
+  mux: { subscribe: (eventName: string, handler: (data: string) => void) => () => void },
+  onCount: (count: number) => void,
+): () => void {
+  const refetch = (data: string) => {
+    if (isEventReflectedInLastCount(data)) return;
+    void fetchDesignatedPendingCount().then((count) => { if (count !== null) onCount(count); });
+  };
+  const unsubs = DESIGNATED_PENDING_COUNT_EVENTS.map((name) => mux.subscribe(name, refetch));
+  return () => { for (const unsub of unsubs) unsub(); };
+}

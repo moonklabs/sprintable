@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -9,7 +9,8 @@ import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'l
 import { cn } from '@/lib/utils';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
-import { fetchDesignatedPendingCount } from '@/lib/designated-pending-count-client';
+import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   DEFAULT_NAV_V3_FLAGS,
@@ -233,6 +234,16 @@ export function MobileTabBar({
   // FastAPI가 미인식 쿼리파라미터를 무시하므로 안전한 no-op(기존과 동일 org-wide 동작) — 배포되면
   // 자동으로 개인화 적용.
   const [pendingCount, setPendingCount] = useState(0);
+  const mux = useSseMultiplexerContext();
+  const muxRef = useRef(mux);
+  useEffect(() => { muxRef.current = mux; }, [mux]);
+
+  // story #4263 AC2 — 사이드바와 같은 라이브 갱신(게이트 SSE 이벤트 · #4245 워터마크 판정 공유). 이 구독이 있으니 SSE가 살아 있는 동안엔
+  // 창 포커스 재조회가 필요 없다(아래 loadPendingCount가 생략). 데스크톱(탭바 숨김)에선 구독도 안 한다(아래 effect와 같은 폭 판정).
+  useEffect(() => {
+    if (!mux || typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
+    return subscribeDesignatedPendingCount(mux, setPendingCount);
+  }, [mux]);
 
   useEffect(() => {
     // 유나 가디언 지적(#2249 병합 처리) — 탭바 자체는 `lg:hidden`(CSS 시각 게이팅)이지만
@@ -262,10 +273,16 @@ export function MobileTabBar({
     }
 
     void loadPendingCount();
-    window.addEventListener('focus', loadPendingCount);
+    // story #4263 AC2 — SSE가 살아 있으면(mux.isAlive · 4252와 같은 판정) 위 구독이 수를 따라가고 있어 포커스 재조회를 생략한다.
+    // 죽었거나 끊겼던 뒤엔 재조회(정확성 우선).
+    const handleFocus = () => {
+      if (muxRef.current?.isAlive()) return;
+      void loadPendingCount();
+    };
+    window.addEventListener('focus', handleFocus);
     return () => {
       cancelled = true;
-      window.removeEventListener('focus', loadPendingCount);
+      window.removeEventListener('focus', handleFocus);
     };
   }, []);
 

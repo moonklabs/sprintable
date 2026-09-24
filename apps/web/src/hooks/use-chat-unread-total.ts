@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useChatSse } from './use-chat-sse';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchChatUnreadTotal } from '@/lib/chat-unread-total-client';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 /**
  * story #1977(트랙B) — GNB 채팅 unread 총합(3번째 표면: 데스크톱 사이드바 채팅 항목 +
@@ -19,25 +20,26 @@ import { fetchWithAuth } from '@/lib/db/client';
 export function useChatUnreadTotal(currentTeamMemberId?: string): number {
   const [total, setTotal] = useState(0);
   const fetchTotalRef = useRef<(() => void) | null>(null);
+  const mux = useSseMultiplexerContext();
+  const muxRef = useRef(mux);
+  useEffect(() => { muxRef.current = mux; }, [mux]);
 
   useEffect(() => {
     let cancelled = false;
     async function fetchTotal() {
-      try {
-        // story #2160 — 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
-        const res = await fetchWithAuth('/api/conversations/unread-count');
-        if (!res.ok || cancelled) return;
-        const json = (await res.json()) as { count?: number };
-        if (!cancelled) setTotal(json.count ?? 0);
-      } catch {
-        /* non-critical — 다음 트리거(SSE/visibility)에서 재시도 */
-      }
+      // story #4263 AC1 — 공용 요청(진행 중이면 합류): 이 훅이 한 화면에 여럿 마운트돼도 같은 순간 1번(fetchWithAuth · 401 처리는 그 안).
+      const count = await fetchChatUnreadTotal();
+      if (!cancelled && count !== null) setTotal(count);
     }
     fetchTotalRef.current = () => void fetchTotal();
 
     void fetchTotal();
     const handleVisibility = () => {
-      if (!document.hidden) void fetchTotal();
+      if (document.hidden) return;
+      // story #4263 AC2 — SSE가 살아 있으면(4252와 같은 판정 · mux.isAlive) 이 수는 SSE가 이미 따라가고 있다(message_created 낙관 +1 ·
+      // conversation.read 재조회) — 포커스 재조회를 생략한다. 죽었거나 끊겼던 뒤엔 재조회(정확성 우선 · 재연결은 onReconnect가 따로 스냅).
+      if (muxRef.current?.isAlive()) return;
+      void fetchTotal();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleVisibility);

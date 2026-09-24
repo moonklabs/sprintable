@@ -47,6 +47,11 @@ const { useChatSseMock } = vi.hoisted(() => ({
 vi.mock('@/hooks/use-chat-sse', () => ({
   useChatSse: (opts: unknown) => useChatSseMock(opts),
 }));
+// story #4263 — SSE 생존 판정(mux.isAlive) 목. 기본 false = 예전 동작(포커스 재조회) 그대로라 기존 테스트는 무변.
+const { muxAliveState } = vi.hoisted(() => ({ muxAliveState: { alive: false } }));
+vi.mock('@/components/realtime-provider', () => ({
+  useSseMultiplexerContext: () => ({ isAlive: () => muxAliveState.alive, subscribe: () => () => {}, subscribeMessage: () => () => {}, subscribeReconnect: () => () => {}, connected: true }),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -602,6 +607,23 @@ describe('ChatListView — window.focus 강제 재fetch·중복 coalescing (stor
     await act(async () => { await Promise.resolve(); });
 
     expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1);
+  });
+
+  // story #4263 AC2 — SSE가 살아 있으면(4252와 같은 판정) 백그라운드 동안에도 message_created가 목록을 따라갔으니 포커스 · 복귀 재조회 생략.
+  it('⭐SSE가 살아 있으면 window.focus · visibilitychange 재fetch 0', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+    muxAliveState.alive = true;
+    try {
+      await act(async () => { window.dispatchEvent(new Event('focus')); });
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      await act(async () => { await Promise.resolve(); });
+      expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount);
+    } finally {
+      muxAliveState.alive = false;
+    }
   });
 
   it('SSE onReconnect와 focus가 근접 시점에 겹치면 재fetch가 1회로 coalesce된다', async () => {

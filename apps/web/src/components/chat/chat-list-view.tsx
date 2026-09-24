@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -652,9 +653,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // use-chat-unread-total.ts와 동일 패턴(document.visibilitychange, !document.hidden에서만).
   // story #3081 — 데스크톱 셸(창은 계속 visible)에서 OS 포커스만 잃었다 되찾는 경우
   // visibilitychange는 안 fire하므로 window.focus를 같은 핸들러에 추가 배선한다.
+  // story #4263 AC2 — 단, SSE가 살아 있으면(mux.isAlive · 4252와 같은 판정 · 백그라운드 동안에도 message_created가 들어와 목록을 따라갔다)
+  // 포커스 재조회를 생략한다. 죽었거나 끊겼던 뒤엔 재조회(정확성 우선 · 재연결은 onReconnect가 따로 백필).
+  const mux = useSseMultiplexerContext();
+  const muxRef = useRef(mux);
+  useEffect(() => { muxRef.current = mux; }, [mux]);
   useEffect(() => {
     const handleVisibility = () => {
-      if (!document.hidden) handleReconnect();
+      if (document.hidden) return;
+      if (muxRef.current?.isAlive()) return;
+      handleReconnect();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleVisibility);
