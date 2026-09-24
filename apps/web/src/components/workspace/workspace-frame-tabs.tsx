@@ -9,20 +9,22 @@ const TABS = [
   // 순서는 「목록·보드·타임라인·스프린트·회고」, 목록이 첫 탭·기본 보기). 「타임라인」은 이
   // 카드 스코프 밖(별 라우트·데이터 0 — 지어내지 않는다, 별 카드 필요). 처음엔 06:28Z
   // 지시대로 배열 끝에 얹었다가 이 재대조로 앞으로 옮겼다.
-  { key: 'workList', path: 'work-list' },
-  { key: 'board', path: 'flow' },
-  { key: 'sprints', path: 'sprints' },
-  { key: 'epic', path: 'epics' },
+  { key: 'workList', labelKey: 'workList', path: 'work-list' },
+  // story #4278 — 라벨은 labelKey로 읽는다(key와 같은 값). t(tab.key)만으론 죽은 키 가드가 nav.board 소비를 못 봤다(예전엔 «전체» 메뉴
+  // 머리 문장의 t('board')가 대신 세어 줬는데 그 문장이 탭 이름만 쓰게 바뀌었다).
+  { key: 'board', labelKey: 'board', path: 'flow' },
+  { key: 'sprints', labelKey: 'sprints', path: 'sprints' },
+  { key: 'epic', labelKey: 'epic', path: 'epics' },
   // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「일감」 흡수 지도
   // (doc a699be00 §②)의 「회고」 탭. board/sprints/epic과 동형(실 라우트 /retro 보존,
   // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
   // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
-  { key: 'retro', path: 'retro' },
+  { key: 'retro', labelKey: 'retro', path: 'retro' },
   // story #3989(「일감」 흡수 3/N, PO 확定 — worklist-6item-absorption doc §②-1) — 전수
   // 가설 집. 다른 탭과 동형(실 라우트 /hypotheses 보존, 이 프레임은 얕은 nav일 뿐).
   // labelKey 'hypothesis'는 flow.ladderName_earth와 같은 낱말(「가설」)이라 값만 맞추고
   // 키는 새로 둔다(namespace가 다름 — 사본이 아니라 같은 사실·다른 화면).
-  { key: 'hypothesis', path: 'hypotheses' },
+  { key: 'hypothesis', labelKey: 'hypothesis', path: 'hypotheses' },
 ] as const;
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
@@ -79,7 +81,7 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
             active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
           )}
         >
-          {t(tab.key)}
+          {t(tab.labelKey)}
         </button>
       ))}
     </div>
