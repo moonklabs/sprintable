@@ -2148,6 +2148,10 @@ async def _render_recipe_publish_failed_message(
     retry_path = await _recipe_publish_retry_path(db, org_id=org_id, payload=payload)
     if retry_path:
         lines.append(f"- {t(f'events.recipe_publish_failed_next_{next_key}', resolved_locale, retry_url=retry_path)}")
+    elif kind == "newsletter_send":
+        # 유나 10:21Z — 뉴스레터 발송은 앱 안에 다시 시도할 자리가 아직 없다(FE 0 · 발송 요청 API는 사람 전용). 없는 버튼을
+        # 찾게 하지 않는다. 만료: 그 자리가 생기면 `_recipe_publish_retry_path`가 주소를 주고 위 링크 줄로 넘어간다.
+        lines.append(f"- {t('events.recipe_publish_failed_next_newsletter_unavailable', resolved_locale)}")
     else:
         lines.append(f"- {t(f'events.recipe_publish_failed_next_{next_key}_no_link', resolved_locale)}")
     lines.append(f"- {t('events.recipe_publish_failed_recipe_stopped', resolved_locale)}")

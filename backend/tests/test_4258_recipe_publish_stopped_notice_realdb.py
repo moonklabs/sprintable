@@ -102,7 +102,7 @@ async def _notice_recipients(Session, org_id, message) -> set:
 @pytest.mark.anyio
 async def test_newsletter_send_dead_letter_notifies_approver_and_send_agent_and_does_not_advance():
     """뉴스레터 발송이 sandbox 발송 실패로 dead_letter → 통지 1(승인자 owner ∪ 발송 요청 담당 에이전트) · send_checked 0.
-    발송 코드는 매핑표 밖이라 needs_check(«나갔는지 모름») · 재시도 화면이 아직 없어 링크 없는 문장."""
+    발송 코드는 매핑표 밖이라 needs_check(«나갔는지 모름») · 앱에 재시도 자리가 없어 «아직 다시 시도할 수 없어요»."""
     from fastapi import BackgroundTasks
 
     from app.routers.events import EventPublishRequest, publish_registry_event
@@ -152,7 +152,9 @@ async def test_newsletter_send_dead_letter_notifies_approver_and_send_agent_and_
         payload = notices[0].msg_metadata["event"]["payload"]
         assert payload["stop_kind"] == "dead_letter" and payload["stage"] == "send_requested"
         assert t("events.recipe_publish_failed_what_newsletter_send", "ko") in notices[0].content
-        assert t("events.recipe_publish_failed_next_needs_check_no_link", "ko") in notices[0].content
+        # 유나 10:21Z — 앱에 뉴스레터 재시도 자리가 없어 «다시 시도해야 해요» 대신 «아직 앱에서 다시 시도할 수 없어요».
+        assert t("events.recipe_publish_failed_next_newsletter_unavailable", "ko") in notices[0].content
+        assert t("events.recipe_publish_failed_next_needs_check_no_link", "ko") not in notices[0].content
         assert await _stage_event_count(Session, {**ctx, "definition_key": _SEED._KEY}, "send_checked") == 0
     finally:
         await engine.dispose()

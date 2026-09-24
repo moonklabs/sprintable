@@ -578,6 +578,10 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 사람이 채널을 다시 연결한 뒤 다시 시도해야 해요.",
         "en": "Next action: a person needs to reconnect the channel, then retry.",
     },
+    "events.recipe_publish_failed_next_newsletter_unavailable": {
+        "ko": "다음 행동: 뉴스레터 발송은 아직 앱에서 다시 시도할 수 없어요.",
+        "en": "Next action: newsletter sends can't be retried in the app yet.",
+    },
     "events.recipe_publish_failed_recipe_stopped": {
         "ko": "레시피는 이 단계에 멈춰 있어요.", "en": "The recipe is paused at this stage.",
     },
