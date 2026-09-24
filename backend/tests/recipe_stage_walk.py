@@ -123,7 +123,10 @@ async def publish_as_server(db, *, org_id, definition_key: str, payload: dict):
     from fastapi import BackgroundTasks
 
     from app.dependencies.auth import AuthContext
-    from app.routers.events import _get_or_create_system_publisher, _publish_registry_event_core
+    from app.routers.events import (
+        _get_or_create_system_publisher,
+        _publish_registry_event_core,
+    )
 
     system_member = await _get_or_create_system_publisher(db, org_id)
     auth = AuthContext(

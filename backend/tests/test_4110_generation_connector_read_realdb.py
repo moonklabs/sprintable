@@ -598,7 +598,9 @@ async def test_resolver_no_fallback_for_unbound_agent_target_stage():
             # 바인딩돼야 해서 «미배정 stage»가 성립하지 않는다.
             from app.dependencies.auth import AuthContext
             from app.routers.events import _publish_registry_event_core
-            from tests.test_3475_publishing_metrics import _seed_human as _seed_owner_user
+            from tests.test_3475_publishing_metrics import (
+                _seed_human as _seed_owner_user,
+            )
 
             owner_user_id = await _seed_owner_user(s, org_id, role="owner")
             resp = await _publish_registry_event_core(

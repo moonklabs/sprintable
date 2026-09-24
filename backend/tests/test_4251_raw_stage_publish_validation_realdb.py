@@ -13,9 +13,13 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import select, update
 
-from tests.test_3312_approve_stage_gate_auto_creation import _fake_request, _seed_story
+from tests.test_3312_approve_stage_gate_auto_creation import _seed_story
 from tests.test_3475_publishing_metrics import _seed_human
-from tests.test_e4fc29fa_site_post_orchestration import _seed_agent, _seed_org, _session_factory
+from tests.test_e4fc29fa_site_post_orchestration import (
+    _seed_agent,
+    _seed_org,
+    _session_factory,
+)
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -283,7 +287,7 @@ async def test_after_a_server_advancing_gate_the_member_does_not_publish_the_nex
     """4254 결함 클래스 — 발송 게이트(`SERVER_ADVANCING_GATE_TYPES`) 뒤 다음 stage는 서버가 발송하고 낸다. 멤버가 먼저 내면 거부."""
     from app.services.recipe_gate_hooks import SERVER_ADVANCING_GATE_TYPES
 
-    gate_type = sorted(SERVER_ADVANCING_GATE_TYPES)[0]
+    gate_type = min(SERVER_ADVANCING_GATE_TYPES)
     stages = ["draft", "send_requested", "send_checked"]
     meta = {
         "draft": {"role": "Writer", "action": "초안"},

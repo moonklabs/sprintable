@@ -180,12 +180,11 @@ def _fake_request() -> "StarletteRequest":
 async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, creator_id, owner_member_id):
     from sqlalchemy import select
 
+    from app.models.event_definition import EventDefinition
     from app.models.gate import Gate
+    from app.models.pm import Story
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.services.gate_service import transition_gate
-
-    from app.models.event_definition import EventDefinition
-    from app.models.pm import Story
     from tests.recipe_stage_walk import seed_stage_publish
 
     async def _publish(stage: str, *, actor_id: uuid.UUID, extra: dict | None = None):

@@ -19,8 +19,15 @@ from __future__ import annotations
 import os
 import uuid
 
+from typing import TYPE_CHECKING
+
 import pytest
 from fastapi import BackgroundTasks
+
+if TYPE_CHECKING:
+    from starlette.requests import Request as StarletteRequest
+
+    from app.dependencies.auth import AuthContext
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -130,7 +137,7 @@ async def _seed_binding(session, org_id, project_id, *, stage, agent_id):
     await session.commit()
 
 
-def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
+def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> AuthContext:
     from app.dependencies.auth import AuthContext
     return AuthContext(
         user_id=str(agent_id), email=None,
@@ -138,12 +145,12 @@ def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
     )
 
 
-def _fake_request() -> "StarletteRequest":
+def _fake_request() -> StarletteRequest:
     from starlette.requests import Request as StarletteRequest
     return StarletteRequest(scope={"type": "http", "headers": []})
 
 
-def _human_auth(user_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
+def _human_auth(user_id: uuid.UUID, org_id: uuid.UUID) -> AuthContext:
     from app.dependencies.auth import AuthContext
     return AuthContext(user_id=str(user_id), email=None, claims={}, org_id=str(org_id))
 
