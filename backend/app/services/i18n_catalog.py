@@ -502,12 +502,12 @@ _CATALOG: dict[str, dict[str, str]] = {
     },
     # story #4255 — 마지막 단계가 서버의 채널 게시일 때 결과 통지 줄(문안 = 유나).
     "events.stage_last_channel_published": {
-        "ko": "다음 행동: 할 일 없음 — 게시됐어요. 게시 주소: {permalink}",
-        "en": "Next action: nothing — it's published. Post URL: {permalink}",
+        "ko": "다음 행동: 할 일 없음 — 발행됐어요. 공개 주소: {permalink}",
+        "en": "Next action: nothing — it's published. Public URL: {permalink}",
     },
     "events.stage_last_channel_published_no_link": {
-        "ko": "다음 행동: 할 일 없음 — 게시됐어요. 게시 주소는 아직 없어요.",
-        "en": "Next action: nothing — it's published. There's no post URL yet.",
+        "ko": "다음 행동: 할 일 없음 — 발행됐어요. 공개 주소는 채널에서 아직 받지 못했어요.",
+        "en": "Next action: nothing — it's published. The channel hasn't sent the public URL yet.",
     },
     "events.stage_next_none": {
         "ko": "다음 단계: 없음(마지막 stage)",
