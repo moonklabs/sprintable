@@ -608,7 +608,8 @@ export default function InboxPage() {
                                     {/* f2ec5395 fix: 카운트 칩을 truncate <p> 밖 shrink-0 형제로 — 긴 title 잘려도 칩 항상 표시 */}
                                     <div className="flex min-w-0 flex-1 items-center gap-1.5">
                                       <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
-                                        {item.latest.title}
+                                        {/* story #4281(까디르 P2) — 묶음 머리도 단일 행과 같은 표시 변환(`[종류]` · 기계 사유 원문 0). */}
+                                        {composeNotificationDisplay(item.latest, t, eventPreviewHelpers).title}
                                       </p>
                                       {/* story #2023 ⓑ: 카운트 칩=L5(시스템 상태), 브랜드 아님 */}
                                       {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
@@ -630,7 +631,7 @@ export default function InboxPage() {
                                 {item.notifications.map((n, idx) => (
                                   <div key={n.id} className="flex items-center gap-2 text-xs">
                                     <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
-                                    <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                    <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
                                     <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
                                   </div>
                                 ))}
@@ -656,7 +657,7 @@ export default function InboxPage() {
                                           {n.reference_id.slice(0, 8)}
                                         </span>
                                       ) : (
-                                        <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                        <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
                                       )}
                                       <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
                                       {n.href ? (

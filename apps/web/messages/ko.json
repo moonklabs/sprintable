@@ -3719,7 +3719,7 @@
     "eventSprintClosed": "스프린트 종료",
     "eventAgentJoined": "에이전트 합류",
     "eventAgentDeployment": "에이전트 배포 알림",
-    "eventDispatched": "에이전트에게 맡겨졌어요",
+    "eventDispatched": "작업 전달",
     "heuristicDeadlinePassed": "{kind} 마감이 {duration} 지났어요.",
     "heuristicDeadlineLeft": "{kind} 마감까지 {duration} 남았어요.",
     "heuristicIdle": "{duration}째 활동이 없어요({kind}).",

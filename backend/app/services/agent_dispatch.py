@@ -152,10 +152,11 @@ async def _finalize_dispatch(
         recipient_id=recipient_id,
         recipient_type=member_type,
         payload=payload,
-        # story #4281 — 사람 수신자는 SSE ack 사이클이 없어 이 Event가 곧 배달 기록이다(`notification_dispatch`의 사람 몫 Event와
-        # 같은 #2380 의미 — delivered + delivered_at). 그쪽은 아래 `human_event_recorded=True`로 건너뛴다(종에 한 번 맡김 = 하나).
-        status="pending" if member_type == "agent" else "delivered",
-        delivered_at=None if member_type == "agent" else datetime.now(timezone.utc),
+        # story #4281 — 사람 수신자도 이 Event 하나만 남긴다(`notification_dispatch`의 사람 몫 Event는 아래 `human_event_recorded_for`로
+        # 이 수신자만 건너뜀 — 종에 한 번 맡김 = 하나). 상태는 예전 그대로 pending: 스트림이 보낸 뒤에 delivered로 바꾸므로(events.py
+        # 백필 · 라이브 둘 다) 연결이 없던 수신자도 다음 연결에서 받는다 — 데스크톱 셸(sprintable-mobile `desktop/ui/lib/sseReconnect.js`)이
+        # 이 `dispatched`를 OS 알림으로 띄우는 실소비처라, 만들 때 delivered로 박으면 백필 창이 300초로 줄어 오프라인 수신자가 놓친다.
+        status="pending",
     )
     db.add(event)
     await db.flush()
@@ -191,7 +192,7 @@ async def _finalize_dispatch(
             # story #2696: outbox 이관(동일 결함 클래스 예방) — in-app Event INSERT/
             # assign_recipient_seq()는 via_outbox와 무관하게 그대로 동기(webhook 배달만 지연).
             via_outbox=True,
-            human_event_recorded=True,  # story #4281 — 위 Event가 사람 몫 기록(종에 둘로 뜨던 결함)
+            human_event_recorded_for=frozenset({recipient_id}),  # story #4281 — 위 Event가 이 사람 몫 기록(종에 둘로 뜨던 결함)
         )
 
     if commit:

@@ -43,3 +43,30 @@ describe('dispatched 알림 표시(story #4281 · 유나 문안)', () => {
     expect(humanizeHours(24 * 31, tEn)).toBe('31 days');
   });
 });
+
+describe('조직 커스텀 라벨이 먼저(유나 선검토 · 4281 §5 «보드와 같은 순서»)', () => {
+  const domainLabels = {
+    statusLabel: (slug: string) => ({ 'in-review': '검토 대기', done: '끝남' } as Record<string, string>)[slug],
+    entityTypeLabel: (slug: string) => ({ story: '과업', epic: '큰 목표' } as Record<string, string>)[slug],
+  };
+
+  it('종류 · story 상태는 커스텀 라벨 · 없는 것은 키 표', () => {
+    expect(composeDispatchedHeuristicDisplay('[story] S', 'story/in-review 96h 무활동(임계 48h)', tKo, domainLabels).body)
+      .toBe('4일째 활동이 없어요(과업 · 검토 대기).');
+    expect(composeDispatchedHeuristicDisplay('[sprint] S', 'sprint 마감이 5h 초과됨', tKo, domainLabels).body)
+      .toBe('스프린트 마감이 5시간 지났어요.');
+  });
+
+  it('상태 커스텀은 story에만 — epic `done`은 slug가 겹쳐도 키 표(«완료»)', () => {
+    expect(composeDispatchedHeuristicDisplay('[epic] E', 'epic 상태 변경 → done', tKo, domainLabels).body)
+      .toBe('큰 목표 상태가 바뀌었어요: 완료.');
+    expect(composeDispatchedHeuristicDisplay('[story] S', 'story 상태 변경 → done', tKo, domainLabels).body)
+      .toBe('과업 상태가 바뀌었어요: 끝남.');
+  });
+
+  it('조직이 정의한 새 story 상태(키 표 밖)도 커스텀 라벨이 있으면 그 낱말', () => {
+    const custom = { statusLabel: (s: string) => (s === 'qa' ? 'QA 중' : undefined) };
+    expect(composeDispatchedHeuristicDisplay('[story] S', 'story 상태 변경 → qa', tKo, custom).body)
+      .toBe('스토리 상태가 바뀌었어요: QA 중.');
+  });
+});

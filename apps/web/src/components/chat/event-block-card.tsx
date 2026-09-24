@@ -616,7 +616,11 @@ export interface EventPreviewHelpers {
   /** story #3893 CHANGES①(PO PR#4298 리뷰) — metric_unit(metric 이름, 「%」 아님) 매핑용,
    * event-block-card.tsx의 METRIC_UNIT_KEYS 닫힌 집합과 동형 재사용. */
   tOutcomeLoop: (key: string) => string;
-  domainLabels: { statusLabel: (slug: string) => string | undefined };
+  domainLabels: {
+    statusLabel: (slug: string) => string | undefined;
+    /** story #4281 — 알림 본문의 종류 낱말도 조직 커스텀 라벨이 먼저(`useOrgDomainLabels` 그대로 넘기면 채워짐). */
+    entityTypeLabel?: (slug: string) => string | undefined;
+  };
 }
 
 /**

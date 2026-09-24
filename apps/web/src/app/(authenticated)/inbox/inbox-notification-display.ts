@@ -106,17 +106,24 @@ export function humanizeHours(hours: number, t: HeuristicT): string {
   return hours < 48 ? t('heuristicDurationHours', { count: hours }) : t('heuristicDurationDays', { count: Math.round(hours / 24) });
 }
 
+// 유나 선검토(PO 전달) — 종류 · 상태 낱말은 조직 커스텀 라벨이 먼저(4281 본문 §5 «보드와 같은 순서»), 없으면 위 키 표.
+// 상태 커스텀은 story에만 — 도메인 라벨의 status slug는 엔티티 구분이 없어 epic `done` 같은 겹치는 slug에 story 라벨이 붙는다.
 export function composeDispatchedHeuristicDisplay(
-  title: string, body: string | null, t: HeuristicT,
+  title: string, body: string | null, t: HeuristicT, domainLabels?: EventPreviewHelpers['domainLabels'],
 ): { title: string; body: string | null } {
   const titleMatch = DISPATCH_KIND_PREFIX_RE.exec(title);
   // 유나 — 제목은 앞 `[종류] `만 뗀다(종류는 본문 문장이 필요한 곳에서만 말한다).
   const nextTitle = titleMatch ? title.slice(titleMatch[0].length) : title;
   if (!body) return { title: nextTitle, body };
-  const kindWord = (k: string) => { const key = HEURISTIC_KIND_KEYS[k]; return key ? t(key) : null; };
+  const kindWord = (k: string) => {
+    const key = HEURISTIC_KIND_KEYS[k];
+    return key ? (domainLabels?.entityTypeLabel?.(k) ?? t(key)) : null;
+  };
   const statusWord = (k: string, st: string | undefined) => {
-    const key = st ? HEURISTIC_STATUS_KEYS[`${k}:${st}`] : undefined;
-    return key ? t(key) : null;
+    if (!st) return null;
+    const custom = k === 'story' ? domainLabels?.statusLabel(st) : undefined;
+    const key = HEURISTIC_STATUS_KEYS[`${k}:${st}`];
+    return custom ?? (key ? t(key) : null);
   };
   let m = HEURISTIC_DEADLINE_PASSED_RE.exec(body);
   if (m && kindWord(m[1]!)) return { title: nextTitle, body: t('heuristicDeadlinePassed', { kind: kindWord(m[1]!)!, duration: humanizeHours(Number(m[2]), t) }) };
@@ -165,7 +172,7 @@ export function composeNotificationDisplay(
   }
 
   if (notification.type === 'dispatched') {
-    ({ title, body } = composeDispatchedHeuristicDisplay(title, body, t));
+    ({ title, body } = composeDispatchedHeuristicDisplay(title, body, t, eventPreviewHelpers.domainLabels));
   }
 
   if (notification.type === 'gate.pending_approval' && typeof event?.payload?.['gate_type'] === 'string') {

@@ -3719,7 +3719,7 @@
     "eventSprintClosed": "Sprint closed",
     "eventAgentJoined": "Agent joined",
     "eventAgentDeployment": "Agent deployment update",
-    "eventDispatched": "Assigned to an agent",
+    "eventDispatched": "Work handed off",
     "heuristicDeadlinePassed": "{kind} deadline passed {duration} ago.",
     "heuristicDeadlineLeft": "{kind} deadline in {duration}.",
     "heuristicIdle": "No activity for {duration} ({kind}).",

@@ -191,3 +191,46 @@ describe('인박스 알림 그룹핑 — story #0d1c69f3(v2 4호, 라이브 121�
     expect(container.textContent).toContain('3건');
   });
 });
+
+// story #4281(까디르 P2) — 묶음 행도 단일 행과 같은 표시 변환을 탄다. 반복 dispatched(같은 제목 · 본문)는 generic 묶음, 반복
+// story_status_changed(같은 reference_id)는 status_change 묶음 — 머리 · 펼친 항목 어디에도 `[종류]` · «h 초과됨» 원문이 없어야 한다.
+// 뮤테이션: 묶음 세 자리 중 하나라도 `n.title` · `item.latest.title` 원문으로 되돌리면 `[hypothesis]`가 보여 RED.
+function dispatchedHeuristicNotif(id: string, refId: string | null) {
+  return {
+    id, org_id: 'o1', user_id: 'u1', type: 'dispatched',
+    title: '[hypothesis] 리뷰 에이전트를 붙이면 결함이 준다', body: 'hypothesis 마감이 743h 초과됨',
+    is_read: false, reference_type: refId ? 'hypothesis' : null, reference_id: refId, href: null,
+    created_at: '2026-01-01T00:00:00+00:00',
+  };
+}
+
+describe('묶음 알림 행도 표시 변환(story #4281)', () => {
+  it('generic 묶음 — 머리 · 펼친 항목(참조 없는 항목은 제목 줄)에 `[종류]` 0', async () => {
+    stubFetch([dispatchedHeuristicNotif('d1', null), dispatchedHeuristicNotif('d2', null), dispatchedHeuristicNotif('d3', null)]);
+    const { default: InboxPage } = await import('./page');
+    await mount(InboxPage);
+    expect(container.textContent).toContain('리뷰 에이전트를 붙이면 결함이 준다');
+    expect(container.textContent).toContain('3건');
+    expect(container.textContent).not.toContain('[hypothesis]');
+
+    const chevronBtn = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.includes('펼치기'))!;
+    await act(async () => { chevronBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent!.split('리뷰 에이전트를 붙이면 결함이 준다').length - 1).toBe(4); // 머리 1 + 항목 3
+    expect(container.textContent).not.toContain('[hypothesis]');
+    expect(container.textContent).not.toContain('743h');
+  });
+
+  it('status_change 묶음 — 머리 · 펼친 항목도 같은 변환 경로(dispatched가 아닌 행은 원문 그대로)', async () => {
+    const statusNotif = (id: string) => ({
+      id, org_id: 'o1', user_id: 'u1', type: 'story_status_changed', title: '[story] 결재 화면 숫자', body: null,
+      is_read: false, reference_type: 'story', reference_id: 'st-1', href: '/stories/st-1', created_at: '2026-01-01T00:00:00+00:00',
+    });
+    stubFetch([statusNotif('s1'), statusNotif('s2')]);
+    const { default: InboxPage } = await import('./page');
+    await mount(InboxPage);
+    const chevronBtn = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.includes('펼치기'))!;
+    await act(async () => { chevronBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 표시 변환은 dispatched만 `[종류]`를 뗀다 — story_status_changed는 원문 유지(과잉 일반화 금지). 머리 1 + 항목 2.
+    expect(container.textContent!.split('[story] 결재 화면 숫자').length - 1).toBe(3);
+  });
+});
