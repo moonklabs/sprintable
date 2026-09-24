@@ -53,11 +53,11 @@ substitutions:
   # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
   # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
   # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
-  # 했었다 — 수동 --port=3000 적용으로 리비전 00002 Ready 확認(위 deploy 스텝에 반영됨) 후
+  # 했었다 — 수동 --port=3000 적용으로 리비전 00002 Ready 확인(위 deploy 스텝에 반영됨) 후
   # `gcloud run services describe office-converter-dev --region=asia-northeast3
   # --format='value(status.url)'`로 아래 canonical 해시 URL 실측(_ADMIN_OPERATOR_AUDIENCE와
   # 동일 표기 원칙 — services list의 project번호 표기 아닌 describe의 canonical hash 그대로).
-  # invoker 바인딩(cloudrun-runtime-dev=backend-dev 런타임 SA 실명 일치, 무인증 403 확認)도
+  # invoker 바인딩(cloudrun-runtime-dev=backend-dev 런타임 SA 실명 일치, 무인증 403 확인)도
   # 수동 적용 완료 — 위 deploy 스텝의 순서 재구성으로 다음 배포부턴 자동 수렴.
   _GOTENBERG_SERVICE_URL: 'https://office-converter-dev-57iommnikq-du.a.run.app'
   _OFFICE_CONVERTER_MAX_INSTANCES: '3'
@@ -81,12 +81,12 @@ substitutions:
   #    Cloud SQL sprintable-prod(max_connections 200)는 RUNNABLE·건강했으나, PgBouncer가 prod에
   #    없거나 무력해(db_pgbouncer=False가 코드+배포 양쪽 기본값 — 위 주석의 "PgBouncer 풀러 불가"
   #    참고) 인스턴스당 3+1=4로 tiny한 앱 풀이 Cloud SQL에 직결돼 실 동시성을 못 버텼다. PO가
-  #    gcloud로 20/10(rev 00257-wdz)까지 올려 즉시 회복 확認(health 8/8 200) — 그 손 값을 SSOT로
+  #    gcloud로 20/10(rev 00257-wdz)까지 올려 즉시 회복 확인(health 8/8 200) — 그 손 값을 SSOT로
   #    durable화한다("손 값은 다음 배포가 덮는다" 교훈 재적용).
   #    안전식(AC4, 롤아웃 배수 없이): maxScale(5)×(pool+overflow)+raw(1) = 5×30+1 = 151 ≤ 200
   #    (25% 여유). ⚠️잔여 리스크(문서화, 미해소) — `docs/db-connection-budget.md`의 롤아웃-인식
   #    산식(2×N×per_instance, N=동시생존 리비전수)으로 보면 2×5×31=310>200. main 배포 빈도가
-  #    develop보다 훨씬 낮아 롤아웃 중첩 창이 짧다는 판단으로 이 잔여 리스크를 감수한다(PO 확認
+  #    develop보다 훨씬 낮아 롤아웃 중첩 창이 짧다는 판단으로 이 잔여 리스크를 감수한다(PO 확인
   #    필요 — 재검토 트리거: num_backends가 150에 근접하거나 main 연속배포가 잦아질 때).
   # story #2445 Phase1(2026-08-03, 페드루 인프라) — dev VM PgBouncer(10.178.0.63:6432,
   # transaction-mode) 라이브 검증 완료. dev-safe 기본값 'false'(현 동작 유지 — PgBouncer
@@ -98,9 +98,9 @@ substitutions:
   _BACKEND_DB_PGBOUNCER: 'false'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
   # story #2728 후속(2026-08-17, 페드루 PO 지시) — 유나 실측: dev FE 빌드가 NEXT_PUBLIC_
-  # EE_ENABLED 자체를 build-arg/Dockerfile ARG 어디에도 배선한 적이 없어(grep 확認 — 이
+  # EE_ENABLED 자체를 build-arg/Dockerfile ARG 어디에도 배선한 적이 없어(grep 확인 — 이
   # substitution·GHA·Dockerfile 전부 무배선) billing 표면이 dev서 아예 렌더 안 됐다. 배포
-  # SSOT/과거 스토리 grep으로 "의도된 결정"이 아님을 확認(manual-env-allowlist.yml에
+  # SSOT/과거 스토리 grep으로 "의도된 결정"이 아님을 확인(manual-env-allowlist.yml에
   # declared_by:PO·미triage로만 남아있던 값 — 코드로 differentiate된 적이 없다). dev-safe
   # 기본값 'false'(SSE_MULTIPLEX_ENABLED와 동일 컨벤션) — GHA가 dev 브랜치에서만 'true' 주입,
   # prod는 이 커밋으로 무접촉(기존 동작 그대로 유지, 명시 false로 durable화만).
@@ -161,7 +161,7 @@ substitutions:
   # story #2749(2026-08-18, 페드루 PO 실측 — 가입 인증메일 verify 링크가 dev에서 prod
   # 도메인(app.sprintable.ai)으로 발급됨) — auth.py(verify-email×2·reset-password)가 읽는
   # `NEXT_PUBLIC_APP_URL`이 배포 SSOT 어디에도 배선된 적이 없다(cloudbuild.yaml·GHA 전부
-  # 무배선 — grep 확認). 코드 기본값(하드코딩 prod URL)이 dev에도 그대로 새어 dev 발급
+  # 무배선 — grep 확인). 코드 기본값(하드코딩 prod URL)이 dev에도 그대로 새어 dev 발급
   # 메일 링크가 prod로 갔다. dev-safe 기본값은 prod URL(수동 gcloud submit 시 최소한
   # prod와 같은 안전값) — GHA가 dev 브랜치에서만 dev 도메인으로 override.
   _NEXT_PUBLIC_APP_URL: "https://app.sprintable.ai"
@@ -192,7 +192,7 @@ substitutions:
   # 2026-07-21 — 문제 생기면 48커밋 중 원인 격리 불가라 별도 판단으로 미룸).
   _SSE_MULTIPLEX_ENABLED: "false"
   # story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): Cloud Run 요청 타임아웃이
-  # `deploy-backend` 스텝에 `--timeout` 플래그로 명시된 적이 한 번도 없어(grep 확認) 인프라
+  # `deploy-backend` 스텝에 `--timeout` 플래그로 명시된 적이 한 번도 없어(grep 확인) 인프라
   # 기본값에 암묵 의존 중이었다(A2A `/rpc` 특히 `SendStreamingMessage` SSE가 사실상 무기한
   # 실행되는 배경). PO가 라이브 `gcloud`로 실측한 현재 유효값(2026-07-17, 이 세션은 gcloud
   # 접근 없이 그 실측을 신뢰): backend-prod=300s · backend-dev=3600s · mcp-prod=300s
@@ -204,7 +204,7 @@ substitutions:
   # "트리거"는 별도 GCP Cloud Build Trigger 리소스가 아니라 그 GHA 워크플로우 자체(파일 상단
   # 주석 "트리거: main→prod, develop→dev (GitHub Actions cloud-build.yml)" 참조)라 prod override
   # 도 이 레포 안에서 완결된다(PO/infra-lane이 GCP 콘솔에서 별도로 설정할 트리거-레벨
-  # override는 존재하지 않음 — 확認 후 아래 GHA 워크플로우도 함께 배선함).
+  # override는 존재하지 않음 — 확인 후 아래 GHA 워크플로우도 함께 배선함).
   _BACKEND_TIMEOUT: '3600'
 
   # story #3259(지원v1·1경계) — Support Gateway. deploy-realtime과 동일 하드게이트 컨벤션:
@@ -242,7 +242,7 @@ substitutions:
   # `_GA4_MEASUREMENT_ID` 는 기본값도 빈 문자열이라 대조가 안 되고, 나머지는 전부 비어있지 않은
   # 값을 넘긴다). ⇒ 폴백 자체를 안전한 쪽으로 뒤집는다 — 빈 값이면 FE 가 FASTAPI_URL 로 폴백하는
   # 것이 이미 설계된 동작이고(deploy-frontend 주석 "이 값을 비우면 즉시 원복"), 그것이 현행 prod
-  # 동작과 정확히 같다. dev 는 워크플로우가 항상 명시값을 넘기므로 무영향(라이브 대조 확認:
+  # 동작과 정확히 같다. dev 는 워크플로우가 항상 명시값을 넘기므로 무영향(라이브 대조 확인:
   # sprintable-frontend-dev REALTIME_URL=…realtime-dev…run.app).
   # ⚠️이 한 줄은 develop 에도 같이 들어가야 한다 — 승격 브랜치에만 남으면 main/develop 이
   # 또 갈라진다(오늘 0163 에서 겪은 그 부채와 같은 종류). 별 PR 로 동반 반영할 것.
@@ -274,11 +274,11 @@ substitutions:
   # "no available instance" abort(인스턴스 부족→콜드스타트 대기→요청 폐기). backend는 #2415로
   # SSOT에 박혀 닫혔으나 frontend는 아직 코드 밖에 떠 있었다. 아래 dev-safe 기본값은 라이브
   # 실측 그대로(2026-07-24, `gcloud run services describe sprintable-frontend-dev` 대조:
-  # latestReady==latestCreated·traffic 100%인 서빙 리비전 자체를 확認, template spec만 본 것
+  # latestReady==latestCreated·traffic 100%인 서빙 리비전 자체를 확인, template spec만 본 것
   # 아님 — 오늘 prod FE 22시간 무실효 사고의 3축 교훈 적용). GHA가 prod에서 override(3/10).
   _FRONTEND_MIN_INSTANCES: '1'
   _FRONTEND_MAX_INSTANCES: '3'
-  # concurrency=80은 Cloud Run 플랫폼 기본값과 라이브 실측(dev describe 확認)이 이미 일치 —
+  # concurrency=80은 Cloud Run 플랫폼 기본값과 라이브 실측(dev describe 확인)이 이미 일치 —
   # SSOT에 값을 안 박아도 드리프트 위험이 없다(플랫폼 기본값 자체가 곧 이 값). 굳이 플래그로
   # 고정하지 않는다(불필요한 명시로 "왜 80이지" 오해를 만들 필요 없음) — 판단 근거만 여기 기록.
   # startup-cpu-boost=true — `gcloud run deploy --help`: "Enabled by default when unspecified
@@ -287,7 +287,7 @@ substitutions:
   # 서로 다른 경로라 애매함이 남는다 — 아래 deploy-frontend에 `--cpu-boost`로 명시해 두 경로
   # 모두 동일 결과가 되게 고정한다(dev/prod 공통값이라 별도 substitution 불필요).
 
-  # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확認 후): api
+  # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확인 후): api
   # (sprintable-backend-*)의 PG_LISTEN_ENABLED. ⚠️ 기본값 'true' — prod는 아직
   # sprintable-realtime-prod가 없다(deploy-realtime 스텝이 prod에서 스킵 중, PO 검증 전).
   # prod api를 false로 먼저 못박으면 prod 승격 시점에 LISTEN 하는 서비스가 하나도 없어
@@ -315,7 +315,7 @@ substitutions:
   # (`_agent_connections`/`_subscribers`는 프로세스-로컬 dict, 크로스서비스 공유 없음) — 에이전트는
   # backend-dev에만 연결되고 브라우저는 realtime-dev(프론트 REALTIME_URL 프록시)에만 연결되므로,
   # 두 서비스가 동시에 dispatch=true여도 서로 다른 로컬 큐를 보는 것이라 같은 클라이언트에 2회
-  # 배달되는 경로가 없다(전제: 에이전트/브라우저 연결이 겹치지 않음 — 위 라이브 카운트로 확認).
+  # 배달되는 경로가 없다(전제: 에이전트/브라우저 연결이 겹치지 않음 — 위 라이브 카운트로 확인).
   # 기본값 'false'(dev-safe fallback) — GHA가 dev만 명시 override(true), prod는 Redis 요소
   # 자체가 없어 무의미(false 유지).
   _BACKEND_REDIS_DISPATCH_ENABLED: 'false'
@@ -324,7 +324,7 @@ substitutions:
   # 여태 `REDIS_CONSUME_ENABLED`였다 — Settings 필드는 `event_broker_redis_consume_enabled`
   # (config.py, env_prefix 없음)라 pydantic-settings가 이 키를 매칭 못 하고 `extra="ignore"`가
   # 조용히 삼켜, 위 _BACKEND_REDIS_CONSUME_ENABLED 의도가 api에 **한 번도 적용된 적이 없었다**
-  # (필드는 항상 코드 기본값 True로 남았음 — uv run 재현 + 라이브 로그 확認 완료. 결과적으로
+  # (필드는 항상 코드 기본값 True로 남았음 — uv run 재현 + 라이브 로그 확인 완료. 결과적으로
   # "의도 false"였던 구간에도 필드는 이미 True였다는 뜻 — 아래 값 정정과 별개로 이 키 이름
   # 버그 자체는 그대로 고친다). 아래 두 곳(deploy-backend/deploy-realtime)의 env var **키
   # 이름**을 `EVENT_BROKER_REDIS_CONSUME_ENABLED`로 정정하고, **구 키(`REDIS_CONSUME_ENABLED`)
@@ -383,7 +383,7 @@ steps:
   # 갱신(story #3242, 2026-08-31, 페드루 PO 발주·유나 실측 근거): #886d996f 업로드 기능이
   # 이 버킷에 서명 PUT을 직접 쏘게 되며 GET/HEAD만 있던 method가 뚫렸다 — PUT 프리플라이트가
   # Access-Control-Allow-Origin 부재로 net::ERR_FAILED. method에 PUT 추가(OPTIONS는 GCS가
-  # Access-Control-Request-Method 매칭으로 자동 처리 — 명시 금지, 공식문서 확認 완료). PUT은
+  # Access-Control-Request-Method 매칭으로 자동 처리 — 명시 금지, 공식문서 확인 완료). PUT은
   # 항상 create_only=True로 서명(x-goog-if-generation-match: 0 바인딩)·content_type 바인딩이라
   # responseHeader(=GCS의 Access-Control-Allow-Headers 대응 필드)에 x-goog-if-generation-match를
   # 추가(Content-Type은 기존에 이미 있었음) — 둘 중 하나라도 빠지면 프리플라이트가 여전히 막힌다.
@@ -684,7 +684,7 @@ steps:
         # 있었는데 frontend만 빠짐). 현행 라이브 값 그대로 IaC에 고정(값 인상 아님) — 근거는 위
         # substitutions 섹션의 _FRONTEND_MIN/MAX_INSTANCES 주석 참조.
         #
-        # startup-cpu-boost=true는 라이브 실측(dev describe 확認) — 근거는 위 substitutions
+        # startup-cpu-boost=true는 라이브 실측(dev describe 확인) — 근거는 위 substitutions
         # 섹션 주석 참조(minScale만큼 위험하진 않지만 명시로 애매함을 없앤다).
         #
         # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
@@ -871,6 +871,25 @@ steps:
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
     waitFor: [run-migrate-job]
+
+  # story #4234 — Cloud Scheduler 작업을 레포 정의(infra/cloud-scheduler/jobs.json)와 맞춘다(dev만). 예전엔 손으로 만든
+  # 작업뿐이라 workflow-sla·workflow-handoff-watchdog 라우트가 생겨도 작업이 없다는 걸 아무도 몰랐다. deploy-backend가
+  # Ready가 된 뒤: 없으면 create · 다르면 update · 정의에 없는 -dev 작업은 보고만(삭제 안 함) · 적용 뒤 재조회로 차이 0
+  # 확인. Authorization 값·호스트는 실물 sprintable-backend-dev describe(CRON_SECRET secretKeyRef · status.url)에서
+  # 읽고 로그엔 값을 찍지 않는다. 실패는 빌드 실패(set -e — 삼키지 않는다). prod는 이 카드 밖이라 스킵.
+  - id: apply-cloud-scheduler
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "apply-cloud-scheduler: ${_DEPLOY_ENV} — dev 전용 스텝이라 스킵"
+          exit 0
+        fi
+        python3 infra/apply_cloud_scheduler.py --env dev --apply
+    waitFor: [deploy-backend]
 
   # E-ARCH 1단계(story #2078): sprintable-realtime-${_DEPLOY_ENV} — SSE/LISTEN 전용 서비스,
   # deploy-backend와 동일 이미지·동일 시크릿 상속(--set-secrets 없는 gcloud run deploy

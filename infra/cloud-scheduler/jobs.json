@@ -1,0 +1,247 @@
+{
+  "_doc": "story #4234 — Cloud Scheduler 작업 정의(레포가 원천). 적용: infra/apply_cloud_scheduler.py(cloudbuild.yaml `apply-cloud-scheduler`, dev만). 가드: backend/tests/test_4234_cloud_scheduler_manifest.py — `/api/v2/internal/cron/*`·FE `/api/cron/*` 라우트는 전부 `jobs`(주기) 아니면 `unscheduled`(수동·일회성)에 정확히 한 번 있어야 하고, 작업의 route·method는 실제 라우트와 맞아야 한다. Authorization 값과 백엔드 호스트는 여기 두지 않는다 — 적용 시점에 실물 백엔드 서비스 describe에서 읽는다(CRON_SECRET secretKeyRef · status.url).",
+  "route_prefix": "/api/v2/internal/cron/",
+  "environments": {
+    "dev": {
+      "location": "asia-northeast3",
+      "backend_service": "sprintable-backend-dev"
+    }
+  },
+  "defaults": {
+    "headers": {
+      "User-Agent": "Google-Cloud-Scheduler"
+    },
+    "attempt_deadline": "180s",
+    "retry": {
+      "max_retry_attempts": 0,
+      "min_backoff": "5s",
+      "max_backoff": "3600s",
+      "max_doublings": 5,
+      "max_retry_duration": "0s"
+    }
+  },
+  "jobs": [
+    {
+      "name": "a2a-task-deadline-sweep",
+      "route": "a2a-task-deadline-sweep",
+      "method": "GET",
+      "schedule": "*/10 * * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "agent-run-timeout-sweep",
+      "route": "agent-run-timeout-sweep",
+      "method": "GET",
+      "schedule": "*/10 * * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "agent-session-recovery",
+      "route": "agent-session-recovery",
+      "method": "GET",
+      "schedule": "*/10 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "au-usage-warn",
+      "route": "au-usage-warn",
+      "method": "GET",
+      "schedule": "*/5 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "detect-unclosed-loops",
+      "route": "detect-unclosed-loops",
+      "method": "POST",
+      "schedule": "0 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "embed-backlog",
+      "route": "embed-backlog",
+      "method": "POST",
+      "schedule": "0 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "expire-stale-events",
+      "route": "expire-stale-events",
+      "method": "GET",
+      "schedule": "0 3 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "hitl-timeouts",
+      "route": "hitl-timeouts",
+      "method": "GET",
+      "schedule": "*/10 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "onboarding-abandoned-sweep",
+      "route": "onboarding-abandoned-sweep",
+      "method": "POST",
+      "schedule": "15 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "onboarding-reminder-sweep",
+      "route": "onboarding-reminder-sweep",
+      "method": "POST",
+      "schedule": "0 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "publication-commands",
+      "route": "publication-commands",
+      "method": "POST",
+      "schedule": "* * * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김",
+      "attempt_deadline": "120s",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "name": "recipe-repeat-tick",
+      "route": "recipe-repeat-tick",
+      "method": "GET",
+      "schedule": "*/10 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "refresh-channel-tokens",
+      "route": "refresh-channel-tokens",
+      "method": "GET",
+      "schedule": "0 */6 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김",
+      "attempt_deadline": "300s",
+      "retry": {
+        "max_retry_attempts": 3
+      }
+    },
+    {
+      "name": "score-ga4-outcomes",
+      "route": "score-ga4-outcomes",
+      "method": "POST",
+      "schedule": "0 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "score-hypotheses",
+      "route": "score-hypotheses",
+      "method": "POST",
+      "schedule": "0 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "toss-billing-maintenance",
+      "route": "toss-billing-maintenance",
+      "method": "GET",
+      "schedule": "15 3 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "toss-daily-reconciliation",
+      "route": "toss-daily-reconciliation",
+      "method": "GET",
+      "schedule": "30 3 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "unattached-snapshot",
+      "route": "unattached-snapshot",
+      "method": "POST",
+      "schedule": "0 4 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
+    },
+    {
+      "name": "workflow-sla",
+      "route": "workflow-sla",
+      "method": "GET",
+      "schedule": "*/10 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "story #4234 신규 — E-DG S13 human-gate SLA processor(cron.py `workflow_sla`): 방치된 게이트를 제품이 독촉·에스컬레이션·자동 승인. 모듈 docstring «HITL-timeout cron 레일 재사용»(workflow_sla_processor.py:4) → hitl-timeouts와 같은 10분 주기. SKIP LOCKED·항목별 트랜잭션(#4228)이라 겹쳐도 안전."
+    },
+    {
+      "name": "workflow-handoff-watchdog",
+      "route": "workflow-handoff-watchdog",
+      "method": "GET",
+      "schedule": "*/5 * * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "story #4234 신규 — E-DG S8 handoff watchdog: «주기적으로» ACK 대사·10분 미ACK → timed_out + 폴백 알림(workflow_handoff_watchdog.py:3·5). 주기는 문서에 없어 문턱(10분)의 절반인 5분으로 정함(정체 감지 ≤15분). SKIP LOCKED라 겹쳐도 안전."
+    },
+    {
+      "name": "storage-usage-warn",
+      "route": "storage-usage-warn",
+      "method": "GET",
+      "schedule": "45 3 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "story #4234 신규(dev 누락) — dev 밖에서는 주기 작업으로 실제로 돎(PO 실측 2026-09-24). S8(PR #1761): 사용량 80%+ 경고 메일 · 7일 쿨다운·재무장(cron.py `storage_usage_warn` docstring) → 하루 1회로 충분. 다른 일일 작업들(03:00~04:00 KST) 사이에 둠."
+    },
+    {
+      "name": "assets-grace-hard-delete",
+      "route": "assets-grace-hard-delete",
+      "method": "GET",
+      "schedule": "30 4 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "story #4234 신규(dev 누락) — dev 밖에서는 주기 작업으로 실제로 돎(PO 실측 2026-09-24). S8(PR #1761): soft-delete 7일 경과 자산 hard-delete · 실패는 다음 tick 재시도 · tick당 500건 상한(cron.py `assets_grace_hard_delete` docstring) → 7일 유예에 하루 1회면 충분."
+    },
+    {
+      "name": "entity-references-orphan-check",
+      "route": "entity-references-orphan-check",
+      "method": "GET",
+      "schedule": "0 5 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "story #4234 신규 — story #2274(C-1c) AC4: count_orphan_types에 «도는 자리»를 준 cron. 읽기 전용 점검이고 결과는 응답·로그(0이 아니면 logger.warning, cron.py 주석). 로그 기반 감시라 주기 실행이 전제 → 하루 1회."
+    },
+    {
+      "name": "zero-referenced-entities-check",
+      "route": "zero-referenced-entities-check",
+      "method": "GET",
+      "schedule": "15 5 * * *",
+      "time_zone": "Asia/Seoul",
+      "basis": "story #4234 신규 — «이 cron의 응답+로그가 이 스토리의 「도는 자리」 전부»(cron.py 주석). 읽기 전용 집계라 하루 1회."
+    }
+  ],
+  "unscheduled": [
+    {
+      "route": "embed-backfill",
+      "kind": "one_off",
+      "basis": "cron.py `embed_backfill_cron` docstring: 기존 hypothesis/loop/loop_artifact를 embeddings pending으로 «1회 backfill» · 재트리거 안전 · 실제 임베딩은 embed-backlog(주기)가 처리."
+    },
+    {
+      "route": "workflow-grandfather-backfill",
+      "kind": "one_off",
+      "basis": "cron.py 주석 E-DG S19(P0-5): «line enable 시점» in-flight story grandfather backfill(allowlist org) — 라인을 켤 때 한 번 돌리는 작업."
+    },
+    {
+      "route": "seed-default-story-line",
+      "kind": "manual",
+      "basis": "cron.py 주석 E-DG S16: 기본 org의 default story line을 shadow로 시드 · «PO 트리거» · ?org_id=로 다른 org 시드."
+    },
+    {
+      "route": "db-connection-stats",
+      "kind": "manual",
+      "basis": "cron.py `db_connection_stats` docstring(SID f2fe1c5e/#2040 AC2): pg_stat_activity 집계 계측 — 커넥션 소비자 분해용 조회라 필요할 때 부름."
+    }
+  ]
+}
