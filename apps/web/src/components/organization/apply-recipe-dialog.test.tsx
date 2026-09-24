@@ -691,8 +691,9 @@ describe('ApplyRecipeDialog — 워크플로우 프리셋 제목 로케일(story
 });
 
 // story #4243 AC2 — 역할별 사람/에이전트 선언(role_actor_kinds)으로 stage 한 줄의 선택지와 필수 여부가 갈린다.
-// loop_agency(시드 0260 · 0403 선언 그대로의 역할 배치): Human → 사람만(비워도 됨) · Any → 사람 + 에이전트 · Agent → 에이전트만 ·
-// PO의 «브리프»는 승인이 결재함의 문서 결재(D3 · approval.surface=doc_approval)라 선택기 없는 읽기 전용 줄.
+// loop_agency 모양(시드 0260의 역할 배치)에 human/either를 선언했을 때의 창 동작 — 0403 시드는 사람 완료 경로가 생길 때까지
+// 전부 agent(까디르 QA P1 · story 4249에서 either 복원). 여기선 선언이 오면 창이 어떻게 그리는지를 고정한다: Human → 사람만(비워도 됨) ·
+// Any → 사람 + 에이전트 · Agent → 에이전트만 · PO(either)의 «브리프»는 승인 자리 선언(approval.surface=doc_approval)이라 선택기 없는 읽기 전용 줄.
 describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
   const LOOP_AGENCY = {
     ...TARGET,
