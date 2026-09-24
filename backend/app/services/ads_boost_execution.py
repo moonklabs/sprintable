@@ -391,13 +391,31 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
 
         async with provider_client(timeout=20) as client:
             if command.operation == OP_BOOST_START:
-                result = await module.create_boost_campaign(
-                    client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
-                    object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
-                    currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
-                    ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
-                )
-                run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                # story #4268 — 재시도(ACTIVE 전환 실패 · 생성 중간 실패 뒤)가 이미 만든 캠페인 · 광고 세트 · 광고를 다시 만들지
+                # 않는다(고객 광고 계정에 PAUSED 객체가 중복으로 쌓이던 결함). 셋이 다 있으면 생성을 건너뛰고 상태 전환만,
+                # 일부만 있으면 이어서 만든다. 중간 실패의 부분 id도 실행 행에 남긴다(이 명령의 결과와 같은 커밋 — 워커가 틱마다
+                # 명령 결과를 커밋한다).
+                existing = {"campaign_id": run.campaign_id, "adset_id": run.adset_id, "ad_id": run.ad_id}
+                if not all(existing.values()):
+                    try:
+                        result = await module.create_boost_campaign(
+                            client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
+                            object_story_id=ctx["object_story_id"], budget_minor=gate.sealed_ads_budget_minor,
+                            currency=gate.sealed_ads_currency, starts_at_iso=gate.sealed_ads_starts_at.isoformat(),
+                            ends_at_iso=gate.sealed_ads_ends_at.isoformat(), objective=gate.sealed_ads_objective,
+                            existing=existing,
+                        )
+                    except Exception as create_exc:
+                        partial = getattr(create_exc, "partial", None) or {}
+                        run.campaign_id = partial.get("campaign_id") or run.campaign_id
+                        run.adset_id = partial.get("adset_id") or run.adset_id
+                        run.ad_id = partial.get("ad_id") or run.ad_id
+                        raise
+                    run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                    # story #4268 AC2 — 만든 id를 ACTIVE 전환 **전에** 커밋한다. 뒤(ACTIVE · 지출 스냅샷 예약 · 활동 기록)에서 DB
+                    # 오류로 이 트랜잭션이 롤백돼도 id는 남아, 재시도가 새로 만들지 않는다(롤백으로 id를 잃으면 이미 ACTIVE인
+                    # 캠페인 옆에 또 만들어 이중 집행이 될 수 있었다). 세션은 expire_on_commit=False라 아래 속성 읽기는 그대로다.
+                    await db.commit()
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
                 )
