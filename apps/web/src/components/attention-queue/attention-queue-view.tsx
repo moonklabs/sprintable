@@ -14,6 +14,7 @@ import {
   buildAttentionQueue, diffAttentionQueueItemIds,
   type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
+import { withProjectParam } from '@/lib/with-project-param';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -31,7 +32,7 @@ async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslato
   const beJson = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`)
     .then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const signals = parseAttentionQueueSignals(beJson);
-  return buildAttentionQueueFromBe(signals, t);
+  return buildAttentionQueueFromBe(signals, t, (href) => withProjectParam(href, projectId));
 }
 
 function RowSkeleton() {

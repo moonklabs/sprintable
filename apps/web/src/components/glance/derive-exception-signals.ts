@@ -89,7 +89,8 @@ const TONE_BY_KIND: Record<ExceptionKind, AttentionQueueItem['actionTone']> = {
  */
 function hrefFor(sig: BeAttentionSignal, withProject: (href: string) => string): string {
   if (sig.kind === 'gate_pending') return withProject('/inbox?tab=gates');
-  return sig.story_id ? `/board?story=${sig.story_id}` : '/board';
+  // story #4231 4차 — 보드(옛 자원 경로)도 flat 목적지라 프로젝트를 싣는다(flow 예외 스트림의 p 없는 `/board?story=` 70건 · PO 라이브).
+  return withProject(sig.story_id ? `/board?story=${sig.story_id}` : '/board');
 }
 
 function idFor(sig: BeAttentionSignal, idx: number): string {

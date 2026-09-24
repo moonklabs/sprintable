@@ -144,18 +144,19 @@ describe('nowStripItemHref — §1a 링크 대상(원탭 도달)', () => {
     expect(nowStripItemHref(AGENT_AUTH_FAILURE, same)).toBe('/organization/workforce/m-1');
   });
 
-  it('unanswered_blocker는 차단 스토리 보드로', () => {
-    expect(nowStripItemHref(UNANSWERED_BLOCKER, same)).toBe('/board?story=story-2');
+  // #4231 4차(PO 07:53Z) — 조직 전체 목록이라 옛 자원 경로는 **항목 자기 project_id**를 싣는다(현재 p 아님).
+  it('unanswered_blocker는 차단 스토리 보드로 · 항목의 프로젝트', () => {
+    expect(nowStripItemHref(UNANSWERED_BLOCKER, same)).toBe(`/board?story=story-2&p=${UNANSWERED_BLOCKER.project_id}`);
   });
 
   it('hypothesis 2종(falsified/overdue)은 전용 상세 페이지가 없어(embed-card.tsx 실측) /flow로', () => {
-    expect(nowStripItemHref(HYPOTHESIS_FALSIFIED, same)).toBe('/flow');
-    expect(nowStripItemHref(LOOP_OVERDUE_HYPOTHESIS, same)).toBe('/flow');
+    expect(nowStripItemHref(HYPOTHESIS_FALSIFIED, same)).toBe(`/flow?p=${HYPOTHESIS_FALSIFIED.project_id}`);
+    expect(nowStripItemHref(LOOP_OVERDUE_HYPOTHESIS, same)).toBe(`/flow?p=${LOOP_OVERDUE_HYPOTHESIS.project_id}`);
   });
 
   it('goal 2종(overdue/outcome-missing)은 /goals/[id]로', () => {
-    expect(nowStripItemHref(LOOP_OVERDUE_GOAL, same)).toBe('/goals/g-1');
-    expect(nowStripItemHref(LOOP_OUTCOME_MISSING_GOAL, same)).toBe('/goals/g-2');
+    expect(nowStripItemHref(LOOP_OVERDUE_GOAL, same)).toBe(`/goals/g-1?p=${LOOP_OVERDUE_GOAL.project_id}`);
+    expect(nowStripItemHref(LOOP_OUTCOME_MISSING_GOAL, same)).toBe(`/goals/g-2?p=${LOOP_OUTCOME_MISSING_GOAL.project_id}`);
   });
 });
 
@@ -204,5 +205,19 @@ describe('nowStripItemHref — flat 목적지는 withProject로 프로젝트를 
     expect(nowStripItemHref({ ...AGENT_STUCK, entity_type: 'epic' }, addP)).toBe('/inbox?tab=gates&p=proj-A');
     expect(nowStripItemHref(AGENT_AUTH_FAILURE, addP)).toBe('/organization/workforce/m-1?p=proj-A');
     expect(nowStripItemHref(AGENT_STUCK, addP)).toBe('/board?story=s-1');
+  });
+});
+
+
+// story #4231 4차(PO 07:53Z) — 조직 전체 목록: 옛 자원 경로는 현재 프로젝트가 아니라 항목 자기 project_id(현재 p로 감싸면 «p는 붙었는데 틀린 셸»).
+describe('nowStripItemHref — 다른 프로젝트 항목은 그 항목의 p(#4231 4차)', () => {
+  const current = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=CURRENT`;
+  it('⭐unanswered_blocker(다른 프로젝트) → 그 항목의 p · 현재 p 아님', () => {
+    const href = nowStripItemHref({ ...UNANSWERED_BLOCKER, project_id: 'OTHER' }, current);
+    expect(href).toBe('/board?story=story-2&p=OTHER');
+    expect(href).not.toContain('CURRENT');
+  });
+  it('agent_stuck(스토리 · BE가 프로젝트를 안 실음) → 주소 그대로(지어내지 않음) · 결재 대상이면 결재함은 현재 p', () => {
+    expect(nowStripItemHref(AGENT_STUCK, current)).toBe('/board?story=s-1');
   });
 });

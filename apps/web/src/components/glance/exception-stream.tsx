@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import type { AttentionQueueItem } from '@/components/attention-queue/derive-attention-queue';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ExceptionStreamProps {
   /**
@@ -44,6 +45,7 @@ const DOT_BY_STATE: Record<string, string> = {
  * 정직 빈상태. 디디 gate-fetch BE가 오면 상위(glance-board)가 파생 items를 내려준다.
  */
 export function ExceptionStream({ items = [], loadFailed = false }: ExceptionStreamProps) {
+  const flatHref = useFlatHref();
   const t = useTranslations('glance');
 
   if (loadFailed) {
@@ -65,7 +67,7 @@ export function ExceptionStream({ items = [], loadFailed = false }: ExceptionStr
             // (gate_pending/blocked/merge_ready 3종 전부 안전 폴백 포함) — 이 null 분기는
             // 현재 아키텍처상 도달 불가지만, 타입을 거짓으로 좁히지 않고 hrefFor 자신의 기존
             // 관례(story_id 없으면 /board)와 동형으로 방어 폴백만 둔다.
-            href={it.href ?? '/board'}
+            href={it.href ?? flatHref('/board')}
             className="flex items-start gap-2.5 rounded-lg border border-proof-line-soft bg-proof-panel px-3 py-2 transition-colors hover:border-proof-line"
           >
             <span className={`mt-1 size-1.5 shrink-0 rounded-full ${DOT_BY_STATE[it.proofState] ?? 'bg-proof-ink-3'}`} aria-hidden="true" />

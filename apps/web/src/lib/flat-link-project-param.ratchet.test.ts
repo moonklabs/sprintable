@@ -14,16 +14,17 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { MIGRATED_RESOURCES } from './legacy-resource-tables';
 import { describe, expect, it } from 'vitest';
 
-const BASELINE = 2;
+const BASELINE = 23;
 
 const SRC = path.resolve(__dirname, '..');
 const AUTH = path.join(SRC, 'app/(authenticated)');
 // 프로젝트를 싣는 함수 — flatHref(useFlatHref) · withProjectParam(lib) · withProject(헬퍼가 **필수 인자**로 받는 «프로젝트를 싣는 함수» —
 // 프로젝트 단위 소비처는 useFlatHref를, 조직 전체 목록은 «항목 자신의 프로젝트를 싣는 함수»를 넘긴다 · #4231 3차 PO 02:34Z) ·
-// useConnectRulesHref(결과에 현재 프로젝트를 싣는 훅).
-const WRAPPERS = new Set(['flatHref', 'withProjectParam', 'withProject', 'useConnectRulesHref']);
+// useConnectRulesHref(결과에 현재 프로젝트를 싣는 훅) · projectHref(#4231 4차 — slug를 알면 scoped 경로 · 모르면 항목 project_id를 `?p=`로).
+const WRAPPERS = new Set(['flatHref', 'withProjectParam', 'withProject', 'useConnectRulesHref', 'projectHref']);
 // 이동이 아닌 호출의 인자(구조 판정) — 탭 정체성(useSyntheticParentTabHistory: 어느 탭 소속인지 표시 · 이동 아님) · 정적 파일 fetch.
 const NON_NAV_CALLEES = new Set(['useSyntheticParentTabHistory', 'fetch']);
 const PREDICATE_METHODS = new Set(['startsWith', 'endsWith', 'includes', 'indexOf', 'match', 'test']);
@@ -33,7 +34,7 @@ export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: str
   { file: 'lib/nav-config.ts', props: ['path'], reason: '내비 설정 경로 — 소비처(사이드바·더보기·탭바·커맨드 팔레트)가 렌더에서 flatHref로 감싼다(각 flat-href 렌더 테스트)' },
   { file: 'lib/nav-v3-destinations.ts', props: ['path'], reason: 'v3 목적지 설정 경로 — 클라이언트 소비처(탭바·nav-v3-item-list·chat-v3 «오늘»·온보딩 첫 착지·온보딩 첫 지시 redirect)가 감싸고, 나머지는 서버 리다이렉트(proxy·app/page·desktop·dashboard/page·auth callback)' },
   { file: 'hooks/use-account-switcher.ts', reason: '다른 조직으로 전환하는 하드 이동 — 현재 프로젝트를 실으면 틀린 p(PO 02:02Z 예외)' },
-  { file: 'app/dashboard/dashboard-shell.tsx', texts: ['/inbox', '/chats', '/more'], reason: 'TAB_ROOT_PREFIXES — 경로 접두 판정 표(이동 아님)' },
+  { file: 'app/dashboard/dashboard-shell.tsx', texts: ['/glance', '/inbox', '/chats', '/more'], reason: 'TAB_ROOT_PREFIXES — 경로 접두 판정 표(이동 아님 · /glance는 #4231 4차에서 옛 자원 경로가 flat 목적지에 들며 드러남)' },
   { file: 'proxy.ts', reason: '미들웨어 경로 판정(이동 링크 아님)' },
   { file: 'lib/nav-v3-destinations.ts', texts: ['/chats'], reason: 'resolveChatsHref 플래그 없을 때의 대화 목적지 — 앱 안 CTA는 useChatsHref가 감싸고, 나머지 호출처는 서버(session-redirect)·문맥 전 착지(mfa·invite·onboarding)' },
   { file: 'components/content/content-rule-violation.tsx', texts: ['/organization/content-rules'], reason: 'BE settings_path와 맞대는 비교 기준 상수 — 이동은 useConnectRulesHref(감쌈)로만' },
@@ -47,8 +48,12 @@ export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: str
   { file: 'components/auth/session-expired-dialog.tsx', reason: '재로그인 뒤 돌아올 경로(현재 주소 폴백) — 로그인 전이라 실을 값이 없다' },
 ];
 
+// story #4231 4차(PO 07:48Z) — 옛 자원 경로(MIGRATED_RESOURCES — /board · /sprints · /storage …)도 flat 목적지다. proxy가 그 자리를 scoped로
+// 리다이렉트할 때 링크의 `?p=`로 프로젝트를 정한다(#4253). 예전 자는 `app/(authenticated)` 최상위 폴더만 세서, 이 경로로 가는 bare 링크
+// (flow 예외 스트림 `/board?story=` 70건 등)를 한 번도 못 셌다.
 function flatRoutes(): string[] {
-  return readdirSync(AUTH).filter((d) => !d.startsWith('[') && statSync(path.join(AUTH, d)).isDirectory()).sort();
+  const dirs = readdirSync(AUTH).filter((d) => !d.startsWith('[') && statSync(path.join(AUTH, d)).isDirectory());
+  return [...new Set([...dirs, ...Object.keys(MIGRATED_RESOURCES)])].sort();
 }
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
@@ -168,6 +173,11 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count('router.push(\n  compose ? `/chats/${c}?compose=${x}` : `/chats/${c}`,\n);')).toBe(2);
     expect(count("this.props.router.replace('/more');")).toBe(1);
     expect(count("const nav = [{ id: 'more', path: '/more' }, { href: '/organization/events' }];")).toBe(2);
+  });
+
+  it('⭐#4231 4차 — 옛 자원 경로(MIGRATED_RESOURCES)도 flat 목적지로 센다(/board · /sprints · /storage …)', () => {
+    const real = flatRoutes();
+    for (const name of ['board', 'sprints', 'storage', 'flow', 'glance', 'standup']) expect(real).toContain(name);
   });
 
   it('⭐양성대조(#4231 3차 사각지대) — 헬퍼 return · 하드 이동 · 다른 이름 prop · 상수 · 기본값', () => {

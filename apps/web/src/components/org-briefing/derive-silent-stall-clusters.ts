@@ -102,7 +102,7 @@ export function deriveSilentStallClusters(
         enteredStateAt: i.entered_state_at as string,
         ageHours,
         assigneeMemberId: i.assignee_member_id,
-        href: projectHref(viewer, i.project_slug, `/board?story=${i.story_id}`),
+        href: projectHref(viewer, i.project_slug, `/board?story=${i.story_id}`, i.project_id),
         crossProjectLabel: crossProjectLabel(viewer, i.project_id, i.project_slug),
       };
     });

@@ -175,7 +175,7 @@ function safeInternalPath(path: string): string | null {
  *   - doc: `/docs/{doc_slug}`
  *   - story: `/board?story={story_id}` (notification-bell 관례 재사용)
  */
-/** withProject — flat 목적지(대화 · 문서)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처는 useFlatHref()를 넘긴다. */
+/** withProject — flat 목적지(대화 · 문서 · 보드)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처는 useFlatHref()를 넘긴다. */
 export function resolveDeeplinkHref(link: AssetSourceLink, withProject: (href: string) => string): string | null {
   const d = link.deeplink;
   if (d == null) return null;
@@ -187,6 +187,6 @@ export function resolveDeeplinkHref(link: AssetSourceLink, withProject: (href: s
       : `/chats/${encodeURIComponent(d.conversation_id)}`);
   }
   if ('doc_slug' in d && d.doc_slug) return withProject(`/docs/${encodeURIComponent(d.doc_slug)}`);
-  if ('story_id' in d && d.story_id) return `/board?story=${encodeURIComponent(d.story_id)}`;
+  if ('story_id' in d && d.story_id) return withProject(`/board?story=${encodeURIComponent(d.story_id)}`); // 옛 자원 경로도 flat(#4231 4차)
   return null;
 }

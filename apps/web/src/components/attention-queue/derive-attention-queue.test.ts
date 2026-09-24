@@ -16,6 +16,9 @@ const koMessages = koMessagesRaw as unknown as LooseMessages;
 const enMessages = enMessagesRaw as unknown as LooseMessages;
 // next-intl's Translator<M,N> overload set doesn't structurally satisfy our minimal
 // AttentionQueueTranslator call-signature for a non-literal LooseMessages import (same
+
+// story #4231 4차 — 보드 링크에 프로젝트를 싣는 함수(필수 인자). 결정적인 표식으로 `?p=P`.
+const P = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=P`;
 // friction as loop-create-dialog.test.tsx's RecipeTranslator) — cast at the boundary, runtime
 // behavior is unaffected (createTranslator's t(key, values) works exactly as at production).
 const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'attentionQueue' }) as unknown as AttentionQueueTranslator;
@@ -93,31 +96,31 @@ describe('parseAttentionQueueSignals', () => {
 
 describe('buildAttentionQueueFromBe', () => {
   it('maps verify_fail to an amber/neutral-tone item', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'verify_fail' })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'verify_fail' })], t, P);
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('verify_fail');
     expect(items[0]!.proofState).toBe('amber');
     expect(items[0]!.actionTone).toBe('neutral');
     expect(items[0]!.claim).toContain('결제 복구 플로우');
     expect(items[0]!.actor).toBeNull(); // BE AttentionItem엔 assignee 필드 없음(no-fiction)
-    expect(items[0]!.href).toBe('/board?story=story-1');
+    expect(items[0]!.href).toBe('/board?story=story-1&p=P'); // #4231 4차 — 큐의 프로젝트를 싣는다
   });
 
   it('maps merge_ready to a green/ready-tone item', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'merge_ready' })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'merge_ready' })], t, P);
     expect(items[0]!.kind).toBe('merge_ready');
     expect(items[0]!.proofState).toBe('green');
     expect(items[0]!.actionTone).toBe('ready');
   });
 
   it('maps needs_input to internal decision_needed (amber/primary-tone)', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input' })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input' })], t, P);
     expect(items[0]!.kind).toBe('decision_needed');
     expect(items[0]!.actionTone).toBe('primary');
   });
 
   it('maps gate_pending to internal decision_needed too (PO 콜: 스킵 대신 결정필요 합류)', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending' })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending' })], t, P);
     expect(items[0]!.kind).toBe('decision_needed');
   });
 
@@ -125,7 +128,7 @@ describe('buildAttentionQueueFromBe', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'gate_pending', story_id: 'story-1' }),
       beItem({ kind: 'needs_input', story_id: 'story-1' }),
-    ], t);
+    ], t, P);
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('decision_needed');
   });
@@ -134,7 +137,7 @@ describe('buildAttentionQueueFromBe', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'needs_input', story_id: 'story-1' }),
       beItem({ kind: 'gate_pending', story_id: 'story-2', title: '온보딩 위저드' }),
-    ], t);
+    ], t, P);
     expect(items).toHaveLength(2);
   });
 
@@ -142,7 +145,7 @@ describe('buildAttentionQueueFromBe', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'blocked', story_id: 'story-1' }),
       beItem({ kind: 'blocked', story_id: 'story-1' }),
-    ], t);
+    ], t, P);
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('blocked');
     expect(items[0]!.claim).toContain('2건');
@@ -150,7 +153,7 @@ describe('buildAttentionQueueFromBe', () => {
   });
 
   it('renders claim/kindLabel/actionLabel in English when given the en translator (ko/en parity)', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'verify_fail' })], tEn);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'verify_fail' })], tEn, P);
     expect(items[0]!.kindLabel).toBe('Verify failed');
     expect(items[0]!.actionLabel).toBe('Send back');
     expect(items[0]!.claim).toContain('CI check failed');
@@ -161,20 +164,20 @@ describe('buildAttentionQueueFromBe', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'blocked', story_id: 'story-1' }),
       beItem({ kind: 'blocked', story_id: 'story-1' }),
-    ], tEn);
+    ], tEn, P);
     expect(items[0]!.claim).toContain('blocked by 2');
   });
 
   it('story #2249 — threads entered_state_at into enteredStateAtMs for 1:1 kinds (verify_fail/merge_ready)', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'verify_fail', entered_state_at: '2026-07-26T00:00:00.000Z' }),
-    ], t);
+    ], t, P);
     expect(items[0]!.enteredStateAtMs).toBe(Date.parse('2026-07-26T00:00:00.000Z'));
     expect(items[0]!.sortKey).toBeGreaterThan(0);
   });
 
   it('story #2249 — enteredStateAtMs/sortKey stay null/0 when entered_state_at is unknown (blocked 등)', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'blocked', entered_state_at: null })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'blocked', entered_state_at: null })], t, P);
     expect(items[0]!.enteredStateAtMs).toBeNull();
     expect(items[0]!.sortKey).toBe(0);
   });
@@ -183,7 +186,7 @@ describe('buildAttentionQueueFromBe', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'blocked', story_id: 'story-1', entered_state_at: '2026-07-27T00:00:00.000Z' }),
       beItem({ kind: 'blocked', story_id: 'story-1', entered_state_at: '2026-07-25T00:00:00.000Z' }),
-    ], t);
+    ], t, P);
     expect(items[0]!.enteredStateAtMs).toBe(Date.parse('2026-07-25T00:00:00.000Z'));
   });
 
@@ -191,7 +194,7 @@ describe('buildAttentionQueueFromBe', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'gate_pending', story_id: 'story-1', entered_state_at: '2026-07-26T00:00:00.000Z' }),
       beItem({ kind: 'needs_input', story_id: 'story-1', entered_state_at: '2026-07-28T00:00:00.000Z' }),
-    ], t);
+    ], t, P);
     expect(items[0]!.enteredStateAtMs).toBe(Date.parse('2026-07-26T00:00:00.000Z'));
   });
 });
@@ -296,7 +299,7 @@ describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => 
       beItem({ kind: 'verify_fail', story_id: 's1' }),
       beItem({ kind: 'blocked', story_id: 's2' }),
       beItem({ kind: 'merge_ready', story_id: 's3' }),
-    ], t);
+    ], t, P);
     const bucketByKind = Object.fromEntries(items.map((i) => [i.kind, i.bucket]));
     expect(bucketByKind['verify_fail']).toBe('BLOCK');
     expect(bucketByKind['blocked']).toBe('BLOCK');
@@ -304,13 +307,13 @@ describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => 
   });
 
   it('gate_pending origin → decision_needed row bucketed GATE (합쳐지기 전 원신호 기억)', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending', story_id: 's1' })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending', story_id: 's1' })], t, P);
     expect(items[0]!.kind).toBe('decision_needed');
     expect(items[0]!.bucket).toBe('GATE');
   });
 
   it('needs_input origin → decision_needed row bucketed STEER (gate_pending과 버킷이 갈린다)', () => {
-    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input', story_id: 's1' })], t);
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input', story_id: 's1' })], t, P);
     expect(items[0]!.kind).toBe('decision_needed');
     expect(items[0]!.bucket).toBe('STEER');
   });
@@ -319,7 +322,7 @@ describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => 
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'gate_pending', story_id: 's1' }),
       beItem({ kind: 'needs_input', story_id: 's1' }),
-    ], t);
+    ], t, P);
     expect(items).toHaveLength(1);
     expect(items[0]!.bucket).toBe('GATE');
   });
@@ -331,7 +334,7 @@ describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => 
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'needs_input', story_id: 's1' }),
       beItem({ kind: 'gate_pending', story_id: 's1' }),
-    ], t);
+    ], t, P);
     expect(items).toHaveLength(1);
     expect(items[0]!.bucket).toBe('GATE');
   });

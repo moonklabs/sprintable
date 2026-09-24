@@ -16,7 +16,7 @@ const addP = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=proj-A
 afterEach(() => { setPendingProjectTarget(null); });
 
 describe('헬퍼 — withProject(필수)로 flat 목적지만 싣는다', () => {
-  it('예외 스트림: 결재 대기 → 결재함 `?p=` · 스토리 신호 → 보드 그대로', () => {
+  it('예외 스트림: 결재 대기 → 결재함 `?p=` · 스토리 신호 → 보드도 `?p=`(#4231 4차)', () => {
     const labels = { kind: {}, action: {} } as unknown as ExceptionLabels;
     const signals = [
       { kind: 'gate_pending', story_id: null, title: 'g', ref: { approval_id: 'ap1' } },
@@ -24,15 +24,15 @@ describe('헬퍼 — withProject(필수)로 flat 목적지만 싣는다', () => 
     ] as unknown as BeAttentionSignal[];
     const hrefs = toExceptionQueueItems(signals, labels, addP).map((i) => i.href);
     expect(hrefs).toContain('/inbox?tab=gates&p=proj-A');
-    expect(hrefs).toContain('/board?story=s1');
+    expect(hrefs).toContain('/board?story=s1&p=proj-A'); // #4231 4차 — 보드(옛 자원 경로)도 flat · 흐름 화면의 현재 프로젝트
   });
 
-  it('저장소 출처 딥링크: 대화 · 문서 → `?p=` · 스토리 → 보드 그대로', () => {
+  it('저장소 출처 딥링크: 대화 · 문서 · 스토리(보드) 모두 `?p=`(#4231 4차)', () => {
     const link = (deeplink: unknown) => ({ type: 'auto', deeplink }) as unknown as AssetSourceLink;
     expect(resolveDeeplinkHref(link({ conversation_id: 'c1', message_id: 'm1' }), addP)).toBe('/chats/c1?messageId=m1&p=proj-A');
     expect(resolveDeeplinkHref(link({ conversation_id: 'c1' }), addP)).toBe('/chats/c1?p=proj-A');
     expect(resolveDeeplinkHref(link({ doc_slug: 'guide' }), addP)).toBe('/docs/guide?p=proj-A');
-    expect(resolveDeeplinkHref(link({ story_id: 's1' }), addP)).toBe('/board?story=s1');
+    expect(resolveDeeplinkHref(link({ story_id: 's1' }), addP)).toBe('/board?story=s1&p=proj-A'); // #4231 4차
   });
 });
 
