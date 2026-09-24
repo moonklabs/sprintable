@@ -14,6 +14,7 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { useRecipeMemberOptions } from '@/hooks/use-recipe-member-options';
 import { presetName } from '@/lib/platform-preset-copy';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #4048(E-RECIPE-1 ①) — 레시피 적용 다이얼로그. story #4173(E-RECIPE-2)부터 자리는
 // 정의(stage_metadata·role_actor_kinds·payload_schema 흐름)로 구동한다 — 영상 레시피 4슬롯
@@ -62,6 +63,7 @@ interface GenerationConnectorOption {
 export function MarketingRecipeApplyDialog({
   recipe, open, onOpenChange, projects, orgId, onSubmit,
 }: MarketingRecipeApplyDialogProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('organization');
   const tc = useTranslations('common');
   const tPreset = useTranslations('recipePreset');
@@ -314,7 +316,7 @@ export function MarketingRecipeApplyDialog({
             ) : generationConnectorsStatus === 'loaded' && activeGenerationConnectors.length === 0 ? (
               <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-generation-connectors-empty">
                 {t('eventApplyGenerationConnectorsEmpty')}{' '}
-                <Link href="/organization/generation-connectors" className="text-primary underline">
+                <Link href={flatHref('/organization/generation-connectors')} className="text-primary underline">
                   {t('eventApplyGenerationConnectorsEmptyLinkAction')}
                 </Link>
               </p>

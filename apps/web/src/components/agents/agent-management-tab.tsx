@@ -22,6 +22,7 @@ import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -111,6 +112,7 @@ export function requiresDeactivateConfirm(agent: Pick<OrgAgent, 'is_active'>): b
  * Phase 2 매트릭스가 우려하는 N×M 콜과 다름: 프로젝트 수 P에만 비례, 에이전트 수와는 무관).
  */
 export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
@@ -272,7 +274,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             <div className="space-y-2">
               {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                  <Link href={`/organization/workforce/${agent.id}`} className="min-w-0 flex-1">
+                  <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium text-foreground hover:underline hover:text-primary">{agent.name}</span>
                       {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
@@ -300,7 +302,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                   <div className="flex shrink-0 items-center gap-2">
                     {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? (
                       <Link
-                        href={`/organization/workforce/${agent.id}`}
+                        href={flatHref(`/organization/workforce/${agent.id}`)}
                         className="whitespace-nowrap text-xs font-medium text-primary hover:underline"
                       >
                         {ta('viewConnectionSettings')}
@@ -325,7 +327,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                         </Button>
                       );
                     })() : null}
-                    <Link href={`/organization/workforce/${agent.id}`} className="text-muted-foreground hover:text-foreground">
+                    <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="text-muted-foreground hover:text-foreground">
                       <ChevronRight className="size-4" />
                     </Link>
                   </div>

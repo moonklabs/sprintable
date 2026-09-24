@@ -19,6 +19,7 @@ import { CommentReplyDialog, type CommentReplyOutcome } from '@/components/conte
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import type { CommentItem } from '@/components/content/comments-section';
 import { shouldShowReplyDetectionUnavailable } from './collection-status';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3805(Phase3·3-1·PR 2[FE]→PR 3, 유나 §절·08:14Z/08:40Z 낱말·범위 정정) —
@@ -133,6 +134,7 @@ async function readJson<T>(res: Response): Promise<T | null> {
 }
 
 export default function ChannelPostsEngagementPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const { orgId, orgTimezone } = useDashboardContext();
   const t = useTranslations('content');
@@ -311,8 +313,8 @@ export default function ChannelPostsEngagementPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
       <Tabs value="engagement" onValueChange={(v) => {
-        if (v === 'list') router.push('/content/channel-posts');
-        if (v === 'calendar') router.push('/content/channel-posts/calendar');
+        if (v === 'list') router.push(flatHref('/content/channel-posts'));
+        if (v === 'calendar') router.push(flatHref('/content/channel-posts/calendar'));
       }}
       >
         <TabsList data-testid="channel-posts-view-switch">

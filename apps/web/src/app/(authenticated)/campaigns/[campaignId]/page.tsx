@@ -12,6 +12,7 @@ import { useChannelLabel } from '@/lib/channel-label';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import type { ContentPostStatusInput } from '@/components/content/post-status';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story 1db41045(#3457) — campaign 상세. backend/app/routers/campaigns.py::
 // get_campaign_detail_endpoint 응답 그대로(조인 축을 이 화면이 새로 안 짠다). 조직
@@ -67,6 +68,7 @@ const CAMPAIGN_STATUS_LABEL_KEYS: Record<string, string> = {
 };
 
 export default function CampaignDetailPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { campaignId } = useParams<{ campaignId: string }>();
   const { orgId } = useDashboardContext();
   const t = useTranslations('content');
@@ -158,14 +160,14 @@ export default function CampaignDetailPage() {
         <ul className="space-y-3">
           {campaign.content_items.map((item) => (
             <li key={item.content_item_id} className="space-y-1.5 rounded-md border border-border p-3 text-sm" data-testid="campaign-detail-content-item">
-              <Link href={`/content/${item.content_item_id}`} className="font-medium underline">
+              <Link href={flatHref(`/content/${item.content_item_id}`)} className="font-medium underline">
                 {item.title}
               </Link>
               {item.variants.length > 0 ? (
                 <ul className="space-y-1 pl-3">
                   {item.variants.map((v) => (
                     <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="campaign-detail-variant-item">
-                      <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
+                      <Link href={flatHref(`/content/channel-posts/${v.draft_id}`)} className="underline">
                         {channelLabel(v.channel)}
                       </Link>
                       <StatusChip

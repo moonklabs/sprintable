@@ -32,6 +32,7 @@ import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 3번) —
@@ -209,6 +210,7 @@ function toGateStatus(status: string | undefined): ContentPostStatusInput['gateS
 }
 
 export default function ContentPostEditPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { draftId } = useParams<{ draftId: string }>();
   const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
@@ -505,7 +507,7 @@ export default function ContentPostEditPage() {
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as { data?: { draft_id: string } } | null;
         if (json?.data?.draft_id) {
-          router.push(`/content/channel-posts/${json.data.draft_id}`);
+          router.push(flatHref(`/content/channel-posts/${json.data.draft_id}`));
           return;
         }
       }
@@ -521,7 +523,7 @@ export default function ContentPostEditPage() {
     } finally {
       setCreatingVariant(false);
     }
-  }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t]);
+  }, [orgId, workItemId, selectedConnectionId, latest, variantText, publication, draftId, router, t, flatHref]);
 
   // 유나 정적 판정·PO 확認(2026-09-04 17:50Z) — 처음엔 site-posts 저장 POST(새
   // 버전 생성)로 campaign_id를 실었으나, 그 경로는 _reseal_gate_on_new_version이
@@ -1040,7 +1042,7 @@ export default function ContentPostEditPage() {
         {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
             읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
             새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
-        <Link href="/content" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -1052,7 +1054,7 @@ export default function ContentPostEditPage() {
         <Alert variant="destructive">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
-        <Link href="/content" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -1118,7 +1120,7 @@ export default function ContentPostEditPage() {
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="content-campaign-current">
           <span>
             {t('campaignCurrentLabel')}{' '}
-            <Link href={`/campaigns/${latest.campaign_id}`} className="underline">
+            <Link href={flatHref(`/campaigns/${latest.campaign_id}`)} className="underline">
               {/* N1(페드루 PO) — campaign_name이 없을 때 UUID를 사람 문장에 그대로
                   보여주지 않는다(지어내지도, 식별자를 문장으로 위장하지도 않는다). */}
               {latest.campaign_name ?? t('campaignNameUnknown')}
@@ -1423,7 +1425,7 @@ export default function ContentPostEditPage() {
               const accountLabel = activeConnections.find((c) => c.id === v.connection_id)?.account_label;
               return (
                 <li key={v.draft_id} className="flex items-center justify-between gap-2" data-testid="content-variants-list-item">
-                  <Link href={`/content/channel-posts/${v.draft_id}`} className="underline">
+                  <Link href={flatHref(`/content/channel-posts/${v.draft_id}`)} className="underline">
                     {channelLabel(v.channel)}
                     {accountLabel ? ` · ${accountLabel}` : ''}
                   </Link>
@@ -1499,12 +1501,12 @@ export default function ContentPostEditPage() {
             {submitResult.type === 'success' ? (
               <>
                 {t('submitSuccess')}{' '}
-                <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+                <Link href={flatHref(`/gates/${submitResult.gateId}`)} className="underline">{t('submitGateLink')}</Link>
               </>
             ) : submitResult.heldByDraftId ? (
               <>
                 {submitResult.text}{' '}
-                <Link href={`/content/${submitResult.heldByDraftId}`} className="underline">
+                <Link href={flatHref(`/content/${submitResult.heldByDraftId}`)} className="underline">
                   {t('errorGateAlreadyHeldLink')}
                 </Link>
               </>

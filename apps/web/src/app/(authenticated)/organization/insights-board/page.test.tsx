@@ -372,6 +372,27 @@ describe('InsightsBoardPage — 쿼리 파라미터(story #3503)', () => {
     expect(laterCall).not.toBeUndefined();
   });
 
+  // story #4231 2차 · 까디르 QA(d5b64e7dc [P2]) — 현재 주소를 복사해 쿼리를 바꿀 때 옛 `p`가 남으면 «이미 실은 p 보존» 규칙이
+  // 전환 대기 목표 대신 옛 프로젝트를 박는다(4585 부류). 복사본의 p는 지우고 목표 프로젝트를 싣는다.
+  it('⭐쿼리 갱신 — 현재 주소의 옛 p(proj-A) 대신 전환 대기 목표(proj-B)를 싣는다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('p=proj-A&sort=d1'));
+    stubFetch({});
+    await mount();
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    await act(async () => { setPendingProjectTarget('proj-B'); });
+    try {
+      await openMenuAndClick('insights-board-metric-trigger', koMessages.content.insightMetricSpend);
+      const lastUrl = routerReplaceMock.mock.calls.at(-1)?.[0] as string;
+      const q = new URLSearchParams(lastUrl.split('?')[1]);
+      expect(q.get('p')).toBe('proj-B');
+      expect(q.getAll('p')).toHaveLength(1);
+      expect(q.get('metric')).toBe('spend');
+      expect(q.get('sort')).toBe('d1');
+    } finally {
+      await act(async () => { setPendingProjectTarget(null); });
+    }
+  });
+
   // story #3583(페드루 PO 確定 2026-09-06) — GA4 유입 지표 2개가 선택기에 더해졌다
   // (열 추가가 아니라 이 선택기의 지표 축 확장 — DEFAULT_METRIC은 그대로 views).
   it('⭐지표 선택기에 유입 세션·유입 사용자가 있고, 고르면 metric 쿼리가 갈아끼워진다', async () => {

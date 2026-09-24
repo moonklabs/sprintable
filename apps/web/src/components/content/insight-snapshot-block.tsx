@@ -12,6 +12,7 @@ import { CHANNEL_LABEL_KEYS } from '@/lib/channel-label';
 // 조용히 안 걸린다(이 스토리가 닫으려던 결함 그대로 재발). 정의는 types.ts
 // 한 곳에만 두고 여기선 import(정본↔사본 없음, 값 하나).
 import type { InsightSnapshotStatus } from '@/components/insights-board/types';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3499(Phase2·FE, 게시물 성과 표면 1차) — BE #3497/PR#3844 계약(PO 確定
 // 2026-09-05) 그대로: normalized 7키(impressions/reach/views/engagements/clicks/
@@ -127,6 +128,7 @@ function MetricValue({ value, dashLabel, reasonLabel }: { value: number | null; 
 }
 
 export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicationId, channel }: InsightSnapshotBlockProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('content');
   const tNav = useTranslations('nav');
 
@@ -167,7 +169,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
             네임스페이스) 재사용 — 새 어휘 0. publicationId 없으면(발행 前) 안 그린다. */}
         {publicationId ? (
           <Link
-            href={`/organization/insights-board?highlight=${encodeURIComponent(publicationId)}`}
+            href={flatHref(`/organization/insights-board?highlight=${encodeURIComponent(publicationId)}`)}
             className="text-xs text-primary hover:underline"
             data-testid="insight-view-in-board-link"
           >

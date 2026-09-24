@@ -1147,7 +1147,7 @@ export function EntityChip({
         </Link>
       ) : effectiveDocStatus === 'pending' ? (
         <Link
-          href={flatHref("/inbox?tab=gates")}
+          href={flatHref('/inbox?tab=gates')}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground no-underline hover:bg-muted"
         >
