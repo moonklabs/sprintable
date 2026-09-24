@@ -583,7 +583,7 @@ def validate_role_actor_kinds(
             t("events.role_actor_kinds_not_object", locale, type_name=type(role_actor_kinds).__name__)
         )
     declared_roles = {
-        meta.get("role") for meta in (stage_metadata or {}).values()
+        meta.get("role") for meta in (stage_metadata.values() if isinstance(stage_metadata, dict) else ())
         if isinstance(meta, dict) and isinstance(meta.get("role"), str)
     }
     for role, kind in role_actor_kinds.items():

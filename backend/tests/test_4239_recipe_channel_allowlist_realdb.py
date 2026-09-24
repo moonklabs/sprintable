@@ -119,6 +119,16 @@ def test_wrong_type_anywhere_in_the_definition_is_a_validation_error_not_a_crash
         validate_role_actor_kinds(meta, kinds)
 
 
+@pytest.mark.parametrize("stage_metadata", [[], [{}], 1, "x"])
+def test_role_actor_kinds_with_non_object_stage_metadata_is_a_validation_error(stage_metadata):
+    """까디르 4598 QA P3 — `validate_role_actor_kinds`가 dict 아닌 stage_metadata에서 `.values()` AttributeError였다(API는
+    stage_metadata 검증이 먼저라 도달 0이지만 같은 부류)."""
+    from app.services.event_definition_registry import InvalidRoleActorKindsError, validate_role_actor_kinds
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(stage_metadata, {"Creator": "agent"})
+
+
 def test_the_type_first_fixture_itself_is_valid():
     """위 매개변수 테스트의 기준 입력은 그 자체로 통과한다 — 거부가 «넣은 값» 때문임을 보장."""
     from app.services.event_definition_registry import validate_role_actor_kinds
