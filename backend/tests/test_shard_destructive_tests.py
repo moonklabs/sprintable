@@ -1873,7 +1873,7 @@ def _destructive_step_run() -> str:
 
 def _run_step(
     tmp_path, *, targets, first, rerun=None, rerun_fail=None, run_text=None, uv_fail_on="", value_overrides=None,
-    drop_shard_files=False, mktemp_fail_at=None, unreadable_failed_out_call=None,
+    drop_shard_files=False, mktemp_fail_at=None, unreadable_failed_out_call=None, rerun_exit=None,
 ):
     import re
     import shutil
@@ -1926,6 +1926,8 @@ def _run_step(
         _write_call(2, {f: rerun(mod, weights, f) for f in targets})
     if rerun_fail:
         (scen / "fail_2.txt").write_text("".join(f"{f}\n" for f in rerun_fail))
+    if rerun_exit is not None:
+        (scen / "exit_2").write_text(f"{rerun_exit}\n")
     if unreadable_failed_out_call is not None:
         (scen / f"unreadable_{unreadable_failed_out_call}").write_text("")
 
@@ -2107,3 +2109,12 @@ def test_4283_step_unreadable_loop_result_is_red(tmp_path):
     code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, unreadable_failed_out_call=1)
     assert code == 1, out
     assert "결과 파일을 못 읽음" in out
+
+
+
+def test_4283_step_rerun_loop_nonzero_without_failure_file_is_red(tmp_path):
+    """까디르 델타 — 재실행 루프가 실패 파일을 못 쓰고(= 비어 있음) non-zero로 끝나면, 파일 내용이 «실패 없음»이어도 RED:
+    재실행 갈래는 실패 파일과 루프 종료 코드를 둘 다 본다(둘 다 깨끗해야 초록). 재실행 경과 자체는 판정선 안(단발 튐)."""
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, rerun_exit=1)
+    assert code == 1 and calls == 2, out
+    assert "재실행 루프 인프라 실패" in out
