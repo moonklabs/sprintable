@@ -514,6 +514,12 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 자동으로 발행되고, 발행이 끝나면 워크플로우가 다음 단계로 넘어가요.",
         "en": "Next action: nothing — it publishes automatically, and the workflow moves to the next stage once publishing finishes.",
     },
+    # story #4254 — 승인 뒤 다음 단계를 서버가 내는 게이트(발송 게이트). 발행 예시를 싣지 않는다(그대로 따르면 발송 전에
+    # 다음 단계가 나 흐름이 거짓 완료된다). 문안 = 유나.
+    "events.gate_verdict_next_action_recipe_server_sends": {
+        "ko": "다음 행동: 할 일 없음 — 서버가 발송하고, 발송에 성공하면 워크플로우가 다음 단계로 넘어가요. 이 단계에서는 publish_event를 부르지 마세요.",
+        "en": "Next action: nothing — the server sends it, and the workflow moves to the next stage once the send succeeds. Don't call publish_event at this stage.",
+    },
     # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
     # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
     # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야

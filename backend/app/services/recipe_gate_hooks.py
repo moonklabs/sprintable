@@ -252,6 +252,11 @@ _GATE_TYPE_SEALED_FIELDS: dict[str, tuple[SealedFieldSpec, ...]] = {
     ),
 }
 
+# story #4254 — 승인 뒤 다음 단계를 **서버가** 내는 게이트 타입. 발송 게이트는 승인 → 예약 시각에 크론이 발송 → 발송이
+# 성공하면 서버가 다음 단계 이벤트를 낸다(story 4214). 판정 알림이 이 게이트 뒤에 다음 단계 발행 예시를 실으면, 그대로 따른
+# 에이전트가 실제 발송 전에 다음 단계를 내고 서버 emit은 중복으로 건너뛰어 흐름이 거짓 완료된다.
+SERVER_ADVANCING_GATE_TYPES: frozenset[str] = frozenset({_NEWSLETTER_SEND_GATE_TYPE})
+
 
 def sealed_field_example(spec: SealedFieldSpec, *, org_timezone: str | None, now: datetime | None = None) -> int | str:
     """자기설명 멘션 발행 예시에 싣는 값. datetime은 «조직 시간대로 내일 09:00»을 그때그때 계산한다

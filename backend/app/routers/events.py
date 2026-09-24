@@ -1427,6 +1427,31 @@ def _next_recipe_stage(definition, stage: str) -> str | None:
     return enum[idx + 1] if idx + 1 < len(enum) else None
 
 
+def gate_verdict_next_action_kind(definition, gate_stage: str, gate_type: str | None) -> str | None:
+    """story #4254 — 레시피 게이트 승인 알림의 «다음 행동»이 무엇인가. 판정 렌더러와 전수 표 테스트가 같은 답을 읽는다.
+
+    - None: 다음 stage가 없다(마지막 stage).
+    - "channel_auto_publish": 다음 stage가 채널 연결 발행 — 승인이 발행까지 잇고 서버가 다음 stage를 낸다(#4090).
+    - "server_sends": 승인 뒤 서버가 실행하고 다음 stage를 내는 게이트(`SERVER_ADVANCING_GATE_TYPES` · 발송 게이트).
+    - "server_publishes": 다음 stage가 서버가 실제 발행 뒤 내는 stage(`_SERVER_DRIVEN_CAPABILITY_KINDS`).
+    - "publish_example": 그 밖 — 다음 stage 담당이 발행한다(발행 예시를 싣는다).
+
+    앞의 셋은 발행 예시를 싣지 않는다 — 그대로 따른 에이전트가 서버보다 먼저 다음 stage를 내면 흐름이 거짓 완료된다."""
+    from app.services.recipe_gate_hooks import SERVER_ADVANCING_GATE_TYPES
+
+    next_stage = _next_recipe_stage(definition, gate_stage)
+    if next_stage is None:
+        return None
+    next_meta = (definition.stage_metadata or {}).get(next_stage) or {}
+    if (next_meta.get("capability") or {}).get("target") == "channel_connection":
+        return "channel_auto_publish"
+    if gate_type in SERVER_ADVANCING_GATE_TYPES:
+        return "server_sends"
+    if _stage_capability_kind(next_meta) in _SERVER_DRIVEN_CAPABILITY_KINDS:
+        return "server_publishes"
+    return "publish_example"
+
+
 def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: dict) -> str:
     """story #4076 — `next_stage`로 넘어가는 `publish_event` 호출의 JSON 페이로드만(라벨·
     "publish_event(" 감싸기는 호출부가 i18n_catalog 문구로 한다 — BE 한글 사용자 문장 가드
@@ -1849,9 +1874,15 @@ async def _render_gate_verdict_message(
                     # _render_gate_verdict_message보다 먼저 실행되므로 이 시점에 이미
                     # 값이 있다)을 그대로 안내문으로 쓴다 — 새 문구를 짓지 않고 AC2의
                     # 실제 결과를 그대로 반영(지어내지 않는다, PO 확定 반복 원칙).
-                    if (_next_meta.get("capability") or {}).get("target") == "channel_connection":
+                    _next_action = gate_verdict_next_action_kind(_recipe_definition, gate_stage, gate_type)
+                    if _next_action == "channel_auto_publish":
                         _outcome = gate_row.publish_outcome if gate_row is not None else None
                         _example_line = f"- {_recipe_auto_publish_outcome_line(_outcome, resolved_locale)}"
+                    elif _next_action == "server_sends":
+                        # story #4254 — 발송 게이트: 다음 단계는 발송이 끝난 뒤 서버가 낸다. 발행 예시를 싣지 않는다.
+                        _example_line = f"- {t('events.gate_verdict_next_action_recipe_server_sends', resolved_locale)}"
+                    elif _next_action == "server_publishes":
+                        _example_line = f"- {t('events.gate_verdict_next_action_recipe_site_auto_publish', resolved_locale)}"
                     else:
                         _example_line = (
                             f"- {t('events.gate_verdict_next_action_publish_example', resolved_locale, example=_example_json)}"
