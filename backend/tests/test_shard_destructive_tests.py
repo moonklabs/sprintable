@@ -1619,3 +1619,202 @@ def test_4206_factor_over_warn_threshold_prints_big_summary_line(tmp_path, capsy
         out = capsys.readouterr().out
         assert ("러너 속도 배율" in out) is expect, (ratio, out)
         assert summary.exists() is expect
+
+
+# ─── story #4283 — 한 번 재실행으로 확인한 뒤에만 RED · 판정 여유 붕괴 경고 ──────────────
+
+# 카드의 네 run(PO · 까디르 2026-09-24) — 1차 경과 · 그 샤드의 적용 러너 배율(잡 로그 «실측 → 적용» 줄) · 재실행 경과.
+# 재실행 경과는 같은 run attempt 2 잡 로그의 `elapsed:` 줄(36018618543 · 36040923585 · 36041927912). 36035793068은
+# attempt 2 없이 새 커밋으로 넘어가 재실행 값이 없다 — 그 둘만 성공 run 17개의 CI 중앙값(test_2636 41s · test_3815 34s)을
+# 대리값으로 쓴다(그 파일이 평소 속도로 한 번 더 돈다는 가정 — 라벨로 구분).
+_CARD_RUNS_4283 = [
+    {"label": "36018618543 a1 샤드4", "file": "tests/test_3313_recipe_notification_render.py", "first": 108.0, "factor": 1.07, "rerun": 27.0},
+    {"label": "36035793068 샤드1(재실행=CI 중앙값 대리)", "file": "tests/test_2636_custom_event_registration.py", "first": 156.0, "factor": 1.50, "rerun": 41.0},
+    {"label": "36035793068 샤드1(재실행=CI 중앙값 대리)", "file": "tests/test_3815_youtube_publish.py", "first": 102.0, "factor": 1.50, "rerun": 34.0},
+    {"label": "36040923585 a1 샤드7", "file": "tests/test_4191_recipe_newsletter_send_realdb.py", "first": 82.0, "factor": 1.25, "rerun": 25.0},
+    {"label": "36041927912 a1 샤드6", "file": "tests/test_3809_org_cost_summary.py", "first": 141.0, "factor": 1.50, "rerun": 40.0},
+]
+
+
+def _judge_4283(mod, case, *, rerun):
+    weights = mod.load_weights()
+    red, _ = mod.slow_files_absolute(
+        {case["file"]: case["first"]}, weights, changed_files=frozenset({case["file"]}), runner_factor=case["factor"],
+    )
+    if not red:
+        return [], []
+    return mod.confirmed_slow_files(red, {case["file"]: rerun}, weights, runner_factor=case["factor"])
+
+
+@pytest.mark.parametrize("case", _CARD_RUNS_4283, ids=[f"{c['label']} {c['file']}" for c in _CARD_RUNS_4283])
+def test_4283_card_runs_are_green_with_the_rerun_they_actually_got(case):
+    """⭐AC(양성 대조 ②) — 카드의 네 run 재현 입력(현재 등재 weight): 1차 판정에서 이미 통과하거나(weight 갱신) 재실행
+    경과로 내려와 RED 0."""
+    confirmed, _ = _judge_4283(_load(), case, rerun=case["rerun"])
+    assert confirmed == [], case
+
+
+@pytest.mark.parametrize("case", _CARD_RUNS_4283, ids=[f"{c['label']} {c['file']}" for c in _CARD_RUNS_4283])
+def test_4283_same_input_with_a_deterministic_slowdown_stays_red(case):
+    """⭐AC(양성 대조 ①) — 같은 입력인데 재실행도 1차만큼 느리면(PR이 그 경로를 결정적으로 느리게 만든 경우) RED.
+    1차에서 판정선 안인 파일은 재실행까지 안 가므로, 판정선을 넘을 만큼 느려진 경우(1차 = 판정선 × 1.3)로 잰다."""
+    mod = _load()
+    weights = mod.load_weights()
+    slow = mod.absolute_slow_threshold_sec(weights[case["file"]]) * case["factor"] * 1.3
+    slowed = dict(case, first=slow)
+    confirmed, _ = _judge_4283(mod, slowed, rerun=slow)
+    assert confirmed == [case["file"]]
+
+
+def test_4283_confirmed_slow_files_rules():
+    """재실행도 넘으면 RED · 내려오면 해제 · 재실행 기록이 없으면(재실행이 못 돈 파일) RED(안전측) · 판정선은 1차 배율."""
+    mod = _load()
+    weights = {"tests/a.py": 30.0, "tests/b.py": 30.0, "tests/c.py": 30.0}
+    # 판정선 = max(30×2.5, 60) × 1.2 = 90s.
+    confirmed, cleared = mod.confirmed_slow_files(
+        ["tests/a.py", "tests/b.py", "tests/c.py"], {"tests/a.py": 95.0, "tests/b.py": 85.0}, weights, runner_factor=1.2,
+    )
+    assert confirmed == ["tests/a.py", "tests/c.py"]
+    assert cleared == ["tests/b.py"]
+
+
+def _write_run(tmp_path, name, elapsed):
+    path = tmp_path / name
+    path.write_text("\n".join(f"{f}\t{s}" for f, s in elapsed.items()))
+    return path
+
+
+def test_4283_check_then_confirm_end_to_end(tmp_path, capsys, monkeypatch):
+    """ci.yml이 부르는 순서 그대로: --check-elapsed --suspects-out → exit 3 · 후보 파일 → --confirm-elapsed.
+    재실행에서 내려오면 exit 0 + 두 값을 ::warning:: 로(PO 조건 ①) · 재실행도 넘으면 exit 1 + ::error::."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 100.0})
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/changed.py\n")
+    suspects = tmp_path / "suspects.txt"
+
+    assert mod._check_elapsed_mode(first, changed_files_path=changed, suspects_out_path=suspects) == mod.CONFIRM_RERUN_EXIT
+    assert suspects.read_text() == "tests/changed.py\n"
+    assert "::error::" not in capsys.readouterr().out
+
+    spike = _write_run(tmp_path, "rerun_spike.tsv", {"tests/changed.py": 31.0})
+    assert mod._confirm_elapsed_mode(first, spike, suspects, changed_files_path=changed) == 0
+    out = capsys.readouterr().out
+    assert "::warning::러너 정규화 가드(story #4283) — tests/changed.py 1차 100s" in out and "재실행 31s" in out
+    assert "::error::" not in out
+
+    real = _write_run(tmp_path, "rerun_real.tsv", {"tests/changed.py": 98.0})
+    assert mod._confirm_elapsed_mode(first, real, suspects, changed_files_path=changed) == 1
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/changed.py" in capsys.readouterr().out
+
+
+def test_4283_more_suspects_than_the_cap_is_red_without_rerun(tmp_path, capsys, monkeypatch):
+    """1차 초과가 CONFIRM_RERUN_MAX_FILES를 넘으면(광범위 둔화) 재실행 없이 바로 RED(exit 1) · 후보 파일 안 씀.
+    뮤테이션: 상한 검사를 빼면 exit 3으로 이 테스트 RED."""
+    mod = _load()
+    n = mod.CONFIRM_RERUN_MAX_FILES + 1
+    changed_names = [f"tests/x{i}.py" for i in range(n)]
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {f: 30.0 for f in changed_names}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {f: 100.0 for f in changed_names})
+    changed = tmp_path / "changed.txt"
+    changed.write_text("\n".join(changed_names))
+    suspects = tmp_path / "suspects.txt"
+    assert mod._check_elapsed_mode(first, changed_files_path=changed, suspects_out_path=suspects) == 1
+    assert not suspects.exists()
+    assert capsys.readouterr().out.count("::error::러너 정규화 절대 가드 초과") == n
+
+
+def test_4283_without_suspects_out_the_old_contract_holds(tmp_path, monkeypatch):
+    """--suspects-out을 안 주는 호출(예전 호출부)은 예전 그대로 바로 RED(exit 1)."""
+    mod = _load()
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 30.0}
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/changed.py": 100.0})
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/changed.py\n")
+    assert mod._check_elapsed_mode(first, changed_files_path=changed) == 1
+
+
+def test_4283_ci_yml_reruns_suspects_before_confirming():
+    """ci.yml 배선 — 1차 판정에 --suspects-out, exit 3이면 같은 격리 루프 스크립트로 후보만 재실행 → 재실행 실패는
+    RED → --confirm-elapsed. 순서가 뒤집히거나 한 줄이 빠지면 이 테스트 RED."""
+    text = (_REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    i_check = text.index('--suspects-out "$suspects_file"')
+    i_gate = text.index('if [ "$slow_exit" -eq 3 ]; then', i_check)
+    i_rerun = text.index('FILES_LIST_FILE="$suspects_file"', i_gate)
+    i_loop = text.index("run-destructive-shard-loop.sh", i_rerun)
+    i_failed = text.index('if [ -s "$rerun_failed" ]; then', i_loop)
+    i_confirm = text.index('--confirm-elapsed "$elapsed_file" "$rerun_elapsed" "$suspects_file"', i_failed)
+    i_json = text.index("--elapsed-to-json", i_confirm)
+    assert i_check < i_gate < i_rerun < i_loop < i_failed < i_confirm < i_json
+
+
+# 카드 7건에 걸렸던 · 판정 여유가 무너졌던 12개 파일의 CI 중앙값(성공 run 17개 durations 산출물 · 2026-09-17~24).
+_CI_MEDIAN_4283 = {
+    "tests/test_3808_x_thread_publish.py": 36.0, "tests/test_3815_youtube_publish.py": 34.0,
+    "tests/test_3813_stibee_esp_connection.py": 28.0, "tests/test_3806_ads_boost_gate.py": 35.0,
+    "tests/test_3816_ghost_connect.py": 31.0, "tests/test_4042_evidence_kind_fail_closed_registry_realdb.py": 31.0,
+    "tests/test_3806_ads_boost_execution.py": 29.0, "tests/test_3813_newsletter_send_gate.py": 29.0,
+    "tests/test_3806_ads_boost_spend.py": 37.0, "tests/test_3809_org_cost_summary.py": 37.0,
+    "tests/test_4191_recipe_newsletter_send_realdb.py": 35.0, "tests/test_3828_conversation_thread_link.py": 33.0,
+}
+
+
+def test_4283_refreshed_weights_restore_the_guard_margin():
+    """갱신 뒤 12개 파일 전부 판정선이 CI 중앙값의 GUARD_MARGIN_WARN배 이상(= 여유 붕괴 경고 대상 아님) · 등재 source에
+    출처가 박혀 있다. 누가 이 값을 옛 로컬값으로 되돌리면 RED."""
+    mod = _load()
+    weights = mod.load_weights()
+    entries = {e["file"]: e for e in mod.load_raw_entries()}
+    assert mod.guard_margin_collapsed(_CI_MEDIAN_4283, weights) == []
+    for f in _CI_MEDIAN_4283:
+        assert "story #4283" in entries[f]["source"] and entries[f].get("provisional") is not True, f
+
+
+def test_4283_margin_collapse_warns_after_three_runs_and_resets(tmp_path, capsys, monkeypatch):
+    """PO 조건 ② — 다음 낡음이 사람 눈에 먼저: 판정선이 실측의 2배 미만인 run이 3번 연속이면 audit이 ::warning:: +
+    잡 요약 표. 2번까진 안 뜸(단발 튐 거름) · 발화 뒤 리셋 · 정상 run이 끼면 스트릭 0.
+    옛 등재값(test_3808 3.9s) × CI 중앙값 36s 그대로 — 판정선 60s = 실측의 1.67배."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/test_3808_x_thread_publish.py": 3.9})
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    state_path = tmp_path / "drift-state.json"
+
+    def _run(run_id, elapsed):
+        (artifact_dir / "shard-durations-0.json").write_text(
+            json.dumps({"shard": 0, "durations": {"tests/test_3808_x_thread_publish.py": elapsed}})
+        )
+        mod._audit_durations_mode(artifact_dir, drift_state_path=state_path, run_id=run_id)
+        return capsys.readouterr().out
+
+    tag = "::warning::절대 가드 판정 여유 붕괴(story #4283): tests/test_3808_x_thread_publish.py"
+    assert tag not in _run("r1", 36.0)
+    assert tag not in _run("r2", 36.0)
+    assert tag not in _run("r2", 36.0)  # 같은 run 재시도 — 이중 카운트 없음.
+    assert tag in _run("r3", 36.0)
+    assert "절대 가드 판정 여유 붕괴" in summary.read_text()
+    assert tag not in _run("r4", 36.0)  # 발화 뒤 리셋.
+    assert tag not in _run("r5", 20.0)  # 판정선 60s / 20s = 3배 — 정상, 스트릭 0.
+    assert tag not in _run("r6", 36.0)
+    assert tag not in _run("r7", 36.0)
+    assert tag in _run("r8", 36.0)
+
+
+def test_4283_margin_state_is_backward_compatible(tmp_path):
+    """옛 모양 상태 파일(margin_streaks 키 없음)은 빈 스트릭으로 읽히고 · 비어 있으면 저장에도 안 실린다."""
+    mod = _load()
+    state_path = tmp_path / "s.json"
+    state_path.write_text(json.dumps({"run_id": "r", "streaks": {"tests/a.py": 1}}))
+    assert mod._load_drift_state(state_path)["margin_streaks"] == {}
+    mod._save_drift_state(state_path, run_id="r", streaks={}, margin_streaks={})
+    assert json.loads(state_path.read_text()) == {"run_id": "r", "streaks": {}}

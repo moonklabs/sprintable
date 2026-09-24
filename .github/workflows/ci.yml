@@ -1452,8 +1452,40 @@ jobs:
             cat /tmp/narrowed_test_files.txt
             changed_files_arg=(--changed-files /tmp/narrowed_test_files.txt)
           fi
-          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}"
+          # story #4283 — 벽시계 한 표본으로 판정하지 않는다. 7일 실측: 파일 하나가 대조군은 정상인데 혼자 중앙값의
+          # 3.4~3.8배로 튀는 일이 판정 1회당 ~0.2%, narrowing 후보 65~154개 → PR당 14~26% 거짓 RED(테스트 전부 통과).
+          # 1차 초과 후보가 5개 이하면(exit 3) 그 파일만 같은 루프(격리 DB)로 한 번 더 돌려 두 번 다 넘을 때만 RED —
+          # PR이 테스트를 실제로 느리게 만들었으면 재실행에서도 넘는다(결정적). 재실행에서 내려온 파일은 두 값을
+          # ::warning::으로 남긴다. 5개 초과(광범위 둔화)는 예전처럼 바로 RED.
+          suspects_file=$(mktemp)
+          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}" \
+            --suspects-out "$suspects_file"
           slow_exit=$?
+          if [ "$slow_exit" -eq 3 ]; then
+            echo "러너 정규화 가드 1차 초과 $(wc -l < "$suspects_file")개 — 재실행으로 확인(story #4283):"
+            cat "$suspects_file"
+            rerun_elapsed=$(mktemp)
+            rerun_failed=$(mktemp)
+            WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
+            STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
+            FILES_LIST_FILE="$suspects_file" \
+            ELAPSED_OUT_FILE="$rerun_elapsed" \
+            FAILED_OUT_FILE="$rerun_failed" \
+            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            "${{ github.workspace }}/scripts/run-destructive-shard-loop.sh" uv run pytest -q
+            if [ -s "$rerun_failed" ]; then
+              echo "::error::러너 정규화 가드 재실행에서 테스트 실패(story #4283): $(tr '\n' ' ' < "$rerun_failed")"
+              slow_exit=1
+            else
+              uv run python scripts/shard_destructive_tests.py \
+                --confirm-elapsed "$elapsed_file" "$rerun_elapsed" "$suspects_file" "${changed_files_arg[@]}"
+              slow_exit=$?
+            fi
+            rm -f "$rerun_elapsed" "$rerun_failed"
+          fi
+          rm -f "$suspects_file"
           # story #3558(CI·소형) AC1 — 삭제(rm -f) 前에 등재값 대조용 산출물로 변환해
           # 둔다(DB 준비를 제외한 순수 pytest wall time, `_t0`가 dropdb/createdb 뒤에서
           # 시작하므로 이미 그 값 — 새 타이머 불요, 기존 elapsed_file을 그대로 재사용).
