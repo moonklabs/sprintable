@@ -360,6 +360,27 @@ describe('KanbanBoard — 첫 그림은 스토리만 기다린다(story #4171)',
   });
 });
 
+// story #4275(E-MOBILE-SPEED · 민 기기 실측 — 2단이 1단 마지막 응답 뒤 2~5ms에 출발해 정착 +0.53~0.74초). 1단 결과(story id)가
+// 필요 없는 부수 요청은 1단과 같이 출발한다 — 스토리 목록이 아직 하나도 안 왔어도 이미 나가 있어야 한다. story id가 필요한
+// 두 갈래(실행 요약 · 라인 상태)만 1단 뒤. 뮤테이션: 네 갈래를 1단 뒤로 되돌리면 첫 단언 RED · 두 갈래를 앞으로 당기면
+// 둘째 단언 RED.
+describe('KanbanBoard — story id가 필요 없는 부수 요청은 1단과 같이 출발한다(story #4275)', () => {
+  it('스토리 목록 응답 전에 sprints · 의존 그래프 · 라벨 · 라벨 연결 · 대기 게이트가 이미 나가 있고, 실행 요약 · 라인 상태는 아직', async () => {
+    const INDEPENDENT = ['/api/sprints', '/api/dependencies/graph', '/api/labels', '/api/item-labels', '/api/gates?'];
+    const NEEDS_STORY_IDS = ['/api/workflow-executions/story-summary', '/api/stories/workflow-line/status'];
+    const fetchMock = vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) return new Promise(() => {}); // 1단이 안 끝난다
+      return new Promise(() => {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const called = (p: string) => fetchMock.mock.calls.some(([u]) => String(u).startsWith(p));
+    expect(called('/api/stories?')).toBe(true);
+    for (const p of INDEPENDENT) expect(called(p), p).toBe(true);
+    for (const p of NEEDS_STORY_IDS) expect(called(p), p).toBe(false);
+  });
+});
+
 describe('KanbanBoard — 스프린트 칩 라벨이 거짓말하지 않는다(story #4171 까디르 QA a)', () => {
   function stubWithSprints(sprints: 'pending' | 'fail' | Array<{ id: string; title: string }>) {
     vi.stubGlobal('fetch', vi.fn((url: string) => {

@@ -421,56 +421,13 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
     setLoading(true);
     setSprintsStatus('loading');
-    try {
-      // CB-S4: status별 5회 독립 호출
-      // story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드의 실제 몸통, 주)와
-      // epicsRes/membersRes(부수, ok?채움:방치)가 같은 Promise.all에 미격리로 묶여 있어,
-      // 부수 하나가 네트워크단 reject하면 보드 주 데이터까지 조용히 텅 비었다 — 부수만 leg별로 격리한다.
-      // story #4171(E-MOBILE-SPEED) — 스켈레톤은 카드 몸통(stories 5 · 카드의 goal 제목 · 담당자
-      // 이름)만 기다린다. 예전엔 여기에 sprints(필터 칩 드롭다운 전용)가 같이 묶이고, 그 뒤 배지용
-      // 6건이 순차로 줄 서 있어 목록이 전부 끝날 때까지 스켈레톤이었다(첫 화면 호출 폭포의 꼬리).
-      const statuses = COLUMNS.map((c) => c.id);
-      const [storyResults, epicsRes, membersRes] = await Promise.all([
-        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
-        fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
-        fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
-      ]);
-      if (stale()) return;
-
-      const allStories: KanbanStory[] = [];
-      const newTotals: Record<string, number> = {};
-      const newCursors: Record<string, string | null> = {};
-      statuses.forEach((s, i) => {
-        allStories.push(...storyResults[i].stories);
-        newTotals[s] = storyResults[i].total;
-        newCursors[s] = storyResults[i].nextCursor;
-      });
-      setStories(allStories);
-      setColumnTotals(newTotals);
-      setColumnCursors(newCursors);
-      storyIds = allStories.map((s) => s.id);
-
-      // 본문 파싱도 await라 그 사이 새 실행(프로젝트·org 전환)이 시작될 수 있다 — 파싱 뒤에도 가드.
-      if (epicsRes?.ok) {
-        const json = await epicsRes.json();
-        if (stale()) return;
-        setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null);
-      }
-      if (membersRes?.ok) {
-        const json = await membersRes.json();
-        if (stale()) return;
-        setMembers(json.data);
-      }
-    } finally {
-      if (!stale()) setLoading(false);
-    }
-    if (stale()) return;
-
-    // 첫 그림 뒤 — 서로 독립인 부수 데이터를 병렬로(예전엔 순차 6단). 각 갈래는 제 실패만 삼킨다
-    // (non-critical, 예전과 같다). 새 fetchData가 시작됐으면 늦게 온 결과로 새 상태를 덮지 않는다.
-    // 유나 design(PR #4552) — 카드 높이를 바꾸는 배지(실행 요약·라인 상태·의존·라벨·대기 게이트)는
-    // 갈래마다 따로 반영하면 카드가 여러 번 밀린다(390폭 최대 137px). 전부 모은 뒤 한 번에 반영한다.
-    // 스프린트는 카드가 아니라 필터 칩이라 따로 먼저.
+    // story #4275(E-MOBILE-SPEED · 민 기기 실측 +0.53~0.74초) — 부수 요청 중 1단 결과(story id)가 필요 없는 넷은 1단과
+    // **같이** 출발한다. 의존 표(PR 본문): sprints(project_id) · dependencies/graph(인자 없음) · labels · item-labels(인자
+    // 없음) · gates(pending · story) — 1단 응답 값을 안 쓴다. 실행 요약 · 라인 상태만 story id가 필요해 1단 뒤에 남는다.
+    // 각 갈래는 제 실패만 삼키고(non-critical), 새 fetchData가 시작됐으면 늦게 온 결과로 새 상태를 덮지 않는다.
+    // 유나 design(PR #4552) — 카드 높이를 바꾸는 배지(실행 요약·라인 상태·의존·라벨·대기 게이트)는 갈래마다 따로 반영하면
+    // 카드가 여러 번 밀린다(390폭 최대 137px) — 출발만 당기고 반영은 아래에서 전부 모은 뒤 한 번에. 스프린트는 카드가 아니라
+    // 필터 칩이라 오는 대로.
     const sprintsLeg = (async () => {
       try {
         const sprintsRes = await fetchWithAuth(`/api/sprints${sprintParams}`);
@@ -480,36 +437,6 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       } catch {
         // non-critical — 스프린트 필터 칩 드롭다운만 비어 있다(칩 라벨은 «선택한 스프린트»).
         if (!stale()) setSprintsStatus('failed');
-      }
-    })();
-
-    const summaryLeg = (async (): Promise<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }> | null> => {
-      if (!projectId || storyIds.length === 0) return null;
-      try {
-        const summaryParams = new URLSearchParams({ project_id: projectId });
-        for (const sid of storyIds) summaryParams.append('story_ids', sid);
-        const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
-        return summaryRes.ok ? await summaryRes.json() : null;
-      } catch {
-        return null; // non-critical — skip silently
-      }
-    })();
-    // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
-    const lineLeg = (async (): Promise<Record<string, LineStatusSummary> | null> => {
-      if (storyIds.length === 0) return null;
-      try {
-        const chunks: string[][] = [];
-        for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
-        const results = await Promise.all(chunks.map((chunk) =>
-          fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
-            .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
-            .catch(() => []),
-        ));
-        const lmap: Record<string, LineStatusSummary> = {};
-        for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
-        return lmap;
-      } catch {
-        return null; // non-critical — line badge 없으면 카드는 기존대로 렌더.
       }
     })();
     const graphLeg = (async (): Promise<Record<string, string[]> | null> => {
@@ -563,6 +490,83 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         return gmap;
       } catch {
         return null; // non-critical
+      }
+    })();
+    try {
+      // CB-S4: status별 5회 독립 호출
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — storyResults(보드의 실제 몸통, 주)와
+      // epicsRes/membersRes(부수, ok?채움:방치)가 같은 Promise.all에 미격리로 묶여 있어,
+      // 부수 하나가 네트워크단 reject하면 보드 주 데이터까지 조용히 텅 비었다 — 부수만 leg별로 격리한다.
+      // story #4171(E-MOBILE-SPEED) — 스켈레톤은 카드 몸통(stories 5 · 카드의 goal 제목 · 담당자
+      // 이름)만 기다린다. 예전엔 여기에 sprints(필터 칩 드롭다운 전용)가 같이 묶이고, 그 뒤 배지용
+      // 6건이 순차로 줄 서 있어 목록이 전부 끝날 때까지 스켈레톤이었다(첫 화면 호출 폭포의 꼬리).
+      const statuses = COLUMNS.map((c) => c.id);
+      const [storyResults, epicsRes, membersRes] = await Promise.all([
+        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
+        fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
+        fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
+      ]);
+      if (stale()) return;
+
+      const allStories: KanbanStory[] = [];
+      const newTotals: Record<string, number> = {};
+      const newCursors: Record<string, string | null> = {};
+      statuses.forEach((s, i) => {
+        allStories.push(...storyResults[i].stories);
+        newTotals[s] = storyResults[i].total;
+        newCursors[s] = storyResults[i].nextCursor;
+      });
+      setStories(allStories);
+      setColumnTotals(newTotals);
+      setColumnCursors(newCursors);
+      storyIds = allStories.map((s) => s.id);
+
+      // 본문 파싱도 await라 그 사이 새 실행(프로젝트·org 전환)이 시작될 수 있다 — 파싱 뒤에도 가드.
+      if (epicsRes?.ok) {
+        const json = await epicsRes.json();
+        if (stale()) return;
+        setEpics(json.data); setEpicsNextCursor(json.meta?.nextCursor ?? null);
+      }
+      if (membersRes?.ok) {
+        const json = await membersRes.json();
+        if (stale()) return;
+        setMembers(json.data);
+      }
+    } finally {
+      if (!stale()) setLoading(false);
+    }
+    if (stale()) return;
+
+    // 첫 그림 뒤 — story id가 필요한 두 갈래(실행 요약 · 라인 상태)만 여기서 출발한다. 나머지 넷은 위에서 1단과
+    // 함께 이미 나가 있다(story #4275).
+
+    const summaryLeg = (async (): Promise<Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }> | null> => {
+      if (!projectId || storyIds.length === 0) return null;
+      try {
+        const summaryParams = new URLSearchParams({ project_id: projectId });
+        for (const sid of storyIds) summaryParams.append('story_ids', sid);
+        const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
+        return summaryRes.ok ? await summaryRes.json() : null;
+      } catch {
+        return null; // non-critical — skip silently
+      }
+    })();
+    // S11 ①: workflow-line 상태 배치(보드 카드 badge)·N+1 0(1 fetch/200건·chunk·silent 캡 없음). storyIds 기준.
+    const lineLeg = (async (): Promise<Record<string, LineStatusSummary> | null> => {
+      if (storyIds.length === 0) return null;
+      try {
+        const chunks: string[][] = [];
+        for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
+        const results = await Promise.all(chunks.map((chunk) =>
+          fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
+            .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
+            .catch(() => []),
+        ));
+        const lmap: Record<string, LineStatusSummary> = {};
+        for (const arr of results) for (const s of arr) lmap[s.story_id] = s;
+        return lmap;
+      } catch {
+        return null; // non-critical — line badge 없으면 카드는 기존대로 렌더.
       }
     })();
 
