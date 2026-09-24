@@ -33,6 +33,12 @@ describe('hrefForNeedsMeItem — 기존 라우트 재사용(새 API 0)', () => {
   it('source=workflow_step → /inbox?tab=gates(전용 상세 없음)', () => {
     expect(hrefForNeedsMeItem({ source: 'workflow_step', id: 'w1' })).toBe('/inbox?tab=gates');
   });
+
+  it('story #4241 — 게이트 상세는 결재 자신의 프로젝트를 싣는다 · 프로젝트 모르면 그대로 · 결재함 큐엔 싣지 않음', () => {
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: 'proj-C' })).toBe('/gates/g1?p=proj-C');
+    expect(hrefForNeedsMeItem({ source: 'gate', id: 'g1', projectId: null })).toBe('/gates/g1');
+    expect(hrefForNeedsMeItem({ source: 'hitl', id: 'h1', projectId: 'proj-C' })).toBe('/inbox?tab=gates');
+  });
 });
 
 describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () => {
@@ -40,7 +46,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     const raw = {
       needs_me: [
         {
-          kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
+          kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1', project_id: 'proj-C',
           work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
           requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
         },
@@ -67,7 +73,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(snapshot.needsMe[0]).toEqual({
       id: 'g1', source: 'gate', state: 'signature', risk: 'high', workItemType: 'story', workItemId: 's1',
       workItemTitle: 'Threads에 글 발행', requestedByName: null, reason: null,
-      createdAt: '2026-09-13T05:00:00Z', conversationId: null, recipePublish: false,
+      createdAt: '2026-09-13T05:00:00Z', conversationId: null, recipePublish: false, projectId: 'proj-C',
     });
     expect(snapshot.needsMe[1]!.state).toBe('answer');
     expect(snapshot.needsMe[1]!.reason).toBe('YouTube 챕터를 3개로 나눌까요?');

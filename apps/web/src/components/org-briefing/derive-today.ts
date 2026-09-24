@@ -30,6 +30,9 @@ export interface TodayNeedsMeItem {
   // story #4190(유나 «본 버전 대조» 2) — BE `recipe_publish`(레시피 발행 게이트 — 초안을 보고 승인해야 함). true면 저위험
   // 일괄 승인에서 빼고 개별 카드(«초안 보고 승인» → 게이트 상세)로 둔다.
   recipePublish: boolean;
+  // story #4241 — 이 항목의 프로젝트(BE needs_me `project_id` · gate = work_item 프로젝트 · hitl = 요청 행 · workflow_step은 null).
+  // 「오늘」은 조직 전체 목록이라 게이트 상세 링크는 «현재 프로젝트»가 아니라 이 값을 `?p=`로 싣는다.
+  projectId: string | null;
 }
 
 // story #3970(BE PR #4364, story #3961) — 정지 요청 상태. state는 BE 순수파생값
@@ -142,9 +145,12 @@ export function deriveNeedsMeState(kind: unknown, risk: unknown): NeedsMeState {
 }
 
 /** source='gate'는 canonical 상세(/gates/{id})로, 그 외(hitl·workflow_step)는 기존
- * 결재함 큐(/inbox?tab=gates)로 — 둘 다 기존 라우트 재사용(새 API 0). */
-export function hrefForNeedsMeItem(item: { source: string; id: string }): string {
-  return item.source === 'gate' ? `/gates/${item.id}` : '/inbox?tab=gates';
+ * 결재함 큐(/inbox?tab=gates)로 — 둘 다 기존 라우트 재사용(새 API 0).
+ * story #4241 — 게이트 상세는 그 결재의 프로젝트(`projectId`)를 `?p=`로 싣는다(다른 프로젝트 결재를 열면 셸·본문 두 세계 방지).
+ * 결재함 큐는 조직 단위라 여기선 p를 싣지 않고, 소비처의 useFlatHref가 현재 프로젝트를 싣는다(이미 실은 p는 보존). */
+export function hrefForNeedsMeItem(item: { source: string; id: string; projectId?: string | null }): string {
+  if (item.source !== 'gate') return '/inbox?tab=gates';
+  return item.projectId ? `/gates/${item.id}?p=${encodeURIComponent(item.projectId)}` : `/gates/${item.id}`;
 }
 
 function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
@@ -176,6 +182,7 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
     // story #3828(PR #4253) develop 착지 — 응답 값 그대로(비참여 실행은 BE가 이미 null).
     conversationId: str(raw['conversation_id']),
     recipePublish: raw['recipe_publish'] === true,
+    projectId: str(raw['project_id']),
   };
 }
 
