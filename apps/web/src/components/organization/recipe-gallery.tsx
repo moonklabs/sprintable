@@ -34,7 +34,11 @@ function roleNames(def: EventDefinitionResponse, t: (key: string, values?: Recor
   const flow = def.payload_schema.properties?.stage?.enum ?? [];
   return orderedRecipeRoles(def.stage_metadata, flow, def.role_actor_kinds).map((role) => {
     const label = stageRoleLabel(role, t);
-    return roleActorKind(role, def.role_actor_kinds) === 'human' ? t('recipeCardHumanRole', { role: label }) : label;
+    // story #4243 — either(사람도 에이전트도)에도 접미사(유나 확정: 안 붙이면 «에이전트 전용»으로 읽힌다).
+    const kind = roleActorKind(role, def.role_actor_kinds);
+    if (kind === 'human') return t('recipeCardHumanRole', { role: label });
+    if (kind === 'either') return t('recipeCardEitherRole', { role: label });
+    return label;
   });
 }
 

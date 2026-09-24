@@ -1191,7 +1191,7 @@ describe('MarketingRecipeApplyDialog — story #4243', () => {
     expect(notes[0]).toContain(koMessages.organization.recipeStageLabelAnimatic);
   });
 
-  it('either: 사람 + 에이전트 선택지 · «사람 또는 에이전트» 배지 · «담당 선택…»', async () => {
+  it('either: 사람 + 에이전트 선택지 · «사람 또는 에이전트» 배지 · «담당자 선택…»', async () => {
     stubMemberFetch();
     const eitherRecipe = { ...RECIPE, role_actor_kinds: { 크리에이터: 'either' as const } };
     await act(async () => {
