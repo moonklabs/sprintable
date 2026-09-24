@@ -27,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
-from sqlalchemy import String, and_, cast, delete, func, or_, select, text, update
+from sqlalchemy import String, and_, cast, delete, func, literal_column, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -1992,10 +1992,14 @@ async def _open_site_draft_ids_for_work_item(
     except (ValueError, TypeError, AttributeError):
         return []
     try:
+        # story #4260 — 부분 식 인덱스 ix_activity_logs_site_post_published_version(0406)을 타도록 JSON 키와 액션 값을 **리터럴**로 박는다.
+        # ORM bracket accessor(`context["version_id"]`)는 키를 bind parameter로 컴파일하고, 액션 비교도 파라미터라 generic plan에선 식
+        # 인덱스 · 부분조건 함의를 플래너가 못 이어 인덱스가 후보에도 못 오른다(에러 없이 조용히 Seq/org 인덱스 — 0384 · #4081과 같은 부류).
+        # 코드 고정 상수라 인젝션 위험 없음.
         published = exists().where(
             ActivityLog.org_id == SitePostDraft.org_id,
-            ActivityLog.action == "site_post_published",
-            ActivityLog.context["version_id"].astext == cast(SitePostVersion.id, String),
+            ActivityLog.action == literal_column("'site_post_published'"),
+            literal_column("activity_logs.context->>'version_id'") == cast(SitePostVersion.id, String),
             SitePostVersion.draft_id == SitePostDraft.id,
         )
         async with db.begin_nested():
