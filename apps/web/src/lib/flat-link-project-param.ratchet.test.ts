@@ -28,6 +28,9 @@ const WRAPPERS = new Set(['flatHref', 'withProjectParam', 'withProject', 'useCon
 // 이동이 아닌 호출의 인자(구조 판정) — 탭 정체성(useSyntheticParentTabHistory: 어느 탭 소속인지 표시 · 이동 아님) · 정적 파일 fetch.
 const NON_NAV_CALLEES = new Set(['useSyntheticParentTabHistory', 'fetch']);
 const PREDICATE_METHODS = new Set(['startsWith', 'endsWith', 'includes', 'indexOf', 'match', 'test']);
+// story #4231 다음 조각(래칫 맹점 ③ · 까디르 4614 codex P2) — 옛 자원 · flat 경로를 **조립하는 헬퍼**. 리터럴이 헬퍼 안(`/${resource}`)에
+// 있어 머리 글자로는 못 셌다. 이 헬퍼 호출 = flat 목적지로 센다 — 인자에 프로젝트를 싣는 함수(WRAPPERS)가 있을 때만 세지 않는다.
+const ASSEMBLERS = new Set(['scopedResourceHref', 'destHref', 'resolveTabHref']);
 
 /** 이동이 아니거나(판정·서버·문맥 전) 감싸면 틀리는 자리 — 파일(SRC 기준) + 리터럴(템플릿은 머리 글자). props가 있으면 그 속성 값일 때만. */
 export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: string[]; reason: string }> = [
@@ -47,6 +50,7 @@ export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: str
   { file: 'app/register/page.tsx', reason: '가입 직후 첫 착지 — 아직 프로젝트 컨텍스트가 없어 실을 값이 없다' },
   { file: 'app/verify-email/page.tsx', reason: '이메일 확인 직후 첫 착지 — 아직 프로젝트 컨텍스트가 없어 실을 값이 없다' },
   { file: 'components/auth/session-expired-dialog.tsx', reason: '재로그인 뒤 돌아올 경로(현재 주소 폴백) — 로그인 전이라 실을 값이 없다' },
+  { file: 'components/nav/mobile-tab-bar.tsx', texts: ['destHref'], props: ['href'], reason: 'TABS/V3_TABS 모듈 상수의 구운 href(단위테스트 계약) — 실제 렌더 href는 MobileTabBar가 resolveTabHref(…, flatHref)로 매 렌더 다시 구한다' },
 ];
 
 // story #4231 4차(PO 07:48Z) — 옛 자원 경로(MIGRATED_RESOURCES — /board · /sprints · /storage …)도 flat 목적지다. proxy가 그 자리를 scoped로
@@ -139,6 +143,10 @@ export function countBareFlatLinksInSource(fileName: string, text: string, route
   let n = 0;
   const visit = (node: ts.Node) => {
     if (isWrapperCall(node)) return;
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ASSEMBLERS.has(node.expression.text)) {
+      const wrapped = node.arguments.some((a) => ts.isIdentifier(a) && WRAPPERS.has(a.text));
+      if (!wrapped && !isExempt(rel, node.expression.text, enclosingPropName(node))) n += 1;
+    }
     const literal = literalText(node);
     if (literal !== null) {
       if (flatRe.test(literal) && !carriesOwnProject(node) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
@@ -216,6 +224,16 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count('const h = `/chats?tab=x#?p=${pid}`;')).toBe(1);
     expect(count("const h = '/chats#section?p=x';")).toBe(1);
     expect(count("const h = '/chats#section';")).toBe(1); // 해시로 바로 이어지는 flat 목적지도 센다(경계 [/?#])
+  });
+
+  it('⭐#4231 다음 조각(맹점 ③) — 조립 헬퍼 호출은 프로젝트를 싣는 함수를 넘길 때만 세지 않는다', () => {
+    expect(count("const h = scopedResourceHref('flow', org, proj, flatHref);")).toBe(0);
+    expect(count("const h = scopedResourceHref('flow', org, proj, keepHref);")).toBe(1);
+    expect(count('const h = destHref(dest, scope, flatHref);')).toBe(0);
+    expect(count('const h = destHref(dest, scope, (h) => h);')).toBe(1);
+    expect(count('const h = resolveTabHref(tab, dest, scope, withProject);')).toBe(0);
+    expect(count("const TABS = [{ href: destHref(D.work, {}, keepHref) }];", 'components/nav/mobile-tab-bar.tsx')).toBe(0);
+    expect(count("const x = destHref(D.work, {}, keepHref);", 'components/nav/mobile-tab-bar.tsx')).toBe(1);
   });
 
   it('예외 표 — 파일·리터럴·속성이 모두 맞을 때만(같은 파일의 다른 모양은 그대로 센다)', () => {

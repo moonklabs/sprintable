@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { keepHref } from '@/lib/with-project-param';
 import { useTranslations } from 'next-intl';
 import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -27,10 +28,11 @@ import {
 // 작업공간·프로젝트 경로를 직접 가리킨다(slug를 모르는 찰나만 bare — 미들웨어 안전망).
 // TABS/V3_TABS의 `href` 필드는 slug 없이 구운 값(기존 단위테스트 계약) — 실제 렌더 href는 MobileTabBar가
 // resolveTabHref(tab, dest, scope)로 매 렌더 다시 구한다.
-export function destHref(destination: NavV3Destination, scope: TabHrefScope = {}): string {
+export function destHref(destination: NavV3Destination, scope: TabHrefScope, withProject: (href: string) => string): string {
+  // story #4231 다음 조각 — static 목적지도, resource 목적지의 slug 모름 폴백도 필수 withProject로 감싼다(호출처가 따로 감싸다 빠뜨리는 자리 0).
   return destination.kind === 'resource'
-    ? scopedResourceHref(destination.path, scope.orgSlug, scope.projectSlug)
-    : destination.path;
+    ? scopedResourceHref(destination.path, scope.orgSlug, scope.projectSlug, withProject)
+    : withProject(destination.path);
 }
 
 export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
@@ -78,17 +80,17 @@ export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
 const DEFAULT_DEST = resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS);
 
 export const TABS = [
-  { key: 'now', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work), icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
+  { key: 'now', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
   // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
   // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
   // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
   // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
-  { key: 'approvals', destKey: 'approvals' as const, href: destHref(DEFAULT_DEST.approvals), icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
-  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
+  { key: 'approvals', destKey: 'approvals' as const, href: destHref(DEFAULT_DEST.approvals, {}, keepHref), icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
+  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
   // 에서는 최소 스텁 라우트로만 연결 — S9가 정식 목록으로 교체.
-  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
+  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
 
 // story #4006(critical, 5pt) AC8(§2, doc 5bc82986) — v3 플래그 중 하나라도 ON이면
@@ -100,10 +102,10 @@ export const TABS = [
 // pendingCount를 그대로 「오늘」 탭에 옮겨 붙인다, 새 API 0). 「결과·연결·규칙」은 이
 // 4탭엔 없고 `/more` 목록에서 진입(AC8, 이 모듈 스코프 밖).
 export const V3_TABS = [
-  { key: 'today', destKey: 'today' as const, href: destHref(DEFAULT_DEST.today), icon: Newspaper, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
-  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
-  { key: 'work', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work), icon: Workflow, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
-  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
+  { key: 'today', destKey: 'today' as const, href: destHref(DEFAULT_DEST.today, {}, keepHref), icon: Newspaper, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
+  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
+  { key: 'work', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: Workflow, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
+  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
 
 export type TabConfig = typeof TABS | typeof V3_TABS;
@@ -115,8 +117,8 @@ export function resolveTabsForFlags(navV3Flags: NavV3Flags): TabConfig {
   return anyV3Enabled ? V3_TABS : TABS;
 }
 
-export function resolveTabHref(tab: TabDef, dest: NavV3Destinations, scope: TabHrefScope = {}): string {
-  return destHref(dest[tab.destKey], scope);
+export function resolveTabHref(tab: TabDef, dest: NavV3Destinations, scope: TabHrefScope, withProject: (href: string) => string): string {
+  return destHref(dest[tab.destKey], scope, withProject);
 }
 
 // story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
@@ -302,8 +304,7 @@ export function MobileTabBar({
     >
       {tabs.map((tab) => {
         const { key, icon: Icon, labelKey, namespace } = tab;
-        const baseHref = resolveTabHref(tab, dest, scope);
-        const href = dest[tab.destKey]?.kind === 'static' ? flatHref(baseHref) : baseHref;
+        const href = resolveTabHref(tab, dest, scope, flatHref);
         const active = key === activeKey;
         // story #4226 — 지금 보는 바로 그 페이지를 가리키는 탭은 프리패치하지 않는다(로컬 prod 빌드 실측: 착지 ≈1.4초 뒤
         // 현재 페이지 RSC 데이터 프리패치 1건 — 이미 떠 있는 화면이라 쓸 곳이 없다). «활성»이 아니라 «경로 일치»로 가른다 —

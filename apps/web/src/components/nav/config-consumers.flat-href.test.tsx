@@ -41,11 +41,13 @@ async function render(node: React.ReactNode) {
 }
 
 describe('내비 설정 경로 소비처가 flat 목적지를 감싼다(story #4231 3차)', () => {
-  it('nav-v3 항목 목록 — static은 `?p=proj-A` · resource(일감)는 그대로', async () => {
+  // story #4231 다음 조각(래칫 맹점 ③) 개정 — resource(일감)는 예전엔 slug를 아예 안 받아 늘 bare `/flow`였다(이 테스트가 그 bare를 핀했다).
+  // 이제 slug를 알면 scoped 경로, 모르면(이 목 맥락) 폴백에 현재 p를 싣는다.
+  it('nav-v3 항목 목록 — static은 `?p=proj-A` · resource(일감)는 slug 모르면 `/flow?p=proj-A`(bare 0)', async () => {
     const { NavV3ItemList } = await import('./nav-v3-item-list');
     await render(<NavV3ItemList flags={DEFAULT_NAV_V3_FLAGS} activeKey="today" />);
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/org-briefing?p=proj-A', '/chats?p=proj-A', '/flow', '/organization/insights-board?p=proj-A']);
+    expect(hrefs).toEqual(['/org-briefing?p=proj-A', '/chats?p=proj-A', '/flow?p=proj-A', '/organization/insights-board?p=proj-A']);
   });
 
   it('커맨드 팔레트 — flat(static) 탐색 항목은 `?p=proj-A`를 싣고 이동', async () => {

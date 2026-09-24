@@ -535,6 +535,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // `pn`(대상 프로젝트명)은 실패 화면(권한 회수 등)에서 dashboardContext.projectMemberships가
     // 이미 그 프로젝트를 못 가진 상태일 수 있어(바로 그게 실패 사유) 클릭 시점 값을 실어 보낸다.
     const params = new URLSearchParams({ p: conv.project_id, from: projectId, pn: conv.project_name });
+    // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
     router.push(flatHref(`/chats/${conv.id}?${params.toString()}`));
   }, [t, router, projectId, flatHref]);
 
@@ -558,6 +559,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     consumedComposeRef.current = true;
     if (conversations.length > 0) {
       const mostRecent = conversations.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
+      // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
       router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
     } else {
       setShowModal(true);
@@ -681,6 +683,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // story #3831 — 「오늘」에서 넘어온 지시 한 줄이 있으면(0건 대화라 새 대화 모달을
     // 거친 경우) 그 새 대화의 컴포저에도 같은 기전으로 싣는다.
     router.push(
+      // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
       composeParam ? flatHref(`/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}`) : flatHref(`/chats/${conversationId}`),
     );
     void fetchConversations(0, false);
@@ -773,7 +776,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`))} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
           ))}
         </div>
       )}
@@ -783,7 +786,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`))} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
           ))}
         </div>
       )}
@@ -857,7 +860,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`))} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button

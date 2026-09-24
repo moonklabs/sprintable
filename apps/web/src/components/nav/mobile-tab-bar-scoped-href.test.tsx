@@ -88,8 +88,8 @@ describe('navProjectSlug — scoped 경로는 현재 URL 조각(story #4211 PO 3
   it('⭐B → C 클라이언트 이동(서버 prop은 B에 머묾 · pathname만 C) → 탭바·사이드바 href 둘 다 /acme/charlie/…', async () => {
     const { navProjectSlug, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
     const slug = navProjectSlug({ ...stale, pathname: '/acme/charlie/flow', currentOrgSlug: 'acme' });
-    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/acme/charlie/flow');
-    expect(scopedResourceHref('docs', 'acme', slug)).toBe('/acme/charlie/docs');
+    expect(scopedResourceHref('flow', 'acme', slug, (h) => h)).toBe('/acme/charlie/flow');
+    expect(scopedResourceHref('docs', 'acme', slug, (h) => h)).toBe('/acme/charlie/docs');
   });
 
   it('flat 경로는 URL 조각을 안 쓰고 가드로(전환 창 → bare)', async () => {
@@ -101,7 +101,7 @@ describe('navProjectSlug — scoped 경로는 현재 URL 조각(story #4211 PO 3
     const { navProjectSlug, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
     const slug = navProjectSlug({ ...stale, pathname: '/gates/123', currentOrgSlug: 'gates' });
     expect(slug).toBe('beta');
-    expect(scopedResourceHref('flow', 'gates', slug)).not.toBe('/gates/123/flow');
+    expect(scopedResourceHref('flow', 'gates', slug, (h) => h)).not.toBe('/gates/123/flow');
   });
 
   it('다른 org 경로(첫 조각 ≠ 현재 org slug)는 URL 조각을 안 쓴다 — 전환기(withSwitchedSlugs)와 같은 판정', async () => {
@@ -115,20 +115,21 @@ describe('slugForEffectiveProject — 딥링크·전환 창·refresh 뒤(story #
   it('⭐딥링크(세션 A · 경로 B · slug B · effective B) → /{ws}/B/… (세션 A로 보내지 않는다)', async () => {
     const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
     const slug = slugForEffectiveProject({ pathProjectId: 'proj-b', sessionProjectId: 'proj-a', slug: 'beta', effectiveProjectId: 'proj-b' });
-    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/acme/beta/flow');
+    expect(scopedResourceHref('flow', 'acme', slug, (h) => h)).toBe('/acme/beta/flow');
   });
 
   it('flat 전환 창(경로 없음 · 세션 A · slug A · effective B) → bare', async () => {
     const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
     const slug = slugForEffectiveProject({ pathProjectId: undefined, sessionProjectId: 'proj-a', slug: 'alpha', effectiveProjectId: 'proj-b' });
     expect(slug).toBeUndefined();
-    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/flow');
+    // story #4231 다음 조각 — slug 모름 폴백도 bare로 안 나간다: 필수 withProject가 현재 p를 싣는다.
+    expect(scopedResourceHref('flow', 'acme', slug, (h) => `${h}?p=proj-b`)).toBe('/flow?p=proj-b');
   });
 
   it('refresh 뒤(세션 B · slug B · effective B) → /{ws}/B/…', async () => {
     const { slugForEffectiveProject, scopedResourceHref } = await import('@/lib/nav-v3-destinations');
     const slug = slugForEffectiveProject({ pathProjectId: undefined, sessionProjectId: 'proj-b', slug: 'beta', effectiveProjectId: 'proj-b' });
-    expect(scopedResourceHref('flow', 'acme', slug)).toBe('/acme/beta/flow');
+    expect(scopedResourceHref('flow', 'acme', slug, (h) => h)).toBe('/acme/beta/flow');
   });
 
   it('배선 핀 — 대시보드 셸이 현재 URL·경로 id·세션 id를 넘기고, 그 값 하나를 컨텍스트(탭바)와 사이드바(ShellBody) 둘 다에', async () => {

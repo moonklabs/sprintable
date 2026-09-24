@@ -159,7 +159,7 @@ export function AppSidebar({
   // extraActivePaths로 WORKSPACE_FRAME_TAB_PATHS(SSOT, 하드코딩 0)를 함께 검사 — 탭을
   // 하나 늘리면 이 판정도 자동으로 늘어난다. href는 여전히 resource(주 진입점) 기준.
   function resourceLink(resource: string, extraActivePaths: readonly string[] = []): { href: string; isActive: boolean } {
-    const href = scopedResourceHref(resource, orgSlug, currentProjectSlug);
+    const href = scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
     const isActivePath = (p: string) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)
       || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${p}`));
     const isActive = [resource, ...extraActivePaths].some(isActivePath);

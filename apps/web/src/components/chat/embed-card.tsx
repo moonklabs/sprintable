@@ -194,6 +194,7 @@ const makeMdBodyComponents = (withProject: (href: string) => string) => ({
 // 그 외 스킴은 기본 sanitize 유지(javascript:/data: 차단). export: MdBody 격리 테스트용.
 export const MdBody = ({ content }: { content: string }) => {
   const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서)은 현재 프로젝트를 싣는다
+  // 대상-프로젝트: 본문 · 상세 안 중첩 엔티티 토큰은 type · id뿐이라 대상 프로젝트를 모른다(칩을 열면 미리보기가 자기 프로젝트로 해소).
   const components = useMemo(() => makeMdBodyComponents(flatHref), [flatHref]);
   return (
     <ReactMarkdown
@@ -649,6 +650,7 @@ export function EntityPreviewModal({
         ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
             ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
             // story #4253 P2 — 문서 프로젝트 id를 알면(docPreview) 그 프로젝트 · 모를 때만 현재 p.
+            // 대상-프로젝트: 위 갈래가 대상 프로젝트를 알면 그것을 싣고, 이 폴백은 모를 때만(현재 p).
             : docPreview?.projectId ? withProjectParam(`/docs?id=${d.doc_id}`, docPreview.projectId) : flatHref(`/docs?id=${d.doc_id}`))
         : null;
     resolvedHref = parentHref;
@@ -679,6 +681,7 @@ export function EntityPreviewModal({
     // story #4253(까디르 codex 01a0d316) — 채팅은 조직 전체가 보는 자리라 게이트 자기 프로젝트(GET /api/gates/{id}의 project_id)를 싣는다.
     // 모를 때(프로젝트 없는 게이트 · fetch 전/실패)만 현재 p.
     const gateProjectId = (detail as { project_id?: string | null } | null)?.project_id ?? null;
+    // 대상-프로젝트: 위 갈래가 대상 프로젝트를 알면 그것을 싣고, 이 폴백은 모를 때만(현재 p).
     resolvedHref = gateProjectId ? withProjectParam(`/gates/${entityId}`, gateProjectId) : flatHref(`/gates/${entityId}`);
     linkKind = 'own';
   } else {
@@ -737,6 +740,7 @@ export function EntityPreviewModal({
   // sprint) EntityDetail이 null을 반환해 몸통이 완전 공백이었다(옛 "미리보기 없음" 문구보다
   // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
+  // 대상-프로젝트: 본문 · 상세 안 중첩 엔티티 토큰은 type · id뿐이라 대상 프로젝트를 모른다(칩을 열면 미리보기가 자기 프로젝트로 해소).
   const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t, flatHref) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
   const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList, tDashboard, tCage) : null;
@@ -818,6 +822,7 @@ export function EmbedCard({
   const [navigating, setNavigating] = useState(false);
   const router = useRouter();
   const colorClass = ENTITY_COLORS[entity_type] ?? GRAY_STATE_COLOR;
+  // 대상-프로젝트: 칩을 그리는 시점엔 대상 프로젝트를 모른다(상세 fetch 전) — 열린 미리보기가 응답의 자기 프로젝트로 «전체 보기»를 싣는다(#4253).
   const href = getEntityHref(entity_type, entity_id, flatHref);
   const label = title ?? entity_id;
   // story #2522 — EmbedCard 자신의 인라인 카드(모달과 별개 렌더 경로)도 원시값을 그대로
@@ -866,6 +871,7 @@ export function EmbedCard({
       // story #4253 P2 — slug가 없어도 문서 프로젝트 id를 알면 그 프로젝트(현재 p로 떨어지지 않게) · 둘 다 모를 때만 현재 p.
       const target = (data.orgSlug && data.projectSlug)
         ? docViewUrl(data.orgSlug, data.projectSlug, data.slug)
+        // 대상-프로젝트: 위 갈래가 대상 프로젝트를 알면 그것을 싣고, 이 폴백은 모를 때만(현재 p).
         : data.projectId ? withProjectParam(`/docs/${data.slug}/view`, data.projectId) : flatHref(`/docs/${data.slug}/view`);
       router.push(target);
     } catch {

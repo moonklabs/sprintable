@@ -34,14 +34,14 @@ describe('mobile-tab-bar ↔ app-sidebar 대칭(story #4016 AC3) — 플래그 8
   it.each(COMBOS)('now 탭(work) — 사이드바 board 항목과 같은 리소스 조각($todayV3Enabled/$chatV3Enabled/$connectRulesV3Enabled)', (flags) => {
     const dest = resolveNavV3Destinations(flags);
     const nowTab = TABS.find((t) => t.key === 'now')!;
-    const tabResourceFragment = resolveTabHref(nowTab, dest).replace(/^\//, '');
+    const tabResourceFragment = resolveTabHref(nowTab, dest, {}, (h) => h).replace(/^\//, '');
     expect(tabResourceFragment).toBe(sidebarBoardResourcePath(flags));
   });
 
   it.each(COMBOS)('chat 탭 — 사이드바 CHAT_CENTER_ITEM과 같은 경로($todayV3Enabled/$chatV3Enabled/$connectRulesV3Enabled)', (flags) => {
     const dest = resolveNavV3Destinations(flags);
     const chatTab = TABS.find((t) => t.key === 'chat')!;
-    expect(resolveTabHref(chatTab, dest)).toBe(resolveChatCenterItem(flags).path);
+    expect(resolveTabHref(chatTab, dest, {}, (h) => h)).toBe(resolveChatCenterItem(flags).path);
   });
 
   // 양성 대조 — 위 두 시험이 실제로 뭔가를 검증하고 있는지(항상 true인 트리비얼 비교가

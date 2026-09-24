@@ -186,6 +186,7 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
 
   const noopResolveName = useCallback((): string | null => null, []);
   const stripItems = useMemo(
+    // 대상-프로젝트: 조직 전체 항목은 항목 project_id가 있으면 그 프로젝트로 싣고(#4231 4차 A) · 이 래퍼는 모를 때 폴백.
     () => buildNowStripItems(items ?? [], tDashboard, flatHref, resolveName ?? noopResolveName, {}),
     [items, tDashboard, resolveName, noopResolveName, flatHref],
   );

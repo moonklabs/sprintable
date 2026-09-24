@@ -210,6 +210,21 @@ export function installProjectHeaderInterceptor(): void {
  * 서버 렌더와 동일한 값(경로/URL/serverProjectId 기준)을 내도록 강제한다 — 안 그러면 SSR과 첫
  * CSR 사이에 값이 갈려 하이드레이션 직후 예상 밖 URL 정규화(router.replace)가 발동할 수 있다.
  */
+/**
+ * story #4231 다음 조각(래칫 맹점 ① · PO 15:10Z) — 이 탭이 들고 있는 프로젝트 후보를 **셸과 같은 순서**로: URL `?p=` → sessionStorage
+ * (`sprintable_tab_project_id` · 셸이 effective를 쓴 값 · 하이드레이션 뒤에만). 셸(resolveEffectiveProjectId)은 여기에 accessibleIds 필터를
+ * 얹고, 셸 밖(useFlatHref)은 필터 없이 첫 후보를 쓴다(착지 셸이 다시 검증하니 낡은 값이면 오늘과 같은 정규화로 떨어질 뿐). 판정 사본 0.
+ */
+export function tabProjectCandidates(urlProjectId: string | null, hydrated: boolean): string[] {
+  const out: string[] = [];
+  if (urlProjectId) out.push(urlProjectId);
+  if (hydrated && typeof window !== 'undefined') {
+    const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);
+    if (stored) out.push(stored);
+  }
+  return out;
+}
+
 export function resolveEffectiveProjectId(
   urlProjectId: string | null,
   serverProjectId: string | undefined,
@@ -218,11 +233,8 @@ export function resolveEffectiveProjectId(
   pathProjectId?: string,
 ): string | undefined {
   if (pathProjectId) return pathProjectId;
-  if (urlProjectId && accessibleIds.has(urlProjectId)) return urlProjectId;
-  if (hydrated && typeof window !== 'undefined') {
-    const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);
-    if (stored && accessibleIds.has(stored)) return stored;
-  }
+  const fromTab = tabProjectCandidates(urlProjectId, hydrated).find((id) => accessibleIds.has(id));
+  if (fromTab) return fromTab;
   // story #2490 — 이전엔 이 마지막 폴백(serverProjectId, me.project_id=쿠키/JWT 유래)만
   // accessibleIds 체크가 없었다. stale한 값이 비멤버 프로젝트를 가리키면 무검증으로
   // 채택돼(fire #2486 재현, 퍼펫티어 실측) X-Project-Id로 실려 project-gated 엔드포인트를
