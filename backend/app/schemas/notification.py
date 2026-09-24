@@ -26,6 +26,16 @@ class NotificationResponse(BaseModel):
     created_at: datetime
 
 
+class NotificationListItem(NotificationResponse):
+    """story #4244 — 목록(GET /notifications) 항목: 알림 대상(reference)의 프로젝트와 문서 slug를 더 싣는다(목록 조회 때 배치 해소 · 저장
+    안 함 · 옛 행도 채워짐). FE 링크가 현재 프로젝트가 아니라 대상 자기 프로젝트 p를 싣고, 문서 알림이 목록이 아니라 그 문서로 가게 한다.
+    조직 단위 대상(team_member) · 해소 불가(삭제됨 · 다른 조직 · 없는 대상)는 None. 표시·링크 전용 — 권한 판정에 쓰지 않는다.
+    ORM 속성이 아니라서 NotificationResponse(from_attributes)와 따로 둔다 — 채우는 곳은 목록 라우트 하나뿐."""
+
+    target_project_id: uuid.UUID | None = None
+    target_doc_slug: str | None = None
+
+
 class NotificationSettingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

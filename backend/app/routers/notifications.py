@@ -12,6 +12,7 @@ from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
 from app.repositories.notification import NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
+    NotificationListItem,
     NotificationResponse,
     NotificationSettingResponse,
     UpsertNotificationSetting,
@@ -78,6 +79,48 @@ def _notif_repo_read(
     return NotificationRepository(session, org_id)
 
 
+# story #4244 — reference_type별 대상 프로젝트 해소(종류당 IN 쿼리 1개 · N+1 0). 게이트는 대상 work item의 프로젝트(#4241 조직 전체
+# 결재함과 같은 해소기 — gate_service.resolve_gate_project_ids_batch), 나머지 work item은 resolve_work_item_project_ids_batch, 대화는
+# Conversation.project_id. 문서는 slug도 싣는다. 조직 단위(team_member)·모르는 종류는 None.
+_WORK_ITEM_REFERENCE_TYPES = frozenset({"story", "task", "doc", "visual_artifact", "epic", "sprint"})
+
+
+async def _enrich_notification_targets(db: AsyncSession, org_id: uuid.UUID, data: list[NotificationListItem]) -> None:
+    from app.models.conversation import Conversation
+    from app.models.doc import Doc
+    from app.models.gate import Gate
+    from app.services.gate_service import resolve_gate_project_ids_batch, resolve_work_item_project_ids_batch
+
+    refs = [(n.reference_type, n.reference_id) for n in data if n.reference_type and n.reference_id]
+    if not refs:
+        return
+    project: dict[tuple[str, uuid.UUID], uuid.UUID | None] = await resolve_work_item_project_ids_batch(
+        db, org_id, ((t, i) for t, i in refs if t in _WORK_ITEM_REFERENCE_TYPES),
+    )
+    gate_ids = {i for t, i in refs if t == "gate"}
+    if gate_ids:
+        gates = (await db.execute(select(Gate).where(Gate.id.in_(gate_ids), Gate.org_id == org_id))).scalars().all()
+        project.update({("gate", gid): pid for gid, pid in (await resolve_gate_project_ids_batch(db, org_id, gates)).items()})
+    conv_ids = {i for t, i in refs if t == "conversation"}
+    if conv_ids:
+        rows = (await db.execute(
+            select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id)
+        )).all()
+        project.update({("conversation", cid): pid for cid, pid in rows})
+    doc_ids = {i for t, i in refs if t == "doc"}
+    slug: dict[uuid.UUID, str] = {}
+    if doc_ids:
+        rows = (await db.execute(
+            select(Doc.id, Doc.slug).where(Doc.id.in_(doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None))
+        )).all()
+        slug = {did: s for did, s in rows}
+    for n in data:
+        if n.reference_type and n.reference_id:
+            n.target_project_id = project.get((n.reference_type, n.reference_id))
+            if n.reference_type == "doc":
+                n.target_doc_slug = slug.get(n.reference_id)
+
+
 @router.get("/notifications")
 async def list_notifications(
     unread: bool | None = Query(default=None, description="True=읽지 않은 것만, False=읽은 것만"),
@@ -113,8 +156,10 @@ async def list_notifications(
         user_id=user_id, is_read=resolved_is_read, limit=limit + 1, before=before_dt, before_id=before_id,
     )
     page, has_more, next_cursor = assemble_page(rows, limit, lambda n: (n.created_at, n.id))
+    data = [NotificationListItem(**NotificationResponse.model_validate(n).model_dump()) for n in page]
+    await _enrich_notification_targets(db, repo.org_id, data)
     return {
-        "data": [NotificationResponse.model_validate(n) for n in page],
+        "data": data,
         "meta": {"has_more": has_more, "next_cursor": next_cursor},
     }
 

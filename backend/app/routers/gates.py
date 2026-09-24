@@ -21,11 +21,8 @@ from app.models.gate import Gate, is_valid_transition
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.hitl import HitlRequest
-from app.models.hypothesis import Hypothesis
-from app.models.loop import LoopRun
-from app.models.pm import Goal, Sprint, Story, Task
-from app.models.visual_artifact import VisualArtifact
-from app.models.workflow_line import WorkflowLineDefinitionVersion, WorkflowLineStepApproval
+from app.models.pm import Story, Task
+from app.models.workflow_line import WorkflowLineStepApproval
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _push_to_agent
 from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
@@ -34,6 +31,8 @@ from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gat
 from app.services.verdict_capture import fetch_status_check_rollup
 from app.services.gate_service import (
     GateUndoNotSelfError,
+    resolve_work_item_project_ids_batch,
+    self_anchored_gate_project_id,
     GateUndoWindowExpiredError,
     RiskGrade,
     apply_gate_urgency_sort,
@@ -1424,12 +1423,6 @@ async def list_gates(
     if non_doc_gates:
         story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
         task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
-        # story #2082: artifact_canonicalize 게이트(work_item_type="visual_artifact")가 이 배치에서
-        # 빠져 있어 project_id_by_work_item 조회가 항상 None으로 떨어졌다 — _non_doc_gate_approvable
-        # 이 그걸 "구조적으로 project-무관"으로 오판해 org owner/admin에게만 노출되고, project-level
-        # owner/admin(정본 담당자)에겐 assigned_to_me=true 인박스에서 사라졌다(회귀). VisualArtifact.
-        # project_id는 NOT NULL이라 story/task와 동형으로 항상 배치 해소 가능.
-        artifact_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "visual_artifact"}
         # story #3784a8d0(3038, 실사고 — 선생님 제보 2026-08-25) — work_item_summary가 doc만
         # 배치 enrich됐다. merge 게이트(work_item_type=='story', 결재함 대다수)는 항상 None이라
         # FE가 "#해시" 폴백만 그렸다 — `_resolve_work_item_summary`(단건 GET /{id} 경로, story
@@ -1453,26 +1446,13 @@ async def list_gates(
             )).all()
             project_id_by_work_item.update({tid: pid for tid, pid, _ in rows})
             summary_by_work_item.update({tid: WorkItemSummary(title=title) for tid, _, title in rows})
-        if artifact_ids:
-            rows = (await session.execute(
-                select(VisualArtifact.id, VisualArtifact.project_id).where(
-                    VisualArtifact.id.in_(artifact_ids), VisualArtifact.org_id == org_id,
-                )
-            )).all()
-            project_id_by_work_item.update({aid: pid for aid, pid in rows})
-        # story #4241(까디르 QA 367369b2e [P2]) — 조직 전체 결재함 행 링크가 결재 자신의 프로젝트를 싣도록 나머지 종류도 배치 해소한다
-        # (resolve_work_item_project_id 단건 표와 같은 축 · 종류당 IN 쿼리 1개 · N+1 0). wf_line_version은 버전 행의 project_id가 nullable
-        # (조직 단위 라인이면 None — 정직한 값). loop·hypothesis·epic(=Goal)·sprint는 NOT NULL.
-        for model, wtype in (
-            (LoopRun, "loop"), (Hypothesis, "hypothesis"), (Goal, "epic"), (Sprint, "sprint"),
-            (WorkflowLineDefinitionVersion, "wf_line_version"),
-        ):
-            ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == wtype}
-            if ids:
-                rows = (await session.execute(
-                    select(model.id, model.project_id).where(model.id.in_(ids), model.org_id == org_id)
-                )).all()
-                project_id_by_work_item.update({rid: pid for rid, pid in rows})
+        # story #4241 → #4244 — 나머지 종류(visual_artifact · loop · hypothesis · epic(=Goal) · sprint · wf_line_version)는 알림 목록과 같은
+        # 배치 해소기(gate_service.resolve_work_item_project_ids_batch · 종류당 IN 1개)로. story/task는 위에서 제목과 함께 이미 해소했다.
+        _rest = await resolve_work_item_project_ids_batch(session, org_id, (
+            (g.work_item_type, g.work_item_id) for _, g in non_doc_gates
+            if g.work_item_type not in ("story", "task", "doc")  # doc은 위 doc_proj(제목·slug와 함께)
+        ))
+        project_id_by_work_item.update({wid: pid for (_t, wid), pid in _rest.items()})
         for resp in responses:
             if resp.work_item_type in ("story", "task"):
                 resp.work_item_summary = summary_by_work_item.get(resp.work_item_id)
@@ -1483,15 +1463,8 @@ async def list_gates(
     # 단건 조회만 resp.project_id 를 대입했고 목록은 빠져 있었다). doc/story/task/artifact 전부
     # 이 한 dict 로 커버(project_id_by_work_item 은 dict(doc_proj) 로 시작).
     for resp, g in zip(responses, gates):
-        resp.project_id = project_id_by_work_item.get(g.work_item_id)
-        # story #4241 — 자기 참조 앵커(agent_decision · support_escalation: work_item_id == gate.id, 대상 테이블 없음)는 생성 때
-        # neutral_facts.project_id에 싣는다(agent_decision은 원래 · support_escalation은 이번부터 — 그 전 행은 None으로 남는다).
-        if resp.project_id is None and g.work_item_type in ("agent_decision", "support_escalation"):
-            raw = (g.neutral_facts or {}).get("project_id")
-            try:
-                resp.project_id = uuid.UUID(str(raw)) if raw else None
-            except ValueError:
-                resp.project_id = None
+        # story #4241 — 자기 참조 앵커(agent_decision · support_escalation)는 neutral_facts.project_id(gate_service.self_anchored_gate_project_id).
+        resp.project_id = project_id_by_work_item.get(g.work_item_id) or self_anchored_gate_project_id(g)
 
     # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
     # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
