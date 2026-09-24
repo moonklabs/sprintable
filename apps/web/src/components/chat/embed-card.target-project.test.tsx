@@ -135,3 +135,46 @@ describe('#4253 — slug 없는 문서도 문서 자기 프로젝트(docs/previe
     expect(hrefs()).toContain('/docs?id=d-9&p=proj-C');
   });
 });
+
+// story #4253(유나 4612 비차단 · PO 14:28Z) — 슬러그로 스코프드 경로를 못 지을 때(project_slug 없음) resolveScopedEntityHref의 폴백이 bare로
+// 나가지 않는다: 응답의 항목(부모) 프로젝트 id → `?p=`. 다섯 자리(태스크 · 아티팩트 스토리/목표 · 증거 · 스토리 자기).
+describe('#4253 — 미리보기 «전체 보기» 폴백은 항목 자기 프로젝트(slug 없음)', () => {
+  const noSlug = { org_slug: 'acme', project_slug: null, project_id: 'proj-C' };
+
+  it('⭐태스크 → 부모 스토리 /board?story=…&p=proj-C', async () => {
+    const hrefs = await renderAndOpen('task', 't-9', { '/api/tasks/': { data: { title: 'T', status: 'todo', story_id: 's-9', ...noSlug } } });
+    expect(hrefs).toContain('/board?story=s-9&p=proj-C');
+  });
+
+  it('⭐아티팩트 → 스토리 · 목표', async () => {
+    let hrefs = await renderAndOpen('artifact', 'art-2', {
+      '/api/visual-artifacts/preview': { data: { projectId: 'proj-C' } },
+      '/api/visual-artifacts/art-2': { data: { id: 'art-2', title: 'A', story_id: 's-2', ...noSlug } },
+    });
+    expect(hrefs).toContain('/board?story=s-2&p=proj-C');
+    await act(async () => { root.unmount(); });
+    document.querySelectorAll('[data-slot="dialog-portal"], [role="dialog"]').forEach((el) => el.remove());
+    root = createRoot(container);
+    hrefs = await renderAndOpen('artifact', 'art-3', {
+      '/api/visual-artifacts/preview': { data: { projectId: 'proj-C' } },
+      '/api/visual-artifacts/art-3': { data: { id: 'art-3', title: 'A', epic_id: 'e-3', ...noSlug } },
+    });
+    expect(hrefs).toContain('/goals/e-3?p=proj-C');
+  });
+
+  it('⭐증거 → 해소된 스토리', async () => {
+    const hrefs = await renderAndOpen('evidence', 'ev-1', { '/api/evidence/': { data: { resolved_story_id: 's-4', ...noSlug } } });
+    expect(hrefs).toContain('/board?story=s-4&p=proj-C');
+  });
+
+  it('⭐스토리 자기 링크 — 응답 project_id가 있으면 그 프로젝트(현재 B여도 C)', async () => {
+    const hrefs = await renderAndOpen('story', 's-5', { '/api/stories/': { data: { title: 'S', status: 'todo', ...noSlug } } });
+    expect(hrefs).toContain('/board?story=s-5&p=proj-C');
+    expect(hrefs).not.toContain('/board?story=s-5&p=proj-B');
+  });
+
+  it('태스크 — 응답에 프로젝트가 없으면 현재 p(B) 폴백', async () => {
+    const hrefs = await renderAndOpen('task', 't-8', { '/api/tasks/': { data: { title: 'T', status: 'todo', story_id: 's-8', org_slug: 'acme', project_slug: null } } });
+    expect(hrefs).toContain('/board?story=s-8&p=proj-B');
+  });
+});

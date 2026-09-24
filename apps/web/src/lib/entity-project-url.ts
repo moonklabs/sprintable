@@ -23,19 +23,23 @@ export interface EntityProjectSlugs {
 }
 
 /**
- * 선조회 결과와 순수 문자열 폴백을 받아, 스코프드 URL을 만들 수 있으면 만들고 아니면 폴백을
- * 그대로 준다(④ 폴백 원칙). `orgSlug`가 빈 문자열이거나 `projectSlug`가 null이면 스코프드
- * URL을 지을 재료가 부족하다는 뜻이라 폴백으로 떨어진다(예: project.slug 미백필).
+ * 선조회 결과와 폴백 경로를 받아, 스코프드 URL을 만들 수 있으면 만들고 아니면 폴백으로 떨어진다(④ 폴백 원칙). `orgSlug`가 빈
+ * 문자열이거나 `projectSlug`가 null이면 스코프드 URL을 지을 재료가 부족하다는 뜻이다(예: project.slug 미백필).
+ *
+ * story #4253(유나 4612 비차단 · PO 14:28Z) — 폴백은 **bare로 못 나간다**: `withProject`(필수)로 감싼다. 호출처는 응답에 항목 프로젝트 id가
+ * 있으면 그 프로젝트(`withProjectParam(…, id)`) · 없을 때만 현재 p(`flatHref`)를 넘긴다. 예전엔 bare `/board?story=`가 그대로 나가 착지 때
+ * 셸이 현재(쿠키) 프로젝트로 정규화했다.
  */
 export function resolveScopedEntityHref(
   slugs: EntityProjectSlugs | null,
   bareFallback: string | null,
   buildScoped: (wsSlug: string, projSlug: string) => string,
+  withProject: (href: string) => string,
 ): string | null {
   if (slugs?.orgSlug && slugs.projectSlug) {
     return buildScoped(slugs.orgSlug, slugs.projectSlug);
   }
-  return bareFallback;
+  return bareFallback ? withProject(bareFallback) : null;
 }
 
 /** story 착지 — next.config.ts의 `/:ws/:proj/board→/:ws/:proj/flow?view=list` redirects()가

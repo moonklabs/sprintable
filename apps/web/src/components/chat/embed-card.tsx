@@ -436,6 +436,9 @@ export function EntityPreviewModal({
   const t = useTranslations('chats');
   // story #3888 — renderGateSummary의 risk 배지 라벨(workList.riskBadgeHigh/riskBadgeUnknown).
   const tWorkList = useTranslations('workList');
+  // story #4253 — 슬러그로 스코프드 경로를 못 지을 때의 폴백: 응답에 항목(또는 부모) 프로젝트 id가 있으면 그 프로젝트 · 없을 때만 현재 p.
+  const ownProjectHref = (projectId: string | null | undefined): ((h: string) => string) =>
+    projectId ? (h: string) => withProjectParam(h, projectId) : flatHref;
   const tDashboard = useTranslations('dashboard');
   const tCage = useTranslations('cage');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
@@ -614,11 +617,12 @@ export function EntityPreviewModal({
     // ② — Task.story_id는 NOT NULL(항상 유일 부모). fetch 전이면 아직 null(풋터는 loading이 가림).
     // story #2642(BE #3044) — TaskResponse가 이제 org_slug/project_slug를 직접 싣는다(story_id→
     // Story.project_id 1-hop을 BE가 이미 해소해 응답에 얹어 준다 — FE가 또 한 번 조회할 필요 없음).
-    const t = detail as { story_id?: string | null; org_slug?: string | null; project_slug?: string | null } | null;
+    const t = detail as { story_id?: string | null; org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     resolvedHref = resolveScopedEntityHref(
       t?.org_slug ? { orgSlug: t.org_slug, projectSlug: t.project_slug ?? null } : null,
       t?.story_id ? `/board?story=${t.story_id}` : null,
       (ws, proj) => storyBoardUrl(ws, proj, t!.story_id!),
+      ownProjectHref(t?.project_id),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
     parentKind = 'story';
@@ -632,15 +636,15 @@ export function EntityPreviewModal({
     // 없이 org_slug/project_slug를 직접 싣는다 — story_id/epic_id 분기 둘 다 이 값을 그대로 쓴다.
     const d = detail as {
       story_id?: string | null; epic_id?: string | null; doc_id?: string | null;
-      org_slug?: string | null; project_slug?: string | null;
+      org_slug?: string | null; project_slug?: string | null; project_id?: string | null;
     } | null;
     const ownerSlugs = d?.org_slug ? { orgSlug: d.org_slug, projectSlug: d.project_slug ?? null } : null;
     // doc 부모만 예외 — docViewUrl은 doc 자신의 slug가 필요한데 artifact 응답엔 그게 없어(위
     // effect가 /api/docs/preview로 별도 선조회한 docPreview를 쓴다, #2168 재사용 그대로).
     const parentHref = d?.story_id
-      ? resolveScopedEntityHref(ownerSlugs, `/board?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!))
+      ? resolveScopedEntityHref(ownerSlugs, `/board?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!), ownProjectHref(d.project_id))
       : d?.epic_id
-      ? resolveScopedEntityHref(ownerSlugs, `/goals/${d.epic_id}`, (ws, proj) => goalUrl(ws, proj, d.epic_id!))
+      ? resolveScopedEntityHref(ownerSlugs, `/goals/${d.epic_id}`, (ws, proj) => goalUrl(ws, proj, d.epic_id!), ownProjectHref(d.project_id))
       : d?.doc_id
         ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
             ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
@@ -655,11 +659,12 @@ export function EntityPreviewModal({
     // resolved_story_id 하나로 해소해 준다(task처럼 여기서 또 한 번 join할 필요가 없다).
     // story #2642(BE #3044) — EvidenceResponse가 그 resolve 과정에서 이미 계산해 둔
     // project_id로 org_slug/project_slug도 같이 싣는다(추가 join 없음).
-    const ev = detail as { resolved_story_id?: string | null; org_slug?: string | null; project_slug?: string | null } | null;
+    const ev = detail as { resolved_story_id?: string | null; org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     resolvedHref = resolveScopedEntityHref(
       ev?.org_slug ? { orgSlug: ev.org_slug, projectSlug: ev.project_slug ?? null } : null,
       ev?.resolved_story_id ? `/board?story=${ev.resolved_story_id}` : null,
       (ws, proj) => storyBoardUrl(ws, proj, ev!.resolved_story_id!),
+      ownProjectHref(ev?.project_id),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
     parentKind = 'story';
@@ -681,7 +686,7 @@ export function EntityPreviewModal({
     // org_slug/project_slug를 직접 싣는다 — 엔티티 자신의 project로 직행(뷰어의 현재 프로젝트
     // 추측을 proxy.ts::redirectLegacyResourcePath에 맡기지 않는다). fetch 전/실패(project_slug
     // 없음 포함)는 기존 bare href prop 그대로(④ 원칙, 회귀 아님).
-    const own = detail as { org_slug?: string | null; project_slug?: string | null } | null;
+    const own = detail as { org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     const slugs = own?.org_slug ? { orgSlug: own.org_slug, projectSlug: own.project_slug ?? null } : null;
     const buildScoped =
       entityType === 'story' ? (ws: string, proj: string) => storyBoardUrl(ws, proj, entityId)
@@ -689,7 +694,15 @@ export function EntityPreviewModal({
       : entityType === 'sprint' ? (ws: string, proj: string) => sprintUrl(ws, proj, entityId)
       : entityType === 'asset' ? (ws: string, proj: string) => assetStorageUrl(ws, proj, entityId)
       : null;
-    resolvedHref = buildScoped ? resolveScopedEntityHref(slugs, href, buildScoped) : href;
+    // story #4253 — 폴백: 응답에 항목 자기 프로젝트 id가 있으면 bare 경로를 다시 지어 그 프로젝트로(prop href는 이미 호출처가 고른 p를
+    // 싣고 withProjectParam은 기존 p를 유지하니 그대로 감쌀 수 없다). 없으면 호출처가 고른 prop href 그대로(호출처 규칙 — 현재 p ·
+    // 게이트 자기 프로젝트 등 — 을 덮지 않는다).
+    const ownId = own?.project_id ?? null;
+    resolvedHref = buildScoped
+      ? (ownId
+          ? resolveScopedEntityHref(slugs, getEntityHref(entityType, entityId, keepHref), buildScoped, (h) => withProjectParam(h, ownId))
+          : resolveScopedEntityHref(slugs, href, buildScoped, (h) => h))
+      : href;
     linkKind = resolvedHref ? 'own' : null;
   }
 
