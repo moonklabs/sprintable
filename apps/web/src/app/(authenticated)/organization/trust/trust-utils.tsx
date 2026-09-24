@@ -132,10 +132,13 @@ export function mergeMemberLookup(
 ): Map<string, RosterMember> {
   const lookup = new Map<string, RosterMember>();
   for (const m of orgMembers) {
-    lookup.set(m.id, { id: m.id, name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? '?', email: m.email ?? undefined, role: m.role ?? undefined });
+    // story #4285(까디르 P2) — 이름을 못 정하면 항목을 만들지 않는다(예전엔 리터럴 '?'가 화면까지 갔다). 표시 이름은 rosterDisplayName이 정한다.
+    const name = (m.name?.trim() || null) ?? (m.email?.split('@')[0] || null);
+    if (name) lookup.set(m.id, { id: m.id, name, email: m.email ?? undefined, role: m.role ?? undefined });
   }
   for (const m of teamMembers) {
-    if (!lookup.has(m.id)) lookup.set(m.id, { id: m.id, name: m.name?.trim() || '?' });
+    const name = m.name?.trim();
+    if (name && !lookup.has(m.id)) lookup.set(m.id, { id: m.id, name });
   }
   return lookup;
 }
@@ -332,4 +335,19 @@ export function withSummaryNames(lookup: Map<string, RosterMember>, rows: OrgSum
     out.set(row.member_id, { ...(prev ?? { id: row.member_id }), name });
   }
   return out;
+}
+
+// story #4285(까디르 P2 · PO 처방) — 신뢰 센터 행 이름을 한 곳에서 정한다. 지워진 구성원(member_deleted) → «알 수 없는 구성원» ·
+// 살아 있는데 이름이 빈 구성원(에이전트 PATCH가 name null을 받는다) → «이름 없는 구성원» · 그 밖엔 조회 이름(응답 이름이 정본 —
+// withSummaryNames). 옛 서버처럼 member_deleted를 모르면 «알 수 없는 구성원». 날것 `?`가 나올 길은 없다(조회가 이름 없는 항목을
+// 만들지 않는다 — mergeMemberLookup).
+export function rosterDisplayName(
+  row: OrgSummaryRow,
+  lookup: Map<string, RosterMember>,
+  labels: { unknown: string; unnamed: string },
+): string {
+  if (row.member_deleted) return labels.unknown;
+  const name = lookup.get(row.member_id)?.name?.trim();
+  if (name) return name;
+  return row.member_deleted === false ? labels.unnamed : labels.unknown;
 }

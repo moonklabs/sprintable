@@ -492,3 +492,33 @@ describe('OrganizationTrustPage — 이름은 조직 범위 응답에서(story #
     expect(container.textContent!.split(koMessages.organization.trustUnknownMember).length - 1).toBe(1);
   });
 });
+
+// story #4285(까디르 P2 · PO 처방) — 살아 있는데 이름이 빈 에이전트(PATCH가 name null을 받는다)는 «이름 없는 구성원» · 지워진 구성원은
+// «알 수 없는 구성원» · 날것 `?`는 0. 예전엔 이름 빈 행이 옛 조회로 떨어져 리터럴 '?'가 떴다(팀원 목록에 이름 빈 항목이 있으면).
+// 뮤테이션: rosterDisplayName의 «이름 없음» 갈래를 «알 수 없음»으로 되돌리면 첫 단언 RED.
+describe('OrganizationTrustPage — 이름 빈 구성원 · 지워진 구성원(story #4285 · 까디르 P2)', () => {
+  it('⭐이름 빈 살아 있는 에이전트 → «이름 없는 구성원» · 지워진 → «알 수 없는 구성원» · `?` 0', async () => {
+    mountAsAdmin();
+    const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const rows: Array<StubMember & { name?: string | null; member_type?: 'human' | 'agent' | null; member_deleted?: boolean }> = [
+      { ...base, member_id: 'nameless-agent', name: null, member_type: 'agent', member_deleted: false },
+      { ...base, member_id: 'gone', name: null, member_type: null, member_deleted: true },
+    ];
+    // 팀원 목록에도 이름 빈 항목이 있는 경우(예전 '?' 리터럴의 출처) — 그대로 흉내 낸다.
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/trust-scores/org-summary') return { ok: true, status: 200, json: async () => ({ members: rows }) };
+      if (url === '/api/org-members') return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.startsWith('/api/team-members')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'nameless-agent', name: null }] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    const text = container.textContent!;
+    expect(text).toContain(koMessages.common.memberUnnamed);
+    expect(text.split(koMessages.organization.trustUnknownMember).length - 1).toBe(1);
+    expect(text).not.toMatch(/(^|[\s>])\?($|[\s<])/);
+    const rowNames = [...container.querySelectorAll('li, [role="listitem"], a, button')].map((el) => el.textContent?.trim());
+    expect(rowNames).not.toContain('?');
+  });
+});

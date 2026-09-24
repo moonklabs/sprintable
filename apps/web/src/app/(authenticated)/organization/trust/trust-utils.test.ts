@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames, withSummaryNames } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames, withSummaryNames, rosterDisplayName } from './trust-utils';
 import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 // story #3735(D1) — groupRosterByRole이 이제 t(Translator)를 받아 기본 5키(role_key)면
@@ -311,5 +311,24 @@ describe('withSummaryNames(story #4285)', () => {
     expect(out.get('a1')).toEqual({ id: 'a1', name: '페드루 올리베이라' });
     expect(out.has('gone')).toBe(false);
     expect(lookup.get('h1')!.name).toBe('song'); // 원본 맵은 그대로(새 맵을 돌려준다).
+  });
+});
+
+describe('rosterDisplayName · mergeMemberLookup — 날것 `?` 0(story #4285 · 까디르 P2)', () => {
+  const base = { role_key: 'dev', role_label: null, hit_rate: null, resolved: 0, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+  const labels = { unknown: '알 수 없는 구성원', unnamed: '이름 없는 구성원' };
+
+  it('지워짐 → unknown · 살아 있고 이름 빔 → unnamed · 이름 있음 → 이름 · 옛 서버(플래그 없음)에 이름 없음 → unknown', () => {
+    const lookup = new Map([['a', { id: 'a', name: '페드루' }]]);
+    expect(rosterDisplayName({ ...base, member_id: 'x', member_deleted: true }, lookup, labels)).toBe(labels.unknown);
+    expect(rosterDisplayName({ ...base, member_id: 'y', name: null, member_deleted: false }, lookup, labels)).toBe(labels.unnamed);
+    expect(rosterDisplayName({ ...base, member_id: 'a', member_deleted: false }, lookup, labels)).toBe('페드루');
+    expect(rosterDisplayName({ ...base, member_id: 'z' }, lookup, labels)).toBe(labels.unknown);
+  });
+
+  it('mergeMemberLookup은 이름을 못 정한 항목을 만들지 않는다(리터럴 `?` 0)', () => {
+    const lookup = mergeMemberLookup([{ id: 'o1', name: null, email: null }], [{ id: 't1', name: null }, { id: 't2', name: '  ' }]);
+    expect(lookup.size).toBe(0);
+    expect([...lookup.values()].map((m) => m.name)).not.toContain('?');
   });
 });

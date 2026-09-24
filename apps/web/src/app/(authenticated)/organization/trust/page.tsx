@@ -19,6 +19,7 @@ import {
   resolveRoleLabel,
   sortGroupMembersByName,
   withSummaryNames,
+  rosterDisplayName,
   useHistoryDrilldown,
   HistoryDrilldownPanel,
   HistoryDrilldownTrigger,
@@ -63,6 +64,7 @@ export default function OrganizationTrustPage() {
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
   const isAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('organization');
+  const tCommon = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const [loading, setLoading] = useState(true);
@@ -123,9 +125,12 @@ export default function OrganizationTrustPage() {
     : sortedRows.filter((row) => resolveRoleLabel(row.role_key, row.role_label, t) === roleFilter);
 
   // [SID:4282] 같은 이름 · 다른 구성원 행에만 구분 꼬리(역할 → 이메일 → ID 앞 8자 · trust-utils.disambiguatedNames).
+  // story #4285 — 구분 꼬리의 이름도 행 이름과 같은 한 해석기(rosterDisplayName)에서 — «이름 없는 구성원» · «알 수 없는 구성원»이 겹쳐도 갈린다.
+  const rosterNameLabels = { unknown: t('trustUnknownMember'), unnamed: tCommon('memberUnnamed') };
+  const rosterRowById = new Map(rosterRows.map((row) => [row.member_id, row]));
   const displayNames = disambiguatedNames(
     rosterRows.map((row) => row.member_id),
-    (id) => rosterMembers.get(id)?.name ?? t('trustUnknownMember'),
+    (id) => rosterDisplayName(rosterRowById.get(id)!, rosterMembers, rosterNameLabels),
     rosterMembers,
     (role) => orgRoleLabel(role, t),
   );
@@ -136,7 +141,7 @@ export default function OrganizationTrustPage() {
         key={`${row.member_id}-${row.role_key}`}
         row={row}
         index={index}
-        name={displayNames.get(row.member_id) ?? rosterMembers.get(row.member_id)?.name ?? t('trustUnknownMember')}
+        name={displayNames.get(row.member_id) ?? rosterDisplayName(row, rosterMembers, rosterNameLabels)}
         t={t}
         displayTimezone={displayTimezone}
       />
