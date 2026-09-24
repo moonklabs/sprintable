@@ -144,9 +144,10 @@ def test_the_two_sets_do_not_overlap_and_match_the_module():
     assert pc._RETRY_SAFE_CODES == frozenset(RETRY_SAFE)
     assert not pc._MAYBE_SENT_CODES & pc._NOT_SENT_CODES
     assert not pc._RETRY_SAFE_CODES & (pc._MAYBE_SENT_CODES | pc._NOT_SENT_CODES)
-    assert pc._TRANSIENT_CODES == frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", *RETRY_SAFE}), (
-        "transient는 명시 목록만(까디르 codex P1)"
-    )
+    # 4272(develop) — 공급자 쓰기 호출 전 코드 없는 예외(`PRE_CALL_ERROR_CODE`)도 «안 나감» 증거가 있는 재시도 안전 부류.
+    assert pc._TRANSIENT_CODES == frozenset(
+        {"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", pc.PRE_CALL_ERROR_CODE, *RETRY_SAFE}
+    ), "transient는 명시 목록만(까디르 codex P1)"
 
 
 def test_provider_codes_pass_through_and_an_unknown_one_is_needs_check_not_auto_retry():
