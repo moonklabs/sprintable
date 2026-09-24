@@ -162,7 +162,9 @@ export function isLocalizedPlatformPreset(def: PresetLike | null | undefined): d
 // 단계 문장 1 · «대상» 필드 1]. 그 **정확한 모양**일 때만 통째로 로케일 문안으로 바꾸고, 아니면 원문 그대로 둔다 — 예전엔
 // 머리말 전부·단계 자리가 든 text 전부를 바꿔, 시드 본문에 다른 문구가 같이 있으면(`… ; 사유 {{payload.reason}}`) 조용히
 // 사라졌다. BE 짝 가드(test_4202)가 시드 전수가 이 모양인지 같은 목록으로 잰다(모양 밖 새 시드 = RED).
-export const SEED_STAGE_TEXTS: readonly string[] = ['**{{label.stage}}** 단계로 넘어갔습니다', '**{{payload.stage}}** 로 넘어갔습니다'];
+// story #4257(PO 11:27Z) — 세 번째는 조직 정의 폼이 예전에 저장해 온 기본 단계 문장(플랫폼이 넣어 준 문장이라 표시할 때 로케일로 바꾼다 ·
+// 이미 저장된 조직 정의도 그대로 고쳐진다). 지금 폼은 두 번째 씨앗 문장을 저장한다(event-definer-logic.ts FORM_DEFAULT_STAGE_TEXT).
+export const SEED_STAGE_TEXTS: readonly string[] = ['**{{label.stage}}** 단계로 넘어갔습니다', '**{{payload.stage}}** 로 넘어갔습니다', '단계 **{{payload.stage}}** 로 넘어갔습니다.'];
 // 워크플로우 시드의 «대상» 값은 `story <UUID>` 원문을 그렸다(유나 반려) — 마케팅과 같은 일감 라벨(제목 링크)로 바꾼다.
 export const SEED_TARGET_VALUES: readonly string[] = ['{{label.work_item_target}}', '{{payload.work_item_type}} {{payload.work_item_id}}'];
 const TARGET_VALUE = '{{label.work_item_target}}';
@@ -195,3 +197,13 @@ export function localizePresetBlockTemplate(
 
 /** 시드 block_template의 대상 필드 라벨(한국어 시드 원문) — 이 값일 때만 로케일 라벨로 바꾼다. */
 export const SEED_TARGET_LABEL = '대상';
+
+/**
+ * story #4257(PO 11:27Z) — 조직 정의(플랫폼 프리셋 밖)의 **text 블록 하나 단위** 로케일화. 플랫폼이 넣어 준 기본 단계 문장
+ * (SEED_STAGE_TEXTS와 글자가 정확히 같은 text 블록)만 보는 사람의 언어로 바꾸고, 머리말 · 작성자 필드 · 조직이 직접 쓴 문장은 원문 그대로.
+ * 카드 전체 모양 판정(isKnownSeedCardShape)은 플랫폼 프리셋 전용으로 따로 둔다.
+ */
+export function localizeSeedStageTextBlocks(template: BlockTemplate, body: string | null): BlockTemplate {
+  if (body === null || !template.blocks.some((b) => b.type === 'text' && SEED_STAGE_TEXTS.includes(b.text))) return template;
+  return { blocks: template.blocks.map((b): BlockTemplateBlock => (b.type === 'text' && SEED_STAGE_TEXTS.includes(b.text) ? { ...b, text: body } : b)) };
+}

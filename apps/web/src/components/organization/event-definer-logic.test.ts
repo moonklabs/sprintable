@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveCycle, deriveMeasure, deriveSignal, emptyFormState, makeId, sampleValueKind,
-  slugify, tryReverseParse, validateFieldName, validateKeySuffix,
+  slugify, tryReverseParse, validateFieldName, validateKeySuffix, withHeaderName, LEGACY_UNNAMED_HEADER,
 } from './event-definer-logic';
 
 // story #4257 — 예시 문자열은 호출부가 넘긴다(로케일 문구). 테스트는 결정적인 영문형.
@@ -219,6 +219,26 @@ describe('판별 핀 — 파생 샘플 payload가 파생 schema를 자기 검증
 });
 
 describe('tryReverseParse — AC3 JSON→폼 왕복(표현 가능 범위만, 못 하면 null="고급 전용")', () => {
+  // story #4257(PO 11:27Z) — 머리말을 비운 채 저장하면 '(이름 없음)'이 남던 옛 저장값은 계속 빈 이름으로 알아본다(새로는 저장되지 않는다).
+  it('옛 저장값 머리말 «(이름 없음)»은 빈 이름으로 복원된다', () => {
+    const state = emptyFormState('cycle');
+    state.name = 'x';
+    state.keySuffix = 'legacy_flow';
+    state.stages = [{ id: makeId(), name: '초안', slug: 'draft' }];
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
+    const legacy = { blocks: [{ type: 'header', text: LEGACY_UNNAMED_HEADER }, { type: 'text', text: '단계 **{{payload.stage}}** 로 넘어갔습니다.' }] };
+    const parsed = tryReverseParse(d.key, d.payload_schema, d.routing, d.action_auth, 'moonklabs', legacy);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.name).toBe('');
+  });
+
+  it('withHeaderName — 머리말이 비면 이벤트 이름 · 있으면 그대로', () => {
+    const empty = emptyFormState('cycle');
+    expect(withHeaderName(empty, '  릴리즈 흐름 ').name).toBe('릴리즈 흐름');
+    const named = { ...emptyFormState('cycle'), name: '카드 머리말' };
+    expect(withHeaderName(named, '릴리즈 흐름').name).toBe('카드 머리말');
+  });
+
   it('deriveCycle 결과를 그대로 되돌리면(자기 왕복) 동일 폼 상태로 복원된다', () => {
     const state = emptyFormState('cycle');
     state.name = '릴리즈';

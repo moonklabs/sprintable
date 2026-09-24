@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { EventBlockCard } from '@/components/chat/event-block-card';
 import {
   type DefinerFormState, type DefinerFormat, type DefinerField, type DefinerStage,
-  deriveDefinition, makeId, slugify, validateFieldName, validateKeySuffix,
+  deriveDefinition, makeId, slugify, validateFieldName, validateKeySuffix, withHeaderName,
 } from './event-definer-logic';
 import { useSampleText } from './use-sample-text';
 
@@ -20,11 +20,13 @@ const FORMATS: { value: DefinerFormat; icon: typeof GitBranch }[] = [
 ];
 
 export function EventDefinerForm({
-  state, onChange, orgSlug, testPublish, testPublishing, testPublishResult,
+  state, onChange, orgSlug, eventName, testPublish, testPublishing, testPublishResult,
 }: {
   state: DefinerFormState;
   onChange: (next: DefinerFormState) => void;
   orgSlug: string;
+  /** story #4257 — 머리말이 비었을 때 저장되는 이벤트 이름(미리보기도 저장과 같은 값을 보인다 · 둘 다 비면 로케일 자리 표시). */
+  eventName: string;
   testPublish: () => void;
   testPublishing: boolean;
   testPublishResult: { ok: boolean; message?: string } | null;
@@ -32,9 +34,10 @@ export function EventDefinerForm({
   const sampleText = useSampleText();
   const t = useTranslations('organization');
   const keyError = state.keySuffix ? validateKeySuffix(state.keySuffix) : null;
+  const unnamedPreview = t('definerUnnamedPreview');
   const derived = useMemo(
-    () => deriveDefinition(state, orgSlug || '{org}', sampleText),
-    [state, orgSlug, sampleText],
+    () => deriveDefinition(withHeaderName(state, eventName.trim() || unnamedPreview), orgSlug || '{org}', sampleText),
+    [state, eventName, unnamedPreview, orgSlug, sampleText],
   );
 
   const set = <K extends keyof DefinerFormState>(key: K, value: DefinerFormState[K]) => onChange({ ...state, [key]: value });

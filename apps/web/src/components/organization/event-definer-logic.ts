@@ -174,6 +174,11 @@ function buildFieldsBlock(fields: DefinerField[]): BlockTemplateBlock | null {
   return { type: 'fields', fields: valid.map((f) => ({ label: f.name, value: `{{payload.${f.name}}}` })) };
 }
 
+/** story #4257 — 폼이 만드는 기본 단계 문장 = 플랫폼 씨앗 문장(platform-preset-copy.ts SEED_STAGE_TEXTS의 payload.stage 문장). */
+export const FORM_DEFAULT_STAGE_TEXT = '**{{payload.stage}}** 로 넘어갔습니다';
+/** story #4257 전 머리말을 비운 채 저장하면 남던 자리 표시(역파싱만 알아본다 · 새로 저장하지 않는다). */
+export const LEGACY_UNNAMED_HEADER = '(이름 없음)';
+
 /** story #4257 — 미리보기 예시 문자열(«예시 {name}» · 로케일 문구 `organization.definerSampleValue`). 순수 함수라 호출부(t 보유)가 넘긴다 —
  * 필수 인자라 한국어 고정 문자열로 조용히 떨어지는 기본값이 없다. */
 export type SampleText = (name: string) => string;
@@ -223,8 +228,9 @@ export function deriveCycle(state: DefinerFormState, orgSlug: string, sampleText
   const fieldsBlock = buildFieldsBlock(state.fields);
   const block_template: BlockTemplate = {
     blocks: [
-      { type: 'header', text: state.name || '(이름 없음)' },
-      { type: 'text', text: '단계 **{{payload.stage}}** 로 넘어갔습니다.' },
+      { type: 'header', text: state.name },
+      // story #4257(PO 11:27Z) — 플랫폼이 넣어 주는 기본 단계 문장은 씨앗 문장(SEED_STAGE_TEXTS)과 글자가 같아야 표시할 때 보는 사람의 언어로 바뀐다.
+      { type: 'text', text: FORM_DEFAULT_STAGE_TEXT },
       ...(fieldsBlock ? [fieldsBlock] : []),
     ],
   };
@@ -253,7 +259,7 @@ export function deriveSignal(state: DefinerFormState, orgSlug: string, sampleTex
   const signalFieldsBlock = buildFieldsBlock(state.fields);
   const block_template: BlockTemplate = {
     blocks: [
-      { type: 'header', text: state.name || '(이름 없음)' },
+      { type: 'header', text: state.name },
       { type: 'text', text: state.includeSummary ? '{{payload.summary}}' : '**{{payload.kind}}**' },
       ...(signalFieldsBlock ? [signalFieldsBlock] : []),
     ],
@@ -286,7 +292,7 @@ export function deriveMeasure(state: DefinerFormState, orgSlug: string, sampleTe
   for (const f of state.fields) { if (f.name.trim() && validateFieldName(f.name)) fieldsBlock.push({ label: f.name, value: `{{payload.${f.name}}}` }); }
   const block_template: BlockTemplate = {
     blocks: [
-      { type: 'header', text: state.name || '(이름 없음)' },
+      { type: 'header', text: state.name },
       { type: 'fields', fields: fieldsBlock },
     ],
   };
@@ -298,6 +304,13 @@ export function deriveMeasure(state: DefinerFormState, orgSlug: string, sampleTe
     block_template,
     samplePayload,
   };
+}
+
+/** story #4257(PO 11:27Z) — 카드 머리말 이름: 폼의 머리말(#definer-name)이 비면 이벤트 이름(저장 필수값)으로. 둘 다 비었을 때의 자리 표시는
+ * 호출부가 미리보기에서만 로케일 문구로 넘긴다(저장값엔 자리 표시가 남지 않는다). */
+export function withHeaderName(state: DefinerFormState, fallbackName: string): DefinerFormState {
+  const own = state.name.trim();
+  return own ? state : { ...state, name: fallbackName.trim() };
 }
 
 export function deriveDefinition(state: DefinerFormState, orgSlug: string, sampleText: SampleText): DerivedDefinition {
@@ -314,7 +327,8 @@ function extractNameFromBlockTemplate(block_template: Record<string, unknown> | 
   if (!Array.isArray(blocks) || blocks.length === 0) return '';
   const first = blocks[0] as { type?: string; text?: string } | undefined;
   if (first?.type !== 'header' || typeof first.text !== 'string') return '';
-  return first.text === '(이름 없음)' ? '' : first.text;
+  // 옛 저장값 — 머리말을 비운 채 저장하면 '(이름 없음)'이 저장되던 시절(story #4257 전)의 자리 표시는 계속 빈 이름으로 알아본다.
+  return first.text === LEGACY_UNNAMED_HEADER ? '' : first.text;
 }
 
 // AC3 — JSON→폼 왕복. 폼이 표현할 수 있는 정확한 모양(이 파일의 derive* 함수들이 만드는 것과

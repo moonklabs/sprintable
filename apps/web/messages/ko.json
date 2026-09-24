@@ -936,6 +936,7 @@
     "definerSampleSummary": "예시 요약",
     "definerSampleSource": "예시 출처",
     "definerSampleMemberId": "예시 멤버 id",
+    "definerUnnamedPreview": "(이름 없음)",
     "definerFieldRequired": "필수",
     "definerFieldOptional": "선택",
     "definerAddField": "필드 추가",

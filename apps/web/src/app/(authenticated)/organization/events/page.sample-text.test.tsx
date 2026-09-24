@@ -8,6 +8,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 import enMessages from '../../../../../messages/en.json';
+import { FORM_DEFAULT_STAGE_TEXT } from '@/components/organization/event-definer-logic';
+import { SEED_STAGE_TEXTS } from '@/lib/platform-preset-copy';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
@@ -72,6 +74,8 @@ describe.each([
     const workflowTab = [...document.body.querySelectorAll('[role="tab"], button')].find((el) => el.textContent?.startsWith(m.recipeGalleryTabWorkflow)) as HTMLElement | undefined;
     if (workflowTab) await act(async () => { workflowTab.click(); });
     await act(async () => { button(container, m.eventCreateCta, true).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story #4257(PO 11:27Z) — 머리말 · 이벤트 이름이 둘 다 비면 미리보기 머리말은 로케일 자리 표시(저장값엔 남지 않는다).
+    expect(dialog().textContent).toContain(m.definerUnnamedPreview);
 
     await act(async () => {
       setInputValue(document.body.querySelector('#event-name') as HTMLInputElement, 'sample');
@@ -86,6 +90,11 @@ describe.each([
 
     // ① 만들기 미리보기(EventBlockCard · 필드 블록)
     const preview = dialog().textContent ?? '';
+    // story #4257 — 머리말이 비면 미리보기도 저장과 같은 이벤트 이름 · 기본 단계 문장은 보는 사람의 언어(씨앗 문장 → recipePreset.stageMovedBody).
+    expect(preview).toContain('sample');
+    expect(preview).not.toContain(m.definerUnnamedPreview);
+    expect(preview).toContain(messages.recipePreset.stageMovedBody.replace('{stage}', 'a').replace(/\*\*/g, ''));
+    expect(preview).not.toContain('넘어갔습니다');
     expect(preview).toContain(m.definerSampleSummary);
     expect(preview).toContain(m.definerSampleSource);
     // en은 «Sample summary» · «Sample source»가 일반 «Sample {name}»과 글자가 같아 부정 단언이 성립하지 않는다 — 두 매핑은 ko 회차가 잠근다
@@ -98,6 +107,12 @@ describe.each([
 
     // ② 테스트 발행 payload(저장 뒤)
     await act(async () => { button(dialog(), m.eventCreateSubmit, true).click(); });
+    // 저장 본문 — 머리말 = 이벤트 이름(자리 표시 저장 0) · 단계 문장 = 씨앗 문장 그대로(표시할 때 로케일).
+    const saved = JSON.parse(calls.find((c) => c.url === '/api/events/definitions' && c.body)!.body!) as { block_template: { blocks: { type: string; text?: string }[] } };
+    expect(saved.block_template.blocks[0]).toEqual({ type: 'header', text: 'sample' });
+    // 폼이 새로 저장하는 값은 정식 씨앗 문장(옛 기본 문장 '단계 … 넘어갔습니다.'가 아니라) — 씨앗 목록의 payload.stage 문장과 글자까지 같다.
+    expect(saved.block_template.blocks[1]).toEqual({ type: 'text', text: '**{{payload.stage}}** 로 넘어갔습니다' });
+    expect(SEED_STAGE_TEXTS).toContain(FORM_DEFAULT_STAGE_TEXT);
     await act(async () => { button(dialog(), m.definerTestPublishCta, true).click(); });
     const publish = calls.find((c) => c.url === '/api/events/publish');
     const payload = JSON.parse(publish!.body!).payload as Record<string, unknown>;
