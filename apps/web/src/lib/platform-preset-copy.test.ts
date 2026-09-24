@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import enMessages from '../../messages/en.json';
 import koMessages from '../../messages/ko.json';
-import { presetDescription, presetName } from './platform-preset-copy';
+import { isLocalizedPlatformPreset, PLATFORM_SYSTEM_EVENT_NAME_KEY, presetDescription, presetName } from './platform-preset-copy';
 
 const t = (key: string) => (enMessages.recipePreset as Record<string, string>)[key] ?? `MISSING:${key}`;
 const PLATFORM = { key: 'preset.marketing.video_production', org_id: null, name: '영상 제작(릴스·쇼츠)', description: '원문 설명' };
@@ -45,6 +45,16 @@ describe('시스템(신호형) 이벤트 정의 7종 이름(story #4233 · 유�
       expect(presetName(def, t), key).toBe(en);
       expect(presetName(def, ko), key).toBe(koName);
     }
+  });
+
+  // 사이클형 표(PLATFORM_PRESET_NAME_KEY)에 섞지 않는 이유를 잠근다 — 그 표는 채팅 카드 block_template 로케일화의 판정
+  // (isLocalizedPlatformPreset)에도 쓰여, 섞이면 시스템 이벤트 카드가 사이클형 카드 규칙(«{name} workflow» 머리말 등)을 탈 수 있다.
+  it.each(SYSTEM.map(([key]) => key))('%s는 사이클형 카드 로케일화 대상이 아니다(isLocalizedPlatformPreset === false)', (key) => {
+    expect(isLocalizedPlatformPreset({ key, org_id: null, name: '', description: null })).toBe(false);
+  });
+
+  it('시스템 이벤트 이름 표 = 위 7종(표와 테스트 목록이 어긋나면 RED)', () => {
+    expect(Object.keys(PLATFORM_SYSTEM_EVENT_NAME_KEY).sort()).toEqual(SYSTEM.map(([key]) => key).sort());
   });
 
   it('같은 key라도 조직 커스텀(org_id 있음)은 원문', () => {
