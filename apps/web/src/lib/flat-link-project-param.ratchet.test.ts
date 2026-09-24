@@ -3,8 +3,9 @@
 // 셈법은 정규식이 아니라 **TypeScript 컴파일러 AST**.
 // story #4231 3차(PO 02:02Z) — 예전 셈법은 «이동 자리 모양»(JSX href · router.push/replace · `href:`/`path:`)만 봐서, href 헬퍼의 `return` ·
 //   `window.location.href/assign` · 다른 이름 prop(`targetRoute`·`conversationHref`·`secondaryHref`) · 상수로 만든 목적지를 못 셌다(≈30곳).
-//   이제는 **flat 리터럴이 어디에 있든 센다**(템플릿은 머리 글자 · 조건식은 갈래마다). 세지 않는 것은 둘뿐이다:
+//   이제는 **flat 리터럴이 어디에 있든 센다**(템플릿은 머리 글자 · 조건식은 갈래마다). 세지 않는 것은 셋뿐이다:
 //   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)` 호출 안.
+//   ①' 리터럴이 스스로 프로젝트를 싣는 자리 — 고정 글자에 `?p=`/`&p=`가 있음(예: 결재 자기 프로젝트로 가는 `/gates/${id}?p=${projectId}` · #4241).
 //   ② 이동이 아닌 자리 — 구조로 판정(비교 연산 · `case` · `startsWith`류 판정 · 탭 정체성 인자 · 정적 파일 fetch)하거나,
 //      아래 EXEMPT 표에 **이유와 함께** 적은 자리(파일 + 리터럴/속성). 표는 늘리지 않는 것이 원칙이다(새 예외는 PO 판단).
 // 이 수는 **문법 전수**(소스에 쓰인 flat 리터럴)이지 런타임 링크 전수가 아니다(한 리터럴이 여러 링크를 그릴 수 있고, 조건 갈래는 따로 센다).
@@ -57,6 +58,14 @@ function literalText(node: ts.Node): string | null {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isTemplateExpression(node)) return node.head.text;
   return null;
+}
+
+/** 리터럴의 고정 글자(템플릿은 머리 + 각 조각 꼬리)에 `?p=`/`&p=`가 있어 스스로 프로젝트를 싣는지. */
+function carriesOwnProject(node: ts.Node): boolean {
+  const fixed = ts.isTemplateExpression(node)
+    ? node.head.text + node.templateSpans.map((sp) => sp.literal.text).join('\u0000')
+    : (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : '';
+  return /[?&]p=/.test(fixed);
 }
 
 function isWrapperCall(node: ts.Node): boolean {
@@ -117,7 +126,7 @@ export function countBareFlatLinksInSource(fileName: string, text: string, route
     if (isWrapperCall(node)) return;
     const literal = literalText(node);
     if (literal !== null) {
-      if (flatRe.test(literal) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
+      if (flatRe.test(literal) && !carriesOwnProject(node) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
       if (!ts.isTemplateExpression(node)) return;
     }
     ts.forEachChild(node, visit);
@@ -173,6 +182,15 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count("switch (p) { case '/inbox': break; }")).toBe(0);
     expect(count("useSyntheticParentTabHistory('/more');")).toBe(0);
     expect(count("fetch('/docs/manifest.json');")).toBe(0);
+  });
+
+  it('⭐스스로 프로젝트를 싣는 리터럴(고정 글자에 ?p= · &p=)은 세지 않는다 — 비슷한 모양은 그대로 센다', () => {
+    expect(count('const h = pid ? `/gates/${id}?p=${encodeURIComponent(pid)}` : `/gates/${id}`;')).toBe(1);
+    expect(count('const h = `/inbox?tab=gates&p=${pid}`;')).toBe(0);
+    expect(count("const h = '/chats?p=abc';")).toBe(0);
+    expect(count('const h = `/gates/${id}?pp=${x}`;')).toBe(1);
+    expect(count('const h = `/gates/${id}?tab=p=${x}`;')).toBe(1);
+    expect(count('const h = `/chats/${id}?q=${p}`;')).toBe(1);
   });
 
   it('예외 표 — 파일·리터럴·속성이 모두 맞을 때만(같은 파일의 다른 모양은 그대로 센다)', () => {
