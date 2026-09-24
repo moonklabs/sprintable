@@ -38,16 +38,19 @@ export type RecipeStageMetadata = Record<string, RecipeStageMeta>;
 
 // story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로 선언하는
 // 옵션 사전({role명: "human"|"agent"}). role은 자유 문자열(위 docstring 그대로)이라 role
-// 이름 자체는 고정 어휘가 아니다 — 닫힌 건 kind 값 둘뿐(BE event_definition_registry.py
+// 이름 자체는 고정 어휘가 아니다 — 닫힌 건 kind 값뿐(BE event_definition_registry.py
 // ROLE_ACTOR_KIND_VALUES와 동일 어휘, 재구현 아님·값만 미러).
-export type RoleActorKinds = Record<string, 'human' | 'agent'>;
+// story #4243(PO 2026-09-24) — 세 번째 값 `either`: 사람도 에이전트도 맡을 수 있는 자리(적용 창이 사람 + 에이전트를 함께
+// 보여 주는 멤버 자리). 대부분의 일반 역할(PO·QA·Reviewer 등)이 여기다.
+export type RoleActorKind = 'human' | 'agent' | 'either';
+export type RoleActorKinds = Record<string, RoleActorKind>;
 
 /**
  * role 문자열 → 사람/에이전트 분류. 정의가 role_actor_kinds를 선언 안 했거나("모름") 그
  * role이 선언 안에 없으면 null — 지어내지 않는다. story #4173부터 역할 순서(사람 먼저)·
  * 적용 자리 판별(recipeRoleSlots)·카드 «(사람)» 표시가 이 값을 읽는다.
  */
-export function roleActorKind(role: string | undefined, roleActorKinds: RoleActorKinds | null | undefined): 'human' | 'agent' | null {
+export function roleActorKind(role: string | undefined, roleActorKinds: RoleActorKinds | null | undefined): RoleActorKind | null {
   if (!role || !roleActorKinds) return null;
   return roleActorKinds[role] ?? null;
 }
@@ -168,9 +171,12 @@ export function orderedRecipeRoles(
  * - channel: capability.target=channel_connection → 조직 채널 연결(필수).
  * - compute: capability.target=generation_connector → 연산 커넥터(선택).
  * - approver: 사람 역할의 게이트 stage → 게이트 승인 주체를 읽기 전용으로(role_mapping 축 아님).
- * - member: 그 밖 → 팀 멤버(사람 역할이면 사람, 아니면 에이전트)에 바인딩(필수).
+ * - member: 그 밖 → 팀 멤버에 바인딩. 고를 수 있는 멤버 종류(`memberType`) = 선언 그대로(human · agent · either —
+ *   either는 사람 + 에이전트 함께). 선언이 없으면 사람 역할이면 사람, 아니면 에이전트.
  * 사람 역할 = role_actor_kinds가 human으로 선언, 또는 선언이 없는 역할이면서 그 역할의 모든
  * stage가 게이트. 선언 없는 역할은 다른 역할의 선언 여부와 상관없이 이 한 규칙으로 판정한다.
+ * either 역할은 사람 역할이 아니다 — 게이트 stage가 있어도 승인 자리가 아니라 멤버 자리(게이트 승인자는 게이트 규칙이
+ * 정한다 · 에이전트 역할의 게이트와 같다).
  * `key`(역할+방식)가 다이얼로그 선택값의 키다. 불변식: role이 있는 모든 stage가 정확히 한
  * 자리에 덮인다(uncoveredRecipeStages). */
 export type RecipeSlotKind = 'approver' | 'approval_elsewhere' | 'member' | 'compute' | 'channel';
@@ -180,23 +186,25 @@ export interface RecipeRoleSlot {
   role: string;
   kind: RecipeSlotKind;
   stages: string[];
-  memberType: 'agent' | 'human';
+  memberType: RoleActorKind;
   gateApprovers: string[];
 }
 
-function isHumanRole(roleStages: string[], stageMetadata: RecipeStageMetadata, declared: 'human' | 'agent' | null): boolean {
+function isHumanRole(roleStages: string[], stageMetadata: RecipeStageMetadata, declared: RoleActorKind | null): boolean {
   if (declared !== null) return declared === 'human';
   return roleStages.length > 0 && roleStages.every((s) => stageMetadata[s]?.gate || stageMetadata[s]?.approval);
 }
 
-function stageSlotKind(meta: RecipeStageMeta, isHuman: boolean): RecipeSlotKind {
+function stageSlotKind(meta: RecipeStageMeta, isHuman: boolean, memberType: RoleActorKind): RecipeSlotKind {
   const target = meta.capability?.target;
   if (target === 'channel_connection') return 'channel';
   if (target === 'generation_connector') return 'compute';
   if (isHuman && meta.gate) return 'approver';
   // story #4174 후속 — 승인이 이 stage 밖(초안 게이트)이라고 정의가 선언한 사람 stage는 고를 사람이 없는 읽기 전용
   // 자리. 선언 없는 사람 비게이트 stage는 사람이 실제로 일하는 단계라 아래 멤버 자리(까디르 QA 재현 C).
-  if (isHuman && meta.approval?.surface) return 'approval_elsewhere';
+  // story #4243 D3 — either 역할(사람도 에이전트도 맡는 자리)도 같다: 승인이 stage 밖이면 그 stage엔 고를 담당이 없다
+  // (loop_agency «브리프» — PO는 either, 승인은 결재함의 문서 결재). 에이전트 역할의 선언은 여전히 멤버 자리(4174 후속 그대로).
+  if ((isHuman || memberType === 'either') && meta.approval?.surface) return 'approval_elsewhere';
   return 'member';
 }
 
@@ -208,15 +216,17 @@ export function recipeRoleSlots(
   const flow = stagesInFlowOrder(stageMetadata, flowStages);
   return orderedRecipeRoles(stageMetadata, flowStages, roleActorKinds).flatMap((role) => {
     const roleStages = flow.filter((s) => stageMetadata[s]?.role === role);
-    const isHuman = isHumanRole(roleStages, stageMetadata, roleActorKind(role, roleActorKinds));
+    const declared = roleActorKind(role, roleActorKinds);
+    const isHuman = isHumanRole(roleStages, stageMetadata, declared);
+    const memberType: RoleActorKind = declared === 'either' ? 'either' : isHuman ? 'human' : 'agent';
     // 자리 순서 = 그 자리의 첫 stage 흐름 순서(roleStages가 이미 흐름 순서라 처음 나온 순서).
     const slots: RecipeRoleSlot[] = [];
     for (const stage of roleStages) {
       const meta = stageMetadata[stage]!;
-      const kind = stageSlotKind(meta, isHuman);
+      const kind = stageSlotKind(meta, isHuman, memberType);
       let slot = slots.find((x) => x.kind === kind);
       if (!slot) {
-        slot = { key: `${role}:${kind}`, role, kind, stages: [], memberType: isHuman ? 'human' : 'agent', gateApprovers: [] };
+        slot = { key: `${role}:${kind}`, role, kind, stages: [], memberType, gateApprovers: [] };
         slots.push(slot);
       }
       slot.stages.push(stage);
@@ -265,4 +275,61 @@ export function allowedChannelsForSlot(slot: RecipeRoleSlot, stageMetadata: Reci
     allowed = allowed === null ? [...declared] : allowed.filter((c) => declared.includes(c));
   }
   return allowed;
+}
+
+// ── story #4243 — 범용 적용 창(stage마다 한 줄 · apply-recipe-dialog · 프로젝트 설정 갤러리)의 멤버 종류 ──
+
+/** stage 한 줄이 고르는 멤버 종류. 채널 연결 · 연산 커넥터 stage는 멤버가 아니라 null. 선언(role_actor_kinds)이 있으면
+ * 그대로, 없으면 에이전트(범용 창의 예전 동작 그대로 — 회귀 0). */
+export function stageMemberKind(
+  stage: string,
+  stageMetadata: RecipeStageMetadata,
+  roleActorKinds: RoleActorKinds | null | undefined,
+): RoleActorKind | null {
+  const meta = stageMetadata[stage];
+  const target = meta?.capability?.target;
+  if (target === 'channel_connection' || target === 'generation_connector') return null;
+  return roleActorKind(meta?.role, roleActorKinds) ?? 'agent';
+}
+
+/** 범용 적용 창에서 승인이 stage 밖이라 고를 담당이 없는 stage의 승인 자리(approval.surface) — 에이전트 역할이 아닌 stage만
+ * (recipeRoleSlots의 approval_elsewhere와 같은 규칙). 아니면 null. 멤버 종류는 `stageMemberKind` 하나로 판정한다 — 선언 없는
+ * 역할은 두 함수 모두 에이전트다(까디르 4606 P2 · 예전엔 여기서만 «에이전트 아님»으로 읽어 승인 자리를 보였다). */
+export function stageApprovalSurface(
+  stage: string,
+  stageMetadata: RecipeStageMetadata,
+  roleActorKinds: RoleActorKinds | null | undefined,
+): string | null {
+  const surface = stageMetadata[stage]?.approval?.surface;
+  if (!surface) return null;
+  return stageMemberKind(stage, stageMetadata, roleActorKinds) === 'agent' ? null : surface;
+}
+
+/** 범용 적용 창의 제출 매핑 — 비워 둔 선택과, 승인이 stage 밖이라 읽기 전용인 stage는 싣지 않는다. 예전에 그 stage에 묶여
+ * 있던 바인딩이 선택값으로 남아 있어도 화면에 없는 값이라 다시 저장하지 않는다(까디르 4606 P1). */
+export function submittableRoleMapping(
+  roleMapping: Readonly<Record<string, string>>,
+  stageMetadata: RecipeStageMetadata,
+  roleActorKinds: RoleActorKinds | null | undefined,
+): Record<string, string> {
+  return Object.fromEntries(Object.entries(roleMapping).filter(
+    ([stage, value]) => value && stageApprovalSurface(stage, stageMetadata, roleActorKinds) === null,
+  ));
+}
+
+/** 범용 적용 창에서 반드시 채워야 하는 stage — 사람 역할(human 선언) stage와 승인이 stage 밖인 stage는 비워도 된다(사람
+ * stage는 바인딩이 없어도 정상 · 발행 때 중립 안내 #4092). 그 밖(에이전트 · either · 연결)은 예전처럼 필수. */
+export function requiredMappingStages(
+  stages: readonly string[],
+  stageMetadata: RecipeStageMetadata,
+  roleActorKinds: RoleActorKinds | null | undefined,
+): string[] {
+  return stages.filter((s) => stageMemberKind(s, stageMetadata, roleActorKinds) !== 'human'
+    && stageApprovalSurface(s, stageMetadata, roleActorKinds) === null);
+}
+
+/** 멤버 종류에 맞는 선택지 — either는 사람 + 에이전트 함께. `type`이 없는 옵션은 에이전트로 본다. */
+export function membersForKind<T extends { type?: string }>(members: readonly T[], kind: RoleActorKind): T[] {
+  if (kind === 'either') return [...members];
+  return members.filter((m) => (m.type ?? 'agent') === kind);
 }

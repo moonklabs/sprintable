@@ -131,8 +131,10 @@ export function filterUnconnectedAgentParticipants(
   );
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
+  const backHref = backHrefProp ?? flatHref('/chats');
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');

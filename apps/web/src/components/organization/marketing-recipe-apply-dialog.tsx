@@ -165,7 +165,8 @@ export function MarketingRecipeApplyDialog({
   };
   const requiredSlots = slots.filter((s) => s.kind === 'member' || ((s.kind === 'channel' || s.kind === 'compute') && !optionalByKind[s.kind]));
   const allRequiredChosen = requiredSlots.every((s) => !!selections[s.key]);
-  const membersFor = (slot: RecipeRoleSlot) => options.filter((o) => o.type === slot.memberType);
+  // story #4243 — either 자리는 사람 + 에이전트를 함께 보여 준다.
+  const membersFor = (slot: RecipeRoleSlot) => options.filter((o) => slot.memberType === 'either' || o.type === slot.memberType);
 
   const select = (key: string, value: string) => setSelections((prev) => ({ ...prev, [key]: value }));
 
@@ -237,9 +238,23 @@ export function MarketingRecipeApplyDialog({
   // 자리 한 줄. 자리 하나인 역할은 지금 모양 그대로(테두리 카드 + 역할 이름 + 배지). 자리가 둘
   // 이상인 역할의 줄(`grouped`)은 역할 이름을 묶음 머리로 올리고 배지 + 맡은 단계 « · » + 선택기만
   // 싣는다 — 줄 사이는 border-t(유나 판정 §9).
+  const memberBadge = (memberType: RecipeRoleSlot['memberType']) => (
+    memberType === 'human' ? t('recipeApplyV2DirectorBadge')
+      : memberType === 'either' ? t('recipeApplyV2EitherBadge')
+        : t('recipeApplyV2CreatorBadge')
+  );
+  const memberPlaceholder = (memberType: RecipeRoleSlot['memberType']) => (
+    memberType === 'human' ? t('recipeApplyV2PersonPlaceholder')
+      : memberType === 'either' ? t('recipeApplyV2MemberPlaceholder')
+        : t('eventApplyAgentPlaceholder')
+  );
+  // story #4243 D3 — 승인 자리 선언별 안내(초안 게이트 · 문서 결재).
+  const approvalSurfaceNote = (surface: string | undefined) => (
+    surface === 'doc_approval' ? t('recipeApplyV2ApprovalOnDocApproval') : t('recipeApplyV2ApprovalOnDraftGate')
+  );
   const badgeFor = (slot: RecipeRoleSlot) => {
     if (slot.kind === 'approver' || slot.kind === 'approval_elsewhere') return t('recipeApplyV2DirectorBadge');
-    if (slot.kind === 'member') return slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge');
+    if (slot.kind === 'member') return memberBadge(slot.memberType);
     if (slot.kind === 'compute') return t('recipeApplyV2ComputeBadge');
     return t('recipeApplyV2PublisherBadge');
   };
@@ -283,19 +298,29 @@ export function MarketingRecipeApplyDialog({
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
           </div>
           <div className="shrink-0 break-keep text-xs text-muted-foreground" data-testid="approval-elsewhere-note">
-            {t('recipeApplyV2ApprovalOnDraftGate')}
+            {approvalSurfaceNote(recipe.stage_metadata[slot.stages[0]!]?.approval?.surface)}
           </div>
         </div>
       );
     }
     if (slot.kind === 'member') {
       const members = membersFor(slot);
+      // story #4243 D4 — 멤버 자리 stage에 걸린 사람 승인 게이트(뉴스레터 «발송 요청» · 영상 «애니매틱» 등)는 동작엔 문제가
+      // 없지만 적용 창에 안 보였다. 그 stage와 승인 주체를 한 줄로 알린다(게이트 승인 주체 낱말 = gate-approver-label SSOT).
+      const gatedStages = slot.stages.filter((s) => recipe.stage_metadata[s]?.gate);
+      const gateNote = gatedStages.length > 0
+        ? t('recipeApplyV2MemberGateNote', {
+          stages: gatedStages.map((s) => recipeStageLabel(s, t)).join(' · '),
+          approvers: Array.from(new Set(gatedStages.map((s) => gateApproverLabel(t, recipe.stage_metadata[s]?.gate?.approver ?? '')))).join(', '),
+        })
+        : null;
       return (
         <div key={slot.key} {...rowAttrs} data-testid="slot-creator">
           <div className="min-w-0 flex-1 break-keep">
             {heading()}
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
+            {gateNote ? <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="member-gate-note">{gateNote}</p> : null}
           </div>
           <select
             className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -305,7 +330,7 @@ export function MarketingRecipeApplyDialog({
             aria-label={controlLabel}
             data-testid="creator-agent-select"
           >
-            <option value="">{t('eventApplyAgentPlaceholder')}</option>
+            <option value="">{memberPlaceholder(slot.memberType)}</option>
             {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </div>

@@ -162,7 +162,7 @@ describe('FirstInstructionRedirect (동작)', () => {
     stubFetch({ conversations: [agentDm('c-existing', '2026-09-17T10:00:00Z')] });
     await renderRedirect({ agentId, compose: '한 줄 지시', projectId: 'proj-1' });
     expect(createConversationMock).not.toHaveBeenCalled();
-    expect(routerReplaceMock).toHaveBeenCalledWith(`/chats/c-existing?compose=${encodeURIComponent('한 줄 지시')}`);
+    expect(routerReplaceMock).toHaveBeenCalledWith(`/chats/c-existing?compose=${encodeURIComponent('한 줄 지시')}&p=proj-1`);
   });
 
   it('없으면 createFirstInstructionConversation 1회(생성 후 참가자 재확認) 후 이동', async () => {
@@ -171,7 +171,7 @@ describe('FirstInstructionRedirect (동작)', () => {
     await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
     expect(createConversationMock).toHaveBeenCalledTimes(1);
     expect(createConversationMock).toHaveBeenCalledWith('proj-1', agentId);
-    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-new');
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-new?p=proj-1');
   });
 
   it('① 체크리스트 id는 그 대화에 에이전트가 있을 때만(GET /{id} 확認) 채택', async () => {
@@ -182,7 +182,7 @@ describe('FirstInstructionRedirect (동작)', () => {
     });
     await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
     expect(createConversationMock).not.toHaveBeenCalled();
-    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-check');
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-check?p=proj-1');
   });
 
   it('생성 뒤 재마운트(새로고침 동형)면 ②에서 찾아 생성 0', async () => {
@@ -196,7 +196,7 @@ describe('FirstInstructionRedirect (동작)', () => {
     stubFetch({ conversations: [agentDm('c-1', '2026-09-17T10:00:00Z')] });
     await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
     expect(createConversationMock).not.toHaveBeenCalled();
-    expect(routerReplaceMock).toHaveBeenLastCalledWith('/chats/c-1');
+    expect(routerReplaceMock).toHaveBeenLastCalledWith('/chats/c-1?p=proj-1');
   });
 
   it('생성 null이면 이동 0·안내(AC3)', async () => {
@@ -257,7 +257,7 @@ describe('FirstInstructionRedirect (동작)', () => {
     stubFetch({ conversations: bulk });
     await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
     expect(createConversationMock).not.toHaveBeenCalled();
-    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-page2');
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-page2?p=proj-1');
   });
 
   it('다른 org 에이전트(프로젝트 멤버 아님·생성 API는 id 반환 모양)면 생성 前 error·이동 0', async () => {
@@ -278,12 +278,13 @@ describe('FirstInstructionRedirect (동작)', () => {
     expect(container.textContent).toContain(koMessages.onboarding.firstInstructionErrorTitle);
   });
 
+  // story #4231 3차 · 까디르 QA(ccef5258a) — 첫 착지·안내 링크는 이 온보딩의 프로젝트(`p`)를 싣는다(기존 쿼리 글자는 그대로).
   // ── story #4158 AC1 — chatV3 ON ──
   it('⭐chatV3 ON — 기존 대화면 v3 셸 딥링크(?conversation=+&compose=)로 이동', async () => {
     stubFetch({ conversations: [agentDm('c-existing', '2026-09-17T10:00:00Z')] });
     await renderRedirect({ agentId, compose: '한 줄 지시', projectId: 'proj-1', flags: CHAT_V3_ON });
     expect(routerReplaceMock).toHaveBeenCalledWith(
-      `/chat?conversation=c-existing&compose=${encodeURIComponent('한 줄 지시')}`,
+      `/chat?conversation=c-existing&compose=${encodeURIComponent('한 줄 지시')}&p=proj-1`,
     );
   });
 
@@ -295,7 +296,7 @@ describe('FirstInstructionRedirect (동작)', () => {
     expect(routerReplaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain(koMessages.onboarding.firstInstructionTooLongTitle);
     const link = container.querySelector('a');
-    expect(link?.getAttribute('href')).toBe('/chat?conversation=c-x');
+    expect(link?.getAttribute('href')).toBe('/chat?conversation=c-x&p=proj-1');
   });
 
   it('⭐chatV3 ON — agent·project 없으면 안내의 「목록으로」 링크가 /chat', async () => {
@@ -303,6 +304,6 @@ describe('FirstInstructionRedirect (동작)', () => {
     await renderRedirect({ agentId: null, compose: '', projectId: 'proj-1', flags: CHAT_V3_ON });
     expect(container.textContent).toContain(koMessages.onboarding.firstInstructionErrorTitle);
     const link = container.querySelector('a');
-    expect(link?.getAttribute('href')).toBe('/chat');
+    expect(link?.getAttribute('href')).toBe('/chat?p=proj-1');
   });
 });

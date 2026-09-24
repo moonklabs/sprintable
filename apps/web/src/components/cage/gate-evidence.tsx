@@ -19,6 +19,7 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { keepHref } from '@/lib/with-project-param';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -144,7 +145,9 @@ interface ParsedReferenceToken {
 // chat-report-density.ts에만 있던 규칙을 헬퍼로 승격)로 원복하지 않으면 실 제목(예: 이 팀
 // 스토리 제목 관례 "[3바퀴·draft] ... v2(276/500자·반려 반영)")이 칩에 `\[...\] ... v2\(...\)`
 // 문자 그대로 새어 나간다 — 초기 구현이 이스케이프 없는 픽스처로만 테스트해 못 잡았던 자리.
-export function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
+/** withProject — 문서 링크(flat)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 게이트 화면은 useFlatHref()(= 게이트의 프로젝트, 4241), 링크를
+ * 쓰지 않는 판정은 keepHref. */
+export function parseReferenceToken(v: unknown, withProject: (href: string) => string): ParsedReferenceToken | null {
   const s = realString(v);
   if (!s) return null;
   const m = s.match(/^\[(.*)\]\((.*)\)$/);
@@ -152,7 +155,7 @@ export function parseReferenceToken(v: unknown): ParsedReferenceToken | null {
   const [, rawLabel, href] = m;
   const ref = parseEntityRef(href);
   if (!ref) return null;
-  return { ...ref, label: unescapeReferenceLabel(rawLabel), href: getEntityHref(ref.entityType, ref.entityId) };
+  return { ...ref, label: unescapeReferenceLabel(rawLabel), href: getEntityHref(ref.entityType, ref.entityId, withProject) };
 }
 
 interface RecipeApprovalFacts {
@@ -269,7 +272,7 @@ interface RecipeApprovalFacts {
   publishOutcome: string | null;
 }
 
-function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
+function recipeApprovalFacts(gate: GateItem, withProject: (href: string) => string): RecipeApprovalFacts | null {
   const f = gate.neutral_facts;
   const contentBody = realString(gate.sealed_content_body);
   const contentVersion = typeof gate.sealed_content_version === 'number' ? gate.sealed_content_version : null;
@@ -282,12 +285,12 @@ function recipeApprovalFacts(gate: GateItem): RecipeApprovalFacts | null {
     ? {
         entityType: 'doc', entityId: sealedDocId,
         label: realString(gate.sealed_doc_title) ?? sealedDocId.slice(0, 8),
-        href: getEntityHref('doc', sealedDocId),
+        href: getEntityHref('doc', sealedDocId, withProject),
       }
     : null;
   const facts: RecipeApprovalFacts = {
-    workItemRef: parseReferenceToken(f?.['work_item_reference_token']),
-    draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token']),
+    workItemRef: parseReferenceToken(f?.['work_item_reference_token'], withProject),
+    draftDocRef: parseReferenceToken(f?.['draft_doc_reference_token'], withProject),
     draftDocSummary: realString(f?.['draft_doc_summary']),
     channel: realString(f?.['channel']),
     stage: realString(f?.['stage']),
@@ -360,7 +363,7 @@ export function gateHasEvidence(gate: GateItem): boolean {
   // story #3328 — 레시피 approve 게이트의 승인 대상 실물(work item·draft doc·channel)도
   // 실 증거다(같은 이유 — 안 그러면 external_publish 게이트가 State A로 가라앉아 승인자가
   // 뭘 승인하는지 dialog 안에서 전혀 못 본다).
-  const hasRecipeApproval = recipeApprovalFacts(gate) !== null;
+  const hasRecipeApproval = recipeApprovalFacts(gate, keepHref) !== null; // 있는지 판정만(링크 안 씀)
   return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft || hasRecipeApproval;
 }
 
@@ -1213,6 +1216,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
 }
 
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 문서 근거 링크는 게이트의 프로젝트(현재 p)를 싣는다
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
   const ci = ciResult(gate);
@@ -1235,7 +1239,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   // State B(부분증거)로 떨어진다 — rich(State C) 분기엔 안 걸리므로 거기는 안 건드린다.
   const draft = hypothesisOutcomeDraft(gate);
   // story #3328 — 레시피 approve 게이트도 동형(ci/trust/cold_start_seed 없음) — State B로.
-  const recipeFacts = recipeApprovalFacts(gate);
+  const recipeFacts = recipeApprovalFacts(gate, flatHref);
 
   const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
@@ -1390,6 +1394,7 @@ const KIND_LABEL_KEY: Record<ProductionWorkbenchKind, string> = {
   verification_sheet: 'gateLinkedEvidenceKindVerificationSheet',
 };
 export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 문서 근거 링크는 게이트의 프로젝트(현재 p)를 싣는다
   const t = useTranslations('cage');
   const seen = new Set<string>();
   const resolved: (ParsedReferenceToken & { key: string })[] = [];
@@ -1404,7 +1409,7 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
   const beAnswered = Array.isArray(gate.linked_evidence);
   if (beAnswered) {
     for (const ev of gate.linked_evidence!) {
-      const parsed = parseReferenceToken(ev.reference_token);
+      const parsed = parseReferenceToken(ev.reference_token, flatHref);
       if (parsed) {
         const key = `${parsed.entityType}:${parsed.entityId}`;
         if (seen.has(key)) continue;
@@ -1420,7 +1425,7 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
   // draft_doc_reference_token이 linked_evidence[]와 같은 doc을 가리키면(#4135 착지 前엔
   // 흔함 — 두 필드가 아직 같은 doc을 독립적으로 채우는 과도기) 중복 칩을 안 낸다. 이 필드는
   // linked_evidence와 무관하게 이미 있어 왔으므로(#3569) beAnswered와 상관없이 항상 본다.
-  const draftDocRef = parseReferenceToken(gate.neutral_facts?.['draft_doc_reference_token']);
+  const draftDocRef = parseReferenceToken(gate.neutral_facts?.['draft_doc_reference_token'], flatHref);
   if (draftDocRef) {
     const key = `${draftDocRef.entityType}:${draftDocRef.entityId}`;
     if (!seen.has(key)) {

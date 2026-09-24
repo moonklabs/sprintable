@@ -248,6 +248,35 @@ async def _bound_member_for_stage(
     )).scalar_one_or_none()
 
 
+async def _stage_approval_is_elsewhere(
+    db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, stage: str,
+) -> bool:
+    """story #4243 — stage가 `approval.surface`를 선언했고 그 stage의 멤버 종류가 에이전트가 아닌가. FE `stageApprovalSurface`
+    (recipe-role-slots.ts · `stageMemberKind() !== 'agent'`)와 같은 규칙이다(까디르 4606 델타 P2): 채널 연결 · 연산 커넥터
+    stage는 멤버 종류가 없어(null) 에이전트가 아니고, 선언 없는 역할은 에이전트다."""
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        .order_by(EventDefinition.org_id.is_(None))
+        .limit(1)
+    )).scalar_one_or_none()
+    if definition is None:
+        return False
+    meta = (definition.stage_metadata or {}).get(stage) or {}
+    if not isinstance(meta, dict) or not (meta.get("approval") or {}).get("surface"):
+        return False
+    if (meta.get("capability") or {}).get("target") in ("channel_connection", "generation_connector"):
+        return True
+    kinds = definition.role_actor_kinds if isinstance(definition.role_actor_kinds, dict) else {}
+    return (kinds.get(meta.get("role")) or "agent") != "agent"
+
+
 async def _resolve_recipe_role_binding(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
 ) -> set[uuid.UUID]:
@@ -263,6 +292,12 @@ async def _resolve_recipe_role_binding(
         return set()
 
     project_id = await _resolve_work_item_project_id(db, org_id=org_id, payload=payload)
+    if await _stage_approval_is_elsewhere(db, org_id=org_id, definition_key=definition_key, stage=stage):
+        # story #4243(까디르 4606 렌즈 · PO ⓑ) — 승인이 stage 밖(approval.surface)인 사람 · either 역할 stage는 고를 담당이
+        # 없는 읽기 전용 자리다. 적용 창이 이제 그 stage를 싣지 않지만, 예전에 적용한 조직엔 옛 바인딩 행이 남아 있다(적용 API는
+        # 빠진 stage를 지우지 않는다). 그 행을 수신자로 잡으면 옛 사람(바뀌었으면 엉뚱한 사람)에게 간다 — 해소에서 뺀다.
+        # 승인 쪽 이음매는 그 게이트의 결재 카드다.
+        return set()
     member_id = await _bound_member_for_stage(
         db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=stage,
     )

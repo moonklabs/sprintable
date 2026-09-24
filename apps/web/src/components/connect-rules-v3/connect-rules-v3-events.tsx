@@ -10,6 +10,7 @@ import {
   ConnectRulesV3SectionError,
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3985(E-UX-OVERHAUL·「연결·규칙」 흡수 2편) — 시안 ⑤ 「이벤트·자동화」 진입·요약
@@ -29,6 +30,7 @@ interface EventDefinitionListItem {
 }
 
 export function ConnectRulesV3Events({ orgId }: { orgId: string }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('connectRulesV3');
   const to = useTranslations('organization');
   const [defs, setDefs] = useState<EventDefinitionListItem[] | null>(null);
@@ -78,7 +80,7 @@ export function ConnectRulesV3Events({ orgId }: { orgId: string }) {
           </div>
         </>
       )}
-      <Link href="/organization/events" className="inline-block text-xs font-medium text-primary hover:underline">
+      <Link href={flatHref('/organization/events')} className="inline-block text-xs font-medium text-primary hover:underline">
         {t('goToEventsLink')}
       </Link>
     </div>

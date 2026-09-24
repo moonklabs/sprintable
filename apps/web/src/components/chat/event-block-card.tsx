@@ -16,6 +16,7 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
 import { isLocalizedPlatformPreset, localizePresetBlockTemplate, presetName } from '@/lib/platform-preset-copy';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
 // INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
@@ -119,7 +120,7 @@ const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
 // `MdBody`의 references-less 패턴과 동형으로 ghost/referenceMeta 생략 기본값을 그대로 쓴다.
 const ENTITY_TOKEN_SPAN_RE = /\[((?:[^\]\\]|\\.)*)\]\(([^)]*)\)/g;
 
-function renderTextWithEntityTokens(text: string): React.ReactNode {
+function renderTextWithEntityTokens(text: string, withProject: (href: string) => string): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let lastEnd = 0;
   let i = 0;
@@ -135,7 +136,7 @@ function renderTextWithEntityTokens(text: string): React.ReactNode {
         entityType={ref.entityType}
         entityId={ref.entityId}
         label={unescapeReferenceLabel(rawTitle)}
-        href={getEntityHref(ref.entityType, ref.entityId)}
+        href={getEntityHref(ref.entityType, ref.entityId, withProject)}
       />,
     );
     lastEnd = start + full.length;
@@ -168,13 +169,13 @@ function renderInlineMarkdown(text: string): React.ReactNode {
 // 마커 조각 판별도 같은 이유로 .test() 재검사 대신 split 결과의 인덱스 홀짝으로 가른다 —
 // 캡처 그룹 1개짜리 정규식의 split은 [평문, 매치, 평문, 매치, ...] 순서를 보장하므로
 // (홀수 인덱스=캡처된 매치) 공유 정규식 객체의 lastIndex 상태와 완전히 무관하다.
-function renderTextWithMissingMarkers(text: string): React.ReactNode {
+function renderTextWithMissingMarkers(text: string, withProject: (href: string) => string): React.ReactNode {
   const parts = text.split(MISSING_MARKER_RE);
-  if (parts.length === 1) return renderTextWithEntityTokens(text);
+  if (parts.length === 1) return renderTextWithEntityTokens(text, withProject);
   return parts.map((part, i) =>
     i % 2 === 1
       ? <em key={i} className="italic text-warning-strong">{part}</em>
-      : <span key={i}>{renderTextWithEntityTokens(part)}</span>,
+      : <span key={i}>{renderTextWithEntityTokens(part, withProject)}</span>,
   );
 }
 
@@ -435,15 +436,16 @@ function isActionAuthorized(
  * 안 걸러도 안전). EventBlockCard와 approval-request-card 둘 다 이 함수로 동일한 시각 어휘를
  * 공유한다(DS 원칙 "동일 개념=동일 어휘" — 사본 분화 금지).
  */
-export function renderStaticEventBlock(block: BlockTemplateBlock, key: number): React.ReactNode {
+/** withProject — 본문 엔티티 칩(문서 · flat)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처 컴포넌트는 useFlatHref()를 넘긴다. */
+export function renderStaticEventBlock(block: BlockTemplateBlock, key: number, withProject: (href: string) => string): React.ReactNode {
   // story #2637 — 유나 design 스티어: 4블록 시각 위계(header 최상위 > fields 구조데이터 >
   // text 본문 > actions 하단 액션열) — 렌더 «순서»는 템플릿 저자가 선언한 그대로 따르되
   // (임의 재배열 안 함), 각 블록 타입의 폰트 크기/굵기로 위계만 표현한다.
   if (block.type === 'header') {
-    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text)}</p>;
+    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
   }
   if (block.type === 'text') {
-    return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text)}</p>;
+    return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
   }
   if (block.type === 'fields') {
     return (
@@ -451,7 +453,7 @@ export function renderStaticEventBlock(block: BlockTemplateBlock, key: number): 
         {block.fields.map((f, i) => (
           <div key={i} className="flex gap-2 text-xs">
             <dt className="shrink-0 font-medium text-muted-foreground">{f.label}</dt>
-            <dd className="min-w-0 text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(f.value)}</dd>
+            <dd className="min-w-0 text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(f.value, withProject)}</dd>
           </div>
         ))}
       </dl>
@@ -469,8 +471,9 @@ function EventBlockRow({
   currentRole: string | undefined;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
   if (block.type !== 'actions') {
-    return renderStaticEventBlock(block, 0);
+    return renderStaticEventBlock(block, 0, flatHref);
   }
   return (
     <div className="flex flex-wrap items-center gap-2 pt-0.5">

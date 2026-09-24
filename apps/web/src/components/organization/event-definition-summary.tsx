@@ -1,6 +1,7 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
+import { Fragment, type ReactNode } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import { EventBlockCard } from '@/components/chat/event-block-card';
 import type { BlockTemplate, EventDefinitionSummary as EventDefinitionSummaryDef } from '@/lib/block-template';
 
@@ -11,7 +12,17 @@ import type { BlockTemplate, EventDefinitionSummary as EventDefinitionSummaryDef
 // 좁히고, 필드 표·routing 요약·실물 카드는 raw JSON에서 직접 읽어 역파생 없이 항상 그린다
 // (payload_schema.properties/routing 두 leg/block_template은 이미 사람이 읽을 수 있는 형태의
 // 구조화 데이터이지 정의기 폼 전용 모양이 아니다 — 그 사실을 활용).
-type SchemaProperty = { type?: string; format?: string; enum?: string[] };
+// JSON Schema의 `type`은 문자열 하나이거나 유니언 배열(예: `["string", "null"]` — 비어도 되는 필드)이다.
+// enum 값은 JSON 값 아무거나다(등록 API가 숫자 · 참거짓 enum도 받는다 — 까디르 4603 QA P1). 문자열로 좁혀 선언하면 tsc가
+// 문자열 전용 처리(`.split`)를 못 잡는다.
+type EnumValue = string | number | boolean | null;
+type SchemaProperty = { type?: string | string[]; format?: string; enum?: EnumValue[] };
+
+/** story #4246 — `null`을 뺀 실제 값 타입들. 비어도 되는지는 «필수/선택» 칸이 따로 말한다. */
+function valueTypes(def: SchemaProperty): string[] {
+  const raw = Array.isArray(def.type) ? def.type : def.type ? [def.type] : [];
+  return raw.filter((type) => type !== 'null');
+}
 
 function classifyFormat(properties: Record<string, SchemaProperty>): 'cycle' | 'signal' | 'measure' | null {
   if ('stage' in properties && properties.stage?.enum) return 'cycle';
@@ -21,20 +32,64 @@ function classifyFormat(properties: Record<string, SchemaProperty>): 'cycle' | '
 }
 
 function sampleValueForProperty(def: SchemaProperty, name: string): unknown {
-  if (def.enum && def.enum.length > 0) return def.enum[0];
-  if (def.type === 'number') return 0;
-  if (def.type === 'boolean') return true;
-  if (def.type === 'string' && def.format === 'date-time') return new Date(0).toISOString();
+  // enum이 null로 시작해도(비어도 되는 선택지) 예시는 첫 실제 값.
+  const firstValue = def.enum?.find((v) => v !== null);
+  if (firstValue !== undefined) return firstValue;
+  const type = valueTypes(def)[0];
+  if (type === 'number' || type === 'integer') return 0;
+  if (type === 'boolean') return true;
+  if (type === 'string' && def.format === 'date-time') return new Date(0).toISOString();
   return `예시 ${name}`;
 }
 
-function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslations>): string {
-  if (def.enum) return `enum(${def.enum.join(', ')})`;
-  if (def.type === 'string' && def.format === 'date-time') return t('definerFieldTypeDate');
-  if (def.type === 'string') return t('definerFieldTypeString');
-  if (def.type === 'number') return t('definerFieldTypeNumber');
-  if (def.type === 'boolean') return t('definerFieldTypeBoolean');
-  return def.type ?? '?';
+/** story #4246(유나 design · 390) — 식별자(필드 이름 · enum 값)는 `_` 뒤에서만 줄을 바꿀 수 있게 `<wbr>`. 코드 칩은 한 덩어리라
+ * `break-words`로는 표 열 최소 폭이 안 줄어 긴 이름이 표를 넓혔다. 복사되는 텍스트는 그대로(`<wbr>`은 글자가 아니다).
+ * `overflow-wrap: anywhere`는 형식 칸을 한 글자 폭으로 무너뜨려 쓰지 않는다. */
+export function breakableIdentifier(value: string): ReactNode {
+  const parts = value.split('_');
+  return parts.map((part, i) => (
+    <Fragment key={i}>{part}{i < parts.length - 1 ? <>_<wbr /></> : null}</Fragment>
+  ));
+}
+
+function valueTypeLabel(type: string, format: string | undefined, t: ReturnType<typeof useTranslations>): string {
+  if (type === 'string' && format === 'date-time') return t('definerFieldTypeDate');
+  if (type === 'string') return t('definerFieldTypeString');
+  if (type === 'number' || type === 'integer') return t('definerFieldTypeNumber');
+  if (type === 'boolean') return t('definerFieldTypeBoolean');
+  if (type === 'array') return t('definerFieldTypeList');
+  if (type === 'object') return t('definerFieldTypeObject');
+  return t('definerFieldTypeOther'); // 알아볼 수 없는 형식 문자열만
+}
+
+// story #4246(유나 확정) — 형식 칸은 사람 말만. 예전엔 유니언 배열(`["string","null"]`)을 그대로 돌려줘 React가 «stringnull»로
+// 이어 그렸고, enum은 내부어 «enum(…)», integer 등은 원문 그대로였다.
+// - 유니언: `null`을 뺀 첫 형식의 라벨(«비어도 됨»은 옆 «필수/선택» 칸이 말한다).
+// - enum: «다음 중 하나: …» — 값은 페이로드에 그대로 보낼 원문이라 번역하지 않고 값마다 `<code>`(줄이지 않고 칸 안에서 줄바꿈).
+function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslations>, locale: string): ReactNode {
+  if (def.enum) {
+    const values = def.enum.filter((v): v is Exclude<EnumValue, null> => v !== null);
+    // 머리말(«다음 중 하나:» / «One of:») 뒤에 값 목록 — ko·en 모두 값이 문장 끝이라 메시지에 자리 태그를 두지 않는다.
+    return (
+      <>
+        {t('definerFieldTypeEnum')}{' '}
+        {values.map((value, i) => (
+          <Fragment key={`${i}:${String(value)}`}>
+            {i > 0 ? ', ' : null}
+            {/* 식별자 줄바꿈은 문자열 값만 — 숫자 · 참거짓은 원문 그대로 */}
+            <code className="rounded bg-muted px-1 font-mono text-[11px]">{typeof value === 'string' ? breakableIdentifier(value) : String(value)}</code>
+          </Fragment>
+        ))}
+      </>
+    );
+  }
+  // 까디르 4603 QA ① — 등록 API는 여러 형식 유니언(`["string","number"]`)도 받고 둘 다 검증하므로, 라벨도 null 아닌 형식
+  // 전부를 «또는»으로 잇는다(첫 것만 쓰면 조직 정의에서 거짓 라벨). 시드엔 null 빼면 형식 하나인 유니언뿐이다.
+  const labels = Array.from(new Set(valueTypes(def).map((type) => valueTypeLabel(type, def.format, t))));
+  if (labels.length === 0) return t('definerFieldTypeAny'); // 형식 없음 = 아무 값이나 받는다
+  // 유나 확정 — en은 문장 속이라 첫 낱말만 대문자(«Text or number» · «Text, number, or boolean»). ko는 그대로.
+  const parts = locale.startsWith('en') ? labels.map((label, i) => (i === 0 ? label : label.toLocaleLowerCase(locale))) : labels;
+  return new Intl.ListFormat(locale, { type: 'disjunction' }).format(parts);
 }
 
 // noRecipientLabel — 「받는 사람」(broadcast) 축과 「즉시 알림」(escalation) 축은 "없음"의
@@ -72,6 +127,7 @@ export function EventDefinitionSummary({
   definition?: EventDefinitionSummaryDef | null;
 }) {
   const t = useTranslations('organization');
+  const locale = useLocale();
   const properties = (payloadSchema.properties ?? {}) as Record<string, SchemaProperty>;
   const required = new Set((payloadSchema.required as string[] | undefined) ?? []);
   const fieldNames = Object.keys(properties);
@@ -120,8 +176,8 @@ export function EventDefinitionSummary({
               <tbody>
                 {fieldNames.map((name) => (
                   <tr key={name} className="border-t border-border">
-                    <td className="px-2 py-1 font-mono text-foreground">{name}</td>
-                    <td className="px-2 py-1 text-muted-foreground">{fieldTypeLabel(properties[name]!, t)}</td>
+                    <td className="px-2 py-1 font-mono text-foreground" data-testid={`event-def-field-name-${name}`}>{breakableIdentifier(name)}</td>
+                    <td className="break-words px-2 py-1 text-muted-foreground" data-testid={`event-def-field-type-${name}`}>{fieldTypeLabel(properties[name]!, t, locale)}</td>
                     {/* story #4223(유나) — 390 ko에서 «필수»가 «필/수»로 세로 접혔다 · 낱말 줄바꿈 금지(좁으면 다른 열이 양보). */}
                     <td className="whitespace-nowrap px-2 py-1 text-muted-foreground" data-testid={`event-def-field-required-${name}`}>
                       {required.has(name) ? t('definerFieldRequired') : t('definerFieldOptional')}

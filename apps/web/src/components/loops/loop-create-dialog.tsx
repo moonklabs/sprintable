@@ -62,12 +62,13 @@ export interface EventDefinitionResponse {
     capability?: { kind?: string; connector_key?: string; target?: 'agent' | 'channel_connection' | 'generation_connector'; channels?: string[] };
     // story #4174 후속(alembic 0401) — 승인이 이 stage 밖(결재함의 초안 게이트)이라는 선언. 닫힌 어휘(BE
     // event_definition_registry.py::_APPROVAL_SURFACES). 적용 다이얼로그가 사람 역할의 이 stage를 읽기 전용 자리로 그린다.
-    approval?: { surface?: 'draft_gate' };
+    // story #4243 D3 — `doc_approval`: 승인이 결재함의 문서 결재에서(loop_agency «브리프»).
+    approval?: { surface?: 'draft_gate' | 'doc_approval' };
   }>;
   // story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로
   // 선언하는 옵션 사전({role명: "human"|"agent"}). 선언 없으면 undefined/null("모름") —
   // recipe-role-slots.ts::roleActorKind가 이 선언을 읽는다.
-  role_actor_kinds?: Record<string, 'human' | 'agent'> | null;
+  role_actor_kinds?: Record<string, 'human' | 'agent' | 'either'> | null;
   enabled: boolean;
 }
 

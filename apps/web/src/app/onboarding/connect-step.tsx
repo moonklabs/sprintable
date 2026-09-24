@@ -18,6 +18,7 @@ import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { copyTextSafely } from '@/lib/clipboard';
+import { withProjectParam } from '@/hooks/use-flat-href';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -348,7 +349,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
       // auth 토큰 갱신 raw fetch 호출을 그대로 베끼지 않고, 같은 목적의 기존 헬퍼
       // (lib/db/client.ts의 refreshAuthTokens, callAuthRoute 경유)를 재사용한다.
       await refreshAuthTokens().catch(() => null);
-      window.location.href = `/chats/${convId}`;
+      window.location.href = withProjectParam(`/chats/${convId}`, projectId); // story #4231 3차 — 온보딩 프로젝트를 싣는다
     } catch {
       onFinish();
     } finally {
@@ -363,7 +364,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
         <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
           <p className="text-sm text-warning-strong">{t('apiKeyFailedMembers')}</p>
           <Link
-            href="/settings?tab=members"
+            href={withProjectParam('/settings?tab=members', projectId)}
             className="inline-block rounded border border-warning-border bg-background px-3 py-1 text-xs font-medium text-warning-strong transition-colors hover:bg-warning-tint"
           >
             {t('goToMembersAgents')} →
@@ -684,7 +685,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
         {advancedOpen && (
           <div className="mt-3 space-y-2">
             <p className="text-xs text-muted-foreground">{t('advancedNote')}</p>
-            <Link href="/settings?tab=members" className="inline-block text-xs font-medium text-primary hover:underline">
+            <Link href={withProjectParam('/settings?tab=members', projectId)} className="inline-block text-xs font-medium text-primary hover:underline">
               {t('goToMembersAgents')} →
             </Link>
           </div>

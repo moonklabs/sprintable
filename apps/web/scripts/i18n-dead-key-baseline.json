@@ -2336,10 +2336,6 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "organization.recipeApplyV2PersonPlaceholder",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "organization.recipeGalleryCreateCta",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
@@ -3366,5 +3362,9 @@
   {
     "key": "workList.stateDone",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+  },
+  {
+    "key": "workList.actionApprove",
+    "reason": "살아 있는 키(story #4231 3차 b) — work-list-detail-actions.ts primaryActionLabelKey()가 반환하고 work-list-detail-panel이 t(labelKey)로 쓴다. 반환값→t 소비 형태를 이 가드가 못 잡는다(예전엔 buildNowFace의 다른 ns t('actionApprove') 리터럴이 우연히 가려 줬음 · 그 함수 삭제로 드러남)"
   }
 ]

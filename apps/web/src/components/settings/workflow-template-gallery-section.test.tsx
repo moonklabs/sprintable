@@ -88,6 +88,45 @@ describe('WorkflowTemplateGallerySection — Promise.all 부수 격리(story #35
   });
 });
 
+describe('WorkflowTemplateGallerySection — 제출 매핑(까디르 4606 P1)', () => {
+  it('승인이 stage 밖인 읽기 전용 stage에 예전 바인딩이 남아 있어도 제출 payload에 그 stage는 0', async () => {
+    const definition = {
+      ...DEFINITION,
+      payload_schema: { properties: { stage: { enum: ['brief', 'kickoff'] } } },
+      stage_metadata: {
+        brief: { role: 'PO', action: '브리프', approval: { surface: 'doc_approval' } },
+        kickoff: { role: 'PO', action: '기획' },
+      },
+      role_actor_kinds: { PO: 'either' },
+    };
+    const capture = { body: null as unknown };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [definition] };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) {
+        return { ok: true, json: async () => ({ bindings: { brief: 'agent-old', kickoff: 'agent-1' } }) };
+      }
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 1, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 레시피'));
+    await act(async () => { tmplBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const applyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '재적용(덮어쓰기)');
+    expect(applyBtn).not.toBeUndefined();
+    await act(async () => { applyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { kickoff: 'agent-1' } });
+  });
+});
+
 describe('WorkflowTemplateGallerySection — error.message 분기 (story #2501 계승)', () => {
   it('적용 실패 사유가 raw "적용 실패" 폴백 대신 실 서버 메시지로 뜬다(핵심 회귀가드)', async () => {
     stubFetch({

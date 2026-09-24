@@ -21,6 +21,7 @@ import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface DocContentRendererProps {
   content: string;
@@ -238,6 +239,11 @@ export function DocContentRenderer({
   suppressLeadingTitle,
   bodyEmphasis = 'default',
 }: DocContentRendererProps) {
+  // story #4231 — 문서 사이 이동(위키링크·임베드 카드 클릭)은 현재 프로젝트(`?p=`)를 싣는다. 이 컴포넌트의 DOM 조립 효과를
+  // 프로젝트 전환마다 다시 돌리지 않으려고 ref로 읽는다(클릭 시점의 최신 값).
+  const flatHref = useFlatHref();
+  const flatHrefRef = useRef(flatHref);
+  useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
 
@@ -319,7 +325,7 @@ export function DocContentRenderer({
       }
       span.className = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground';
       span.title = title;
-      const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
+      const handleClick = () => { if (slug) { const flatHref = flatHrefRef.current; window.location.href = flatHref(`/docs/${slug}`); } };
       span.addEventListener('click', handleClick);
       return () => span.removeEventListener('click', handleClick);
     });
@@ -349,7 +355,7 @@ export function DocContentRenderer({
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
       // 유지하되 클릭 네비게이션만 뺀다.
       if (publicMode || !slug) return () => { /* no handler attached */ };
-      const handleClick = () => { window.location.href = `/docs/${slug}`; };
+      const handleClick = () => { const flatHref = flatHrefRef.current; window.location.href = flatHref(`/docs/${slug}`); };
       block.addEventListener('click', handleClick);
       return () => block.removeEventListener('click', handleClick);
     });
@@ -602,7 +608,7 @@ export function DocContentRenderer({
             entityType={ref.entityType}
             entityId={ref.entityId}
             label={String(children)}
-            href={getEntityHref(ref.entityType, ref.entityId)}
+            href={getEntityHref(ref.entityType, ref.entityId, flatHref)}
           />
         );
       }
@@ -649,7 +655,7 @@ export function DocContentRenderer({
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',

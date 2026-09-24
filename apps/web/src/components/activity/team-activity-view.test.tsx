@@ -65,3 +65,26 @@ describe('TeamActivityView — 페이지 h1 1개(story #3946)', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });
+
+// story #4231 3차(b · PO 02:34Z) — 활동 항목의 문서 링크는 **그 항목의 프로젝트**(item.project_id)를 싣는다(4241과 같은 규칙).
+describe('TeamActivityView — 활동 항목 링크는 자기 프로젝트(story #4231)', () => {
+  it('⭐문서 항목 → `/docs?id=d1&p=<항목의 project_id>`', async () => {
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: { items: [{
+            activity_id: 'a1', project_id: 'proj-X', actor_id: null, verb: 'updated', object_type: 'doc', object_id: 'd1',
+            occurred_at: new Date().toISOString(), source_event_ids: [], recipient_ids: [], recipient_types: [], payload: {}, activity_seq: 1,
+          }], next_after_seq: null } }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    await mount();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/docs?id=d1&p=proj-X');
+  });
+});

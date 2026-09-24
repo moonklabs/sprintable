@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { resolveDeeplinkHref } from '@/lib/storage/format';
 import type { AssetSourceLink, AssetSourceLinkType } from '@/lib/storage/types';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface StorageSourceUsageListProps {
   links: AssetSourceLink[];
@@ -32,6 +33,7 @@ const TYPE_TINT: Record<AssetSourceLinkType, string> = {
 };
 
 export function StorageSourceUsageList({ links, compact = false }: StorageSourceUsageListProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('storage');
 
   const typeLabel = (type: AssetSourceLinkType): string => {
@@ -64,7 +66,7 @@ export function StorageSourceUsageList({ links, compact = false }: StorageSource
   return (
     <div className="space-y-[7px]">
       {links.map((link, idx) => {
-        const href = link.type === 'manual' ? null : resolveDeeplinkHref(link);
+        const href = link.type === 'manual' ? null : resolveDeeplinkHref(link, flatHref);
         const isLinked = href != null;
         const subtitle = subtitleFor(link);
         const Icon = TYPE_ICON[link.type];

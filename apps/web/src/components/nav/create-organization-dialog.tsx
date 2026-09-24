@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { getPublicAppHost } from '@/lib/public-app-host';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/;
 
@@ -36,6 +37,7 @@ export function CreateOrganizationDialog({
   onOpenChange,
   onCreated,
 }: CreateOrganizationDialogProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('nav');
   // story #2470 후속(유나 홀름 design:changes) — 온보딩 wizard 경로(#2470 본체)는 완전
   // i18n인데 이 dialog의 한도 배너 본문은 별도로 하드코딩 영한혼용이었다("Free 플랜
@@ -143,9 +145,8 @@ export function CreateOrganizationDialog({
             <div key={planLimitNonce} role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-warning-border bg-warning-tint px-3 py-3 text-sm space-y-1">
               <p className="font-medium text-warning-strong">{t('orgLimitBannerTitle')}</p>
               <p className="text-warning-strong">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
-              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
               <a
-                href="/settings?tab=billing"
+                href={flatHref('/settings?tab=billing')}
                 className="inline-block mt-1 text-xs font-medium text-warning-strong underline underline-offset-2 transition hover:opacity-80"
               >
                 {t('orgLimitUpgradeLink')}

@@ -114,8 +114,9 @@ describe('AC — 가드는 고의 합니다체 주입을 잡아낸다(양성대�
 });
 
 describe('SCOPED_KEYS — story #3877 AC1 표 count-lock(레거시, story #3927부터는 필터링에 안 쓰임)', () => {
-  it('정확히 104개(AC1 표 94 + AC4 orgBriefing 9 + 캡처 中 발견 1 — docs.emptyDescription)', () => {
-    expect(SCOPED_KEYS).toHaveLength(104);
+  // story #4231 3차 (b) — 죽은 orgBriefing 키 5개(decide*Context 3 · signal*Context 2)를 삭제해 AC4 몫이 9 → 4.
+  it('정확히 99개(AC1 표 94 + AC4 orgBriefing 4 + 캡처 中 발견 1 — docs.emptyDescription)', () => {
+    expect(SCOPED_KEYS).toHaveLength(99);
   });
 
   it('중복 키가 없다', () => {
@@ -127,7 +128,7 @@ describe('실 ko.json — 스코프 키 count-lock(SCOPED_KEYS 기본 인자 경
   const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
   const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
 
-  it('SCOPED_KEYS 104개 전부의 ko.json 값에 합니다체 0건(story #3877 AC2 전량 이관 확認)', () => {
+  it('SCOPED_KEYS 99개 전부의 ko.json 값에 합니다체 0건(story #3877 AC2 전량 이관 확認)', () => {
     expect(findHonorificToneInScopedKeys(ko)).toEqual([]);
   });
 
@@ -142,15 +143,15 @@ describe('실 ko.json — 스코프 키 count-lock(SCOPED_KEYS 기본 인자 경
     expect(findings).toContainEqual({ key: 'board.noStories', matches: ['습니다'], value: '스토리가 없습니다' });
   });
 
-  // 양성대조 ②(ㅂ니다 계열) — AC4 orgBriefing 9키 中 3키(decideGateContext 등)는 원래
-  // 「필요합니다」(모음어간+ㅂ니다) 형태라 습니다/십시오 리터럴이 없다 — NFD 처방이 실제로
-  // 이 자리에서 작동하는지 실 키로 확認(합성 아님).
-  it('양성대조 — orgBriefing.decideGateContext(ㅂ니다 계열)를 원래 값으로 되돌려도 RED가 된다', () => {
+  // 양성대조 ②(ㅂ니다 계열) — AC4 orgBriefing 키 中 decideGateContext 등 3키가 원래 「필요합니다」(모음어간+ㅂ니다) 형태라
+  // 습니다/십시오 리터럴이 없었다 — NFD 처방이 이 형태를 잡는지 확認. story #4231 3차 (b)에서 그 3키가 죽은 키로 삭제돼, 목록에 남은
+  // 실 orgBriefing 키에 같은 형태 값을 넣어 확認한다.
+  it('양성대조 — 남은 orgBriefing 키에 ㅂ니다 계열(「필요합니다」)을 넣으면 RED가 된다', () => {
     const mutated = JSON.parse(JSON.stringify(ko)) as Record<string, unknown>;
-    (mutated.orgBriefing as Record<string, unknown>).decideGateContext = '승인이 필요합니다';
+    (mutated.orgBriefing as Record<string, unknown>).clusterUnclosedOverdueGoalTitle = '승인이 필요합니다';
     const findings = findHonorificToneInScopedKeys(mutated);
     expect(findings).toContainEqual({
-      key: 'orgBriefing.decideGateContext', matches: ['ㅂ니다'], value: '승인이 필요합니다',
+      key: 'orgBriefing.clusterUnclosedOverdueGoalTitle', matches: ['ㅂ니다'], value: '승인이 필요합니다',
     });
   });
 
@@ -199,7 +200,7 @@ describe('resolveEffectiveScopedKeys / flattenAllLeafKeys — 순수 함수(stor
     expect(effective).not.toContain('chats.arr');
   });
 
-  it('SCOPED_KEYS 크기보다 항상 크거나 같다(실 ko.json은 SCOPED_KEYS 104개보다 leaf가 훨씬 많다)', () => {
+  it('SCOPED_KEYS 크기보다 항상 크거나 같다(실 ko.json은 SCOPED_KEYS 99개보다 leaf가 훨씬 많다)', () => {
     const messagesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages');
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     expect(resolveEffectiveScopedKeys(ko).length).toBeGreaterThan(SCOPED_KEYS.length);

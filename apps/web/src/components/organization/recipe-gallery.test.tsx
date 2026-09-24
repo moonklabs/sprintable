@@ -180,6 +180,11 @@ describe('RecipeCardGrid — 역할·연결 행(story #4173)', () => {
     expect(card('plain')).toEqual({ roles: '에이전트 · 사람', connections: '없음' });
   });
 
+  it('either 역할에도 접미사 «(사람 또는 에이전트)» — 안 붙이면 «에이전트 전용»으로 읽힌다(story #4243 · 유나 확정)', async () => {
+    const card = await renderCards([{ ...BLOG, id: 'either', role_actor_kinds: { Writer: 'either', Editor: 'human', Publisher: 'agent' } }]);
+    expect(card('either').roles).toBe('Editor(사람) · Writer(사람 또는 에이전트) · 발행자');
+  });
+
   it('역할이 하나도 없으면 역할 행도 «없음»', async () => {
     const card = await renderCards([NO_ROLES]);
     expect(card('signal')).toEqual({ roles: '없음', connections: '없음' });

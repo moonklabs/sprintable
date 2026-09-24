@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isEEEnabled } from '@/lib/ee';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /** 세션 한정 dismiss 키 — warning(80/90%)만 사용. paused는 non-dismissible.
  * storage-capacity-banner.tsx와 달리 «어느 밴드를 dismiss했는지»를 저장(값='80'|'90')한다 —
@@ -39,6 +40,7 @@ interface AuUsage {
  * storage-capacity-banner(전 구성원 노출+CTA만 role-gate)와 달리 가시성 자체를 role로 막는다.
  */
 export function AuUsageBanner() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('billing');
   const router = useRouter();
   const { orgId } = useDashboardContext();
@@ -165,7 +167,7 @@ export function AuUsageBanner() {
       )}
 
       <div className="col-start-2 mt-2 flex flex-wrap gap-2">
-        <Button size="sm" variant="default" onClick={() => router.push('/settings?tab=billing')}>
+        <Button size="sm" variant="default" onClick={() => router.push(flatHref('/settings?tab=billing'))}>
           {t('auUpgrade')}
         </Button>
       </div>

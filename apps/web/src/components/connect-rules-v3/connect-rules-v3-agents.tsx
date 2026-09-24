@@ -13,6 +13,7 @@ import {
   ConnectRulesV3SectionError,
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3982 §(c) 연결된 에이전트 — `GET /api/team-members?type=agent` 1콜만 마운트
@@ -73,6 +74,7 @@ function formatLeadTimeDays(avgLeadTimeMs: number): number {
 }
 
 export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('connectRulesV3');
   const ta = useTranslations('agents');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
@@ -188,7 +190,7 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
                   {/* story #3994 AC3 — 이 행엔 연결 설정 CTA도 없다(연결 대상 자체가
                       아니다, PO 판정). */}
                   {!isSystemPublisher(agent.runtime_type) ? (
-                    <Link href={`/organization/workforce/${agent.id}`} className="font-medium text-primary hover:underline">
+                    <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="font-medium text-primary hover:underline">
                       {ta('viewConnectionSettings')}
                     </Link>
                   ) : null}
@@ -216,7 +218,7 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
         })
       )}
       <Link
-        href="/organization/workforce/recruiter"
+        href={flatHref('/organization/workforce/recruiter')}
         className="inline-block text-xs font-medium text-primary hover:underline"
         data-testid="connect-rules-v3-add-agent-link"
       >

@@ -20,6 +20,7 @@ import {
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
 import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3982 §(d) 연결된 채널(+성과 수집) — `channel-connect/connection-status.ts`의
@@ -85,6 +86,7 @@ function ChannelRow({
   t: ReturnType<typeof useTranslations<'connectRulesV3'>>;
   tc: ReturnType<typeof useTranslations<'channelConnect'>>;
 }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const rows = connections.filter((c) => c.channel === item.channel);
   const statuses = rows.map((c) => deriveChannelConnectionStatus({
     serverStatus: c.status,
@@ -112,7 +114,7 @@ function ChannelRow({
       {needsReconnect ? (
         <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
           <p>{t('channelReconnectBanner')}</p>
-          <Link href="/organization/channels" className="shrink-0 font-medium text-primary hover:underline">
+          <Link href={flatHref('/organization/channels')} className="shrink-0 font-medium text-primary hover:underline">
             {tc('channelReauthAction')}
           </Link>
         </div>
@@ -128,6 +130,7 @@ function MeasurementSection({
   tc: ReturnType<typeof useTranslations<'channelConnect'>>;
   locale: string;
 }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const displayTimezone = resolveDisplayTimezone().tz;
   const beacon = items.find((it) => it.key === 'beacon');
   const utm = items.find((it) => it.key === 'utm');
@@ -187,7 +190,7 @@ function MeasurementSection({
             <span className="flex items-center gap-2">
               {ga4NeedsAction ? <Badge variant="warning">{ga4StatusText}</Badge> : <span className="text-muted-foreground">{ga4StatusText}</span>}
               {ga4NeedsAction ? (
-                <Link href="/organization/channels" className="font-medium text-primary hover:underline">
+                <Link href={flatHref('/organization/channels')} className="font-medium text-primary hover:underline">
                   {ga4.status === 'needs_reauth' ? tc('channelReauthAction') : tc('channelConnectAction', { channel: 'GA4' })}
                 </Link>
               ) : null}
@@ -200,6 +203,7 @@ function MeasurementSection({
 }
 
 export function ConnectRulesV3Channels({ orgId, isOwnerStrict }: { orgId: string; isOwnerStrict: boolean }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('connectRulesV3');
   const tc = useTranslations('channelConnect');
   const locale = useLocale();
@@ -277,7 +281,7 @@ export function ConnectRulesV3Channels({ orgId, isOwnerStrict }: { orgId: string
 
         <MeasurementSection items={measurement} tc={tc} locale={locale} />
 
-        <Link href="/organization/channels" className="inline-block text-xs font-medium text-primary hover:underline">
+        <Link href={flatHref('/organization/channels')} className="inline-block text-xs font-medium text-primary hover:underline">
           {t('goToChannelSettingsLink')}
         </Link>
       </>

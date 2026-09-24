@@ -25,6 +25,7 @@ import { SidebarMenuButton } from '@/components/ui/sidebar';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
 import { useUnifiedSwitcher, withSwitchedSlugs, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -57,6 +58,7 @@ export function UnifiedSwitcher({
   currentProjectId,
   className,
 }: UnifiedSwitcherProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
   const tSettings = useTranslations('settings');
@@ -99,7 +101,7 @@ export function UnifiedSwitcher({
               </DropdownMenuLabel>
               <button
                 type="button"
-                onClick={() => { window.location.href = '/settings?tab=organization'; }}
+                onClick={() => { window.location.href = flatHref('/settings?tab=organization'); }}
                 className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                 aria-label={t('switcherOrgSettingsAria')}
               >

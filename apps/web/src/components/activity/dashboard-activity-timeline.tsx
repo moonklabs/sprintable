@@ -10,6 +10,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { memberDisplayLabel } from '@/lib/member-display';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ActivityLogItem {
   id: string;
@@ -95,6 +96,7 @@ function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
 }
 
 export function DashboardActivityTimeline({ projectId }: DashboardActivityTimelineProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('activityTimeline');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -145,7 +147,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
             <div className="text-sm font-semibold text-foreground">{t('title')}</div>
           </div>
           <Link
-            href="/activity"
+            href={flatHref('/activity')}
             className="flex items-center gap-1 text-xs text-primary hover:underline"
           >
             {t('viewAll')}

@@ -23,6 +23,11 @@ def test_approval_surface_draft_gate_is_accepted():
     validate_stage_metadata(_SCHEMA, _meta(approval={"surface": "draft_gate"}))
 
 
+def test_approval_surface_doc_approval_is_accepted():
+    """story #4243 D3 — 결재함의 문서 결재(loop_agency «브리프»)."""
+    validate_stage_metadata(_SCHEMA, _meta(approval={"surface": "doc_approval"}))
+
+
 @pytest.mark.parametrize("approval", [
     {"surface": "chat"},                                  # 닫힌 어휘 밖
     {"surface": "draft_gate", "approver": "org_owner"},  # 승인자는 싣지 않는다(두 번째 원천 금지)

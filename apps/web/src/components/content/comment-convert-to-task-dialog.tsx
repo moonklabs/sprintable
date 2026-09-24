@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import type { CommentItem } from '@/components/content/comments-section';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3517(유나 §22-④, PO 確定 2026-09-05) — insights-board/follow-up-dialog.tsx(#3503)
@@ -33,6 +34,7 @@ export interface CommentConvertToTaskDialogProps {
 }
 
 export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubmit }: CommentConvertToTaskDialogProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const t = useTranslations('content');
   const tc = useTranslations('common');
   const prefillTitle = `${t('commentsConvertDialogTitlePrefix')} ${postTitle}`;
@@ -57,7 +59,7 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
     }
   }
 
-  const storyHref = successStoryId ? getEntityHref('story', successStoryId) : null;
+  const storyHref = successStoryId ? getEntityHref('story', successStoryId, flatHref) : null;
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>

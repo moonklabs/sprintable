@@ -35,6 +35,8 @@ import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
+import { withProjectParam } from '@/lib/with-project-param';
+import { usePendingProjectTarget } from '@/lib/pending-project-switch';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -117,11 +119,18 @@ export function useDashboardContext() {
 // 여러 곳이 각자 목적지 계산을 반복하지 않게 얇은 래퍼로 — 실 로직(순수 함수, 단위테스트
 // 대상)은 nav-v3-destinations.ts의 resolveChatsHref/resolveConnectRulesHref.
 export function useChatsHref(): string {
-  return resolveChatsHref(useDashboardContext().navV3Flags);
+  // story #4231 3차 — 앱 안 CTA의 대화 목적지(flat)는 현재 프로젝트를 싣는다(useConnectRulesHref와 같은 방식 · 순환 import 회피).
+  const ctx = useDashboardContext();
+  const pending = usePendingProjectTarget();
+  return withProjectParam(resolveChatsHref(ctx.navV3Flags), pending ?? ctx.projectId);
 }
 
 export function useConnectRulesHref(legacyFallback: string): string {
-  return resolveConnectRulesHref(useDashboardContext().navV3Flags, legacyFallback);
+  // story #4231 3차 — 목적지(flat)에 현재 프로젝트(`?p=`)를 싣는다(useFlatHref와 같은 목표: 전환 대기 중 목표 → 컨텍스트 프로젝트).
+  // useFlatHref를 여기서 부르면 use-flat-href ↔ dashboard-shell 순환 import라 lib 순수 함수를 직접 쓴다.
+  const ctx = useDashboardContext();
+  const pending = usePendingProjectTarget();
+  return withProjectParam(resolveConnectRulesHref(ctx.navV3Flags, legacyFallback), pending ?? ctx.projectId);
 }
 
 interface DashboardShellProps extends DashboardContext {

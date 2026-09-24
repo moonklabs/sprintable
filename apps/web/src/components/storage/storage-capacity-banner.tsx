@@ -11,6 +11,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { isEEEnabled } from '@/lib/ee';
 import { formatStorageSize } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /** 세션 한정 dismiss 키 — warning 배너만 사용. 다음 세션에도 ≥80%면 재노출(영구 숨김 금지). */
 const WARN_DISMISS_KEY = 'storage-capacity-warn-dismissed';
@@ -30,6 +31,7 @@ interface StorageUsage {
  * 색상은 Alert variant + bg-warning/bg-destructive 토큰만 사용(하드코딩 금지·양 테마 대응).
  */
 export function StorageCapacityBanner() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('storage');
   const router = useRouter();
   const { orgId, orgMemberships } = useDashboardContext();
@@ -150,7 +152,7 @@ export function StorageCapacityBanner() {
           {t('capacityManageFiles')}
         </Button>
         {showUpgrade && (
-          <Button size="sm" variant="outline" onClick={() => router.push('/settings?tab=billing')}>
+          <Button size="sm" variant="outline" onClick={() => router.push(flatHref('/settings?tab=billing'))}>
             {t('capacityUpgrade')}
           </Button>
         )}
