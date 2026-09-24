@@ -74,6 +74,86 @@ export function composeLegacyEventBodyFallback(body: string | null, tEventCard: 
   return headerKey ? `${tEventCard(headerKey)} · ${label}` : label;
 }
 
+// story #4281 — 사람에게 가는 dispatched 알림(`agent_dispatch.py` `title=f"[{entity_type}] {title}"` · body = L2 휴리스틱의 기계 사유
+// `l2_heuristics.py` · `l2_trigger_worker.py`)은 종류 키와 «743h 초과됨» 같은 원문 시간이 사람에게 그대로 갔다(ko 문자열이라 en에도).
+// 저장된 문자열이라 옛 행 · 새 행 모두 **표시 시점**에 한 자리에서 바꾼다. 모양을 못 알아보면 원문 그대로(과잉 일반화 금지).
+const DISPATCH_KIND_PREFIX_RE = /^\[(story|epic|sprint|doc|hypothesis)\]\s+/;
+const HEURISTIC_DEADLINE_PASSED_RE = /^(sprint|epic|hypothesis) 마감이 (\d+)h 초과됨$/;
+const HEURISTIC_DEADLINE_LEFT_RE = /^(sprint|epic|hypothesis) 마감까지 (\d+)h 남음\(임계 \d+h\)$/;
+const HEURISTIC_IDLE_RE = /^(story|sprint)(?:\/([a-z-]+))? (\d+)h 무활동\(임계 \d+h\)$/;
+const HEURISTIC_STATUS_CHANGED_RE = /^([a-z_]+) 상태 변경(?: → ([a-z-]+))?$/;
+
+type HeuristicT = (key: string, values?: Record<string, string | number>) => string;
+
+// 유나 확정(4281 스토리 본문 «디자인 확정» 표) — 종류 · 상태 낱말은 기존 화면 낱말(epic은 «목표» — v3 내비 `nav.goals`). 표 값으로
+// 둬야 죽은 키 가드가 소비로 읽는다.
+const HEURISTIC_KIND_KEYS: Record<string, string> = {
+  story: 'heuristicKindStory', epic: 'heuristicKindGoal', sprint: 'heuristicKindSprint',
+  hypothesis: 'heuristicKindHypothesis', doc: 'heuristicKindDoc',
+};
+const HEURISTIC_STATUS_KEYS: Record<string, string> = {
+  'story:backlog': 'heuristicStatusStoryBacklog', 'story:ready-for-dev': 'heuristicStatusStoryReadyForDev',
+  'story:in-progress': 'heuristicStatusStoryInProgress', 'story:in-review': 'heuristicStatusStoryInReview',
+  'story:done': 'heuristicStatusStoryDone',
+  'sprint:planning': 'heuristicStatusSprintPlanning', 'sprint:active': 'heuristicStatusSprintActive',
+  'sprint:closed': 'heuristicStatusSprintClosed',
+  'epic:active': 'heuristicStatusGoalActive', 'epic:done': 'heuristicStatusGoalDone', 'epic:archived': 'heuristicStatusGoalArchived',
+};
+
+/** 시간 원문(h)을 사람 단위로 — 1시간 미만 «1시간 미만» · 48시간 미만 시간 · 그 이상 일(÷24 반올림). */
+export function humanizeHours(hours: number, t: HeuristicT): string {
+  if (hours < 1) return t('heuristicDurationUnderHour');
+  return hours < 48 ? t('heuristicDurationHours', { count: hours }) : t('heuristicDurationDays', { count: Math.round(hours / 24) });
+}
+
+// 유나 선검토(PO 전달) — 종류 · 상태 낱말은 조직 커스텀 라벨이 먼저(4281 본문 §5 «보드와 같은 순서»), 없으면 위 키 표.
+// 상태 커스텀은 story에만 — 도메인 라벨의 status slug는 엔티티 구분이 없어 epic `done` 같은 겹치는 slug에 story 라벨이 붙는다.
+export function composeDispatchedHeuristicDisplay(
+  title: string, body: string | null, t: HeuristicT, domainLabels?: EventPreviewHelpers['domainLabels'],
+): { title: string; body: string | null } {
+  const titleMatch = DISPATCH_KIND_PREFIX_RE.exec(title);
+  // 유나 — 제목은 앞 `[종류] `만 뗀다(종류는 본문 문장이 필요한 곳에서만 말한다).
+  const nextTitle = titleMatch ? title.slice(titleMatch[0].length) : title;
+  if (!body) return { title: nextTitle, body };
+  const kindWord = (k: string) => {
+    const key = HEURISTIC_KIND_KEYS[k];
+    return key ? (domainLabels?.entityTypeLabel?.(k) ?? t(key)) : null;
+  };
+  const statusWord = (k: string, st: string | undefined) => {
+    if (!st) return null;
+    const custom = k === 'story' ? domainLabels?.statusLabel(st) : undefined;
+    const key = HEURISTIC_STATUS_KEYS[`${k}:${st}`];
+    return custom ?? (key ? t(key) : null);
+  };
+  let m = HEURISTIC_DEADLINE_PASSED_RE.exec(body);
+  if (m && kindWord(m[1]!)) return { title: nextTitle, body: t('heuristicDeadlinePassed', { kind: kindWord(m[1]!)!, duration: humanizeHours(Number(m[2]), t) }) };
+  m = HEURISTIC_DEADLINE_LEFT_RE.exec(body);
+  if (m && kindWord(m[1]!)) return { title: nextTitle, body: t('heuristicDeadlineLeft', { kind: kindWord(m[1]!)!, duration: humanizeHours(Number(m[2]), t) }) };
+  m = HEURISTIC_IDLE_RE.exec(body);
+  if (m && kindWord(m[1]!)) {
+    const duration = humanizeHours(Number(m[3]), t);
+    const status = statusWord(m[1]!, m[2]);
+    return {
+      title: nextTitle,
+      body: status
+        ? t('heuristicIdleWithStatus', { duration, kind: kindWord(m[1]!)!, status })
+        : t('heuristicIdle', { duration, kind: kindWord(m[1]!)! }),
+    };
+  }
+  m = HEURISTIC_STATUS_CHANGED_RE.exec(body);
+  if (m && kindWord(m[1]!)) {
+    const status = statusWord(m[1]!, m[2]);
+    // 유나 — 새 상태가 없거나 낱말표에 없으면 «…바뀌었어요.»에서 끝낸다(slug 노출 0).
+    return {
+      title: nextTitle,
+      body: status
+        ? t('heuristicStatusChangedTo', { kind: kindWord(m[1]!)!, status })
+        : t('heuristicStatusChanged', { kind: kindWord(m[1]!)! }),
+    };
+  }
+  return { title: nextTitle, body };
+}
+
 export function composeNotificationDisplay(
   notification: Notification,
   t: (key: string, values?: Record<string, string | number>) => string,
@@ -89,6 +169,10 @@ export function composeNotificationDisplay(
     } else if (notification.type === 'conversation.message') {
       title = t('messageTitle', { name: event.sender_name });
     }
+  }
+
+  if (notification.type === 'dispatched') {
+    ({ title, body } = composeDispatchedHeuristicDisplay(title, body, t, eventPreviewHelpers.domainLabels));
   }
 
   if (notification.type === 'gate.pending_approval' && typeof event?.payload?.['gate_type'] === 'string') {
