@@ -96,7 +96,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     attachedEventNamesRef.current.add(eventName);
     es.addEventListener(eventName, (e: Event) => {
       const me = e as MessageEvent<string>;
-      livenessRef.current.markActivity();
+      // story #4252(까디르 QA HIGH) — 활동은 **지금 소스**의 것만 센다. 재연결로 tracker를 reset한 뒤 옛 소스 큐에 남은 이벤트가
+      // 새(좀비일 수 있는) 소스를 «살아 있음»으로 되살리지 않게.
+      if (esRef.current === es) livenessRef.current.markActivity();
       dispatchNamed(eventName, me.data, me.lastEventId || undefined);
     });
   }, [dispatchNamed]);
@@ -156,7 +158,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       for (const eventName of namedSubscribersRef.current.keys()) attachIfNeeded(eventName);
 
       es.onopen = () => {
-        livenessRef.current.markActivity();
+        if (esRef.current === es) livenessRef.current.markActivity(); // 지금 소스만(#4252 · 위 이름 있는 이벤트와 같은 가드)
         const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
         pendingForcedReconnect = false;
         backoff.onOpen();
@@ -165,7 +167,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       };
 
       es.onmessage = (e: MessageEvent<string>) => {
-        livenessRef.current.markActivity();
+        if (esRef.current === es) livenessRef.current.markActivity(); // 지금 소스만(#4252)
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         for (const handler of messageSubscribersRef.current) handler(e.data, e.lastEventId || undefined);
       };

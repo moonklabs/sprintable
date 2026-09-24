@@ -306,7 +306,8 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
       }
 
       source.onopen = () => {
-        liveness.markActivity();
+        // story #4252(까디르 QA HIGH) — 지금 소스의 open만 생존 신호(옛 소스 큐의 open이 새 소스를 되살리지 않게 · 이름 있는 이벤트와 같은 가드).
+        if (sourceRef.current === source) liveness.markActivity();
         const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
         pendingForcedReconnect = false;
         setConnected(true);

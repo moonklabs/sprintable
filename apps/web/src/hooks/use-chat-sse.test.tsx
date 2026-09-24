@@ -356,6 +356,24 @@ describe('useChatSse — window.focus: 살아 있는 커넥션은 끊지 않는�
       vi.useRealTimers();
     }
   });
+
+  it('⭐옛 소스의 onopen은 새 소스의 생존으로 세지 않는다 → 좀비 새 소스는 focus에서 재연결(까디르 QA HIGH)', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+      act(() => { FakeEventSource.instances[0]!.readyState = 1; FakeEventSource.instances[0]!.onopen?.(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(FakeEventSource.instances).toHaveLength(2);
+      act(() => { FakeEventSource.instances[0]!.onopen?.(); }); // 옛 소스 큐에 남은 open
+      act(() => { FakeEventSource.instances[1]!.readyState = 1; });
+      await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(FakeEventSource.instances).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // story 6ddaa086(critical, 선생님 실사고) — 「연결이 끊겼어요」 배너가 실 연결(readyState=1

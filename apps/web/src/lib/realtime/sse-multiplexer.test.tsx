@@ -545,5 +545,30 @@ describe('useSseMultiplexer — story #2078', () => {
       expect(instances).toHaveLength(2);
       vi.useRealTimers();
     });
+
+    // 까디르 QA HIGH — 재연결로 tracker를 reset한 뒤 옛 소스 큐에 남은 open · message · 이름 있는 이벤트가 새(좀비일 수 있는) 소스를
+    // «살아 있음»으로 되살리면 안 된다. 새 소스는 OPEN을 자칭하지만 아무것도 안 보냄 → focus에서 다시 재연결해야 한다.
+    it.each([
+      ['onopen', (old: FakeInstance) => { old.onopen?.(); }],
+      ['onmessage', (old: FakeInstance) => { old.onmessage?.({ data: '{}', lastEventId: '' }); }],
+      ['이름 있는 이벤트', (old: FakeInstance) => { dispatchNamed(old, 'conversation.gate_resolved', {}); }],
+    ] as const)('⭐옛 소스의 %s는 새 소스의 생존으로 세지 않는다 → 좀비 새 소스는 focus에서 재연결', async (_label, fireOld) => {
+      vi.useFakeTimers();
+      try {
+        await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+        await act(async () => { handle!.subscribe('conversation.gate_resolved', () => {}); });
+        act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
+        act(() => { window.dispatchEvent(new Event('focus')); }); // 조용한 0 → 재연결(1 생성)
+        expect(instances).toHaveLength(2);
+        act(() => { fireOld(instances[0]!); });
+        act(() => { instances[1]!.readyState = 1; }); // 새 소스: OPEN 자칭 · 아무것도 안 보냄
+        await act(async () => { await vi.advanceTimersByTimeAsync(4_000); }); // focus throttle(3초) 밖
+        act(() => { window.dispatchEvent(new Event('focus')); });
+        expect(instances).toHaveLength(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
