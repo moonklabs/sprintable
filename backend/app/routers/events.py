@@ -2601,6 +2601,8 @@ async def _stage_publish_rejection_detail(db: AsyncSession, definition, rejectio
         head = t(
             "events.stage_publish_rejected_not_approved", locale, current=_stage_label(definition, rejection.current), stage=stage,
         )
+    elif rejection.code == "STAGE_ALREADY_APPROVED":
+        head = t("events.stage_publish_rejected_already_approved", locale, stage=stage)
     elif rejection.code == "STAGE_SERVER_DRIVEN":
         head = t("events.stage_publish_rejected_server", locale, stage=stage)
     else:

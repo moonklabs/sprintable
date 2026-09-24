@@ -503,3 +503,63 @@ async def test_one_project_source_for_validation_recipients_and_the_conversation
         assert conversation.project_id == w["project_id"]
     finally:
         await engine.dispose()
+
+
+# ── 같은 stage 재발행 = 바인딩 멤버 ∪ 지금 stage를 낸 멤버(PO 12:59Z) ─────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_the_member_who_published_the_current_stage_may_republish_it_and_nobody_else():
+    """바인딩 없는 stage(블로그 «발행 승인 대기»와 같은 자리)도 그 stage를 낸 멤버는 다시 낼 수 있다 — 빠뜨린 값을 고치는 길.
+    바인딩도 발신자도 아닌 멤버는 거부."""
+    engine, Session = await _session_factory()
+    try:
+        # revise는 바인딩이 없다(앞 stage review 게이트 승인 뒤 요청자 writer가 낸다).
+        w = await _world(Session, bindings={"draft": "writer", "review": "writer", "measure": "analyst"})
+        await _publish(Session, w, "draft", as_member="writer")
+        await _publish(Session, w, "review", as_member="writer")
+        await _set_gate(Session, w, "approved")
+        await _publish(Session, w, "revise", as_member="writer")
+        d = await _rejected(Session, w, "revise", as_member="outsider")
+        assert (d["code"], d["allowed_member_ids"]) == ("NOT_STAGE_ASSIGNEE", [str(w["writer"])])
+        await _publish(Session, w, "revise", as_member="writer")
+        assert await _stage_count(Session, w, "revise") == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_stage_whose_gate_is_already_approved_cannot_be_republished():
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _publish(Session, w, "draft", as_member="writer")
+        await _publish(Session, w, "review", as_member="writer")
+        await _set_gate(Session, w, "approved")
+        d = await _rejected(Session, w, "review", as_member="writer")
+        assert (d["status"], d["code"]) == (409, "STAGE_ALREADY_APPROVED")
+        assert "이미 승인됐어요" in d["message"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_stage_the_server_published_is_not_reopened_to_anyone():
+    """서버(시스템 발행자)가 낸 stage는 «낸 멤버» 규칙으로 누구에게도 열리지 않는다(바인딩도 없으면 아무도 다시 못 낸다)."""
+    from app.routers.events import _get_or_create_system_publisher
+    from tests.recipe_stage_walk import seed_stage_publish
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        async with Session() as s:
+            system = await _get_or_create_system_publisher(s, w["org_id"])
+            await seed_stage_publish(
+                s, org_id=w["org_id"], project_id=w["project_id"], definition=w["definition"], work_item_type="story",
+                work_item_id=w["story_id"], stage="publish", sender_id=system.id,
+            )
+            await s.commit()
+        d = await _rejected(Session, w, "publish", as_member="editor")
+        assert (d["code"], d["allowed_member_ids"]) == ("NOT_STAGE_ASSIGNEE", [])
+    finally:
+        await engine.dispose()

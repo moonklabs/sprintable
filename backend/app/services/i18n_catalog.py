@@ -278,6 +278,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "The {current} stage isn't approved yet — publish the {stage} stage after the approval notification "
         "(preset.gate.verdict) arrives.",
     },
+    # PO 12:59Z — 게이트가 이미 승인된 stage를 다시 내려 할 때.
+    "events.stage_publish_rejected_already_approved": {
+        "ko": "{stage} 단계는 이미 승인됐어요 — 다시 내지 말고 다음 단계로 이어 가세요.",
+        "en": "The {stage} stage is already approved — don't publish it again; continue with the next stage.",
+    },
     "events.stage_publish_rejected_server": {
         "ko": "{stage} 단계는 서버가 내요 — 직접 내지 마세요. 서버 일이 성공하면 워크플로우가 다음 단계로 넘어가요.",
         "en": "The server publishes the {stage} stage — don't publish it yourself. Once the server's work succeeds, the "

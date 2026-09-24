@@ -381,10 +381,20 @@ async def validate_raw_stage_publish(
 
     current_bound = await bound(current)
     if stage == current:
-        allowed = {current_bound}
+        # PO 12:59Z — 같은 stage 재발행 = 그 stage 바인딩 멤버 ∪ 지금 stage 이벤트를 낸 멤버(반려 뒤 재개의 원 요청자도 여기
+        # 들어온다 · 바인딩 없는 승인 자리 — 블로그 `pending_approval` — 를 낸 사람이 고칠 길).
+        # - 서버(시스템 발행자)가 낸 stage는 이 규칙으로 누구에게도 열리지 않는다.
+        # - 낸 멤버라도 지금 그 프로젝트에 접근할 수 있어야 한다.
+        # - 그 stage 게이트가 이미 승인됐으면 재발행 거부(승인된 게이트를 건드려 조용히 멈추게 하지 않는다 · 4261 부류).
         gate = await latest_stage_gate(db, org_id=org_id, work_item_id=work_item_id, definition=definition, stage=stage)
-        if gate is not None:
-            allowed.add(_member_uuid((gate.neutral_facts or {}).get("requested_by_member_id")))
+        if gate is not None and gate.status == "approved":
+            raise reject("STAGE_ALREADY_APPROVED", 409, assignee=current_bound)
+        allowed = {current_bound}
+        publisher = latest.sender_id
+        if publisher is not None and not await _is_system_publisher(db, publisher) and (
+            project_id is not None and publisher in await _project_member_ids(db, org_id=org_id, project_id=project_id)
+        ):
+            allowed.add(publisher)
         if sender.id in allowed - {None}:
             return
         raise reject("NOT_STAGE_ASSIGNEE", 403, tuple(allowed), assignee=current_bound)
@@ -415,6 +425,21 @@ async def validate_raw_stage_publish(
     if sender.id in allowed - {None}:
         return
     raise reject("NOT_STAGE_ASSIGNEE", 403, tuple(allowed), assignee=current_bound)
+
+
+async def _is_system_publisher(db: AsyncSession, member_id: uuid.UUID) -> bool:
+    """서버 자동 발행 전용 발신자(events.py `_get_or_create_system_publisher` · `members.runtime_type = system-publisher`)."""
+    from app.models.member import Member
+
+    runtime = (await db.execute(select(Member.runtime_type).where(Member.id == member_id))).scalar_one_or_none()
+    return runtime == "system-publisher"
+
+
+async def _project_member_ids(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID) -> set[uuid.UUID]:
+    """지금 이 프로젝트에 접근할 수 있는 멤버(사람 · 에이전트 같은 id 공간 — `project_accessible_member_ids`)."""
+    from app.services.project_auth import project_accessible_member_ids
+
+    return await project_accessible_member_ids(db, org_id, project_id)
 
 
 def _member_uuid(raw) -> uuid.UUID | None:
