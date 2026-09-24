@@ -219,6 +219,36 @@ async function getProjectIdFromAccessToken(token: string): Promise<string | null
 // 에서 가져오던 경로)가 안 깨지게 유지한다 — 값은 여전히 legacy-resource-tables.ts가 SSOT다.
 export { RENAMED_RESOURCES, RETIRED_RESOURCES };
 
+/** story #4253 — 해소된 org/project slug로 옛 flat 자원 경로를 scoped 경로로 보내는 307(+ resolve 캐시). `?p=` · 쿠키 → JWT 두 경로가 같이 쓴다.
+ * 착지 URL에서 `p`는 뗀다 — 경로가 프로젝트를 대신한다(scoped 경로에선 아무도 읽지 않아 남으면 경로와 어긋날 수만 있다). */
+async function legacyResourceRedirect(
+  request: NextRequest,
+  resourceName: string,
+  pathname: string,
+  slugs: NonNullable<Awaited<ReturnType<typeof resolveLegacyResourcePath>>>,
+  orgId: string,
+  projectId: string,
+): Promise<NextResponse> {
+  const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
+  const url = request.nextUrl.clone();
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
+  url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
+  url.searchParams.delete('p');
+  const response = sessionDependentRedirect(url);
+  // story #4219 G2(PO 판정) — 이 307이 가리키는 `/{org}/{project}`를 방금 org 소속(단건 조회 = /resolve와 같은 판정)·project
+  // 접근(has_project_access)까지 확인했으니, 그 결과를 기존 sp_resolve_cache(서명·50초 만료) 규칙 그대로 심는다 — 이어지는
+  // 문서 요청의 proxy가 /resolve 왕복(dev 콜드 ≈50ms)을 건너뛴다. 캐시 키가 이 307의 목적지 slug와 같아서 다른 org/project로
+  // 가는 요청엔 안 맞는다(verifyResolveCache가 slug 불일치 = 미스). 역할을 모르면(옛 백엔드) 심지 않는다. project를 read replica
+  // 목록 폴백으로 찾았으면(primaryVerified=false) 심지 않는다 — replica 지연 중 회수된 권한으로 서명하지 않게(까디르 P2).
+  if (slugs.orgRole && slugs.primaryVerified) {
+    const token = await signResolveCache(slugs.orgSlug, slugs.projectSlug, {
+      orgId, orgSlug: slugs.orgSlug, orgRole: slugs.orgRole, projectId, projectSlug: slugs.projectSlug,
+    });
+    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, token, { ...cookieBase(), maxAge: RESOLVE_CACHE_TTL_SECONDS });
+  }
+  return response;
+}
+
 /**
  * story a539c649(S2 최초 도입·S3에서 리소스 파라미터화) — 옛 flat `/{resource}/*` 를
  * default(현재 org+project) 로 해소해 301. 해소 불가(로그인 직후 project 미선택 등)면 null
@@ -257,6 +287,16 @@ async function redirectLegacyResourcePath(
     }
   }
 
+  // story #4253 — 링크가 실은 `?p=`(대상 자기 프로젝트 · #4231 · #4244)를 **먼저** 시도한다. 예전엔 쿠키 → JWT만 봐서, 다른 프로젝트 문서 ·
+  // 스토리 링크(`/docs?id=…&p=C`)가 현재(쿠키 B) 프로젝트 셸로 착지했다. org 소속 · project 접근은 resolveLegacyResourcePath 안에서 확인된다
+  // (GET /projects/{id}는 has_project_access가 없으면 404 · 목록 폴백은 보이는 프로젝트만) — p로 접근 못 하는 프로젝트를 열 수는 없고,
+  // 실패하면(모양 불일치 · 다른 org · 접근 없음 · 없는 프로젝트) 아래 기존 순서(쿠키 → JWT)로 간다.
+  const linkProjectId = request.nextUrl.searchParams.get('p');
+  if (linkProjectId && UUID_RE.test(linkProjectId)) {
+    const linkSlugs = await resolveLegacyResourcePath(fastapiUrl, orgId, linkProjectId, accessToken);
+    if (linkSlugs) return legacyResourceRedirect(request, resourceName, pathname, linkSlugs, orgId, linkProjectId);
+  }
+
   // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
   const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
     ?? await getProjectIdFromAccessToken(accessToken);
@@ -281,23 +321,7 @@ async function redirectLegacyResourcePath(
     return redirectToProjectPicker(request, pathname);
   }
 
-  const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
-  const url = request.nextUrl.clone();
-  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${finalResourcePath(resourceName, rest)}`;
-  url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
-  const response = sessionDependentRedirect(url);
-  // story #4219 G2(PO 판정) — 이 307이 가리키는 `/{org}/{project}`를 방금 org 소속(단건 조회 = /resolve와 같은 판정)·project
-  // 접근(has_project_access)까지 확인했으니, 그 결과를 기존 sp_resolve_cache(서명·50초 만료) 규칙 그대로 심는다 — 이어지는
-  // 문서 요청의 proxy가 /resolve 왕복(dev 콜드 ≈50ms)을 건너뛴다. 캐시 키가 이 307의 목적지 slug와 같아서 다른 org/project로
-  // 가는 요청엔 안 맞는다(verifyResolveCache가 slug 불일치 = 미스). 역할을 모르면(옛 백엔드) 심지 않는다. project를 read replica
-  // 목록 폴백으로 찾았으면(primaryVerified=false) 심지 않는다 — replica 지연 중 회수된 권한으로 서명하지 않게(까디르 P2).
-  if (slugs.orgRole && slugs.primaryVerified) {
-    const token = await signResolveCache(slugs.orgSlug, slugs.projectSlug, {
-      orgId, orgSlug: slugs.orgSlug, orgRole: slugs.orgRole, projectId, projectSlug: slugs.projectSlug,
-    });
-    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, token, { ...cookieBase(), maxAge: RESOLVE_CACHE_TTL_SECONDS });
-  }
-  return response;
+  return legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
 }
 
 /**
