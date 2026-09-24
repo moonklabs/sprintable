@@ -277,8 +277,11 @@ async def _stage_approval_is_elsewhere(
     return (kinds.get(meta.get("role")) or "agent") != "agent"
 
 
-async def _context_trigger_gate(db: AsyncSession, *, org_id: uuid.UUID, context: dict | None):
-    """story #4255(까디르 P1) — 서버가 이벤트 문맥으로 실어 보낸 «이 발행을 촉발한 게이트». 없거나 다른 조직이면 None."""
+async def _context_trigger_gate(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID | None, context: dict | None,
+):
+    """story #4255(까디르 P1) — 서버가 이벤트 문맥으로 실어 보낸 «이 발행을 촉발한 게이트». 없거나, 다른 조직이거나, 이 이벤트의
+    작업 항목이 아니면 None(PO 10:15Z — 엉뚱한 id가 실려 와도 다른 항목의 승인자에게 새지 않게)."""
     from app.models.gate import Gate
 
     raw = (context or {}).get("trigger_gate_id")
@@ -288,7 +291,11 @@ async def _context_trigger_gate(db: AsyncSession, *, org_id: uuid.UUID, context:
         gate = await db.get(Gate, uuid.UUID(str(raw)))
     except (TypeError, ValueError):
         return None
-    return gate if gate is not None and gate.org_id == org_id else None
+    if gate is None or gate.org_id != org_id or gate.work_item_id != work_item_id:
+        if gate is not None:
+            logger.warning("recipe_role_binding: trigger gate %s does not belong to this event's work item — ignored", gate.id)
+        return None
+    return gate
 
 
 async def _last_server_stage_recipients(
@@ -310,7 +317,7 @@ async def _last_server_stage_recipients(
         work_item_id = uuid.UUID(str(payload.get("work_item_id")))
     except (TypeError, ValueError):
         work_item_id = None
-    trigger_gate = await _context_trigger_gate(db, org_id=org_id, context=context)
+    trigger_gate = await _context_trigger_gate(db, org_id=org_id, work_item_id=work_item_id, context=context)
     if previous_stage is not None and work_item_id is not None:
         gate = trigger_gate or (await db.execute(
             select(Gate).where(

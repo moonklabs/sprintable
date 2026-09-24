@@ -431,3 +431,38 @@ async def test_old_agent_binding_on_the_channel_stage_does_not_bypass_the_rule()
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_carried_gate_from_another_work_item_is_ignored():
+    """PO 10:15Z — 실어 보낸 id의 게이트가 이 이벤트의 작업 항목이 아니면(다른 스토리의 승인 게이트) 쓰지 않는다 — 이 항목의
+    게이트로 폴백해 그 승인자(owner)에게. 뮤테이션: 작업 항목 조건을 지우면 다른 스토리 승인자에게 새어 RED."""
+    from datetime import datetime, timezone
+
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.team import TeamMember
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _seed_story as _seed_other_story
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        await _run_to_published(app, Session, w)
+        async with Session() as s:
+            other_story_id = await _seed_other_story(s, w["org_id"], w["project_id"], title="다른 스토리")
+            stranger = TeamMember(
+                id=uuid.uuid4(), org_id=w["org_id"], project_id=w["project_id"], type="human", name="다른 항목 승인자", is_active=True,
+            )
+            s.add(stranger)
+            other_gate = Gate(
+                id=uuid.uuid4(), org_id=w["org_id"], work_item_id=other_story_id, work_item_type="story",
+                gate_type="external_publish", scope_key="", status="approved", resolver_id=stranger.id,
+                resolved_at=datetime.now(timezone.utc),
+                neutral_facts={"stage": "pending_approval", "triggered_by_event": _KEY},
+            )
+            s.add(other_gate)
+            await s.commit()
+        assert await _resolve_published(Session, w, context={"trigger_gate_id": str(other_gate.id)}) == {w["owner_member_id"]}
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
