@@ -1,5 +1,6 @@
 import { fetchWithAuth } from '@/lib/db/client';
 import { getRequestContextKey } from '@/lib/project-context-client';
+import { isBackfillEvent } from '@/lib/realtime/sse-multiplexer';
 
 /**
  * story #4171(E-MOBILE-SPEED) — `GET /api/gates/designated-pending-count` 진행 중 요청 공유.
@@ -11,13 +12,46 @@ import { getRequestContextKey } from '@/lib/project-context-client';
  */
 let inFlight: { key: string; promise: Promise<number | null> } | null = null;
 
+// story #4245(까디르 QA P2 · PO 04:12Z) — 마지막으로 받은 수의 스냅숏 워터마크(BE `snapshot_xmin` = pg_snapshot_xmin(pg_current_snapshot())).
+// 시각(now() = 트랜잭션 시작)으로는 «수를 센 순간 이미 보였나»를 못 가른다 — 커밋 가시성으로 가른다. 요청 맥락(org·project) 키와 함께 둔다 —
+// org 전환 뒤 새 맥락의 수를 받기 전엔 옛 맥락의 워터마크로 판정하지 않는다(모르면 다시 묻는다).
+let lastWatermark: { key: string; xmin: bigint } | null = null;
+
+function parseXid(v: unknown): bigint | null {
+  if (typeof v !== 'string' || !/^\d+$/.test(v)) return null;
+  try { return BigInt(v); } catch { return null; }
+}
+
+/**
+ * story #4245 — SSE 연결 직후 백필 이벤트가 **마지막 수에 이미 보였던** 것인지. 이벤트를 만든 트랜잭션(created_xid)이 수를 센 순간의 워터마크보다
+ * 작으면 그 트랜잭션은 그때 이미 끝났다(커밋이면 수에 보였고 · 롤백이면 이벤트 자체가 없다) → 다시 묻지 않는다.
+ * 백필이 아니거나(실시간) · created_xid 없음(옛 행) · 워터마크 모름 · 맥락 다름 · 워터마크 이상(그때 아직 안 끝난 트랜잭션)이면 false — 다시 묻는다.
+ */
+export function isEventReflectedInLastCount(data: string): boolean {
+  if (!isBackfillEvent(data) || lastWatermark === null || lastWatermark.key !== getRequestContextKey()) return false;
+  try {
+    const createdXid = parseXid((JSON.parse(data) as { created_xid?: unknown }).created_xid);
+    return createdXid !== null && createdXid < lastWatermark.xmin;
+  } catch {
+    return false;
+  }
+}
+
+/** 테스트 전용 — 모듈 상태 초기화. */
+export function resetDesignatedPendingCountStateForTest(): void {
+  inFlight = null;
+  lastWatermark = null;
+}
+
 export function fetchDesignatedPendingCount(): Promise<number | null> {
   const key = getRequestContextKey();
   if (!inFlight || inFlight.key !== key) {
     const promise = fetchWithAuth('/api/gates/designated-pending-count')
       .then(async (res) => {
         if (!res.ok) return null;
-        const json = await res.json() as { count?: number };
+        const json = await res.json() as { count?: number; snapshot_xmin?: string | null };
+        const xmin = parseXid(json.snapshot_xmin);
+        if (xmin !== null) lastWatermark = { key, xmin };
         return typeof json.count === 'number' ? json.count : 0;
       })
       .catch(() => null);

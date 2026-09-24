@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Text, func, text
+from sqlalchemy.types import UserDefinedType
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,6 +12,15 @@ from app.core.database import Base
 from app.models.base import OrgScopedMixin
 
 import enum
+
+
+class XID8(UserDefinedType):
+    """PostgreSQL xid8(64비트 트랜잭션 id). asyncpg가 int로 푼다. story #4245 — events.created_xid."""
+
+    cache_ok = True
+
+    def get_col_spec(self, **kw) -> str:
+        return "xid8"
 
 
 class EventType(str, enum.Enum):
@@ -84,6 +94,9 @@ class Event(Base, OrgScopedMixin):
     )
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4245(migration 0404) — 이 이벤트를 만든 트랜잭션 id. count 응답의 snapshot_xmin과 비교해 «수를 센 순간 이미 보였나»를 가른다
+    # (시각으로는 못 가름 — 트랜잭션 시작 시각 now()와 커밋 시점이 벌어질 수 있다). 옛 행 NULL.
+    created_xid: Mapped[int | None] = mapped_column(XID8(), nullable=True, server_default=text("pg_current_xact_id()"))
 
     # story #2391 AC2 — 구조로 막는다. status는 여태 순수 Text라 오타·미선언 값이 조용히 통과
     # 했다(`expired`가 그렇게 8개월 가까이 enum 밖에 살았다). SQL 문자열을 손으로 다시 적지

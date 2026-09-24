@@ -379,6 +379,55 @@ async def test_toss_already_resolved_gate_rejected():
 
 @_REAL_DB_SKIP
 @pytest.mark.anyio
+async def test_designated_pending_count_snapshot_xmin_vs_uncommitted_event_xid():
+    """story #4245(까디르 QA P2 시나리오) — 해소 트랜잭션이 이벤트를 남기고 **아직 커밋하지 않은** 동안 센 수의 snapshot_xmin은 그 이벤트의
+    created_xid 이하다(→ FE는 «반영됨»으로 건너뛰지 않고 다시 묻는다). 커밋 뒤 센 수의 snapshot_xmin은 created_xid보다 크다(→ 그때는 반영됨).
+    시각 판정(now() = 트랜잭션 시작)으로는 못 가르던 자리."""
+    import sqlalchemy as sa
+    from app.main import app
+    from app.routers.events import _event_to_payload
+    from app.models.event import Event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_scenario(s)
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["designated_user_id"])
+        client = _client_for(app)
+        long_tx = await engine.connect()
+        trans = await long_tx.begin()
+        try:
+            event_id = uuid.uuid4()
+            created_xid = (await long_tx.execute(sa.text(
+                "INSERT INTO events (id, org_id, project_id, event_type, recipient_id, recipient_type, payload, status) "
+                "VALUES (:id, :org, :proj, 'conversation.gate_resolved', :rcp, 'member', '{}'::jsonb, 'pending') RETURNING created_xid"
+            ), {"id": event_id, "org": seeded["org_id"], "proj": seeded["project_id"], "rcp": seeded["designated_member_id"]})).scalar_one()
+            assert created_xid is not None
+
+            mid = await client.get("/api/v2/gates/designated-pending-count")
+            assert mid.status_code == 200, mid.text
+            assert int(mid.json()["snapshot_xmin"]) <= int(created_xid)  # 아직 안 끝난 트랜잭션 → 반영 안 됨
+
+            await trans.commit()
+            after = await client.get("/api/v2/gates/designated-pending-count")
+            assert int(after.json()["snapshot_xmin"]) > int(created_xid)  # 끝난 트랜잭션 → 반영됨
+
+            async with Session() as s:
+                evt = (await s.execute(sa.select(Event).where(Event.id == event_id))).scalar_one()
+            assert _event_to_payload(evt)["created_xid"] == str(created_xid)  # 백필 페이로드가 싣는다
+        finally:
+            if trans.is_active:
+                await trans.rollback()
+            await long_tx.close()
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
 async def test_designated_pending_count_room_agnostic():
     """층1 불변식 — 카드가 몇 개 방에 심겼든(토스 전/후 무관) 카운트는 오직
     designated_approver_id=me AND status=pending 로만 결정된다."""
@@ -395,6 +444,8 @@ async def test_designated_pending_count_room_agnostic():
             resp = await client.get("/api/v2/gates/designated-pending-count")
             assert resp.status_code == 200, resp.text
             assert resp.json()["count"] == 1
+            # story #4245 — 이 수를 센 문장의 스냅숏 워터마크(snapshot_xmin · xid8 문자열)를 함께 싣는다.
+            assert int(resp.json()["snapshot_xmin"]) > 0
 
             # 토스해도(카드가 방 2개가 돼도) 카운트는 그대로 1 — room 불문.
             toss_resp = await client.post(

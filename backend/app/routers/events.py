@@ -321,6 +321,8 @@ def _event_to_payload(event: "Event") -> dict:
         # connector가 top-level content를 읽어 드롭 안 걸리게.
         "content": (event.payload or {}).get("content"),
         "created_at": event.created_at.isoformat(),
+        # story #4245 — 만든 트랜잭션 id(xid8 · 문자열 — 64비트라 JS number 정밀도 밖일 수 있음). 옛 행 None.
+        "created_xid": str(event.created_xid) if getattr(event, "created_xid", None) is not None else None,
     }
 
 
