@@ -13,7 +13,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { roleAccentVar } from '@/lib/role-accent';
 import { presetName } from '@/lib/platform-preset-copy';
-import { DialogTitle } from '@/components/ui/dialog';
+import { DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // story #4048(E-RECIPE-1 ①) — 유나 v2 시안(artifact be718c0a §3) 상세 뷰. 이 화면은 레시피
 // «정의»(카탈로그 항목)를 보여주는 것이지 레시피를 적용한 특정 loop 인스턴스의 진행 상태가
@@ -47,7 +47,8 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
 
   return (
     <div className="space-y-5" data-testid="recipe-detail-view">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      {/* story #4210 후속 — 머리 줄(제목·머리 액션)은 DialogHeader: 다이얼로그에 닫기(X)가 있으면 이 줄만 X 자리를 비운다(본문은 폭 그대로). */}
+      <DialogHeader className="flex-row flex-wrap items-start justify-between gap-3">
         <div>
           {/* story #4210 후속 — 다이얼로그 안에선 DialogTitle(스크린리더 이름 · 이전엔 이름이 비어 있었다). 단독 렌더(테스트 등)는 h3. */}
           {titleAs === 'dialog-title' ? (
@@ -65,7 +66,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
           {onDuplicate ? <Button size="sm" variant="outline" onClick={onDuplicate}>{t('recipeDetailDuplicateCta')}</Button> : null}
           <Button size="sm" onClick={onApply}>{t('recipeGalleryApplyCta')}</Button>
         </div>
-      </div>
+      </DialogHeader>
 
       <div className="flex flex-wrap gap-4 text-[11px] text-muted-foreground" data-testid="recipe-legend">
         <span className="flex items-center gap-1.5">

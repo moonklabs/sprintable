@@ -283,5 +283,9 @@ describe('RecipeDetailView — 머리 줄(story #4210 후속 · 배포 20 라이
     expect(titleEl.id).toBe(labelledBy);
     expect(titleEl.textContent?.trim().length).toBeGreaterThan(0);
     expect(dialog.querySelector('h3')).toBeNull(); // 다이얼로그 안에선 h3 대신 DialogTitle 하나
+    // 머리 줄(제목·머리 액션)은 DialogHeader — 닫기(X) 자리를 이 줄만 비우고 본문(범례·스테퍼)은 폭 그대로.
+    const view = dialog.querySelector('[data-testid="recipe-detail-view"]')!;
+    expect(view.firstElementChild?.getAttribute('data-slot')).toBe('dialog-header');
+    expect(view.firstElementChild?.contains(titleEl)).toBe(true);
   });
 });
