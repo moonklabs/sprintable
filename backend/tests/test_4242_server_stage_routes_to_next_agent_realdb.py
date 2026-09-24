@@ -4,8 +4,8 @@
 받을 에이전트가 없어 이벤트가 아무에게도 안 갔고, 다음 단계 «발송 요청(send_requested)»을 낼 Publisher 에이전트는
 발송 예시·봉인 필드(`publication_id` 등)를 몰랐다.
 
-- 규칙 1: channel_connection stage의 수신자 = 다음 stage에 바인딩된 에이전트(다음 stage가 사람·다른 서버 stage이거나
-  바인딩이 없으면 0 + 로그 경고 — PO 확정).
+- 규칙 1: channel_connection stage의 수신자 = 다음 stage에 바인딩된 멤버(에이전트·사람 종류 무관). 바인딩이 없거나 다음
+  stage가 또 다른 서버 stage면 0 + 로그 경고(PO 확정 · 까디르 4601 QA P2 주장 정정).
 - 규칙 2: 서버가 낸 발행 단계 payload에 방금 만든 발행물 id(`publication_id`)를 싣는다 — 정의의 payload_schema가 그
   필드를 선언할 때만(SNS·영상은 `additionalProperties: false`).
 - 본문은 기존 렌더러 그대로 — 다음 단계 발행 예시 + 봉인 필드 안내.
@@ -155,9 +155,37 @@ async def test_campaign_created_reaches_send_requested_agent_with_sealed_fields_
 
 
 @pytest.mark.anyio
-async def test_next_stage_without_agent_binding_reaches_nobody_and_logs_warning(caplog):
-    """PO 확정 — 다음 stage에 에이전트 바인딩이 없으면(사람 stage · 다른 서버 stage · 미배정) 0 + 로그 경고.
-    다른 stage 담당에게 새지 않는다."""
+async def test_next_stage_bound_to_a_human_member_reaches_that_person():
+    """까디르 4601 QA P2 · PO 판단 — 규칙은 «다음 stage에 바인딩된 멤버(종류 무관)». 사람을 바인딩했으면 그 사람이 받는다
+    (명시적 바인딩 = «아는» 경우 · 4243 `either`로 사람 바인딩이 정식)."""
+    from app.models.team import TeamMember
+
+    engine, Session = await _session_factory()
+    try:
+        ctx = await _setup_newsletter(Session)
+        async with Session() as s:
+            person = TeamMember(
+                id=uuid.uuid4(), org_id=ctx["org_id"], project_id=ctx["project_id"], type="human", name="발송 담당자",
+                is_active=True,
+            )
+            s.add(person)
+            await s.commit()
+        await _bind_agent(Session, ctx, definition_key=_SEED._KEY, stage="send_requested", agent_id=person.id)
+
+        await _emit(Session, ctx, definition_key=_SEED._KEY, stage="campaign_created", publication_id=ctx["pub"].id)
+
+        _message, participants = await _stage_message_and_participants(
+            Session, ctx, definition_key=_SEED._KEY, stage="campaign_created",
+        )
+        assert person.id in participants
+        assert ctx["sender_id"] not in participants and ctx["bystander_id"] not in participants
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_next_stage_without_a_bound_member_reaches_nobody_and_logs_warning(caplog):
+    """PO 확정 — 다음 stage에 바인딩된 멤버가 없으면(미배정) 0 + 로그 경고. 다른 stage 담당에게 새지 않는다."""
     engine, Session = await _session_factory()
     try:
         ctx = await _setup_newsletter(Session)
@@ -172,7 +200,7 @@ async def test_next_stage_without_agent_binding_reaches_nobody_and_logs_warning(
         assert ctx["bystander_id"] not in participants
         assert ctx["sender_id"] not in participants
         assert any(
-            "channel stage 'campaign_created' -> next stage 'send_requested' has no agent binding" in r.getMessage()
+            "channel stage 'campaign_created' -> next stage 'send_requested' has no bound member" in r.getMessage()
             for r in caplog.records
         ), [r.getMessage() for r in caplog.records]
     finally:
