@@ -100,7 +100,7 @@ async def _seed(session):
     return {
         "org_id": org.id, "other_org_id": other_org.id,
         "agent_id": agent.id, "stranger_id": stranger.id, "cross_org_agent_id": cross_org_agent.id,
-        "story_id": story.id, "task_id": task.id,
+        "story_id": story.id, "task_id": task.id, "project_id": project.id,
         "story_evidence_id": story_evidence.id, "task_evidence_id": task_evidence.id,
     }
 
@@ -151,6 +151,8 @@ async def test_get_story_evidence_200_with_resolved_story_id():
             assert body["work_item_type"] == "story"
             assert body["ref"] == "https://example.com/story-evidence"
             assert body["resolved_story_id"] == str(seeded["story_id"])
+            # story #4231 다음 조각 — 접근 판정에 쓴 증거 자기 프로젝트 id를 응답에도 싣는다(slug 없는 프로젝트의 FE 폴백 `?p=`).
+            assert body["project_id"] == str(seeded["project_id"])
             # AC5(MCP mention wiring) 전제조건 — reference_token이 실제로 실린다(제목이 없어
             # ref를 대신 쓴다). _resolve_mention_content(chat.py)가 이 필드를 그대로 읽는다.
             # 기대값은 실제 builder(build_reference_token)로 계산 — escape 규칙을 이 테스트에서

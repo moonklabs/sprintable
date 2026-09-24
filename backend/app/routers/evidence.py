@@ -100,6 +100,9 @@ class EvidenceResponse(BaseModel):
     # story join 불요, #2168 DocPreviewResponse와 동형 org_slug/project_slug 개념).
     org_slug: str | None = None
     project_slug: str | None = None
+    # story #4231 다음 조각(PO 14:56Z) — 위 slug와 같은 값(접근 판정에 이미 쓴 _project_id_of_evidence)의 id. project_slug가 없는 옛 프로젝트에서도
+    # FE 미리보기 «상위 스토리로» 폴백이 현재 p 대신 증거 자기 프로젝트를 싣게(embed-card resolveScopedEntityHref 폴백 · #4253). 단건 GET만.
+    project_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -558,6 +561,7 @@ async def get_evidence(
             "resolved_story_id": resolved_story_id,
             "org_slug": org_slug,
             "project_slug": project_slug_map.get(project_id),
+            "project_id": project_id,
         }
     )
 
