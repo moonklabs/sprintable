@@ -296,15 +296,18 @@ class TestOtherGateTypesUnchanged:
     """story #3387 회귀 0 — external_publish 이외 gate_type(예: qa/deploy/merge/pr_review·
     레시피 파이프라인)은 옛 문구를 그대로 유지한다."""
 
-    async def test_non_external_publish_approved_keeps_old_publish_tool_text(self):
+    # story #4265(유나 확정 · PO 14:28Z · 14:57Z) 개정 — 레시피 문맥이 없는 게이트(qa 등 · triggered_by_event 없음)는 레시피 전제 문구
+    # («발행 도구» · «같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요»)를 싣지 않는다 — «다음 행동» 줄 자체가 없다.
+    async def test_non_recipe_qa_gate_approved_has_no_recipe_next_action(self):
         text = await _render(_payload(gate_type="qa", verdict="approved"))
-        assert "발행 도구" in text
-        assert "할 일 없음" not in text
+        assert "발행 도구" not in text
+        assert "다음 행동" not in text
 
-    async def test_non_external_publish_rejected_keeps_old_resubmit_text(self):
+    async def test_non_recipe_qa_gate_rejected_has_no_recipe_resubmit_line(self):
         text = await _render(_payload(gate_type="qa", verdict="rejected", resolution_note="폐기 대상"))
-        assert "다시 발행하세요" in text
-        assert "자동 재오픈돼요" in text
+        assert "다시 발행하세요" not in text
+        assert "자동 재오픈돼요" not in text
+        assert "다음 행동" not in text  # 까디르 codex 4627 P3 — 옛 문구 부재만이 아니라 줄 자체가 없다
 
 
 class TestNextActionI18nCatalogMigration:
