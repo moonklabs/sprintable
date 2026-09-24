@@ -1938,8 +1938,9 @@ def _run_step(
         "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": "",
     } | (value_overrides or {})
     text = run_text if run_text is not None else _destructive_step_run()
-    text = re.sub(r"\$\{\{\s*([^}]+?)\s*\}\}", lambda m: values[m.group(1)], text)
+    # `/tmp/`를 먼저 바꾼다 — CI 러너의 pytest tmp_path가 /tmp 아래라, `${{ github.workspace }}`를 먼저 채우면 그 경로까지 바뀐다.
     text = text.replace("/tmp/", f"{tmpdir}/")
+    text = re.sub(r"\$\{\{\s*([^}]+?)\s*\}\}", lambda m: values[m.group(1)], text)
     script = tmp_path / "step.sh"
     script.write_text(text)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", SCENARIO_DIR=str(scen), TMPDIR=str(tmpdir),
@@ -2118,3 +2119,19 @@ def test_4283_step_rerun_loop_nonzero_without_failure_file_is_red(tmp_path):
     code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, rerun_exit=1)
     assert code == 1 and calls == 2, out
     assert "재실행 루프 인프라 실패" in out
+
+
+def test_4283_step_harness_works_when_the_work_dir_is_under_tmp():
+    """까디르 CHANGES — 하네스 자신의 결함: `${{ github.workspace }}`를 먼저 채우고 `/tmp/`를 나중에 바꾸면, CI 러너처럼 pytest
+    tmp_path가 `/tmp/…`일 때 workspace 경로 안의 `/tmp/`까지 또 바뀌어 스텁 루프를 못 찾는다(exit 127 · CI에서만 RED — macOS
+    tmp_path는 /private/var/…라 로컬은 초록으로 가려졌다). 작업 폴더를 일부러 `/tmp` 아래 만들어 리눅스 경로 모양을 흉내 낸다.
+    뮤테이션: 치환 순서를 되돌리면 macOS에서도 RED."""
+    import shutil
+    import tempfile
+
+    work = Path(tempfile.mkdtemp(prefix="sdt4283-", dir="/tmp"))
+    try:
+        code, out, calls = _run_step(work, targets=_STEP_TARGET, first=_over, rerun=_normal)
+        assert code == 0 and calls == 2, out
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
