@@ -117,3 +117,65 @@ it('⭐unread-count — 같은 conversation.read를 받은 훅 여러 마운트(
   await tick();
   expect(pending).toHaveLength(2);
 });
+
+// 까디르 codex 4626 P2 — 워터마크도 최신 요청의 응답만. 옛 응답이 늦게 워터마크를 들고 와도 쓰지 않고, 최신 응답이 실패하거나 워터마크가
+// 없으면 이전 워터마크를 무효화 → 뒤 백필 이벤트는 «이미 반영»으로 건너뛰지 않는다(다시 묻는다).
+describe('designated-pending-count 워터마크 — 최신 요청 응답만 · 실패/없음이면 무효화', () => {
+  type Ctl = { ok: (count: number, xmin?: string) => void; fail: () => void };
+  let ctls: Ctl[] = [];
+  beforeEach(() => {
+    ctls = [];
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      ctls.push({
+        ok: (count: number, xmin?: string) => resolve({ ok: true, status: 200, json: async () => ({ count, ...(xmin ? { snapshot_xmin: xmin } : {}) }) }),
+        fail: () => resolve({ ok: false, status: 500, json: async () => ({}) }),
+      });
+    })));
+  });
+  const backfill = (xid: string) => JSON.stringify({ is_backfill: true, created_xid: xid });
+
+  it('⭐A 진행 중 B 발사 → A가 늦게 워터마크(100) · B 실패 → 백필(created_xid 50)은 건너뛰지 않는다', async () => {
+    const m = await import('./designated-pending-count-client');
+    m.resetDesignatedPendingCountStateForTest();
+    const a = m.fetchDesignatedPendingCount();
+    await tick();
+    const b = m.fetchDesignatedPendingCount({ fresh: true });
+    await tick();
+    ctls[1]!.fail();
+    await b;
+    ctls[0]!.ok(3, '100'); // 옛 응답이 늦게 워터마크를 들고 옴
+    await a;
+    await tick();
+    expect(m.isEventReflectedInLastCount(backfill('50'))).toBe(false);
+  });
+
+  it('⭐최신 요청이 실패하면 이전 워터마크 무효화(워터마크 100 뒤 새 요청 500 → 백필 50은 다시 묻는다)', async () => {
+    const m = await import('./designated-pending-count-client');
+    m.resetDesignatedPendingCountStateForTest();
+    const first = m.fetchDesignatedPendingCount();
+    await tick();
+    ctls[0]!.ok(2, '100');
+    await first;
+    expect(m.isEventReflectedInLastCount(backfill('50'))).toBe(true);
+    const second = m.fetchDesignatedPendingCount({ fresh: true });
+    await tick();
+    ctls[1]!.fail();
+    await second;
+    expect(m.isEventReflectedInLastCount(backfill('50'))).toBe(false);
+  });
+
+  it('최신 응답에 워터마크가 없으면 이전 워터마크 무효화', async () => {
+    const m = await import('./designated-pending-count-client');
+    m.resetDesignatedPendingCountStateForTest();
+    const first = m.fetchDesignatedPendingCount();
+    await tick();
+    ctls[0]!.ok(2, '100');
+    await first;
+    expect(m.isEventReflectedInLastCount(backfill('50'))).toBe(true); // 대조: 워터마크 있음 → 건너뜀
+    const second = m.fetchDesignatedPendingCount({ fresh: true });
+    await tick();
+    ctls[1]!.ok(2); // 워터마크 없음
+    await second;
+    expect(m.isEventReflectedInLastCount(backfill('50'))).toBe(false);
+  });
+});

@@ -47,10 +47,7 @@ export function resetDesignatedPendingCountStateForTest(): void {
   inFlight = null;
   latest = null;
   lastWatermark = null;
-  lastWatermarkSeq = 0;
 }
-
-let lastWatermarkSeq = 0;
 
 /**
  * @param opts.fresh 이벤트(SSE)가 부른 재조회면 true — 진행 중 요청(이벤트 전에 떴을 수 있음)에 합류하지 않고 새로 묻는다. 기동 · 포커스 ·
@@ -68,16 +65,19 @@ export function fetchDesignatedPendingCount(opts?: { fresh?: boolean }): Promise
     turn = freshTurn;
   }
   const seq = ++requestSeq;
+  // 까디르 codex 4626 P2 — 워터마크는 **가장 최근에 뜬 요청의 응답만** 기록한다. 옛 요청이 늦게 오면 그 수와 워터마크를 모두 버리고,
+  // 최신 응답이 실패하거나 유효한 워터마크가 없으면 이전 워터마크를 **무효화**한다 — 판정이 «이미 반영»(백필 건너뜀)이 아니라 «모름 → 다시
+  // 묻기»로 떨어지게(옛 워터마크가 남아 뒤 백필 이벤트를 건너뛰면 배지가 폴링까지 낡는다 · 4605 판정을 흐림).
+  const isLatest = () => latest !== null && latest.seq === seq;
   const raw = fetchWithAuth('/api/gates/designated-pending-count')
     .then(async (res) => {
-      if (!res.ok) return null;
+      if (!res.ok) { if (isLatest()) lastWatermark = null; return null; }
       const json = await res.json() as { count?: number; snapshot_xmin?: string | null };
       const xmin = parseXid(json.snapshot_xmin);
-      // 워터마크도 더 새 요청이 이미 남긴 값을 옛 응답이 덮지 않는다.
-      if (xmin !== null && seq >= lastWatermarkSeq) { lastWatermark = { key, xmin }; lastWatermarkSeq = seq; }
+      if (isLatest()) lastWatermark = xmin !== null ? { key, xmin } : null;
       return typeof json.count === 'number' ? json.count : 0;
     })
-    .catch(() => null);
+    .catch(() => { if (isLatest()) lastWatermark = null; return null; });
   const promise: Promise<number | null> = raw.then((value) => {
     const newer = latest;
     return newer && newer.key === key && newer.seq > seq ? newer.promise : value;
