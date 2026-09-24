@@ -1,6 +1,8 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
+import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { membersForKind, stageApprovalSurface, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
 
 // story #4243 — 멤버 선택지는 사람 + 에이전트(`type`). stage마다 정의의 role_actor_kinds로 거른다(human → 사람 ·
@@ -72,6 +74,7 @@ export function RecipeRoleMappingFields({
   /** story #4243 D3 — 승인이 stage 밖(approval.surface)인 stage의 읽기 전용 안내 문구. */
   approvalNote: (surface: string) => string;
 }) {
+  const t = useTranslations('organization');
   // sandbox 포함 — status로 걸러 disconnected 등은 아예 안 보인다(잘못 고를 표면 자체를
   // 없앤다, "고른 뒤 실패"보다 "애초에 못 고름"이 싸다).
   const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
@@ -85,10 +88,13 @@ export function RecipeRoleMappingFields({
         const target = meta?.capability?.target;
         const memberKind = stageMemberKind(stage, stageMetadata, roleActorKinds) ?? 'agent';
         const approvalSurface = stageApprovalSurface(stage, stageMetadata, roleActorKinds);
+        // 유나 design(4606) — 승인 자리 선언이 있는데 에이전트 선택기로 그려지는 행(에이전트 역할)도 승인 자리를 흐린 한 줄로 알린다.
+        const surfaceUnderPicker = !approvalSurface ? meta?.approval?.surface : undefined;
         return (
           <div key={stage} className="flex items-center gap-3">
-            <span className="w-32 shrink-0 text-xs font-medium text-foreground">
-              {meta?.role ?? stage}
+            {/* 유나 design(4606) — 행 이름은 단계 라벨(역할 원문 «Human»·«Any»는 번역도 안 되고 역할 kind와 어긋나 보인다). */}
+            <span className="w-32 shrink-0 break-keep text-xs font-medium text-foreground" data-testid={`mapping-row-label-${stage}`}>
+              {recipeStageLabel(stage, t)}
             </span>
             {approvalSurface ? (
               // story #4243 D3 — 승인이 이 stage 밖(결재함)이라 고를 담당이 없다. 선택기 없음 · 필수 아님 · role_mapping에 안 실림.
@@ -118,18 +124,23 @@ export function RecipeRoleMappingFields({
                 ))}
               </select>
             ) : (
-              <select
-                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                value={roleMapping[stage] ?? ''}
-                onChange={(e) => onChange(stage, e.target.value)}
-              >
-                <option value="">
-                  {memberKind === 'human' ? personPlaceholder : memberKind === 'either' ? memberPlaceholder : agentPlaceholder}
-                </option>
-                {membersForKind(members, memberKind).map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  value={roleMapping[stage] ?? ''}
+                  onChange={(e) => onChange(stage, e.target.value)}
+                >
+                  <option value="">
+                    {memberKind === 'human' ? personPlaceholder : memberKind === 'either' ? memberPlaceholder : agentPlaceholder}
+                  </option>
+                  {membersForKind(members, memberKind).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                {surfaceUnderPicker ? (
+                  <p className="text-[11px] text-muted-foreground" data-testid="mapping-approval-note">{approvalNote(surfaceUnderPicker)}</p>
+                ) : null}
+              </div>
             )}
           </div>
         );
