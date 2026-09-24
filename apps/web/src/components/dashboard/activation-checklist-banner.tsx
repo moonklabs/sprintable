@@ -13,6 +13,7 @@ import { inActivationScope, writeActivationCollapsed, writeActivationHint } from
 import { useActivationStatus, type ActivationState } from '@/hooks/use-activation-status';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #4032(실측 — Lighthouse CI 인증화면 6곳 전부 CLS>0.1, layout-shift-elements 감사
 // 상위 기여요소가 6곳 모두 이 배너 바로 아래 그리드였다) — 진짜 원인은 `useActivationStatus`
@@ -47,6 +48,7 @@ import { cn } from '@/lib/utils';
  */
 
 export function ActivationChecklistBanner() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('activation');
   const router = useRouter();
   const {
@@ -169,7 +171,7 @@ export function ActivationChecklistBanner() {
   const handleFirstInstructionClick = async () => {
     if (navigatingToInstruction) return;
     if (state?.first_instruction_conversation_id) {
-      router.push(`/chats/${state.first_instruction_conversation_id}`);
+      router.push(flatHref(`/chats/${state.first_instruction_conversation_id}`));
       return;
     }
     if (!projectId) return;
@@ -181,7 +183,7 @@ export function ActivationChecklistBanner() {
       // 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은 null을 «건너뛰고
       // 진행»으로 의도적으로 쓰지만(범위 밖, 그쪽은 그대로 둠), 이 배너는 그 클릭 자체가
       // 유일한 목적이라 실패를 알려야 한다.
-      if (convId) router.push(`/chats/${convId}`);
+      if (convId) router.push(flatHref(`/chats/${convId}`));
       else setInstructionStartError(true);
     } finally {
       setNavigatingToInstruction(false);
@@ -262,7 +264,7 @@ export function ActivationChecklistBanner() {
             return (
               <li key={key}>
                 <Link
-                  href="/organization/workforce"
+                  href={flatHref('/organization/workforce')}
                   className={cn(
                     'flex h-auto w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-sm font-normal hover:underline',
                     // story #3839 — 위 first_roundtrip 분기와 동일 처방(색 통일, 아이콘이 met 전달).

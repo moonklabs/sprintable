@@ -34,6 +34,8 @@ describe('useFlatHref(story #4226)', () => {
     expect(withProjectParam('/chats?p=OTHER', 'P')).toBe('/chats?p=OTHER');
     expect(withProjectParam('/chats/c1?p=OTHER&from=P&pn=x', 'P')).toBe('/chats/c1?p=OTHER&from=P&pn=x');
     expect(withProjectParam('/more', undefined)).toBe('/more');
+    // story #4231 3차 — 기존 쿼리 글자는 그대로(재인코딩 없음 · `%20`이 `+`로 안 바뀜).
+    expect(withProjectParam('/chats/c1?compose=%ED%95%9C%20%EC%A4%84', 'P')).toBe('/chats/c1?compose=%ED%95%9C%20%EC%A4%84&p=P');
   });
 
   it('⭐컨텍스트 프로젝트를 싣고 · 전환 대기 중 목표가 있으면 그걸 먼저', async () => {

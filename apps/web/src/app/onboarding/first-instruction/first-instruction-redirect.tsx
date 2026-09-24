@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
+import { withProjectParam } from '@/hooks/use-flat-href';
 
 // [SID:4021] compose는 URL 쿼리로 실려 가고, 메시지 content는 서버 스키마(SendMessageRequest.content:
 // str·conversation.py content=Text)에 명시 상한이 없다 → «기존 채팅 입력 상한»이 없어 URL-안전 상한을
@@ -214,12 +215,13 @@ export function FirstInstructionRedirect({
         const { path, tooLong } = buildFirstInstructionTarget(conversationId, compose, flags);
         if (tooLong) {
           // compose 없이 재구성 — 새 리터럴 0(같은 함수 재사용, 위 base와 동형).
-          setConversationHref(buildFirstInstructionTarget(conversationId, '', flags).path);
+          setConversationHref(withProjectParam(buildFirstInstructionTarget(conversationId, '', flags).path, projectId));
           setPhase('too_long');
           return;
         }
         // AC2 — 교체 이동(뒤로가기로 이 중간 주소에 안 돌아옴). 전송은 사람이 대화 화면에서 누른다.
-        router.replace(path);
+        // story #4231 3차 · 까디르 QA(ccef5258a) — 첫 착지(대화 · flat)는 이 온보딩의 프로젝트를 싣는다(착지 뒤 셸 ?p= 정규화 왕복 없음).
+        router.replace(withProjectParam(path, projectId));
       } catch {
         fail();
       }
@@ -231,7 +233,7 @@ export function FirstInstructionRedirect({
   }, [agentId, projectId, compose, router, flags]);
 
   // 안내 화면의 「목록으로」 폴백 — 목적지 모듈 한 곳(AC3, 파일 안 경로 리터럴 0).
-  const chatsListHref = resolveNavV3Destinations(flags).chats.path;
+  const chatsListHref = withProjectParam(resolveNavV3Destinations(flags).chats.path, projectId);
 
   if (phase === 'error') {
     return (

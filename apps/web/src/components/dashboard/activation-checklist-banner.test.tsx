@@ -322,7 +322,7 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
     await flush();
 
     expect(createFirstInstructionConversationMock).not.toHaveBeenCalled();
-    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-abc');
+    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-abc?p=proj-1') /* story #4231 — 현재 프로젝트를 싣는다 */;
   });
 
   it('first_instruction_conversation_id가 null이면 신규 DM 생성 경로(connect-step과 동일)를 타 그 대화로 이동한다', async () => {
@@ -338,7 +338,7 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
     await flush();
 
     expect(createFirstInstructionConversationMock).toHaveBeenCalledWith('proj-1');
-    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-new');
+    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-new?p=proj-1') /* story #4231 — 현재 프로젝트를 싣는다 */;
   });
 
   it('다른 항목(예: 이메일 인증하기)은 여전히 클릭 불가능한 li다', async () => {

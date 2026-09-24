@@ -9,6 +9,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { getPublicAppHost } from '@/lib/public-app-host';
 import { ConnectStep } from './connect-step';
 import { emitOnboardingEvent } from './onboarding-telemetry';
+import { withProjectParam } from '@/hooks/use-flat-href';
 
 // story #3195 — 이메일 인증 왕복(가입 → 1/4 입력 → EMAIL_VERIFICATION_REQUIRED 400 →
 // 메일함에서 링크 클릭 → verify-email 페이지 → 「시작하기」로 복귀)이 풀 페이지 네비게이션이라
@@ -303,7 +304,8 @@ export function OnboardingForm({
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
   const finishToHome = async () => {
     await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-    window.location.href = resolveOnboardingLandingHref(todayV3Enabled, todayHref, chatsHref);
+    // story #4231 — 첫 착지(flat)는 방금 만든 프로젝트를 싣는다(착지 뒤 셸 ?p= 정규화 왕복 없음).
+    window.location.href = withProjectParam(resolveOnboardingLandingHref(todayV3Enabled, todayHref, chatsHref), projectId);
   };
 
   const handleCreateProject = async () => {

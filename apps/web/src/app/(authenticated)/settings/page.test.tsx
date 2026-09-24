@@ -567,6 +567,33 @@ describe('SettingsPage — story #3789: 조직 탭·삭제 다이얼로그 i18n 
   });
 });
 
+// story #4231 3차 · 까디르 QA(ccef5258a [P2]) — api-keys 탭의 자동 이동은 탭이 이유이고 프로젝트는 싣는 값일 뿐이다. 프로젝트가
+// «모름 → A → 대기 B → A»로 바뀌는 동안에도 이동은 1번(여러 번이면 Next가 앞 이동을 버리는 경로 — 4231이 막으려던 부류).
+describe('SettingsPage — api-keys 자동 이동은 프로젝트가 정해지는 동안 1번(story #4231)', () => {
+  it('⭐프로젝트 «모름 → A → 대기 B → A» — router.push 1번, 발사 시점의 프로젝트(모름 → p 없음)', async () => {
+    const pushMock = vi.fn();
+    const router = { replace: vi.fn(), refresh: vi.fn(), push: pushMock, prefetch: vi.fn() };
+    const stableParams = new URLSearchParams('tab=api-keys');
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => router,
+      useSearchParams: () => stableParams,
+      usePathname: () => '/settings',
+    }));
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn(async () => ({ ok: false, json: async () => ({ data: null }) })) }));
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1', orgMemberships: [], projectId: undefined });
+    const { default: SettingsPage } = await import('./page');
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    await mount(<SettingsPage />);
+    useDashboardContextMock.mockReturnValue({ orgId: 'org-1', orgMemberships: [], projectId: 'proj-A' });
+    await mount(<SettingsPage />);
+    await act(async () => { setPendingProjectTarget('proj-B'); });
+    await act(async () => { setPendingProjectTarget(null); });
+    await act(async () => { await Promise.resolve(); });
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledWith('/organization/workforce');
+  });
+});
+
 // story #4184(E-MOBILE-SPEED) AC1 — /settings 한 번 진입에 /api/me가 7회(dev·prod 라이브) 나갔다
 // (페이지 loadContext + 프로필 탭 섹션들 + 알림 채널 + 구성원 절이 각자 fetch). 요청 공유
 // (lib/me-client.ts) 뒤엔 같은 화면이 네트워크 요청 1회를 나눠 쓴다.
