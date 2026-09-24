@@ -1,1 +1,1 @@
-{"file": "tests/test_4262_newsletter_send_not_sent_and_blocked_retry_realdb.py", "sec": 20.0, "source": "story-4262 — 신규 파일(로컬 실측 전 잠정값 · 실측 뒤 갱신)"}
+{"file": "tests/test_4262_newsletter_send_not_sent_and_blocked_retry_realdb.py", "sec": 9.5, "source": "story-4262 — 신규 파일 실측(로컬 pg16, pytest 직접 1회 실행, 7건 wall time 약 9.5s — test_4249 등재와 같은 방법론)"}
