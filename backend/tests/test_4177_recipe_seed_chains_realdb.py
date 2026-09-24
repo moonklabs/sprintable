@@ -621,7 +621,7 @@ async def _social_text_chain_to_published(app, Session, w) -> None:
 
 @pytest.mark.anyio
 async def test_social_text_post_seed_runs_start_to_published():
-    """SNS 텍스트 — sandbox 게시 1 · 마지막 단계(published) 이벤트 정확히 1. 그 이벤트의 수신자는 열린 결함 4255(아래 xfail)."""
+    """SNS 텍스트 — sandbox 게시 1 · 마지막 단계(published) 이벤트 정확히 1. 그 이벤트의 수신자는 아래 테스트(story #4255)."""
     from app.main import app
 
     engine, Session = await _realdb_session()
@@ -634,13 +634,11 @@ async def test_social_text_post_seed_runs_start_to_published():
         await engine.dispose()
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="열린 결함 story #4255 — 마지막 단계가 서버 stage(published)면 수신자 0(게시 결과가 아무에게도 안 감)",
-)
 @pytest.mark.anyio
-async def test_social_text_post_last_server_stage_reaches_previous_stage_member():
-    """마지막 단계 published(서버 게시)의 이벤트가 직전 단계(최종 발행 승인) 담당에게 간다(PO 처방 방향 · 4255)."""
+async def test_social_text_post_last_server_stage_reaches_the_publish_gate_approver():
+    """마지막 단계 published(서버 게시)의 이벤트는 그 게시를 촉발한 게이트(최종 발행 승인)를 **실제로 승인한 사람** ∪ 직전
+    stage에 바인딩된 에이전트에게 간다(story #4255 PO 확정 규칙 · 예전엔 수신자 0이라 xfail). 마케팅 적용 창은 사람 승인
+    stage를 바인딩하지 않으므로 여기선 승인한 owner다. 결과 줄은 «발행됐어요 · 공개 주소»."""
     from app.main import app
 
     engine, Session = await _realdb_session()
@@ -649,6 +647,7 @@ async def test_social_text_post_last_server_stage_reaches_previous_stage_member(
         w = await _world(Session, "sns-last")
         await _social_text_chain_to_published(app, Session, w)
         await _assert_reaches(Session, w, _SNS_TEXT, "published", w["owner_member_id"])
+        assert "발행됐어요" in (await _stage_message(Session, w, _SNS_TEXT, "published")).content
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
