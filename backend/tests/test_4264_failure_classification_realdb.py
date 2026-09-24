@@ -97,6 +97,7 @@ RETRY_SAFE = [
     "YOUTUBE_UPLOAD_SESSION_INIT_FAILED", "YOUTUBE_UPLOAD_SESSION_MISSING_LOCATION",
     "THREADS_DELETE_MEDIA_FAILED", "FACEBOOK_DELETE_POST_FAILED",  # 회수(삭제) — 다시 해도 같은 결과
     "SANDBOX_PROVIDER_ERROR", "SANDBOX_INSTAGRAM_PROVIDER_ERROR",  # sandbox 컨테이너 생성 단계(실 코드와 같은 부류)
+    "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED",  # sandbox 캐러셀 자식(부모 게시 전)
 ]
 NOT_SENT = [
     "NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
@@ -433,5 +434,60 @@ async def test_approval_and_budget_stops_are_stored_the_same_way_by_the_worker_a
             router_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.org_id == org_id))).scalar_one()
 
         assert _shape(worker_row) == _shape(router_row) == ("blocked_unapproved", reason, None, None)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_insights_board_row_carries_the_same_failure_fields_as_the_channel_post_list():
+    """까디르 codex P2(PO 18:51Z) — 성과 보드도 채널 포스트 목록과 같은 실패 필드 넷(같은 이름 · 같은 형식)을 내려야 «나갔을 수 있음» ·
+    승인/예산 사유 문장이 같게 뜬다. 뮤테이션: 보드 행에서 필드를 빼면 RED."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.models.publication_command import PublicationCommand
+    from app.services.insights_board import list_insights_board
+    from tests.test_3766_insights_board_command_status import (
+        _seed_channel_publication,
+        _seed_command,
+        _seed_gate,
+    )
+    from tests.test_3766_insights_board_command_status import (
+        _seed_human as _seed_board_human,
+    )
+    from tests.test_3766_insights_board_command_status import (
+        _seed_org as _seed_board_org,
+    )
+    from tests.test_3766_insights_board_command_status import (
+        _seed_story as _seed_board_story,
+    )
+    from tests.test_3766_insights_board_command_status import (
+        _session_factory as _board_session_factory,
+    )
+
+    engine, Session = await _board_session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_board_org(s)
+            story_id = await _seed_board_story(s, org_id, project_id)
+            human_id = await _seed_board_human(s, org_id)
+            now = datetime.now(UTC)
+            gate = await _seed_gate(s, org_id=org_id, work_item_id=story_id)
+            cp = await _seed_channel_publication(
+                s, org_id=org_id, gate_id=gate.id, channel="threads", published_at=now - timedelta(days=1),
+            )
+            cmd = await _seed_command(s, org_id=org_id, gate_id=gate.id, requested_by_member_id=human_id, status="dead_letter")
+            reset = now + timedelta(hours=3)
+            await s.execute(update(PublicationCommand).where(PublicationCommand.id == cmd.id).values(
+                failure_kind="needs_check", reason_code="X_POST_TWEET_MISSING_ID", reason_reset_at=reset, next_attempt_at=None,
+            ))
+            await s.commit()
+            result = await list_insights_board(s, org_id=org_id, window="30d")
+        row = next(r for r in result["rows"] if r["publication_id"] == cp.id)
+        assert (row["command_status"], row["failure_kind"], row["command_reason_code"], row["next_retry_at"]) == (
+            "dead_letter", "needs_check", "X_POST_TWEET_MISSING_ID", None,
+        )
+        assert row["command_reason_reset_at"] == reset.isoformat()
     finally:
         await engine.dispose()

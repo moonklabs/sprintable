@@ -515,8 +515,18 @@ export default function InsightsBoardPage() {
       key: 'actions', header: t('columnActions'), cardSlot: 'action',
       renderCell: (row) => {
         const index = rows.findIndex((r) => r.publication_id === row.publication_id);
-        const rowFailureAction = deriveFailureAction({ commandStatus: row.command_status as CommandStatus | null });
-        const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked';
+        // story #4264(까디르 codex P2 · PO 18:51Z) — 목록 · 상세 · 캘린더와 같은 입력(실패 부류 · 사유 · 리셋 · 다음 시도)으로 판정해
+        // «나갔을 수 있음» 문장 · 승인/예산 사유 문장이 이 보드에서도 같게 뜬다. 승인 필요 뒷문장은 게이트 상태를 모르는 화면이라
+        // 앞문장만(approvalContext 없음).
+        const rowFailureAction = deriveFailureAction({
+          commandStatus: row.command_status as CommandStatus | null,
+          failureKind: row.failure_kind ?? null,
+          reasonCode: row.command_reason_code ?? null,
+          reasonResetAt: row.command_reason_reset_at ?? null,
+          nextRetryAt: row.next_retry_at ?? null,
+        });
+        const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked'
+          || rowFailureAction?.kind === 'blocked_unapproved';
         // story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z) — 이 칸은 이제 배지(있으면)+
         // 펼침 토글만. 후속 조치·재조정 버튼은 행 상세(renderInsightsRowFooter의
         // InsightsBoardRowDetail)로 옮겼다 — 표가 9→7열로 좁아진다(자리 옮김 ①③).

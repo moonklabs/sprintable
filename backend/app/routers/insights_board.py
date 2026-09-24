@@ -83,6 +83,12 @@ class InsightsBoardRow(BaseModel):
     # PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
     # 축이라 섞지 않는다(필터 대상 아님 — 행 배지 전용). site_post 행은 항상 null.
     command_status: str | None = None
+    # story #4264(까디르 codex P2 · PO 18:51Z) — 채널 포스트 목록(ChannelPostDraftListItem)과 같은 이름 · 같은 뜻의 실패 필드 넷.
+    # 예전엔 command_status만 내려 «나갔을 수 있음»(needs_check) 문장 · 승인/예산 사유 문장이 이 보드에서만 안 떴다.
+    failure_kind: str | None = None
+    next_retry_at: str | None = None
+    command_reason_code: str | None = None
+    command_reason_reset_at: str | None = None
     # story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
     # 이 publication에 홍보 요청이 없으면 None(FE가 「해당 없음」으로 렌더 — 값을
     # 지어내지 않는다). paid_snapshots_only()로 organic 지표(d1/d7)와 원천부터
