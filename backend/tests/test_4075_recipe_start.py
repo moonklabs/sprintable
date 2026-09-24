@@ -443,4 +443,8 @@ async def test_start_candidates_carry_org_id_platform_none_org_str():
             assert by_key[platform_def.key].org_id is None
             assert "org_id" in resp.model_dump()["candidates"][0]
     finally:
+        # story #4233(CI 35943916027) — 공유 DB에 org_id NULL 플랫폼 정의를 남기지 않는다(플랫폼 짝 가드가 셈).
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = 'preset.marketing.e4202' AND org_id IS NULL"))
         await engine.dispose()

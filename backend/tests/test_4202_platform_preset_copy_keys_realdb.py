@@ -64,8 +64,20 @@ def anyio_backend():
     return "asyncio"
 
 
+# story #4233(CI 35943916027 · PO 02:04Z) — 테스트 전용 네임스페이스. 다른 realdb 테스트가 공유 DB에 org_id NULL 정의를
+# `preset.test<숫자>.` 이름으로 심는다(예: test_4091 `preset.test4091.sample_<uuid>`). 제품 시드는 이 모양을 쓰지 않으므로 짝 범위에서
+# 뺀다 — 뺄 수 있는 건 **이 모양 하나뿐**이다(`preset.testing…` 같은 이름 · 그 밖의 org_id NULL `preset.*`는 새 플랫폼 정의로 보고
+# 키 누락 RED · 음성 대조 테스트가 잠금).
+TEST_ONLY_PRESET_KEY = re.compile(r"^preset\.test\d*\.")
+
+
+def platform_name_scope(keys) -> set[str]:
+    """org_id NULL `preset.*` key 집합 → 이름 짝 범위(테스트 전용 네임스페이스만 제외)."""
+    return {k for k in keys if k.startswith("preset.") and not TEST_ONLY_PRESET_KEY.match(k)}
+
+
 async def _all_platform_preset_keys() -> set[str]:
-    """story #4233 — 이름 짝 범위: org_id NULL `preset.*` 전수(사이클형 + 신호형)."""
+    """story #4233 — 이름 짝 범위: org_id NULL `preset.*` 전수(사이클형 + 신호형 · 테스트 전용 네임스페이스 제외)."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -77,7 +89,7 @@ async def _all_platform_preset_keys() -> set[str]:
             ))).scalars().all()
     finally:
         await engine.dispose()
-    return set(rows)
+    return platform_name_scope(rows)
 
 
 async def _cyclic_platform_presets() -> dict[str, dict]:
@@ -187,6 +199,12 @@ def test_find_gaps_catches_each_failure_mode():
     sig_names = {**names, "preset.gate.v": "vName"}
     assert any("messages/en.json recipePreset.vName" in g for g in find_gaps(presets, sig_names, descs, {"ko": {**ok["ko"], "vName": "판정"}, "en": ok["en"]}, name_keys=sig_scope))
     assert find_gaps(presets, sig_names, descs, {"ko": {**ok["ko"], "vName": "판정"}, "en": {**ok["en"], "vName": "Verdict"}}, name_keys=sig_scope) == []
+
+    # 테스트 전용 네임스페이스(#4233 CI) — `preset.test…`만 빠지고, 그 밖의 org_id NULL `preset.*`는 범위에 남아 키 누락 RED.
+    scope = platform_name_scope({"preset.test4091.sample_ab12", "preset.test.x", "preset.testing_new.x", "preset.zz_new.signal", "preset.gate.v", "org.acme.x"})
+    assert scope == {"preset.testing_new.x", "preset.zz_new.signal", "preset.gate.v"}  # 빠지는 건 `preset.test<숫자>.` 모양뿐
+    assert any("preset.zz_new.signal: PLATFORM_PRESET_NAME_KEY에 행 없음" in g
+               for g in find_gaps(presets, sig_names, descs, ok, name_keys=scope | {"preset.marketing.a"}))
 
     # 워크플로우(#4203) — ko가 시드와 달라도 정상(새 문안이 기준), 키 누락은 그대로 RED.
     wf = {"preset.workflow.w": {"key": "preset.workflow.w", "name": "Kanban Flow", "description": "원문"}}

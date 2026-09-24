@@ -194,14 +194,14 @@ async def test_event_derived_message_carries_structured_event_summary():
     from app.main import app
 
     engine, Session = await _session_factory()
+    # 이 DB가 매 테스트 실행마다 초기화되지 않을 수 있어(로컬 재실행) preset 유니크
+    # 키(org_id IS NULL)를 실행마다 새로 짓는다.
+    key = f"preset.test4091.sample_{uuid.uuid4().hex[:8]}"
     try:
         async with Session() as s:
             org = await _make_org(s)
             project = await _make_project(s, org.id, "P")
             member_id, user_id = await _make_human_member(s, org.id, project.id)
-            # 이 DB가 매 테스트 실행마다 초기화되지 않을 수 있어(로컬 재실행) preset 유니크
-            # 키(org_id IS NULL)를 실행마다 새로 짓는다.
-            key = f"preset.test4091.sample_{uuid.uuid4().hex[:8]}"
             await _make_event_definition(s, key, _STAGE_METADATA)
             story = await _make_story(s, org.id, project.id, title="Target Story")
             conv_id = await _make_conversation(s, org.id, project.id, [member_id], member_id)
@@ -233,6 +233,10 @@ async def test_event_derived_message_carries_structured_event_summary():
             await client.aclose()
             app.dependency_overrides.clear()
     finally:
+        # story #4233(CI 35943916027) — 공유 DB에 org_id NULL 플랫폼 정의를 남기지 않는다(다른 가드가 플랫폼 정의로 셈).
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = :k AND org_id IS NULL"), {"k": key})
         await engine.dispose()
 
 
