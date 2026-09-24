@@ -483,6 +483,26 @@ describe('ApprovalsQueue', () => {
     expect(pushMock).toHaveBeenCalledWith('/gates/g-tap');
   });
 
+  it('story #4231 — 항목 탭은 현재 프로젝트(`?p=`)를 싣고 · 프로젝트 전환 대기 중이면 그 목표를 싣는다(4585와 같은 동작)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [],
+      currentMemberType: 'human', currentTeamMemberId: 'member-1', projectId: 'proj-A',
+    });
+    mockFetches([gate({ id: 'g-tap' })], []);
+    await mount();
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenLastCalledWith('/gates/g-tap?p=proj-A');
+
+    const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
+    try {
+      await act(async () => { setPendingProjectTarget('proj-B'); });
+      await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(pushMock).toHaveBeenLastCalledWith('/gates/g-tap?p=proj-B');
+    } finally {
+      setPendingProjectTarget(null);
+    }
+  });
+
   // story #2926(P0-F F3) — 클릭-스루 전용 항목은 ProofCapsule density="row"(컷코너+신뢰단계
   // 레일)로 셸이 바뀐다. 3버튼 인라인 결재 카드·resolved 카드는 F3 스코프 밖(현행 rounded-xl
   // border 카드 그대로 — 2923이 다룰 표면)이라 이 항목만 겨냥해 확認한다.

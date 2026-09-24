@@ -33,6 +33,7 @@ import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
 // 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
@@ -197,6 +198,7 @@ interface ChatInputProps {
 }
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const tSettings = useTranslations('settings');
@@ -697,7 +699,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                     })}
                   </span>
                   <Link
-                    href={`/organization/workforce/${tg.agentId}`}
+                    href={flatHref(`/organization/workforce/${tg.agentId}`)}
                     className="shrink-0 rounded font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('commandViewSettings')}

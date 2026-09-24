@@ -471,7 +471,7 @@ export function WorkListDetailPanel({
       <ul className="space-y-1.5" data-testid="panel-publications-list">
         {site.map((d) => (
           <li key={`site-${d.draft_id}`} className="flex items-center justify-between gap-2 text-xs">
-            <Link href={`/content/${d.draft_id}`} className="truncate text-primary underline-offset-2 hover:underline">
+            <Link href={flatHref(`/content/${d.draft_id}`)} className="truncate text-primary underline-offset-2 hover:underline">
               {d.title}
             </Link>
             <StatusChip status={siteDraftStatus(d)} />
@@ -479,7 +479,7 @@ export function WorkListDetailPanel({
         ))}
         {channel.map((d) => (
           <li key={`channel-${d.draft_id}`} className="flex items-center justify-between gap-2 text-xs">
-            <Link href={`/content/channel-posts/${d.draft_id}`} className="truncate text-primary underline-offset-2 hover:underline">
+            <Link href={flatHref(`/content/channel-posts/${d.draft_id}`)} className="truncate text-primary underline-offset-2 hover:underline">
               {d.text_preview}
             </Link>
             <StatusChip status={channelDraftStatus(d)} />
@@ -596,7 +596,7 @@ export function WorkListDetailPanel({
             )}
             {conversationId ? (
               <Button asChild variant="outline" size="sm">
-                <Link href={`/chats/${conversationId}`} data-testid="panel-reply-action">{t('actionReply')}</Link>
+                <Link href={flatHref(`/chats/${conversationId}`)} data-testid="panel-reply-action">{t('actionReply')}</Link>
               </Button>
             ) : null}
           </div>

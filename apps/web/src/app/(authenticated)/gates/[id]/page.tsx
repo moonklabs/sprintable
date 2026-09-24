@@ -29,6 +29,7 @@ import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-sec
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -69,6 +70,7 @@ function GateLineagePerformance({ gate }: { gate: GateDetail }) {
 }
 
 export default function GateDetailPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('cage');
@@ -204,7 +206,7 @@ export default function GateDetailPage() {
   // 고위험 게이트가 타는 서명 버튼엔 안 붙는 결함이 났다, CHANGES 실측).
   const approveButtonLabelKey = gateApproveLabelKey(gate);
   const targetLink = isDocGate && gate?.work_item_summary?.slug
-    ? { href: `/docs/${gate.work_item_summary.slug}`, labelKey: 'gateDetailViewTargetDoc' as const }
+    ? { href: flatHref(`/docs/${gate.work_item_summary.slug}`), labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
     ? { href: `/artifacts/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetArtifact' as const }
     : isLoopDecisionGate && gate?.work_item_id
@@ -274,7 +276,7 @@ export default function GateDetailPage() {
       // 승인/거부한 사람은 다음 게이트를 마저 처리하러 온 것이지 알림을 보러 온 게 아니다.
       // '?tab=gates'로 명시해 실제 결재함(게이트 탭)으로 돌아간다.
       if (res.ok) {
-        router.replace('/inbox?tab=gates');
+        router.replace(flatHref('/inbox?tab=gates'));
         return;
       }
       // story #2043 AC3: 서버 거부(예: #2027 — 고위험 승인은 note 필수, 422)를 사람이 읽을
@@ -306,7 +308,7 @@ export default function GateDetailPage() {
     } finally {
       setResolving(false);
     }
-  }, [gate, router, t, fetchGate]);
+  }, [gate, router, t, fetchGate, flatHref]);
 
   // story #2631 — «보류(논의 필요)». transition()과 형제: 상태 전이가 없어(pending 유지)
   // 페이지 이동 없이 그 자리서 fetchGate()로 discussion_requested만 갱신한다.
@@ -346,7 +348,7 @@ export default function GateDetailPage() {
         title={
           <button
             type="button"
-            onClick={() => router.replace('/inbox?tab=gates')}
+            onClick={() => router.replace(flatHref('/inbox?tab=gates'))}
             className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -570,7 +572,7 @@ export default function GateDetailPage() {
               <p className="text-[11px] text-muted-foreground">
                 {t('gateDeferredToRecipeGate')}
                 {' · '}
-                <Link href={`/gates/${gate.deferred_to_gate_id}`} className="font-medium text-primary hover:underline">
+                <Link href={flatHref(`/gates/${gate.deferred_to_gate_id}`)} className="font-medium text-primary hover:underline">
                   {t('gateDeferredToRecipeGateLink')}
                 </Link>
               </p>

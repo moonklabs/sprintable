@@ -25,6 +25,7 @@ import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine } from './event-block-card';
 import { toPlainPreview } from './entity-ref';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface Participant {
   member_id: string;
@@ -363,6 +364,7 @@ function applyConversationMessageUpdate(
 const PAGE_LIMIT = 30;
 
 export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
@@ -532,8 +534,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // `pn`(대상 프로젝트명)은 실패 화면(권한 회수 등)에서 dashboardContext.projectMemberships가
     // 이미 그 프로젝트를 못 가진 상태일 수 있어(바로 그게 실패 사유) 클릭 시점 값을 실어 보낸다.
     const params = new URLSearchParams({ p: conv.project_id, from: projectId, pn: conv.project_name });
-    router.push(`/chats/${conv.id}?${params.toString()}`);
-  }, [t, router, projectId]);
+    router.push(flatHref(`/chats/${conv.id}?${params.toString()}`));
+  }, [t, router, projectId, flatHref]);
 
   // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
   // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
@@ -555,11 +557,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     consumedComposeRef.current = true;
     if (conversations.length > 0) {
       const mostRecent = conversations.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
-      router.replace(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`);
+      router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
     } else {
       setShowModal(true);
     }
-  }, [composeParam, loading, conversations, router, setShowModal]);
+  }, [composeParam, loading, conversations, router, setShowModal, flatHref]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -671,7 +673,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // story #3831 — 「오늘」에서 넘어온 지시 한 줄이 있으면(0건 대화라 새 대화 모달을
     // 거친 경우) 그 새 대화의 컴포저에도 같은 기전으로 싣는다.
     router.push(
-      composeParam ? `/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}` : `/chats/${conversationId}`,
+      composeParam ? flatHref(`/chats/${conversationId}?compose=${encodeURIComponent(composeParam)}`) : flatHref(`/chats/${conversationId}`),
     );
     void fetchConversations(0, false);
   };
@@ -763,7 +765,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`))} />
           ))}
         </div>
       )}
@@ -773,7 +775,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`))} />
           ))}
         </div>
       )}
@@ -847,7 +849,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(`/chats/${conv.id}`)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`))} />
       ))}
       {allConversations.length < agentTotal && (
         <Button

@@ -758,6 +758,7 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * 정정용으로 남긴다.
  */
 function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('cage');
   const draft = gate.linked_channel_draft;
 
@@ -834,7 +835,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
         <p className="whitespace-pre-wrap text-foreground">{draft.text}</p>
       ) : null}
       <a
-        href={`/content/channel-posts/${draft.draft_id}`}
+        href={flatHref(`/content/channel-posts/${draft.draft_id}`)}
         className="inline-block text-[11px] text-primary underline underline-offset-2"
       >
         {t('linkedChannelDraftOpenLink')}

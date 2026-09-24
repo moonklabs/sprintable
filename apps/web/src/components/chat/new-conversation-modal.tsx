@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface Member {
   id: string;
@@ -35,6 +36,7 @@ interface NewConversationModalProps {
 }
 
 export function NewConversationModal({ projectId, onClose, onCreated }: NewConversationModalProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).
   const ta = useTranslations('agents');
@@ -194,7 +196,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
               {error.kind === 'policy' ? (
                 <>
                   {' · '}
-                  <Link href={`/organization/workforce/${error.agentId}`} className="whitespace-nowrap text-primary underline">
+                  <Link href={flatHref(`/organization/workforce/${error.agentId}`)} className="whitespace-nowrap text-primary underline">
                     {t('policyDeniedManageLink')}
                   </Link>
                 </>

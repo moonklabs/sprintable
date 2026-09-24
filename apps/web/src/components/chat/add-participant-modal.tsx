@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface Member {
   id: string;
@@ -40,6 +41,7 @@ export function AddParticipantModal({
   onClose,
   onAdded,
 }: AddParticipantModalProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const [members, setMembers] = useState<Member[]>([]);
@@ -156,7 +158,7 @@ export function AddParticipantModal({
               {error.kind === 'policy' ? (
                 <>
                   {' · '}
-                  <Link href={`/organization/workforce/${error.agentId}`} className="whitespace-nowrap text-primary underline">
+                  <Link href={flatHref(`/organization/workforce/${error.agentId}`)} className="whitespace-nowrap text-primary underline">
                     {t('policyDeniedManageLink')}
                   </Link>
                 </>
