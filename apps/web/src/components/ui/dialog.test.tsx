@@ -6,7 +6,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { Dialog, DialogContent, DialogTitle } from './dialog';
+import { Dialog, DialogContent, DialogTitle, DialogHeader } from './dialog';
 // story 3436(묶음 1) — DialogContent가 이제 useTranslations('common')을 쓴다
 // (sr-only "Close" i18n화) — 렌더 트리에 NextIntlClientProvider가 있어야 한다.
 import koMessages from '../../../messages/ko.json';
@@ -86,7 +86,9 @@ describe('DialogContent·DialogTitle — 390 규격(story #4210)', () => {
       root.render(wrap(
         <Dialog open>
           <DialogContent showCloseButton={showCloseButton}>
-            <DialogTitle>긴 제목 Video production (Reels, Shorts) — Apply to project</DialogTitle>
+            <DialogHeader>
+              <DialogTitle>긴 제목 Video production (Reels, Shorts) — Apply to project</DialogTitle>
+            </DialogHeader>
           </DialogContent>
         </Dialog>,
       ));
@@ -101,11 +103,16 @@ describe('DialogContent·DialogTitle — 390 규격(story #4210)', () => {
     expect(popup.className).toContain('grid-cols-[minmax(0,1fr)]');
   });
 
-  it('닫기 버튼이 있으면 팝업에 data-close-button 표지 · 제목이 그 표지로 pr-8', async () => {
+  it('⭐닫기 버튼이 있으면 팝업에 data-close-button 표지 · **머리 줄(DialogHeader) 전체**가 그 표지로 pr-8 · 헤더 안 제목은 중복 pr 없음', async () => {
     const { popup, title } = await render(true);
     expect(popup.hasAttribute('data-close-button')).toBe(true);
     expect(popup.className).toContain('group/dialog');
-    expect(title.className).toContain('group-data-[close-button]/dialog:pr-8');
+    // 첫 자식 전체에 거는 규칙은 쓰지 않는다 — 내용 전체를 한 래퍼로 감싼 다이얼로그는 본문까지 32px을 잃는다(PO 리뷰 · 레시피 상세 실측).
+    expect(popup.className).not.toContain('first-child');
+    const header = popup.querySelector('[data-slot="dialog-header"]')!;
+    expect(header.className).toContain('group-data-[close-button]/dialog:pr-8');
+    // 헤더 밖에 쓰인 DialogTitle(커스텀 행 13곳)은 여전히 스스로 비운다 · 헤더 안이면 머리 줄이 이미 비우므로 안 비운다.
+    expect(title.className).toContain('group-data-[close-button]/dialog:not-in-data-[slot=dialog-header]:pr-8');
   });
 
   it('닫기 버튼이 없으면 표지도 없다(제목 오른쪽을 비우지 않음)', async () => {
