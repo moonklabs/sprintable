@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -26,9 +26,15 @@ export default function IntegrationsPage() {
     return g === 'connected' ? 'success' : 'error'; // 실패 사유는 중립(존재/원인 누설 X·anti-IDOR 정신)
   });
 
+  // story #4231 3차 · 까디르 QA(ccef5258a [P2]) — 이동 이유는 github 파라미터이고 프로젝트는 싣는 값일 뿐 — flatHref를 deps에서 빼고
+  // 발사 순간의 최신 값을 ref로 읽는다(프로젝트가 정해지는 동안 replace가 여러 번 나가 앞 이동을 버리던 경로).
+  const flatHrefRef = useRef(flatHref);
+  useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
   useEffect(() => {
-    if (params.get('github')) router.replace(flatHref('/settings/integrations')); // 1회 소비
-  }, [params, router, flatHref]);
+    if (!params.get('github')) return;
+    const flatHref = flatHrefRef.current;
+    router.replace(flatHref('/settings/integrations')); // 1회 소비
+  }, [params, router]);
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6">

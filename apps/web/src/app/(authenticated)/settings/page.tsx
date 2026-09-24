@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -453,13 +453,19 @@ export default function SettingsPage() {
     void refreshMemberData(memberProjectId).catch((err) => { console.error('멤버 데이터 로드 실패', err); });
   }, [memberProjectId]);
 
+  // story #4231 3차 · 까디르 QA(ccef5258a [P2]) — 이동 이유는 탭(activeTab)이고 프로젝트는 싣는 값일 뿐이다. flatHref를 deps에 넣으면
+  // 프로젝트가 «모름 → A → 대기 B → A»로 바뀌는 동안 이동이 여러 번 나가(Next가 앞 이동을 버리는 경로) — 발사 순간의 최신 값을 ref로 읽는다.
+  const flatHrefRef = useRef(flatHref);
+  useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
+
   // api-keys 탭 접근 시 /agents(관리 탭)으로 자동 전환 (레거시 리다이렉트)
   useEffect(() => {
     // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
     if (activeTab === 'api-keys') {
+      const flatHref = flatHrefRef.current;
       router.push(flatHref('/organization/workforce'));
     }
-  }, [activeTab, router, flatHref]);
+  }, [activeTab, router]);
 
   const applySettingOptimistic = (eventType: string, newEnabled: boolean) => {
     setSettings((prev) => {

@@ -7,6 +7,7 @@
 //   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)` 호출 안.
 //   ② 이동이 아닌 자리 — 구조로 판정(비교 연산 · `case` · `startsWith`류 판정 · 탭 정체성 인자 · 정적 파일 fetch)하거나,
 //      아래 EXEMPT 표에 **이유와 함께** 적은 자리(파일 + 리터럴/속성). 표는 늘리지 않는 것이 원칙이다(새 예외는 PO 판단).
+// 이 수는 **문법 전수**(소스에 쓰인 flat 리터럴)이지 런타임 링크 전수가 아니다(한 리터럴이 여러 링크를 그릴 수 있고, 조건 갈래는 따로 센다).
 // 이 수가 **늘면 RED**(새 bare flat 목적지 금지). 줄였으면 BASELINE도 같이 낮출 것(래칫) — #4231이 0까지 내린다.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -25,17 +26,18 @@ const PREDICATE_METHODS = new Set(['startsWith', 'endsWith', 'includes', 'indexO
 /** 이동이 아니거나(판정·서버·문맥 전) 감싸면 틀리는 자리 — 파일(SRC 기준) + 리터럴(템플릿은 머리 글자). props가 있으면 그 속성 값일 때만. */
 export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: string[]; reason: string }> = [
   { file: 'lib/nav-config.ts', props: ['path'], reason: '내비 설정 경로 — 소비처(사이드바·더보기·탭바·커맨드 팔레트)가 렌더에서 flatHref로 감싼다(각 flat-href 렌더 테스트)' },
-  { file: 'lib/nav-v3-destinations.ts', props: ['path'], reason: 'v3 목적지 설정 경로 — 클라이언트 소비처(탭바·nav-v3-item-list·chat-v3 «오늘»·온보딩 첫 착지)가 감싸고, 나머지는 서버 리다이렉트(proxy·app/page·desktop·dashboard/page·auth callback)' },
+  { file: 'lib/nav-v3-destinations.ts', props: ['path'], reason: 'v3 목적지 설정 경로 — 클라이언트 소비처(탭바·nav-v3-item-list·chat-v3 «오늘»·온보딩 첫 착지·온보딩 첫 지시 redirect)가 감싸고, 나머지는 서버 리다이렉트(proxy·app/page·desktop·dashboard/page·auth callback)' },
   { file: 'hooks/use-account-switcher.ts', reason: '다른 조직으로 전환하는 하드 이동 — 현재 프로젝트를 실으면 틀린 p(PO 02:02Z 예외)' },
   { file: 'app/dashboard/dashboard-shell.tsx', texts: ['/inbox', '/chats', '/more'], reason: 'TAB_ROOT_PREFIXES — 경로 접두 판정 표(이동 아님)' },
   { file: 'proxy.ts', reason: '미들웨어 경로 판정(이동 링크 아님)' },
-  { file: 'app/api/oauth-channel/authorize/route.ts', reason: '서버 리다이렉트 — 로그인 뒤 돌아올 next(프로젝트 문맥 전)' },
-  { file: 'app/auth/link/route.ts', reason: '서버 리다이렉트 — 로그인 뒤 돌아올 next(프로젝트 문맥 전)' },
-  { file: 'app/dashboard/settings/page.tsx', reason: '서버 리다이렉트(옛 주소 → /settings) — 서버에 현재 프로젝트 문맥 없음' },
-  { file: 'app/(authenticated)/organization/connectors/page.tsx', reason: '서버 리다이렉트(옛 주소) — 서버에 현재 프로젝트 문맥 없음' },
-  { file: 'app/register/page.tsx', reason: '가입 직후 첫 착지 — 프로젝트 문맥 전' },
-  { file: 'app/verify-email/page.tsx', reason: '이메일 확인 직후 첫 착지 — 프로젝트 문맥 전' },
-  { file: 'components/auth/session-expired-dialog.tsx', reason: '재로그인 뒤 돌아올 경로(현재 주소 폴백) — 로그인 전 문맥' },
+  // 아래 예외는 «p를 실으면 안 된다»가 아니라 «이 자리엔 실을 목표 프로젝트 값이 없다(클라이언트 훅 밖)»는 뜻이다.
+  { file: 'app/api/oauth-channel/authorize/route.ts', reason: '서버 리다이렉트(로그인 뒤 돌아올 next) — 서버엔 클라이언트의 목표 프로젝트가 없다(들어온 주소의 p는 이어질 수 있음)' },
+  { file: 'app/auth/link/route.ts', reason: '서버 리다이렉트(로그인 뒤 돌아올 next) — 서버엔 클라이언트의 목표 프로젝트가 없다(들어온 주소의 p는 이어질 수 있음)' },
+  { file: 'app/dashboard/settings/page.tsx', reason: '서버 리다이렉트(옛 주소 → /settings) — 서버엔 클라이언트의 목표 프로젝트가 없다(착지 뒤 셸이 정한다)' },
+  { file: 'app/(authenticated)/organization/connectors/page.tsx', reason: '서버 리다이렉트(옛 주소) — 서버엔 클라이언트의 목표 프로젝트가 없다(착지 뒤 셸이 정한다)' },
+  { file: 'app/register/page.tsx', reason: '가입 직후 첫 착지 — 아직 프로젝트 컨텍스트가 없어 실을 값이 없다' },
+  { file: 'app/verify-email/page.tsx', reason: '이메일 확인 직후 첫 착지 — 아직 프로젝트 컨텍스트가 없어 실을 값이 없다' },
+  { file: 'components/auth/session-expired-dialog.tsx', reason: '재로그인 뒤 돌아올 경로(현재 주소 폴백) — 로그인 전이라 실을 값이 없다' },
 ];
 
 function flatRoutes(): string[] {
