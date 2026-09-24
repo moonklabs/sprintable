@@ -198,3 +198,49 @@ async def test_realdb_batch_project_resolver_matches_single_per_type():
             assert other == {}
     finally:
         await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_reference_targets_issue_one_in_query_per_kind_when_direct_and_gate_targets_mix():
+    """까디르 codex · PO 10:03Z — «종류당 IN 쿼리 1개» 약속을 SQL로 잠근다. 스토리 직접 + 스토리 게이트 + 문서 직접 + 문서 게이트를 섞어도
+    stories · docs 조회는 각 1번(예전엔 게이트 해소기가 같은 배치를 또 불러 stories 2번 · 문서는 project/slug 따로 docs 2번)."""
+    from sqlalchemy import event
+
+    from app.models.gate import Gate
+    from app.services.notification_targets import resolve_reference_targets
+
+    engine, Session = await _session_factory()
+    captured: list[str] = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        captured.append(statement)
+
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_users(s)
+            org_id = seeded["org_id"]
+            pid, t = await _seed_targets(s, seeded)
+            doc_gate = Gate(id=uuid.uuid4(), org_id=org_id, work_item_id=t["doc"].id, work_item_type="doc",
+                            gate_type="doc_approval", status="pending")
+            s.add(doc_gate)
+            await s.commit()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _capture)
+        async with Session() as s:
+            got = await resolve_reference_targets(s, org_id, [
+                ("story", t["story"].id), ("gate", t["gate"].id), ("doc", t["doc"].id), ("gate", doc_gate.id),
+            ])
+        event.remove(engine.sync_engine, "before_cursor_execute", _capture)
+
+        def count(table: str) -> int:
+            return sum(1 for q in captured if f"FROM {table}" in q or f"JOIN {table}" in q)
+
+        assert count("stories") == 1, captured
+        assert count("docs") == 1, captured
+        assert got[("story", t["story"].id)].project_id == pid
+        assert got[("gate", t["gate"].id)].project_id == pid
+        assert got[("gate", doc_gate.id)].project_id == pid
+        assert got[("doc", t["doc"].id)].project_id == pid and got[("doc", t["doc"].id)].doc_slug == t["doc"].slug
+    finally:
+        await engine.dispose()
