@@ -527,7 +527,7 @@ async def _newsletter_chain_to_send_approval(app, Session, w):
 @pytest.mark.anyio
 async def test_newsletter_seed_runs_start_to_send_checked(monkeypatch):
     """뉴스레터(6단계) — 발송 요청 승인 → 발송(크론 · 워커 · sandbox) → 발송 결과 확인(서버) 정확히 1.
-    발송 승인 알림의 발행 예시는 여기서 따르지 않는다 — 열린 결함 4254(아래 xfail 테스트가 잰다)."""
+    발송 승인 알림이 발행 예시를 싣지 않는 것은 아래 테스트가 잰다(story #4254)."""
     from app.main import app
     from app.services.newsletter_send_execution import process_due_newsletter_sends
     from app.services.publication_command import process_due_publication_commands
@@ -551,13 +551,12 @@ async def test_newsletter_seed_runs_start_to_send_checked(monkeypatch):
         await engine.dispose()
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="열린 결함 story #4254 — 발송 요청 승인 알림이 send_checked 발행 예시를 준다(발송 전 거짓 완료)",
-)
 @pytest.mark.anyio
 async def test_newsletter_send_approval_notice_does_not_advance_before_the_send():
-    """발송 요청 승인 알림을 담당이 그대로 따라도(최저 지능 기준) 실제 발송 전에 «발송 결과 확인»이 나지 않는다."""
+    """발송 요청 승인 알림을 담당이 그대로 따라도(최저 지능 기준) 실제 발송 전에 «발송 결과 확인»이 나지 않는다 — 알림에 발행
+    예시가 없고 «서버가 발송하고 · 성공하면 넘어가요»만 있다(story #4254 · 예전엔 xfail로 둔 열린 결함)."""
+    from app.services.i18n_catalog import t
+
     from app.main import app
 
     engine, Session = await _realdb_session()
@@ -566,6 +565,8 @@ async def test_newsletter_send_approval_notice_does_not_advance_before_the_send(
         w = await _world(Session, "newsletter-verdict")
         _example, send_gate = await _newsletter_chain_to_send_approval(app, Session, w)
         verdict = await _verdict_message(Session, w, send_gate.id)
+        assert "publish_event(" not in verdict.content, verdict.content
+        assert t("events.gate_verdict_next_action_recipe_server_sends", "ko") in verdict.content, verdict.content
         if "publish_event(" in verdict.content:
             await _publish(app, Session, w, actor="publisher_id", body=_publish_example(verdict.content))
         assert await _stage_event_count(Session, w, _NEWSLETTER, "send_checked") == 0, (
