@@ -251,7 +251,10 @@ async def test_site_post_branch_maps_pause_raised_inside_publish_to_blocked_paus
         await engine.dispose()
 
 
-@pytest.mark.parametrize(("status", "failure_kind"), [("blocked", "connection"), ("dead_letter", "needs_check")])
+# story #4264 — «확실히 안 나감»(not_sent · dead_letter)도 사람 재시도 대상이라 자가복구가 되살리지 않는다.
+@pytest.mark.parametrize(
+    ("status", "failure_kind"), [("blocked", "connection"), ("dead_letter", "needs_check"), ("dead_letter", "not_sent")],
+)
 async def test_self_heal_rechecks_after_lock_and_skips_commands_changed_in_between(status, failure_kind):
     """AC2b(까디르 QA) — 자가복구가 blocked/paused id를 모은 뒤 잠그기 전에, 다른 tick이 그 명령을 처리해
     `blocked/connection`·`dead_letter/needs_check`가 됐다 → 되살리지 않는다(사람의 재시도 필요 판단 우회 금지)."""

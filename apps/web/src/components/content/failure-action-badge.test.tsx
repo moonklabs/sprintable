@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { FailureActionBadge } from './failure-action-badge';
-import type { FailureAction } from './failure-action';
+import { deriveFailureAction, type FailureAction } from './failure-action';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('next/navigation', () => ({ useParams: () => ({}) }));
@@ -168,6 +168,22 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
       .toBe(koMessages.content.channelPostsFailureYoutubeQuotaExceeded);
     expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureDeadLetter);
     expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureNeedsCheck);
+  });
+
+  // story #4264(PO 15:18Z) — 사용량 초과가 `not_sent`(확실히 안 나감)로 옮겨도 사용량 문장 · 리셋 전 재시도 비활성은 그대로다
+  // (not_sent 갈래가 일반 «자동 재시도를 멈췄어요»로 덮지 않는다). 판정을 실제 입력(failure_kind)에서 끌어낸다.
+  it('⭐dead_letter ∧ failure_kind=not_sent ∧ YOUTUBE_QUOTA_EXCEEDED — 사용량 문장 · 리셋 전 재시도 비활성 그대로', async () => {
+    const action = deriveFailureAction({
+      commandStatus: 'dead_letter', failureKind: 'not_sent',
+      reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: new Date(Date.now() + 9 * 3600_000).toISOString(),
+    });
+    expect(action).toMatchObject({ kind: 'dead_letter', needsRecheck: false, reasonCode: 'YOUTUBE_QUOTA_EXCEEDED' });
+    await render(action as FailureAction);
+    expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureYoutubeQuotaExceeded);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureDeadLetter);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryAfterReset);
   });
 
   // story #3815(페드루 PO steer②) — "지정 코드만 막으면 클래스가 남는다": 표에
