@@ -147,9 +147,12 @@ export const BUCKET_BY_KIND: Record<AttentionKind, AttentionBucket> = {
  * 엣지 1개당 1행을 주므로 story_id별 집계해 실 차단 건수를 claim에 반영(v1 클라 파생과 동일
  * UX·집계 지점만 이동).
  */
+/** withProject — story #4231 4차: 보드(옛 자원 경로 · flat 목적지) 링크에 프로젝트를 싣는 함수(필수). 이 큐는 한 프로젝트의 신호라 호출처는
+ * 그 프로젝트를 싣는 함수를 넘긴다. */
 export function buildAttentionQueueFromBe(
   signals: BeAttentionItem[],
   t: AttentionQueueTranslator,
+  withProject: (href: string) => string,
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
   const blockedByStory = new Map<string, { title: string; count: number; enteredAtMs: number | null }>();
@@ -189,14 +192,14 @@ export function buildAttentionQueueFromBe(
         id: `verify_fail-${sig.story_id}`, kind: 'verify_fail', bucket: BUCKET_BY_KIND.verify_fail, kindLabel: t('kindVerifyFail'),
         proofState: PROOF_STATE.verify_fail, claim: t('claimVerifyFail', { title: sig.title }),
         actor: null, actionLabel: t('actionRework'), actionTone: 'neutral',
-        href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+        href: withProject(`/board?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     } else if (sig.kind === 'merge_ready') {
       items.push({
         id: `merge_ready-${sig.story_id}`, kind: 'merge_ready', bucket: BUCKET_BY_KIND.merge_ready, kindLabel: t('kindMergeReady'),
         proofState: PROOF_STATE.merge_ready, claim: t('claimMergeReady', { title: sig.title }),
         actor: null, actionLabel: t('actionMerge'), actionTone: 'ready',
-        href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+        href: withProject(`/board?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     }
   }
@@ -206,7 +209,7 @@ export function buildAttentionQueueFromBe(
       id: `blocked-${storyId}`, kind: 'blocked', bucket: BUCKET_BY_KIND.blocked, kindLabel: t('kindBlocked'),
       proofState: PROOF_STATE.blocked, claim: t('claimBlocked', { title, count }),
       actor: null, actionLabel: t('actionCoordinate'), actionTone: 'neutral',
-      href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+      href: withProject(`/board?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   for (const [storyId, { title, enteredAtMs, originKind }] of decisionNeededByStory) {
@@ -217,7 +220,7 @@ export function buildAttentionQueueFromBe(
       id: `decision_needed-${storyId}`, kind: 'decision_needed', bucket: originKind === 'gate_pending' ? 'GATE' : 'STEER', kindLabel: t('kindDecisionNeeded'),
       proofState: PROOF_STATE.decision_needed, claim: t('claimDecisionNeeded', { title }),
       actor: null, actionLabel: t('actionDecide'), actionTone: 'primary',
-      href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+      href: withProject(`/board?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   return items;

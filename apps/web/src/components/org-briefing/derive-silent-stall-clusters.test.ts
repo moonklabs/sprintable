@@ -111,11 +111,11 @@ describe('deriveSilentStallClusters', () => {
     expect(deriveSilentStallClusters(brokenShape, undefined, NOW).totalCount).toBe(0);
   });
 
-  it('viewer 미제공이면 bare path로 폴백(회귀 0)', () => {
+  it('viewer 미제공이면 scoped 경로 대신 항목 project_id를 `?p=`로(#4231 4차)', () => {
     const clusters = deriveSilentStallClusters(
       response([item({ story_id: 's1', project_id: 'p1', project_slug: 'sprintable' })]), undefined, NOW,
     );
-    expect(clusters.buckets.flatMap((b) => b.items)[0]!.href).toBe('/board?story=s1');
+    expect(clusters.buckets.flatMap((b) => b.items)[0]!.href).toBe('/board?story=s1&p=p1'); // #4231 4차 — 항목 자기 프로젝트
   });
 
   // story #3153(93b076c8 후속, org-wide 커버리지) — 항목별 project_id/project_slug로

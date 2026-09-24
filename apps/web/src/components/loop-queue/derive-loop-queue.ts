@@ -103,13 +103,6 @@ export interface LoopQueueItem {
   crossProjectLabel: string | null;
 }
 
-// story #2830(유나 스티어③)와 동형 — 딥링크가 실제 outcome 판정 UI(flow 캔버스의 가설/goal
-// 판정 표면)에 닿는다. goal href는 view=flow를 반드시 동반(PR#3257 근거 — 데스크톱
-// parseView 기본값이 'hypothesis'라 focusGoalId가 조용히 드롭됨).
-function bareHref(type: LoopQueueWorkItemType, id: string): string {
-  return type === 'hypothesis' ? `/flow?hypothesis=${id}` : `/flow?view=flow&goal=${id}`;
-}
-
 /** `GET /api/projects` 응답(id/slug 등) → project_id→slug 맵. slug 없는(legacy) 프로젝트는 생략. */
 export function parseProjectSlugMap(json: unknown): Record<string, string> {
   const inner = isRecord(json) ? (json['data'] ?? json) : json;
@@ -150,7 +143,14 @@ export function deriveLoopQueueItems(
       title: it.title ?? t('loopQueueUntitled'),
       overdueDays: it.overdue_days,
       ownerMemberId: it.owner_member_id,
-      href: projectHref(viewer, slug, bareHref(it.work_item_type, it.work_item_id)),
+      // story #2830(유나 스티어③)와 동형 — 딥링크가 실제 outcome 판정 UI(flow 캔버스의 가설/goal 판정 표면)에 닿는다. goal href는 view=flow를
+      // 반드시 동반(PR#3257 — 데스크톱 parseView 기본값이 'hypothesis'라 focusGoalId가 조용히 드롭됨). story #4231 4차 — slug를 모르면 항목의
+      // project_id를 `?p=`로(projectHref).
+      href: projectHref(
+        viewer, slug,
+        it.work_item_type === 'hypothesis' ? `/flow?hypothesis=${it.work_item_id}` : `/flow?view=flow&goal=${it.work_item_id}`,
+        it.project_id,
+      ),
       crossProjectLabel: crossProjectLabel(viewer, it.project_id, slug),
     });
   });
