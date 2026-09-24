@@ -114,6 +114,12 @@ async def _world(Session, *, stages=None, meta=None, bindings=None, routing=None
     }
 
 
+def _request_with_project(project_id: uuid.UUID):
+    from starlette.requests import Request as StarletteRequest
+
+    return StarletteRequest(scope={"type": "http", "headers": [(b"x-project-id", str(project_id).encode())]})
+
+
 async def _publish(Session, w, stage: str, *, as_member: str | None = None, as_human: bool = False, payload=None):
     from app.routers.events import EventPublishRequest, publish_registry_event
 
@@ -123,7 +129,7 @@ async def _publish(Session, w, stage: str, *, as_member: str | None = None, as_h
             EventPublishRequest(definition_key=w["definition"].key, payload=payload or {
                 "stage": stage, "work_item_type": "story", "work_item_id": str(w["story_id"]),
             }),
-            BackgroundTasks(), _fake_request(), db=s, auth=auth, org_id=w["org_id"],
+            BackgroundTasks(), _request_with_project(w["project_id"]), db=s, auth=auth, org_id=w["org_id"],
         )
         await s.commit()
         return result
@@ -206,8 +212,13 @@ async def test_next_stage_only_by_the_current_stage_member_and_never_skipping():
         d = await _rejected(Session, w, "revise", as_member="writer")  # review 건너뛰기
         assert (d["status"], d["code"], d["next_stage"]) == (409, "STAGE_NOT_NEXT", "review")
         await _publish(Session, w, "review", as_member="writer")
-        d = await _rejected(Session, w, "draft", as_member="writer")  # 되돌아가기
-        assert d["code"] == "STAGE_NOT_NEXT"
+        await _set_gate(Session, w, "approved")
+        await _publish(Session, w, "revise", as_member="editor")
+        d = await _rejected(Session, w, "review", as_member="writer")  # 되돌아가기
+        assert (d["code"], d["current_stage"], d["next_stage"]) == ("STAGE_NOT_NEXT", "revise", "publish")
+        # 첫 stage로 되돌아가는 발행은 검사 앞의 중복 방지(4075)가 기존 첫 발행을 돌려준다 — 새 이벤트 0.
+        again = await _publish(Session, w, "draft", as_member="writer")
+        assert again["deduplicated"] is True and await _stage_count(Session, w, "draft") == 1
     finally:
         await engine.dispose()
 
@@ -369,7 +380,8 @@ async def test_a_payload_without_a_work_item_is_not_checked():
     engine, Session = await _session_factory()
     try:
         w = await _world(Session, work_item_required=False)
-        await _publish(Session, w, "revise", as_member="outsider", payload={"stage": "revise"})
+        # 조직 «테스트 발행»(관리자 · 사람)처럼 작업 항목 없는 payload — 순서 밖 stage라도 검사하지 않는다(Q5).
+        await _publish(Session, w, "revise", as_human=True, payload={"stage": "revise"})
         assert await _stage_count(Session, w, "revise") == 1
     finally:
         await engine.dispose()
