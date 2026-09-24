@@ -63,6 +63,71 @@ def test_malformed_channels_are_rejected(capability):
         validate_stage_metadata(_SCHEMA, _publish_meta(**capability))
 
 
+def _with(path: str, value):
+    """정의 입력 한 자리에 `value`를 넣은 (payload_schema, stage_metadata, role_actor_kinds)."""
+    schema = {"properties": {"stage": {"enum": ["draft", "campaign_created"]}}}
+    meta = {
+        "draft": {"role": "Creator", "action": "draft", "gate": {"type": "concept_approval", "approver": "org_owner"}},
+        "campaign_created": {
+            "role": "Publisher", "action": "publish",
+            "capability": {"kind": "publish", "target": "channel_connection", "channels": ["stibee"]},
+        },
+    }
+    kinds = {"Creator": "agent"}
+    if path == "stage_metadata":
+        meta = value
+    elif path == "payload_schema.properties":
+        schema = {"properties": value}
+    elif path == "payload_schema.properties.stage":
+        schema = {"properties": {"stage": value}}
+    elif path == "stage.enum":
+        schema = {"properties": {"stage": {"enum": value}}}
+    elif path == "stage.enum[]":
+        schema = {"properties": {"stage": {"enum": ["draft", "campaign_created", value]}}}
+    elif path == "gate.approver":
+        meta["draft"]["gate"]["approver"] = value
+    elif path == "capability.target":
+        # channels 없이 — channels 검사가 target != channel_connection을 먼저 걸러 target 검사를 가리지 않게.
+        meta["campaign_created"]["capability"] = {"kind": "publish", "target": value}
+    elif path == "capability.channels":
+        meta["campaign_created"]["capability"]["channels"] = value
+    elif path == "capability.channels[]":
+        meta["campaign_created"]["capability"]["channels"] = ["stibee", value]
+    elif path == "role_actor_kinds.value":
+        kinds = {"Creator": value}
+    else:
+        raise AssertionError(path)
+    return schema, meta, kinds
+
+
+_TYPE_FIRST_PATHS = [
+    "stage_metadata", "payload_schema.properties", "payload_schema.properties.stage", "stage.enum", "stage.enum[]",
+    "gate.approver", "capability.target", "capability.channels", "capability.channels[]", "role_actor_kinds.value",
+]
+
+
+@pytest.mark.parametrize("value", [[], {}, [{}], 1], ids=["list", "object", "list_of_object", "int"])
+@pytest.mark.parametrize("path", _TYPE_FIRST_PATHS)
+def test_wrong_type_anywhere_in_the_definition_is_a_validation_error_not_a_crash(path, value):
+    """까디르 4598 QA P2(부류 전체) — 등록·수정 API 입력의 어느 자리에 목록·객체·숫자가 와도 검증 오류(API 400)여야 한다.
+    예전엔 frozenset 멤버십·set()·`.get`이 타입 확인보다 먼저라 TypeError/AttributeError(API 500)였다."""
+    from app.services.event_definition_registry import InvalidRoleActorKindsError, validate_role_actor_kinds
+
+    schema, meta, kinds = _with(path, value)
+    with pytest.raises((InvalidStageMetadataError, InvalidRoleActorKindsError)):
+        validate_stage_metadata(schema, meta)
+        validate_role_actor_kinds(meta, kinds)
+
+
+def test_the_type_first_fixture_itself_is_valid():
+    """위 매개변수 테스트의 기준 입력은 그 자체로 통과한다 — 거부가 «넣은 값» 때문임을 보장."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    schema, meta, kinds = _with("stage.enum", ["draft", "campaign_created"])
+    validate_stage_metadata(schema, meta)
+    validate_role_actor_kinds(meta, kinds)
+
+
 def test_all_channel_keys_match_registered_adapters_with_sandbox_enabled():
     """드리프트 가드 — 샌드박스를 켜고 새 프로세스에서 import한 등록 키 == 정적 목록(어댑터를 더하면 여기 RED)."""
     code = (
@@ -157,6 +222,30 @@ async def test_apply_accepts_an_allowed_connection():
         w = await _seed_world(Session, ["stibee", "stibee_sandbox"])
         result = await _apply(Session, w, w["connections"]["stibee"])
         assert result.bindings_upserted == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_apply_rejects_a_malformed_id_with_422_not_500():
+    """까디르 4598 QA P2 — role_mapping 값이 UUID가 아니면 `uuid.UUID` ValueError(500)였다 → 422 · 바인딩 0."""
+    from sqlalchemy import func, select
+
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _seed_world(Session, ["stibee", "stibee_sandbox"])
+        with pytest.raises(HTTPException) as info:
+            await _apply(Session, w, "not-a-uuid")
+        assert info.value.status_code == 422
+        assert "campaign_created" in str(info.value.detail)
+        async with Session() as fresh:
+            count = (await fresh.execute(
+                select(func.count()).select_from(RecipeRoleBinding).where(RecipeRoleBinding.org_id == w["org"])
+            )).scalar_one()
+        assert count == 0
     finally:
         await engine.dispose()
 

@@ -3537,6 +3537,18 @@ async def apply_recipe_role_bindings(
             status_code=422,
             detail=f"role_mapping에 이 정의의 stage_metadata에 없는 stage가 있습니다: {unknown_stages}",
         )
+    # story #4239(까디르 4598 QA P2) — 값은 전부 id다. 아래 `uuid.UUID(v)`가 잘못된 문자열에서 ValueError(→ 500)가 되지
+    # 않게 먼저 거른다(422).
+    malformed_ids = []
+    for stage, value in body.role_mapping.items():
+        try:
+            uuid.UUID(value)
+        except ValueError:
+            malformed_ids.append(stage)
+    if malformed_ids:
+        raise HTTPException(
+            status_code=422, detail=f"role_mapping values must be UUIDs — malformed for stages: {sorted(malformed_ids)}",
+        )
 
     # story #4090(alembic 0385, 페드루 PO 確定 2026-09-21) — capability.target=
     # "channel_connection"인 stage(Publisher)는 알릴 사람이 아니라 **발행할 채널**을
