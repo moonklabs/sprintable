@@ -307,6 +307,7 @@ class TestOtherGateTypesUnchanged:
         text = await _render(_payload(gate_type="qa", verdict="rejected", resolution_note="폐기 대상"))
         assert "다시 발행하세요" not in text
         assert "자동 재오픈돼요" not in text
+        assert "다음 행동" not in text  # 까디르 codex 4627 P3 — 옛 문구 부재만이 아니라 줄 자체가 없다
 
 
 class TestNextActionI18nCatalogMigration:
