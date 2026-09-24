@@ -432,7 +432,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         # story #4192(까디르 4583 P1) — «발행 뒤 레시피 처리» 전체(레시피 문맥 읽기 · 레시피 게이트 outcome 기록 · 이벤트)를
         # **격리 세션**에서. 예전엔 앞 두 단계를 워커 세션에서 해, 거기서 SQL 오류가 나면 워커 트랜잭션이 aborted →
         # 같은 배치 다음 명령이 망가졌다(4573 부류). 워커 세션은 위 completed 커밋까지만 — 여기선 값만 넘긴다.
-        await _emit_recipe_published_for_channel_command(db, command, draft)
+        await _emit_recipe_published_for_channel_command(db, command, draft, publication.id)
         return
     except ChannelImageContainerFailedError as exc:
         error_code, last_error = "CHANNEL_IMAGE_CONTAINER_FAILED", str(exc)
@@ -588,7 +588,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
 
 
 async def _emit_recipe_published_for_channel_command(
-    db: AsyncSession, command: PublicationCommand, draft: ChannelPostDraft,
+    db: AsyncSession, command: PublicationCommand, draft: ChannelPostDraft, publication_id: uuid.UUID | None = None,
 ) -> None:
     """story #4093·#4192 — 예약 채널 발행 명령이 **성공으로** 끝난 순간(completed 커밋 뒤) 레시피 뒤처리: 레시피 문맥 읽기 ·
     레시피 게이트 outcome 기록 · published 단계 이벤트. 전부 **격리 세션**에서(까디르 4583 P1) — 워커 세션은 completed
@@ -618,6 +618,7 @@ async def _emit_recipe_published_for_channel_command(
         await emit_recipe_published_stage_event(
             side, org_id=_org_id, work_item_type=work_item_type,
             work_item_id=_work_item_id, definition_key=definition_key, next_stage=next_stage,
+            publication_id=publication_id,  # story #4242 — 뉴스레터 «발송 요청» 봉인 필드 `publication_id`의 원천
         )
 
     await run_side_effect_in_own_session(

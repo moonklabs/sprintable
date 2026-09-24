@@ -220,6 +220,34 @@ async def resolve_broad_crew_member_ids(
     )).scalars().all())
 
 
+async def _bound_member_for_stage(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition_key: str, stage: str,
+) -> uuid.UUID | None:
+    """그 stage에 바인딩된 멤버(`agent_member_id` 열 — 에이전트·사람 종류 무관) — project 스코프 바인딩 우선, 없으면 org
+    전역(story #3288 규칙 그대로)."""
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    if project_id is not None:
+        agent_id = (await db.execute(
+            select(RecipeRoleBinding.agent_member_id).where(
+                RecipeRoleBinding.org_id == org_id,
+                RecipeRoleBinding.project_id == project_id,
+                RecipeRoleBinding.event_definition_key == definition_key,
+                RecipeRoleBinding.stage == stage,
+            )
+        )).scalar_one_or_none()
+        if agent_id is not None:
+            return agent_id
+    return (await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.project_id.is_(None),
+            RecipeRoleBinding.event_definition_key == definition_key,
+            RecipeRoleBinding.stage == stage,
+        )
+    )).scalar_one_or_none()
+
+
 async def _resolve_recipe_role_binding(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
 ) -> set[uuid.UUID]:
@@ -234,32 +262,12 @@ async def _resolve_recipe_role_binding(
     if not stage:
         return set()
 
-    from app.models.recipe_role_binding import RecipeRoleBinding
-
     project_id = await _resolve_work_item_project_id(db, org_id=org_id, payload=payload)
-
-    if project_id is not None:
-        agent_id = (await db.execute(
-            select(RecipeRoleBinding.agent_member_id).where(
-                RecipeRoleBinding.org_id == org_id,
-                RecipeRoleBinding.project_id == project_id,
-                RecipeRoleBinding.event_definition_key == definition_key,
-                RecipeRoleBinding.stage == stage,
-            )
-        )).scalar_one_or_none()
-        if agent_id is not None:
-            return {agent_id}
-
-    agent_id = (await db.execute(
-        select(RecipeRoleBinding.agent_member_id).where(
-            RecipeRoleBinding.org_id == org_id,
-            RecipeRoleBinding.project_id.is_(None),
-            RecipeRoleBinding.event_definition_key == definition_key,
-            RecipeRoleBinding.stage == stage,
-        )
-    )).scalar_one_or_none()
-    if agent_id is not None:
-        return {agent_id}
+    member_id = await _bound_member_for_stage(
+        db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=stage,
+    )
+    if member_id is not None:
+        return {member_id}
 
     # story #4110(#4109 PO 결정, 2026-09-21) — generation_connector-target stage(예:
     # live_generation)는 agent_member_id가 원천적으로 없다(그 stage의 바인딩 행은
@@ -269,6 +277,7 @@ async def _resolve_recipe_role_binding(
     # 채워진 모든 행의 집합)로 폴백한다 — 리허설 1호에서 댄이 live_generation을 스스로
     # 발행하고 이어간 형상을 제품이 명시적으로 지지하는 것.
     from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
 
     definition = (await db.execute(
         select(EventDefinition)
@@ -285,6 +294,31 @@ async def _resolve_recipe_role_binding(
     if definition is None:
         return set()
     capability = (definition.stage_metadata.get(stage) or {}).get("capability") or {}
+    if capability.get("target") == "channel_connection":
+        # story #4242 — 채널 연결 stage(뉴스레터 «캠페인 생성» 등)는 서버가 대신 수행하는 자리라 바인딩된 멤버가 원래
+        # 없다(그 stage의 바인딩 행은 channel_connection_id). 그 이벤트는 **다음 stage에 바인딩된 멤버**(에이전트·사람 종류
+        # 무관 — 명시적 바인딩은 «아는» 경우)가 받는다. 그래야 다음 할 일(발행 예시 · 봉인 필드)이 도달한다. 예전엔 수신자
+        # 0이라 흐름이 거기서 멈췄다. 다음 stage가 없으면(마지막 stage) 0 그대로. 다음 stage에 바인딩된 멤버가 없거나 그
+        # stage가 또 다른 서버 stage(채널 연결 · 연산 커넥터)면 **건너뛰지 않고** 0 + 경고(PO 2026-09-24 — 흐름을 조용히
+        # 건너뛰게 두지 않는다 · 「모르면 안 준다」).
+        from app.routers.events import _next_recipe_stage
+
+        next_stage = _next_recipe_stage(definition, stage)
+        if next_stage is None:
+            return set()
+        next_capability = (definition.stage_metadata.get(next_stage) or {}).get("capability") or {}
+        next_member = None
+        if next_capability.get("target") in (None, "agent"):
+            next_member = await _bound_member_for_stage(
+                db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=next_stage,
+            )
+        if next_member is None:
+            logger.warning(
+                "recipe_role_binding: channel stage %r -> next stage %r has no bound member — 0 recipients (definition=%s)",
+                stage, next_stage, definition_key,
+            )
+            return set()
+        return {next_member}
     if capability.get("target") != "generation_connector":
         return set()
 
