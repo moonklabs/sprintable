@@ -34,7 +34,7 @@ export function ListRow({
     <div className={cn('space-y-2 px-3 py-3', className)} data-testid={dataTestId}>
       {/* [SID:4282 · 유나 추가 결정] 글자 칸이 basis 0(flex-1)이면 flex-wrap이 안 꺾여 390에서 글자 칸이 50px까지 줄었다
           (신뢰 센터 꼬리 잘림 · en 부제 낱말 중간 끊김). 글자 칸은 10rem을 바탕 너비로 두고, 상태 · 동작 · 메뉴는 한 묶음
-          (ml-auto shrink-0)으로 같이 다음 줄로 내려간다. 넓은 폭(1440)에선 종전처럼 한 줄. */}
+          (ml-auto)으로 같이 다음 줄로 내려간다. 넓은 폭(1440)에선 종전처럼 한 줄. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {mark}
         <div className="min-w-0 flex-[1_1_10rem]">
@@ -46,9 +46,12 @@ export function ListRow({
               어디서든 꺾는다(overflow-wrap:anywhere · 칸을 뚫지 않게). 공용 슬롯이라 소비처 넷 모두에 같이 적용. */}
           {subtitle ? <p className="line-clamp-2 break-keep text-xs text-muted-foreground [overflow-wrap:anywhere]">{subtitle}</p> : null}
         </div>
+        {/* [SID:4282 · 까디르 P2 · 유나 정정] 묶음이 shrink-0이면 콘텐츠 규칙의 긴 상태 문장 + 편집 버튼이 좁은 폭에서
+            행을 넘어 카드 overflow-hidden에 잘렸다. 묶음은 줄 너비까지만(min-w-0 max-w-full) · 상태만 줄 수 있게 감싸
+            띄어쓰기에서 꺾고(break-keep), 동작 · 메뉴는 그대로(버튼은 줄지 않음). */}
         {status || action || menu ? (
-          <div className="ml-auto flex shrink-0 items-center gap-3">
-            {status}
+          <div className="ml-auto flex min-w-0 max-w-full items-center gap-3">
+            {status ? <div className="min-w-0 break-keep [overflow-wrap:break-word]">{status}</div> : null}
             {action}
             {menu}
           </div>
