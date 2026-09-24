@@ -1599,6 +1599,10 @@ async def list_gates(
 
 class GateDesignatedPendingCountResponse(BaseModel):
     count: int
+    # story #4245(까디르 QA P2 · PO 04:12Z) — 이 수를 센 문장의 스냅숏 워터마크 pg_snapshot_xmin(pg_current_snapshot())(xid8 · 문자열).
+    # 그보다 작은 xid의 트랜잭션은 그 순간 이미 끝났다 → 그 트랜잭션이 만든 이벤트(events.created_xid)는 커밋됐으면 이 수에 이미 보였다.
+    # FE는 SSE 백필 이벤트 중 created_xid < snapshot_xmin인 것만 «반영됨»으로 건너뛴다(시각 판정은 쓰지 않는다). 옛 클라이언트는 무시해도 되는 필드.
+    snapshot_xmin: str | None = None
 
 
 @router.get("/designated-pending-count", response_model=GateDesignatedPendingCountResponse)
@@ -1616,14 +1620,14 @@ async def get_designated_pending_count(
     쿼리라, "주 대화 추론"이 틀려도(층2가 best-effort인 이유) 이 뱃지는 항상 정확하다
     (AC1이 이 층에서 닫히는 근거)."""
     resolved = await resolve_member(auth, org_id, session)
-    count = (await session.execute(
-        select(func.count()).select_from(Gate).where(
+    count, snapshot_xmin = (await session.execute(
+        select(func.count(), func.pg_snapshot_xmin(func.pg_current_snapshot())).select_from(Gate).where(
             Gate.org_id == org_id,
             Gate.designated_approver_id == resolved.id,
             Gate.status == "pending",
         )
-    )).scalar_one()
-    return GateDesignatedPendingCountResponse(count=count)
+    )).one()
+    return GateDesignatedPendingCountResponse(count=count, snapshot_xmin=str(snapshot_xmin) if snapshot_xmin is not None else None)
 
 
 class HitlInboxItem(BaseModel):

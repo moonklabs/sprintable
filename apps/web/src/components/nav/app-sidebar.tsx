@@ -12,7 +12,7 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { Button } from '@/components/ui/button';
-import { fetchDesignatedPendingCount } from '@/lib/designated-pending-count-client';
+import { fetchDesignatedPendingCount, isEventReflectedInLastCount } from '@/lib/designated-pending-count-client';
 import { cn } from '@/lib/utils';
 import {
   NAV_GROUPS,
@@ -329,7 +329,11 @@ export function AppSidebar({
   // 이벤트 전부에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
   useEffect(() => {
     if (!mux) return;
-    const refetch = () => {
+    const refetch = (data: string) => {
+      // story #4245 — 연결 직후 백필 중 **마지막 수에 이미 보였던** 이벤트(만든 트랜잭션이 수를 센 순간의 워터마크 전에 끝남)는 다시 묻지
+      // 않는다(dev 배포 21 · 기동마다 designated-pending-count 2번째 요청의 발신 지점이 이 자리였다). 그때 아직 안 끝난 트랜잭션의 이벤트 ·
+      // 옛 행 · 모르는 경우는 백필이어도 다시 묻는다(수가 낡지 않게 — 커밋 가시성 판정 · 시각 판정 아님).
+      if (isEventReflectedInLastCount(data)) return;
       // 실패는 null — 다음 정상 이벤트나 30초 폴링으로 자연 회복.
       void fetchDesignatedPendingCount().then((count) => { if (count !== null) setInboxPendingCount(count); });
     };

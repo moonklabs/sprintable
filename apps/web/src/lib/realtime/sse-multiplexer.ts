@@ -29,6 +29,20 @@ import { createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 type EventHandler = (data: string, eventId?: string) => void;
 
+/**
+ * story #4245 — 연결 직후 서버가 다시 보내는 «백필» 이벤트인지(BE events.py 스트림이 백필 행 data에 `is_backfill: true`를 싣는다).
+ * 백필은 이 연결 이전에 이미 일어난 일이라, 마운트 때 한 번 조회한 값(배지 수 등)이 이미 반영하고 있다 — 재조회 트리거로 쓰면 기동마다
+ * 같은 요청이 한 번 더 나간다. data가 JSON이 아니거나 필드가 없으면 false(실시간 이벤트로 본다 — 재조회를 놓치지 않는 쪽).
+ */
+export function isBackfillEvent(data: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return typeof parsed === 'object' && parsed !== null && (parsed as { is_backfill?: unknown }).is_backfill === true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SseMultiplexerHandle {
   /** 이름 있는 SSE 이벤트(예: 'chat:message'·'presence'·'notification') 구독. 구독 순서
    * 무관 — 커넥션이 이미 열려있어도 그 순간부터 즉시 받는다. */
