@@ -9,15 +9,15 @@ count 응답의 `pg_snapshot_xmin(pg_current_snapshot())`(그 순간 아직 안 
 가산만: 컬럼은 NULL 허용으로 먼저 더하고(옛 행은 NULL — FE는 모르면 다시 묻는다), 기본값은 따로 건다 — ADD COLUMN에 휘발성 기본값을 같이 주면
 기존 행마다 평가하느라 테이블을 다시 쓴다. PostgreSQL 13+(dev·prod 15).
 
-번호: 착지 순 사다리(PO) — 미르코 4243이 0403을 쓰는 중이라 0404. 지금 develop 머리는 0402라 down_revision 0402로 두고, 4243(0403)이 먼저
-착지하면 rebase 때 down_revision을 0403으로 바꾼다(이 PR이 먼저면 번호를 맞바꾼다).
+번호: 착지 순 사다리(PO 06:28Z) — 4606(0403 · 미르코)이 먼저 착지한다. 두 PR이 모두 0402를 부모로 두면 ci.yml의 sibling 가드가 양쪽 CI를
+failure로 만들어 둘 다 게이트를 못 넘으므로, 이 PR이 먼저 down_revision을 0403으로 둔다(4606 병합 전까지 이 PR의 fresh-DB alembic upgrade는 RED — 정상).
 """
 from __future__ import annotations
 
 from alembic import op
 
 revision = "0404"
-down_revision = "0402"
+down_revision = "0403"
 branch_labels = None
 depends_on = None
 
