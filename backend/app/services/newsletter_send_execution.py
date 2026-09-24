@@ -15,6 +15,7 @@ from app.models.channel_connection import ChannelConnection
 from app.models.channel_publication import ChannelPublication
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
+from app.services.provider_call_mark import mark_provider_call
 from app.services.publication_command import create_or_get_publication_command
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,7 @@ async def _process_sandbox_send(db: AsyncSession, command: PublicationCommand, *
     from app.services.stibee_sandbox_campaign import StibeeSandboxSendError, send_campaign
 
     try:
+        mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
         result = await send_campaign(
             campaign_id=publication.external_id, segment_name=gate.sealed_newsletter_segment_name or "",
         )
@@ -281,6 +283,7 @@ async def _process_real_send(
         import httpx
 
         async with httpx.AsyncClient(timeout=20) as client:
+            mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
             await reserve_email(
                 client, api_key=access_token, email_id=int(publication.external_id),
                 scheduled_at_utc=gate.sealed_newsletter_scheduled_at,

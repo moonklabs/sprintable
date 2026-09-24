@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
+from app.services.provider_call_mark import mark_provider_call
 from app.services.publication_command import create_or_get_publication_command
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
@@ -362,7 +363,9 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     "ads_boost" 분기가 이 함수로 넘긴다(site_post/comment_reply와 동형 위임 패턴).
     실패 시 `apply_command_failure`(publication_command.py)를 그대로 재사용 —
     백오프·connection 승격 로직 재구현 금지."""
+    from app.services.provider_call_mark import provider_call_marked
     from app.services.publication_command import (
+        PRE_CALL_ERROR_CODE,
         STATUS_BLOCKED_UNAPPROVED,
         apply_command_failure,
         record_publication_attempt,
@@ -388,6 +391,7 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         import httpx
 
         async with httpx.AsyncClient(timeout=20) as client:
+            mark_provider_call()  # story #4272 — 이 블록의 갈래는 전부 곧바로 광고 API를 부른다(캠페인 없음 거절은 코드가 가른다)
             if command.operation == OP_BOOST_START:
                 result = await module.create_boost_campaign(
                     client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
@@ -493,11 +497,13 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
         command.last_error = None
         command.failure_kind = None
     except Exception as exc:  # noqa: BLE001 — publication_command.py 2중 방어와 동형.
-        error_code = getattr(exc, "code", None) or "ADS_BOOST_PROVIDER_ERROR"
+        # story #4272(까디르 codex P1) — 코드 없는 예외는 광고 API 호출 직전 표시로 가른다: 호출 전이면 자동 재시도(아무것도 안
+        # 나감), 호출 뒤면 예전처럼 모름(needs_check). 장부의 adapter_called도 그 표시 그대로.
+        error_code = getattr(exc, "code", None) or ("ADS_BOOST_PROVIDER_ERROR" if provider_call_marked() else PRE_CALL_ERROR_CODE)
         last_error = getattr(exc, "message", None) or str(exc)
         run.last_error = last_error[:2000]
         await record_publication_attempt(
-            db, command=command, approval_check="ok", adapter_called=True,
+            db, command=command, approval_check="ok", adapter_called=provider_call_marked(),
             started_at=attempt_started_at, finished_at=now, result_code=error_code,
         )
         await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)

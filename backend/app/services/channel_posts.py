@@ -56,6 +56,7 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
     get_site_post_draft,
     is_agent_caller,
 )
+from app.services.provider_call_mark import mark_provider_call
 from app.services.utm import attach_utm, resolve_utm_campaign
 
 # story #4192(디디 발견) — 이 모듈은 logger.warning/info/exception을 4곳에서 쓰는데 모듈 logger가 없어, side-channel
@@ -2037,6 +2038,7 @@ async def publish_channel_post_draft(
                                 row.last_error = str(exc)
                                 await db.commit()
                                 raise
+                        mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
                         container_id = await create_reels_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, video_url=video_public_url, cover_url=image_public_url,
@@ -2074,6 +2076,7 @@ async def publish_channel_post_draft(
                                 f"{draft.channel} 채널은 이미지 2장 이상(캐러셀)을 지원하지 않습니다",
                                 status_code=422,
                             )
+                        mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
                         container_id = await create_carousel_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, image_urls=image_public_urls,
@@ -2098,6 +2101,7 @@ async def publish_channel_post_draft(
                             _extra_kwargs["list_id"] = connection.account_label
                             _extra_kwargs["sender_email"] = (connection.provider_config or {}).get("sender_email")
                             _extra_kwargs["sender_name"] = (connection.provider_config or {}).get("sender_name")
+                        mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
                         container_id = await create_container(
                             client, access_token=access_token, threads_user_id=connection.account_id,
                             text=text_to_post, image_url=image_public_url, **_extra_kwargs,
@@ -2984,6 +2988,7 @@ async def _publish_x_thread_draft(
     failure_exc: ThreadsPublishError | None = None
     async with httpx.AsyncClient(timeout=20) as client:
         try:
+            mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
             succeeded = await publish_x_thread_fn(
                 client, access_token=access_token, texts=remaining_texts,
                 media_id=image_public_url, initial_reply_to_tweet_id=prev_external_id,
@@ -3201,6 +3206,7 @@ async def unpublish_channel_post(
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             try:
+                mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
                 await delete_media(client, access_token=access_token, media_id=pub.external_id)
             except ThreadsPublishError as exc:
                 # story #3513(site_posts.py::unpublish_site_post_external_command와

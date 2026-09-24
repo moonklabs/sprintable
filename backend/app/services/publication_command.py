@@ -30,6 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.publication_attempt import PublicationAttempt
 from app.models.publication_command import PublicationCommand
+from app.services.provider_call_mark import (
+    mark_provider_call,
+    provider_call_marked,
+    reset_provider_call_mark,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +127,10 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # 끝났다. 폴링을 몇 번 더 반복해도 같은 결과이므로(결정적) transient 백오프가 아니라
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
 _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
-_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
+# story #4272(까디르 codex P1) — 코드 없는 예외가 공급자 쓰기 호출 **전**에 났다(`provider_call_mark` 표시 없음) — 아무것도 안
+# 나갔으니 자동 재시도가 안전하다(이중 발행 0). 호출 뒤의 코드 없는 예외는 예전처럼 needs_check(모름).
+PRE_CALL_ERROR_CODE = "PUBLICATION_COMMAND_PRE_CALL_ERROR"
+_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE})
 # story #4262 — 뉴스레터 발송 실행기만 내는 두 코드(newsletter_send_execution.py · grep 확인). 채널 게시와 겹치는
 # STIBEE_PLAN_RESTRICTED는 4264에서 부류로 다룬다.
 _NOT_SENT_CODES = frozenset({"NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED"})
@@ -596,14 +604,16 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+        if not provider_call_marked():
+            error_code = PRE_CALL_ERROR_CODE  # story #4272 — 공급자 호출 전 → 자동 재시도
 
     # story #3474 — 여기 도달한 실패는 전부 게이트 재검증(missing/version_mismatch)을
     # 이미 통과한 뒤(publish_channel_post_draft 내부)의 실패다(그 둘은 위에서 별도
-    # return으로 먼저 빠졌다). DRAFT_NOT_FOUND만 예외 — 그건 gate 조회 자체보다도
-    # 먼저(버전/초안 조회 단계) 나므로 adapter가 안 불렸다.
+    # return으로 먼저 빠졌다). story #4272 — 공급자를 불렀는지는 코드 목록 대신 호출 직전 표시(`provider_call_marked`)로
+    # 적는다(예전: 코드 없는 호출 뒤 실패를 False로, 호출 전 검사 실패 · 연결 비활성을 True로 적었다).
     await record_publication_attempt(
         db, command=command, approval_check="ok",
-        adapter_called=error_code not in (None, "CHANNEL_POST_DRAFT_NOT_FOUND"),
+        adapter_called=provider_call_marked(),
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
     # story #4093 AC2(음성 대조, 페드루 PO 確定 2026-09-21) — 워커 발행 실패 시 published
@@ -811,13 +821,16 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("site_post publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+        if not provider_call_marked():
+            error_code = PRE_CALL_ERROR_CODE  # story #4272 — 공급자 호출 전 → 자동 재시도
 
     # story #3474 — SITE_POST_DRAFT_NOT_FOUND/SITE_POST_NOT_PUBLISHED는 게이트 조회
     # 자체보다 먼저(버전/발행기록 조회 단계) 나므로 adapter가 안 불렸다. 그 외(연결
     # 비활성·자격거절 등)는 게이트 재검증을 통과한 뒤의 실패라 adapter가 불렸다.
+    # story #4272 — 공급자 호출 여부는 호출 직전 표시 그대로(위 채널 갈래와 같은 규칙).
     await record_publication_attempt(
         db, command=command, approval_check="ok",
-        adapter_called=error_code not in (None, "SITE_POST_DRAFT_NOT_FOUND", "SITE_POST_NOT_PUBLISHED"),
+        adapter_called=provider_call_marked(),
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
     await apply_command_failure(db, command, error_code=error_code, last_error=last_error, now=now)
@@ -915,6 +928,7 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
 
         try:
             async with httpx.AsyncClient() as client:
+                mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
                 external_reply_id, external_reply_url = await _publish_client.reply(
                     client, access_token=access_token, threads_user_id=connection.account_id,
                     reply_to_id=comment.external_comment_id, text=reply.text,
@@ -946,9 +960,11 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.
         last_error = str(exc)
         logger.exception("comment_reply publication_command 처리 중 미분류 예외 command_id=%s", command.id)
+        if not provider_call_marked():
+            error_code = PRE_CALL_ERROR_CODE  # story #4272 — 공급자 호출 전 → 자동 재시도
 
     await record_publication_attempt(
-        db, command=command, approval_check="ok", adapter_called=error_code is not None,
+        db, command=command, approval_check="ok", adapter_called=provider_call_marked(),  # story #4272 — 호출 직전 표시
         started_at=attempt_started_at, finished_at=now, result_code=error_code,
     )
     reply.status = "failed"
@@ -1228,6 +1244,7 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
     # in_progress로 잡힌 나머지는 되살리는 장치 없이 남는다. 원시 id만 들고 돌며 건마다 행을 다시 읽는다.
     command_ids = [command.id for command in rows]
     for command_id in command_ids:
+        reset_provider_call_mark()
         try:
             command = await db.get(PublicationCommand, command_id)
             if command is None:
@@ -1244,7 +1261,7 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
             await db.rollback()
             counts["error"] += 1
             logger.exception("publication command batch item 처리 실패 command_id=%s", command_id)
-            await _dead_letter_unclassified_command(db, command_id, now=now)
+            await _record_unclassified_batch_failure(db, command_id, provider_called=provider_call_marked(), now=now)
     # story #4258(까디르 4621 codex P2) — 멈춤 통지는 표식(`stop_notice_state = pending`)을 보고 보낸다. 이번 틱에 방금 멈춘 것
     # · 지난 틱에 전이 커밋 뒤 통지 전에 죽은 것 · 통지가 실패해 남은 것을 모두 여기서 줍는다(행마다 자기 트랜잭션).
     from app.services.recipe_publish_failure import deliver_pending_stop_notices
@@ -1256,16 +1273,19 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
 UNCLASSIFIED_ERROR_CODE = "PUBLICATION_COMMAND_UNCLASSIFIED_ERROR"
 
 
-async def _dead_letter_unclassified_command(db: AsyncSession, command_id: uuid.UUID, *, now: datetime) -> None:
-    """story #4272 — 미분류 예외로 rollback된 건은 in_progress로 남으면 아무도 다시 집지 않는다. 나갔는지 모르니
-    (분류표 밖 = needs_check) 사람 확인 뒤 재시도 대상인 dead_letter로 내린다. 이 기록마저 실패해도 배치는 잇는다."""
+async def _record_unclassified_batch_failure(
+    db: AsyncSession, command_id: uuid.UUID, *, provider_called: bool, now: datetime,
+) -> None:
+    """story #4272 — 배치 밖으로 샌 예외로 rollback된 건은 in_progress로 남으면 아무도 다시 집지 않는다. 공급자 쓰기 호출 전이면
+    (`provider_call_mark` 표시 없음) 아무것도 안 나갔으니 자동 재시도(transient — `PRE_CALL_ERROR_CODE`), 호출 뒤면 나갔는지
+    모르니 사람 확인 뒤 재시도(needs_check dead_letter — `UNCLASSIFIED_ERROR_CODE`, 까디르 codex P1 · 4264 원칙). 이 기록마저
+    실패해도 배치는 잇는다."""
     try:
         command = await db.get(PublicationCommand, command_id)
         if command is None or command.status != "in_progress":
             return
-        await apply_command_failure(
-            db, command, error_code=UNCLASSIFIED_ERROR_CODE, last_error=UNCLASSIFIED_ERROR_CODE, now=now,
-        )
+        error_code = UNCLASSIFIED_ERROR_CODE if provider_called else PRE_CALL_ERROR_CODE
+        await apply_command_failure(db, command, error_code=error_code, last_error=error_code, now=now)
         await db.commit()
     except Exception:  # 기록 실패도 이 건에서 멈춘다.
         await db.rollback()
