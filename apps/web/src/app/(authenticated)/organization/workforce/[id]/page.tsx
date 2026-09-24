@@ -718,7 +718,7 @@ export default function AgentDetailPage() {
                   <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
                   <Badge variant="info">SSE</Badge>
                 </div>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground break-keep">
                   {t('agentFakechatDescription')}
                 </p>
               </div>
@@ -729,7 +729,8 @@ export default function AgentDetailPage() {
               ) : null}
             </div>
           </SectionCardHeader>
-          <SectionCardBody className="space-y-3">
+          {/* story #4240(유나 390 실측 «않아/요») — 한국어 안내 줄은 낱말 단위로만 줄바꿈(break-keep · CJK에만 작용 · 키·코드 줄 무영향). */}
+          <SectionCardBody className="space-y-3 break-keep">
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <p>{t('agentFakechatEnvKeyInstruction')}</p>
               <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>

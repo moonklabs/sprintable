@@ -56,10 +56,11 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
           ) : (
             <h3 className="text-lg font-semibold text-foreground">{presetName(recipe, tPreset)}</h3>
           )}
-          <p className="mt-1 text-xs text-muted-foreground">
+          {/* story #4240(유나 390 실측 «필요해/요») — 머리 줄 한국어 안내는 낱말 단위로만 줄바꿈. */}
+          <p className="mt-1 text-xs text-muted-foreground break-keep">
             {t('recipeDetailSummary', { stageCount: stages.length, gateCount: gates.length, roleCount: Object.keys(roleGroups).length })}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{t('recipeDetailIrreversibleNote')}</p>
+          <p className="mt-1 text-xs text-muted-foreground break-keep">{t('recipeDetailIrreversibleNote')}</p>
         </div>
         <div className="flex gap-2">
           {/* story #4210 후속 — 복제 기능은 아직 없다(연결된 호출부 0 · 눌러도 무동작이던 버튼). 핸들러가 올 때만 그린다. */}

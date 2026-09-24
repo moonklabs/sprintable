@@ -76,6 +76,14 @@ describe('RecipeDetailView — 9단계 스텝퍼·게이트 4(live/building 실�
     expect(container.textContent).toMatch(/역할\s*3/);
   });
 
+  it('story #4240 — 머리 줄 한국어 안내(요약·불가역 주의)는 낱말 단위로만 줄바꿈(break-keep · 유나 390 «필요해/요»)', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
+    const note = [...container.querySelectorAll('p')].find((p) => p.textContent === koMessages.organization.recipeDetailIrreversibleNote);
+    expect(note?.classList.contains('break-keep')).toBe(true);
+    const summary = [...container.querySelectorAll('p')].find((p) => /단계\s*9/.test(p.textContent ?? ''));
+    expect(summary?.classList.contains('break-keep')).toBe(true);
+  });
+
   it('게이트 마커는 게이트 있는 stage에서만 선다(3곳)', async () => {
     await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} />)); });
     expect(container.querySelector('[data-testid="gate-marker-concept_confirmed"]')).not.toBeNull();

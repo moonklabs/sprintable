@@ -1247,7 +1247,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     {/* story #2362(2026-07-31) — 여기 있던 「이 포트로 접속하세요」 안내는
                         죽은 안내였다(fakechat은 다이얼아웃 방식, 포트를 안 쓴다). 이 화면이
                         이미 쥔 위 키가 그대로 fakechat이 필요로 하는 그 키라 재사용한다. */}
-                    <div className="space-y-1 pt-1 text-xs text-muted-foreground">
+                    {/* story #4240 — 같은 안내 문구(①②③)라 같은 분절 방지(break-keep). */}
+                    <div className="space-y-1 pt-1 text-xs text-muted-foreground break-keep">
                       <p className="flex flex-wrap items-center gap-1.5">
                         <Badge variant="info">SSE</Badge>
                         {tSettings('agentFakechatEnvKeyInstruction')}

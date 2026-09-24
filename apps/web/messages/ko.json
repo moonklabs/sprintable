@@ -750,7 +750,7 @@
     "gcFieldModelVoice": "음성",
     "gcModelHint": "비워 두면 그 모달리티는 이 커넥터로 생성하지 않아요.",
     "gcFieldCredential": "서비스 계정 자격 (JSON)",
-    "gcCredentialPlaceholder": "'{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }' 를 붙여넣어요",
+    "gcCredentialPlaceholder": "'{ \"type\": \"service_account\", \"project_id\": \"…\", \"private_key\": \"…\" }'를 붙여넣어요",
     "gcRevokeAction": "해지",
     "gcRevokeAriaLabel": "{n}번째 연산 커넥터 {label} 해지",
     "gcRevokeConfirmTitle": "{name}{josa} 해지할까요",
