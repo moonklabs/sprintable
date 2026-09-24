@@ -258,6 +258,43 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 선언이 어느 발행에 묶이는지에 따라 두 문장으로 갈린다(recipe_gate_hooks.py::
     # maybe_create_stage_gate — routing 직후·메시지 발송 전에 "지금 발행되는 그 stage"의
     # 게이트를 만든다, events.py:1845-1854).
+    # story #4251(PO 판정) — 원시 발행이 레시피 stage 순서 · 권한을 어겨 거부될 때의 본문. 사람과 에이전트가 같은 문장을 읽고
+    # 스스로 멈추게 «무엇이 막혔나(첫 줄) + 지금 stage와 담당(둘째 줄)»을 싣는다(events.py `_stage_publish_rejection_detail`).
+    # 문안 = 유나 11:08Z — 자리표시자 뒤에 조사를 두지 않는다(값마다 받침이 달라 «이고/고» · «예요/이에요»가 틀린다).
+    "events.stage_publish_rejected_not_next": {
+        "ko": "{stage} 단계는 지금 낼 수 없어요 — 레시피는 단계를 건너뛰거나 되돌아가지 않아요. 다음에 낼 단계: {next}",
+        "en": "The {stage} stage can't be published now — a recipe never skips or goes back a stage. Next stage to publish: {next}",
+    },
+    "events.stage_publish_rejected_not_next_last": {
+        "ko": "{stage} 단계는 지금 낼 수 없어요 — 레시피가 이미 마지막 단계에 와 있어요.",
+        "en": "The {stage} stage can't be published now — the recipe is already at its last stage.",
+    },
+    "events.stage_publish_rejected_not_assignee": {
+        "ko": "{stage} 단계는 {allowed}만 낼 수 있어요 — 직접 내지 말고 그 멤버가 이어 가게 두세요.",
+        "en": "Only {allowed} can publish the {stage} stage — don't publish it yourself; let them continue.",
+    },
+    "events.stage_publish_rejected_not_approved": {
+        "ko": "{current} 단계의 승인이 아직이에요 — 승인 알림(preset.gate.verdict)을 받은 뒤 {stage} 단계를 내 주세요.",
+        "en": "The {current} stage isn't approved yet — publish the {stage} stage after the approval notification "
+        "(preset.gate.verdict) arrives.",
+    },
+    "events.stage_publish_rejected_server": {
+        "ko": "{stage} 단계는 서버가 내요 — 직접 내지 마세요. 서버 일이 성공하면 워크플로우가 다음 단계로 넘어가요.",
+        "en": "The server publishes the {stage} stage — don't publish it yourself. Once the server's work succeeds, the "
+        "workflow moves to the next stage.",
+    },
+    "events.stage_publish_rejected_now": {
+        "ko": "지금 단계: {current} · 담당: {assignee}",
+        "en": "Current stage: {current} · assigned to: {assignee}",
+    },
+    "events.stage_publish_rejected_not_started": {
+        "ko": "이 작업 항목에서 이 레시피는 아직 시작 전이에요.",
+        "en": "This recipe hasn't started on this work item yet.",
+    },
+    "events.stage_publish_rejected_nobody": {
+        "ko": "담당 없음",
+        "en": "no one",
+    },
     "events.stage_gate_already_open": {
         "ko": "지금 사람 승인 게이트가 열려 있어요({approver_clause}) — 승인 알림"
         "(preset.gate.verdict) 뒤 다음 단계를 발행해 주세요.",
