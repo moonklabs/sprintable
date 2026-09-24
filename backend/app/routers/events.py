@@ -2327,6 +2327,9 @@ async def _publish_registry_event_core(
     # 3곳(판정 알림 publish_preset_event · recipe_repeat_scheduler · channel_posts published stage)과 요청 로케일이 없는 HTTP
     # 발행이 en org에서 한국어 본문을 내던 자리. 요청 로케일이 있으면 그대로 우선(행동 변화 0).
     resolved_locale: str | None = None,
+    # story #4230 — 넘기면 호출자 트랜잭션에 참여(`send_message_core` 참조 — 커밋 없음 · 커밋 뒤 배달은 이 목록에).
+    # `publish_preset_event`만 쓴다. HTTP 발행 · 레시피 stage · repeat 스케줄러는 None(예전대로 즉시 커밋).
+    after_commit: list | None = None,
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -2655,7 +2658,7 @@ async def _publish_registry_event_core(
             participant_ids=participant_ids, created_by=sender.id,
         )
 
-    from app.routers.conversations import SendMessageRequest, send_message
+    from app.routers.conversations import SendMessageRequest, send_message_core
 
     # story #3332 — block_template의 `{{ref.X}}` 머스태시가 FE에서 해소할 값. `{{payload.X}}`
     # 와 달리 발행자가 직접 준 값이 아니라 **서버가 발행 시점에 계산**하는 참조 토큰이다 —
@@ -2731,8 +2734,8 @@ async def _publish_registry_event_core(
         mentioned_ids=list(escalation_ids),
         event_context={"event_key": definition.key, "payload": payload, "refs": refs},
     )
-    msg_response = await send_message(
-        conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
+    msg_response = await send_message_core(
+        conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
     )
 
     # story #2636(P1b) 갭 1호 처방 — 전환 실측(가동 1시간, 페드루군)에서 실제로 걸린
@@ -2902,16 +2905,28 @@ async def publish_preset_event(
     if definition is None:
         return None
 
-    system_member = await _get_or_create_system_publisher(db, org_id)
-    auth = AuthContext(
-        user_id=str(system_member.id), email=None,
-        claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
-    )
+    # story #4230 — 호출자 트랜잭션 참여. 예전엔 core → send_message가 스스로 커밋해, 게이트 전이 한가운데서 호출되면 전이
+    # 트랜잭션을 중간에 확정했다(승인 · step · 상태변경이 먼저 영구 → 전이 뒷부분이 실패해도 남음). 이제:
+    # - 발행 전체를 SAVEPOINT 안에서(flush만). 실패하면 그 SAVEPOINT만 롤백되고 예외는 호출자의 best-effort
+    #   try/except가 받는다 — 전이는 멀쩡하다. 그 안에서 예약된 wake도 그 SAVEPOINT 소유라 함께 버려진다.
+    # - 밖으로 나가는 배달(SSE · ws · background task 5종)은 SAVEPOINT가 성공한 뒤에만, 호출자 커밋 뒤로 예약한다
+    #   (`app.services.after_commit`) — 전이가 롤백되면 배달도 없다. 커밋은 전이를 연 쪽이 한 번.
+    from app.services.after_commit import schedule_after_commit
+
     background_tasks = BackgroundTasks()
-    result = await _publish_registry_event_core(
-        db, org_id, auth, definition_key, payload, background_tasks,
-    )
-    await background_tasks()
+    deliveries: list = []
+    # SAVEPOINT 안에서 예약된 wake(event_seq)는 그 SAVEPOINT 소유라, 실패해 롤백되면 그것만 버려진다(after_commit 기전).
+    async with db.begin_nested():
+        system_member = await _get_or_create_system_publisher(db, org_id)
+        auth = AuthContext(
+            user_id=str(system_member.id), email=None,
+            claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
+        )
+        result = await _publish_registry_event_core(
+            db, org_id, auth, definition_key, payload, background_tasks, after_commit=deliveries,
+        )
+    deliveries.append(background_tasks)
+    schedule_after_commit(db, deliveries)
     if result.get("zero_reach_warning"):
         logger.warning(
             "preset event zero_reach — 도달 0명(org=%s definition=%s payload_keys=%s)",

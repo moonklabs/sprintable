@@ -210,7 +210,7 @@ async def test_push_fires_only_after_commit_not_before(monkeypatch):
 
         pushed: list[tuple[str, dict]] = []
         monkeypatch.setattr(events_mod, "_push_to_agent", lambda pid, payload: pushed.append((pid, payload)))
-        # approval_delivery._fire_pending_gate_created_pushes는 `from app.routers.events import
+        # approval_delivery의 커밋 뒤 push(_fire_gate_created_push · app.services.after_commit 경유)는 `from app.routers.events import
         # _push_to_agent`를 발화 시점마다 late-import하므로, events_mod 속성을 바꾸는 것만으로
         # monkeypatch가 반영된다(test_2381의 gw_mod.wake_agent와 동일 원리).
 

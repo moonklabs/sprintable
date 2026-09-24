@@ -11,11 +11,11 @@ SoD 인가 경유)만 유효하다. 이 모듈은 그 규칙을 코드로 강제
 """
 from __future__ import annotations
 
+import functools
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import event as sa_event
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -450,8 +450,6 @@ async def _maybe_auto_seed_designated_secondary_conversation(
     )
 
 
-_GATE_CREATED_PENDING_KEY = "s3044_pending_gate_created_pushes"
-_GATE_CREATED_HOOKED_KEY = "s3044_gate_created_hook_installed"
 
 
 async def notify_gate_created_to_recipients(
@@ -554,47 +552,27 @@ async def notify_gate_created_to_recipients(
 
 
 def _schedule_gate_created_push_after_commit(db: AsyncSession, pid_str: str, payload: dict) -> None:
-    """event_seq.py의 _schedule_wake_after_commit과 완전히 동형(주석도 그쪽이 정본 — 여기선
-    요지만) — commit 성공 後에만(rollback 시 미발화) _push_to_agent가 정확히 한 번 불리도록
-    세션에 예약. MVCC 가시성 레이스 방지(commit 前 push하면 recipient가 GET해도 아직 안 보임)."""
+    """event_seq.py의 _schedule_wake_after_commit과 같은 모양 — commit 성공 後에만 _push_to_agent가 정확히 한 번
+    불리도록 예약(MVCC 가시성 레이스 방지: commit 前 push하면 recipient가 GET해도 아직 안 보임). 예약은 커밋 뒤 배달의
+    단일 기전 `app.services.after_commit`이 맡는다 — 바깥 커밋 뒤에만 발화 · SAVEPOINT release에선 대기 · 예약한
+    트랜잭션(SAVEPOINT 포함)이 롤백되면 그 예약만 버림(story #4230 · 까디르 4597 QA P1 — 예전 자체 훅은 SAVEPOINT
+    롤백에도 발화하는 `after_rollback`에서 목록을 통째로 비웠다)."""
     sync_session = db.sync_session
     if not isinstance(sync_session, Session):
         logger.debug("gate_created push scheduling skipped — sync_session is not a real Session (test double?)")
         return
-    pending: list[tuple[str, dict]] = sync_session.info.setdefault(_GATE_CREATED_PENDING_KEY, [])
-    pending.append((pid_str, payload))
-    if not sync_session.info.get(_GATE_CREATED_HOOKED_KEY):
-        sync_session.info[_GATE_CREATED_HOOKED_KEY] = True
-        sa_event.listen(sync_session, "after_commit", _fire_pending_gate_created_pushes)
-        sa_event.listen(sync_session, "after_rollback", _clear_pending_gate_created_pushes_on_rollback)
+    from app.services.after_commit import schedule_after_commit
+
+    schedule_after_commit(db, [functools.partial(_fire_gate_created_push, pid_str, payload)])
 
 
-def _fire_pending_gate_created_pushes(sync_session: Session) -> None:
-    """⚠️SAVEPOINT 유령 push(카디르 QA #3467 REQUEST_CHANGES②, 2026-08-25) — `after_commit`은
-    SQLAlchemy가 outer 최종 commit뿐 아니라 `begin_nested()` SAVEPOINT를
-    release(`nested.commit()`)할 때도 발화한다(실측: 콜백 안에서
-    `in_nested_transaction()`이 그 순간엔 True). outer 트랜잭션이 이후 rollback돼도 이미
-    push가 나가버려 "실은 durable하지 않은 이벤트"가 라이브로 새는 결함이었다.
-    `in_nested_transaction()`이 True인 발화(=SAVEPOINT release)는 pending을 비우지 않고
-    그대로 둔다 — 언젠가 진짜 outer commit의 after_commit이 다시 발화할 때(그때는
-    in_nested_transaction()=False) 최종 발사된다. outer가 끝내 rollback되면
-    after_rollback 훅(_clear_pending_gate_created_pushes_on_rollback)이 비운다."""
-    if sync_session.in_nested_transaction():
-        return
-    pending = sync_session.info.pop(_GATE_CREATED_PENDING_KEY, None) or []
-    if not pending:
-        return
+def _fire_gate_created_push(pid_str: str, payload: dict) -> None:
     from app.routers.events import _push_to_agent
 
-    for pid_str, payload in pending:
-        try:
-            _push_to_agent(pid_str, payload)
-        except Exception:  # noqa: BLE001
-            logger.warning("post-commit gate_created push failed recipient=%s", pid_str, exc_info=True)
-
-
-def _clear_pending_gate_created_pushes_on_rollback(sync_session: Session) -> None:
-    sync_session.info.pop(_GATE_CREATED_PENDING_KEY, None)
+    try:
+        _push_to_agent(pid_str, payload)
+    except Exception:  # noqa: BLE001
+        logger.warning("post-commit gate_created push failed recipient=%s", pid_str, exc_info=True)
 
 
 async def dispatch_approval_result_reply(
