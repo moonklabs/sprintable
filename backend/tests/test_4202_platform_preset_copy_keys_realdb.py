@@ -16,6 +16,9 @@ en 화면의 한국어다 — 그래서:
    — FE localizePresetBlockTemplate가 덮는 모양. 새 프리셋 시드가 다른 모양이면 RED(규칙이 조용히 못 덮는 것을 막는다).
 범위: 사이클형 `preset.*`(#4202 만료 조건대로 #4203에서 넓힘). 신호형 프리셋(stage enum 없음 — `preset.gate.verdict`
 등)은 제외: 이 짝 가드가 여는 화면(갤러리·적용·실행 만들기)은 사이클형만 그린다.
+⚠️story #4233 — **이름**만은 신호형(시스템 이벤트 정의 7종)도 포함한 `preset.*` 전수: 조직 이벤트 «개발 워크플로» 목록이 시스템 정의의
+이름을 그려(en 화면에 한국어 7줄 · 배포 20 라이브) 누락이 곧 en 화면의 한국어다. 설명은 사이클형만 그대로(신호형 중 설명이 있는
+것은 에이전트 지시문이고 사람 화면에 안 그린다 — 유나 확정).
 """
 from __future__ import annotations
 
@@ -61,6 +64,22 @@ def anyio_backend():
     return "asyncio"
 
 
+async def _all_platform_preset_keys() -> set[str]:
+    """story #4233 — 이름 짝 범위: org_id NULL `preset.*` 전수(사이클형 + 신호형)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(_async_url())
+    try:
+        async with engine.connect() as conn:
+            rows = (await conn.execute(text(
+                "SELECT key FROM event_definitions WHERE org_id IS NULL AND key LIKE 'preset.%'"
+            ))).scalars().all()
+    finally:
+        await engine.dispose()
+    return set(rows)
+
+
 async def _cyclic_platform_presets() -> dict[str, dict]:
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -80,10 +99,10 @@ async def _cyclic_platform_presets() -> dict[str, dict]:
 
 def _ts_table(table_name: str, path: Path = _COPY_TS) -> dict[str, str]:
     src = path.read_text(encoding="utf-8")
-    m = re.search(rf"const {table_name}: Record<string, string> = \{{(.*?)\n\}};", src, re.S)
+    m = re.search(rf"const {table_name}: Record<string, string> = \{{(.*?)\n\}};", src, re.DOTALL)
     assert m, f"{_COPY_TS.name}에서 {table_name} 표를 못 찾음 — 표 이름/형태가 바뀌었으면 이 파서를 같이 고쳐라"
     # 한 줄 단위로만(주석 줄은 건너뛴다) — `\s`는 줄바꿈까지 먹어 주석이 다음 키에 붙는다.
-    table = dict(re.findall(r"^[ \t]*'?([A-Za-z0-9_.:-]+)'?[ \t]*:[ \t]*'([^']+)'[ \t]*,?[ \t]*$", m.group(1), re.M))
+    table = dict(re.findall(r"^[ \t]*'?([A-Za-z0-9_.:-]+)'?[ \t]*:[ \t]*'([^']+)'[ \t]*,?[ \t]*$", m.group(1), re.MULTILINE))
     assert table, f"{table_name} 파싱 결과가 비었다"
     return table
 
@@ -93,13 +112,23 @@ def _messages(lang: str) -> dict:
 
 
 def find_gaps(presets: dict[str, dict], names: dict[str, str], descriptions: dict[str, str],
-              messages: dict[str, dict]) -> list[str]:
+              messages: dict[str, dict], *, name_keys: set[str] | None = None) -> list[str]:
+    """name_keys(#4233) — 이름 표가 짝을 이룰 key 집합(기본 = presets · 실 시드에선 신호형 포함 `preset.*` 전수)."""
     gaps: list[str] = []
     seeded = set(presets)
-    for label, table in (("NAME", names), ("DESCRIPTION", descriptions)):
+    for label, table, scope in (("NAME", names, name_keys if name_keys is not None else seeded), ("DESCRIPTION", descriptions, seeded)):
         in_table = {k for k in table if k.startswith("preset.")}
-        gaps += [f"{k}: PLATFORM_PRESET_{label}_KEY에 행 없음(en 화면에 한국어 원문)" for k in sorted(seeded - in_table)]
-        gaps += [f"{k}: PLATFORM_PRESET_{label}_KEY 행이 시드에 없음(낡은 행)" for k in sorted(in_table - seeded)]
+        gaps += [f"{k}: PLATFORM_PRESET_{label}_KEY에 행 없음(en 화면에 한국어 원문)" for k in sorted(scope - in_table)]
+        gaps += [f"{k}: PLATFORM_PRESET_{label}_KEY 행이 시드에 없음(낡은 행)" for k in sorted(in_table - scope)]
+    # 이름만 있는 키(신호형)도 messages ko·en이 있어야 한다.
+    for key in sorted((name_keys or set()) - seeded):
+        msg_key = names.get(key)
+        if not msg_key:
+            continue
+        for lang, ns in messages.items():
+            value = ns.get(msg_key)
+            if not isinstance(value, str) or not value.strip():
+                gaps.append(f"{key} name: messages/{lang}.json {_NAMESPACE}.{msg_key} 없음/빈 값")
     for key, row in presets.items():
         for field, table in (("name", names), ("description", descriptions)):
             msg_key = table.get(key)
@@ -123,10 +152,15 @@ async def test_cyclic_preset_keys_pair_with_messages_on_real_seed():
     # 양성 대조 — 시드가 비면 이 가드가 공허하게 통과한다(두 가족 다 실제로 잡히는지).
     assert {"preset.marketing.video_production", "preset.marketing.social_card_news",
             "preset.marketing.social_text_post", "preset.workflow.kanban", "preset.workflow.loop_agency"} <= set(presets), sorted(presets)
-    # 음성 대조 — 신호형은 범위 밖이어야 한다.
+    # 음성 대조 — 신호형은 설명 범위 밖이어야 한다.
     assert "preset.gate.verdict" not in presets
-    gaps = find_gaps(presets, _ts_table("PLATFORM_PRESET_NAME_KEY"), _ts_table("PLATFORM_PRESET_DESCRIPTION_KEY"),
-                     {lang: _messages(lang) for lang in _MESSAGES})
+    # story #4233 — 이름 범위는 신호형 포함 전수(양성 대조: 시스템 정의 7종이 실제로 잡히는지).
+    name_keys = await _all_platform_preset_keys()
+    assert {"preset.gate.verdict", "preset.work.assigned", "preset.loop.measure_due", "preset.agent_run.cancel_requested"} <= name_keys
+    # 이름 표 = 사이클형 표 + 시스템 이벤트 표(#4233 · FE presetName이 두 표를 다 본다).
+    names = {**_ts_table("PLATFORM_PRESET_NAME_KEY"), **_ts_table("PLATFORM_SYSTEM_EVENT_NAME_KEY")}
+    gaps = find_gaps(presets, names, _ts_table("PLATFORM_PRESET_DESCRIPTION_KEY"),
+                     {lang: _messages(lang) for lang in _MESSAGES}, name_keys=name_keys)
     assert gaps == [], "\n".join(gaps)
 
 
@@ -146,6 +180,13 @@ def test_find_gaps_catches_each_failure_mode():
     assert any("messages/en.json recipePreset.aDescription" in g for g in find_gaps(presets, names, descs, no_en))
     drift = {"ko": {"aName": "다른 이름", "aDescription": "가 설명"}, "en": ok["en"]}
     assert any("ko 문안이 시드 원문과 다름" in g for g in find_gaps(presets, names, descs, drift))
+
+    # 신호형(#4233) — 이름 범위에만 있는 key: 이름 표 누락 RED · messages 누락 RED · 설명 표는 요구하지 않음.
+    sig_scope = {"preset.marketing.a", "preset.gate.v"}
+    assert any("preset.gate.v: PLATFORM_PRESET_NAME_KEY에 행 없음" in g for g in find_gaps(presets, names, descs, ok, name_keys=sig_scope))
+    sig_names = {**names, "preset.gate.v": "vName"}
+    assert any("messages/en.json recipePreset.vName" in g for g in find_gaps(presets, sig_names, descs, {"ko": {**ok["ko"], "vName": "판정"}, "en": ok["en"]}, name_keys=sig_scope))
+    assert find_gaps(presets, sig_names, descs, {"ko": {**ok["ko"], "vName": "판정"}, "en": {**ok["en"], "vName": "Verdict"}}, name_keys=sig_scope) == []
 
     # 워크플로우(#4203) — ko가 시드와 달라도 정상(새 문안이 기준), 키 누락은 그대로 RED.
     wf = {"preset.workflow.w": {"key": "preset.workflow.w", "name": "Kanban Flow", "description": "원문"}}

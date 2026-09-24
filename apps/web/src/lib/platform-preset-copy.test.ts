@@ -1,6 +1,7 @@
 // story #4202 — 플랫폼 마케팅 프리셋 이름·설명 로케일 헬퍼.
 import { describe, expect, it } from 'vitest';
 import enMessages from '../../messages/en.json';
+import koMessages from '../../messages/ko.json';
 import { presetDescription, presetName } from './platform-preset-copy';
 
 const t = (key: string) => (enMessages.recipePreset as Record<string, string>)[key] ?? `MISSING:${key}`;
@@ -23,5 +24,35 @@ describe('presetName / presetDescription', () => {
   it('표에 없는 플랫폼 key → 원문, name이 비면 key', () => {
     expect(presetName({ key: 'preset.marketing.new', org_id: null, name: '', description: null }, t)).toBe('preset.marketing.new');
     expect(presetDescription({ key: 'preset.marketing.new', org_id: null, description: null }, t)).toBe('');
+  });
+});
+
+describe('시스템(신호형) 이벤트 정의 7종 이름(story #4233 · 유나 확정)', () => {
+  const ko = (key: string) => (koMessages.recipePreset as Record<string, string>)[key] ?? `MISSING:${key}`;
+  const SYSTEM: Array<[string, string, string, string]> = [
+    ['preset.gate.verdict', '게이트 판정', 'Gate verdict', '게이트 판정'],
+    ['preset.work.assigned', '작업 배정', 'Work assigned', '작업 배정'],
+    ['preset.work.status_changed', '작업 상태 변경', 'Work status changed', '작업 상태 변경'],
+    ['preset.goal.measured', '목표 측정', 'Goal measured', '목표 측정'],
+    ['preset.loop.measure_due', '측정 기한 도과', 'Past measure date', '측정 기한 지남'],
+    ['preset.steer.instruct', '방향 전환', 'Direction change', '방향 전환'],
+    ['preset.agent_run.cancel_requested', '에이전트 실행 중단 요청', 'Agent run stop request', '에이전트 실행 중단 요청'],
+  ];
+
+  it('⭐en은 영어 · ko는 유나 문안(«측정 기한 도과» → «측정 기한 지남») · 시드 원문과 무관', () => {
+    for (const [key, seedName, en, koName] of SYSTEM) {
+      const def = { key, org_id: null, name: seedName, description: null };
+      expect(presetName(def, t), key).toBe(en);
+      expect(presetName(def, ko), key).toBe(koName);
+    }
+  });
+
+  it('같은 key라도 조직 커스텀(org_id 있음)은 원문', () => {
+    expect(presetName({ key: 'preset.gate.verdict', org_id: 'org-1', name: '우리 판정', description: null }, t)).toBe('우리 판정');
+  });
+
+  it('채팅 이벤트 카드 머리말 en이 목록 이름과 같은 낱말(Work assigned · Work status changed)', () => {
+    expect(enMessages.eventCard.workAssignedHeader).toBe('Work assigned');
+    expect(enMessages.eventCard.statusChangedHeader).toBe('Work status changed');
   });
 });

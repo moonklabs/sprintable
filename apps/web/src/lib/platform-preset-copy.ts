@@ -23,6 +23,21 @@ export const PLATFORM_PRESET_NAME_KEY: Record<string, string> = {
   'preset.workflow.loop_agency': 'workflowLoopAgencyName',
 };
 
+/**
+ * story #4233(유나 확정) — 플랫폼 시스템(신호형 · stage 없음) 이벤트 정의 7종의 이름. 채팅 이벤트 카드 머리말(eventCard.*Header)과 같은 낱말.
+ * 사이클형 표(PLATFORM_PRESET_NAME_KEY)와 **따로** 둔다 — 그 표는 «사이클형 플랫폼 프리셋인가»(isLocalizedPlatformPreset → 채팅 카드
+ * block_template 로케일화)의 판정에도 쓰여, 섞으면 시스템 이벤트 카드까지 사이클형 카드 규칙을 탄다. 이름은 presetName이 두 표를 다 본다.
+ */
+export const PLATFORM_SYSTEM_EVENT_NAME_KEY: Record<string, string> = {
+  'preset.gate.verdict': 'systemGateVerdictName',
+  'preset.work.assigned': 'systemWorkAssignedName',
+  'preset.work.status_changed': 'systemWorkStatusChangedName',
+  'preset.goal.measured': 'systemGoalMeasuredName',
+  'preset.loop.measure_due': 'systemLoopMeasureDueName',
+  'preset.steer.instruct': 'systemSteerInstructName',
+  'preset.agent_run.cancel_requested': 'systemAgentRunCancelRequestedName',
+};
+
 export const PLATFORM_PRESET_DESCRIPTION_KEY: Record<string, string> = {
   'preset.marketing.newsletter': 'newsletterDescription',
   'preset.marketing.blog_article': 'blogArticleDescription',
@@ -49,7 +64,7 @@ function platformKey(table: Record<string, string>, def: PresetLike): string | u
 
 /** 화면 이름. 번역 키가 없으면 원문 name, 그것도 비면 key(기존 `name || key`와 같다). */
 export function presetName(def: PresetLike, t: Translate): string {
-  const k = platformKey(PLATFORM_PRESET_NAME_KEY, def);
+  const k = platformKey(PLATFORM_PRESET_NAME_KEY, def) ?? platformKey(PLATFORM_SYSTEM_EVENT_NAME_KEY, def);
   return k ? t(k) : def.name || def.key;
 }
 
