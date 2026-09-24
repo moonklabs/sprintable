@@ -198,6 +198,11 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           ))}
         </div>
       )}
+      {/* story #4273(유나 처방) — 시작 전 후보는 하나여도 이름을 단다(여럿일 때 라디오 라벨과 같은 presetName · 같은 text-sm). 하나면 자동
+          선택돼 버튼만 남아, 바로 위 다른 레시피의 진행 줄과 붙어 «그 레시피를 다시 시작»으로 읽혔다. 버튼 문구는 그대로. */}
+      {notStarted.length === 1 && (
+        <p className="mb-2 text-sm text-foreground" data-testid="recipe-start-name">{presetName(notStarted[0], tPreset)}</p>
+      )}
       {selected ? (
         <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
           {publishing ? t('recipeStarting') : t('recipeStartButton')}
