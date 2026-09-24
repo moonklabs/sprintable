@@ -28,53 +28,60 @@ def _load_apply_module():
     return mod
 
 
+BACKEND_PREFIX = "/api/v2/internal/cron/"
+FE_PREFIX = "/api/cron/"
+
+
 def _backend_cron_routes() -> dict[str, set[str]]:
-    """`/api/v2/internal/cron/` 뒤 경로 → HTTP method 집합(라우터를 실제로 import해 읽음)."""
+    """백엔드 cron 라우트 **전체 경로** → HTTP method 집합(라우터를 실제로 import해 읽음)."""
     from app.routers.cron import router
 
-    prefix = "/api/v2/internal/cron/"
     out: dict[str, set[str]] = {}
     for route in router.routes:
         path = getattr(route, "path", "")
-        assert path.startswith(prefix), path
-        out.setdefault(path[len(prefix):], set()).update(route.methods or set())
+        assert path.startswith(BACKEND_PREFIX), path
+        out.setdefault(path, set()).update(route.methods or set())
     return out
 
 
 def _fe_cron_routes() -> set[str]:
+    """FE cron 라우트 **전체 경로**(`/api/cron/<x>`)."""
     if not FE_CRON_DIR.exists():
         return set()
-    return {p.parent.relative_to(FE_CRON_DIR).as_posix() for p in FE_CRON_DIR.rglob("route.ts")}
+    return {FE_PREFIX + p.parent.relative_to(FE_CRON_DIR).as_posix() for p in FE_CRON_DIR.rglob("route.ts")}
 
 
 def guard_violations(manifest: dict, backend: dict[str, set[str]], fe: set[str]) -> list[str]:
-    """가드 본체 — 위반 문장 목록(비면 통과). 테스트가 사본 정의·가짜 라우트로 뮤테이션을 고정하려고 함수로 뺐다."""
+    """가드 본체 — 위반 문장 목록(비면 통과). 테스트가 사본 정의·가짜 라우트로 뮤테이션을 고정하려고 함수로 뺐다.
+
+    분류 키는 **전체 경로**다(까디르 4590 P3) — 이름(접미사)만 대조하면 FE `/api/cron/workflow-sla`를 새로 만들어도
+    백엔드 `workflow-sla`가 이미 분류돼 있어 통과해 버렸다."""
     problems: list[str] = []
-    classified: list[str] = [j["route"] for j in manifest["jobs"]] + [u["route"] for u in manifest["unscheduled"]]
-    for route in sorted({r for r in classified if classified.count(r) > 1}):
-        problems.append(f"두 번 분류됨: {route}")
+    prefix = manifest["route_prefix"]
+    job_paths = {prefix + j["route"]: j for j in manifest["jobs"]}
+    classified: list[str] = [prefix + j["route"] for j in manifest["jobs"]] + [u["path"] for u in manifest["unscheduled"]]
+    for path in sorted({p for p in classified if classified.count(p) > 1}):
+        problems.append(f"두 번 분류됨: {path}")
     names = [j["name"] for j in manifest["jobs"]]
     for name in sorted({n for n in names if names.count(n) > 1}):
         problems.append(f"작업 이름 중복: {name}")
-    for route in sorted(set(backend) - set(classified)):
-        problems.append(f"분류 없는 백엔드 cron 라우트: {route} — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것")
-    for route in sorted(fe - set(classified)):
-        problems.append(f"분류 없는 FE cron 라우트: /api/cron/{route}")
-    for job in manifest["jobs"]:
-        methods = backend.get(job["route"])
+    for path in sorted((set(backend) | fe) - set(classified)):
+        problems.append(f"분류 없는 cron 라우트: {path} — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것")
+    for path, job in job_paths.items():
+        methods = backend.get(path)
         if methods is None:
-            problems.append(f"없는 라우트를 가리키는 작업: {job['name']} → {job['route']}")
+            problems.append(f"없는 라우트를 가리키는 작업: {job['name']} → {path}")
         elif job["method"] not in methods:
             problems.append(f"method 불일치: {job['name']} {job['method']} vs 라우트 {sorted(methods)}")
         if not job.get("basis"):
             problems.append(f"근거 없는 작업: {job['name']}")
     for item in manifest["unscheduled"]:
-        if item["route"] not in backend and item["route"] not in fe:
-            problems.append(f"없는 라우트를 분류함: {item['route']}")
+        if item["path"] not in backend and item["path"] not in fe:
+            problems.append(f"없는 라우트를 분류함: {item['path']}")
         if item.get("kind") not in ("one_off", "manual"):
-            problems.append(f"알 수 없는 kind: {item['route']} {item.get('kind')!r}")
+            problems.append(f"알 수 없는 kind: {item['path']} {item.get('kind')!r}")
         if not item.get("basis"):
-            problems.append(f"근거 없는 분류: {item['route']}")
+            problems.append(f"근거 없는 분류: {item['path']}")
     return problems
 
 
@@ -91,7 +98,8 @@ def test_route_inventory_is_real():
     """라우트 수집이 조용히 비지 않았다 — 이 카드의 두 라우트가 실제로 잡힌다."""
     backend = _backend_cron_routes()
     assert len(backend) >= 25
-    assert backend["workflow-sla"] == {"GET"} and backend["workflow-handoff-watchdog"] == {"GET"}
+    assert backend[BACKEND_PREFIX + "workflow-sla"] == {"GET"}
+    assert backend[BACKEND_PREFIX + "workflow-handoff-watchdog"] == {"GET"}
 
 
 def test_sla_and_handoff_watchdog_are_scheduled(manifest):
@@ -104,16 +112,25 @@ def test_guard_goes_red_when_a_job_is_dropped(manifest):
     """뮤테이션 — 정의에서 작업 하나를 빼면 그 라우트가 «분류 없음»으로 RED."""
     mutated = {**manifest, "jobs": [j for j in manifest["jobs"] if j["route"] != "workflow-sla"]}
     assert guard_violations(mutated, _backend_cron_routes(), _fe_cron_routes()) == [
-        "분류 없는 백엔드 cron 라우트: workflow-sla — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것",
+        "분류 없는 cron 라우트: /api/v2/internal/cron/workflow-sla — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것",
     ]
 
 
 def test_guard_goes_red_when_a_new_route_appears_unclassified(manifest):
     """뮤테이션 — 새 cron 라우트(백엔드·FE 각각)가 분류 없이 생기면 RED."""
-    backend = {**_backend_cron_routes(), "brand-new-sweep": {"GET"}}
-    problems = guard_violations(manifest, backend, _fe_cron_routes() | {"brand-new-proxy"})
-    assert "분류 없는 백엔드 cron 라우트: brand-new-sweep — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것" in problems
-    assert "분류 없는 FE cron 라우트: /api/cron/brand-new-proxy" in problems
+    backend = {**_backend_cron_routes(), BACKEND_PREFIX + "brand-new-sweep": {"GET"}}
+    problems = guard_violations(manifest, backend, _fe_cron_routes() | {FE_PREFIX + "brand-new-proxy"})
+    assert f"분류 없는 cron 라우트: {BACKEND_PREFIX}brand-new-sweep — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것" in problems
+    assert f"분류 없는 cron 라우트: {FE_PREFIX}brand-new-proxy — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것" in problems
+
+
+def test_guard_goes_red_for_a_fe_route_sharing_a_scheduled_backend_name(manifest):
+    """까디르 4590 P3 뮤테이션 — 백엔드 `workflow-sla`가 주기로 분류돼 있어도, 같은 이름의 FE `/api/cron/workflow-sla`는
+    별개 경로라 분류 없음으로 RED(예전 접미사 대조는 통과시켰다)."""
+    problems = guard_violations(manifest, _backend_cron_routes(), _fe_cron_routes() | {FE_PREFIX + "workflow-sla"})
+    assert problems == [
+        f"분류 없는 cron 라우트: {FE_PREFIX}workflow-sla — jobs.json의 jobs(주기) 또는 unscheduled(일회성·수동)에 넣을 것",
+    ]
 
 
 def test_guard_goes_red_on_wrong_method_or_missing_route(manifest):
@@ -122,7 +139,7 @@ def test_guard_goes_red_on_wrong_method_or_missing_route(manifest):
     jobs.append({**jobs[1], "name": "ghost", "route": "no-such-route"})
     problems = guard_violations({**manifest, "jobs": jobs}, _backend_cron_routes(), _fe_cron_routes())
     assert any(p.startswith(f"method 불일치: {jobs[0]['name']}") for p in problems), problems
-    assert "없는 라우트를 가리키는 작업: ghost → no-such-route" in problems
+    assert f"없는 라우트를 가리키는 작업: ghost → {BACKEND_PREFIX}no-such-route" in problems
 
 
 # ─── 적용 스크립트(infra/apply_cloud_scheduler.py) ─────────────────────────────
@@ -279,3 +296,66 @@ def test_leak_guard_goes_red_without_masking(manifest, monkeypatch, capsys):
     trace, message = _run_apply_through_real_gcloud_wrapper(mod, manifest, monkeypatch)
     capsys.readouterr()
     assert _SECRET in message and _SECRET in trace
+
+
+class _StatefulGcloud(_FakeGcloud):
+    """create/update 플래그를 실물 목록에 실제로 반영하는 가짜 — 적용 뒤 재조회 차이 0까지 잴 수 있게."""
+
+    def __call__(self, args: list[str]) -> str:
+        if args[:3] in (["scheduler", "jobs", "create"], ["scheduler", "jobs", "update"]):
+            self.calls.append(args)
+            self._write(args[3 + 1], args[5:], create=args[2] == "create")
+            return ""
+        return super().__call__(args)
+
+    def _write(self, name: str, flags: list[str], *, create: bool) -> None:
+        opts = dict(f[2:].split("=", 1) for f in flags)
+        job = next((j for j in self.live if j["name"].rsplit("/", 1)[-1] == name), None)
+        if job is None or create:
+            job = {"name": f"projects/p/locations/asia-northeast3/jobs/{name}", "httpTarget": {"headers": {}}, "retryConfig": {}}
+            self.live.append(job)
+        target, retry = job["httpTarget"], job["retryConfig"]
+        headers = target.setdefault("headers", {})
+        if create:
+            headers.clear()
+        for key in ("headers", "update-headers"):
+            if key in opts:
+                headers.update(dict(kv.split("=", 1) for kv in opts[key].split(",")))
+        for name_ in opts.get("remove-headers", "").split(",") if opts.get("remove-headers") else []:
+            headers.pop(name_, None)
+        job.update(schedule=opts["schedule"], timeZone=opts["time-zone"], attemptDeadline=opts["attempt-deadline"])
+        target.update(uri=opts["uri"], httpMethod=opts["http-method"])
+        retry.update(retryCount=int(opts["max-retry-attempts"]), minBackoffDuration=opts["min-backoff"],
+                     maxBackoffDuration=opts["max-backoff"], maxDoublings=int(opts["max-doublings"]),
+                     maxRetryDuration=opts["max-retry-duration"])
+
+
+def test_empty_or_missing_authorization_on_a_live_job_is_a_difference(manifest):
+    """까디르 4590 P2 — 실물 Authorization이 빈 값이거나 없으면 «같음»이 아니라 차이(인증 없는 작업을 UNCHANGED로 두지 않는다)."""
+    mod = _load_apply_module()
+    desired = mod.desired_jobs(manifest, "dev", _SECRET, base_url=_URL)
+    live = [_live_from_desired(j) for j in desired]
+    live[0]["httpTarget"]["headers"]["Authorization"] = ""
+    del live[1]["httpTarget"]["headers"]["Authorization"]
+    plan = mod.make_plan(desired, live, "dev")
+    assert [(j.name, changed) for j, changed in plan.update] == [
+        (desired[0].name, ["headers.Authorization"]), (desired[1].name, ["headers.Authorization"]),
+    ]
+
+
+def test_apply_removes_live_only_headers_and_converges(manifest, capsys):
+    """까디르 4590 P2 — 실물에만 있는 헤더는 `--remove-headers`로 지운다(안 지우면 적용 뒤 재조회에서 또 차이 → 매 배포
+    exit 1). 적용 뒤 재조회 차이 0 · exit 0 — 빈 Authorization·누락 작업도 한 번에 수렴."""
+    mod = _load_apply_module()
+    desired = mod.desired_jobs(manifest, "dev", _SECRET, base_url=_URL)
+    live = [_live_from_desired(j) for j in desired if j.name != "workflow-sla-dev"]
+    live[0]["httpTarget"]["headers"]["X-Legacy"] = "1"
+    live[1]["httpTarget"]["headers"]["Authorization"] = ""
+    fake = _StatefulGcloud(live)
+    assert mod.main(["--env", "dev", "--apply"], run=fake) == 0
+    updates = {c[4]: c for c in fake.calls if c[:3] == ["scheduler", "jobs", "update"]}
+    assert "--remove-headers=X-Legacy" in updates[desired[0].name]
+    assert not any(a.startswith("--remove-headers") for a in updates[desired[1].name])
+    residual = mod.make_plan(desired, fake.live, "dev")
+    assert (residual.create, residual.update) == ([], [])
+    assert _SECRET not in capsys.readouterr().out

@@ -1,5 +1,5 @@
 {
-  "_doc": "story #4234 — Cloud Scheduler 작업 정의(레포가 원천). 적용: infra/apply_cloud_scheduler.py(cloudbuild.yaml `apply-cloud-scheduler`, dev만). 가드: backend/tests/test_4234_cloud_scheduler_manifest.py — `/api/v2/internal/cron/*`·FE `/api/cron/*` 라우트는 전부 `jobs`(주기) 아니면 `unscheduled`(수동·일회성)에 정확히 한 번 있어야 하고, 작업의 route·method는 실제 라우트와 맞아야 한다. Authorization 값과 백엔드 호스트는 여기 두지 않는다 — 적용 시점에 실물 백엔드 서비스 describe에서 읽는다(CRON_SECRET secretKeyRef · status.url).",
+  "_doc": "story #4234 — Cloud Scheduler 작업 정의(레포가 원천). 적용: infra/apply_cloud_scheduler.py(cloudbuild.yaml `apply-cloud-scheduler`, dev만). 가드: backend/tests/test_4234_cloud_scheduler_manifest.py — `/api/v2/internal/cron/*`·FE `/api/cron/*` 라우트는 **전체 경로** 기준으로 전부 `jobs`(주기 — 백엔드 `route_prefix` + route) 아니면 `unscheduled`(수동·일회성 — `path`)에 정확히 한 번 있어야 하고, 작업의 route·method는 실제 라우트와 맞아야 한다. Authorization 값과 백엔드 호스트는 여기 두지 않는다 — 적용 시점에 실물 백엔드 서비스 describe에서 읽는다(CRON_SECRET secretKeyRef · status.url).",
   "route_prefix": "/api/v2/internal/cron/",
   "environments": {
     "dev": {
@@ -224,22 +224,22 @@
   ],
   "unscheduled": [
     {
-      "route": "embed-backfill",
+      "path": "/api/v2/internal/cron/embed-backfill",
       "kind": "one_off",
       "basis": "cron.py `embed_backfill_cron` docstring: 기존 hypothesis/loop/loop_artifact를 embeddings pending으로 «1회 backfill» · 재트리거 안전 · 실제 임베딩은 embed-backlog(주기)가 처리."
     },
     {
-      "route": "workflow-grandfather-backfill",
+      "path": "/api/v2/internal/cron/workflow-grandfather-backfill",
       "kind": "one_off",
       "basis": "cron.py 주석 E-DG S19(P0-5): «line enable 시점» in-flight story grandfather backfill(allowlist org) — 라인을 켤 때 한 번 돌리는 작업."
     },
     {
-      "route": "seed-default-story-line",
+      "path": "/api/v2/internal/cron/seed-default-story-line",
       "kind": "manual",
       "basis": "cron.py 주석 E-DG S16: 기본 org의 default story line을 shadow로 시드 · «PO 트리거» · ?org_id=로 다른 org 시드."
     },
     {
-      "route": "db-connection-stats",
+      "path": "/api/v2/internal/cron/db-connection-stats",
       "kind": "manual",
       "basis": "cron.py `db_connection_stats` docstring(SID f2fe1c5e/#2040 AC2): pg_stat_activity 집계 계측 — 커넥션 소비자 분해용 조회라 필요할 때 부름."
     }

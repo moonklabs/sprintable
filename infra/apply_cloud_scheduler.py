@@ -133,8 +133,14 @@ def _live_view(live: dict) -> dict:
     }
 
 
+def extra_headers(desired: DesiredJob, live: dict) -> list[str]:
+    """실물에만 있는 헤더 이름(정의에 없음) — update 때 `--remove-headers`로 지운다."""
+    return sorted(name for name in _live_view(live)["headers"] if name not in desired.headers)
+
+
 def diff_job(desired: DesiredJob, live: dict) -> list[str]:
-    """다른 필드 이름 목록. Authorization 값은 실물이 값을 돌려줄 때만 비교한다(안 돌려주면 비교 불가 — 이름만 본다)."""
+    """다른 필드 이름 목록. 헤더는 값까지 비교한다 — 목록 API는 헤더 값을 돌려준다(PO 실측 · 18개 모두 값 있음). 실물의
+    Authorization이 비었거나 없으면 **차이**다(인증 없는 작업을 «같음»으로 두지 않는다 — 까디르 4590 P2)."""
     view = _live_view(live)
     changed = []
     for key in ("schedule", "time_zone", "uri", "http_method", "attempt_deadline"):
@@ -142,15 +148,9 @@ def diff_job(desired: DesiredJob, live: dict) -> list[str]:
             changed.append(key)
     live_headers = view["headers"]
     for name, value in desired.headers.items():
-        if name not in live_headers:
+        if live_headers.get(name) != value:
             changed.append(f"headers.{name}")
-        elif name == AUTH_HEADER and live_headers[name] in ("", None):
-            continue
-        elif live_headers[name] != value:
-            changed.append(f"headers.{name}")
-    for name in live_headers:
-        if name not in desired.headers and name != "Content-Length":
-            changed.append(f"headers.{name}")
+    changed.extend(f"headers.{name}" for name in extra_headers(desired, live))
     for key, value in desired.retry.items():
         if view["retry"].get(key) != value:
             changed.append(f"retry.{key}")
@@ -161,6 +161,8 @@ def diff_job(desired: DesiredJob, live: dict) -> list[str]:
 class Plan:
     create: list[DesiredJob] = field(default_factory=list)
     update: list[tuple[DesiredJob, list[str]]] = field(default_factory=list)
+    # update 대상별로 실물에만 있는 헤더(지울 것) — 이름 → 목록
+    remove_headers: dict[str, list[str]] = field(default_factory=dict)
     unchanged: list[str] = field(default_factory=list)
     unmanaged: list[str] = field(default_factory=list)
 
@@ -178,6 +180,9 @@ def make_plan(desired: list[DesiredJob], live_jobs: list[dict], env: str) -> Pla
         changed = diff_job(job, live)
         if changed:
             plan.update.append((job, changed))
+            extras = extra_headers(job, live)
+            if extras:
+                plan.remove_headers[job.name] = extras
         else:
             plan.unchanged.append(job.name)
     suffix = f"-{env}"
@@ -185,10 +190,10 @@ def make_plan(desired: list[DesiredJob], live_jobs: list[dict], env: str) -> Pla
     return plan
 
 
-def _job_flags(job: DesiredJob, *, header_flag: str) -> list[str]:
+def _job_flags(job: DesiredJob, *, header_flag: str, remove_headers: list[str] | None = None) -> list[str]:
     headers = ",".join(f"{k}={v}" for k, v in sorted(job.headers.items()))
     r = job.retry
-    return [
+    flags = [
         f"--schedule={job.schedule}", f"--time-zone={job.time_zone}", f"--uri={job.uri}",
         f"--http-method={job.http_method}", f"{header_flag}={headers}",
         f"--attempt-deadline={job.attempt_deadline}",
@@ -196,6 +201,10 @@ def _job_flags(job: DesiredJob, *, header_flag: str) -> list[str]:
         f"--max-backoff={r['max_backoff']}", f"--max-doublings={r['max_doublings']}",
         f"--max-retry-duration={r['max_retry_duration']}",
     ]
+    if remove_headers:
+        # 까디르 4590 P2 — 실물에만 있는 헤더를 안 지우면 적용 뒤 재조회에서 또 차이 → 매 배포 exit 1.
+        flags.append(f"--remove-headers={','.join(remove_headers)}")
+    return flags
 
 
 def describe_backend(run: Runner, *, service: str, region: str) -> dict:
@@ -273,7 +282,7 @@ def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
              *_job_flags(job, header_flag="--headers")])
     for job, _changed in plan.update:
         run(["scheduler", "jobs", "update", "http", job.name, f"--location={location}",
-             *_job_flags(job, header_flag="--update-headers")])
+             *_job_flags(job, header_flag="--update-headers", remove_headers=plan.remove_headers.get(job.name))])
 
     after = json.loads(run(["scheduler", "jobs", "list", f"--location={location}", "--format=json"]))
     residual = make_plan(desired, after, args.env)
