@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames, withSummaryNames } from './trust-utils';
 import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 // story #3735(D1) — groupRosterByRole이 이제 t(Translator)를 받아 기본 5키(role_key)면
@@ -295,5 +295,21 @@ describe('sortGroupMembersByName — 같은 이름은 member_id · role_key로 �
     const b = sortGroupMembersByName([row('p1', 'dev'), row('p1', 'qa')], one).map((r) => r.role_key);
     expect(a).toEqual(['dev', 'qa']);
     expect(b).toEqual(['dev', 'qa']);
+  });
+});
+
+describe('withSummaryNames(story #4285)', () => {
+  it('응답 이름이 정본 — 없던 행은 채우고 · 있던 행은 이름만 바꾸고 이메일은 둔다 · 이름 없는 행(지워진 구성원)은 건드리지 않는다', () => {
+    const lookup = new Map([['h1', { id: 'h1', name: 'song', email: 'song@x.dev' }]]);
+    const base = { role_key: 'dev', role_label: null, hit_rate: null, resolved: 0, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const out = withSummaryNames(lookup, [
+      { ...base, member_id: 'h1', name: '송윤재' },
+      { ...base, member_id: 'a1', name: '페드루 올리베이라' },
+      { ...base, member_id: 'gone', name: null, member_deleted: true },
+    ]);
+    expect(out.get('h1')).toEqual({ id: 'h1', name: '송윤재', email: 'song@x.dev' });
+    expect(out.get('a1')).toEqual({ id: 'a1', name: '페드루 올리베이라' });
+    expect(out.has('gone')).toBe(false);
+    expect(lookup.get('h1')!.name).toBe('song'); // 원본 맵은 그대로(새 맵을 돌려준다).
   });
 });

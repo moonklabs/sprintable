@@ -461,3 +461,34 @@ describe('OrganizationTrustPage — PageHeader(⓪, story #3749)', () => {
     expect(container.textContent).not.toContain('오케스트레이션');
   });
 });
+
+// story #4285 — 이름은 org-summary 응답이 싣는다(조직 범위). 조직 구성원 · 지금 프로젝트 팀원 어디에도 없는 다른 프로젝트 에이전트(실측:
+// 페드루)도 이름으로 뜨고, «알 수 없는 구성원»은 지워진 구성원(name=null · member_deleted)일 때만. 뮤테이션: page.tsx에서
+// withSummaryNames를 빼면 첫 테스트가 «알 수 없는 구성원»으로 RED.
+describe('OrganizationTrustPage — 이름은 조직 범위 응답에서(story #4285)', () => {
+  type SummaryRow = StubMember & { name?: string | null; member_type?: 'human' | 'agent' | null; member_deleted?: boolean };
+  const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+
+  it('⭐다른 프로젝트 에이전트 — 조직 구성원 · 팀원 목록에 없어도 응답 이름으로 보인다', async () => {
+    mountAsAdmin();
+    const rows: SummaryRow[] = [{ ...base, member_id: 'agent-other-project', name: '페드루 올리베이라', member_type: 'agent', member_deleted: false }];
+    stubFetchAdmin(rows);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.textContent).toContain('페드루 올리베이라');
+    expect(container.textContent).not.toContain(koMessages.organization.trustUnknownMember);
+  });
+
+  it('⭐지워진 구성원만 «알 수 없는 구성원»', async () => {
+    mountAsAdmin();
+    const rows: SummaryRow[] = [
+      { ...base, member_id: 'alive', name: '살아 있는 에이전트', member_type: 'agent', member_deleted: false },
+      { ...base, member_id: 'gone', name: null, member_type: null, member_deleted: true },
+    ];
+    stubFetchAdmin(rows);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.textContent).toContain('살아 있는 에이전트');
+    expect(container.textContent!.split(koMessages.organization.trustUnknownMember).length - 1).toBe(1);
+  });
+});

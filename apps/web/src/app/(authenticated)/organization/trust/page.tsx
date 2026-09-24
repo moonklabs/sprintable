@@ -18,6 +18,7 @@ import {
   mergeMemberLookup,
   resolveRoleLabel,
   sortGroupMembersByName,
+  withSummaryNames,
   useHistoryDrilldown,
   HistoryDrilldownPanel,
   HistoryDrilldownTrigger,
@@ -87,7 +88,7 @@ export default function OrganizationTrustPage() {
       const teamMembersJson = teamMembersRes?.ok ? await teamMembersRes.json() as { data?: Array<{ id: string; name?: string | null }> } : { data: [] };
       if (cancelled) return;
       setRosterRows(summaryJson.members ?? []);
-      setRosterMembers(mergeMemberLookup(orgMembersJson.data ?? [], teamMembersJson.data ?? []));
+      setRosterMembers(withSummaryNames(mergeMemberLookup(orgMembersJson.data ?? [], teamMembersJson.data ?? []), summaryJson.members ?? []));
       setLoading(false);
     }
     async function loadSelf() {

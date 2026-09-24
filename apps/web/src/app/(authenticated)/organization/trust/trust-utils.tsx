@@ -17,6 +17,11 @@ export interface OrgSummaryRow {
   // 가설 N건" 문장을 내려면 필요. BE가 이미 metrics JSONB에 갖고 있던 값을 이
   // 스토리에서 org-summary 응답에 배선(routers/trust_scores.py 1줄).
   pending: number | null;
+  // story #4285 — 이름 · 종류를 서버가 조직 범위로 싣는다(다른 프로젝트 에이전트도). 지워진(또는 이 조직에서 못 찾는) 구성원이면
+  // name=null · member_deleted=true. 옛 서버 응답엔 없을 수 있어 선택 필드.
+  name?: string | null;
+  member_type?: 'human' | 'agent' | null;
+  member_deleted?: boolean;
 }
 
 export interface HistorySnapshot {
@@ -312,4 +317,19 @@ export function HistoryDrilldownPanel({
       )}
     </div>
   );
+}
+
+// story #4285 — 이름은 org-summary 응답이 정본이다(조직 범위 조인). 예전엔 조직 구성원(사람) + 지금 프로젝트 팀원 두 부분 목록으로만
+// 짜 맞춰 같은 조직 다른 프로젝트의 에이전트가 «알 수 없는 구성원»이었다. 응답 이름이 있으면 그 이름으로 덮고(이메일 · 역할은 그대로 —
+// 같은 이름 구분 꼬리 재료), 없으면(옛 서버 · 지워진 구성원) 기존 조회값 그대로. 지워진 구성원은 조회에 없으니 화면 폴백
+// «알 수 없는 구성원»은 그 경우에만 남는다.
+export function withSummaryNames(lookup: Map<string, RosterMember>, rows: OrgSummaryRow[]): Map<string, RosterMember> {
+  const out = new Map(lookup);
+  for (const row of rows) {
+    const name = row.name?.trim();
+    if (!name) continue;
+    const prev = out.get(row.member_id);
+    out.set(row.member_id, { ...(prev ?? { id: row.member_id }), name });
+  }
+  return out;
 }
