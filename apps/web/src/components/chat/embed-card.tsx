@@ -17,6 +17,9 @@ import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchS
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
+import { gateStatusLabel } from '@/lib/gate-status-label';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { parseEntityRef } from './entity-ref';
 import { useReadingPanel } from './reading-panel-context';
 import type { ReferenceForm } from './embed-renderer';
@@ -24,7 +27,7 @@ import type { ReferenceForm } from './embed-renderer';
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { keepHref } from '@/lib/with-project-param';
+import { keepHref, withProjectParam } from '@/lib/with-project-param';
 
 export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
 
@@ -42,13 +45,16 @@ export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
  * 항목마다 프로젝트가 있는 목록은 «그 항목의 프로젝트를 싣는 함수»를 넘긴다. 이동하지 않고 «자기 주소가 있나»만 보는 판정은 keepHref. */
 export function getEntityHref(entityType: string, entityId: string, withProject: (href: string) => string): string | null {
   switch (entityType) {
-    case 'story': return `/board?story=${entityId}`;
+    // story #4253(유나 4612 design) — 목적지가 있는 갈래는 모두 withProject로 프로젝트를 싣는다. 예전엔 doc만 감싸, 활동 피드의 다른 프로젝트
+    // 스토리 링크(`/board?story=`)가 p 없이 옛 자원 리다이렉트를 타 쿠키 프로젝트 셸로 착지했다. /board · /sprints · /storage는 옛 자원 경로라
+    // flat 래칫(app/(authenticated) 최상위 폴더 기준)이 세지 못한 자리다.
+    case 'story': return withProject(`/board?story=${entityId}`);
     case 'doc': return withProject(`/docs?id=${entityId}`);
     // AC1 — 은퇴한 이름(/epics/)이 주소로 남아 404였다. 모델은 Goal, 화면은 goals/[id]/page.tsx.
-    case 'epic': return `/goals/${entityId}`;
+    case 'epic': return withProject(`/goals/${entityId}`);
     // sprint는 sprints-client.tsx가 `?id=`를 실제로 읽어 자동선택한다(딥링크 주석 확認됨) — ①.
-    case 'sprint': return `/sprints?id=${entityId}`;
-    case 'asset': return `/storage?asset=${entityId}`;
+    case 'sprint': return withProject(`/sprints?id=${entityId}`);
+    case 'asset': return withProject(`/storage?asset=${entityId}`);
     case 'task': return null; // ② — 부모 story_id는 EntityPreviewModal이 fetch 후 판정.
     case 'artifact': return null; // 레코드마다 ②/③ — 위 함수 doc 참고.
     case 'hypothesis': return null; // ③ 고정 — 위 함수 doc 참고.
@@ -308,10 +314,13 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
   // (+task는 story_id 부모링크·sprint는 start/end_date)가 실제로 있다 — 「있으면 열고 없으면
   // 안 연다」로 이번엔 포함. 필드가 없으면(과거처럼) 여전히 null 반환 — 진입점을 억지로 안 만든다.
   if (entityType === 'task') {
-    const d = detail as { title?: string; status?: string; story_id?: string };
+    const d = detail as { title?: string; status?: string; story_id?: string; project_id?: string | null };
     if (!d.title) return null;
     const statusLabel = d.status ? translateEntityStatus('task', d.status) : null;
-    const parentHref = d.story_id ? getEntityHref('story', d.story_id, withProject) : null;
+    // story #4253(까디르 codex · PO 09:45Z) — 채팅은 조직 전체가 보는 자리라 «항목 자기 프로젝트»: TaskResponse.project_id(story_id →
+    // Story.project_id 1-hop)로 싣고, 모를 때만 현재 p.
+    const parentProject = d.project_id ? (h: string) => withProjectParam(h, d.project_id ?? null) : withProject;
+    const parentHref = d.story_id ? getEntityHref('story', d.story_id, parentProject) : null;
     if (!statusLabel && !parentHref) return null;
     return (
       <div className="space-y-2">
@@ -360,19 +369,25 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
 function renderGateSummary(
   detail: Record<string, unknown>,
   tWorkList: (key: string) => string,
+  tDashboard: (key: string) => string,
+  tCage: (key: string) => string,
 ): React.ReactNode | null {
   const d = detail as {
     gate_type?: string; status?: string; risk_grade?: 'low' | 'high' | 'unknown' | null;
     work_item_summary?: { title: string; slug: string | null } | null; work_item_id?: string;
   };
   if (!d.status && !d.gate_type) return null;
-  const statusLabel = d.status ? translateEntityStatus('gate', d.status) : null;
+  // story #4253(유나 CHANGES · PO 13:46Z) — 이 본문은 envelope 수정으로 이 PR에서 처음 실제로 그려진다. 원시 키를 찍지 않게 옆 카드들과 같은
+  // 공용 낱말: 종류 = gateTypeLabel(dashboard · 미등재는 일반 «게이트») · 상태 = gateStatusLabel(cage) — translateEntityStatus는 gate 맵이
+  // 없어 늘 null이었다.
+  const statusLabel = d.status ? gateStatusLabel(d.status, tCage) : null;
+  const typeLabel = d.gate_type ? gateTypeLabel(tDashboard, d.gate_type) : null;
   const title = d.work_item_summary?.title ?? (d.work_item_id ? `#${d.work_item_id.slice(0, 8)}` : null);
   return (
     <div className="space-y-2">
       {title && <p className="text-sm font-medium text-foreground">{title}</p>}
       <div className="flex flex-wrap items-center gap-1.5">
-        {d.gate_type && <MdBadge label={d.gate_type} />}
+        {typeLabel && <MdBadge label={typeLabel} />}
         {statusLabel && <MdBadge label={statusLabel} />}
         {d.risk_grade === 'high' && <MdBadge label={tWorkList('riskBadgeHigh')} />}
         {d.risk_grade === 'unknown' && <MdBadge label={tWorkList('riskBadgeUnknown')} />}
@@ -421,6 +436,11 @@ export function EntityPreviewModal({
   const t = useTranslations('chats');
   // story #3888 — renderGateSummary의 risk 배지 라벨(workList.riskBadgeHigh/riskBadgeUnknown).
   const tWorkList = useTranslations('workList');
+  // story #4253 — 슬러그로 스코프드 경로를 못 지을 때의 폴백: 응답에 항목(또는 부모) 프로젝트 id가 있으면 그 프로젝트 · 없을 때만 현재 p.
+  const ownProjectHref = (projectId: string | null | undefined): ((h: string) => string) =>
+    projectId ? (h: string) => withProjectParam(h, projectId) : flatHref;
+  const tDashboard = useTranslations('dashboard');
+  const tCage = useTranslations('cage');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
@@ -478,15 +498,13 @@ export function EntityPreviewModal({
     }
 
     if (entityType === 'gate') {
-      // gates/[id]/page.tsx·approval-request-card.tsx와 동일 계약(GET /api/gates/{id},
-      // {data:GateItem} envelope) — parity 대상 ENTITY_API를 거치지 않는 독립 fetch.
-      // fetchWithAuth 필수([[feedback-client-fetch-use-fetchwithauth]]).
+      // GET /api/gates/{id} — 공용 fetchGateById(lib/fetch-gate.ts · 날 GateResponse). story #4253(까디르 codex 01a0d35f P1) — 예전엔 {data}
+      // envelope로 가정해 json.data만 읽어 미리보기 본문과 게이트 프로젝트(?p=)가 늘 비었다. parity 대상 ENTITY_API를 거치지 않는 독립 fetch.
       void (async () => {
         try {
-          const res = await fetchWithAuth(`/api/gates/${entityId}`);
-          if (!res.ok) throw new Error();
-          const json = (await res.json()) as { data?: Record<string, unknown> };
-          if (!cancelled) setDetail(json.data ?? null);
+          const result = await fetchGateById<Record<string, unknown> & { id: string }>(entityId);
+          if (result.kind !== 'ok') throw new Error();
+          if (!cancelled) setDetail(result.gate);
         } catch {
           if (!cancelled) setNotFound(true);
         } finally {
@@ -591,18 +609,20 @@ export function EntityPreviewModal({
     resolvedHref = docPreview
       ? (docPreview.orgSlug && docPreview.projectSlug
           ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
-          : flatHref(`/docs/${docPreview.slug}/view`))
+          // story #4253(까디르 codex 01a0d35f P2) — slug가 없어도 문서 프로젝트 id는 안다 → 현재 p 대신 문서 자기 프로젝트.
+          : withProjectParam(`/docs/${docPreview.slug}/view`, docPreview.projectId))
       : null;
     linkKind = resolvedHref ? 'own' : null;
   } else if (entityType === 'task') {
     // ② — Task.story_id는 NOT NULL(항상 유일 부모). fetch 전이면 아직 null(풋터는 loading이 가림).
     // story #2642(BE #3044) — TaskResponse가 이제 org_slug/project_slug를 직접 싣는다(story_id→
     // Story.project_id 1-hop을 BE가 이미 해소해 응답에 얹어 준다 — FE가 또 한 번 조회할 필요 없음).
-    const t = detail as { story_id?: string | null; org_slug?: string | null; project_slug?: string | null } | null;
+    const t = detail as { story_id?: string | null; org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     resolvedHref = resolveScopedEntityHref(
       t?.org_slug ? { orgSlug: t.org_slug, projectSlug: t.project_slug ?? null } : null,
       t?.story_id ? `/board?story=${t.story_id}` : null,
       (ws, proj) => storyBoardUrl(ws, proj, t!.story_id!),
+      ownProjectHref(t?.project_id),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
     parentKind = 'story';
@@ -616,19 +636,20 @@ export function EntityPreviewModal({
     // 없이 org_slug/project_slug를 직접 싣는다 — story_id/epic_id 분기 둘 다 이 값을 그대로 쓴다.
     const d = detail as {
       story_id?: string | null; epic_id?: string | null; doc_id?: string | null;
-      org_slug?: string | null; project_slug?: string | null;
+      org_slug?: string | null; project_slug?: string | null; project_id?: string | null;
     } | null;
     const ownerSlugs = d?.org_slug ? { orgSlug: d.org_slug, projectSlug: d.project_slug ?? null } : null;
     // doc 부모만 예외 — docViewUrl은 doc 자신의 slug가 필요한데 artifact 응답엔 그게 없어(위
     // effect가 /api/docs/preview로 별도 선조회한 docPreview를 쓴다, #2168 재사용 그대로).
     const parentHref = d?.story_id
-      ? resolveScopedEntityHref(ownerSlugs, `/board?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!))
+      ? resolveScopedEntityHref(ownerSlugs, `/board?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!), ownProjectHref(d.project_id))
       : d?.epic_id
-      ? resolveScopedEntityHref(ownerSlugs, `/goals/${d.epic_id}`, (ws, proj) => goalUrl(ws, proj, d.epic_id!))
+      ? resolveScopedEntityHref(ownerSlugs, `/goals/${d.epic_id}`, (ws, proj) => goalUrl(ws, proj, d.epic_id!), ownProjectHref(d.project_id))
       : d?.doc_id
         ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
             ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
-            : flatHref(`/docs?id=${d.doc_id}`))
+            // story #4253 P2 — 문서 프로젝트 id를 알면(docPreview) 그 프로젝트 · 모를 때만 현재 p.
+            : docPreview?.projectId ? withProjectParam(`/docs?id=${d.doc_id}`, docPreview.projectId) : flatHref(`/docs?id=${d.doc_id}`))
         : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
@@ -638,11 +659,12 @@ export function EntityPreviewModal({
     // resolved_story_id 하나로 해소해 준다(task처럼 여기서 또 한 번 join할 필요가 없다).
     // story #2642(BE #3044) — EvidenceResponse가 그 resolve 과정에서 이미 계산해 둔
     // project_id로 org_slug/project_slug도 같이 싣는다(추가 join 없음).
-    const ev = detail as { resolved_story_id?: string | null; org_slug?: string | null; project_slug?: string | null } | null;
+    const ev = detail as { resolved_story_id?: string | null; org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     resolvedHref = resolveScopedEntityHref(
       ev?.org_slug ? { orgSlug: ev.org_slug, projectSlug: ev.project_slug ?? null } : null,
       ev?.resolved_story_id ? `/board?story=${ev.resolved_story_id}` : null,
       (ws, proj) => storyBoardUrl(ws, proj, ev!.resolved_story_id!),
+      ownProjectHref(ev?.project_id),
     );
     linkKind = resolvedHref ? 'via-parent' : null;
     parentKind = 'story';
@@ -654,14 +676,17 @@ export function EntityPreviewModal({
     // gate 상세(/gates/[id])는 story #1954부터 이미 org-scope 플랫 라우트(워크스페이스/
     // 프로젝트 slug 세그먼트 없음, gates/[id]/page.tsx 그대로) — story/epic처럼 슬러그 해소가
     // 필요 없다. getEntityHref의 parity 스위치는 안 거친다(gate는 그 계약 밖).
-    resolvedHref = flatHref(`/gates/${entityId}`);
+    // story #4253(까디르 codex 01a0d316) — 채팅은 조직 전체가 보는 자리라 게이트 자기 프로젝트(GET /api/gates/{id}의 project_id)를 싣는다.
+    // 모를 때(프로젝트 없는 게이트 · fetch 전/실패)만 현재 p.
+    const gateProjectId = (detail as { project_id?: string | null } | null)?.project_id ?? null;
+    resolvedHref = gateProjectId ? withProjectParam(`/gates/${entityId}`, gateProjectId) : flatHref(`/gates/${entityId}`);
     linkKind = 'own';
   } else {
     // story·epic·sprint·asset — own-href ①. story #2642(BE #3044)부터 각 detail 응답이
     // org_slug/project_slug를 직접 싣는다 — 엔티티 자신의 project로 직행(뷰어의 현재 프로젝트
     // 추측을 proxy.ts::redirectLegacyResourcePath에 맡기지 않는다). fetch 전/실패(project_slug
     // 없음 포함)는 기존 bare href prop 그대로(④ 원칙, 회귀 아님).
-    const own = detail as { org_slug?: string | null; project_slug?: string | null } | null;
+    const own = detail as { org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     const slugs = own?.org_slug ? { orgSlug: own.org_slug, projectSlug: own.project_slug ?? null } : null;
     const buildScoped =
       entityType === 'story' ? (ws: string, proj: string) => storyBoardUrl(ws, proj, entityId)
@@ -669,7 +694,15 @@ export function EntityPreviewModal({
       : entityType === 'sprint' ? (ws: string, proj: string) => sprintUrl(ws, proj, entityId)
       : entityType === 'asset' ? (ws: string, proj: string) => assetStorageUrl(ws, proj, entityId)
       : null;
-    resolvedHref = buildScoped ? resolveScopedEntityHref(slugs, href, buildScoped) : href;
+    // story #4253 — 폴백: 응답에 항목 자기 프로젝트 id가 있으면 bare 경로를 다시 지어 그 프로젝트로(prop href는 이미 호출처가 고른 p를
+    // 싣고 withProjectParam은 기존 p를 유지하니 그대로 감쌀 수 없다). 없으면 호출처가 고른 prop href 그대로(호출처 규칙 — 현재 p ·
+    // 게이트 자기 프로젝트 등 — 을 덮지 않는다).
+    const ownId = own?.project_id ?? null;
+    resolvedHref = buildScoped
+      ? (ownId
+          ? resolveScopedEntityHref(slugs, getEntityHref(entityType, entityId, keepHref), buildScoped, (h) => withProjectParam(h, ownId))
+          : resolveScopedEntityHref(slugs, href, buildScoped, (h) => h))
+      : href;
     linkKind = resolvedHref ? 'own' : null;
   }
 
@@ -706,7 +739,7 @@ export function EntityPreviewModal({
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
   const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t, flatHref) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
-  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList) : null;
+  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList, tDashboard, tCage) : null;
 
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -828,11 +861,12 @@ export function EmbedCard({
       const res = await fetch(`/api/docs/preview?q=${encodeURIComponent(entity_id)}`);
       if (!res.ok) throw new Error();
       const { data } = await res.json() as {
-        data: { slug: string; orgSlug?: string; projectSlug?: string | null };
+        data: { slug: string; orgSlug?: string; projectSlug?: string | null; projectId?: string | null };
       };
+      // story #4253 P2 — slug가 없어도 문서 프로젝트 id를 알면 그 프로젝트(현재 p로 떨어지지 않게) · 둘 다 모를 때만 현재 p.
       const target = (data.orgSlug && data.projectSlug)
         ? docViewUrl(data.orgSlug, data.projectSlug, data.slug)
-        : flatHref(`/docs/${data.slug}/view`);
+        : data.projectId ? withProjectParam(`/docs/${data.slug}/view`, data.projectId) : flatHref(`/docs/${data.slug}/view`);
       router.push(target);
     } catch {
       setNavigating(false);
@@ -1055,22 +1089,26 @@ export function EntityChip({
   // 딥링크(doc-gate-section.tsx가 이미 그 픽커를 가진다), pending=기존과 동일하게 결재함
   // 딥링크 — "쓰던 자리" 원칙(#2669)은 실 제출 액션에서만 후퇴, 목적지 발견성은 유지.
   const { projectMemberships } = useDashboardContext();
-  const [canSubmit, setCanSubmit] = useState(false);
+  // story #4253(PO 09:45Z · 까디르 codex 01a0d35f P3) — «올릴 수 있는 문서 프로젝트» 하나로 둔다: 문서 프로젝트를 알고 · 내가 그 멤버일 때만 값이
+  // 있다. CTA 노출과 링크의 ?p=가 같은 값에서 나와, «보이는데 프로젝트를 모름» 상태가 표현 자체로 없다(예전 canSubmit + docProjectId 두 상태).
+  const [submitProjectId, setSubmitProjectId] = useState<string | null>(null);
   const rawDocStatus = entityStatus?.kind === 'resolved' ? entityStatus.raw : null;
   const effectiveDocStatus = rawDocStatus;
 
   useEffect(() => {
-    if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setCanSubmit(false); return; }
+    if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setSubmitProjectId(null); return; }
     let cancelled = false;
     void (async () => {
       try {
         const res = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
         if (!res.ok) throw new Error();
         const json = (await res.json()) as { data?: { projectId?: string } };
-        const docProjectId = json.data?.projectId;
-        if (!cancelled) setCanSubmit(!!docProjectId && projectMemberships.some((p) => p.projectId === docProjectId));
+        const resolvedProjectId = json.data?.projectId ?? null;
+        if (!cancelled) {
+          setSubmitProjectId(resolvedProjectId && projectMemberships.some((p) => p.projectId === resolvedProjectId) ? resolvedProjectId : null);
+        }
       } catch {
-        if (!cancelled) setCanSubmit(false); // ㉠ 조회 실패=fail-closed(버튼 안 보임), 조용한 무권한 노출 금지.
+        if (!cancelled) setSubmitProjectId(null); // ㉠ 조회 실패=fail-closed(버튼 안 보임), 조용한 무권한 노출 금지.
       }
     })();
     return () => { cancelled = true; };
@@ -1147,9 +1185,10 @@ export function EntityChip({
     // 지정이 서버 필수가 됐고, 이 인라인 칩엔 픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435).
     // 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const docCta = entityType === 'doc' && !ghost ? (
-      effectiveDocStatus === 'draft' && canSubmit ? (
+      // story #4253 — CTA는 올릴 수 있는 문서 프로젝트가 있을 때만(모르면 · 멤버가 아니면 없다 · 현재 p 폴백 없음).
+      effectiveDocStatus === 'draft' && submitProjectId ? (
         <Link
-          href={getEntityHref('doc', entityId, flatHref) ?? '#'}
+          href={getEntityHref('doc', entityId, (h) => withProjectParam(h, submitProjectId)) ?? '#'}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >

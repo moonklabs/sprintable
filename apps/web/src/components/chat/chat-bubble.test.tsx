@@ -690,7 +690,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
         return { ok: true, json: async () => ({ data: gate }) };
       }
       if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
-        return { ok: true, json: async () => ({ data: gate }) };
+        return { ok: true, json: async () => (gate) };
       }
       // story #2627 — 카드 제목 클릭 시 EntityPreviewModal(embed-card.tsx)이 doc 2단계
       // fetch를 시도한다 — 그 경로도 여기서 같이 응답한다.
@@ -908,7 +908,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
         return { ok: true, json: async () => ({ data: gate }) };
       }
       if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
-        return { ok: true, json: async () => ({ data: gate }) };
+        return { ok: true, json: async () => (gate) };
       }
       return { ok: false, json: async () => ({}) };
     }));
@@ -1585,10 +1585,31 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     // (doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const goToDocLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '결재자 지정하고 올리기');
     expect(goToDocLink).toBeDefined();
-    // story #4231 3차 — 문서 링크(flat)는 현재 프로젝트를 싣는다.
-    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}&p=proj-1`);
+    // story #4253(까디르 codex · PO 09:45Z) — 화면(현재 p = proj-1)과 문서 프로젝트(doc-proj-1)가 다르면 문서 자기 프로젝트를 싣는다
+    // (canSubmit 판정에 푼 docProjectId를 CTA에도 쓴다 · 예전 4231 3차는 현재 p).
+    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}&p=doc-proj-1`);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
     expect(calls.some((c) => c.url === `/api/docs/${DOC_ID}/transition`)).toBe(false);
+  });
+
+  // story #4253(까디르 codex 01a0d316) — 문서 프로젝트를 모르면(preview에 projectId 없음) CTA 자체가 없다 · 현재 p로 싣고 뜨는 폴백 없음.
+  it('draft인데 문서 프로젝트를 모르면 "결재자 지정하고 올리기" 링크가 안 뜬다(현재 p 폴백 없음)', async () => {
+    mockDashboardContext.projectMemberships = [{ projectId: 'proj-1', projectName: 'Current' }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재자 지정하고 올리기')).toBe(false);
   });
 
   it('draft지만 doc의 project 멤버가 아니면 "결재자 지정하고 올리기" 링크가 안 뜬다(fail-closed)', async () => {
@@ -1746,7 +1767,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
       entityId: storyId,
       title: '스토리 제목',
       status: null,
-      href: '/board?story=' + storyId,
+      href: '/board?story=' + storyId + '&p=proj-1', // story #4253 — 스토리 링크도 프로젝트를 싣는다(getEntityHref withProject)
     });
   });
 
@@ -1759,12 +1780,10 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
         return {
           ok: true,
           json: async () => ({
-            data: {
-              id: gateId, status: 'pending', gate_type: 'doc_approval', risk_grade: 'low',
-              work_item_type: 'doc', work_item_id: 'wi-1', can_approve: true,
-              work_item_summary: { title: '기획안 v2', slug: null },
-              resolver_id: null, resolved_at: null, resolution_note: null, neutral_facts: null,
-            },
+            id: gateId, status: 'pending', gate_type: 'doc_approval', risk_grade: 'low',
+            work_item_type: 'doc', work_item_id: 'wi-1', can_approve: true,
+            work_item_summary: { title: '기획안 v2', slug: null },
+            resolver_id: null, resolved_at: null, resolution_note: null, neutral_facts: null,
           }),
         };
       }

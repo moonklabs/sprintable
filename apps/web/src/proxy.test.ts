@@ -1104,6 +1104,68 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
   });
 });
 
+// story #4253(유나 4608 실측 · PO 코드 확認) — 옛 flat 자원 리다이렉트가 링크의 `?p=`를 안 읽어, 다른 프로젝트 문서 · 스토리 링크가 쿠키
+// 프로젝트 셸로 착지했다. `?p=`를 먼저 시도(접근은 resolveLegacyResourcePath의 GET /projects/{id} · has_project_access) → 실패하면 쿠키 → JWT.
+describe('proxy — 옛 자원 리다이렉트가 링크의 ?p=를 먼저 읽는다(story #4253)', () => {
+  const PROJ_C = '0c0c0c0c-0000-4000-8000-00000000000c';
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  function stubBackend({ cAccessible }: { cAccessible: boolean }) {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      if (url.includes(`/api/v2/projects/${PROJ_C}`)) {
+        return Promise.resolve(cAccessible
+          ? { ok: true, json: async () => ({ id: PROJ_C, slug: 'charlie' }) }
+          : { ok: false, status: 404, json: async () => ({}) });
+      }
+      if (url.includes('/api/v2/projects/proj-b')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-b', slug: 'beta' }) });
+      // 목록 폴백 — 접근 못 하는 C는 목록에도 없다(가시성 필터).
+      if (url.endsWith('/api/v2/projects')) return Promise.resolve({ ok: true, json: async () => [{ id: 'proj-b', slug: 'beta' }] });
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+  }
+
+  it('⭐쿠키 B여도 /docs?id=X&p=C → C의 scoped 경로(셸 = C) · 착지 URL에서 p는 뗀다', async () => {
+    stubBackend({ cAccessible: true });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest(`/docs?id=doc-x&p=${PROJ_C}`, { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/charlie/docs?id=doc-x');
+  });
+
+  it('⭐쿠키 B여도 /board?story=Y&p=C → C의 flow(이름 바꿈까지 한 홉)', async () => {
+    stubBackend({ cAccessible: true });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest(`/board?story=s-y&p=${PROJ_C}`, { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/charlie/flow?story=s-y');
+  });
+
+  it('⭐p가 접근 못 하는 프로젝트면(404 · 목록에도 없음) 지금처럼 쿠키 B로 — p로 남의 프로젝트를 열 수 없다', async () => {
+    stubBackend({ cAccessible: false });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest(`/docs?id=doc-x&p=${PROJ_C}`, { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/beta/docs?id=doc-x');
+  });
+
+  it('p가 UUID 모양이 아니면 조회 없이 쿠키 B로 · p 없으면 지금과 같음', async () => {
+    stubBackend({ cAccessible: true });
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const bad = await middleware(makeRequest('/docs?p=not-a-uuid', { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(bad.headers.get('location')).toBe('https://app.example.com/moonklabs/beta/docs');
+    expect(mockFetch.mock.calls.some(([u]) => String(u).includes('/api/v2/projects/not-a-uuid'))).toBe(false);
+    const none = await middleware(makeRequest('/board?story=s-z', { sp_at: token, sprintable_current_project_id: 'proj-b' }));
+    expect(none.headers.get('location')).toBe('https://app.example.com/moonklabs/beta/flow?story=s-z');
+  });
+});
+
 describe('proxy — bare /artifacts/{id}는 «현재 project 추측»이 아니라 자기 project로 해소(story #3208, customer-zero)', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;

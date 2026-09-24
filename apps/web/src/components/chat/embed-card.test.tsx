@@ -67,7 +67,8 @@ describe('EmbedCard doc — story #2168 PR-①', () => {
     expect(pushMock).toHaveBeenCalledWith('/acme/content/docs/other-doc/view');
   });
 
-  it('project_slug 가 없으면(옛 미백필 프로젝트) bare 링크로 우아하게 폴백한다(회귀 아님)', async () => {
+  // story #4253(까디르 codex 01a0d35f P2) — slug 없는 문서도 프로젝트 id는 안다 → 예전 bare 폴백(현재 p로 떨어짐) 대신 문서 자기 프로젝트를 싣는다.
+  it('project_slug 가 없으면(옛 미백필 프로젝트) flat 링크에 문서 자기 프로젝트(?p=)를 싣는다', async () => {
     stubFetch(async () => ({
       ok: true,
       json: async () => ({
@@ -82,7 +83,7 @@ describe('EmbedCard doc — story #2168 PR-①', () => {
       );
     });
     await clickMainDocButton();
-    expect(pushMock).toHaveBeenCalledWith('/docs/legacy-doc/view');
+    expect(pushMock).toHaveBeenCalledWith('/docs/legacy-doc/view?p=p-3');
   });
 
   it('preview fetch 실패 시 이동하지 않고 navigating 스피너를 해제한다', async () => {

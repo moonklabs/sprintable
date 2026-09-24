@@ -26,6 +26,7 @@ import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
@@ -319,9 +320,10 @@ export function ApprovalsQueue() {
       // — fetchGates()가 방금 같은 걸 받아왔거나 중복 이벤트) 지어내지 않고 skip.
       void (async () => {
         try {
-          const res = await fetchWithAuth(`/api/gates/${payload.gate_id}`);
-          if (!res.ok) return;
-          const gate = (await res.json()) as GateItem;
+          if (!payload.gate_id) return;
+          const result = await fetchGateById<GateItem>(payload.gate_id); // story #4253 — 공용(날 GateResponse)
+          if (result.kind !== 'ok') return;
+          const gate = result.gate;
           setItems((prev) => (prev.some((it) => it.id === gate.id) ? prev : [gate, ...prev]));
         } catch { /* fetch 실패 — 무시(다음 하드 리로드가 흡수) */ }
       })();
@@ -353,11 +355,9 @@ export function ApprovalsQueue() {
   // story #4190 — 409 gate_draft_changed 뒤 그 행 하나만 최신으로 바꾼다(목록 전체 재조회 없이 — 다른 행의 오류·완료
   // 표시를 보존).
   const refetchGateRow = async (id: string) => {
-    const res = await fetchWithAuth(`/api/gates/${id}`);
-    if (!res.ok) return;
-    const json = await res.json().catch(() => null);
-    const fresh = (json?.data ?? json) as GateItem | null;
-    if (!fresh?.id) return;
+    const result = await fetchGateById<GateItem>(id); // story #4253 — 공용(날 GateResponse)
+    if (result.kind !== 'ok') return;
+    const fresh = result.gate;
     setItems((prev) => prev.map((it) => (it.id === id && !isHitl(it) ? { ...it, ...fresh } : it)));
   };
 

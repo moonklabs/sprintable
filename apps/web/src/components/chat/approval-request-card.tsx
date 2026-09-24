@@ -23,10 +23,12 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -139,17 +141,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const { addToast } = useToast();
 
   const fetchGate = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth(`/api/gates/${target.gate_id}`);
-      if (res.status === 404) { setState({ kind: 'not-found' }); return; }
-      if (!res.ok) { setState({ kind: 'error' }); return; }
-      const json = await res.json().catch(() => null) as { data?: GateItem } | GateItem | null;
-      const gate = (json && 'data' in json ? json.data : json) as GateItem | undefined;
-      if (!gate) { setState({ kind: 'error' }); return; }
-      setState({ kind: 'ready', gate });
-    } catch {
-      setState({ kind: 'error' });
-    }
+    // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양 · 404 = not-found · 그 밖 = error).
+    const result = await fetchGateById<GateItem>(target.gate_id);
+    setState(result.kind === 'ok' ? { kind: 'ready', gate: result.gate } : { kind: result.kind });
   }, [target.gate_id]);
 
   // story #5ace2e84(2026-08-28 라이브 재측 후속) — gateByKey «맵 객체 자체»가 정의돼 있으면
@@ -336,6 +330,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     return null;
   })();
 
+  // story #4253(까디르 codex · PO 09:45Z) — 채팅의 승인 요청 카드는 조직 전체가 보는 자리라 작업 항목 링크는 게이트 자기 프로젝트(gate.project_id)
+  // · 모를 때만 현재 p.
+  const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   return (
     <>
       <ProofCapsule
@@ -348,7 +345,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           if (readingPanel) {
             readingPanel.open({
               kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
-              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id, flatHref),
+              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id, gateProjectHref),
             });
             return;
           }
@@ -383,7 +380,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           entityId={gate.work_item_id}
           title={title}
           status={null}
-          href={getEntityHref(previewEntityType, gate.work_item_id, flatHref)}
+          href={getEntityHref(previewEntityType, gate.work_item_id, gateProjectHref)}
           onClose={() => setShowPreview(false)}
         />
       )}
@@ -410,6 +407,8 @@ function ApprovalRequestBody({
   addToast: (toast: { type?: 'info' | 'warning' | 'success' | 'error'; title: string; body?: string }) => void;
 }) {
   const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
+  // story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 대상 칩은 게이트 자기 프로젝트 · 모를 때만 현재 p.
+  const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
@@ -679,9 +678,10 @@ function ApprovalRequestBody({
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
                 {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, flatHref))}
+                {/* story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 엔티티 칩(work_item_target = 게이트 대상 작업 항목)도 게이트 자기 프로젝트 */}
+                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
               </div>
-              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, flatHref))}
+              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
             </div>
           ) : (
             <div className="space-y-1">

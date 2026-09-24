@@ -248,6 +248,33 @@ async def test_get_gate_endpoint_project_id_none_skips_access_check():
     access_spy.assert_not_called()
 
 
+@pytest.mark.anyio
+async def test_get_gate_endpoint_self_anchored_gate_carries_neutral_facts_project_id():
+    """story #4253(까디르 codex 01a0d35f P2) — 자기 참조 앵커(agent_decision) 게이트는 work item 해소가 None이라 단건 응답이 project_id를
+    빼먹었다(목록 list_gates는 self_anchored_gate_project_id로 채움). 단건도 같은 규칙 — 채팅 미리보기 링크의 ?p= 원천."""
+    from app.routers import gates as gates_mod
+    from app.routers.gates import get_gate_endpoint
+    from tests.gate_mock_factory import make_gate
+
+    org_id, gate_id, anchored_project = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    gate = make_gate(
+        id=gate_id, org_id=org_id, work_item_id=gate_id, work_item_type="agent_decision", gate_type="merge",
+        neutral_facts={"project_id": str(anchored_project), "question": "q"},
+        created_at=datetime(2026, 9, 24, tzinfo=timezone.utc), updated_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_scalar_result(gate))
+    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
+
+    with patch.object(gates_mod, "resolve_work_item_project_id", AsyncMock(return_value=None)), \
+         patch.object(gates_mod, "has_project_access", AsyncMock(side_effect=AssertionError("접근 판정은 work item 해소값 기준 — 호출 안 됨"))), \
+         patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)), \
+         patch.object(gates_mod, "resolve_pr_link", AsyncMock(return_value=None)):
+        result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
+
+    assert result.project_id == anchored_project
+
+
 # ── realdb 통합(story/task/doc 각 타입 콜드 GET) ─────────────────────────────────
 
 _REAL_DB_SKIP = pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
