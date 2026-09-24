@@ -2377,9 +2377,14 @@ async def publish_channel_post_draft_endpoint(
             headers={"Retry-After": str(retry_after_seconds)},
         ) from exc
     except ChannelPublishProviderError as exc:
+        # story #4264(PO 15:18Z) — 워커와 같은 헬퍼로 provider_code를 푼다. 예전엔 라우터가 provider_code를 아예 안 넘겨
+        # «200인데 id 없음»(나갔을 수 있음)도 transient → 자동 재시도(이중 게시)였다.
+        from app.services.publication_command import provider_error_code
+
+        _provider_error_code = provider_error_code(exc.provider_code)
         await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_PUBLISH_PROVIDER_ERROR")
         await apply_command_failure(
-            db, command, error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", last_error=str(exc), now=now,
+            db, command, error_code=_provider_error_code, last_error=str(exc), now=now,
         )
         await db.commit()
         raise HTTPException(

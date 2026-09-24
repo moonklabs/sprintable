@@ -131,18 +131,47 @@ _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CO
 # 나갔으니 자동 재시도가 안전하다(이중 발행 0). 호출 뒤의 코드 없는 예외는 예전처럼 needs_check(모름).
 PRE_CALL_ERROR_CODE = "PUBLICATION_COMMAND_PRE_CALL_ERROR"
 _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE})
-# story #4262 — 뉴스레터 발송 실행기만 내는 두 코드(newsletter_send_execution.py · grep 확인). 채널 게시와 겹치는
-# STIBEE_PLAN_RESTRICTED는 4264에서 부류로 다룬다.
-_NOT_SENT_CODES = frozenset({"NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED"})
-# story #3536(PO 確定 2026-09-06) — ChannelPublishProviderError.provider_code가 이
-# 집합에 있으면(어댑터가 구조적으로 실어 준 코드, 문자열 매칭 아님 — instagram_
-# publish.py::create_media_container가 ThreadsPublishError("INSTAGRAM_IMAGE_
-# REQUIRED", ...)로 던진 값이 _classify_threads_error→ChannelPublishProviderError.
-# provider_code에 그대로 실린다) 「영구 조건」이라 재시도해도 다시 같은 결과 —
-# 일반 provider 오류(_TRANSIENT_CODES)와 달리 classify_failure_kind가 needs_check로
-# 보내도록 이 코드 자체를 error_code로 승격한다(아래 except 분기). 매핑표에 없는
-# 코드는 이미 needs_check가 기본값이라 이 집합에 새 이름을 추가하는 것만으로 충분.
-_PERMANENT_PROVIDER_CONDITION_CODES = frozenset({"INSTAGRAM_IMAGE_REQUIRED"})
+
+# story #4264(PO 15:18Z) — 실패 코드 → 부류의 **한 표**. 분류(`classify_failure_kind`)와 어댑터 코드 승격(`provider_error_code`)이
+# 같은 두 모음을 읽는다(사본 0). 원칙: `not_sent`는 «안 나간 적극적 증거»가 있을 때만 — HTTP 호출 전 검사에서 막혔거나 공급자가
+# 명시 거절 코드를 줬을 때. 일반 4xx에서 추론하지 않는다(성공 뒤 타임아웃이면 재시도의 4xx가 거짓 «안 나감»이 된다).
+# 전수 표(코드 · 내는 곳 · 근거 HTTP 단계)는 PR 4264 본문.
+_NOT_SENT_CODES = frozenset({
+    # 뉴스레터 발송 실행기(4262) — 어댑터 호출 전.
+    "NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
+    # 채널 게시 — HTTP 호출 전 검사(초안 · 글자 수 · 봉인 · 사용량 · 메타데이터 · 승인 · 예산).
+    "CHANNEL_POST_DRAFT_NOT_FOUND", "CHANNEL_TEXT_TOO_LONG", "SITE_POST_SEAL_MISSING", "YOUTUBE_QUOTA_EXCEEDED",
+    "YOUTUBE_METADATA_INVALID", "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "GENERATION_BUDGET_EXCEEDED",
+    "API_USAGE_BUDGET_EXCEEDED",
+    # 어댑터가 provider_code로 싣는 사전 검사 · 명시 거절(`provider_error_code`로 승격).
+    "INSTAGRAM_IMAGE_REQUIRED", "INSTAGRAM_REELS_VIDEO_REQUIRED", "FACEBOOK_REELS_VIDEO_REQUIRED",
+    "CHANNEL_REELS_UNSUPPORTED", "CHANNEL_CAROUSEL_UNSUPPORTED", "YOUTUBE_IMAGE_CONTAINER_UNSUPPORTED",
+    "X_MEDIA_SOURCE_FETCH_FAILED", "YOUTUBE_VIDEO_SOURCE_FETCH_FAILED", "STIBEE_CONNECTION_INCOMPLETE",
+    "STIBEE_PLAN_RESTRICTED", "STIBEE_SENDER_NOT_VERIFIED",
+    # 블로그 외부 발행 — URL 검사 · 초안 · 게시 전 확인.
+    "SITE_POST_DESTINATION_INSECURE", "SITE_POST_DRAFT_NOT_FOUND", "SITE_POST_NOT_PUBLISHED",
+    # 댓글 답글 — 대상 행 없음.
+    "COMMENT_REPLY_NOT_FOUND", "COMMENT_NOT_FOUND",
+    # 광고 — 공급자에 시작 전 · 모든 객체를 PAUSED로 만들어 지출 0(«밖에 나감» = 광고가 도는 것).
+    "ADS_BOOST_NOT_STARTED_AT_PROVIDER", "META_ADS_CAMPAIGN_CREATE_FAILED", "META_ADS_CAMPAIGN_CREATE_MISSING_FIELD",
+    "META_ADS_ADSET_CREATE_FAILED", "META_ADS_ADSET_CREATE_MISSING_FIELD", "META_ADS_AD_CREATE_FAILED",
+    "META_ADS_AD_CREATE_MISSING_FIELD",
+})
+# 공급자가 200/201을 준 **뒤** 응답에 id가 비었다 — 실제로 게시됐을 가능성이 높다. 자동 재시도(transient)면 이중 게시라
+# needs_check(재시도 0 · 사람이 채널에서 확인 뒤 재시도).
+_MAYBE_SENT_CODES = frozenset({
+    "FACEBOOK_CREATE_POST_MISSING_ID", "X_POST_TWEET_MISSING_ID", "YOUTUBE_UPLOAD_MISSING_VIDEO_ID",
+    "THREADS_PUBLISH_CONTAINER_MISSING_ID", "INSTAGRAM_PUBLISH_CONTAINER_MISSING_ID",
+    "INSTAGRAM_REPLY_MISSING_ID", "FACEBOOK_REPLY_MISSING_ID",
+})
+
+
+def provider_error_code(provider_code: str | None) -> str:
+    """어댑터가 실어 준 provider_code를 명령의 error_code로(워커 · 즉시 발행 라우터 · 댓글 답글 공용 — PO 15:18Z). 표(위 두 모음)에
+    있는 코드는 그대로 올려 부류를 정확히 가르고, 모르는 코드는 예전처럼 일반 공급자 오류(transient)로 둔다."""
+    if provider_code and (provider_code in _NOT_SENT_CODES or provider_code in _MAYBE_SENT_CODES):
+        return provider_code
+    return "CHANNEL_PUBLISH_PROVIDER_ERROR"
 
 
 # story #3474(페드루 PO 確定 2026-09-05) — 게이트가 approved가 아니거나(missing)
@@ -188,7 +217,7 @@ def classify_failure_kind(error_code: str | None) -> str:
         return FAILURE_KIND_CONNECTION
     if error_code in _TRANSIENT_CODES:
         return FAILURE_KIND_TRANSIENT
-    if error_code in _NEEDS_CHECK_CODES:
+    if error_code in _NEEDS_CHECK_CODES or error_code in _MAYBE_SENT_CODES:
         return FAILURE_KIND_NEEDS_CHECK
     if error_code in _NOT_SENT_CODES:
         return FAILURE_KIND_NOT_SENT
@@ -424,6 +453,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         ChannelRateLimitedError,
         ChannelTextTooLongError,
         ChannelTokenExpiredError,
+        ChannelYouTubeMetadataError,
         ExternalPublishGateNotApprovedError,
         get_channel_post_draft,
         publish_channel_post_draft,
@@ -588,10 +618,13 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         # 필수 채널에 이미지 없이 도달) 그 코드 자체를 error_code로 써서 classify_
         # failure_kind가 needs_check(재시도 0·dead_letter)로 보내게 한다. 그 외
         # 일반 provider 오류는 기존처럼 CHANNEL_PUBLISH_PROVIDER_ERROR(transient).
-        if exc.provider_code in _PERMANENT_PROVIDER_CONDITION_CODES:
-            error_code, last_error = exc.provider_code, str(exc)
-        else:
-            error_code, last_error = "CHANNEL_PUBLISH_PROVIDER_ERROR", str(exc)
+        # story #4264 — 표(`_NOT_SENT_CODES` · `_MAYBE_SENT_CODES`)에 있는 provider_code는 그대로 올려 부류를 가른다(즉시 발행
+        # 라우터 · 댓글 답글과 같은 헬퍼).
+        error_code, last_error = provider_error_code(exc.provider_code), str(exc)
+    except ChannelYouTubeMetadataError as exc:
+        # story #4264 — 예전엔 이 절이 없어 아래 미분류(None → needs_check)로 떨어졌다. 메타데이터 검사는 HTTP 호출 전이라
+        # 확실히 안 나감(즉시 발행 라우터는 이미 이 코드를 쓴다).
+        error_code, last_error = "YOUTUBE_METADATA_INVALID", str(exc)
     except ChannelPublishInProgressError as exc:
         error_code, last_error = "CHANNEL_PUBLISH_IN_PROGRESS", str(exc)
     except ExternalPublishPausedError as exc:
@@ -937,7 +970,8 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
             elif exc.status_code == 429:
                 error_code = "CHANNEL_RATE_LIMITED"
             else:
-                error_code = "CHANNEL_PUBLISH_PROVIDER_ERROR"
+                # story #4264 — «200인데 답글 id 없음»(나갔을 수 있음) 등 표에 있는 코드는 그대로 올린다(자동 재시도 = 이중 답글).
+                error_code = provider_error_code(exc.code)
             last_error = str(exc)
             raise _CommentReplySendFailed() from exc
 
