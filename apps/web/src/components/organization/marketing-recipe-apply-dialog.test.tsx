@@ -14,6 +14,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { MarketingRecipeApplyDialog } from './marketing-recipe-apply-dialog';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { VIDEO_PRODUCTION_RECIPE } from '@/lib/video-production-seed.test.fixture';
+import { BLOG_ARTICLE_RECIPE } from '@/lib/blog-article-seed.test.fixture';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
@@ -1045,5 +1046,34 @@ describe('MarketingRecipeApplyDialog — 제목의 프리셋 이름 로케일(st
     } finally {
       LOCALE = 'ko';
     }
+  });
+});
+
+// story #4174 후속(PO 2026-09-24) — 블로그 적용 창의 «승인 대기»(디렉터 · 게이트 없음 · 승인은 결재함의 초안)는 고를 사람이
+// 없는 읽기 전용 자리. 예전엔 사람 멤버 select가 서서(«에이전트 선택...» 문구 · 사람 목록) 그걸 고를 때까지 «적용하기»가
+// 비활성이었다 — 의미 없는 사람 손 하나.
+describe('블로그 레시피 — «승인 대기»는 선택 없는 읽기 전용 자리(story #4174 후속)', () => {
+  it('승인 대기 줄에 select 0 · 크리에이터·발행자만 고르면 «적용하기» 활성 · role_mapping에 승인 대기·컨셉 없음', async () => {
+    stubAll();
+    const onSubmit = await mountDialog(BLOG_ARTICLE_RECIPE);
+    const waitRow = document.body.querySelector('[data-testid="slot-approval-elsewhere"]')!;
+    expect(waitRow).not.toBeNull();
+    expect(waitRow.getAttribute('data-role')).toBe('Director');
+    expect(waitRow.querySelectorAll('select')).toHaveLength(0);
+    expect(waitRow.querySelector('[data-testid="approval-elsewhere-note"]')?.textContent).toBe(ORG.recipeApplyV2ApprovalOnDraftGate);
+    expect(waitRow.textContent).toContain(ORG.recipeApplyV2DirectorBadge);
+
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    const memberSelects = document.body.querySelectorAll('[data-testid="creator-agent-select"]');
+    expect(memberSelects).toHaveLength(2); // 크리에이터 · 발행자(에이전트) — 사람 select 0
+    await choose('[data-testid="creator-agent-select"]', 'agent-1', 0);
+    expect(submitButton().hasAttribute('disabled')).toBe(true);
+    await choose('[data-testid="creator-agent-select"]', 'agent-2', 1);
+    expect(submitButton().hasAttribute('disabled')).toBe(false);
+    await act(async () => { submitButton().click(); });
+    await flush();
+    expect(onSubmit.mock.calls[0]![0].roleMapping).toEqual({
+      planning: 'agent-1', writing: 'agent-1', verification: 'agent-1', published: 'agent-2', publish_checked: 'agent-2',
+    });
   });
 });

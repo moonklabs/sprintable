@@ -834,6 +834,7 @@
     "recipeApplyV2CreatorBadge": "에이전트",
     "recipeApplyV2ComputeBadge": "모델",
     "recipeApplyV2ComputeDesc": "생성 단계가 쓰는 연산 커넥터",
+    "recipeApplyV2ApprovalOnDraftGate": "결재함의 초안에서 승인해요",
     "recipeApplyV2ComputeEmptyFallbackHint": "비워 두면 담당 에이전트가 자기 도구로 생성해요 — 조직 커넥터는 안 써요.",
     "recipeApplyV2PublisherBadge": "채널",
     "recipeApplyV2PublisherDesc": "승인된 소재를 채널에 게시",

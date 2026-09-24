@@ -7,6 +7,7 @@ import {
   type RecipeRoleSlot, type RecipeStageMetadata,
 } from './recipe-role-slots';
 import { VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE } from './video-production-seed.test.fixture';
+import { BLOG_ARTICLE_FLOW, BLOG_ARTICLE_RECIPE } from './blog-article-seed.test.fixture';
 
 // story #4426 P1 교훈 그대로 — 실 seed 모양(영어 role 키)과만 대조한다. story #4173부터는
 // 손으로 옮긴 축소판 대신 dev 실 정의(version 8) 한 벌(video-production-seed.test.fixture.ts)을
@@ -283,5 +284,38 @@ describe('레시피 전용 상수 소비처 0(story #4173 AC2)', () => {
     const hits = sources(join(__dirname, '..'))
       .filter((f) => /MARKETING_CREATOR_ROLE_KEY|creatorRoleLabel/.test(readFileSync(f, 'utf8')));
     expect(hits).toEqual([]);
+  });
+});
+
+// story #4174 후속 — 승인이 stage 밖(초안 게이트)이라고 정의가 선언한 사람 stage는 읽기 전용 자리. 선언 없는 사람 비게이트
+// stage(위 142줄 · 재현 C)는 그대로 멤버 자리 — 둘을 가르는 것은 정의의 선언뿐(stage 이름 상수 없음).
+describe('approval.surface — 승인이 stage 밖인 사람 stage(story #4174 후속)', () => {
+  it('블로그 레시피(실 seed): 디렉터 = 승인 자리(컨셉) + 읽기 전용 자리(승인 대기) · 크리에이터 · 발행자', () => {
+    const slots = recipeRoleSlots(BLOG_ARTICLE_RECIPE.stage_metadata, BLOG_ARTICLE_FLOW, BLOG_ARTICLE_RECIPE.role_actor_kinds);
+    expect(slots.map((s) => [s.key, s.kind, s.stages, s.memberType])).toEqual([
+      ['Director:approver', 'approver', ['concept_confirmed'], 'human'],
+      ['Director:approval_elsewhere', 'approval_elsewhere', ['pending_approval'], 'human'],
+      ['Creator:member', 'member', ['planning', 'writing', 'verification'], 'agent'],
+      ['Publisher:member', 'member', ['published', 'publish_checked'], 'agent'],
+    ]);
+    expect(uncoveredRecipeStages(BLOG_ARTICLE_RECIPE.stage_metadata, BLOG_ARTICLE_FLOW, slots)).toEqual([]);
+  });
+
+  it('선언이 없으면 같은 모양의 사람 stage는 지금처럼 멤버 자리(142줄 규칙 유지)', () => {
+    const slots = recipeRoleSlots({ wait: { role: 'Lead' } }, ['wait'], { Lead: 'human' });
+    expect(slots.map((s) => [s.kind, s.memberType])).toEqual([['member', 'human']]);
+  });
+
+  it('에이전트 역할의 선언은 읽기 전용이 되지 않는다(사람 역할에만 해당)', () => {
+    const slots = recipeRoleSlots({ wait: { role: 'Writer', approval: { surface: 'draft_gate' } } }, ['wait'], { Writer: 'agent' });
+    expect(slots.map((s) => s.kind)).toEqual(['member']);
+  });
+
+  it('선언이 없는 정의(role_actor_kinds 없음)에서도 게이트·승인 선언만 가진 역할은 사람으로 본다', () => {
+    const slots = recipeRoleSlots({
+      review: { role: 'Editor', gate: { type: 'doc_approval', approver: 'org_owner' } },
+      wait: { role: 'Editor', approval: { surface: 'draft_gate' } },
+    }, ['review', 'wait'], null);
+    expect(slots.map((s) => [s.kind, s.stages])).toEqual([['approver', ['review']], ['approval_elsewhere', ['wait']]]);
   });
 });
