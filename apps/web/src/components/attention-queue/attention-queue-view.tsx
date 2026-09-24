@@ -16,6 +16,7 @@ import {
 } from './derive-attention-queue';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 const CAP = 7;
 // 9ef0f914: story.trust_stage_changed 버스트(같은 story 연속 전이 등)를 단발 재조회로 병합.
@@ -110,6 +111,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
  * 아님. 이전 리스트와 diff해 신규/갱신 행만 1회 하이라이트(全행 반짝 금지·prefers-reduced-motion).
  */
 export function AttentionQueueView({ projectId, memberId }: { projectId: string; memberId?: string }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const t = useTranslations('attentionQueue');
   const [loading, setLoading] = useState(true);
@@ -224,7 +226,7 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
           {overflow > 0 && overflowHasGate ? (
             <button
               type="button"
-              onClick={() => router.push('/inbox?tab=gates')}
+              onClick={() => router.push(flatHref('/inbox?tab=gates'))}
               className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-[12.5px] text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
             >
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />

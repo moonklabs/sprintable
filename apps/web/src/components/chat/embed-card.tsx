@@ -23,6 +23,7 @@ import type { ReferenceForm } from './embed-renderer';
 // story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
 
@@ -1013,6 +1014,7 @@ export function EntityChip({
    * entityType으로 그 둘을 이미 가른다). */
   entityStatus?: EntityStatusFetchState;
 } & VariantProps<typeof entityChipLabelVariants>) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #3776(1층A) — "결재함에서 보기" 딥링크 CTA, content ns의 기존 submitGateLink 키 재사용.
   const tContent = useTranslations('content');
   // story #3776(1층B, 페드루 재검토 10:07Z·10:14Z) — "근거"는 chats ns의 기존
@@ -1145,7 +1147,7 @@ export function EntityChip({
         </Link>
       ) : effectiveDocStatus === 'pending' ? (
         <Link
-          href="/inbox?tab=gates"
+          href={flatHref("/inbox?tab=gates")}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground no-underline hover:bg-muted"
         >

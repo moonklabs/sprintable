@@ -15,6 +15,9 @@ export function withProjectParam(href: string, projectId: string | null | undefi
   const [pathAndQuery, hash = ''] = href.split('#');
   const [path, query = ''] = pathAndQuery!.split('?');
   const sp = new URLSearchParams(query);
+  // story #4231 — 주소가 이미 `p`를 싣고 있으면 그대로 둔다: 일부러 **다른** 프로젝트로 보내는 링크(«다른 프로젝트» 대화 열기 ·
+  // 원래 프로젝트로 돌아가기)를 현재 프로젝트로 덮으면 이동 목적 자체가 바뀐다.
+  if (sp.has('p')) return href;
   sp.set('p', projectId);
   return `${path}?${sp.toString()}${hash ? `#${hash}` : ''}`;
 }

@@ -27,10 +27,12 @@ async function hrefFor(input: string): Promise<string> {
 }
 
 describe('useFlatHref(story #4226)', () => {
-  it('withProjectParam — 기존 쿼리·해시 보존 · 기존 p는 덮어씀 · 프로젝트 없으면 그대로', async () => {
+  it('withProjectParam — 기존 쿼리·해시 보존 · 이미 실은 p는 그대로(#4231) · 프로젝트 없으면 그대로', async () => {
     const { withProjectParam } = await import('./use-flat-href');
     expect(withProjectParam('/inbox?tab=gates#x', 'P')).toBe('/inbox?tab=gates&p=P#x');
-    expect(withProjectParam('/chats?p=OLD', 'P')).toBe('/chats?p=P');
+    // story #4231 — 일부러 다른 프로젝트로 보내는 링크(«다른 프로젝트» 대화 · 원래 프로젝트로 돌아가기)를 현재 프로젝트로 덮지 않는다.
+    expect(withProjectParam('/chats?p=OTHER', 'P')).toBe('/chats?p=OTHER');
+    expect(withProjectParam('/chats/c1?p=OTHER&from=P&pn=x', 'P')).toBe('/chats/c1?p=OTHER&from=P&pn=x');
     expect(withProjectParam('/more', undefined)).toBe('/more');
   });
 

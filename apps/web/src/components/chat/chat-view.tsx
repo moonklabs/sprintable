@@ -35,6 +35,7 @@ import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ChatViewProps {
   threadId: string;
@@ -131,6 +132,7 @@ export function filterUnconnectedAgentParticipants(
 }
 
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -943,7 +945,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                   : t('agentNotConnectedBannerMulti', { count: unconnectedAgentParticipants.length })}
               </span>
               <Link
-                href={`/organization/workforce/${unconnectedAgentParticipants[0]!.member_id}`}
+                href={flatHref(`/organization/workforce/${unconnectedAgentParticipants[0]!.member_id}`)}
                 className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
               >
                 {ta('viewConnectionSettings')}

@@ -1638,7 +1638,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       await Promise.resolve(); await Promise.resolve();
     });
     const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '결재함에서 보기');
-    expect(link?.getAttribute('href')).toBe('/inbox?tab=gates');
+    expect(link?.getAttribute('href')).toBe('/inbox?tab=gates&p=proj-1'); // story #4231 — 현재 프로젝트를 싣는 flat 링크
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
   });
 

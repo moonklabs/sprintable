@@ -114,7 +114,8 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(replaceMock).toHaveBeenCalledWith('/chats');
+    // story #4231 — 현재 프로젝트(`?p=`)를 싣고 복귀(착지한 flat 목록이 셸 ?p= 정규화로 다시 요청하지 않게).
+    expect(replaceMock).toHaveBeenCalledWith('/chats?p=proj-content');
   });
 
   it('?from=이 없으면(직접 진입 등) 기존대로 /chats로 복귀한다(회귀 없음)', async () => {
@@ -124,7 +125,8 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    expect(replaceMock).toHaveBeenCalledWith('/chats');
+    // story #4231 — 현재 프로젝트(`?p=`)를 싣고 복귀(착지한 flat 목록이 셸 ?p= 정규화로 다시 요청하지 않게).
+    expect(replaceMock).toHaveBeenCalledWith('/chats?p=proj-content');
   });
 });
 

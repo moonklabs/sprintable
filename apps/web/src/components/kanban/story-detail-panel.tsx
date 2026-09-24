@@ -59,6 +59,7 @@ import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 export interface Task {
   id: string;
@@ -356,6 +357,7 @@ export function DescriptionViewer({
 }
 
 export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
   const tc = useTranslations('common');
@@ -603,13 +605,25 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const [bareNumberTargets, setBareNumberTargets] = useState<Record<string, string> | undefined>(undefined);
   // story #2922 W5 — Workcell Conversation 구획 요약(대화 근거 건수+링크). count=null이면
   // 확認된 0건(정직한 "연결된 대화 없음"), undefined면 로딩/실패라 렌더 보류(no-fiction).
-  const [chatProofSummary, setChatProofSummary] = useState<{ count: number | null; href: string | null } | undefined>(undefined);
+  // story #4231 — 응답에서는 목적지(대화·메시지)만 담고 href는 렌더에서 만든다: 대상 프로젝트(`?p=`)가 바뀌어도 fetch를 다시 돌리지 않는다.
+  const [chatProofRaw, setChatProofRaw] = useState<
+    { count: number | null; first: { conversationId: string; startMessageId: string } | null } | undefined
+  >(undefined);
+  const chatProofSummary = useMemo(
+    () => chatProofRaw === undefined ? undefined : {
+      count: chatProofRaw.count,
+      href: chatProofRaw.first
+        ? flatHref(`/chats/${chatProofRaw.first.conversationId}?messageId=${chatProofRaw.first.startMessageId}`)
+        : null,
+    },
+    [chatProofRaw, flatHref],
+  );
 
   useEffect(() => {
     let cancelled = false;
     setOutgoingRefs(undefined);
     setBareNumberTargets(undefined);
-    setChatProofSummary(undefined);
+    setChatProofRaw(undefined);
     fetchWithAuth(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: unknown; bare_number_targets?: unknown } | null) => {
@@ -629,9 +643,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         // 재해석해 Workcell 요약도 채운다(전용 fetch 신설 0). 가장 최근(첫) 근거의 대화로 링크.
         const { items } = parseStoryProofReferences(json);
         const first = items[0] ?? null;
-        setChatProofSummary({
+        setChatProofRaw({
           count: items.length,
-          href: first ? `/chats/${first.conversationId}?messageId=${first.startMessageId}` : null,
+          first: first ? { conversationId: first.conversationId, startMessageId: first.startMessageId } : null,
         });
       })
       .catch(() => { /* undefined 유지 — 유령/치환/대화요약 판정 전부 보류 */ });
@@ -950,7 +964,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // 다시 열자고 하면 no-fiction 위반(이미 끝난 결정을 대기 중처럼 보여줌).
   const workcellGate: ProofCapsuleGate | undefined =
     mergeGate && mergeGate.status === 'pending'
-      ? { risk: mergeGate.risk_grade ?? undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
+      ? { risk: mergeGate.risk_grade ?? undefined, action: t('workcellGateAction'), href: flatHref(`/gates/${mergeGate.id}`) }
       : undefined;
   const workcellEvidence: ProofCapsuleProps | null =
     evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)

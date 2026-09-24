@@ -17,6 +17,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface Participant {
   member_id: string;
@@ -75,6 +76,7 @@ function formatHeaderTitle(
 }
 
 export default function ConversationPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
   // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
@@ -209,11 +211,11 @@ export default function ConversationPage() {
     setShowAddParticipant(false);
     if (newConversationId && newConversationId !== conversation_id) {
       // DM → group fork: navigate to new group chat
-      router.push(`/chats/${newConversationId}`);
+      router.push(flatHref(`/chats/${newConversationId}`));
     } else {
       void fetchMeta();
     }
-  }, [conversation_id, fetchMeta, router]);
+  }, [conversation_id, fetchMeta, router, flatHref]);
 
   if (!currentTeamMemberId) {
     return (
@@ -264,7 +266,7 @@ export default function ConversationPage() {
               // 프로젝트로 `?p=`를 실어 복귀시킨다(R2 SSOT가 그대로 헤더·스위처를 되돌린다 —
               // "전환이 일방통행이 아니다"). 새 되돌리기 UI를 만들지 않고 기존 뒤로가기 버튼이
               // 그 역할을 겸한다.
-              onClick={() => router.replace(fromProjectId ? `/chats?p=${fromProjectId}` : '/chats')}
+              onClick={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />

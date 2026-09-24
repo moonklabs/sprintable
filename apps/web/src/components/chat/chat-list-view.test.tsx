@@ -1220,6 +1220,20 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
     expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘'));
   });
 
+  it('story #4231 — compose 경유 이동도 현재 프로젝트(`?p=`)를 싣는다', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'member', projectId: 'proj-A' });
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'conv-recent', type: 'dm', title: null, latest_message: null, updated_at: '2026-09-13T00:00:00Z', unread_count: 0 }], total: 1 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('지시') + '&p=proj-A');
+  });
+
   it('compose 없이 마운트되면 리다이렉트가 전혀 안 일어난다(회귀 0)', async () => {
     stubFetch([]);
     await mount();

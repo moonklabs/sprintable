@@ -11,6 +11,7 @@ import {
 import { isSuggestionDismissed, dismissSuggestion } from '@/lib/intent-suggestion-dismissal';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface IntentSuggestionCardProps {
   messageId: string;
@@ -77,6 +78,7 @@ export function computeSuggestion(
 }
 
 export function IntentSuggestionCard({ messageId, content, isMine, entityStatusByKey }: IntentSuggestionCardProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const { currentTeamMemberId } = useDashboardContext();
   const [dismissedLocally, setDismissedLocally] = useState(false);
@@ -129,7 +131,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
         // Pedro 리뷰 PR #3435). 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로
         // route-first 딥링크한다.
         <Link
-          href={`/docs?id=${suggestion.ref.id}`}
+          href={flatHref(`/docs?id=${suggestion.ref.id}`)}
           onClick={handleDismiss}
           className="rounded border border-primary/40 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10"
         >

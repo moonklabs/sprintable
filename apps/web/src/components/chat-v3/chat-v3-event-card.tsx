@@ -10,6 +10,7 @@ import { buildGateTransitionBody, classifyGateTransitionErrorCode } from '@/lib/
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
 import { toPlainPreview } from '@/components/chat/entity-ref';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3972 AC1 그라운딩(페드루 PO 확認 2026-09-16 17:07Z) — 이 카드는 옛
@@ -41,6 +42,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
   todayHref: string;
   onDone: () => void;
 }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -80,7 +82,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
             {/* story #4004 — OFF 폴백(/gates/{id})은 이 카드 고유 맥락(v3 걷기 前
                 서명 자리)이라 목적지 모듈이 정할 대상이 아니다 — 그대로 유지. */}
             <Link
-              href={todayV3Enabled ? todayHref : `/gates/${approvalTarget.gate_id}`}
+              href={todayV3Enabled ? todayHref : flatHref(`/gates/${approvalTarget.gate_id}`)}
               data-testid="chat-v3-event-card-sign"
             >
               {t('eventCardSignAction')}

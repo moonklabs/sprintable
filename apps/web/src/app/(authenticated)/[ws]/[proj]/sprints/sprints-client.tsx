@@ -43,6 +43,7 @@ import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
 import type { RetroHypothesisResult } from '@/services/retro-session';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -391,6 +392,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
 // ─── Main Client ──────────────────────────────────────────────────────────────
 
 export function SprintsClient({ projectId }: SprintsClientProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('sprints');
   const tc = useTranslations('common');
   // story #3878(§⑤ 낱말 드리프트, 유나 §⑤ 표 확定 2026-09-14) — 스프린트 생애주기
@@ -807,7 +809,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               </p>
               {sprint.report_doc_id ? (
                 <a
-                  href={`/docs?id=${sprint.report_doc_id}`}
+                  href={flatHref(`/docs?id=${sprint.report_doc_id}`)}
                   onClick={(e) => e.stopPropagation()}
                   className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 >
@@ -989,7 +991,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           ) : null}
           {selected.report_doc_id ? (
             <a
-              href={`/docs?id=${selected.report_doc_id}`}
+              href={flatHref(`/docs?id=${selected.report_doc_id}`)}
               className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm font-medium text-primary transition hover:bg-primary/10"
             >
               📄 {t('viewReport')}

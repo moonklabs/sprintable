@@ -14,6 +14,7 @@ import { ContextPackPanel } from '@/components/loops/context-pack-panel';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /** E-LOOP-LEDGER S7 loop_outcome_attribution.py::attribute_loop_outcome 산출 shape 그대로. */
 interface OutcomeSnapshot {
@@ -54,6 +55,7 @@ interface DocSummary {
  * ·까심 QA 적출) — route param으로 fetch하는 상세 page는 항상 key-remount.
  */
 export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loopId: string; wsSlug: string; projSlug: string; projectId: string }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
   const router = useRouter();
@@ -221,7 +223,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
             </p>
             {brief ? (
               <Link
-                href={`/docs/${brief.slug}`}
+                href={flatHref(`/docs/${brief.slug}`)}
                 className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <FileText className="size-3" aria-hidden />

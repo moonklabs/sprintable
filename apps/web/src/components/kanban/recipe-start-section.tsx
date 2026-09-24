@@ -13,6 +13,7 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 import { presetName } from '@/lib/platform-preset-copy';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts에 미등재된 slug는
 // raw 노출 대신 「단계 n/9」로 자리표시한다(recipeStageLabel 자신의 기존 pass-through
@@ -40,6 +41,7 @@ interface RecipeStartSectionProps {
 // .../start-candidates, AC1/AC6) — 필터·정렬은 BE가 이미 끝낸 결과를 그대로 나열만 한다
 // (2개 이상이면 고르게, 페드루 확定).
 export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
   // story #4082(유나 design CHANGES) — role/stage 정본 낱말표는 organization 네임스페이스
   // (recipe-detail-view.tsx가 이미 쓰는 그 SSOT, 적용 다이얼로그와 화면 간 낱말 통일).
@@ -81,7 +83,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     return sectionShell(
       <>
         <p className="text-xs text-muted-foreground">{t('recipeStartRoleUnassigned')}</p>
-        <Link href="/organization/events" className="mt-1 inline-block text-xs text-primary hover:underline">
+        <Link href={flatHref("/organization/events")} className="mt-1 inline-block text-xs text-primary hover:underline">
           {t('recipeStartGoToAssign')}
         </Link>
       </>,
@@ -155,7 +157,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       )}
       {c.conversation_id && (
         <Link
-          href={`/chats/${c.conversation_id}${c.message_id ? `?messageId=${encodeURIComponent(c.message_id)}` : ''}`}
+          href={flatHref(`/chats/${c.conversation_id}${c.message_id ? `?messageId=${encodeURIComponent(c.message_id)}` : ''}`)}
           className="text-xs font-medium text-primary hover:underline"
         >
           {t('recipeStartViewConversation')}
