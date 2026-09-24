@@ -94,11 +94,13 @@ describe('en 개수 문구 복수형(story #4223)', () => {
     const json = '{ "type": "service_account", "project_id": "…", "private_key": "…" }';
     // 값 없이 = use-intl prod 원문 경로(이스케이프가 있으면 컴파일) · 값을 넘기면 = 컴파일 경로 — 두 경로 모두 보이는 글자가 같아야 한다.
     expect(en('organization.gcCredentialPlaceholder')).toBe(`Paste ${json}`);
-    // story #4240 — 한국어 조사는 붙여 쓴다(«} 를» 0 · «}를» 1).
-    expect(ko('organization.gcCredentialPlaceholder')).toBe(`${json}를 붙여넣어요`);
+    // story #4240 — 한국어 조사는 붙여 쓴다(«} 를» 0). 코드 블록 끝(`}`)과 조사 사이엔 WORD JOINER(U+2060) — `}` 뒤가 줄바꿈 허용
+    // 자리라 390에서 «를 붙여넣어요»가 줄 맨 앞으로 떨어졌다(keep-all로는 안 막힘 · 유나 390 실측). 보이는 글자는 «}를».
+    expect(ko('organization.gcCredentialPlaceholder')).toBe(`${json}\u2060를 붙여넣어요`);
+    expect(ko('organization.gcCredentialPlaceholder')).toContain('}\u2060를');
     expect(ko('organization.gcCredentialPlaceholder')).not.toContain('} 를');
     expect(en('organization.gcCredentialPlaceholder', { unused: '' })).toBe(`Paste ${json}`);
-    expect(ko('organization.gcCredentialPlaceholder', { unused: '' })).toBe(`${json}를 붙여넣어요`);
+    expect(ko('organization.gcCredentialPlaceholder', { unused: '' })).toBe(`${json}\u2060를 붙여넣어요`);
   });
 
   it('양성·음성 대조 — 이름이 무엇이든 잡고, 동사·plural 안·숫자 아닌 자리는 안 잡는다', () => {
