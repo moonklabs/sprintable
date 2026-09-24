@@ -19,7 +19,6 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
 import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
-import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
 // INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
