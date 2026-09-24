@@ -205,12 +205,18 @@ async def _call_list_gates(
     conv_batch.all.return_value = []
     session = AsyncMock()
     # execute call order: gates SELECT, [doc batch if fetch_ids], [story batch if story_ids],
-    # [conversation_id 배치 if resolved is not None and gates non-empty]
+    # [wf_line_version batch if any], [conversation_id 배치 if resolved is not None and gates non-empty]
     side_effects = [gates_result]
     if any(g.work_item_type == "doc" or g.gate_type == "doc_approval" for g in gates):
         side_effects.append(doc_batch)
     if any(g.work_item_type == "story" and g.gate_type != "doc_approval" for g in gates):
         side_effects.append(story_batch)
+    # story #4241 — list_gates가 wf_line_version(및 loop·hypothesis·epic·sprint) 게이트의 project_id도 배치 해소한다(종류당 IN 쿼리 1개).
+    # 이 파일의 org-level 게이트는 조직 단위 라인이라 project_id None 행을 돌려준다(실 DB와 같은 모양).
+    if any(g.work_item_type == "wf_line_version" for g in gates):
+        wf_batch = MagicMock()
+        wf_batch.all.return_value = [(g.work_item_id, None) for g in gates if g.work_item_type == "wf_line_version"]
+        side_effects.append(wf_batch)
     if not resolve_raises and gates:
         side_effects.append(conv_batch)
     session.execute = AsyncMock(side_effect=side_effects)

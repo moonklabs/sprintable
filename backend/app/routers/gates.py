@@ -21,9 +21,11 @@ from app.models.gate import Gate, is_valid_transition
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.hitl import HitlRequest
-from app.models.pm import Story, Task
+from app.models.hypothesis import Hypothesis
+from app.models.loop import LoopRun
+from app.models.pm import Goal, Sprint, Story, Task
 from app.models.visual_artifact import VisualArtifact
-from app.models.workflow_line import WorkflowLineStepApproval
+from app.models.workflow_line import WorkflowLineDefinitionVersion, WorkflowLineStepApproval
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _push_to_agent
 from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
@@ -1458,6 +1460,19 @@ async def list_gates(
                 )
             )).all()
             project_id_by_work_item.update({aid: pid for aid, pid in rows})
+        # story #4241(까디르 QA 367369b2e [P2]) — 조직 전체 결재함 행 링크가 결재 자신의 프로젝트를 싣도록 나머지 종류도 배치 해소한다
+        # (resolve_work_item_project_id 단건 표와 같은 축 · 종류당 IN 쿼리 1개 · N+1 0). wf_line_version은 버전 행의 project_id가 nullable
+        # (조직 단위 라인이면 None — 정직한 값). loop·hypothesis·epic(=Goal)·sprint는 NOT NULL.
+        for model, wtype in (
+            (LoopRun, "loop"), (Hypothesis, "hypothesis"), (Goal, "epic"), (Sprint, "sprint"),
+            (WorkflowLineDefinitionVersion, "wf_line_version"),
+        ):
+            ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == wtype}
+            if ids:
+                rows = (await session.execute(
+                    select(model.id, model.project_id).where(model.id.in_(ids), model.org_id == org_id)
+                )).all()
+                project_id_by_work_item.update({rid: pid for rid, pid in rows})
         for resp in responses:
             if resp.work_item_type in ("story", "task"):
                 resp.work_item_summary = summary_by_work_item.get(resp.work_item_id)
@@ -1469,6 +1484,14 @@ async def list_gates(
     # 이 한 dict 로 커버(project_id_by_work_item 은 dict(doc_proj) 로 시작).
     for resp, g in zip(responses, gates):
         resp.project_id = project_id_by_work_item.get(g.work_item_id)
+        # story #4241 — 자기 참조 앵커(agent_decision · support_escalation: work_item_id == gate.id, 대상 테이블 없음)는 생성 때
+        # neutral_facts.project_id에 싣는다(agent_decision은 원래 · support_escalation은 이번부터 — 그 전 행은 None으로 남는다).
+        if resp.project_id is None and g.work_item_type in ("agent_decision", "support_escalation"):
+            raw = (g.neutral_facts or {}).get("project_id")
+            try:
+                resp.project_id = uuid.UUID(str(raw)) if raw else None
+            except ValueError:
+                resp.project_id = None
 
     # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
     # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
