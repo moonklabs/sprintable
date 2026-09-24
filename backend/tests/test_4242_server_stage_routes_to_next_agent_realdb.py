@@ -114,6 +114,17 @@ async def _stage_message_and_participants(Session, ctx, *, definition_key: str, 
     return message, participants
 
 
+async def _resolved_recipients(Session, ctx, *, stage: str) -> set:
+    """리졸버 결과 그 자체(대화 참가자엔 시스템 발신자 · relay 소유자가 섞여 수로 못 잰다 — PO)."""
+    from app.services.event_routing_resolver import _resolve_recipe_role_binding
+
+    async with Session() as s:
+        return await _resolve_recipe_role_binding(
+            s, org_id=ctx["org_id"], definition_key=_SEED._KEY,
+            payload={"stage": stage, "work_item_type": "story", "work_item_id": str(ctx["story_id"])},
+        )
+
+
 async def _setup_newsletter(Session):
     await _ensure_newsletter_preset(Session)
     ctx = await _setup(Session)
@@ -179,6 +190,7 @@ async def test_next_stage_bound_to_a_human_member_reaches_that_person():
         )
         assert person.id in participants
         assert ctx["sender_id"] not in participants and ctx["bystander_id"] not in participants
+        assert await _resolved_recipients(Session, ctx, stage="campaign_created") == {person.id}  # 정확히 1명
     finally:
         await engine.dispose()
 
@@ -199,6 +211,7 @@ async def test_next_stage_without_a_bound_member_reaches_nobody_and_logs_warning
         )
         assert ctx["bystander_id"] not in participants
         assert ctx["sender_id"] not in participants
+        assert await _resolved_recipients(Session, ctx, stage="campaign_created") == set()  # 정확히 0
         assert any(
             "channel stage 'campaign_created' -> next stage 'send_requested' has no bound member" in r.getMessage()
             for r in caplog.records
