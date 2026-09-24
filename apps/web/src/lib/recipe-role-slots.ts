@@ -293,7 +293,8 @@ export function stageMemberKind(
 }
 
 /** 범용 적용 창에서 승인이 stage 밖이라 고를 담당이 없는 stage의 승인 자리(approval.surface) — 에이전트 역할이 아닌 stage만
- * (recipeRoleSlots의 approval_elsewhere와 같은 규칙). 아니면 null. */
+ * (recipeRoleSlots의 approval_elsewhere와 같은 규칙). 아니면 null. 멤버 종류는 `stageMemberKind` 하나로 판정한다 — 선언 없는
+ * 역할은 두 함수 모두 에이전트다(까디르 4606 P2 · 예전엔 여기서만 «에이전트 아님»으로 읽어 승인 자리를 보였다). */
 export function stageApprovalSurface(
   stage: string,
   stageMetadata: RecipeStageMetadata,
@@ -301,7 +302,19 @@ export function stageApprovalSurface(
 ): string | null {
   const surface = stageMetadata[stage]?.approval?.surface;
   if (!surface) return null;
-  return roleActorKind(stageMetadata[stage]?.role, roleActorKinds) === 'agent' ? null : surface;
+  return stageMemberKind(stage, stageMetadata, roleActorKinds) === 'agent' ? null : surface;
+}
+
+/** 범용 적용 창의 제출 매핑 — 비워 둔 선택과, 승인이 stage 밖이라 읽기 전용인 stage는 싣지 않는다. 예전에 그 stage에 묶여
+ * 있던 바인딩이 선택값으로 남아 있어도 화면에 없는 값이라 다시 저장하지 않는다(까디르 4606 P1). */
+export function submittableRoleMapping(
+  roleMapping: Readonly<Record<string, string>>,
+  stageMetadata: RecipeStageMetadata,
+  roleActorKinds: RoleActorKinds | null | undefined,
+): Record<string, string> {
+  return Object.fromEntries(Object.entries(roleMapping).filter(
+    ([stage, value]) => value && stageApprovalSurface(stage, stageMetadata, roleActorKinds) === null,
+  ));
 }
 
 /** 범용 적용 창에서 반드시 채워야 하는 stage — 사람 역할(human 선언) stage와 승인이 stage 밖인 stage는 비워도 된다(사람

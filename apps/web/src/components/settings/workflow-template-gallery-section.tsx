@@ -10,7 +10,7 @@ import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { RecipeRoleMappingFields, type ChannelConnectionOption, type GenerationConnectorOption } from '@/components/organization/recipe-role-mapping-fields';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
-import { requiredMappingStages } from '@/lib/recipe-role-slots';
+import { requiredMappingStages, submittableRoleMapping } from '@/lib/recipe-role-slots';
 
 // story #3293(도메인탈고정 축2-ⓒ) — 구세대 workflow_templates(story #3010 P3 등) 소비를
 // 신세대(EventDefinition/recipe_role_bindings, 축2-ⓐ story #3288)로 이전. doc
@@ -185,8 +185,8 @@ export function WorkflowTemplateGallerySection({
     setApplying(true);
     setApplyResult(null);
     setApplyWarnings([]);
-    // story #4243 — 비워 둔 선택(사람 stage 등)은 싣지 않는다(빈 문자열은 id가 아니다).
-    const chosen = Object.fromEntries(Object.entries(roleMapping).filter(([, v]) => v));
+    // story #4243 — 비워 둔 선택(사람 stage 등)과 승인이 stage 밖인 읽기 전용 stage는 싣지 않는다.
+    const chosen = submittableRoleMapping(roleMapping, selected.stage_metadata, selected.role_actor_kinds);
     try {
       const res = await fetchWithAuth(`/api/events/definitions/${selected.id}/apply`, {
         method: 'POST',

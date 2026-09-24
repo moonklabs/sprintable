@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  allowedChannelsForSlot, groupStagesByRole, membersForKind, orderedRecipeRoles, requiredMappingStages, stageApprovalSurface, stageMemberKind, recipeConnectionTargets, recipeKeyDomain,
+  allowedChannelsForSlot, groupStagesByRole, membersForKind, orderedRecipeRoles, requiredMappingStages, stageApprovalSurface, stageMemberKind, submittableRoleMapping, recipeConnectionTargets, recipeKeyDomain,
   recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
   type RecipeRoleSlot, type RecipeStageMetadata,
 } from './recipe-role-slots';
@@ -389,5 +389,25 @@ describe('D3 — either + approval.surface(story #4243)', () => {
     expect(stageApprovalSurface('brief', META, { PO: 'either' })).toBe('doc_approval');
     expect(stageApprovalSurface('brief', META, { PO: 'agent' })).toBeNull();
     expect(requiredMappingStages(['brief', 'kickoff'], META, { PO: 'either' })).toEqual(['kickoff']);
+  });
+});
+
+describe('범용 창 판정 하나 · 제출 매핑(까디르 4606 P1 · P2)', () => {
+  const META = {
+    brief: { role: 'PO', action: '브리프', approval: { surface: 'doc_approval' } },
+    kickoff: { role: 'PO', action: '기획' },
+    build: { role: 'Dev', action: '구현' },
+  };
+  it('P2 — 선언 없는 역할: 멤버 종류도 에이전트 · 승인 자리도 없음(두 함수가 같은 판정)', () => {
+    expect(stageMemberKind('brief', META, null)).toBe('agent');
+    expect(stageApprovalSurface('brief', META, null)).toBeNull();
+    expect(stageApprovalSurface('brief', META, {})).toBeNull();
+  });
+  it('P1 — 예전 바인딩이 남은 승인 자리 stage · 빈 선택은 제출에 안 싣는다', () => {
+    const previous = { brief: 'old-member', kickoff: 'po-member', build: '' };
+    expect(submittableRoleMapping(previous, META, { PO: 'either', Dev: 'agent' })).toEqual({ kickoff: 'po-member' });
+  });
+  it('P1 — 에이전트 역할의 승인 선언 stage는 멤버 자리라 그대로 싣는다', () => {
+    expect(submittableRoleMapping({ brief: 'agent-1' }, META, { PO: 'agent' })).toEqual({ brief: 'agent-1' });
   });
 });

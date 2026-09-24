@@ -164,6 +164,57 @@ describe('ApplyRecipeDialog', () => {
 
   // story #4118(라이브 실사고 그라운딩, 2026-09-21) — 토스트 count가 서버 실 값(리터럴
   // 1 고정 아님)을 반영하는지 진짜 번역기로 문장 자체를 고정한다.
+  it('까디르 4606 P1 — 승인이 stage 밖인 읽기 전용 stage에 예전 바인딩이 남아 있어도 제출 payload에 그 stage는 0', async () => {
+    const capture = { body: null as unknown };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) {
+        return { ok: true, json: async () => ({ bindings: { brief: 'agent-old', kickoff: 'agent-1' } }) };
+      }
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 1, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    const target = {
+      ...TARGET,
+      payload_schema: { properties: { stage: { enum: ['brief', 'kickoff'] } } },
+      stage_metadata: {
+        brief: { role: 'PO', action: '브리프', approval: { surface: 'doc_approval' as const } },
+        kickoff: { role: 'PO', action: '기획' },
+      },
+      role_actor_kinds: { PO: 'either' as const },
+    };
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={target}
+          open
+          onOpenChange={() => {}}
+          t={((k: string) => k) as never}
+          tc={((k: string) => k) as never}
+          addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { kickoff: 'agent-1' } });
+  });
+
   it('apply 성공 토스트 count가 실제 bindings_upserted(5)를 반영한다(리터럴 1 고정 아님)', async () => {
     const capture = { body: null as unknown };
     stubFetch({ ok: true, bindings_upserted: 5, warnings: [] }, capture);

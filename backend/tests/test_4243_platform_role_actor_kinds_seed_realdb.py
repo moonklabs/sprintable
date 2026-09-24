@@ -92,7 +92,8 @@ async def test_human_or_either_roles_have_a_human_completion_path_on_every_stage
 
 async def test_migration_0403_is_idempotent_and_reversible():
     """까디르 QA P2 — 0403을 이미 적용한 DB에 upgrade를 한 번 더 돌려도 version이 안 오르고, downgrade는 선언을 걷고 version을
-    되돌린다(마지막에 다시 upgrade — 공유 migrated DB는 적용 상태로 남긴다)."""
+    되돌린다. 까디르 4606 P3 — 공유 migrated DB라 전부 **한 트랜잭션** 안에서 돌리고 끝에 rollback한다(중간에 실패해도 다른
+    테스트가 보는 행은 그대로)."""
     import importlib.util
     from pathlib import Path
 
@@ -111,29 +112,35 @@ async def test_migration_0403_is_idempotent_and_reversible():
             url = "postgresql+psycopg2://" + url[len(prefix):]
             break
     engine = sa.create_engine(url)
-
-    def _run(fn):
-        with engine.begin() as conn:
-            with Operations.context(MigrationContext.configure(conn)):
-                fn()
-
-    def _state():
-        with engine.connect() as conn:
-            return conn.execute(sa.text(
-                "SELECT version, role_actor_kinds, stage_metadata->'brief_doc_approval'->'approval' FROM event_definitions "
-                "WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
-            )).one()
-
     try:
-        applied = _state()
-        assert applied[1] is not None and applied[2] == {"surface": "doc_approval"}
-        _run(m.upgrade)
-        assert _state() == applied, "이미 적용된 DB에 upgrade를 다시 돌리면 아무것도(version 포함) 안 바뀌어야 한다"
-        _run(m.downgrade)
-        down = _state()
-        assert down[1] is None and down[2] is None and down[0] == applied[0] - 2
-        _run(m.upgrade)
-        assert _state() == applied
+        with engine.connect() as conn:
+            transaction = conn.begin()
+            try:
+                def _run(fn):
+                    with Operations.context(MigrationContext.configure(conn)):
+                        fn()
+
+                def _state():
+                    return conn.execute(sa.text(
+                        "SELECT version, role_actor_kinds, stage_metadata->'brief_doc_approval'->'approval' FROM event_definitions "
+                        "WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
+                    )).one()
+
+                applied = _state()
+                assert applied[1] is not None and applied[2] == {"surface": "doc_approval"}
+                _run(m.upgrade)
+                assert _state() == applied, "이미 적용된 DB에 upgrade를 다시 돌리면 아무것도(version 포함) 안 바뀌어야 한다"
+                _run(m.downgrade)
+                down = _state()
+                assert down[1] is None and down[2] is None and down[0] == applied[0] - 2
+                _run(m.upgrade)
+                assert _state() == applied
+            finally:
+                transaction.rollback()
+        with engine.connect() as conn:
+            assert conn.execute(sa.text(
+                "SELECT role_actor_kinds IS NOT NULL FROM event_definitions WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
+            )).scalar_one(), "rollback 뒤 공유 DB의 0403 선언이 그대로 남아 있어야 한다"
     finally:
         engine.dispose()
 

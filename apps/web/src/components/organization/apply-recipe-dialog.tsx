@@ -13,7 +13,7 @@ import type { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { requiredMappingStages } from '@/lib/recipe-role-slots';
+import { requiredMappingStages, submittableRoleMapping } from '@/lib/recipe-role-slots';
 
 interface MemberOption {
   id: string;
@@ -185,8 +185,8 @@ export function ApplyRecipeDialog({
     setApplying(true);
     setError(null);
     setWarnings([]);
-    // story #4243 — 비워 둔 선택(사람 stage 등)은 싣지 않는다(빈 문자열은 id가 아니다).
-    const chosen = Object.fromEntries(Object.entries(roleMapping).filter(([, v]) => v));
+    // story #4243 — 비워 둔 선택(사람 stage 등)과 승인이 stage 밖인 읽기 전용 stage는 싣지 않는다.
+    const chosen = submittableRoleMapping(roleMapping, target.stage_metadata, target.role_actor_kinds);
     try {
       const res = await fetchWithAuth(`/api/events/definitions/${target.id}/apply`, {
         method: 'POST',

@@ -632,6 +632,25 @@ def test_role_actor_kinds_rejects_non_dict_value():
         validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")  # dict 아님
 
 
+@pytest.mark.parametrize("value", [[], "", 0, False])
+def test_role_actor_kinds_rejects_falsy_non_dict_values(value):
+    """까디르 4606 P2 — «없음»은 None과 빈 dict뿐. falsy라도 모양이 틀린 값은 «없음»으로 통과시키지 않고 거부한다.
+    뮤테이션: 첫 가드를 `if not role_actor_kinds: return`으로 되돌리면 넷 다 RED."""
+    from app.services.event_definition_registry import (
+        InvalidRoleActorKindsError, validate_role_actor_kinds,
+    )
+
+    with pytest.raises(InvalidRoleActorKindsError):
+        validate_role_actor_kinds(_STAGE_METADATA_2ROLE, value)
+
+
+def test_role_actor_kinds_none_and_empty_dict_mean_unknown():
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, None)
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {})
+
+
 def test_role_actor_kinds_error_messages_route_through_i18n_catalog_not_raw_hardcoded():
     """⭐페드루 PO CHANGES(2026-09-21, PR #4467) 핵심 pin — 정의 저자에게 닿는 이 3개
     거부 사유는 raw f-string이 아니라 i18n_catalog(해요체)에서 온다. 뮤테이션 셀프체크:
