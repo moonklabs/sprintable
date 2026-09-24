@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { RECIPE_CONNECTION_TARGETS, allowedChannelsForSlot, recipeRoleSlots, uncoveredRecipeStages, type RecipeRoleSlot } from '@/lib/recipe-role-slots';
 import { useChannelLabel } from '@/lib/channel-label';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
@@ -70,6 +71,16 @@ export function MarketingRecipeApplyDialog({
   // channelLoadFailed 키 재사용(신규 문구 발명 0).
   const tChannel = useTranslations('channelConnect');
   const channelLabel = useChannelLabel();
+  const locale = useLocale();
+  const flatHref = useFlatHref();
+  // story #4239(유나 확정) — «이 레시피는 {channels} 연결이 필요해요»의 {channels}: 테스트 채널(sandbox · *_sandbox)은 뺀다
+  // (테스트 연결이 있으면 선택지가 안 비어 이 안내가 뜨지 않으니 빼도 거짓이 아님) · 표시 이름 · 같은 이름 한 번 · 정의 순서 ·
+  // «또는»으로 묶는다(하나만 연결해도 된다 — « · »는 «모두 필요»로 읽힌다). 빼고 나서 비면 null(기존 «연결 없음» 문장으로).
+  const neededChannelsPhrase = (allowed: string[]): string | null => {
+    const names = [...new Set(allowed.filter((c) => c !== 'sandbox' && !c.endsWith('_sandbox')).map(channelLabel))];
+    if (names.length === 0) return null;
+    return new Intl.ListFormat(locale, { type: 'disjunction' }).format(names);
+  };
   const [projectId, setProjectId] = useState('');
   // story #4173 — 자리(slot.key = 역할+방식)별 선택값. member 자리는 팀 멤버 id, channel은
   // 채널 연결 id, compute는 연산 커넥터 id. approver 자리는 읽기 전용이라 값이 없다.
@@ -356,10 +367,10 @@ export function MarketingRecipeApplyDialog({
               <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
             </div>
           ) : channelConnectionsStatus === 'loaded' && slotConnections.length === 0 ? (
-            allowedChannels ? (
+            allowedChannels && neededChannelsPhrase(allowedChannels) ? (
               <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-none-allowed">
-                {t('recipeApplyV2ChannelsNoneAllowed', { channels: allowedChannels.map(channelLabel).join(' · ') })}{' '}
-                <Link href="/organization/channels" className="font-medium text-primary hover:underline">
+                {t('recipeApplyV2ChannelsNoneAllowed', { channels: neededChannelsPhrase(allowedChannels)! })}{' '}
+                <Link href={flatHref('/organization/channels')} className="font-medium text-primary hover:underline">
                   {t('recipeApplyV2ChannelsConnectLink')}
                 </Link>
               </p>

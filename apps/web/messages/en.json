@@ -838,7 +838,7 @@
     "recipeApplyV2ComputeEmptyFallbackHint": "Leave it empty and the assigned agent generates with its own tools — no organization connector.",
     "recipeApplyV2PublisherBadge": "Channel",
     "recipeApplyV2PublisherDesc": "Posts the approved material to the channel",
-    "recipeApplyV2ChannelsNoneAllowed": "This recipe needs a {channels} connection.",
+    "recipeApplyV2ChannelsNoneAllowed": "This recipe needs a connection to {channels}.",
     "recipeApplyV2ChannelsConnectLink": "Connect a channel",
     "recipeApplyV2StageCoverage": "Executes {count, plural, one {# stage} other {# stages}}",
     "recipeApplyV2CreatorMembershipError": "The selected agent isn't a member of this project. Please choose again.",

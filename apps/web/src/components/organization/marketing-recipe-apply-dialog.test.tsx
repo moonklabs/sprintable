@@ -1132,11 +1132,39 @@ describe('발행 자리 채널 선택지 = 레시피 허용 채널만(story #423
     const select = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
     expect([...select.querySelectorAll('option')].map((o) => o.value).filter(Boolean)).toEqual([]);
     const note = document.body.querySelector('[data-testid="marketing-apply-channels-none-allowed"]')!;
-    expect(note.textContent).toContain(ORG.recipeApplyV2ChannelsNoneAllowed.replace('{channels}', `${koMessages.channelConnect.channelLabelStibee} · ${koMessages.channelConnect.channelLabelStibeeSandbox}`));
-    expect(note.querySelector('a')?.getAttribute('href')).toBe('/organization/channels');
+    // 유나 확정: 테스트 채널(stibee_sandbox)은 이름에서 뺀다 → «스티비»만.
+    expect(note.textContent).toContain(ORG.recipeApplyV2ChannelsNoneAllowed.replace('{channels}', koMessages.channelConnect.channelLabelStibee));
+    expect(note.querySelector('a')?.getAttribute('href')).toMatch(/^\/organization\/channels/);
     expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')).toBeNull();
     await choose('#marketing-recipe-apply-project', 'proj-1');
     await choose('[data-testid="creator-agent-select"]', 'agent-1');
     expect(submitButton().hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('허용 채널 안내 문구(story #4239 유나 확정)', () => {
+  const withChannels = (channels: string[]): EventDefinitionResponse & { id: string } => ({
+    ...NEWSLETTER_LIKE,
+    stage_metadata: {
+      ...NEWSLETTER_LIKE.stage_metadata,
+      campaign_created: { ...NEWSLETTER_LIKE.stage_metadata.campaign_created, capability: { kind: 'publish', target: 'channel_connection', channels } },
+    },
+  });
+
+  it('여러 채널은 «또는»으로 묶고(Intl.ListFormat disjunction) 테스트 채널은 뺀다', async () => {
+    stubChannels(MIXED_CONNECTIONS.filter((c) => c.channel !== 'instagram'));
+    await mountDialog(withChannels(['threads', 'x', 'facebook', 'sandbox', 'x_sandbox', 'facebook_sandbox']));
+    const cc = koMessages.channelConnect;
+    const expected = new Intl.ListFormat('ko', { type: 'disjunction' }).format([cc.channelThreads, cc.channelLabelX, cc.channelLabelFacebook]);
+    const note = document.body.querySelector('[data-testid="marketing-apply-channels-none-allowed"]')!;
+    expect(note.textContent).toContain(ORG.recipeApplyV2ChannelsNoneAllowed.replace('{channels}', expected));
+    expect(note.textContent).not.toContain('Sandbox');
+  });
+
+  it('테스트 채널만 허용이면(빼고 나서 빈 목록) 기존 «연결 없음» 문장으로', async () => {
+    stubChannels(MIXED_CONNECTIONS);
+    await mountDialog(withChannels(['sandbox', 'stibee_sandbox']));
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-none-allowed"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')?.textContent).toBe(ORG.eventApplyChannelsEmpty);
   });
 });
