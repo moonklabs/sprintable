@@ -91,8 +91,15 @@ async def _seed_story_gate_with_line(Session) -> dict:
             config={"steps": [{"from_status": "in-review", "to_status": "done", "step_type": "human-gate",
                                "sla_policy": {"timeout_hours": 4, "on_timeout": "auto_approve"},
                                "on_approve": {"apply_transition": True}}]}))
+        # 수신자가 있어야 SSE·ws 배달이 실제로 생긴다(까디르 4597 QA P2 — 예전 픽스처는 수신자 0이라 배달 지연 테스트가
+        # 공허했다). 두 프리셋의 broadcast = work_item_stakeholders → 스토리 담당 에이전트.
+        from app.models.team import TeamMember
+
+        agent = uuid.uuid4()
+        s.add(TeamMember(id=agent, org_id=org, project_id=proj, type="agent", name="담당 에이전트", is_active=True))
+        await s.flush()
         story = uuid.uuid4()
-        s.add(Story(id=story, org_id=org, project_id=proj, title="S", status="in-review", story_points=3))
+        s.add(Story(id=story, org_id=org, project_id=proj, title="S", status="in-review", story_points=3, assignee_id=agent))
         gate = Gate(id=uuid.uuid4(), org_id=org, work_item_id=story, work_item_type="story",
                     gate_type="merge", status="pending")
         s.add(gate)
@@ -104,7 +111,7 @@ async def _seed_story_gate_with_line(Session) -> dict:
             gate_id=gate.id)
         s.add(sr)
         await s.commit()
-        return {"org": org, "story": story, "gate": gate.id, "sr": sr.id}
+        return {"org": org, "story": story, "gate": gate.id, "sr": sr.id, "agent": agent}
 
 
 async def _state(Session, w) -> dict:
@@ -130,20 +137,31 @@ async def _state(Session, w) -> dict:
 
 
 class _Deliveries:
-    """커밋 뒤 배달 기록 — 웹훅 background task(메시지마다 등록) + SSE push."""
+    """커밋 뒤 배달 기록 — 웹훅 background task(메시지마다 등록) · SSE push · ws 브로드캐스트."""
 
-    def __init__(self):
+    def __init__(self, agent_id: uuid.UUID | None = None):
         self.webhooks: list[uuid.UUID] = []
         self.sse: list[str] = []
+        self.ws: list[str] = []
+        self.agent_id = agent_id
 
     def patches(self):
         async def _webhook(**kw):
             self.webhooks.append(kw["message_id"])
 
+        async def _broadcast(aid, payload):
+            self.ws.append(aid)
+
+        rooms = {str(self.agent_id): object()} if self.agent_id else {}
         return (
             patch("app.services.conversation_webhook.deliver_conversation_message_webhook", _webhook),
             patch("app.routers.conversations._push_to_agent", lambda pid, payload: self.sse.append(pid)),
+            patch("app.routers.ws_chat._rooms", rooms),
+            patch("app.routers.ws_chat._broadcast", _broadcast),
         )
+
+    def none(self) -> bool:
+        return self.webhooks == [] and self.sse == [] and self.ws == []
 
 
 def _fail_late_in_transition(monkeypatch) -> None:
@@ -177,9 +195,9 @@ async def test_sla_auto_approve_late_pg_error_rolls_back_approval_step_and_event
     try:
         w = await _seed_story_gate_with_line(Session)
         _fail_late_in_transition(monkeypatch)
-        deliveries = _Deliveries()
-        p1, p2 = deliveries.patches()
-        with p1, p2, patch(_NOTIFY, new=AsyncMock()):
+        deliveries = _Deliveries(w["agent"])
+        p1, p2, p3, p4 = deliveries.patches()
+        with p1, p2, p3, p4, patch(_NOTIFY, new=AsyncMock()):
             async with Session() as s:
                 counts = await process_sla(s, now=_NOW)
             await _drain()
@@ -188,7 +206,7 @@ async def test_sla_auto_approve_late_pg_error_rolls_back_approval_step_and_event
             "gate": "pending", "story": "in-review", "step": "gate_pending",
             "messages": {_STATUS_KEY: 0, _VERDICT_KEY: 0},
         }
-        assert deliveries.webhooks == [] and deliveries.sse == []
+        assert deliveries.none(), (deliveries.webhooks, deliveries.sse, deliveries.ws)
     finally:
         await engine.dispose()
 
@@ -206,10 +224,10 @@ async def test_human_transition_late_pg_error_rolls_back_approval_step_and_event
     try:
         w = await _seed_story_gate_with_line(Session)
         _fail_late_in_transition(monkeypatch)
-        deliveries = _Deliveries()
+        deliveries = _Deliveries(w["agent"])
         approver = ResolvedMember(id=uuid.uuid4(), user_id=uuid.uuid4(), name="h", type="human", role="member", org_id=w["org"])
-        p1, p2 = deliveries.patches()
-        with p1, p2, patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
+        p1, p2, p3, p4 = deliveries.patches()
+        with p1, p2, p3, p4, patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
                 patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
             async with Session() as s:
                 bg = BackgroundTasks()
@@ -226,7 +244,7 @@ async def test_human_transition_late_pg_error_rolls_back_approval_step_and_event
             "gate": "pending", "story": "in-review", "step": "gate_pending",
             "messages": {_STATUS_KEY: 0, _VERDICT_KEY: 0},
         }
-        assert deliveries.webhooks == [] and deliveries.sse == []
+        assert deliveries.none(), (deliveries.webhooks, deliveries.sse, deliveries.ws)
     finally:
         await engine.dispose()
 
@@ -239,19 +257,22 @@ async def test_success_path_commits_once_and_delivers_only_after_the_commit():
     engine, Session = await _session()
     try:
         w = await _seed_story_gate_with_line(Session)
-        deliveries = _Deliveries()
-        p1, p2 = deliveries.patches()
-        with p1, p2:
+        deliveries = _Deliveries(w["agent"])
+        p1, p2, p3, p4 = deliveries.patches()
+        with p1, p2, p3, p4:
             async with Session() as s:
                 await transition_gate(s, w["org"], w["gate"], "approved", resolver_id=uuid.uuid4())
                 await _drain()
-                assert deliveries.webhooks == [], "커밋 전에 배달이 나갔다"
+                assert deliveries.none(), f"커밋 전에 배달이 나갔다: {deliveries.webhooks, deliveries.sse, deliveries.ws}"
                 await s.commit()
             await _drain()
         state = await _state(Session, w)
         assert state["gate"] == "approved" and state["story"] == "done"
         assert state["messages"] == {_STATUS_KEY: 1, _VERDICT_KEY: 1}, state
         assert len(deliveries.webhooks) == 2, deliveries.webhooks
+        # 수신자(담당 에이전트)가 있으니 SSE·ws도 커밋 뒤에 실제로 나간다(P2 — 공허하지 않은 단언)
+        assert str(w["agent"]) in deliveries.sse, deliveries.sse
+        assert str(w["agent"]) in deliveries.ws, deliveries.ws
     finally:
         await engine.dispose()
 
@@ -274,9 +295,9 @@ async def test_failed_preset_publish_rolls_back_only_its_savepoint(monkeypatch):
     engine, Session = await _session()
     try:
         w = await _seed_story_gate_with_line(Session)
-        deliveries = _Deliveries()
-        p1, p2 = deliveries.patches()
-        with p1, p2:
+        deliveries = _Deliveries(w["agent"])
+        p1, p2, p3, p4 = deliveries.patches()
+        with p1, p2, p3, p4:
             async with Session() as s:
                 await transition_gate(s, w["org"], w["gate"], "approved", resolver_id=uuid.uuid4())
                 await s.commit()
@@ -284,7 +305,7 @@ async def test_failed_preset_publish_rolls_back_only_its_savepoint(monkeypatch):
         state = await _state(Session, w)
         assert state["gate"] == "approved" and state["story"] == "done", state
         assert state["messages"] == {_STATUS_KEY: 0, _VERDICT_KEY: 0}, state
-        assert deliveries.webhooks == [] and deliveries.sse == []
+        assert deliveries.none(), (deliveries.webhooks, deliveries.sse, deliveries.ws)
     finally:
         await engine.dispose()
 
@@ -344,5 +365,108 @@ async def test_after_commit_action_errors_are_only_logged(caplog):
         await _drain()
         assert ran == ["next"]
         assert "after-commit action failed" in caplog.text
+    finally:
+        await engine.dispose()
+
+
+# ─── 까디르 4597 QA P1 — 형제 SAVEPOINT 롤백이 성공한 쪽 배달을 지우지 않는다 ─────────────────────────────────────
+
+async def test_a_failed_sibling_publish_does_not_erase_the_successful_publishs_deliveries(monkeypatch):
+    """한 전이 안에서 판정 알림 발행(성공) → 상태변경 발행(자기 SAVEPOINT에서 실 PG 오류 → 롤백). 전이는 커밋되고, 판정 메시지와
+    그 배달(웹훅 · SSE · ws)은 **나간다** · 상태변경 메시지와 배달은 0. 예전엔 SQLAlchemy 2.0이 SAVEPOINT 롤백에도 발화하는
+    `after_rollback`에서 예약을 통째로 비워 판정 배달까지 사라졌다(까디르 재현: committed rows=[(1,)] deliveries=[]).
+    뮤테이션: `after_rollback` 통째 비우기를 되살리면 RED."""
+    import app.routers.events as events
+    from app.services.gate_service import transition_gate
+
+    real_core = events._publish_registry_event_core
+
+    async def _status_publish_breaks(db, org_id, auth, definition_key, *a, **kw):
+        if definition_key == _STATUS_KEY:
+            from sqlalchemy import text
+
+            await db.execute(text("SELECT * FROM no_such_table_4230_sibling"))
+        return await real_core(db, org_id, auth, definition_key, *a, **kw)
+
+    monkeypatch.setattr(events, "_publish_registry_event_core", _status_publish_breaks)
+    engine, Session = await _session()
+    try:
+        w = await _seed_story_gate_with_line(Session)
+        deliveries = _Deliveries(w["agent"])
+        p1, p2, p3, p4 = deliveries.patches()
+        with p1, p2, p3, p4:
+            async with Session() as s:
+                await transition_gate(s, w["org"], w["gate"], "approved", resolver_id=uuid.uuid4())
+                await s.commit()
+            await _drain()
+        state = await _state(Session, w)
+        assert state["gate"] == "approved" and state["story"] == "done", state
+        assert state["messages"] == {_STATUS_KEY: 0, _VERDICT_KEY: 1}, state
+        assert len(deliveries.webhooks) == 1, deliveries.webhooks  # 판정 메시지 하나분
+        assert str(w["agent"]) in deliveries.sse and str(w["agent"]) in deliveries.ws, (deliveries.sse, deliveries.ws)
+    finally:
+        await engine.dispose()
+
+
+async def test_sibling_savepoints_only_the_rolled_back_ones_reservations_are_dropped():
+    """단위 — SAVEPOINT A 예약(release) · SAVEPOINT B 예약(롤백) · 바깥 예약 → 바깥 커밋 뒤 A·바깥만 실행. A 안의 중첩
+    SAVEPOINT에서 한 예약은 A가 나중에 롤백되면 같이 버려진다(자손)."""
+    from sqlalchemy import text
+
+    from app.services.after_commit import schedule_after_commit
+
+    engine, Session = await _session()
+    try:
+        ran: list[str] = []
+        async with Session() as s:
+            await s.execute(text("SELECT 1"))
+            schedule_after_commit(s, [lambda: ran.append("outer")])
+            async with s.begin_nested():
+                schedule_after_commit(s, [lambda: ran.append("A")])
+            try:
+                async with s.begin_nested():
+                    schedule_after_commit(s, [lambda: ran.append("B")])
+                    raise RuntimeError("roll back B")
+            except RuntimeError:
+                pass
+            try:
+                async with s.begin_nested():
+                    async with s.begin_nested():
+                        schedule_after_commit(s, [lambda: ran.append("C-inner")])
+                    raise RuntimeError("roll back C (after its inner released)")
+            except RuntimeError:
+                pass
+            await s.commit()
+        await _drain()
+        assert sorted(ran) == ["A", "outer"], ran
+    finally:
+        await engine.dispose()
+
+
+async def test_event_seq_wakes_follow_the_same_ownership():
+    """event_seq wake 큐도 같은 기전 — 형제 SAVEPOINT 롤백이 다른 wake를 지우지 않고, 롤백된 SAVEPOINT 안의 wake는 유령으로
+    나가지 않는다(예전: 통째 비우기 · 또는 롤백된 SAVEPOINT의 wake가 바깥 커밋 때 발화)."""
+    from unittest.mock import patch as _patch
+
+    from sqlalchemy import text
+
+    from app.services.event_seq import _schedule_wake_after_commit
+
+    engine, Session = await _session()
+    try:
+        fired: list[tuple[str, int]] = []
+        with _patch("app.routers.agent_gateway.wake_agent", lambda rid, seq: fired.append((rid, seq))):
+            async with Session() as s:
+                await s.execute(text("SELECT 1"))
+                async with s.begin_nested():
+                    _schedule_wake_after_commit(s, "agent-kept", 1)
+                try:
+                    async with s.begin_nested():
+                        _schedule_wake_after_commit(s, "agent-ghost", 2)
+                        raise RuntimeError
+                except RuntimeError:
+                    pass
+                await s.commit()
+        assert fired == [("agent-kept", 1)], fired
     finally:
         await engine.dispose()

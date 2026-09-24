@@ -2908,28 +2908,23 @@ async def publish_preset_event(
     # story #4230 — 호출자 트랜잭션 참여. 예전엔 core → send_message가 스스로 커밋해, 게이트 전이 한가운데서 호출되면 전이
     # 트랜잭션을 중간에 확정했다(승인 · step · 상태변경이 먼저 영구 → 전이 뒷부분이 실패해도 남음). 이제:
     # - 발행 전체를 SAVEPOINT 안에서(flush만). 실패하면 그 SAVEPOINT만 롤백되고 예외는 호출자의 best-effort
-    #   try/except가 받는다 — 전이는 멀쩡하다. 그 안에서 예약된 wake도 버린다(SAVEPOINT 롤백은 after_rollback을 안 부름).
+    #   try/except가 받는다 — 전이는 멀쩡하다. 그 안에서 예약된 wake도 그 SAVEPOINT 소유라 함께 버려진다.
     # - 밖으로 나가는 배달(SSE · ws · background task 5종)은 SAVEPOINT가 성공한 뒤에만, 호출자 커밋 뒤로 예약한다
     #   (`app.services.after_commit`) — 전이가 롤백되면 배달도 없다. 커밋은 전이를 연 쪽이 한 번.
     from app.services.after_commit import schedule_after_commit
-    from app.services.event_seq import discard_pending_wakes_since, pending_wakes_mark
 
     background_tasks = BackgroundTasks()
     deliveries: list = []
-    wake_mark = pending_wakes_mark(db)
-    try:
-        async with db.begin_nested():
-            system_member = await _get_or_create_system_publisher(db, org_id)
-            auth = AuthContext(
-                user_id=str(system_member.id), email=None,
-                claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
-            )
-            result = await _publish_registry_event_core(
-                db, org_id, auth, definition_key, payload, background_tasks, after_commit=deliveries,
-            )
-    except Exception:
-        discard_pending_wakes_since(db, wake_mark)
-        raise
+    # SAVEPOINT 안에서 예약된 wake(event_seq)는 그 SAVEPOINT 소유라, 실패해 롤백되면 그것만 버려진다(after_commit 기전).
+    async with db.begin_nested():
+        system_member = await _get_or_create_system_publisher(db, org_id)
+        auth = AuthContext(
+            user_id=str(system_member.id), email=None,
+            claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
+        )
+        result = await _publish_registry_event_core(
+            db, org_id, auth, definition_key, payload, background_tasks, after_commit=deliveries,
+        )
     deliveries.append(background_tasks)
     schedule_after_commit(db, deliveries)
     if result.get("zero_reach_warning"):

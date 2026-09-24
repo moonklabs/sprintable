@@ -19,9 +19,9 @@ db 세션 객체에 훅이 걸리므로 그 스레딩이 틀려도 이제 무음
 """
 from __future__ import annotations
 
+import functools
 import logging
 
-from sqlalchemy import event as sa_event
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -30,8 +30,6 @@ from app.models.event import Event
 
 logger = logging.getLogger(__name__)
 
-_PENDING_WAKES_KEY = "e2381_pending_agent_wakes"
-_HOOKED_KEY = "e2381_wake_hook_installed"
 
 
 async def assign_recipient_seq(db: AsyncSession, event: Event) -> int:
@@ -62,15 +60,17 @@ def _schedule_wake_after_commit(db: AsyncSession, recipient_id: str, seq: int) -
     """commit 성공 後 wake_agent(recipient_id, seq)가 정확히 한 번 자동 발화되도록 세션에 예약.
 
     ⛔wake_agent()를 여기서 직접 부르지 않는다 — 아직 commit 前이면 recipient는 이 row를 볼 수
-    없다(MVCC 가시성 레이스 — 이 스토리의 본체). SQLAlchemy의 `after_commit` 세션 이벤트는 실제
-    COMMIT이 성공한 뒤에만(rollback 시엔 아예 안 불림) 호출을 보장한다 — "commit 후에"를 코드
-    규율이 아니라 트랜잭션 경계 자체가 강제하게 만든다.
+    없다(MVCC 가시성 레이스 — story #2381의 본체). 예약은 `app.services.after_commit`(커밋 뒤 배달의 단일 기전)이 맡는다:
+    바깥 커밋 뒤에만 발화 · SAVEPOINT release에선 대기 · **예약한 트랜잭션(SAVEPOINT 포함)이 롤백되면 그 예약만** 버림.
+
+    story #4230(까디르 4597 QA P1) — 예전 자체 훅은 `after_rollback`에서 목록을 통째로 비웠는데, SQLAlchemy 2.0은
+    SAVEPOINT 롤백에도 `after_rollback`을 발화해 형제 SAVEPOINT(또는 바깥)의 정상 wake까지 지웠다. 반대로 롤백된
+    SAVEPOINT 안의 wake가 남아 유령으로 나가는 경우도 있었다(그 SAVEPOINT 뒤 바깥이 커밋되면). 둘 다 소유 트랜잭션
+    기준으로 닫는다.
 
     ⚠️단위테스트가 db를 MagicMock/AsyncMock으로 대체하는 경로(assign_recipient_seq를 직접
-    호출하는 기존 테스트 다수)에서는 `sync_session`이 진짜 Session이 아니라 SQLAlchemy가
-    `event.listen()`에서 InvalidRequestError를 던진다 — 조용히 스킵한다(프로덕션은 db가 항상
-    실 AsyncSession이라 여기 걸릴 일이 없다).
-    """
+    호출하는 기존 테스트 다수)에서는 `sync_session`이 진짜 Session이 아니다 — 조용히 스킵한다(프로덕션은 db가 항상
+    실 AsyncSession이라 여기 걸릴 일이 없다)."""
     sync_session = db.sync_session
     if not isinstance(sync_session, Session):
         logger.debug(
@@ -78,60 +78,17 @@ def _schedule_wake_after_commit(db: AsyncSession, recipient_id: str, seq: int) -
             "recipient_id=%s", recipient_id,
         )
         return
-    pending: list[tuple[str, int]] = sync_session.info.setdefault(_PENDING_WAKES_KEY, [])
-    pending.append((recipient_id, seq))
-    if not sync_session.info.get(_HOOKED_KEY):
-        sync_session.info[_HOOKED_KEY] = True
-        sa_event.listen(sync_session, "after_commit", _fire_pending_wakes)
-        sa_event.listen(sync_session, "after_rollback", _clear_pending_wakes_on_rollback)
+    from app.services.after_commit import schedule_after_commit
+
+    schedule_after_commit(db, [functools.partial(_fire_wake, recipient_id, seq)])
 
 
-def _fire_pending_wakes(sync_session: Session) -> None:
-    """⚠️SAVEPOINT 유령 wake(story #3062, approval_delivery.py의 `_fire_pending_gate_created_
-    pushes`/PR#3467·카디르 QA REQUEST_CHANGES②와 완전히 동형 — 이 함수가 그 패턴의 원본) —
-    `after_commit`은 outer 최종 commit뿐 아니라 `begin_nested()` SAVEPOINT를
-    release(`nested.commit()`)할 때도 발화한다(실측: 콜백 안에서 `in_nested_transaction()`이
-    그 순간 True). outer 트랜잭션이 이후 rollback돼도 이미 wake가 나가버려, 존재하지 않게 될
-    recipient_seq를 가리키는 유령 재조회 신호가 라이브로 새는 결함이었다.
-    `in_nested_transaction()`이 True인 발화(=SAVEPOINT release)는 pending을 비우지 않고
-    그대로 둔다 — 언젠가 진짜 outer commit의 after_commit이 다시 발화할 때(그때는
-    in_nested_transaction()=False) 최종 발사된다. outer가 끝내 rollback되면 after_rollback
-    훅(_clear_pending_wakes_on_rollback)이 비운다."""
-    if sync_session.in_nested_transaction():
-        return
-    pending = sync_session.info.pop(_PENDING_WAKES_KEY, None) or []
-    if not pending:
-        return
+def _fire_wake(recipient_id: str, seq: int) -> None:
     from app.routers.agent_gateway import wake_agent
 
-    for recipient_id, seq in pending:
-        try:
-            wake_agent(recipient_id, seq)
-        except Exception:
-            logger.warning(
-                "post-commit wake_agent failed recipient_id=%s seq=%s", recipient_id, seq, exc_info=True,
-            )
-
-
-def pending_wakes_mark(db: AsyncSession) -> int:
-    """story #4230 — 지금까지 예약된 wake 수(표시). SAVEPOINT 안 작업이 실패하면 `discard_pending_wakes_since`로 그 뒤 예약만
-    버린다 — SAVEPOINT 롤백은 `after_rollback`을 부르지 않아 그 안에서 예약된 wake가 바깥 커밋 때 유령으로 나가지 않게."""
-    sync_session = db.sync_session
-    if not isinstance(sync_session, Session):
-        return 0
-    return len(sync_session.info.get(_PENDING_WAKES_KEY, []))
-
-
-def discard_pending_wakes_since(db: AsyncSession, mark: int) -> None:
-    sync_session = db.sync_session
-    if not isinstance(sync_session, Session):
-        return
-    pending = sync_session.info.get(_PENDING_WAKES_KEY)
-    if pending is not None:
-        del pending[mark:]
-
-
-def _clear_pending_wakes_on_rollback(sync_session: Session) -> None:
-    """롤백된 트랜잭션에서 쌓인 예약은 버린다 — 같은 세션이 다음 트랜잭션에 재사용돼도
-    이전 롤백분이 잘못 발화되지 않도록(_HOOKED_KEY는 유지 — 리스너 재등록 방지, 예약 목록만 초기화)."""
-    sync_session.info.pop(_PENDING_WAKES_KEY, None)
+    try:
+        wake_agent(recipient_id, seq)
+    except Exception:
+        logger.warning(
+            "post-commit wake_agent failed recipient_id=%s seq=%s", recipient_id, seq, exc_info=True,
+        )

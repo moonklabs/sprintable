@@ -148,7 +148,7 @@ async def test_fix_wake_fires_only_after_commit_and_row_already_visible_by_then(
 
         woken: list[tuple[str, int]] = []
         monkeypatch.setattr(gw_mod, "wake_agent", lambda rid, seq: woken.append((rid, seq)))
-        # event_seq._fire_pending_wakes는 `from app.routers.agent_gateway import wake_agent`를
+        # event_seq의 커밋 뒤 wake(_fire_wake · app.services.after_commit 경유)는 `from app.routers.agent_gateway import wake_agent`를
         # 발화 시점에 매번 late-import하므로, gw_mod 속성을 바꾸는 것만으로 monkeypatch가 반영된다.
 
         async with Session() as s:
