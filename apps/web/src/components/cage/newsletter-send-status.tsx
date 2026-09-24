@@ -20,7 +20,7 @@ import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
-import { postPublicationRetry, PublicationRetryResultLine, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -54,8 +54,8 @@ export interface NewsletterSendStatusProps {
   /** 지금 화면의 사람이 사람 멤버인가 — 에이전트 화면엔 상태 줄만 둔다(재시도 API가 사람 전용). */
   isHuman: boolean;
   displayTimezone: string;
-  /** 재시도가 받아들여진 뒤 게이트를 다시 읽는다(명령 상태가 pending으로 바뀐다). */
-  onRetried?: () => void;
+  /** 재시도가 받아들여진 뒤(또는 404 · 재시도 대상 아님) 게이트를 다시 읽는다. true = 새 상태를 반영함 · false/예외 = 다시 읽기 실패(이전 상태 유지). */
+  onRetried?: () => Promise<boolean>;
 }
 
 export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, onRetried }: NewsletterSendStatusProps) {
@@ -87,8 +87,7 @@ export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, on
       const next = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${command.id}/retry`);
       setConfirmOpen(false);
       setChecklistConfirmed(false);
-      setResult(next);
-      if (next.type !== 'error') onRetried?.();
+      setResult(onRetried ? await withReload(next, onRetried) : next);
     } finally {
       setRetrying(false);
     }

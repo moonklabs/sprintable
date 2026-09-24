@@ -2542,6 +2542,41 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(draftGets()).toBe(before + 1); // 상태를 다시 읽었다
     });
 
+    // 까디르 codex 4634 P2① — 재시도 뒤 다시 읽기가 실패하면 «다시 불러왔어요»라고 말하지 않고 이전 상태(배지)를 그대로 둔다.
+    function failDraftReloadAfterRetry() {
+      const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+      let retried = false;
+      vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+        if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+        if (retried && String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}` && !i?.method) {
+          return { ok: false, status: 500, json: async () => ({ detail: 'x' }) };
+        }
+        return base(u, i);
+      }));
+    }
+
+    it('⭐#4634 P2① — 404 + 다시 읽기 실패 → «지금은 다시 시도할 수 없는 상태예요.» + «최신 상태는 불러오지 못했어요 …» · «다시 불러왔어요» 0 · 배지 그대로', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+      });
+      failDraftReloadAfterRetry();
+      await openAndConfirmRetry();
+      const texts = [...container.querySelectorAll('[data-testid="channel-post-retry-result"] p')].map((e) => e.textContent);
+      expect(texts).toEqual([koMessages.content.publicationRetryNotRetryable, koMessages.content.publicationRetryReloadFailed]);
+      expect(container.textContent).not.toContain(koMessages.content.publicationRetryNotRetryableReloaded);
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull(); // 이전 상태 유지
+    });
+
+    it('#4634 P2① — 성공 + 다시 읽기 실패 → 성공 문장 뒤 «최신 상태는 불러오지 못했어요 …» · 배지 그대로(낡은 표시임을 말함)', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' } });
+      failDraftReloadAfterRetry();
+      await openAndConfirmRetry();
+      const texts = [...container.querySelectorAll('[data-testid="channel-post-retry-result"] p')].map((e) => e.textContent);
+      expect(texts).toEqual([koMessages.content.channelPostsRetrySuccess, koMessages.content.publicationRetryReloadFailed]);
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).not.toBeNull();
+    });
+
     it('#4266 — 네트워크 실패 → 창 닫힘 · «다시 시도하지 못했어요.»', async () => {
       stubFetch({ draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' } });
       const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
@@ -4840,6 +4875,42 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     const commentGets = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .filter(([u, i]) => String(u).includes('/comments') && !String(u).endsWith('/refresh') && !(i as RequestInit | undefined)?.method).length;
     expect(commentGets).toBeGreaterThanOrEqual(2); // 첫 로드 + 404 뒤 다시 읽기
+  });
+
+  // 까디르 codex 4634 P2 — 목록 다시 읽기가 실패하면 목록은 그대로(오류 면으로 안 바꿈) · «다시 불러왔어요» 대신 «불러오지 못했어요».
+  it('⭐#4634 — 「다시 보내기」 404 + 목록 다시 읽기 실패 → 목록 그대로 · 두 문장 · «다시 불러왔어요» 0', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+          },
+        }],
+      },
+      onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }, meta: null } }),
+    });
+    const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+    let retried = false;
+    vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+      if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+      if (retried && String(u).endsWith('/comments') && !i?.method) return { ok: false, status: 500, json: async () => ({}) };
+      return base(u, i);
+    }));
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const retryBtn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement;
+    expect(retryBtn).not.toBeNull();
+    await act(async () => { retryBtn.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')?.textContent)
+      .toBe(`${koMessages.content.publicationRetryNotRetryable} ${koMessages.content.publicationRetryReloadFailed}`);
+    expect(container.textContent).not.toContain(koMessages.content.publicationRetryNotRetryableReloaded);
+    expect(container.textContent).toContain('언제 되나요?'); // 목록 그대로(오류 면으로 안 바뀜)
   });
 
   // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로

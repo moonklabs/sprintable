@@ -36,7 +36,7 @@ import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-bud
 import { ApiUsageBudgetIndicator, type ApiUsageBudgetState } from '@/components/content/api-usage-budget-indicator';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
-import { postPublicationRetry, PublicationRetryResultLine, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
 import { ImageAttachmentList } from '@/components/content/image-attachment-list';
 import { formatImageConvertedBadge } from '@/components/content/image-converted-badge';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
@@ -552,6 +552,22 @@ export default function ChannelPostEditPage() {
     return () => { cancelled = true; };
   }, [orgId, draft?.publication_id]);
   useEffect(() => loadComments(), [loadComments]);
+  // 까디르 codex 4634 P2 — 댓글 답변 «다시 보내기» 뒤 다시 읽기 전용: 실패하면 지금 목록을 **그대로 두고** false(loadComments는 실패면
+  // 목록 자리를 오류 면으로 바꾼다 — 첫 로드 동작 그대로 · 여기서만 이전 상태 유지).
+  const refreshCommentsAfterRetry = useCallback(async (): Promise<boolean> => {
+    if (!orgId || !draft?.publication_id) return false;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments`);
+      if (!res.ok) return false;
+      const body = await res.json().catch(() => null);
+      const data = (body?.data ?? null) as RawCommentsResponse | null;
+      if (!data) return false;
+      setCommentsFace(deriveCommentsFace(data));
+      return true;
+    } catch {
+      return false;
+    }
+  }, [orgId, draft?.publication_id]);
   // story #3517(BE #3865 조각①, 유나 §22-10③) — 수동 재수집. 세 갈래로 가른다(전부
   // 뭉뚱그리면 429/422가 같은 취급을 받는다 — CommentsRefreshButton 주석 참고):
   // 429는 Retry-After 헤더를 그대로 읽어 초를 준다(지어내지 않는다, 없으면 null).
@@ -698,21 +714,28 @@ export default function ChannelPostEditPage() {
   // 성공/재실패로 끝내야 'failed'에서 벗어난다(비동기 지연은 정상, 지어내지 않는다).
   const handleRetryReply = useCallback(async (
     comment: CommentItem,
-  ): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
+  ): Promise<{ ok: true; notice?: string } | { ok: false; errorMessage: string }> => {
     if (!orgId || !comment.replyCommandId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
     // story #4266 — 발행 재시도 확인 창들과 같은 공용 규칙(같은 엔드포인트): 404(재시도 대상 아님)는 서버 원문 대신 목록을 다시 읽고
     // 유나 문장 · 그 밖의 실패도 서버 원문 대신 로케일 문장. 이 자리는 확인 창 없이 줄 안에 보여 «창 뒤 오류»는 해당 없음.
-    const result = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`);
+    const result = await withReload(
+      await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`),
+      refreshCommentsAfterRetry,
+    );
+    // 다시 읽기 실패면 목록은 이전 그대로 · «다시 불러왔어요»라고 말하지 않고 «최신 상태는 불러오지 못했어요» 한 줄(유나 확정 조합).
     if (result.type === 'success') {
-      loadComments();
-      return { ok: true };
+      return result.reloadFailed ? { ok: true, notice: t('publicationRetryReloadFailed') } : { ok: true };
     }
     if (result.type === 'not_retryable') {
-      loadComments();
-      return { ok: false, errorMessage: t('publicationRetryNotRetryableReloaded') };
+      return {
+        ok: false,
+        errorMessage: result.reloadFailed
+          ? `${t('publicationRetryNotRetryable')} ${t('publicationRetryReloadFailed')}`
+          : t('publicationRetryNotRetryableReloaded'),
+      };
     }
     return { ok: false, errorMessage: result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed') };
-  }, [orgId, loadComments, t]);
+  }, [orgId, refreshCommentsAfterRetry, t]);
 
   // story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
   // 「다시 상신」 전용. 일반 「답변」(handleOpenReply)과 갈라 두는 이유: 이쪽만
@@ -1998,12 +2021,14 @@ export default function ChannelPostEditPage() {
   // 다시 불러 서버가 낸 command_status로 배지를 갱신한다(§3-2 "지어내지 않는다").
   // story #4266 — 결과가 무엇이든 확인 창을 닫고 결과 줄로 보인다(예전엔 실패면 창이 열린 채 · 오류 줄이 오버레이 뒤). 404(재시도 대상 아님)는
   // 서버 원문 대신 상태를 다시 읽고 로케일 문장 · 그 밖의 실패도 로케일 문장(공용 postPublicationRetry).
-  const reloadDraft = async () => {
+  // 까디르 codex 4634 P2① — 다시 읽기 성공 여부를 돌려준다(실패면 이전 초안 그대로 · 결과 줄이 «다시 불러오지 못했어요»를 말한다).
+  const reloadDraft = async (): Promise<boolean> => {
     const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
-    if (draftRes.ok) {
-      const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
-      if (draftJson?.data) setDraft(draftJson.data);
-    }
+    if (!draftRes.ok) return false;
+    const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+    if (!draftJson?.data) return false;
+    setDraft(draftJson.data);
+    return true;
   };
   const handleRetry = async () => {
     if (!orgId || !draft?.command_id) return;
@@ -2015,8 +2040,7 @@ export default function ChannelPostEditPage() {
       );
       setRetryConfirmOpen(false);
       setRetryChecklistConfirmed(false);
-      setRetryResult(result);
-      if (result.type !== 'error') await reloadDraft().catch(() => {});
+      setRetryResult(await withReload(result, reloadDraft));
     } finally {
       setRetrying(false);
     }

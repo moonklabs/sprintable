@@ -15,8 +15,10 @@ import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { fetchWithAuth } from '@/lib/db/client';
 
 export type PublicationRetryResult =
-  | { type: 'success' }
-  | { type: 'not_retryable' }
+  // reloadFailed — 재시도 뒤(성공 · 404) 상태 다시 읽기가 실패했다(까디르 codex 4634 P2 · PO). 화면은 이전 상태를 그대로 두고, 결과 줄은
+  // «다시 불러왔어요»라고 말하지 않고 «다시 불러오지 못했어요» 한 줄을 더한다.
+  | { type: 'success'; reloadFailed?: boolean }
+  | { type: 'not_retryable'; reloadFailed?: boolean }
   /** messageKey 없음 = 모르는 실패 · 네트워크 → «다시 시도하지 못했어요.»(렌더 자리에서 t 리터럴 — 죽은 키 가드가 읽는 형태). */
   | { type: 'error'; messageKey?: string; raw?: string };
 
@@ -33,17 +35,32 @@ export async function postPublicationRetry(url: string): Promise<PublicationRetr
   }
 }
 
+/**
+ * 재시도 결과가 성공 · 404면 상태를 다시 읽고, 다시 읽기가 실패하면 reloadFailed를 단다. reload는 **실패해도 이전 상태를 지우지 않는**
+ * 함수여야 한다(true = 새 상태를 화면에 반영함). 오류 결과는 다시 읽지 않는다(상태가 바뀌지 않았다).
+ */
+export async function withReload(result: PublicationRetryResult, reload: () => Promise<boolean>): Promise<PublicationRetryResult> {
+  if (result.type === 'error') return result;
+  const ok = await Promise.resolve().then(reload).then((v) => v === true).catch(() => false);
+  return ok ? result : { ...result, reloadFailed: true };
+}
+
 /** 확인 창 밖(창을 닫은 뒤) 화면에 남는 결과 줄. */
 export function PublicationRetryResultLine({ result, testId }: { result: PublicationRetryResult | null; testId: string }) {
   const t = useTranslations('content');
   if (!result) return null;
   const isError = result.type === 'error';
+  const reloadFailed = result.type !== 'error' && result.reloadFailed === true;
   const text = result.type === 'success' ? t('channelPostsRetrySuccess')
-    : result.type === 'not_retryable' ? t('publicationRetryNotRetryableReloaded')
-    : result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed');
+    : result.type === 'not_retryable'
+      ? (reloadFailed ? t('publicationRetryNotRetryable') : t('publicationRetryNotRetryableReloaded'))
+      : result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed');
   return (
     <Alert variant={isError ? 'destructive' : 'default'} role={isError ? 'alert' : 'status'} data-testid={testId}>
       <AlertDescription className="break-keep">{text}</AlertDescription>
+      {reloadFailed ? (
+        <AlertDescription className="break-keep" data-testid={`${testId}-reload-failed`}>{t('publicationRetryReloadFailed')}</AlertDescription>
+      ) : null}
       {isError ? <RawDetailsToggle raw={result.raw} label={t('errorRawDetailsToggle')} /> : null}
     </Alert>
   );

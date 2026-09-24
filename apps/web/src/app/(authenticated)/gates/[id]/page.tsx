@@ -114,15 +114,18 @@ export default function GateDetailPage() {
   // loading state 자체를 안 건드리는 구조(초기값만 loading)라 이 결함이 없었다 — 그 패턴을
   // 그대로 가져와 최소 변경: 성공하면 화면 교체·실패(404 제외)하면 기존 화면 유지, 첫
   // 로드·id 변경 때만(호출부가 silent 생략) «불러오는 중».
-  const fetchGate = useCallback(async (opts?: { silent?: boolean }) => {
+  // story #4266(까디르 codex 4634 P2) — 새 상태를 화면에 반영했는지 돌려준다(뉴스레터 발송 재시도 뒤 «다시 불러왔어요»를 말해도 되는지).
+  // 실패하면 이전 게이트를 그대로 둔다(예전과 같음). 404는 «없어짐»을 반영한 것이라 true.
+  const fetchGate = useCallback(async (opts?: { silent?: boolean }): Promise<boolean> => {
     if (!opts?.silent) setLoading(true);
     try {
-      // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양).
+      // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양) · story #4266 — 반영 여부를 돌려준다(404 = «없어짐» 반영 = true).
       const result = await fetchGateById<GateDetail>(id);
-      if (result.kind === 'not-found') { setNotFound(true); return; }
-      if (result.kind !== 'ok') return;
+      if (result.kind === 'not-found') { setNotFound(true); return true; }
+      if (result.kind !== 'ok') return false;
       setGate(result.gate);
       setNotFound(false);
+      return true;
     } finally {
       if (!opts?.silent) setLoading(false);
     }
@@ -505,7 +508,7 @@ export default function GateDetailPage() {
                 <NewsletterSendStatus
                   gate={gate} orgId={gate.org_id ?? null} isHuman={currentMemberType !== 'agent'}
                   displayTimezone={resolveDisplayTimezone(orgTimezone).tz}
-                  onRetried={() => void fetchGate({ silent: true })}
+                  onRetried={() => fetchGate({ silent: true })}
                 />
                 {/* story #4136 — canAct/needsAction과 무관하게 항상 렌더(모든 열람자, AC1).
                     GateProductionWorkbenchEvidence(아래, #4057)는 work-item 범위 훅이 0건이면

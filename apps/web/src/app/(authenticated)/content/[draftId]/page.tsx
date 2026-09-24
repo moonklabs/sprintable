@@ -21,7 +21,7 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
-import { postPublicationRetry, PublicationRetryResultLine, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
 // story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
 // 위반. field는 title|summary|body_md(channel_post의 text|link_url과 다른 축이라
 // 컴포넌트는 field를 모른다 — 호출부가 이미 걸러 넘긴다).
@@ -687,6 +687,22 @@ export default function ContentPostEditPage() {
     }
   }, [orgId, draftId]);
 
+  // 까디르 codex 4634 P2② — 재시도 뒤 다시 읽기 전용: 실패하면 이전 발행 정보를 **지우지 않고** false(첫 로드 loadPublication은 그대로 —
+  // 실패면 null로 두는 첫 로드 동작 회귀 0). 지우면 외부 발행 카드와 결과 줄이 통째로 사라졌다.
+  const refreshPublicationAfterRetry = useCallback(async (): Promise<boolean> => {
+    if (!orgId) return false;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
+      if (!res.ok) return false;
+      const json = (await res.json().catch(() => null)) as { data?: SitePostPublicationInfo } | null;
+      if (!json?.data) return false;
+      setPublication(json.data);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [orgId, draftId]);
+
   useEffect(() => {
     void loadGate();
     void loadPublication();
@@ -1013,8 +1029,7 @@ export default function ContentPostEditPage() {
       const result = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`);
       setRetryConfirmOpen(false);
       setRetryChecklistConfirmed(false);
-      setRetryResult(result);
-      if (result.type !== 'error') void loadPublication();
+      setRetryResult(await withReload(result, refreshPublicationAfterRetry));
     } finally {
       setRetryingCommand(false);
     }

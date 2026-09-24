@@ -48,7 +48,7 @@ function gate(command: Partial<Command> | null, gateType = 'newsletter_send'): G
   } as GateItem;
 }
 
-async function mount(g: GateItem, { isHuman = true, onRetried }: { isHuman?: boolean; onRetried?: () => void } = {}) {
+async function mount(g: GateItem, { isHuman = true, onRetried }: { isHuman?: boolean; onRetried?: () => Promise<boolean> } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -125,7 +125,7 @@ describe('NewsletterSendStatus — 재시도', () => {
 
   it('확인 창을 거쳐 공용 재시도 BFF를 정확히 1회 · 결과 줄 · 게이트 다시 읽기', async () => {
     fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ id: 'cmd-1', status: 'pending' }), { status: 200 }));
-    const onRetried = vi.fn();
+    const onRetried = vi.fn(async () => true);
     await mount(gate({ status: 'dead_letter', failure_kind: 'not_sent' }), { onRetried });
     await click(q('channel-post-failure-retry-button'));
     expect(fetchWithAuthMock).not.toHaveBeenCalled(); // 확인 전엔 부르지 않는다(구독자 전원에게 두 번 갈 수 있어서)
@@ -139,7 +139,7 @@ describe('NewsletterSendStatus — 재시도', () => {
   });
 
   // story #4266 — 채널 포스트 · 사이트 글과 같은 공용 규칙: 결과가 무엇이든 창을 닫고 결과 줄 · 404는 게이트를 다시 읽고 유나 문장.
-  async function confirmRetry(onRetried = vi.fn()) {
+  async function confirmRetry(onRetried: () => Promise<boolean> = vi.fn(async () => true)) {
     await mount(gate({ status: 'dead_letter', failure_kind: 'not_sent' }), { onRetried });
     await click(q('channel-post-failure-retry-button'));
     const confirm = Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent === K.channelPostsRetryConfirmAction);
@@ -176,5 +176,21 @@ describe('NewsletterSendStatus — 재시도', () => {
     fetchWithAuthMock.mockRejectedValue(new TypeError('network'));
     await confirmRetry();
     expect(q('channel-post-retry-result')?.querySelector('p')?.textContent).toBe(K.channelPostsRetryFailed);
+  });
+
+  // 까디르 codex 4634 P2 — 게이트 다시 읽기(onRetried)가 실패(false · 예외)하면 «다시 불러왔어요» 대신 «불러오지 못했어요».
+  it('⭐#4634 — 404 + 게이트 다시 읽기 실패(false) → «다시 시도할 수 없는 상태» + «불러오지 못했어요» · «다시 불러왔어요» 0', async () => {
+    fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ detail: 'x' }), { status: 404 }));
+    await confirmRetry(vi.fn(async () => false));
+    const texts = [...(q('channel-post-retry-result')?.querySelectorAll('p') ?? [])].map((e) => e.textContent);
+    expect(texts).toEqual([K.publicationRetryNotRetryable, K.publicationRetryReloadFailed]);
+    expect(document.body.textContent).not.toContain(K.publicationRetryNotRetryableReloaded);
+  });
+
+  it('#4634 — 성공 + 게이트 다시 읽기 예외 → 성공 문장 + «불러오지 못했어요»', async () => {
+    fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ id: 'cmd-1', status: 'pending' }), { status: 200 }));
+    await confirmRetry(vi.fn(async () => { throw new Error('network'); }));
+    const texts = [...(q('channel-post-retry-result')?.querySelectorAll('p') ?? [])].map((e) => e.textContent);
+    expect(texts).toEqual([K.channelPostsRetrySuccess, K.publicationRetryReloadFailed]);
   });
 });
