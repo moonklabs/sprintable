@@ -37,6 +37,36 @@ const HIDDEN_RECONNECT_THRESHOLD_MS = 3_000;
  */
 const FOCUS_RECONNECT_THROTTLE_MS = 3_000;
 
+/**
+ * story #4252(민 하네스 실측 · 2026-09-24) — 위 focus 강제 재연결이 **살아 있는** 커넥션까지 끊었다: 웜 기동 뒤 첫 탭의 `focus`에서
+ * OPEN(readyState 1) 커넥션을 닫고 4ms 뒤 다시 열어, open 때 재조회 2 · 끼어든 요청 6이 생겼다(onFocusRegained가 첫 focus면 조건 없이 true).
+ * 좀비(OPEN을 자칭하지만 소켓은 죽음)를 가르는 신호는 readyState가 아니라 **최근에 받은 것**이다 — BE events 스트림은 쉬는 동안
+ * 30초마다 `event: heartbeat`를 보낸다(backend/app/routers/events.py _SSE_HEARTBEAT_TIMEOUT). 그래서 OPEN이면서 마지막 수신(open ·
+ * heartbeat · 이벤트)이 heartbeat 주기 + 여유 안이면 «살아 있음»으로 보고 focus 재연결을 건너뛴다. 그보다 오래 조용하면(좀비) · OPEN이
+ * 아니면 · 수신 기록이 없으면 예전처럼 강제 재연결한다(#3081 보호 유지).
+ */
+export const SSE_LIVENESS_WINDOW_MS = 45_000;
+
+export interface SseLivenessTracker {
+  /** 커넥션에서 무엇이든 받았을 때(open · heartbeat · 이벤트) 호출. */
+  markActivity: () => void;
+  /** 새 커넥션을 열 때 호출 — 옛 커넥션의 수신 기록을 버린다. */
+  reset: () => void;
+  /** readyState가 OPEN이고 마지막 수신이 SSE_LIVENESS_WINDOW_MS 안이면 true. */
+  isAlive: (readyState: number | undefined) => boolean;
+}
+
+export function createSseLivenessTracker(now: () => number = Date.now): SseLivenessTracker {
+  let lastActivityAt: number | null = null;
+  return {
+    markActivity() { lastActivityAt = now(); },
+    reset() { lastActivityAt = null; },
+    isAlive(readyState) {
+      return readyState === 1 && lastActivityAt !== null && now() - lastActivityAt < SSE_LIVENESS_WINDOW_MS;
+    },
+  };
+}
+
 export interface VisibilityReconnectState {
   /** 페이지가 hidden이 될 때 호출(visibilitychange, document.visibilityState==='hidden'). */
   onHidden: () => void;
@@ -44,8 +74,9 @@ export interface VisibilityReconnectState {
    * 이상). false면 순간 전환이었으니 기존 커넥션을 그대로 둔다. */
   onVisible: () => boolean;
   /** `window.focus` 이벤트에서 호출 — hidden 이력과 무관하게 판정한다. true면 강제
-   * 재연결(짧은 throttle 안에 중복 호출이면 false). */
-  onFocusRegained: () => boolean;
+   * 재연결(짧은 throttle 안에 중복 호출이면 false). story #4252 — `alive`(SseLivenessTracker.isAlive)면 false(살아 있는 커넥션은
+   * 두고 throttle 창도 쓰지 않는다). */
+  onFocusRegained: (alive?: boolean) => boolean;
 }
 
 /** 테스트에서 결정적 값을 주입할 수 있도록 시계 소스를 분리(기본 Date.now). */
@@ -63,7 +94,8 @@ export function createVisibilityReconnectState(now: () => number = Date.now): Vi
       hiddenAt = null;
       return hiddenDuration >= HIDDEN_RECONNECT_THRESHOLD_MS;
     },
-    onFocusRegained() {
+    onFocusRegained(alive = false) {
+      if (alive) return false;
       const nowTs = now();
       if (lastFocusReconnectAt !== null && nowTs - lastFocusReconnectAt < FOCUS_RECONNECT_THROTTLE_MS) {
         return false;
