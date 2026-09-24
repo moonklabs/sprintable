@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -1818,3 +1819,258 @@ def test_4283_margin_state_is_backward_compatible(tmp_path):
     assert mod._load_drift_state(state_path)["margin_streaks"] == {}
     mod._save_drift_state(state_path, run_id="r", streaks={}, margin_streaks={})
     assert json.loads(state_path.read_text()) == {"run_id": "r", "streaks": {}}
+
+
+# ─── story #4283(까디르 P1) — 워크플로 스텝 원문을 GitHub 기본 셸(`bash -e {0}`)로 그대로 돌린다 ──────────────
+# 이 스텝엔 `shell:`이 없어(워크플로 `defaults`도 없음) GitHub 기본 `bash -e {0}`로 돈다. 첫 구현은 `set -uo pipefail`만
+# 적어 -e가 켜진 채였고, `--check-elapsed`가 exit 3을 내는 순간 스텝이 죽어 재실행 갈래에 못 갔다. 로컬 e2e는 -e 없는
+# 셸로 돌려 이걸 못 봤다 — 그래서 여기선 ci.yml의 `run:` 텍스트를 그대로 꺼내 `bash -e`로 실행한다. 바꾸는 건 `${{ }}`
+# 값 · `/tmp/` 위치 · `uv`(→ 이 파이썬으로 실제 스크립트 실행) · 격리 루프 스크립트(→ 시나리오대로 경과를 쓰는 스텁)뿐이고,
+# 판정은 진짜 `shard_destructive_tests.py` + 진짜 등재 weight가 한다.
+
+_LOOP_STUB = r"""#!/usr/bin/env bash
+# 격리 루프 스텁 — 부를 때마다 call 번호를 올리고 $SCENARIO_DIR/call_N.tsv의 경과를 FILES_LIST_FILE 순서대로 쓴다.
+set -u
+n=$(( $(cat "$SCENARIO_DIR/calls" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$SCENARIO_DIR/calls"
+: > "$FAILED_OUT_FILE"
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  sec=$(awk -F'\t' -v f="$f" '$1==f {print $2}' "$SCENARIO_DIR/call_$n.tsv")
+  printf '%s\t%s\n' "$f" "${sec:-1}" >> "$ELAPSED_OUT_FILE"
+done < "$FILES_LIST_FILE"
+[ -f "$SCENARIO_DIR/fail_$n.txt" ] && cat "$SCENARIO_DIR/fail_$n.txt" >> "$FAILED_OUT_FILE"
+exit "$(cat "$SCENARIO_DIR/exit_$n" 2>/dev/null || echo 0)"
+"""
+
+
+def _bash5() -> str | None:
+    import shutil
+    import subprocess
+
+    for cand in (shutil.which("bash"), "/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"):
+        if not cand or not Path(cand).exists():
+            continue
+        out = subprocess.run([cand, "-c", "echo ${BASH_VERSINFO[0]}"], capture_output=True, text=True, check=False).stdout.strip()
+        if out.isdigit() and int(out) >= 4:  # mapfile — macOS 기본 /bin/bash 3.2엔 없다.
+            return cand
+    return None
+
+
+def _destructive_step_run() -> str:
+    import yaml
+
+    wf = yaml.safe_load((_REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    step = next(
+        s for s in wf["jobs"]["backend-test-destructive"]["steps"]
+        if s.get("name", "").startswith("Run pytest (destructive schema")
+    )
+    # 전제 고정: 셸을 안 적었다 = GitHub 기본 `bash -e {0}`. 누가 `shell:`을 달면 이 테스트의 셸도 같이 바꿔야 한다.
+    assert "shell" not in step and "defaults" not in wf and "defaults" not in wf["jobs"]["backend-test-destructive"]
+    return step["run"]
+
+
+def _run_step(
+    tmp_path, *, targets, first, rerun=None, rerun_fail=None, run_text=None, uv_fail_on="", value_overrides=None,
+    drop_shard_files=False,
+):
+    import re
+    import subprocess
+
+    bash = _bash5()
+    if bash is None:
+        pytest.skip("bash 4+ 없음(mapfile) — CI ubuntu엔 있다")
+    mod = _load()
+    weights = mod.load_weights()
+    provisional = mod.provisional_files_in(mod.load_raw_entries())
+    controls = [f for f in sorted(weights) if f not in provisional and f not in targets][:6]
+    scen = tmp_path / "scenario"
+    scen.mkdir(parents=True)
+    ws = tmp_path / "ws"
+    (ws / "scripts").mkdir(parents=True)
+    loop = ws / "scripts" / "run-destructive-shard-loop.sh"
+    loop.write_text(_LOOP_STUB)
+    loop.chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    uv = bindir / "uv"
+    uv.write_text(
+        '#!/usr/bin/env bash\n[ "$1" = run ] && [ "$2" = python ] || exit 99\n'
+        'if [ -n "${UV_FAIL_ON:-}" ]; then case " $* " in *" $UV_FAIL_ON "*) exit 7;; esac; fi\n'
+        f'shift 2\nexec "{sys.executable}" "$@"\n'
+    )
+    uv.chmod(0o755)
+    tmpdir = tmp_path / "t"
+    tmpdir.mkdir()
+    if not drop_shard_files:
+        (tmpdir / "shard_files.txt").write_text("".join(f"{f}\n" for f in controls + targets))
+
+    def _write_call(n, values):
+        (scen / f"call_{n}.tsv").write_text("".join(f"{f}\t{s}\n" for f, s in values.items()))
+
+    _write_call(1, {f: weights[f] for f in controls} | {f: first(mod, weights, f) for f in targets})
+    if rerun is not None:
+        _write_call(2, {f: rerun(mod, weights, f) for f in targets})
+    if rerun_fail:
+        (scen / "fail_2.txt").write_text("".join(f"{f}\n" for f in rerun_fail))
+
+    values = {
+        "github.workspace": str(ws), "matrix.shard": "0",
+        "needs.detect-changed-scope.outputs.backend_test_files_changed": " ".join(targets),
+        "needs.detect-changed-scope.outputs.backend_app_files_changed": "",
+        "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": "",
+    } | (value_overrides or {})
+    text = run_text if run_text is not None else _destructive_step_run()
+    text = re.sub(r"\$\{\{\s*([^}]+?)\s*\}\}", lambda m: values[m.group(1)], text)
+    text = text.replace("/tmp/", f"{tmpdir}/")
+    script = tmp_path / "step.sh"
+    script.write_text(text)
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", SCENARIO_DIR=str(scen), TMPDIR=str(tmpdir),
+               UV_FAIL_ON=uv_fail_on)
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    proc = subprocess.run([bash, "-e", str(script)], cwd=_REPO_ROOT / "backend", env=env, capture_output=True, text=True, check=False)
+    calls = int((scen / "calls").read_text()) if (scen / "calls").exists() else 0
+    return proc.returncode, proc.stdout + proc.stderr, calls
+
+
+def _over(mod, weights, f):
+    return round(mod.absolute_slow_threshold_sec(weights[f]) * 1.3)
+
+
+def _normal(mod, weights, f):
+    return round(weights[f])
+
+
+_STEP_TARGET = ["tests/test_3813_stibee_esp_connection.py"]
+
+
+def test_4283_step_under_bash_e_spike_is_green_with_warning(tmp_path):
+    """⭐후보 1 → 재실행에서 내려옴 → 스텝 exit 0 + 두 값 ::warning::(루프 두 번 불림 = 재실행 갈래에 실제로 감)."""
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal)
+    assert code == 0, out
+    assert calls == 2
+    assert "::warning::러너 정규화 가드(story #4283) — tests/test_3813_stibee_esp_connection.py 1차" in out
+
+
+def test_4283_step_under_bash_e_repeat_is_red(tmp_path):
+    """후보 1 → 재실행도 넘음 → exit 1 + ::error::."""
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_over)
+    assert code == 1 and calls == 2, out
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/test_3813_stibee_esp_connection.py" in out
+
+
+def test_4283_step_under_bash_e_rerun_test_failure_is_red(tmp_path):
+    """재실행에서 테스트가 실패하면 경과와 무관하게 exit 1."""
+    code, out, calls = _run_step(
+        tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, rerun_fail=_STEP_TARGET,
+    )
+    assert code == 1 and calls == 2, out
+    assert "재실행에서 테스트 실패(story #4283)" in out
+
+
+def test_4283_step_under_bash_e_six_suspects_is_red_without_rerun(tmp_path):
+    """후보 6(> CONFIRM_RERUN_MAX_FILES) → 재실행 없이 exit 1(루프 한 번만)."""
+    mod = _load()
+    weights = mod.load_weights()
+    provisional = mod.provisional_files_in(mod.load_raw_entries())
+    targets = [f for f in sorted(weights, reverse=True) if f not in provisional][: mod.CONFIRM_RERUN_MAX_FILES + 1]
+    code, out, calls = _run_step(tmp_path, targets=targets, first=_over)
+    assert code == 1 and calls == 1, out
+    assert out.count("::error::러너 정규화 절대 가드 초과") == len(targets)
+
+
+_CHECK_CAPTURE = '--suspects-out "$suspects_file" --expected-files /tmp/shard_files.txt || slow_exit=$?'
+
+
+def test_4283_step_mutation_first_implementation_dies_at_exit_3(tmp_path):
+    """뮤테이션 — 첫 구현 모양(`set +e` 없음 + `cmd` 다음 줄 `slow_exit=$?`)으로 되돌리면 기본 셸의 -e가 exit 3에서 스텝을
+    죽여 재실행 갈래에 못 간다: 단발 튐이 RED가 된다(루프 한 번만). 지금 모양은 둘 중 하나만 있어도 산다 — `|| x=$?`가
+    -e에서도 종료 코드를 받는 쪽이고 `set +e`는 주석이 말한 설계를 실제 셸에 맞추는 쪽이라, 둘 다 걷어야 옛 결함이 재현된다."""
+    text = _destructive_step_run()
+    assert text.count("\nset +e\n") == 1 and text.count(_CHECK_CAPTURE) == 1
+    mutated = text.replace("\nset +e\n", "\n").replace(
+        _CHECK_CAPTURE, '--suspects-out "$suspects_file" --expected-files /tmp/shard_files.txt\nslow_exit=$?',
+    )
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, run_text=mutated)
+    assert code != 0 and calls == 1, out
+
+    only_set_e_removed = text.replace("\nset +e\n", "\n")
+    code, out, calls = _run_step(tmp_path / "b", targets=_STEP_TARGET, first=_over, rerun=_normal, run_text=only_set_e_removed)
+    assert code == 0 and calls == 2, out
+
+
+def test_4283_step_loop_infra_failure_still_stops_the_step(tmp_path):
+    """-e에 기대던 자리 — 격리 루프가 인프라 실패(non-zero)로 끝나면 여전히 스텝 RED(명시 처리로 옮김)."""
+    # call 1이 exit 1 — 시나리오 폴더는 _run_step 안에서 만들어지므로 스텁이 읽을 exit_1을 스텝 앞머리에 심는다.
+    text = _destructive_step_run().replace("\nset +e\n", '\nset +e\necho 1 > "$SCENARIO_DIR/exit_1"\n', 1)
+    code, out, calls = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, run_text=text)
+    assert code == 1 and calls == 1, out
+    assert "격리 루프 인프라 실패" in out
+
+
+@pytest.mark.parametrize(
+    ("content", "expected", "needle"),
+    [
+        ("tests/a.py\tnan\n", None, "유한수가 아님"),
+        ("tests/a.py\tinf\n", None, "유한수가 아님"),
+        ("tests/a.py\t-3\n", None, "음수"),
+        ("tests/a.py\tabc\n", None, "숫자가 아님"),
+        ("", None, "0줄"),
+        ("tests/a.py\t10\n", ["tests/a.py", "tests/b.py"], "tests/b.py: 경과 기록 없음"),
+    ],
+)
+def test_4283_record_fail_open_is_red_in_both_modes(tmp_path, capsys, monkeypatch, content, expected, needle):
+    """까디르 P1② — NaN(어떤 비교도 False) · inf · 음수 · 숫자 아님 · 0줄 · 돌았어야 하는 파일 누락 → check/confirm 둘 다 exit 1
+    + ::error::(판정 불가). 예전엔 전부 «느린 게 없다»로 읽혀 초록."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/a.py": 30.0, "tests/b.py": 30.0})
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    bad = tmp_path / "bad.tsv"
+    bad.write_text(content)
+    expected_path = None
+    if expected is not None:
+        expected_path = tmp_path / "expected.txt"
+        expected_path.write_text("\n".join(expected))
+    assert mod._check_elapsed_mode(bad, expected_files_path=expected_path) == 1
+    assert needle in capsys.readouterr().out
+
+    good = _write_run(tmp_path, "good.tsv", {"tests/a.py": 100.0, "tests/b.py": 30.0})
+    suspects = tmp_path / "suspects.txt"
+    suspects.write_text("tests/a.py\n" + ("tests/b.py\n" if expected else ""))
+    assert mod._confirm_elapsed_mode(good, bad, suspects) == 1
+    assert "::error::러너 정규화 가드 재실행 기록 이상" in capsys.readouterr().out
+
+
+def test_4283_confirm_with_missing_or_empty_suspects_is_red(tmp_path, capsys, monkeypatch):
+    """후보 목록 파일이 없거나 비면(재실행이 무엇을 확인했는지 모름) RED."""
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: {"tests/a.py": 30.0})
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    good = _write_run(tmp_path, "good.tsv", {"tests/a.py": 100.0})
+    empty = tmp_path / "empty.txt"
+    empty.write_text("")
+    assert mod._confirm_elapsed_mode(good, good, empty) == 1
+    assert mod._confirm_elapsed_mode(good, good, tmp_path / "nope.txt") == 1
+    assert "재실행 후보 목록이 비었거나 없음" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("label", "kwargs", "needle"),
+    [
+        ("파일 목록 없음", {"drop_shard_files": True}, "샤드 파일 목록"),
+        ("narrowing 계산 실패", {
+            "uv_fail_on": "--resolve-app-module-dependents",
+            "value_overrides": {
+                "needs.detect-changed-scope.outputs.backend_test_files_changed": "__ALL__",
+                "needs.detect-changed-scope.outputs.backend_app_files_changed": "app/routers/events.py",
+            },
+        }, "narrowing 계산 실패"),
+        ("산출물 변환 실패", {"uv_fail_on": "--elapsed-to-json"}, "산출물 변환 실패"),
+    ],
+)
+def test_4283_step_places_that_relied_on_bash_e_still_stop_the_step(tmp_path, label, kwargs, needle):
+    """`set +e` 뒤에도 예전에 -e가 막던 자리(파일 목록 · narrowing · 산출물 변환 · 격리 루프는 위 테스트)는 명시로 RED —
+    그냥 넘어가면 0개 실행 · 후보 목록 빔 · 산출물 누락으로 조용히 초록이 된다."""
+    code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, **kwargs)
+    assert code == 1, (label, out)
+    assert needle in out, (label, out)

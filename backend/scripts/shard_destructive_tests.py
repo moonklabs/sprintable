@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import statistics
@@ -604,6 +605,43 @@ def _parse_elapsed_file(path: Path) -> dict[str, float]:
     return result
 
 
+def read_elapsed_strict(path: Path, *, expected: list[str] | None = None) -> tuple[dict[str, float], list[str]]:
+    """story #4283(까디르 P1 — 기록 fail-open) — 판정에 쓰는 경과 기록을 믿기 전에 검사한다. `NaN`은 어떤 비교도 False라
+    판정선을 절대 안 넘고, 음수 · 빈 파일 · 빠진 파일도 «느린 게 없다»로 읽혀 초록이 된다. 반환 (경과 · 문제 목록) —
+    문제가 하나라도 있으면 호출측이 RED. 문제: 파일 없음 · 숫자 아님 · 유한 아님 · 음수 · 기록 0줄 · `expected`에 있는데
+    기록 없음."""
+    if not path.exists():
+        return {}, [f"경과 기록 파일 없음: {path}"]
+    result: dict[str, float] = {}
+    problems: list[str] = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        file_name, _, raw = line.partition("\t")
+        try:
+            value = float(raw)
+        except ValueError:
+            problems.append(f"{file_name}: 경과가 숫자가 아님({raw!r})")
+            continue
+        if not math.isfinite(value):
+            problems.append(f"{file_name}: 경과가 유한수가 아님({raw!r})")
+        elif value < 0:
+            problems.append(f"{file_name}: 경과가 음수({raw!r})")
+        else:
+            result[file_name] = value
+    if not result and not problems:
+        problems.append(f"경과 기록 0줄: {path}")
+    for f in expected or []:
+        if f not in result and not any(p.startswith(f"{f}:") for p in problems):
+            problems.append(f"{f}: 경과 기록 없음(돌았어야 하는 파일)")
+    return result, problems
+
+
+def _print_record_problems(problems: list[str], *, what: str) -> None:
+    for p in problems:
+        print(f"::error::러너 정규화 가드 {what} 기록 이상(story #4283 — 판정 불가라 RED): {p}")
+
+
 # story #3558(CI·소형) — shard(5) 22분29초 사례(2026-09-06, #3910 CI): 원인이 신규
 # 파일이 아니라 옛 파일 클러스터의 등재값 과소(4~10배)였다. `_check_elapsed_mode`(위,
 # #3396)는 "이 run 자신의 중앙값 배율로 60초를 스케일"하는 *러너 정규화* 가드라
@@ -974,9 +1012,15 @@ def _confirm_elapsed_mode(
     """story #4283 — 1차 초과 후보(`suspects_path`)를 재실행한 경과(`rerun_path`)로 확인한다. 판정선은 1차 run과 같다
     (등재 weight 절대 기준 × 1차 run의 러너 배율 — 재실행 표본은 몇 개뿐이라 배율을 새로 못 잰다). 두 번 다 넘은 파일만
     RED. 재실행에서 내려온 파일은 두 값을 `::warning::`으로 남긴다(PO 조건 — 조용히 넘기지 않는다)."""
-    elapsed_by_file = _parse_elapsed_file(elapsed_path)
-    rerun_elapsed = _parse_elapsed_file(rerun_path)
-    suspects = sorted(parse_changed_files(suspects_path.read_text()))
+    suspects = sorted(parse_changed_files(suspects_path.read_text())) if suspects_path.exists() else []
+    elapsed_by_file, first_problems = read_elapsed_strict(elapsed_path)
+    rerun_elapsed, rerun_problems = read_elapsed_strict(rerun_path, expected=suspects)
+    if not suspects:
+        rerun_problems.append(f"재실행 후보 목록이 비었거나 없음: {suspects_path}")
+    if first_problems or rerun_problems:
+        _print_record_problems(first_problems, what="1차")
+        _print_record_problems(rerun_problems, what="재실행")
+        return 1
     weights = load_weights()
     provisional = provisional_files_in(load_raw_entries())
     changed_files = (
@@ -1009,14 +1053,27 @@ def _confirm_elapsed_mode(
 
 def _check_elapsed_mode(
     elapsed_path: Path, *, changed_files_path: Path | None = None, suspects_out_path: Path | None = None,
+    expected_files_path: Path | None = None,
 ) -> int:
     """story #4152 — ci.yml의 pytest 루프가 이 샤드의 모든 파일을 다 돈 뒤 한 번
     호출한다. #3396의 run-relative 중앙값 정규화 대신 `slow_files_absolute`(파일 자신의
     등재 weight×AC1 배수, AC2 diff-scoping·AC4 provisional 제외)로 판정한다.
 
     story #4283 — `suspects_out_path`가 주어지고 RED 후보가 `CONFIRM_RERUN_MAX_FILES` 이하면 RED 대신 후보를 그
-    파일에 쓰고 `CONFIRM_RERUN_EXIT`을 돌려준다(호출측이 재실행 뒤 `--confirm-elapsed`로 확정). 생략하면 예전 그대로."""
-    elapsed_by_file = _parse_elapsed_file(elapsed_path)
+    파일에 쓰고 `CONFIRM_RERUN_EXIT`을 돌려준다(호출측이 재실행 뒤 `--confirm-elapsed`로 확정). 생략하면 예전 그대로.
+
+    story #4283(까디르 P1) — 경과 기록은 `read_elapsed_strict`로 읽는다(NaN · 음수 · 0줄 · `expected_files_path`에 있는데
+    기록 없음 = RED)."""
+    expected = (
+        [f for f in expected_files_path.read_text().splitlines() if f.strip()]
+        if expected_files_path is not None and expected_files_path.exists() else None
+    )
+    elapsed_by_file, problems = read_elapsed_strict(elapsed_path, expected=expected)
+    if expected_files_path is not None and expected is None:
+        problems.append(f"돌았어야 하는 파일 목록이 없음: {expected_files_path}")
+    if problems:
+        _print_record_problems(problems, what="1차")
+        return 1
     weights = load_weights()
     provisional = provisional_files_in(load_raw_entries())
     changed_files = (
@@ -1170,6 +1227,11 @@ def main() -> int:
         help="story #4283 — 1차 elapsed · 재실행 elapsed · 후보 목록으로 확정 판정(두 번 다 판정선을 넘은 파일만 RED). "
              "--changed-files는 1차 판정과 같은 값을 넘긴다(러너 배율 대조군이 같아야 한다).",
     )
+    ap.add_argument(
+        "--expected-files", type=Path, default=None,
+        help="story #4283 — --check-elapsed와 함께 쓴다. 이 샤드가 돌렸어야 하는 파일 목록(한 줄에 하나) — 경과 기록에 "
+             "빠진 파일이 있으면 판정 불가로 RED.",
+    )
     args = ap.parse_args()
 
     if args.confirm_elapsed is not None:
@@ -1185,6 +1247,7 @@ def main() -> int:
     if args.check_elapsed is not None:
         return _check_elapsed_mode(
             args.check_elapsed, changed_files_path=args.changed_files, suspects_out_path=args.suspects_out,
+            expected_files_path=args.expected_files,
         )
 
     if args.elapsed_to_json is not None:
