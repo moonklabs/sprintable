@@ -42,6 +42,7 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
 from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
@@ -1076,11 +1077,12 @@ async def _get_or_create_event_conversation(
     )
 
 
-def _generic_event_message_lines(definition_key: str, payload: dict) -> list[str]:
+def _generic_event_message_lines(definition_key: str, payload: dict, resolved_locale: str) -> list[str]:
     """P2(story #2637)의 block_template 렌더러가 상륙하기 전 제네릭 폴백 — model.py docstring의
     "템플릿 없으면 제네릭 카드"와 동형 원칙을 메시지 본문 레벨에서 지금 구현. 필드 순서는
-    payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다."""
-    lines = [f"[이벤트] {definition_key}"]
+    payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다.
+    story #4224 — 머리 줄은 stage 렌더와 같은 로케일 키(en 본문에 «[이벤트]»가 남던 자리). 필드 줄은 payload 원값."""
+    lines = [t("events.event_line_header", resolved_locale, event_key=definition_key)]
     lines += [f"- {k}: {v}" for k, v in payload.items()]
     return lines
 
@@ -1231,7 +1233,8 @@ async def _render_event_notification_doc_ref(
 # story #3323 — previous_output_doc_id는 일반 *_doc_id 토큰화와 같은 해소·폴백 규칙을 따르되
 # (present+해소 실패 시 raw 폴백, 부재 시 줄 자체 없음 — AC1/AC3 공통), 사람이 읽는 레이블만
 # 「앞 단계 산출물」로 특별 표기한다(승인자가 «이게 뭘 검토하는지» 한눈에 보게, 처방 1).
-_DOC_ID_PAYLOAD_LABELS: dict[str, str] = {"previous_output_doc_id": "앞 단계 산출물"}
+# story #4224 — 레이블은 로케일 카탈로그 키(ko는 «앞 단계 산출물» 그대로).
+_DOC_ID_PAYLOAD_LABEL_KEYS: dict[str, str] = {"previous_output_doc_id": "events.previous_output_doc_label"}
 
 
 # story #3329 — stage_metadata.action 같은 자유 문구 안에 "박힌" UUID/8자 prefix를 찾는다.
@@ -1542,7 +1545,8 @@ async def _render_gate_verdict_message(
         except (ValueError, AttributeError, TypeError):
             work_item_id = None
 
-    lines = ["[이벤트] preset.gate.verdict"]
+    # story #4224 — 머리 줄도 로케일 키(아래 줄들은 이미 resolved_locale · en 본문에 «[이벤트]»가 남던 자리).
+    lines = [t("events.event_line_header", resolved_locale, event_key="preset.gate.verdict")]
 
     work_item_ref: str | None = None
     if work_item_type and work_item_id is not None:
@@ -1554,7 +1558,7 @@ async def _render_gate_verdict_message(
     elif work_item_id_raw:
         lines.append(f"- work_item_id: {work_item_id_raw}")
 
-    lines.append(f"- 게이트: {gate_type} → {verdict}")
+    lines.append(f"- {t('events.gate_verdict_gate_line', resolved_locale, gate_type=gate_type, verdict=verdict)}")
     # story #3370 AC2(유나 실측 2026-09-10 13:23Z) — 게이트가 종류로만 표기되고 있었다
     # (gate_id는 아래 재조회 대상으로만 쓰이고 사람이 읽는 줄로는 한 번도 안 나갔다).
     # 에이전트 표면(이 함수)이 AC2의 「gate ID」 요구를 실제로 충족하려면 값 자체를 찍어야
@@ -1569,7 +1573,7 @@ async def _render_gate_verdict_message(
     # block_template의 "사유" 필드는 별개 — chat-bubble.tsx event-block-card, 이 스토리
     # 스코프 밖). 값 없으면 줄 자체를 생략(승인·반려 공통 — 지어내지 않는다).
     if resolution_note:
-        lines.append(f"- 사유: {resolution_note}")
+        lines.append(f"- {t('events.gate_verdict_reason_line', resolved_locale, note=resolution_note)}")
 
     draft_doc_ref: str | None = None
     draft_id: str | None = None
@@ -1630,7 +1634,7 @@ async def _render_gate_verdict_message(
             _channel_raw = facts.get("channel")
             gate_channel = _channel_raw if isinstance(_channel_raw, str) and _channel_raw and _channel_raw != "미확認" else None
     if draft_doc_ref:
-        lines.append(f"- 대상 산출물: {draft_doc_ref}")
+        lines.append(f"- {t('events.gate_verdict_target_artifact_line', resolved_locale, ref=draft_doc_ref)}")
     if draft_id:
         lines.append(f"- draft_id: {draft_id}")
     if version_id:
@@ -1773,7 +1777,7 @@ async def _render_gate_verdict_message(
             # 문구다). 재상신을 권하면 카드가 사람의 결정과 정면으로 반대되는 행동을
             # 시킨다(스토리 관측 사례 5).
             if not has_discontinue_signal(resolution_note):
-                lines.append("- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.")
+                lines.append(f"- {t('events.gate_verdict_next_action_none_author_decides', resolved_locale)}")
     # 페드루 리뷰(PR#3711) — "approve 게이트를 다시 발행"은 실재하지 않는 동작(게이트는
     # 발행 대상이 아니라 이벤트 발행의 부산물)이라 최저 지능 에이전트가 그대로 따라도
     # 실패하지 않을 실제 동작으로 정정: rejected는 「산출물 수정→같은 정의의 approve
@@ -1781,11 +1785,7 @@ async def _render_gate_verdict_message(
     # 다음 stage 이벤트 발행」. ⚠️story #3387 — 이 갈래는 external_publish 이외
     # gate_type 전용이다(회귀 0, 위에서 이미 갈라냈다).
     elif verdict == "rejected":
-        lines.append(
-            "- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 "
-            "다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 "
-            "발행으로 자동 재오픈됩니다."
-        )
+        lines.append(f"- {t('events.gate_verdict_next_action_revise_and_republish', resolved_locale)}")
     elif verdict == "approved":
         # story #3359 — publish stage면 channel→connector_key를 리졸버로 구체화한다
         # (예전엔 "발행 도구를 쓰세요"뿐이라 모든 채널이 정의에 박힌 connector_key
@@ -1797,14 +1797,9 @@ async def _render_gate_verdict_message(
 
             _connector_key = await resolve_connector_key_for_channel(db, org_id=org_id, channel=gate_channel)
             if _connector_key:
-                _connector_line = (
-                    f"- 다음 행동: {_connector_key} 커넥터로 발행하세요(channel={gate_channel})."
-                )
+                _connector_line = f"- {t('events.gate_verdict_next_action_publish_via_connector', resolved_locale, connector_key=_connector_key, channel=gate_channel)}"
             else:
-                _connector_line = (
-                    f"- 다음 행동: channel={gate_channel}에 대한 커넥터 매핑이 없습니다 — "
-                    "조직 설정에 channel_connector_map을 등록하세요."
-                )
+                _connector_line = f"- {t('events.gate_verdict_next_action_no_connector_mapping', resolved_locale, channel=gate_channel)}"
         # story #4076 — ④ 갭 처방: "다음 stage 이벤트를 발행하세요"뿐이던 자리를
         # triggered_by_event_key(위, gate_row.neutral_facts — 이 게이트를 만든 recipe
         # 정의)로 그 정의를 재조회해 구체 definition_key+payload 예시로 채운다(사이클
@@ -1866,8 +1861,7 @@ async def _render_gate_verdict_message(
         lines.append(
             _connector_line
             or _example_line
-            or "- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 "
-            "승인 게이트를 확인하는 발행 도구를 쓰세요)."
+            or f"- {t('events.gate_verdict_next_action_publish_next_stage', resolved_locale)}"
         )
 
     return "\n".join(lines)
@@ -1981,13 +1975,13 @@ async def _render_event_message_content(
     if definition.key == "preset.gate.verdict":
         return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
     if not definition.stage_metadata:
-        return "\n".join(_generic_event_message_lines(definition.key, payload))
+        return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 
     stage = payload.get("stage")
     stage_meta = definition.stage_metadata.get(stage) if stage else None
     if stage_meta is None:
         # stage가 payload에 없거나 stage_metadata에 등재 안 됨 — 지어내지 않고 기존 폴백.
-        return "\n".join(_generic_event_message_lines(definition.key, payload))
+        return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 
     # PO 리뷰(페드루, 2026-09-02) — validate_stage_metadata의 role/action 필수 검증은
     # 2026-08-19 이후 "쓰기 시점" 가드라, 그 전에 저장된 정의는 role/action이 누락된 채
@@ -1997,10 +1991,15 @@ async def _render_event_message_content(
     role = stage_meta.get("role")
     action = stage_meta.get("action")
     if not role or not action:
-        return "\n".join(_generic_event_message_lines(definition.key, payload))
+        return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 
     # story #3329 — action 문구 안에 박힌 doc/story UUID(전체 또는 8자 prefix)를 참조
     # 토큰으로. work_item_ref/*_doc_id와 같은 "실재하는 것만" 원칙(없으면 원문 그대로).
+    # story #4224(까디르 QA 4588 · PO 23:25Z) — «To do»는 에이전트 지시라 원천이 시드다: 단계 메타의 로케일별 action
+    # (`action_i18n[locale]` · 도구·게이트 이름 유지)이 있으면 그걸, 없으면 원문 action. 화면용 FE 문안은 쓰지 않는다.
+    _localized = (stage_meta.get("action_i18n") or {}).get(resolved_locale) if isinstance(stage_meta.get("action_i18n"), dict) else None
+    if isinstance(_localized, str) and _localized:
+        action = _localized
     rendered_action = await _tokenize_embedded_entity_refs(db, org_id=org_id, text=action)
 
     # story #4174(유나 · PO 12:37Z) — 머리 줄·할 일 줄도 로케일 키(«다음 단계» 줄들과 같은 방식) — en 본문 안에 한국어가 섞이지 않게.
@@ -2121,7 +2120,8 @@ async def _render_event_message_content(
         if k.endswith("_doc_id") and isinstance(v, str) and v:
             doc_ref = await _render_event_notification_doc_ref(db, org_id=org_id, doc_id_raw=v)
             if doc_ref:
-                lines.append(f"- {_DOC_ID_PAYLOAD_LABELS.get(k, k)}: {doc_ref}")
+                _label = t(_DOC_ID_PAYLOAD_LABEL_KEYS[k], resolved_locale) if k in _DOC_ID_PAYLOAD_LABEL_KEYS else k
+                lines.append(f"- {_label}: {doc_ref}")
                 continue
         lines.append(f"- {k}: {v}")
 
@@ -2161,7 +2161,11 @@ async def publish_registry_event(
     10여 곳이 이 함수를 HTTP 경유 없이 직접 호출하는데, `request`는 이미 실
     Starlette Request라 `.headers`가 항상 안전하게 동작한다 — `Header()` 마커였다면
     그 호출부 전부가 깨졌을 것)."""
-    resolved_locale = resolve_locale_from_request(locale, request.headers.get("accept-language"))
+    # story #4224 — 요청에 로케일이 전혀 없으면(명시값·Accept-Language 둘 다 없음) core가 org 기준 언어로 푼다.
+    _accept_language = request.headers.get("accept-language")
+    resolved_locale = (
+        resolve_locale_from_request(locale, _accept_language) if (locale or _accept_language) else None
+    )
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
@@ -2319,13 +2323,18 @@ async def _publish_registry_event_core(
     # preset_event, HTTP 요청 컨텍스트 없음 — 이 함수 docstring 참조)은 이 인자를
     # 안 넘겨 기본값 "ko"로 떨어진다(회귀 0) — HTTP 진입점(publish_registry_event)만
     # Header()로 실제 값을 풀어 넘긴다.
-    resolved_locale: str = "ko",
+    # story #4224(PO 판단 22:35Z) — 기본값을 "ko" 고정에서 None(= org 기준 언어 · `resolve_org_locale`)으로. 서버 자동 발행
+    # 3곳(판정 알림 publish_preset_event · recipe_repeat_scheduler · channel_posts published stage)과 요청 로케일이 없는 HTTP
+    # 발행이 en org에서 한국어 본문을 내던 자리. 요청 로케일이 있으면 그대로 우선(행동 변화 0).
+    resolved_locale: str | None = None,
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
     풀어 기존 단일 판정 파이프(route_message/DeliveryDecision, AC2)로 전달한다. HTTP 전용
     폴백(`request`가 있을 때만 쓰는 `resolve_required_project_id`)만 옵션 처리 — 자동발행
     호출부는 항상 payload에 work_item/goal 참조를 실어 이 폴백에 안 걸린다."""
+    if resolved_locale is None:
+        resolved_locale = await resolve_org_locale(db, org_id)
     from app.services.member_resolver import resolve_member
 
     sender = await resolve_member(auth, org_id, db)

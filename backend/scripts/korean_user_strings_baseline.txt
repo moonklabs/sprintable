@@ -186,18 +186,8 @@ app/routers/docs.py::해당 문서의 프로젝트 접근 권한이 없습니다
 app/routers/events.py::)는
 app/routers/events.py::)는 human 발행자만 허용합니다.
 app/routers/events.py::** 담당 —
-app/routers/events.py::- 게이트:
-app/routers/events.py::- 다음 행동:
-app/routers/events.py::- 다음 행동: channel=
-app/routers/events.py::- 다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈됩니다.
-app/routers/events.py::- 다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 승인 게이트를 확인하는 발행 도구를 쓰세요).
-app/routers/events.py::- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.
 app/routers/events.py::- 단계 `
-app/routers/events.py::- 대상 산출물:
-app/routers/events.py::- 사유:
 app/routers/events.py::Cursor: ISO 8601 created_at, fetch after this time(오래된순 정렬 forward-cursor)
-app/routers/events.py::[이벤트]
-app/routers/events.py::[이벤트] preset.gate.verdict
 app/routers/events.py::extra_broadcast_member_ids에 이 org의 실존 회원이 아닌 id가 있습니다:
 app/routers/events.py::name은 key와 같을 수 없습니다(코드 키를 이름으로 쓸 수 없음)
 app/routers/events.py::name은 비울 수 없습니다(공백뿐인 값도 안 됨)
@@ -209,13 +199,10 @@ app/routers/events.py::발행 시 필수 항목:
 app/routers/events.py::발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — work_item이 미배정이거나 routing이 아무도 가리키지 않습니다.
 app/routers/events.py::시스템 발행
 app/routers/events.py::아래는 이 조직에서 발행 가능한 이벤트 전부입니다. 사이클형 이벤트는 각 단계마다 누가(역할) 무엇을(행동) 해야 하는지 그대로 적혀 있습니다 — 외우지 말고 그때그때 이 표를 다시 확인하세요. 한 번에 한 단계만 진행하세요. 무엇을 할지 모르겠으면 지어내지 말고 이 표에서 찾으세요.
-app/routers/events.py::앞 단계 산출물
 app/routers/events.py::에 anchor할 project가 없음 — 시스템 발신자 프로비저닝 불가
-app/routers/events.py::에 대한 커넥터 매핑이 없습니다 — 조직 설정에 channel_connector_map을 등록하세요.
 app/routers/events.py::이 이벤트(
 app/routers/events.py::이 이벤트는 다음 상황에서 발행하세요:
 app/routers/events.py::지정된 conversation_id에 escalation 대상이 참가자로 없어 발행을 거부합니다(지시가 조용히 미도달하는 것을 막기 위함).
-app/routers/events.py::커넥터로 발행하세요(channel=
 app/routers/evidence.py::(gate_approval은 게이트 승인 시 시스템이 자동 생성)
 app/routers/evidence.py::)와 일치해야 합니다.
 app/routers/evidence.py::currency는 조직 정책 통화(

@@ -163,7 +163,7 @@ async def test_publish_stage_with_unmapped_channel_states_missing_mapping_not_si
     monkeypatch.setattr(mod, "resolve_connector_key_for_channel", _fake_resolve)
     text = await _render(_FakeGateRow({"stage": "publish", "channel": "blog"}))
     assert "channel=blog" in text
-    assert "매핑이 없습니다" in text
+    assert "매핑이 없어요" in text
     assert "발행 도구를 쓰세요" not in text
 
 

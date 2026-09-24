@@ -28,7 +28,6 @@ async def test_onboarding_guide_includes_stage_metadata_role_action():
     role/action이 가이드 텍스트에 실제로 등장 — "기대 행동" 공란 결함ⓑ가 이 respec으로
     실제 닫혔는지 종단 확인."""
     from app.routers.events import get_onboarding_guide
-    from app.dependencies.auth import AuthContext
 
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -113,6 +112,11 @@ async def test_onboarding_guide_isolates_malformed_stage_metadata_instead_of_500
             ), {"id": str(org_id), "slug": f"malorg-{org_id.hex[:8]}"})
             await s.commit()
 
+            # story #4224 — 원복은 하드코딩 옛 값이 아니라 오염 前 실제 값으로(시드가 진화하면 — 예: 0400의 action_i18n — 옛 값
+            # 원복이 공유 DB에 낡은 행을 남긴다).
+            original_solo = (await s.execute(text(
+                "SELECT stage_metadata::text FROM event_definitions WHERE key = 'preset.workflow.solo' AND org_id IS NULL"
+            ))).scalar_one()
             # validate_stage_metadata를 거치지 않고(raw UPDATE) preset.workflow.solo의
             # stage_metadata를 malformed하게 오염 — "쓰기 시점 가드를 어떻게든 우회한
             # 레거시 데이터"를 시뮬레이션(렌더러는 이런 데이터가 와도 안전해야 함).
@@ -134,9 +138,8 @@ async def test_onboarding_guide_isolates_malformed_stage_metadata_instead_of_500
     finally:
         async with Session() as s:
             await s.execute(text(
-                "UPDATE event_definitions SET stage_metadata = "
-                "'{\"assign_step_1\": {\"role\": \"Worker\", \"action\": \"담당자 배정\"}}'::jsonb "
-                "WHERE key = 'preset.workflow.solo'"
-            ))
+                "UPDATE event_definitions SET stage_metadata = CAST(:orig AS jsonb) "
+                "WHERE key = 'preset.workflow.solo' AND org_id IS NULL"
+            ), {"orig": original_solo})
             await s.commit()
         await engine.dispose()

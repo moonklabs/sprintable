@@ -277,7 +277,7 @@ async def test_rejected_gate_reaches_work_item_assignee_with_reason_and_next_act
             # ("approve stage 이벤트를 다시 발행하세요")는 gate_type=merge 등 external_publish
             # 이외 전용으로 갈라졌다(test_gate_type_outside_verdict_capture_mapping_still_notifies
             # 가 그쪽을 그대로 pin) — 여기는 external_publish 신 문구를 pin한다.
-            assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in content
+            assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정해요." in content
             assert "approve stage 이벤트를 다시 발행하세요" not in content
     finally:
         await engine.dispose()
