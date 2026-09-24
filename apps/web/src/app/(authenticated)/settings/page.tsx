@@ -45,6 +45,7 @@ import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -140,6 +141,7 @@ function resolveSettingsTab(tab: string | null): string {
 }
 
 export default function SettingsPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const tNav = useTranslations('nav');
@@ -455,9 +457,9 @@ export default function SettingsPage() {
   useEffect(() => {
     // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
     if (activeTab === 'api-keys') {
-      router.push('/organization/workforce');
+      router.push(flatHref('/organization/workforce'));
     }
-  }, [activeTab, router]);
+  }, [activeTab, router, flatHref]);
 
   const applySettingOptimistic = (eventType: string, newEnabled: boolean) => {
     setSettings((prev) => {
@@ -822,7 +824,7 @@ export default function SettingsPage() {
             {/* E-GHAPP: 연동 — 자체 섹션(결제와 분리·향후 slack/jira 등 통합 표준 위치)·서브라우트 `/settings/integrations`(install-callback 타깃·탭 아닌 발견성 진입점) */}
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('tabIntegrations')}</span>
             <Link
-              href="/settings/integrations"
+              href={flatHref('/settings/integrations')}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
             >
               <Webhook className="h-4 w-4" />
@@ -907,7 +909,7 @@ export default function SettingsPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => router.push('/organization/workforce')}
+                    onClick={() => router.push(flatHref('/organization/workforce'))}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
                     {t('agentManagementCta')}

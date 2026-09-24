@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Link2, MessageSquare, Newspaper, TrendingUp, Workflow } from 'lucide-react';
 import { resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { destHref } from '@/components/nav/mobile-tab-bar';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #4004(E-UX-OVERHAUL·셸 통합 3/N·FE) — v3 3화면(오늘·대화·연결·규칙)이 각자
@@ -57,6 +58,7 @@ export interface NavV3ItemListProps {
 export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3ItemListProps) {
   const t = useTranslations('nav');
   const dest = resolveNavV3Destinations(flags);
+  const flatHref = useFlatHref(); // story #4231 — static 목적지는 현재 프로젝트(`?p=`)를 싣는다(탭바와 같은 규칙)
 
   return (
     <nav className="mt-1 flex flex-col gap-0.5" data-testid="nav-v3-item-list">
@@ -70,7 +72,7 @@ export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3It
         return (
           <Link
             key={item.key}
-            href={destHref(destination)}
+            href={destination.kind === 'static' ? flatHref(destHref(destination)) : destHref(destination)}
             data-testid={`nav-v3-item-${item.key}`}
             aria-current={isActive ? 'page' : undefined}
             className={

@@ -18,6 +18,7 @@ import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3972(E-UX-OVERHAUL·「대화」 구현 2/N·FE) — 시안 ②(artifact c707a913)
@@ -41,7 +42,8 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   // '/today'를 구하던 건 리터럴을 한 겹 감싼 재조립이었다 — 이 화면이 실 flags로
   // 딱 한 번 구해 todayHref로 내려준다.
   const todayV3Enabled = flags.todayV3Enabled;
-  const todayHref = resolveNavV3Destinations(flags).today.path;
+  const flatHref = useFlatHref(); // story #4231 — «오늘» 목적지(flat)는 현재 프로젝트를 싣는다
+  const todayHref = flatHref(resolveNavV3Destinations(flags).today.path);
   const t = useTranslations('chatV3');
   const tc = useTranslations('common');
   const locale = useLocale();

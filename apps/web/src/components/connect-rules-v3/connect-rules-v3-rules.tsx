@@ -11,6 +11,7 @@ import {
   ConnectRulesV3SectionError,
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3982 §(e) 콘텐츠 규칙 — 「첫 화면 콜 ≤5(A 제외)」 예산을 지키려고 별도
@@ -74,6 +75,7 @@ function BudgetRow({
 }
 
 export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('connectRulesV3');
   const tcr = useTranslations('contentRules');
   const tContent = useTranslations('content');
@@ -180,7 +182,7 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
         </div>
       ) : null}
 
-      <Link href="/organization/content-rules" className="block text-xs font-medium text-primary hover:underline">
+      <Link href={flatHref('/organization/content-rules')} className="block text-xs font-medium text-primary hover:underline">
         {t('goToContentRulesLink')}
       </Link>
     </div>

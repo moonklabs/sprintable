@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { IntegrationCard } from '@/components/settings/integration-card';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * E-GHAPP 연동 설정 페이지(`/settings/integrations`) — GitHub App 발견성 + install-callback 복귀 타깃.
@@ -14,6 +15,7 @@ import { IntegrationCard } from '@/components/settings/integration-card';
  * param 1회 소비(router.replace로 URL 정리·재방문 배너 재노출 방지·doc-slug 패턴 동형).
  */
 export default function IntegrationsPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const router = useRouter();
   const params = useSearchParams();
@@ -25,12 +27,12 @@ export default function IntegrationsPage() {
   });
 
   useEffect(() => {
-    if (params.get('github')) router.replace('/settings/integrations'); // 1회 소비
-  }, [params, router]);
+    if (params.get('github')) router.replace(flatHref('/settings/integrations')); // 1회 소비
+  }, [params, router, flatHref]);
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6">
-      <Link href="/settings" replace className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground">
+      <Link href={flatHref('/settings')} replace className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground">
         <ArrowLeft className="size-3.5" />{t('title')}
       </Link>
       <h1 className="mt-3 text-sm font-semibold text-foreground">{t('tabIntegrations')}</h1>

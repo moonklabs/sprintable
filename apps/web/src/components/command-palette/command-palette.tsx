@@ -20,6 +20,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
 import { NAV_GROUPS, CHAT_CENTER_ITEM, LEGACY_NAV_ITEMS } from '@/lib/nav-config';
 import { pickEuroJosa } from '@/lib/korean-particle';
@@ -158,6 +159,7 @@ export interface CommandPaletteProps {
 
 export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }: CommandPaletteProps) {
   const router = useRouter();
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const locale = useLocale();
   const t = useTranslations('commandPalette');
   const tNav = useTranslations('nav');
@@ -201,13 +203,14 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
       group: 'navigate' as const,
       icon: item.icon,
       label: item.labelSource === 'anchor' ? t(item.labelKey) : goDestinationLabel(tNav(item.labelKey)),
-      href: item.href,
+      // story #4231 — 워크스페이스 없는(flat) 목적지는 사이드바·더보기와 같이 현재 프로젝트(`?p=`)를 싣는다.
+      href: item.isWorkspaceless ? flatHref(item.href) : item.href,
       shortcut: NAV_ITEM_SHORTCUTS[item.id],
     }));
     // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음) —
     // 함수 참조 자체를 deps에 넣으면 매 렌더 새로 만들어져 메모가 무의미해진다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgSlug, currentProjectSlug, t, tNav, locale]);
+  }, [orgSlug, currentProjectSlug, t, tNav, locale, flatHref]);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [docResults, setDocResults] = useState<DocResult[]>([]);

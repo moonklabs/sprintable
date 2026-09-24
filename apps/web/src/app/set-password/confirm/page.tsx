@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #ab2a503f([버그·보안·HIGH] set-password 재인증 게이트) — 이메일 확인 링크가 여는
 // 2단계 페이지. verify-email/page.tsx와 동형 구조. confirm은 새 세션 토큰을 발급하지
@@ -19,6 +20,7 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
 // ③ALREADY_HAS_PASSWORD는 실패가 아니라 「이미 완료」라 빨강(destructive)이 부적절 —
 //   중립 톤(neutral status) 전용.
 export default function SetPasswordConfirmPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('setPassword');
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
@@ -106,7 +108,7 @@ export default function SetPasswordConfirmPage() {
           <div className="space-y-4">
             <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message}</p>
             {showRetryLink && (
-              <Link href="/settings" className="block text-sm font-medium text-brand hover:text-brand/80">
+              <Link href={flatHref('/settings')} className="block text-sm font-medium text-brand hover:text-brand/80">
                 {t('retryLink')}
               </Link>
             )}
