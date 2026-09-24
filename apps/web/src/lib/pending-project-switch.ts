@@ -6,17 +6,42 @@
  */
 import { useSyncExternalStore } from 'react';
 
-let pending: string | null = null;
+// 까디르 재QA(011da90c2) — 전역 목표에 주인이 없어, 전환기 인스턴스 X가 사라질 때 X의 정리가 Y가 세운 목표를 지웠다. 목표마다 세대 토큰을
+// 달고, 세운 쪽이 자기 토큰으로만 지운다(begin → end(token)). 토큰이 다르면(그 사이 다른 전환이 목표를 새로 세움) 아무것도 안 한다.
+let pending: { projectId: string; token: number } | null = null;
+let generation = 0;
 const listeners = new Set<() => void>();
 
-export function setPendingProjectTarget(projectId: string | null): void {
-  if (pending === projectId) return;
-  pending = projectId;
+function notify(): void {
   for (const l of listeners) l();
 }
 
+export function beginPendingProjectTarget(projectId: string): number {
+  generation += 1;
+  pending = { projectId, token: generation };
+  notify();
+  return generation;
+}
+
+export function endPendingProjectTarget(token: number): void {
+  if (pending?.token !== token) return;
+  pending = null;
+  notify();
+}
+
+/** 테스트·강제 초기화용 — 운영 코드는 begin/end(token)만 쓴다. */
+export function setPendingProjectTarget(projectId: string | null): void {
+  if (projectId === null) {
+    if (pending === null) return;
+    pending = null;
+    notify();
+    return;
+  }
+  beginPendingProjectTarget(projectId);
+}
+
 export function getPendingProjectTarget(): string | null {
-  return pending;
+  return pending?.projectId ?? null;
 }
 
 function subscribe(l: () => void): () => void {

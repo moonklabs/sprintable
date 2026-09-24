@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { setPendingProjectTarget } from '@/lib/pending-project-switch';
+import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -107,13 +107,20 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 같은 URL 이동 등 다른 이동에 밀렸든 · push가 던졌든) 목표를 해제한다. 전환 도중 이 훅이 사라져도 해제.
   const [navPending, startNavTransition] = useTransition();
   const navWasPending = useRef(false);
+  // 까디르 재QA — 이 인스턴스가 세운 목표의 세대 토큰. 해제는 자기 토큰으로만(다른 인스턴스가 새로 세운 목표를 지우지 않는다).
+  const myPendingToken = useRef<number | null>(null);
+  const releaseMyPendingTarget = () => {
+    if (myPendingToken.current === null) return;
+    endPendingProjectTarget(myPendingToken.current);
+    myPendingToken.current = null;
+  };
   useEffect(() => {
-    if (navWasPending.current && !navPending) setPendingProjectTarget(null);
+    if (navWasPending.current && !navPending) releaseMyPendingTarget();
     navWasPending.current = navPending;
   }, [navPending]);
-  useEffect(() => () => { if (navWasPending.current) setPendingProjectTarget(null); }, []);
+  useEffect(() => () => { releaseMyPendingTarget(); }, []);
   const pushWithPendingTarget = (url: string, projectId: string) => {
-    setPendingProjectTarget(projectId);
+    myPendingToken.current = beginPendingProjectTarget(projectId);
     // transition 콜백 안에서 던진 오류는 React가 에러 경계로 보낸다(호출부로 안 온다) — 콜백 안에서 잡아 두고 전환기 호출부로 다시
     // 던진다(develop과 같은 전파 · finally의 busy 해제도 그대로). 목표 해제는 따로 하지 않는다 — push가 던져도 transition은 시작·종료되어
     // 위 effect(isPending true → false)가 해제한다(해제 기전 하나).
