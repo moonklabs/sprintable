@@ -1921,6 +1921,28 @@ _SERVER_DRIVEN_CAPABILITY_KINDS = frozenset({"site_post_auto_publish"})
 # 발행 payload에 에이전트가 제출한 초안 id를 싣는다. 레시피 문맥은 «이 회차가 연결한 바로 그 초안»에만 성립한다 —
 # 버려진 회차가 남은 work item의 무관 초안·같은 회차의 다른 목적지 초안은 문맥이 아니다(사람 클릭 흐름 그대로).
 RECIPE_SITE_DRAFT_LINK_FIELD = "site_post_draft_id"
+
+
+async def _open_site_draft_ids_for_work_item(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
+) -> list[uuid.UUID]:
+    """story #4256 — 이 발행의 work item에 걸린 아직 발행 전(status=draft) · 삭제 안 된 블로그 초안 id들(오래된 순 · 후보 표시용 — 고르지 않는다).
+    work item을 모르면 빈 목록(→ 자리 표시). 조직 조건으로 다른 조직 초안은 섞이지 않는다."""
+    from app.models.site_post_draft import SitePostDraft
+
+    try:
+        work_item_id = uuid.UUID(str(payload.get("work_item_id")))
+    except (ValueError, TypeError, AttributeError):
+        return []
+    rows = (await db.execute(
+        select(SitePostDraft.id).where(
+            SitePostDraft.org_id == org_id,
+            SitePostDraft.work_item_id == work_item_id,
+            SitePostDraft.status == "draft",
+            SitePostDraft.deleted_at.is_(None),
+        ).order_by(SitePostDraft.created_at, SitePostDraft.id)
+    )).scalars().all()
+    return list(rows)
 # story #4104(페드루 PO 리뷰, 2026-09-21) — 준비 경고 루프(apply_recipe_role_bindings)가
 # 같은 딕셔너리를 "이 kind는 에이전트 자기 도구로 처리(org 커넥터 무관)"라는 다른 목적으로
 # 재사용한다 — 이름을 붙여 그 의도를 다음 사람이 안 물어도 되게 한다(값은 여전히 하나뿐,
@@ -2108,9 +2130,17 @@ async def _render_event_message_content(
         if _after_next is not None and _stage_capability_kind(
             definition.stage_metadata.get(_after_next)
         ) in _SERVER_DRIVEN_CAPABILITY_KINDS:
-            _example_base_payload = {**_example_base_payload, RECIPE_SITE_DRAFT_LINK_FIELD: "<draft_id you passed to submit_site_post_draft>"}
+            # story #4256 — 서버가 이 스토리의 블로그 초안을 이미 알면(정확히 1건) 자리 표시 대신 실제 id를 싣는다(예시를 그대로 따르면
+            # uuid 검증 422가 나던 자리). 0건 = 자리 표시 · 2건 이상 = 자리 표시 + 후보 목록(가장 최근 것을 고르지 않는다 — 추측 금지).
+            _draft_ids = await _open_site_draft_ids_for_work_item(db, org_id=org_id, payload=payload)
+            _draft_value = str(_draft_ids[0]) if len(_draft_ids) == 1 else "<draft_id you passed to submit_site_post_draft>"
+            _example_base_payload = {**_example_base_payload, RECIPE_SITE_DRAFT_LINK_FIELD: _draft_value}
+        else:
+            _draft_ids = []
         example_json = _next_stage_publish_payload_json(definition, next_stage, _example_base_payload)
         lines.append(f"- {t('events.stage_next_publish_example', resolved_locale, example=example_json)}")
+        if len(_draft_ids) > 1:
+            lines.append(f"- {t('events.site_draft_link_candidates', resolved_locale, field=RECIPE_SITE_DRAFT_LINK_FIELD, ids=', '.join(str(i) for i in _draft_ids))}")
         if _next_gate_decl is not None:
             lines.append(f"- {t('events.stage_gate_opens_on_publish', resolved_locale)}")
             for spec in _sealed_specs:

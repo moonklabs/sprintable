@@ -353,6 +353,10 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 리팩터하면서 라벨 부분의 AST 리터럴 경계가 바뀌어 BE 한글 사용자 문장 가드(#3779)가
     # "신규 한글"로 잡았다 — 라벨을 카탈로그로 옮겨 근본 해결(리터럴 경계가 코드 구조를
     # 바꿀 때마다 다시 걸리는 일을 막는다).
+    "events.site_draft_link_candidates": {
+        "ko": "이 스토리에 발행 전 블로그 초안이 여럿이라 {field}를 자동으로 채우지 않았어요. 이번 회차에 제출한 초안 id를 골라 넣어 주세요: {ids}",
+        "en": "This story has several unpublished blog drafts, so {field} was not filled in. Put the id of the draft you submitted in this run: {ids}",
+    },
     "events.stage_next_publish_example": {
         "ko": "다음 단계로 넘기는 발행 예시: publish_event({example})",
         "en": "Publish example for the next stage: publish_event({example})",
