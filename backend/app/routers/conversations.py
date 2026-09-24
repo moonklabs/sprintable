@@ -5,7 +5,9 @@ import json
 import logging
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -2519,6 +2521,27 @@ async def send_message(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """POST /api/v2/conversations/{id}/messages — 전송 + SSE dispatch."""
+    return await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
+
+
+async def send_message_core(
+    conversation_id: uuid.UUID,
+    body: SendMessageRequest,
+    background_tasks: BackgroundTasks,
+    *,
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    after_commit: list[Callable[[], Any]] | None = None,
+) -> dict:
+    """`send_message`(HTTP 엔드포인트)의 본체.
+
+    story #4230 — `after_commit`을 넘기면 **호출자 트랜잭션에 참여**한다: 스스로 커밋하지 않고(flush만) 커밋 뒤에만 해야
+    하는 일(SSE push · ws 브로드캐스트)을 그 목록에 넣어 돌려준다 — 호출자가 자기 커밋 뒤에 실행한다
+    (`app.services.after_commit.schedule_after_commit`). 서버 훅(`publish_preset_event`)이 게이트 전이 한가운데서 이 함수를
+    불러 전이 트랜잭션을 중간 커밋하던 결함의 뿌리 처방. 엔드포인트 경로(`after_commit=None`)는 예전과 같다(여기서 커밋 ·
+    커밋 뒤 작업 즉시). background task 등록은 두 경로 모두 같다(실행 시점은 호출자 몫 — HTTP는 응답 뒤, 훅은 커밋 뒤).
+    참여형은 서버 발신(에이전트) 메시지 전용이다 — 사람 발신은 커밋 뒤 `process_event` 훅이 세션을 쓰므로 받지 않는다."""
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
@@ -2526,6 +2549,8 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    if after_commit is not None and sender.type != "agent":
+        raise ValueError("호출자 트랜잭션 참여형 send_message는 서버 발신(에이전트) 메시지 전용")
 
     # 참여자 검증
     participant = (await db.execute(
@@ -3163,7 +3188,11 @@ async def send_message(
     # conversation updated_at 갱신
     conv.updated_at = datetime.now(timezone.utc)
 
-    await db.commit()
+    if after_commit is None:
+        await db.commit()
+    else:
+        # story #4230 — 호출자 트랜잭션 참여: 커밋은 전이를 연 쪽이 한 번.
+        await db.flush()
     await db.refresh(msg)
 
     # Phase 6-1: human 발신 메시지 → process_event 훅
@@ -3189,8 +3218,14 @@ async def send_message(
             logger.warning("process_event failed for message.created message_id=%s", msg.id, exc_info=True)
 
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
-    for pid_str, sse_payload in pending_sse_pushes:
-        _push_to_agent(pid_str, sse_payload)
+    def _push_pending_sse() -> None:
+        for pid_str, sse_payload in pending_sse_pushes:
+            _push_to_agent(pid_str, sse_payload)
+
+    if after_commit is None:
+        _push_pending_sse()
+    else:
+        after_commit.append(_push_pending_sse)
     # story #2090 정정(2026-07-22, 까심 발견 — 2026-07-21 PR #2375의 착오 정정) + #2132(2026-07-23
     # 근본수정): publish_event()의 org _subscribers fanout은 영구 죽은 레지스트리(story #2059/
     # #2067과 동일 근본)라 실제 SSE 전달 경로가 아니었다 — 그 함수 자체를 삭제했다. L1
@@ -3241,9 +3276,15 @@ async def send_message(
                     "content": msg.content,
                     "ts": msg.created_at.isoformat(),
                 })
-                for aid in agent_ids:
-                    if aid in _rooms:
-                        await _broadcast(aid, ws_payload)
+                async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload) -> None:
+                    for aid in ids:
+                        if aid in _rooms:
+                            await _broadcast(aid, payload)
+
+                if after_commit is None:
+                    await _ws_send()
+                else:
+                    after_commit.append(_ws_send)
     except Exception:
         logger.warning("ws_chat broadcast failed message_id=%s", msg.id, exc_info=True)
 

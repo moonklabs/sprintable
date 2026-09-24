@@ -113,6 +113,24 @@ def _fire_pending_wakes(sync_session: Session) -> None:
             )
 
 
+def pending_wakes_mark(db: AsyncSession) -> int:
+    """story #4230 — 지금까지 예약된 wake 수(표시). SAVEPOINT 안 작업이 실패하면 `discard_pending_wakes_since`로 그 뒤 예약만
+    버린다 — SAVEPOINT 롤백은 `after_rollback`을 부르지 않아 그 안에서 예약된 wake가 바깥 커밋 때 유령으로 나가지 않게."""
+    sync_session = db.sync_session
+    if not isinstance(sync_session, Session):
+        return 0
+    return len(sync_session.info.get(_PENDING_WAKES_KEY, []))
+
+
+def discard_pending_wakes_since(db: AsyncSession, mark: int) -> None:
+    sync_session = db.sync_session
+    if not isinstance(sync_session, Session):
+        return
+    pending = sync_session.info.get(_PENDING_WAKES_KEY)
+    if pending is not None:
+        del pending[mark:]
+
+
 def _clear_pending_wakes_on_rollback(sync_session: Session) -> None:
     """롤백된 트랜잭션에서 쌓인 예약은 버린다 — 같은 세션이 다음 트랜잭션에 재사용돼도
     이전 롤백분이 잘못 발화되지 않도록(_HOOKED_KEY는 유지 — 리스너 재등록 방지, 예약 목록만 초기화)."""
