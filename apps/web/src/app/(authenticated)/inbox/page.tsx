@@ -24,6 +24,7 @@ import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic
 import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -182,6 +183,8 @@ async function fetchInboxNotifications(typeFilter: string, cursor?: string | nul
 
 export default function InboxPage() {
   const router = useRouter();
+  // story #4226 — 인박스 내부 탭 이동도 `?p=`를 싣는다(셸의 착지 정규화 router.replace = 현재 페이지 RSC 재요청 0).
+  const flatHref = useFlatHref();
   const searchParams = useSearchParams();
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
@@ -493,7 +496,7 @@ export default function InboxPage() {
             <button
               key={key}
               type="button"
-              onClick={() => router.replace(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`, { scroll: false })}
+              onClick={() => router.replace(flatHref(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`), { scroll: false })}
               className={`border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
                 activeTab === key
                   ? 'border-primary text-foreground'

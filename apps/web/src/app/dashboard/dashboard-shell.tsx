@@ -333,7 +333,7 @@ function useProjectSsot(
   // effectiveProjectId 값이 바뀔 수 있다. 그 값이 서버 렌더 결과와 다르면 하이드레이션 직후
   // useEffect가 즉시 다른 URL로 replace를 걸어 자식(GlanceBoard 등) subtree를 다시 흔든다.
   // hydrated로 한 틱 미뤄 첫 렌더(서버+첫 클라이언트 둘 다)를 항상 동일하게 만들면 이 잦은
-  // 재-replace 근원 하나가 사라진다 — router.replace 자체(2번째 소스)는 여전히 필요하면 실행.
+  // 재-replace 근원 하나가 사라진다 — router.replace 자체(2번째 소스)는 여전히 필요하면 실행(story #4226부터 flat 경로의 드문 진입만).
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { startTransition(() => setHydrated(true)); }, []);
 
@@ -349,15 +349,22 @@ function useProjectSsot(
   installProjectHeaderInterceptor();
 
   // 탭별 backstop 영속 + URL 정규화(`?p=` 누락/불일치 시 effective 로 replace → 링크 드롭에도 stale 방지).
+  // story #4226(E-MOBILE-SPEED) — `?p=`는 이 셸(클라)만 읽는다(서버 컴포넌트·proxy 소비 0). 그런데 router.replace는 현재 페이지 RSC를
+  // 다시 받아 왔다: 착지마다 같은 페이지 RSC 1건 + 라우터 트리가 바뀌어 탭·링크 프리패치 한 바퀴 더, 탭 이동마다 같은 ms에 RSC 2건
+  // (로컬 prod 빌드 · 요청별 history/헤더 실측). PO 판단(까디르 QA 2회 뒤) — 주소를 Next 몰래 고치지 않는다:
+  // - scoped 경로(`/{ws}/{proj}/…` · pathProjectId 있음): 경로가 프로젝트 SSOT라 `?p=`를 읽는 곳이 없다
+  //   (resolveEffectiveProjectId가 pathProjectId를 먼저 반환) → 쓰지 않는다. 착지 RSC 1→0은 이걸로.
+  // - flat 탭(결재·대화·더보기 등)은 탭바 링크가 처음부터 `?p={effective}`를 싣고 간다(mobile-tab-bar) → 착지 때 정규화 조건이
+  //   안 생긴다. 그 밖의 flat 진입은 여기서 router.replace — develop과 같은 성질이다(Next가 아는 이동이라 refresh 뒤에도 `?p=`가
+  //   남지만, 대기 중인 다른 이동을 버릴 수 있다). 링크가 `?p=`를 싣게 해서 이 경로 자체를 줄이는 것이 처방이다.
   useEffect(() => {
     if (!effectiveProjectId || typeof window === 'undefined') return;
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, effectiveProjectId);
-    if (urlProjectId !== effectiveProjectId) {
-      const sp = new URLSearchParams(Array.from(searchParams.entries()));
-      sp.set('p', effectiveProjectId);
-      router.replace(`${pathname}?${sp.toString()}`);
-    }
-  }, [effectiveProjectId, urlProjectId, pathname, searchParams, router]);
+    if (pathProjectId || urlProjectId === effectiveProjectId) return;
+    const sp = new URLSearchParams(Array.from(searchParams.entries()));
+    sp.set('p', effectiveProjectId);
+    router.replace(`${pathname}?${sp.toString()}`);
+  }, [effectiveProjectId, urlProjectId, pathProjectId, pathname, searchParams, router]);
 
   return effectiveProjectId;
 }

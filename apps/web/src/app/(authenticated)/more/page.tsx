@@ -9,6 +9,7 @@ import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { groupVisibleLegacyByTarget, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
 import { pickEunNeunJosa } from '@/lib/korean-particle';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
 // #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
@@ -22,6 +23,8 @@ import { pickEunNeunJosa } from '@/lib/korean-particle';
 // 수(「{n}개 화면 · {g}개 구역」)는 렌더 결과에서 센다(리터럴 금지 — MOBILE_HUB_EXCLUDE_IDS가
 // 늘면 이 수도 따라 줄어야 한다).
 export default function MorePage() {
+  // story #4226 — flat(static) 목적지 링크는 `?p=`를 싣는다(use-flat-href).
+  const flatHref = useFlatHref();
   const t = useTranslations('nav');
   const tMore = useTranslations('mobileTabBar');
   const [query, setQuery] = useState('');
@@ -137,7 +140,7 @@ export default function MorePage() {
           {filteredGroups.map((group) => {
             const isLegacy = group.id === LEGACY_CARD_ID;
             const renderItemRow = (item: (typeof group.items)[number]) => {
-              const href = item.kind === 'static' ? item.path : `/${item.path}`;
+              const href = item.kind === 'static' ? flatHref(item.path) : `/${item.path}`;
               const Icon = item.icon;
               return (
                 <Link

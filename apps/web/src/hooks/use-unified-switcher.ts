@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -101,6 +102,34 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [pending, setPending] = useState(false);
+  // story #4226(PO · 까디르 QA cd595a263) — 프로젝트 전환 «대기 중 목표»의 수명은 주소 비교로 추측하지 않고 프레임워크 신호로:
+  // `?p=` 이동(router.push)을 이 전환 자신의 transition 안에서 부르고, 그 transition이 끝나면(isPending true → false — 커밋이든
+  // 같은 URL 이동 등 다른 이동에 밀렸든 · push가 던졌든) 목표를 해제한다. 전환 도중 이 훅이 사라져도 해제.
+  const [navPending, startNavTransition] = useTransition();
+  const navWasPending = useRef(false);
+  // 까디르 재QA — 이 인스턴스가 세운 목표의 세대 토큰. 해제는 자기 토큰으로만(다른 인스턴스가 새로 세운 목표를 지우지 않는다).
+  const myPendingToken = useRef<number | null>(null);
+  const releaseMyPendingTarget = () => {
+    if (myPendingToken.current === null) return;
+    endPendingProjectTarget(myPendingToken.current);
+    myPendingToken.current = null;
+  };
+  useEffect(() => {
+    if (navWasPending.current && !navPending) releaseMyPendingTarget();
+    navWasPending.current = navPending;
+  }, [navPending]);
+  useEffect(() => () => { releaseMyPendingTarget(); }, []);
+  const pushWithPendingTarget = (url: string, projectId: string) => {
+    myPendingToken.current = beginPendingProjectTarget(projectId);
+    // transition 콜백 안에서 던진 오류는 React가 에러 경계로 보낸다(호출부로 안 온다) — 콜백 안에서 잡아 두고 전환기 호출부로 다시
+    // 던진다(develop과 같은 전파 · finally의 busy 해제도 그대로). 목표 해제는 따로 하지 않는다 — push가 던져도 transition은 시작·종료되어
+    // 위 effect(isPending true → false)가 해제한다(해제 기전 하나).
+    let pushError: unknown = null;
+    startNavTransition(() => {
+      try { router.push(url); } catch (err) { pushError = err; }
+    });
+    if (pushError !== null) throw pushError;
+  };
   const [open, setOpen] = useState(false);
   const [createOrgOpen, setCreateOrgOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -254,7 +283,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const newOrgSlug = orgs.find((o) => o.orgId === nextOrgId)?.orgSlug;
       const newSlug = newOrgSlug ? await fetchProjectSlug(projectId) : null;
       const switchedPath = newOrgSlug && newSlug ? withSwitchedSlugs(pathname, currentOrg?.orgSlug, newOrgSlug, newSlug) : null;
-      router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
+      pushWithPendingTarget(`${switchedPath ?? pathname}?${sp.toString()}`, projectId); // story #4226 — 커밋 전 탭 링크가 옛 프로젝트를 박지 않게
       router.refresh();
     } catch {
       // story #2544 — switchOrg와 동일 함정: orgRes 이후(switch-project/slug 해소/router.push)
@@ -291,7 +320,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const orgSlug = currentOrg?.orgSlug;
       const newSlug = orgSlug ? await fetchProjectSlug(nextProjectId) : null;
       const switchedPath = orgSlug && newSlug ? withSwitchedSlugs(pathname, orgSlug, orgSlug, newSlug) : null;
-      router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
+      pushWithPendingTarget(`${switchedPath ?? pathname}?${sp.toString()}`, nextProjectId); // story #4226 — 커밋 전 탭 링크가 옛 프로젝트를 박지 않게
       await fetch('/api/switch-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { useTranslations } from 'next-intl';
 import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -207,6 +208,8 @@ export function MobileTabBar({
   // story #4211 — 사이드바(app-sidebar resourceLink)와 같은 소스(대시보드 컨텍스트의 현재 org slug·project slug)로
   // resource 탭을 /{ws}/{proj}/{resource} 직접 경로로. 컨텍스트 밖이거나 slug를 모르면 bare(안전망).
   const { orgId, orgMemberships, currentProjectSlug, projectPathUnresolved } = useDashboardContext();
+  // story #4226 — flat(static kind) 탭 링크는 처음부터 `?p=`(전환 대기 중 목표 → 유효 프로젝트 순 · use-flat-href). scoped 탭은 경로가 프로젝트.
+  const flatHref = useFlatHref();
   const scope = useMemo<TabHrefScope>(() => ({
     orgSlug: orgMemberships.find((o) => o.orgId === orgId)?.orgSlug,
     projectSlug: currentProjectSlug,
@@ -282,8 +285,13 @@ export function MobileTabBar({
     >
       {tabs.map((tab) => {
         const { key, icon: Icon, labelKey, namespace } = tab;
-        const href = resolveTabHref(tab, dest, scope);
+        const baseHref = resolveTabHref(tab, dest, scope);
+        const href = dest[tab.destKey]?.kind === 'static' ? flatHref(baseHref) : baseHref;
         const active = key === activeKey;
+        // story #4226 — 지금 보는 바로 그 페이지를 가리키는 탭은 프리패치하지 않는다(로컬 prod 빌드 실측: 착지 ≈1.4초 뒤
+        // 현재 페이지 RSC 데이터 프리패치 1건 — 이미 떠 있는 화면이라 쓸 곳이 없다). «활성»이 아니라 «경로 일치»로 가른다 —
+        // 채팅 탭은 대화 상세(/chats/{id})에서도 활성이지만 거기선 /chats 프리패치가 목록 복귀를 빠르게 한다.
+        const isCurrentPage = staticPathOnly(href) === pathname;
         // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
         // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
         // story #4006 AC8 — v3 4탭엔 「승인」이 없다. 같은 pendingCount를 「오늘」 탭
@@ -312,6 +320,7 @@ export function MobileTabBar({
           <Link
             key={key}
             href={href}
+            prefetch={isCurrentPage ? false : undefined}
             aria-current={active ? 'page' : undefined}
             className={cn(
               'relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]',

@@ -11,10 +11,13 @@ import { act, type ReactNode, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const nav = { pathname: '/repro/beta/flow', search: '' };
+// story #4226 — scoped 경로는 `?p=` 정규화를 안 한다(경로가 SSOT) · flat 경로의 드문 진입만 router.replace(Next가 아는 이동 →
+// useSearchParams 반영). router.replace는 호출을 기록하고 nav.search를 갱신해 Next 동작을 비춘다.
+const routerReplace = vi.fn((u: string) => { nav.search = u.split('?')[1] ?? ''; });
 vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
   useSearchParams: () => new URLSearchParams(nav.search),
-  useRouter: () => ({ replace: (u: string) => { nav.search = u.split('?')[1] ?? ''; }, push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ replace: routerReplace, push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (k: string) => k }));
 const { reopenMock, clearMock, retryMock } = vi.hoisted(() => ({ reopenMock: vi.fn(() => true), clearMock: vi.fn(), retryMock: vi.fn() }));
@@ -118,6 +121,7 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(seen.at(-1)?.projectId).toBe(B);
 
     const mark = sent.length;
+    routerReplace.mockClear();
     await renderShellAt('/repro/charlie/flow');
     expect(seen.at(-1)).toEqual({ name: 'Project Charlie', projectId: C });
     expect(sidebar.slug).toBe('charlie');
@@ -127,7 +131,18 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     // ⭐쓰기 — C 화면에서 만든 스토리가 C로(수정 전 로컬 실측은 B에 저장).
     const write = after.find((r) => r.body);
     expect(write?.body?.project_id).toBe(C);
-    expect(new URLSearchParams(nav.search).get('p')).toBe(C);
+    // ⭐story #4226 — scoped 경로는 경로가 프로젝트 SSOT라 `?p=`를 쓰지 않는다(현재 페이지 RSC 재요청 0).
+    expect(routerReplace).not.toHaveBeenCalled();
+  });
+
+  it('⭐story #4226 — flat 경로의 드문 진입(`?p=` 없음)은 router.replace 한 번 · Next가 새 `p`를 읽은 뒤 재렌더 추가 0', async () => {
+    nav.search = '';
+    routerReplace.mockClear();
+    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
+    expect(routerReplace).toHaveBeenCalledTimes(1);
+    expect(routerReplace.mock.calls[0]![0]).toMatch(/^\/inbox\?p=/);
+    await renderShellAt('/inbox', { pathProjectId: undefined, serverResolvedPath: undefined });
+    expect(routerReplace).toHaveBeenCalledTimes(1);
   });
 
   it('scoped → flat 클라이언트 이동은 옛 서버 pathProjectId(B)를 쓰지 않는다 — `?p=`(탭 값) 기준(하드 로드와 같음)', async () => {
