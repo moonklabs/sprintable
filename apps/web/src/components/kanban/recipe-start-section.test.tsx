@@ -244,9 +244,12 @@ describe('RecipeStartSection', () => {
         }));
       }
       if (url === '/api/events/publish' && init?.method === 'POST') {
-        return new Response(JSON.stringify({ detail: {
-          code: 'RECIPE_ALREADY_STARTED', reason: 'in_progress', message: '이미 진행 중이에요.', conversation_id: 'conv-1', message_id: 'msg-1',
-        } }), { status: 409 });
+        // 실제 봉투(유나 측정 · 까디르 P2와 같은 부류): /api/events/publish는 proxyToFastapi → BE http_exception_handler가
+        // HTTPException(detail=dict)을 {data: null, error: {code, message, …}, meta: null}로 싼다 — {detail} 모양이 아니다.
+        return new Response(JSON.stringify({ data: null, error: {
+          code: 'RECIPE_ALREADY_STARTED', reason: 'already_started', message: '이 스토리에서 이 레시피는 이미 시작됐어요.', conversation_id: 'conv-1', message_id: 'msg-1',
+          current_stage: 'draft', is_last_stage: false,
+        }, meta: null }), { status: 409 });
       }
       throw new Error(`unexpected fetch: ${url}`);
     });
@@ -265,7 +268,8 @@ describe('RecipeStartSection', () => {
   it('발행 실패 시 사용자 문장을 보여준다(AC3, 조용한 삼킴 없음)', async () => {
     await render(
       [candidateStub()],
-      { onPublish: async () => new Response(JSON.stringify({ detail: 'boom' }), { status: 500 }) },
+      // 실제 봉투(BE 에러 핸들러) — {data: null, error: {code, message}, meta: null}.
+      { onPublish: async () => new Response(JSON.stringify({ data: null, error: { code: 'INTERNAL_ERROR', message: 'boom' }, meta: null }), { status: 500 }) },
     );
     const button = container.querySelector('button')!;
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });

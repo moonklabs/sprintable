@@ -215,9 +215,9 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
 }
 
 
-/** story #4261 — BE 409 본문에서 RECIPE_ALREADY_STARTED 코드(error.code 또는 detail.code 어느 쪽이든). */
+/** story #4261 — BE 409 본문의 RECIPE_ALREADY_STARTED. 실제 봉투는 한 모양: /api/events/publish(proxyToFastapi) → BE http_exception_handler가
+ * HTTPException(detail=dict)을 `{data: null, error: {code, message, …}, meta: null}`로 싼다(유나 측정). */
 function isRecipeAlreadyStarted(body: unknown): boolean {
   if (!body || typeof body !== 'object') return false;
-  const b = body as { error?: { code?: unknown }; detail?: { code?: unknown } };
-  return b.error?.code === 'RECIPE_ALREADY_STARTED' || b.detail?.code === 'RECIPE_ALREADY_STARTED';
+  return (body as { error?: { code?: unknown } }).error?.code === 'RECIPE_ALREADY_STARTED';
 }

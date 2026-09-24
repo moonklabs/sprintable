@@ -2449,6 +2449,11 @@ async def _find_latest_stage_publish(
     )).scalars().first()
 
 
+def _stage_label(definition, stage: str | None) -> str:
+    role = ((definition.stage_metadata or {}).get(stage) or {}).get("role") if stage else None
+    return f"{stage}({role})" if role else str(stage)
+
+
 async def _publish_registry_event_core(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -2584,24 +2589,30 @@ async def _publish_registry_event_core(
             # story #4261(PO 09:08Z · 4075 AC7 개정) — 레시피 실행은 **스토리당 1회**. 예전엔 200 + deduplicated로 조용히 흡수해, 두 번째
             # 회차를 시작하려던 호출자(특히 에이전트)가 막힌 줄 모르고 이어서 낸 단계가 1회차의 승인된 게이트에 걸려 카드 · 알림 · 다음 멘션
             # 없이 멈췄다(디디 실측). 09-21 결정의 목적(두 클릭 · 새로고침에 메시지 2건 0 · 사람 화면엔 에러 대신 상태)은 그대로 — 메시지는
-            # 새로 안 만들고, 신호만 409 + 사유(completed / in_progress) + 기존 conversation/message id로 바꾼다. FE는 이 409를 상태로 받는다.
+            # 새로 안 만들고, 신호만 409 + 사실 + 기존 conversation/message id로 바꾼다. FE는 이 409를 상태로 받는다.
+            # 까디르 codex 01a0d395 P1(PO 13:38Z) — «끝났다»를 여기서 판정하지 않는다: 마지막 stage가 발행만 되고 사람 작업 · 게이트 대기
+            # 중일 수 있고, 레시피마다 «끝남» 신호가 다르다(워크플로 = 사람이 스토리 상태로 · 마케팅 = 서버 발행). 판정 대신 **사실**만 싣는다
+            # — reason은 already_started 하나 · current_stage · is_last_stage(마지막 stage가 발행됐는가라는 사실).
             latest = await _find_latest_stage_publish(
                 db, org_id=org_id, definition_key=definition.key,
                 work_item_type=work_item_type, work_item_id=str(work_item_id),
             )
             latest_stage = ((((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}).get("stage")
                             if latest is not None else None)
-            reason = "completed" if latest_stage is not None and latest_stage == first_stage[-1] else "in_progress"
+            current_stage = latest_stage if isinstance(latest_stage, str) else None
             raise HTTPException(status_code=409, detail={
                 "code": "RECIPE_ALREADY_STARTED",
-                "reason": reason,
+                "reason": "already_started",
+                # 유나 확정 문안(13:39Z) — {stage}는 4251 거절 문장과 같은 모양(`draft(Writer)` · _stage_label) · 지금 단계를 모르면(마지막 발행
+                # 못 찾음) «— 지금 단계: …» 구절을 뺀 문장.
                 "message": (
-                    t("events.recipe_already_started_completed", resolved_locale) if reason == "completed"
-                    else t("events.recipe_already_started_in_progress", resolved_locale)
+                    t("events.recipe_already_started", resolved_locale, stage=_stage_label(definition, current_stage))
+                    if current_stage is not None else t("events.recipe_already_started_no_stage", resolved_locale)
                 ),
                 "conversation_id": str(existing_publish.conversation_id),
                 "message_id": str(existing_publish.id),
-                "current_stage": latest_stage,
+                "current_stage": current_stage,
+                "is_last_stage": current_stage is not None and current_stage == first_stage[-1],
             })
 
     from app.services.event_routing_resolver import (
