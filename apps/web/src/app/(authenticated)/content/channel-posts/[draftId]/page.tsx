@@ -1819,12 +1819,15 @@ export default function ChannelPostEditPage() {
           // "발행 버튼은 오버레이 규칙대로").
           setPublishResult(null);
           setDraft((prev) => prev && { ...prev, processing_kind: 'awaiting_container', command_status: 'pending' });
-        } else if (permalink && published_at) {
+        } else if (published_at) {
+          // story #4264(까디르 codex P1 · PO 17:33Z) — 게시 뒤 permalink 조회가 실패하면 BE는 게시 성공 · id 보존 · permalink만
+          // 비워 준다(X username 없음도 같은 모양). 예전 조건(permalink && published_at)은 그 성공을 «발행 실패»로 그렸다 —
+          // 성공 판정은 published_at, 링크 행은 permalink가 있을 때만(발행됨 카드가 이미 그 조건으로 그린다).
           setPublishResult({ type: 'success' });
           // story #3525(PO 確定 ③) — publication_id도 permalink 등과 같은 병합 대상
           // (BE #3525가 publish 응답에 이 필드를 추가) — 재로드 없이도 발행됨 카드가
           // draft.publication_id 조건 하나로 즉시 열린다.
-          setDraft((prev) => prev && { ...prev, permalink, external_id, published_at, publication_status: 'published', publication_id: publication_id ?? prev.publication_id });
+          setDraft((prev) => prev && { ...prev, permalink: permalink ?? null, external_id, published_at, publication_status: 'published', publication_id: publication_id ?? prev.publication_id });
         } else {
           setPublishResult({ type: 'error', text: t('publishFailed'), raw: JSON.stringify(json) });
         }
@@ -2362,6 +2365,9 @@ export default function ChannelPostEditPage() {
             // ConfirmDialog가 실제 needs_check 관문(체크리스트·확認버튼 disabled)을
             // 제공한다 — recheckGate=true라 needsRecheck 문면이 「약속을 지키는」 곳.
             recheckGate
+            // story #4264 ④ — 승인 필요 멈춤의 뒷문장은 이 화면이 실제로 받은 게이트 상태 · 승인된 예약 시각으로만 고른다.
+            approvalContext={(('gate_status' in draft && 'scheduled_at' in draft)
+              ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
             onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
           />
         ) : null}
@@ -2533,12 +2539,18 @@ export default function ChannelPostEditPage() {
               {t('channelPostsYoutubePublishedPrivateBadge')}
             </span>
           ) : null}
-          {draft.permalink ? (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+          {/* story #4264(유나 디자인 확정 · 까디르 codex P1) — 게시는 됐는데 permalink 조회가 실패하면(BE가 id 보존 · permalink만
+              비움) 줄을 숨기지 않고 «가져오지 못했어요»를 흐린 글씨로 남긴다(«아직»은 안 붙인다 — 다시 가져오는 길이 없으면 약속). */}
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">{t('publishedInfoUrlLabel')}</span>
+            {draft.permalink ? (
               <a href={draft.permalink} target="_blank" rel="noreferrer" className="underline">{draft.permalink}</a>
-            </div>
-          ) : null}
+            ) : (
+              <span className="text-muted-foreground" data-testid="channel-post-published-url-unavailable">
+                {t('publishedInfoUrlUnavailable')}
+              </span>
+            )}
+          </div>
           {draft.published_at ? (
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">{t('publishedInfoAtLabel')}</span>

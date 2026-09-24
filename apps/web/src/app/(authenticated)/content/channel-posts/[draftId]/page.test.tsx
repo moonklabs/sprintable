@@ -1237,6 +1237,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // 그런 조합이 혹시 와도 신호가 1개로 유지됨을 보장한다.)
   const COMMAND_STATUS_ALL: Record<CommandStatus, true> = {
     pending: true, in_progress: true, completed: true, blocked: true, dead_letter: true, voided: true, cancelled: true,
+    blocked_unapproved: true, // story #4264 ④
   };
   // story #4262 — `not_sent`(확실히 안 나감) 추가. 전수 곱에 그대로 들어간다.
   const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true };
@@ -1977,6 +1978,37 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.textContent).toContain(koMessages.content.publishSuccess.replace('{time}', '').split('{')[0]);
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://threads.net/@x/1"]')).not.toBeNull();
+  });
+
+  // story #4264(까디르 codex P1 · PO 17:33Z) — 게시는 됐는데 permalink 조회가 실패하면 BE는 게시 성공 · id 보존 ·
+  // permalink만 비워 준다. 성공 문장이 나오고 발행됨 정보는 서되 깨진 링크(빈 href)는 없다. 뮤테이션: 성공 조건을 예전
+  // `permalink && published_at`로 되돌리면 «발행 실패»로 RED.
+  it('⭐발행 성공인데 permalink가 비었다 — 성공 문장 · 발행됨 정보 · URL 줄은 «가져오지 못했어요»(«발행 실패» 아님)', async () => {
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status: 200, body: { permalink: null, external_id: 'media-1', published_at: '2026-09-04T00:00:00Z', version_id: 'v1', publication_id: 'pub-1' } }),
+    });
+    await act(async () => {
+      root.render(wrap(<ChannelPostEditPage />));
+    });
+    await flush();
+
+    const btn = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    await act(async () => {
+      btn.click();
+    });
+    await flush();
+
+    const result = container.querySelector('[data-testid="channel-post-publish-result"]');
+    expect(result?.textContent).toContain(koMessages.content.publishSuccess.replace('{time}', '').split('{')[0]);
+    expect(result?.textContent).not.toContain(koMessages.content.publishFailed);
+    expect(container.querySelector('[data-testid="channel-post-published-info"]')).not.toBeNull();
+    // 유나 디자인 확정 — 줄은 남기고 값은 «가져오지 못했어요»(깨진 링크 · 빈 href 0).
+    expect(container.querySelector('[data-testid="channel-post-published-url-unavailable"]')?.textContent)
+      .toBe(koMessages.content.publishedInfoUrlUnavailable);
+    expect([...container.querySelectorAll('a')].some((a) => !a.getAttribute('href'))).toBe(false);
+    // PO 17:38Z — 이미 나간 글을 사람이 다시 올리지 못하게 발행 버튼은 막힌다(예전: «발행 실패» + 버튼 살아 있음 = 이중 게시 길).
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement | null)?.disabled ?? true).toBe(true);
   });
 
   // story #3539(PO 確定 2026-09-06) — IG처럼 IMAGE 컨테이너가 비동기인 채널은 즉시

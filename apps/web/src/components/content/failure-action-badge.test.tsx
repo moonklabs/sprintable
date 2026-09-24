@@ -179,6 +179,60 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(container.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
   });
 
+  // story #4264 ④(까디르 codex P2 · PO 17:45Z) — 승인 필요 · 예산 초과로 발행 직전 막힘(blocked_unapproved). 워커 · 즉시 발행 두 경로가
+  // 같은 모양으로 오고, 화면은 사유 문장만 · 버튼 0(compact든 아니든). 사유가 비면(4264 전 워커 행) 승인 필요. 뮤테이션:
+  // deriveFailureAction의 blocked_unapproved 갈래를 빼면 배지가 없어 RED.
+  it.each([
+    ['EXTERNAL_PUBLISH_APPROVAL_REQUIRED', 'channelPostsBlockedReasonApprovalRequired'],
+    ['GENERATION_BUDGET_EXCEEDED', 'channelPostsVoidReasonGenerationBudgetExceeded'],
+    ['API_USAGE_BUDGET_EXCEEDED', 'channelPostsVoidReasonApiUsageBudgetExceeded'],
+    [null, 'channelPostsBlockedReasonApprovalRequired'],
+  ] as const)('⭐blocked_unapproved(%s) — 사유 문장만 · 버튼 0', async (reasonCode, key) => {
+    const action = deriveFailureAction({ commandStatus: 'blocked_unapproved', reasonCode });
+    for (const compact of [false, true]) {
+      await act(async () => {
+        root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact={compact} onRetryClick={() => {}} />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+        .toBe((koMessages.content as Record<string, string>)[key]);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    }
+  });
+
+  // story #4264 ④(PO 18:07Z · 유나 문장) — 승인 필요 멈춤의 뒷문장은 화면이 실제로 받은 게이트 상태 · 승인된 예약 시각으로만 고른다.
+  // 근거: 결재함은 pending 게이트만(approvals-queue `/api/gates/inbox?status=pending`) · 승인 훅은 채널 게시 중 예약 글만 새 발행
+  // 명령을 만든다(gate_service `if gate.sealed_scheduled_at is None: return`). 모르면(undefined) 앞문장만 · 약속 0.
+  // 뮤테이션: 갈래 함수가 항상 A를 내게 하면 즉시 · 반려 경우가 RED.
+  it.each([
+    [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() + 86_400_000).toISOString() }, 'channelPostsBlockedNextApprovalScheduled'],
+    [{ gateStatus: 'pending', sealedScheduledAt: null }, 'channelPostsBlockedNextApprovalImmediate'],
+    // 봉인된 예약 시각이 이미 지났다 — 승인하면 곧바로 워커가 집어 «예약이 새로 잡혀요»가 거짓 → 앞문장만.
+    [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() - 86_400_000).toISOString() }, null],
+    [{ gateStatus: 'rejected', sealedScheduledAt: null }, 'channelPostsBlockedNextResubmit'],
+    [{ gateStatus: null, sealedScheduledAt: null }, 'channelPostsBlockedNextResubmit'],
+    [{ gateStatus: 'approved', sealedScheduledAt: null }, null],
+    [{ gateStatus: 'pending', sealedScheduledAt: undefined }, null],
+    [undefined, null],
+  ] as const)('⭐blocked_unapproved 승인 필요 뒷문장 — %o → %s', async (approvalContext, nextKey) => {
+    const action = deriveFailureAction({ commandStatus: 'blocked_unapproved', reasonCode: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact approvalContext={approvalContext} />));
+    });
+    const content = koMessages.content as Record<string, string>;
+    expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+      .toBe(content.channelPostsBlockedReasonApprovalRequired);
+    expect(container.querySelector('[data-testid="channel-post-failure-next"]')?.textContent ?? null)
+      .toBe(nextKey ? content[nextKey] : null);
+  });
+
+  it('⭐blocked_unapproved 예산 사유엔 승인 뒷문장이 안 붙는다(결재가 아니라 한도 문제)', async () => {
+    const action = deriveFailureAction({ commandStatus: 'blocked_unapproved', reasonCode: 'GENERATION_BUDGET_EXCEEDED' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" approvalContext={{ gateStatus: 'pending', sealedScheduledAt: null }} />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-failure-next"]')).toBeNull();
+  });
+
   // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — dead_letter ∧ reasonCode가
   // CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS 표에 있으면(YOUTUBE_QUOTA_
   // EXCEEDED) needsRecheck/recheckGate보다 먼저 갈라 정적 문구를 낸다(일반

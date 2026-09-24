@@ -1443,7 +1443,7 @@ def _blog_destination_exception_classes() -> tuple[tuple[type[Exception], ...], 
 _BLOG_DESTINATION_INSECURE_ERRORS, _BLOG_DESTINATION_PUBLISH_ERRORS = _blog_destination_exception_classes()
 
 
-def _blog_publish_error_code(exc: Exception) -> str:
+def _blog_publish_error_code(exc: Exception, *, writing: bool = False) -> str:
     """story e4fc29fa(조각④) — 401/403은 "일시적 provider 오류"가 아니라 자격 자체가
     틀렸다는 뜻(wordpress Application Password·webhook 공유 비밀 오설정). 뮤테이션
     대상: 이 분기를 지우면 401도 CHANNEL_PUBLISH_PROVIDER_ERROR(transient)로 떨어져
@@ -1462,7 +1462,9 @@ def _blog_publish_error_code(exc: Exception) -> str:
         return "GHOST_AUTH_FAILED"
     if getattr(exc, "status_code", None) in (401, 403):
         return "CHANNEL_PUBLISH_AUTH_REJECTED"
-    return "CHANNEL_PUBLISH_PROVIDER_ERROR"
+    # story #4264(까디르 codex P1 · PO 17:33Z) — 글 쓰기 호출의 non-2xx(5xx · 타임아웃 포함)는 글이 이미 생겼을 수 있다 → 자동 재시도
+    # (transient)면 이중 게시라 «나갔을 수 있음»(needs_check). 회수(삭제)는 다시 해도 같은 결과라 예전 코드(transient) 그대로.
+    return "SITE_POST_PROVIDER_ERROR" if writing else "CHANNEL_PUBLISH_PROVIDER_ERROR"
 
 
 async def _call_blog_module_publish(
@@ -1738,7 +1740,7 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     except _BLOG_DESTINATION_INSECURE_ERRORS as exc:
         raise SitePostExternalPublishError(error_code="SITE_POST_DESTINATION_INSECURE", message=str(exc)) from exc
     except _BLOG_DESTINATION_PUBLISH_ERRORS as exc:
-        raise SitePostExternalPublishError(error_code=_blog_publish_error_code(exc), message=str(exc)) from exc
+        raise SitePostExternalPublishError(error_code=_blog_publish_error_code(exc, writing=True), message=str(exc)) from exc
 
     # story #3395/#3757 동형 SAVEPOINT 관용구(동시 처리 방어) — (gate_id, version_id) UNIQUE 재사용.
     from sqlalchemy.exc import IntegrityError

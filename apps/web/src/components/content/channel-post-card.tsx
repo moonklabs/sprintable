@@ -71,7 +71,13 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
       {/* N3(페드루 PO, 2026-09-04 13:26Z) — 카드 전체가 <Link>라 그 안에 배지의
           <Button>을 그대로 두면 인터랙티브 요소가 중첩된다(a>button). compact로 라벨만
           받는다 — 재시도는 카드를 눌러 상세로 들어간 다음에 한다. */}
-      {failureAction ? <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact /> : null}
+      {failureAction ? (
+        <FailureActionBadge
+          action={failureAction} displayTimezone={displayTimezone} compact
+          approvalContext={(('gate_status' in item && 'scheduled_at' in item)
+              ? { gateStatus: item.gate_status ?? null, sealedScheduledAt: item.scheduled_at ?? null } : undefined)}
+        />
+      ) : null}
       {/* story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이
           객체를 받는다(discriminator=BE의 channel 판별, content_kind류 신규 필드 0).
           subject 우선(제목이 사람이 알아보는 값), 세그먼트는 미확定이면 기존 어휘

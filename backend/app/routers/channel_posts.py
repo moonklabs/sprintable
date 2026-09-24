@@ -2159,9 +2159,11 @@ async def publish_channel_post_draft_endpoint(
         # 이 코드 경로 자체의 재시도/종결 정책 변경은 이 스토리 스코프 밖, 원장
         # 기록만 추가).
         await _record_this_attempt(approval_check="missing", adapter_called=False, result_code=None)
-        await apply_command_failure(
-            db, command, error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc), now=now,
-        )
+        # story #4264 ④(까디르 codex P2 · PO 17:45Z) — 워커와 같은 모양(blocked_unapproved + 사유 · 재시도 없음). 예전엔
+        # apply_command_failure로 dead_letter가 돼 «다시 시도» 버튼이 떴다 — 눌러도 같은 이유로 또 막히는 헛된 약속.
+        from app.services.publication_command import mark_blocked_unapproved
+
+        mark_blocked_unapproved(command, reason_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc))
         await db.commit()
         raise HTTPException(
             status_code=403,
@@ -2203,9 +2205,9 @@ async def publish_channel_post_draft_endpoint(
             else "GENERATION_BUDGET_EXCEEDED"
         )
         await _record_this_attempt(approval_check="budget_exceeded", adapter_called=False, result_code=None)
-        await apply_command_failure(
-            db, command, error_code=budget_exceeded_code, last_error=str(exc), now=now,
-        )
+        from app.services.publication_command import mark_blocked_unapproved
+
+        mark_blocked_unapproved(command, reason_code=budget_exceeded_code, last_error=str(exc))  # story #4264 ④ — 워커와 같은 모양
         await db.commit()
         raise HTTPException(
             status_code=422,

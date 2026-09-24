@@ -130,7 +130,39 @@ _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CO
 # story #4272(까디르 codex P1) — 코드 없는 예외가 공급자 쓰기 호출 **전**에 났다(`provider_call_mark` 표시 없음) — 아무것도 안
 # 나갔으니 자동 재시도가 안전하다(이중 발행 0). 호출 뒤의 코드 없는 예외는 예전처럼 needs_check(모름).
 PRE_CALL_ERROR_CODE = "PUBLICATION_COMMAND_PRE_CALL_ERROR"
-_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE})
+# story #4264(까디르 codex P1 · PO 17:33Z) — **자동 재시도(transient)는 «안 나갔다»는 적극적 증거가 있는 명시 목록만.** 표 밖 ·
+# 모르는 코드의 기본값은 needs_check(`classify_failure_kind`). 공급자 5xx도 쓰기 호출 뒤면 나갔을 수 있으니 기본 transient가 아니다 —
+# 아래는 공급자에 **보이는 글을 만드는 쓰기 호출 전** 단계에서만 나는 코드와 다시 해도 같은 결과인 회수(삭제)뿐(각 묶음에 근거). 전수 표(코드 · 파일:줄 · 쓰기 前/後)는 PR 4264 본문.
+_RETRY_SAFE_CODES = frozenset({
+    # Threads · Instagram — 컨테이너 생성 · 상태 조회 · 게시 한도 조회는 `publish_container`(게시) 전(컨테이너는 게시 전엔 안 보임).
+    "THREADS_CREATE_CONTAINER_FAILED", "THREADS_CREATE_CONTAINER_MISSING_ID", "THREADS_CONTAINER_STATUS_FAILED",
+    "THREADS_CONTAINER_STATUS_MISSING_FIELD", "THREADS_PUBLISHING_LIMIT_FAILED", "THREADS_PUBLISHING_LIMIT_MISSING_FIELDS",
+    "THREADS_REPLY_CREATE_CONTAINER_FAILED", "THREADS_REPLY_CREATE_CONTAINER_MISSING_ID",
+    "INSTAGRAM_CREATE_CONTAINER_FAILED", "INSTAGRAM_CREATE_CONTAINER_MISSING_ID",
+    "INSTAGRAM_CREATE_CAROUSEL_CHILD_FAILED", "INSTAGRAM_CREATE_CAROUSEL_CHILD_MISSING_ID",
+    "INSTAGRAM_CREATE_CAROUSEL_PARENT_FAILED", "INSTAGRAM_CREATE_CAROUSEL_PARENT_MISSING_ID",
+    "INSTAGRAM_CREATE_REELS_CONTAINER_FAILED", "INSTAGRAM_CREATE_REELS_CONTAINER_MISSING_ID",
+    "INSTAGRAM_CONTAINER_STATUS_FAILED", "INSTAGRAM_CONTAINER_STATUS_MISSING_FIELD",
+    "INSTAGRAM_PUBLISHING_LIMIT_FAILED", "INSTAGRAM_PUBLISHING_LIMIT_MISSING_FIELDS",
+    # Facebook — 캐러셀 자식 사진은 `published=false` 업로드 · 릴스 start/upload는 `video_state=PUBLISHED` finish 전.
+    "FACEBOOK_CREATE_CAROUSEL_CHILD_FAILED", "FACEBOOK_CREATE_CAROUSEL_CHILD_MISSING_ID",
+    "FACEBOOK_REELS_START_FAILED", "FACEBOOK_REELS_START_MISSING_FIELDS", "FACEBOOK_REELS_UPLOAD_FAILED",
+    # X — 미디어 업로드(INIT · APPEND · FINALIZE · 상태)는 `post_tweet` 전(미디어만으로는 아무것도 안 보임).
+    "X_MEDIA_INIT_FAILED", "X_MEDIA_INIT_MISSING_ID", "X_MEDIA_APPEND_FAILED", "X_MEDIA_FINALIZE_FAILED", "X_MEDIA_STATUS_FAILED",
+    # YouTube — 업로드 세션 열기는 영상 바이트 PUT(영상 생성) 전.
+    "YOUTUBE_UPLOAD_SESSION_INIT_FAILED", "YOUTUBE_UPLOAD_SESSION_MISSING_LOCATION",
+    # 회수(삭제) — 다시 해도 같은 결과(이미 지워졌으면 404/410을 회수 성공으로 받는다 · channel_posts.py `unpublish_channel_post`).
+    "THREADS_DELETE_MEDIA_FAILED", "FACEBOOK_DELETE_POST_FAILED",
+    # sandbox 마커 — 실 어댑터의 같은 단계와 같은 부류로 둔다(sandbox로 실 동작을 재현하려는 것이라). Threads · Instagram sandbox의
+    # `[sandbox:provider-error]`는 컨테이너 생성 단계 실패(실 `THREADS_/INSTAGRAM_CREATE_*_FAILED`와 같은 쓰기 전 단계). Facebook ·
+    # X · YouTube · 스티비 sandbox 마커는 게시 쓰기 단계라 기본값(needs_check) 그대로.
+    "SANDBOX_PROVIDER_ERROR", "SANDBOX_INSTAGRAM_PROVIDER_ERROR",
+})
+# `CHANNEL_PUBLISH_PROVIDER_ERROR`는 읽기 경로(인사이트 · 댓글 수집의 공급자 5xx — 재시도 안전)가 쓰는 코드라 transient 유지. 발행
+# 경로는 이제 이 코드를 내지 않는다(`provider_error_code`가 코드 그대로 · 블로그 쓰기는 `SITE_POST_PROVIDER_ERROR`).
+# 속도 제한(429)은 요청 자체가 거절된 것.
+# 공급자 쓰기 호출 전 코드 없는 예외(4272 `PRE_CALL_ERROR_CODE`)도 «안 나감»의 증거가 있는 재시도 안전 부류.
+_TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED", PRE_CALL_ERROR_CODE}) | _RETRY_SAFE_CODES
 
 # story #4264(PO 15:18Z) — 실패 코드 → 부류의 **한 표**. 분류(`classify_failure_kind`)와 어댑터 코드 승격(`provider_error_code`)이
 # 같은 두 모음을 읽는다(사본 0). 원칙: `not_sent`는 «안 나간 적극적 증거»가 있을 때만 — HTTP 호출 전 검사에서 막혔거나 공급자가
@@ -157,21 +189,34 @@ _NOT_SENT_CODES = frozenset({
     "META_ADS_ADSET_CREATE_FAILED", "META_ADS_ADSET_CREATE_MISSING_FIELD", "META_ADS_AD_CREATE_FAILED",
     "META_ADS_AD_CREATE_MISSING_FIELD",
 })
-# 공급자가 200/201을 준 **뒤** 응답에 id가 비었다 — 실제로 게시됐을 가능성이 높다. 자동 재시도(transient)면 이중 게시라
-# needs_check(재시도 0 · 사람이 채널에서 확인 뒤 재시도).
+# «나갔을 수 있음» — 보이는 글을 만드는 **쓰기 호출 자체**가 실패했거나(5xx · 타임아웃이면 이미 만들어졌을 수 있다) 200/201을 준
+# **뒤** 응답에 id가 비었다. 자동 재시도(transient)면 이중 게시라 needs_check(재시도 0 · 사람이 채널에서 확인 뒤 재시도). 모르는
+# 코드도 기본값이 needs_check라 이 목록은 «왜 모르는지»를 적는 자리다(분류 결과는 같다).
 _MAYBE_SENT_CODES = frozenset({
+    # 200 뒤 id 없음.
     "FACEBOOK_CREATE_POST_MISSING_ID", "X_POST_TWEET_MISSING_ID", "YOUTUBE_UPLOAD_MISSING_VIDEO_ID",
     "THREADS_PUBLISH_CONTAINER_MISSING_ID", "INSTAGRAM_PUBLISH_CONTAINER_MISSING_ID",
     "INSTAGRAM_REPLY_MISSING_ID", "FACEBOOK_REPLY_MISSING_ID",
+    "FACEBOOK_CREATE_CAROUSEL_PARENT_MISSING_ID",  # 부모 게시물(attached_media) 생성 = 게시(까디르 codex P1)
+    # 쓰기 호출 자체의 실패(상태 코드만으로는 나갔는지 모름).
+    "THREADS_PUBLISH_CONTAINER_FAILED", "INSTAGRAM_PUBLISH_CONTAINER_FAILED", "FACEBOOK_CREATE_POST_FAILED",
+    "FACEBOOK_CREATE_CAROUSEL_PARENT_FAILED", "FACEBOOK_REELS_FINISH_FAILED",  # finish = video_state=PUBLISHED(까디르 codex P1)
+    "X_POST_TWEET_FAILED", "YOUTUBE_UPLOAD_PUT_FAILED", "FACEBOOK_REPLY_FAILED", "INSTAGRAM_REPLY_FAILED",
+    "STIBEE_PUBLISH_PROVIDER_ERROR",  # 캠페인 초안 생성 · 본문 넣기 중 하나 — 초안이 이미 생겼을 수 있다(구독자 발송 아님)
+    "SITE_POST_PROVIDER_ERROR",  # 블로그 글 쓰기 호출의 non-2xx(site_posts.py)
+    "YOUTUBE_VIDEO_STATUS_FAILED",  # 영상 바이트 업로드(= 영상 생성) **뒤** 처리 상태 조회 — 재시도는 영상을 또 올린다
 })
 
 
+PROVIDER_CODE_MISSING = "CHANNEL_PUBLISH_PROVIDER_CODE_MISSING"
+
+
 def provider_error_code(provider_code: str | None) -> str:
-    """어댑터가 실어 준 provider_code를 명령의 error_code로(워커 · 즉시 발행 라우터 · 댓글 답글 공용 — PO 15:18Z). 표(위 두 모음)에
-    있는 코드는 그대로 올려 부류를 정확히 가르고, 모르는 코드는 예전처럼 일반 공급자 오류(transient)로 둔다."""
-    if provider_code and (provider_code in _NOT_SENT_CODES or provider_code in _MAYBE_SENT_CODES):
-        return provider_code
-    return "CHANNEL_PUBLISH_PROVIDER_ERROR"
+    """어댑터가 실어 준 provider_code를 명령의 error_code로(워커 · 즉시 발행 라우터 · 댓글 답글 공용 — PO 15:18Z). 코드는 **그대로**
+    올린다 — 표(`_RETRY_SAFE_CODES` · `_NOT_SENT_CODES` · `_MAYBE_SENT_CODES`)가 부류를 가르고, 표 밖 코드는 기본값
+    needs_check(까디르 codex P1 · PO 17:33Z — 예전엔 모르는 코드를 일반 공급자 오류 = transient = 자동 재시도로 뭉갰다). 코드가 없으면
+    `PROVIDER_CODE_MISSING`(역시 needs_check)."""
+    return provider_code or PROVIDER_CODE_MISSING
 
 
 # story #3474(페드루 PO 確定 2026-09-05) — 게이트가 approved가 아니거나(missing)
@@ -180,6 +225,17 @@ def provider_error_code(provider_code: str | None) -> str:
 # 아니라 "재시도라는 개념 자체가 안 맞는" 종류: 사람이 다시 승인해야 새 커맨드가
 # 생긴다). 기존 'voided'(재승인으로 무효화)와 같은 결의 신규 terminal 상태.
 STATUS_BLOCKED_UNAPPROVED = "blocked_unapproved"
+
+
+def mark_blocked_unapproved(command: PublicationCommand, *, reason_code: str, last_error: str) -> None:
+    """story #4264 ④(까디르 codex P2 · PO 17:45Z) — 발행 직전 승인 필요 · 예산 초과로 막힘. 재시도 개념이 없다(다시 승인하면 새 명령).
+    워커 · 즉시 발행 라우터 · 블로그 워커가 **같은 모양**으로 남긴다 — 예전엔 워커는 사유 없이(승인 필요) · 라우터는 dead_letter +
+    «다시 시도» 버튼(눌러도 같은 이유로 또 막힘)으로 갈려 사람에게 다르게 보였다. 화면은 사유 문장만 · 버튼 0."""
+    command.status = STATUS_BLOCKED_UNAPPROVED
+    command.reason_code = reason_code
+    command.failure_kind = None
+    command.next_attempt_at = None
+    command.last_error = last_error[:2000]
 _GATE_REVERIFY_ERROR_CODES = frozenset({
     "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "SITE_POST_REAPPROVAL_REQUIRED",
     # story #3498(AC4) — 예산 재검사도 이 워커 재검증 묶음에 낀다(adapter 호출 0
@@ -552,8 +608,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             db, command=command, approval_check="missing", adapter_called=False,
             started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.last_error = str(exc)[:2000]
+        mark_blocked_unapproved(command, reason_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc))
         return
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — site_post 쪽의 GENERATION_BUDGET_EXCEEDED 처리와 동형
@@ -566,12 +621,14 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             db, command=command, approval_check="budget_exceeded", adapter_called=False,
             started_at=attempt_started_at, finished_at=now, result_code=None,
         )
-        command.status = STATUS_BLOCKED_UNAPPROVED
-        command.reason_code = (
-            "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
-            else "GENERATION_BUDGET_EXCEEDED"
+        mark_blocked_unapproved(
+            command,
+            reason_code=(
+                "API_USAGE_BUDGET_EXCEEDED" if exc.rule_key == API_USAGE_BUDGET_RULE_KEY
+                else "GENERATION_BUDGET_EXCEEDED"
+            ),
+            last_error=str(exc),
         )
-        command.last_error = str(exc)[:2000]
         return
     except YouTubeQuotaExceededError as exc:
         # story #3815(배포 82 라이브 회차 실 결함, 페드루 PO 確定 2026-09-12 —
@@ -846,9 +903,8 @@ async def _process_one_site_post_command(db: AsyncSession, command: PublicationC
                 command.status = "voided"
                 command.reason_code = "CONTENT_CHANGED"
             else:
-                command.status = STATUS_BLOCKED_UNAPPROVED
-                if approval_check == "budget_exceeded":
-                    command.reason_code = "GENERATION_BUDGET_EXCEEDED"
+                mark_blocked_unapproved(command, reason_code=error_code, last_error=last_error)
+                return
             command.last_error = last_error[:2000]
             return
     except Exception as exc:  # noqa: BLE001 — 미분류 실패도 이 command 하나만 막는다.

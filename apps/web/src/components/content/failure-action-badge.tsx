@@ -1,7 +1,8 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import {
-  CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, CHANNEL_POST_VOID_REASON_MESSAGE_KEYS, type FailureAction,
+  CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS, CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, CHANNEL_POST_VOID_REASON_MESSAGE_KEYS,
+  type FailureAction,
 } from '@/components/content/failure-action';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 import { useResetPassed } from '@/components/content/use-reset-passed';
@@ -35,9 +36,41 @@ export interface FailureActionBadgeProps {
    * 거짓 문면이 된다. 이 prop이 true인 소비처(channel_posts 상세, 실제 관문이 있음)만
    * needsRecheck를 반영 — 기본 false(정직한 일반 dead_letter 문면이 거짓 약속보다 낫다). */
   recheckGate?: boolean;
+  /** story #4264 ④(PO 18:07Z) — 승인 필요로 멈춘 글의 뒷문장(무엇을 하면 되는지)을 고르는 사실. 화면이 게이트 상태 · 승인된
+   * 예약 시각을 **실제로 받는** 곳만 넘긴다(모르면 안 넘김 → 앞문장만 · 약속 0). `undefined` = 모름, `null` = 없음이 확실함. */
+  approvalContext?: BlockedApprovalContext;
 }
 
-export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate }: FailureActionBadgeProps) {
+export interface BlockedApprovalContext {
+  gateStatus: string | null | undefined;
+  sealedScheduledAt: string | null | undefined;
+}
+
+// 근거(PR 4264 본문): 막는 조건 `channel_posts.py` `gate.status != "approved"` · 결재함은 pending 게이트만
+// (`approvals-queue.tsx` `/api/gates/inbox?status=pending`) · 승인 훅은 채널 게시 중 예약 글만 새 발행 명령을 만든다
+// (`gate_service.py` `if gate.sealed_scheduled_at is None: return`).
+// 문장 키는 표 값으로 둔다(죽은 키 가드가 표 값을 소비로 읽는다 — voided · blocked 사유 표와 같은 관례).
+const BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS: Record<string, string> = {
+  scheduled: 'channelPostsBlockedNextApprovalScheduled',
+  immediate: 'channelPostsBlockedNextApprovalImmediate',
+  resubmit: 'channelPostsBlockedNextResubmit',
+};
+
+function blockedApprovalNextKey(ctx: BlockedApprovalContext | undefined): string | undefined {
+  if (!ctx) return undefined;
+  if (ctx.gateStatus === 'pending') {
+    if (ctx.sealedScheduledAt === undefined) return undefined;
+    if (!ctx.sealedScheduledAt) return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.immediate;
+    // PO 18:13Z — 봉인된 예약 시각이 이미 지났으면 승인 훅이 그 과거 시각으로 명령을 만들고 워커가 다음 tick에 곧바로 집는다
+    // (gate_service 승인 훅 · 과거 시각 가드 없음) — «예약이 새로 잡혀요»가 거짓이 되니 앞문장만.
+    if (Date.parse(ctx.sealedScheduledAt) <= Date.now()) return undefined;
+    return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.scheduled;
+  }
+  if (ctx.gateStatus === 'rejected' || ctx.gateStatus === null) return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.resubmit;
+  return undefined;
+}
+
+export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate, approvalContext }: FailureActionBadgeProps) {
   const t = useTranslations('content');
   // story #3815 — dead_letter가 아닌 다른 kind에선 항상 null(훅은 조건 없이 매
   // 렌더 호출돼야 하므로 이 자리에 둔다 — early return보다 위).
@@ -147,6 +180,21 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     return (
       <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {t('channelPostsFailureProcessing')}
+      </p>
+    );
+  }
+  if (action.kind === 'blocked_unapproved') {
+    // story #4264 ④ — 사유 문장만 · 버튼 0(compact 여부와 무관). 사유가 비면 승인 필요(4264 전 워커 행).
+    const approvalReason = !action.reasonCode || !(action.reasonCode in CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS)
+      || action.reasonCode === 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED';
+    const blockedReasonKey = approvalReason
+      ? CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS.EXTERNAL_PUBLISH_APPROVAL_REQUIRED
+      : CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS[action.reasonCode as string];
+    const nextKey = approvalReason ? blockedApprovalNextKey(approvalContext) : undefined;
+    return (
+      <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
+        <span data-testid="channel-post-failure-reason">{t(blockedReasonKey)}</span>
+        {nextKey ? <>{' '}<span data-testid="channel-post-failure-next">{t(nextKey)}</span></> : null}
       </p>
     );
   }
