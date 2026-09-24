@@ -463,7 +463,8 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].gate.type은 비어있지 않은 문자열이어야 합니다."
                 )
-            if gate.get("approver") not in APPROVER_ROLE_REFERENCES:
+            # 목록·객체는 frozenset 멤버십에서 TypeError(→ API 500)라 문자열인지 먼저 본다(까디르 4594 codex P2).
+            if not isinstance(gate.get("approver"), str) or gate["approver"] not in APPROVER_ROLE_REFERENCES:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].gate.approver는 {sorted(APPROVER_ROLE_REFERENCES)} "
                     f"중 하나여야 합니다 — {gate.get('approver')!r}은 닫힌 어휘 밖입니다."
@@ -471,7 +472,10 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
         # story #4174 후속 — approval(선택): `{"surface": <닫힌 어휘>}` 하나만. gate와 동시 선언 금지(승인 자리가 둘이 된다).
         if "approval" in meta:
             approval = meta["approval"]
-            if not isinstance(approval, dict) or set(approval) != {"surface"} or approval["surface"] not in _APPROVAL_SURFACES:
+            if (
+                not isinstance(approval, dict) or set(approval) != {"surface"} or not isinstance(approval["surface"], str)
+                or approval["surface"] not in _APPROVAL_SURFACES
+            ):
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].approval must be exactly {{'surface': one of {sorted(_APPROVAL_SURFACES)}}} "
                     f"— got {approval!r}."

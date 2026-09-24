@@ -34,6 +34,18 @@ def test_malformed_approval_is_rejected(approval):
         validate_stage_metadata(_SCHEMA, _meta(approval=approval))
 
 
+@pytest.mark.parametrize("value", [[], {}, 1])
+@pytest.mark.parametrize("field", ["approval.surface", "gate.approver"])
+def test_non_string_closed_vocabulary_value_is_rejected_not_type_error(field, value):
+    """까디르 4594 codex P2 — 목록·객체는 frozenset 멤버십에서 TypeError(등록·수정 API 500)였다. 400이 되게 검증 오류로."""
+    extra = (
+        {"approval": {"surface": value}} if field == "approval.surface"
+        else {"gate": {"type": "concept_approval", "approver": value}}
+    )
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA, _meta(**extra))
+
+
 def test_approval_and_gate_together_are_rejected():
     with pytest.raises(InvalidStageMetadataError, match="both gate and approval"):
         validate_stage_metadata(_SCHEMA, _meta(
