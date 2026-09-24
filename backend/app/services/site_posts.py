@@ -31,7 +31,7 @@ from app.services.gate_seal import (
     compute_seal_hash,
 )
 from app.services.gate_service import ConceptApprovalNotApprovedError  # noqa: F401 (재-export, 라우터가 import — story #3561)
-from app.services.provider_call_mark import mark_provider_call
+from app.services.provider_call_mark import provider_client
 
 logger = logging.getLogger(__name__)
 
@@ -1728,11 +1728,8 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
     )).scalar_one_or_none()
     prior_external_id = existing_pub.external_id if existing_pub is not None else None
 
-    import httpx
-
     try:
-        async with httpx.AsyncClient() as client:
-            mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
+        async with provider_client() as client:
             external_id, permalink = await _call_blog_module_publish(
                 module, client, channel=connection.channel, connection=connection, app_password=app_password,
                 title=version.title, body_md=version.body_md, summary=version.summary, tags=version.tags,
@@ -1885,11 +1882,8 @@ async def unpublish_site_post_external_command(
 
     module = get_blog_destination_module(connection_id=connection.id, channel=connection.channel)
 
-    import httpx
-
     try:
-        async with httpx.AsyncClient() as client:
-            mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
+        async with provider_client() as client:
             await _call_blog_module_unpublish(
                 module, client, channel=connection.channel, connection=connection,
                 app_password=app_password, external_id=row.external_id,

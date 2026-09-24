@@ -31,8 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.publication_attempt import PublicationAttempt
 from app.models.publication_command import PublicationCommand
 from app.services.provider_call_mark import (
-    mark_provider_call,
     provider_call_marked,
+    provider_client,
     reset_provider_call_mark,
 )
 
@@ -924,11 +924,9 @@ async def _process_one_comment_reply_command(db: AsyncSession, command: Publicat
             raise _CommentReplySendFailed()
 
         _publish_client = get_publish_client_module(comment.channel)
-        import httpx
 
         try:
-            async with httpx.AsyncClient() as client:
-                mark_provider_call()  # story #4272 — 공급자 쓰기 호출 직전
+            async with provider_client() as client:
                 external_reply_id, external_reply_url = await _publish_client.reply(
                     client, access_token=access_token, threads_user_id=connection.account_id,
                     reply_to_id=comment.external_comment_id, text=reply.text,

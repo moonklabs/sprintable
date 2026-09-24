@@ -6,6 +6,7 @@ rollback은 세션의 ORM 객체를 전부 만료시킨다. 그 뒤 `command.id`
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -254,35 +255,98 @@ def _channel_media_storage(monkeypatch, tmp_path):
     monkeypatch.setattr(cpi_module, "_PUBLIC_BASE", f"https://storage.googleapis.com/{_CHANNEL_MEDIA_BUCKET}/")
 
 
+def _instagram_transport(monkeypatch, handler):
+    """채널 발행 경로의 `provider_client`에 목 전송 계층을 끼운다 — 실 Instagram 어댑터가 실제 HTTP 요청을 보내고, 표시는 요청 훅이
+    켠다(호출처 표시 없음)."""
+    import httpx
+
+    import app.services.channel_posts as channel_posts_module
+    from app.services.provider_call_mark import provider_client as real_provider_client
+
+    monkeypatch.setattr(
+        channel_posts_module, "provider_client",
+        lambda **kw: real_provider_client(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"}),
+    )
+
+
+async def _command_outcome(Session, command_id):
+    from sqlalchemy import select
+
+    from app.models.publication_attempt import PublicationAttempt
+    from app.services.publication_command import PublicationCommand
+
+    async with Session() as s:
+        row = await s.get(PublicationCommand, command_id)
+        attempts = (await s.execute(
+            select(PublicationAttempt.adapter_called).where(PublicationAttempt.command_id == command_id)
+            .order_by(PublicationAttempt.started_at)
+        )).scalars().all()
+    return row, attempts
+
+
 @pytest.mark.parametrize(("where", "status", "failure_kind", "adapter_called"), [
     ("publishing_limit", "pending", "transient", False),
     ("create_container", "dead_letter", "needs_check", True),
 ])
 @pytest.mark.anyio
-async def test_the_channel_worker_splits_an_unclassified_error_on_the_provider_call_mark(
+async def test_the_channel_worker_splits_an_unclassified_error_on_the_write_request(
     monkeypatch, _channel_media_storage, where, status, failure_kind, adapter_called,
 ):
-    """코드 없는 예외가 공급자 쓰기 호출 전(게시 한도 읽기)이면 자동 재시도 · 장부 adapter_called=False, 쓰기 호출(컨테이너 생성)
-    안이면 needs_check · adapter_called=True(예전: 둘 다 needs_check · 호출 뒤도 False). 뮤테이션: 채널 발행 경로의
-    `mark_provider_call()`을 빼면 두 번째 경우가 transient로 RED."""
-    from sqlalchemy import select
+    """코드 없는 예외가 읽기 요청(게시 한도 GET)에서 나면 자동 재시도 · 장부 False, 쓰기 요청(컨테이너 생성 POST)이 나간 뒤면
+    needs_check · True — 표시는 요청 훅이 켠다."""
+    import httpx
 
-    import app.services.instagram_publish as instagram_publish_module
-    from app.models.publication_attempt import PublicationAttempt
+    from app.services.publication_command import process_due_publication_commands
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "content_publishing_limit" in request.url.path:
+            if where == "publishing_limit":
+                raise RuntimeError("주입된 미분류 예외(읽기)")
+            return httpx.Response(200, json={"data": [{"quota_usage": 0, "config": {"quota_total": 100, "quota_duration": 86400}}]})
+        if request.method == "POST" and request.url.path.endswith("/media"):
+            raise RuntimeError("주입된 미분류 예외(쓰기 요청 뒤)")
+        return httpx.Response(500, text="unrouted")
+
+    _instagram_transport(monkeypatch, handler)
+    engine, Session = await _session_factory()
+    try:
+        command_id = await _instagram_command(Session)
+        async with Session() as s:
+            await process_due_publication_commands(s)
+        row, attempts = await _command_outcome(Session, command_id)
+        assert (row.status, row.failure_kind) == (status, failure_kind), (row.status, row.failure_kind, row.reason_code)
+        assert attempts == [adapter_called]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_image_container_published_on_the_next_tick_is_marked_by_its_publish_request(monkeypatch, _channel_media_storage):
+    """PO 17:54Z ① — 비동기 이미지 컨테이너: 1 tick에 생성(처리 대기) → 다음 tick에 상태 FINISHED 뒤 `media_publish` POST가 미분류
+    예외. 예전엔 그 명령의 생성 표시가 배치마다 지워져 게시 뒤 예외가 PRE_CALL(transient · 자동 재시도 = 이중 게시)이었다. 이제
+    게시 요청 자체가 표시를 켜 needs_check · 장부 True. 뮤테이션: 요청 훅을 빼면 transient로 RED."""
+    import httpx
+
     from app.services.publication_command import (
         PublicationCommand,
         process_due_publication_commands,
     )
 
-    async def boom(*_args, **_kwargs):
-        raise RuntimeError("주입된 미분류 예외")
+    ticks = {"n": 0}
 
-    async def limit_ok(client, *, access_token, threads_user_id):
-        return (0, 100, 24 * 60 * 60)
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "GET" and "content_publishing_limit" in path:
+            return httpx.Response(200, json={"data": [{"quota_usage": 0, "config": {"quota_total": 100, "quota_duration": 86400}}]})
+        if request.method == "POST" and path.endswith("/media"):
+            return httpx.Response(200, json={"id": "container-1"})
+        if request.method == "GET" and path.endswith("/container-1"):
+            return httpx.Response(200, json={"status_code": "IN_PROGRESS" if ticks["n"] == 0 else "FINISHED"})
+        if request.method == "POST" and path.endswith("/media_publish"):
+            raise RuntimeError("주입된 미분류 예외(게시 요청 뒤)")
+        return httpx.Response(500, text="unrouted")
 
-    monkeypatch.setattr(instagram_publish_module, "get_publishing_limit", boom if where == "publishing_limit" else limit_ok)
-    if where == "create_container":
-        monkeypatch.setattr(instagram_publish_module, "create_container", boom)
+    _instagram_transport(monkeypatch, handler)
     engine, Session = await _session_factory()
     try:
         command_id = await _instagram_command(Session)
@@ -290,13 +354,126 @@ async def test_the_channel_worker_splits_an_unclassified_error_on_the_provider_c
             await process_due_publication_commands(s)
         async with Session() as s:
             row = await s.get(PublicationCommand, command_id)
-            attempts = (await s.execute(
-                select(PublicationAttempt.adapter_called).where(PublicationAttempt.command_id == command_id)
-            )).scalars().all()
-        assert (row.status, row.failure_kind) == (status, failure_kind), (row.status, row.failure_kind, row.reason_code)
-        assert attempts == [adapter_called]
+            assert row.status == "pending", (row.status, row.failure_kind, row.reason_code)
+            row.next_attempt_at = None  # 다음 tick이 곧바로 집게
+            await s.commit()
+        ticks["n"] = 1
+        async with Session() as s:
+            await process_due_publication_commands(s)
+        row, attempts = await _command_outcome(Session, command_id)
+        assert (row.status, row.failure_kind) == ("dead_letter", "needs_check"), (row.status, row.failure_kind, row.reason_code)
+        assert attempts[-1] is True
     finally:
         await engine.dispose()
+
+
+# ── 표시 장치 — 쓰기 요청이 나가는 한 자리(클래스 잠금 · PO 17:54Z) ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("method", "marked"), [("GET", False), ("POST", True), ("PUT", True), ("PATCH", True), ("DELETE", True)])
+@pytest.mark.anyio
+async def test_the_provider_client_marks_only_write_requests(method, marked):
+    import httpx
+
+    from app.services.provider_call_mark import (
+        provider_call_marked,
+        provider_client,
+        reset_provider_call_mark,
+    )
+
+    seen: list[bool] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(provider_call_marked())
+        return httpx.Response(200, json={})
+
+    reset_provider_call_mark()
+    async with provider_client(transport=httpx.MockTransport(handler)) as client:
+        await client.request(method, "https://provider.example/x")
+    assert seen == [marked] and provider_call_marked() is marked
+
+
+def _adapter_cases():
+    """(이름, 호출) — 실 어댑터의 쓰기 함수 · 읽기만 하고 실패하는 함수. 응답은 전부 500(요청 시점 표시만 본다)."""
+    import app.services.facebook_publish as facebook
+    import app.services.instagram_publish as instagram
+    import app.services.meta_ads_campaign as meta_ads
+    import app.services.threads_publish as threads
+    import app.services.x_publish as x
+    import app.services.youtube_publish as youtube
+    from app.services import stibee_client
+
+    tok = {"access_token": "t"}
+    return [
+        ("threads.create_container", lambda c: threads.create_container(c, threads_user_id="u", text="hi", **tok), True),
+        ("threads.publish_container", lambda c: threads.publish_container(c, threads_user_id="u", creation_id="c1", **tok), True),
+        ("threads.reply", lambda c: threads.reply(c, threads_user_id="u", reply_to_id="p", text="hi", **tok), True),
+        ("instagram.create_container", lambda c: instagram.create_container(c, threads_user_id="u", text="hi", image_url="https://i/a.png", **tok), True),
+        ("instagram.publish_container", lambda c: instagram.publish_container(c, threads_user_id="u", creation_id="c1", **tok), True),
+        ("facebook.create_container", lambda c: facebook.create_container(c, threads_user_id="u", text="hi", **tok), True),
+        ("x.post_tweet", lambda c: x.post_tweet(c, text="hi", **tok), True),
+        ("youtube.create_reels_container", lambda c: youtube.create_reels_container(c, threads_user_id="u", text="t", video_url="https://v/a.mp4", **tok), False),
+        ("x.create_container(원본 GET 실패)", lambda c: x.create_container(c, threads_user_id="u", text="hi", image_url="https://i/a.png", **tok), False),
+        ("stibee_client.create_email", lambda c: stibee_client.create_email(c, api_key="k", subject="s", list_id=1, sender_email="a@b.c", sender_name="n"), True),
+        ("meta_ads.create_boost_campaign", lambda c: meta_ads.create_boost_campaign(
+            c, ad_account_id="1", object_story_id="p_1", budget_minor=1000, currency="KRW",
+            starts_at_iso="2026-09-25T00:00:00+00:00", ends_at_iso="2026-09-26T00:00:00+00:00", objective="REACH", **tok), True),
+    ]
+
+
+@pytest.mark.parametrize("case", range(len(_adapter_cases())), ids=[c[0] for c in _adapter_cases()])
+@pytest.mark.anyio
+async def test_every_adapter_write_request_goes_out_marked_and_read_only_failures_stay_unmarked(case):
+    """어댑터 전부 — 쓰기 메서드 요청이 나가는 순간 표시가 켜져 있고, 읽기(GET)만 하고 실패한 경로는 꺼져 있다. 새 쓰기 경로가
+    `provider_client` 밖에서 생기면 아래 구조 가드가 막는다. 뮤테이션: 요청 훅을 빼면 쓰기 쪽 전부 RED."""
+    import httpx
+
+    from app.services.provider_call_mark import (
+        provider_call_marked,
+        provider_client,
+        reset_provider_call_mark,
+    )
+
+    name, call, expects_write = _adapter_cases()[case]
+    seen: list[tuple[str, bool]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, provider_call_marked()))
+        return httpx.Response(500, text="down")
+
+    reset_provider_call_mark()
+    # 응답이 전부 500이라 어댑터가 실패로 끝나는 게 정상 — 요청 시점 표시만 본다.
+    async with provider_client(transport=httpx.MockTransport(handler)) as client:
+        with contextlib.suppress(Exception):
+            await call(client)
+    writes = [marked for method, marked in seen if method != "GET"]
+    assert seen, f"{name}: 요청이 하나도 안 나갔다"
+    assert all(writes), f"{name}: 쓰기 요청이 표시 없이 나갔다 {seen}"
+    assert bool(writes) is expects_write, f"{name}: {seen}"
+    assert provider_call_marked() is expects_write, f"{name}: 읽기만 하고 실패했는데 표시가 켜졌다 {seen}"
+
+
+_PUBLISH_PATH_MODULES = [
+    "app/services/channel_posts.py", "app/services/site_posts.py", "app/services/publication_command.py",
+    "app/services/ads_boost_execution.py", "app/services/newsletter_send_execution.py",
+]
+
+
+@pytest.mark.parametrize("path", _PUBLISH_PATH_MODULES)
+def test_publish_path_modules_create_http_clients_only_through_provider_client(path):
+    """구조 가드 — 발행 경로 모듈이 맨 `httpx.AsyncClient`를 만들면 그 클라이언트의 쓰기 요청은 표시 없이 나간다. 뮤테이션: 한 곳을
+    `httpx.AsyncClient(`로 되돌리면 RED."""
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse((Path(__file__).resolve().parents[1] / path).read_text())
+    bare = [
+        n.lineno for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "AsyncClient"
+        and isinstance(n.func.value, ast.Name) and n.func.value.id == "httpx"
+    ]
+    assert bare == [], f"{path}: 맨 httpx.AsyncClient {bare}"
+    assert "mark_provider_call()" not in (Path(__file__).resolve().parents[1] / path).read_text(), "호출처 손 표시는 걷어낸다"
 
 
 # ── 구조 고정 — 워커 배치 루프는 미리 읽은 ORM 행이 아니라 원시 id를 돈다 ────────────────────────────────────

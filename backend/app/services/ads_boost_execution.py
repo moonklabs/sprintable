@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
 from app.models.publication_command import PublicationCommand
-from app.services.provider_call_mark import mark_provider_call
+from app.services.provider_call_mark import provider_client
 from app.services.publication_command import create_or_get_publication_command
 
 _ADS_BOOST_GATE_TYPE = "ads_boost"
@@ -388,10 +388,8 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
     is_sandbox = getattr(module, "__name__", "").endswith("ads_sandbox_campaign")
 
     try:
-        import httpx
 
-        async with httpx.AsyncClient(timeout=20) as client:
-            mark_provider_call()  # story #4272 — 이 블록의 갈래는 전부 곧바로 광고 API를 부른다(캠페인 없음 거절은 코드가 가른다)
+        async with provider_client(timeout=20) as client:
             if command.operation == OP_BOOST_START:
                 result = await module.create_boost_campaign(
                     client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
