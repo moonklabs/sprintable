@@ -1746,7 +1746,7 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
       entityId: storyId,
       title: '스토리 제목',
       status: null,
-      href: '/board?story=' + storyId,
+      href: '/board?story=' + storyId + '&p=proj-1', // story #4253 — 스토리 링크도 프로젝트를 싣는다(getEntityHref withProject)
     });
   });
 

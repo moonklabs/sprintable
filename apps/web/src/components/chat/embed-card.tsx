@@ -42,13 +42,16 @@ export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
  * 항목마다 프로젝트가 있는 목록은 «그 항목의 프로젝트를 싣는 함수»를 넘긴다. 이동하지 않고 «자기 주소가 있나»만 보는 판정은 keepHref. */
 export function getEntityHref(entityType: string, entityId: string, withProject: (href: string) => string): string | null {
   switch (entityType) {
-    case 'story': return `/board?story=${entityId}`;
+    // story #4253(유나 4612 design) — 목적지가 있는 갈래는 모두 withProject로 프로젝트를 싣는다. 예전엔 doc만 감싸, 활동 피드의 다른 프로젝트
+    // 스토리 링크(`/board?story=`)가 p 없이 옛 자원 리다이렉트를 타 쿠키 프로젝트 셸로 착지했다. /board · /sprints · /storage는 옛 자원 경로라
+    // flat 래칫(app/(authenticated) 최상위 폴더 기준)이 세지 못한 자리다.
+    case 'story': return withProject(`/board?story=${entityId}`);
     case 'doc': return withProject(`/docs?id=${entityId}`);
     // AC1 — 은퇴한 이름(/epics/)이 주소로 남아 404였다. 모델은 Goal, 화면은 goals/[id]/page.tsx.
-    case 'epic': return `/goals/${entityId}`;
+    case 'epic': return withProject(`/goals/${entityId}`);
     // sprint는 sprints-client.tsx가 `?id=`를 실제로 읽어 자동선택한다(딥링크 주석 확認됨) — ①.
-    case 'sprint': return `/sprints?id=${entityId}`;
-    case 'asset': return `/storage?asset=${entityId}`;
+    case 'sprint': return withProject(`/sprints?id=${entityId}`);
+    case 'asset': return withProject(`/storage?asset=${entityId}`);
     case 'task': return null; // ② — 부모 story_id는 EntityPreviewModal이 fetch 후 판정.
     case 'artifact': return null; // 레코드마다 ②/③ — 위 함수 doc 참고.
     case 'hypothesis': return null; // ③ 고정 — 위 함수 doc 참고.

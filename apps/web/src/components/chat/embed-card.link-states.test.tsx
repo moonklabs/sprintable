@@ -68,6 +68,14 @@ async function flush(times = 4) {
 }
 
 describe('AC1 — epic 링크가 은퇴한 /epics/ 대신 실재 라우트로 간다', () => {
+  // story #4253(유나 4612 design) — 목적지가 있는 갈래는 전부 넘긴 withProject(프로젝트를 싣는 함수)를 거친다(예전엔 doc만).
+  it.each([
+    ['story', '/board?story=x&p=P'], ['doc', '/docs?id=x&p=P'], ['epic', '/goals/x?p=P'], ['sprint', '/sprints?id=x&p=P'], ['asset', '/storage?asset=x&p=P'],
+  ])('⭐getEntityHref("%s")는 withProject로 프로젝트를 싣는다', (type, expected) => {
+    const withP = (h: string) => `${h}${h.includes('?') ? '&' : '?'}p=P`;
+    expect(getEntityHref(type, 'x', withP)).toBe(expected);
+  });
+
   it('getEntityHref("epic", id)가 /goals/{id}를 반환한다(404였던 /epics/ 아님)', () => {
     expect(getEntityHref('epic', 'e1', (h) => h)).toBe('/goals/e1');
   });
