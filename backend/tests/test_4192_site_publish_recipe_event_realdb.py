@@ -281,7 +281,9 @@ async def test_external_blog_worker_failure_emits_nothing():
 
 async def test_hosted_blog_in_recipe_is_published_by_server_on_approval():
     """AC2 — 레시피 회차 자사 블로그: 초안 게이트 사람 승인 → 서버가 봉인 버전 발행(사람 클릭 0) → published 1 ·
-    승인 알림 «다음 행동»은 자동 발행 문구. 뮤테이션: transition_gate의 자사 블로그 자동 발행 호출 제거 → 발행 0으로 RED."""
+    승인 알림 «다음 행동»은 자동 발행 문구. 이 테스트는 `_approve`(전이 → 커밋 → 발행 함수 직접 호출)로 **발행 함수**를
+    잰다. 라우터 배선(전이 엔드포인트가 커밋 뒤 발행을 부르는지)은
+    `test_hosted_blog_in_recipe_is_published_through_the_real_transition_endpoint`(#4229)가 가른다."""
     from app.main import app
     from app.models.gate import Gate
     from app.routers.events import _render_gate_verdict_message
@@ -845,4 +847,114 @@ async def test_site_after_publish_recipe_step_never_touches_the_worker_session(l
         assert await _published_events(Session, w) == 1
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_hosted_blog_in_recipe_is_published_through_the_real_transition_endpoint():
+    """story #4229(까디르 4583 P3 ①) — 레시피 회차 자사 블로그 초안 게이트를 **실 전이 엔드포인트**
+    (`POST /api/v2/gates/{id}/transition`)로 승인하면, 라우터가 승인 커밋 뒤 서버 발행까지 부른다: 응답 200 · 공개 글 1 ·
+    `publish_outcome=published` · published 이벤트 1 · 승인 알림 «다음 행동»은 자동 발행 문구(전부 새 세션 재조회).
+    뮤테이션: 전이 엔드포인트의 커밋 뒤 발행 호출(`publish_recipe_approved_hosted_site_draft_after_commit`)을 빼면 공개 글 0 ·
+    이벤트 0으로 RED(실측)."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.routers.events import _render_gate_verdict_message
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_hosted(app, Session, w, "hosted-endpoint")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
+
+        _setup_org_scoped_app(app, Session, w["org_id"], user_id=w["human_user_id"], agent=False)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/gates/{gate_id}/transition", json={
+                "status": "approved", "note": "발행 승인", "evidence_viewed": True,
+            })
+        assert r.status_code == 200, r.text
+
+        assert await _site_posts(Session, w) == 1
+        async with Session() as fresh:
+            gate = await fresh.get(Gate, gate_id)
+            assert gate.status == "approved" and gate.publish_outcome == "published", gate.publish_outcome
+            assert gate.resolver_id == w["human_id"]
+            rendered = await _render_gate_verdict_message(fresh, org_id=w["org_id"], payload={
+                "work_item_type": "story", "work_item_id": str(w["story_id"]), "gate_type": "external_publish",
+                "verdict": "approved", "resolver_member_id": str(w["human_id"]), "gate_id": str(gate_id),
+            })
+        assert await _published_events(Session, w) == 1
+        assert t("events.gate_verdict_next_action_recipe_site_auto_publish", "ko") in rendered, rendered
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_channel_after_publish_recipe_step_never_touches_the_worker_session():
+    """story #4229(까디르 4583 P3 ②) — site 쪽 `test_site_after_publish_recipe_step_never_touches_the_worker_session`의 채널
+    짝: 예약 채널 발행 성공 뒤 레시피 처리(`_emit_recipe_published_for_channel_command`)는 워커 세션을 **읽기조차** 하지
+    않는다. 세션 메서드가 전부 터지는 대역(엔진만 빌려 줌)을 넘겨도 레시피 문맥 조회 · 레시피 게이트
+    `publish_outcome=published` 기록 · published 이벤트가 격리 세션에서 끝난다(새 세션 재조회). (배치 테스트
+    `test_channel_scheduled_worker_context_lookup_pg_error_keeps_completed`만으로는 격리를 못 가른다 — 워커가 completed를
+    먼저 커밋하므로 깨진 트랜잭션의 COMMIT이 조용한 ROLLBACK이 돼 배치 결과가 같다.)
+    뮤테이션: 레시피 문맥 조회를 워커 세션(`db`)으로 되돌리면 대역이 터져 이벤트 0 · outcome 그대로로 RED(실측)."""
+    from unittest.mock import MagicMock
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.channel_post_draft import ChannelPostDraft
+    from app.models.gate import Gate
+    from app.models.publication_command import PublicationCommand
+    from app.routers.events import _find_existing_stage_publish
+    from app.services.publication_command import _emit_recipe_published_for_channel_command
+    from tests.conftest import seed_org_with_human_owner
+    from tests.test_4093_scheduled_publish_event_realdb import (
+        _KEY as _CH_KEY,
+        _approve_and_schedule_submit,
+        _realdb_session,
+        _seed_agent as _ch_seed_agent,
+        _seed_default_role as _ch_seed_default_role,
+        _seed_definition,
+        _seed_recipe_channel_binding,
+        _seed_sandbox_connection,
+        _seed_story as _ch_seed_story,
+        _seed_system_publisher_teammember_shim,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id = await seed_org_with_human_owner(s, slug="4229ch", org_name="Org4229ch")
+            await _ch_seed_default_role(s, org_id)
+            await _seed_system_publisher_teammember_shim(s, org_id, project_id)
+            creator_id = await _ch_seed_agent(s, org_id, project_id, name="댄")
+            story_id = await _ch_seed_story(s, org_id, project_id)
+            await _seed_definition(s)
+            connection_id = await _seed_sandbox_connection(s, org_id)
+            await _seed_recipe_channel_binding(s, org_id, connection_id)
+            gate_d_id, scoped_gate_id, draft_id = await _approve_and_schedule_submit(
+                s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
+                connection_id=connection_id,
+            )
+        async with Session() as s:
+            command = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == scoped_gate_id)
+            )).scalar_one()
+            draft = await s.get(ChannelPostDraft, draft_id)
+
+        worker = MagicMock(spec=AsyncSession)
+        for name in ("execute", "commit", "rollback", "flush", "get", "begin_nested", "scalar", "scalars", "add", "refresh"):
+            setattr(worker, name, MagicMock(side_effect=AssertionError(f"워커 세션 {name} 사용")))
+        worker.bind = engine
+        await _emit_recipe_published_for_channel_command(worker, command, draft)
+
+        async with Session() as fresh:
+            assert (await fresh.get(Gate, gate_d_id)).publish_outcome == "published"
+            assert await _find_existing_stage_publish(
+                fresh, org_id=org_id, definition_key=_CH_KEY, work_item_type="story",
+                work_item_id=str(story_id), stage="published",
+            ) is not None
+    finally:
         await engine.dispose()
