@@ -20,6 +20,7 @@ import { ArtifactEditor } from './artifact-editor';
 import { StoryPickerDialog } from './story-picker-dialog';
 import { ImportArtifactDialog } from './import-artifact-dialog';
 import { useToast } from '@/components/ui/toast';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -93,6 +94,7 @@ function ArtifactCard({
   /** 기본 버전(anchor??latest) 실물 열람. */
   onOpen: () => void;
 }) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   return (
     // story #3378(결함·customer-zero, 선생님 실사용) — 카드 전체가 <button>이라 크게 보기
     // 다이얼로그 말고는 갈 곳이 없었다(다이얼로그 자체도 막다른 길이었다). <a>는 <button>
@@ -113,7 +115,7 @@ function ArtifactCard({
         />
       </button>
       <Link
-        href={`/artifacts/${artifact.id}`}
+        href={flatHref(`/artifacts/${artifact.id}`)}
         title={axisT('galleryOpenDetailAction')}
         className="flex flex-col gap-1.5 px-3 pt-2.5 pb-3 hover:underline"
       >

@@ -33,6 +33,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -208,12 +209,15 @@ export default function GateDetailPage() {
   // approvals-queue.tsx도 같은 헬퍼를 쓴다 — 처음엔 이 평문 버튼에만 붙여 정작
   // 고위험 게이트가 타는 서명 버튼엔 안 붙는 결함이 났다, CHANGES 실측).
   const approveButtonLabelKey = gateApproveLabelKey(gate);
+  // story #4231 4차 B(PO 08:48Z) — 게이트 상세는 조직 수준 화면이라 bare `/gates/{id}`로 들어오면 현재 p = 쿠키 프로젝트다. 대상 링크는 현재 p가
+  // 아니라 **게이트 자기 프로젝트**(GET /gates/{id}의 project_id — 4241 · 4600 해소)를 싣는다. 모르면(조직 단위 게이트) 주소 그대로.
+  const gateProjectId = gate?.project_id ?? null;
   const targetLink = isDocGate && gate?.work_item_summary?.slug
-    ? { href: flatHref(`/docs/${gate.work_item_summary.slug}`), labelKey: 'gateDetailViewTargetDoc' as const }
+    ? { href: withProjectParam(`/docs/${gate.work_item_summary.slug}`, gateProjectId), labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
-    ? { href: `/artifacts/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetArtifact' as const }
+    ? { href: withProjectParam(`/artifacts/${gate.work_item_id}`, gateProjectId), labelKey: 'gateDetailViewTargetArtifact' as const }
     : isLoopDecisionGate && gate?.work_item_id
-    ? { href: `/loops/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetLoop' as const }
+    ? { href: withProjectParam(`/loops/${gate.work_item_id}`, gateProjectId), labelKey: 'gateDetailViewTargetLoop' as const }
     : null;
   const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
   // story #2091(P0) — needsAction은 "이 게이트가 사람의 판단을 필요로 하는가"만 답한다(gate 자체의

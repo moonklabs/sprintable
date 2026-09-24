@@ -49,6 +49,7 @@ import { SteerDispatchModal } from './steer-dispatch-modal';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -739,6 +740,7 @@ interface GoalDetailPanelProps {
 }
 
 function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   const t = useTranslations('goals');
   // story #3878(§⑤ 낱말 드리프트) — 스토리 목록 배지의 story.status(canonical slug)를
   // t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례
@@ -887,7 +889,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                     <button
                       key={story.id}
                       type="button"
-                      onClick={() => router.push(`/board?story=${story.id}`)}
+                      onClick={() => router.push(flatHref(`/board?story=${story.id}`))}
                       className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                     >
                       <p className="text-sm text-foreground">{story.title}</p>

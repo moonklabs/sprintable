@@ -25,6 +25,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { copyTextSafely } from '@/lib/clipboard';
 import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -325,6 +326,7 @@ interface RecruiterClientProps {
 }
 
 export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   // story #4017(PO 확定 2026-09-17) — 아래 「완료」 CTA(/chats)를 목적지 모듈로.
   const chatsHref = useChatsHref();
   // S25(ae844d74): 카탈로그·recruit이 소비할 활성 UI locale — locale-switcher가 쿠키 전환 후 풀
@@ -1616,7 +1618,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     `/flow?view=list`로 흡수. 라벨("보드에서 보기")은 목적지 콘텐츠(칸반)가
                     그대로라 안 바꿨다 — bare href는 proxy.ts MIGRATED_RESOURCES 안전망이
                     org/project 쿠키로 해소한다. */}
-                <Link href="/flow?view=list" className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
+                <Link href={flatHref('/flow?view=list')} className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
               </div>
 
               <p className="flex items-start gap-1.5 text-xs text-info">

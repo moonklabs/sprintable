@@ -1029,6 +1029,25 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     expect(link?.getAttribute('href')).toBe('/artifacts/artifact-42');
   });
 
+  // story #4231 4차 B(PO 08:48Z) — 조직 수준 화면이라 현재 p는 쿠키 프로젝트일 수 있다 → 대상 링크는 게이트 자기 프로젝트.
+  it('⭐다른 프로젝트 게이트의 아티팩트 대상 링크는 게이트 자기 project_id를 싣는다', async () => {
+    await mount(gate({
+      gate_type: 'artifact_canonicalize', work_item_type: 'visual_artifact', work_item_id: 'artifact-42',
+      can_approve: true, risk_grade: 'low', work_item_summary: null, project_id: 'proj-GATE',
+    }));
+    const art = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetArtifact);
+    expect(art?.getAttribute('href')).toBe('/artifacts/artifact-42?p=proj-GATE');
+  });
+
+  it('⭐다른 프로젝트 게이트의 문서 대상 링크도 게이트 자기 project_id', async () => {
+    await mount(gate({
+      gate_type: 'doc_approval', work_item_type: 'doc', can_approve: true, risk_grade: 'low',
+      work_item_summary: { title: '온보딩 재실측', slug: 'onboarding-remeasure' }, project_id: 'proj-GATE',
+    }));
+    const doc = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetDoc);
+    expect(doc?.getAttribute('href')).toBe('/docs/onboarding-remeasure?p=proj-GATE');
+  });
+
   it('doc/artifact가 아닌 다른 gate 유형(merge 등)은 대상 링크를 렌더하지 않는다(엉뚱한 경로 지어내지 않음)', async () => {
     // PO AC 리뷰(PR#3542) 사소 지적 — 'merge'가 실존 gate_type(hitl_config.py GATE_TYPES).
     // 'merge_gate'는 이 파일 기존 기본 픽스처값(line 57)일 뿐 실존 타입 아님 — 내 신규
@@ -1048,6 +1067,17 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
     expect(link).toBeTruthy();
     expect(link?.getAttribute('href')).toBe('/loops/loop-7');
+  });
+
+  // story #4231 4차 B(까디르 codex 01a0d3ad ②) — 다른 프로젝트 게이트의 루프 링크는 현재 p가 아니라 게이트 자기 프로젝트(gate.project_id).
+  // 예전 픽스처엔 프로젝트가 없어 폴백만 재서, 루프 링크를 현재 p(flatHref)로 바꿔도 초록이었다.
+  it('⭐다른 프로젝트 loop_decision — /loops/{id}?p=게이트 프로젝트', async () => {
+    await mount(gate({
+      gate_type: 'loop_decision', work_item_type: 'loop', work_item_id: 'loop-8', project_id: 'proj-GATE',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
+    expect(link?.getAttribute('href')).toBe('/loops/loop-8?p=proj-GATE');
   });
 
   it('workflow_config_publish는 이번에도 대상 링크가 없다(실 뷰어 부재 — 억지 진입점 금지, #2118 AC④)', async () => {

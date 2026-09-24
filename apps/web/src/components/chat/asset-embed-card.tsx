@@ -11,6 +11,7 @@ import type { Asset } from '@/lib/storage/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
+import { withProjectParam } from '@/lib/with-project-param';
 
 /** 파일 타입 글리프 — getFileIcon 결과를 createElement 로 직접 렌더(render 중 컴포넌트 생성 lint 회피). */
 function fileGlyph(contentType: string | null, className: string) {
@@ -137,7 +138,8 @@ export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel
 
   return (
     <Link
-      href={`/storage?asset=${asset.id}`}
+      // story #4231 4차 B — 채팅 임베드는 다른 프로젝트 자산일 수 있다 → 자산 자기 project_id(현재 p 아님).
+      href={withProjectParam(`/storage?asset=${asset.id}`, asset.project_id ?? null)}
       className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 no-underline transition-colors ${cardSurface}`}
     >
       {inner}
