@@ -29,7 +29,16 @@ export interface RecipeStartCandidate {
   // 「단계 n/9」 자리표시용(내부어 raw slug 노출 대신).
   current_stage_position: number | null;
   total_stages: number | null;
+  // story #4249 — 지금 stage 담당(바인딩 멤버)과 완료 방식(BE recipe_stage_completion.completion_mode).
+  current_bound_member_id?: string | null;
+  current_completion?: RecipeStageCompletion | null;
+  // 게이트 stage 승인 뒤 다음 stage 담당이 사람이면 «내 단계 시작» — 다음 stage 담당 · 지금 stage 게이트 상태.
+  next_bound_member_id?: string | null;
+  current_gate_status?: string | null;
 }
+
+export type RecipeStageCompletion =
+  | 'complete' | 'last_stage' | 'server_continues' | 'gate_approval' | 'needs_fields' | 'not_member_stage' | 'unknown_stage';
 
 export interface UseRecipeStartCandidatesResult {
   candidates: RecipeStartCandidate[];

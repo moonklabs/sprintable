@@ -161,3 +161,26 @@ describe('EventBlockCard — story #4086 레시피 단계 라벨 해소', () => 
     expect(container.textContent).toContain('not_a_registered_stage');
   });
 });
+
+// story #4249(유나 design ⑥) — 레시피 stage 카드는 그 stage 담당(refs.stage_assignee)이 보는 사람일 때만 «스토리 보기» 링크.
+describe('EventBlockCard — 담당에게만 «스토리 보기»(story #4249)', () => {
+  const TEMPLATE = { blocks: [{ type: 'header' as const, text: '헤더' }] };
+  const PAYLOAD = { stage: 'assign_step_1', work_item_type: 'story', work_item_id: 'story-9' };
+
+  it('담당 = 나 → 스토리 링크 · 담당 ≠ 나 · 담당 모름 → 링크 없음', async () => {
+    useDashboardContextMock.mockReturnValue({ currentMemberType: 'human', role: 'admin', orgId: 'org-1', currentTeamMemberId: 'me-1' });
+    await act(async () => { root.render(wrap(<EventBlockCard template={TEMPLATE} payload={PAYLOAD} refs={{ stage_assignee: 'me-1' }} />)); });
+    await flush();
+    const link = container.querySelector('[data-testid="event-card-view-story"]');
+    expect(link?.textContent).toBe(koMessages.eventCard.viewStory);
+    expect(link?.getAttribute('href')).toContain('/board?story=story-9');
+
+    await act(async () => { root.render(wrap(<EventBlockCard template={TEMPLATE} payload={PAYLOAD} refs={{ stage_assignee: 'someone-else' }} />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="event-card-view-story"]')).toBeNull();
+
+    await act(async () => { root.render(wrap(<EventBlockCard template={TEMPLATE} payload={PAYLOAD} refs={{}} />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="event-card-view-story"]')).toBeNull();
+  });
+});

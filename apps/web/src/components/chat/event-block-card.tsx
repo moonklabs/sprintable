@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
@@ -206,7 +208,8 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   const tHypotheses = useTranslations('hypotheses');
   const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
-  const { currentMemberType, role, orgId } = useDashboardContext();
+  const { currentMemberType, role, orgId, currentTeamMemberId } = useDashboardContext();
+  const flatHref = useFlatHref();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
   // (오버라이드 미설정) 아래에서 canonical i18n(STORY_STATUS_KEY_MAP→tBoard)으로 폴백한다 —
   // kanban-board.tsx 등 기존 소비처와 동일 3단 폴백(org 커스텀 → canonical i18n → 원시 slug).
@@ -410,6 +413,15 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     );
   const blocks = renderBlockTemplate(localizedTemplate, payload, refsForTemplate, labels, translations);
 
+  // story #4249(유나 design ⑥) — 레시피 stage 카드는 그 stage 담당(발행 시점 바인딩 · refs.stage_assignee)이 보는 사람일 때만
+  // 그 스토리로 가는 링크 하나. 카드가 아직 현재 단계인지는 여기서 모르므로 행동을 약속하지 않는 «스토리 보기»다(«스토리에서
+  // 완료하기»는 현재 단계를 알 수 있을 때만 — 지난 카드에 «완료하기»가 남으면 거짓).
+  const stageAssignee = refs?.['stage_assignee'];
+  const storyId = payload['work_item_type'] === 'story' && typeof payload['work_item_id'] === 'string' ? payload['work_item_id'] : null;
+  const storyHref = storyId && typeof stageAssignee === 'string' && currentTeamMemberId && stageAssignee === currentTeamMemberId
+    ? getEntityHref('story', storyId, flatHref)
+    : null;
+
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
       {blocks.map((block, i) => (
@@ -422,6 +434,11 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
           t={t}
         />
       ))}
+      {storyHref ? (
+        <Link href={flatHref(storyHref)} className="inline-block text-xs font-medium text-primary hover:underline" data-testid="event-card-view-story">
+          {tEventCard('viewStory')}
+        </Link>
+      ) : null}
     </div>
   );
 }
