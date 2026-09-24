@@ -249,8 +249,13 @@ async def dispatch_notification(
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
     via_outbox: bool = True,
+    human_event_recorded: bool = False,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
+
+    ``human_event_recorded``: story #4281 — 호출부(`agent_dispatch._finalize_dispatch`)가 사람 수신자 몫 Event(dispatched)를 이미
+    만들었으면 True. 이 함수가 사람 몫 Event를 또 만들면 종(`/api/v2/event-notifications` — 수신자 Event를 그대로 셈)에 한 번
+    맡김이 둘로 떴다(실 DB 테스트로 재현). True면 Notification만 넣고 사람 Event는 건너뛴다.
 
     ``event``: story #3903(migration 0378, additive·nullable) — human Notification 행에
     그대로 실린다(옵셔널, 기본 None — 이 파라미터를 안 넘기는 기존 ~40개 호출부는 무회귀).
@@ -456,7 +461,7 @@ async def dispatch_notification(
                         inserted = True
                     except Exception:
                         logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
-                    if member_row.project_id:
+                    if member_row.project_id and not human_event_recorded:
                         try:
                             async with db.begin_nested():
                                 # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로

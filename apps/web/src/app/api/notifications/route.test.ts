@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 837a36c4(Group B b9): 직접 repo 핸들러(NotificationRepository) — auth게이트 → repo.list/markRead/markAllRead.
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createNotificationRepository: vi.fn(),
-  list: vi.fn(), markRead: vi.fn(), markAllRead: vi.fn(),
+  list: vi.fn(), markRead: vi.fn(), markAllRead: vi.fn(), countUnread: vi.fn(),
   attachHrefs: vi.fn(), parseBody: vi.fn(),
 }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
@@ -22,7 +22,8 @@ describe('/api/notifications (직접 repo)', () => {
   beforeEach(() => {
     Object.values(h).forEach((m) => m.mockReset());
     h.getAuthContext.mockResolvedValue(agent());
-    h.createNotificationRepository.mockResolvedValue({ list: h.list, markRead: h.markRead, markAllRead: h.markAllRead });
+    h.createNotificationRepository.mockResolvedValue({ list: h.list, markRead: h.markRead, markAllRead: h.markAllRead, countUnread: h.countUnread });
+    h.countUnread.mockResolvedValue(1);
     h.attachHrefs.mockImplementation((items: unknown[]) => items);
   });
 
@@ -42,6 +43,18 @@ describe('/api/notifications (직접 repo)', () => {
     const body = await res.json();
     expect(body.data).toHaveLength(2);
     expect(body.meta.unreadCount).toBe(1);
+  });
+
+  // story #4281 — 머리 숫자는 한 페이지(50)가 아니라 진짜 안 읽은 수. 뮤테이션: 페이지 안 안읽음을 세게 되돌리면(1) RED.
+  it('GET: unreadCount는 받은 페이지가 아니라 진짜 안 읽은 수(COUNT)', async () => {
+    h.list.mockResolvedValue({
+      items: Array.from({ length: 50 }, (_, i) => ({ id: `n${i}`, is_read: i > 0, type: 'x' })),
+      hasMore: true, nextCursor: 'c',
+    });
+    h.countUnread.mockResolvedValue(120);
+    const body = await (await GET(new Request('http://localhost/api/notifications'))).json();
+    expect(body.meta.unreadCount).toBe(120);
+    expect(h.countUnread).toHaveBeenCalledWith('mem-1');
   });
 
   // story #2195 — 규약 A: cursor를 받아 repo.list에 그대로 실어 보내고, hasMore/nextCursor를

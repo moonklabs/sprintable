@@ -472,7 +472,9 @@ export default function InboxPage() {
         title={
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-medium">{activeTabLabel}</h1>
-            {unreadCount > 0 ? (
+            {/* story #4281 — 이 숫자는 알림 탭의 안 읽은 수다. 오늘 · 결재함 탭엔 그 탭의 수를 모르므로 안 붙인다(예전엔 탭과
+                무관하게 알림 수가 떠 «오늘 50»처럼 읽혔다). */}
+            {activeTab === 'notifications' && unreadCount > 0 ? (
               <span className="text-sm tabular-nums text-muted-foreground">{unreadCount}</span>
             ) : null}
           </div>
