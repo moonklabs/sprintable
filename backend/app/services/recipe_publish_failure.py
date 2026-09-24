@@ -174,7 +174,7 @@ async def _deliver_one_stop_notice(side: AsyncSession, command_id: uuid.UUID) ->
     # 까디르 4621 델타 codex ①(PO 14:23Z) — 표식이 선 뒤 멈춤에서 벗어난 행(취소 · voided · 완료 · 재시도 뒤 pending 등)은 보낼
     # 멈춤이 아니다. 표식을 세운 쪽과 같은 판정으로 보고 비운다 — 쓰는 곳마다 비우기를 흩지 않고 여기 한 곳에서 막는다(안
     # 그러면 `stop_kind`가 이벤트 스키마 enum 밖이라 롤백 → 틱마다 재시도하는 독 행이 된다).
-    if not awaits_stop_notice(row.status, row.failure_kind):
+    if not awaits_stop_notice(row):
         row.stop_notice_state = None
         return False
     ctx = await resolve_recipe_publish_failure_context(side, row)
@@ -193,7 +193,9 @@ async def _deliver_one_stop_notice(side: AsyncSession, command_id: uuid.UUID) ->
         "stage": ctx.request_stage,
         "command_id": str(command_id),
         "content_kind": ctx.kind,
-        "stop_kind": row.status,
+        # 이벤트 스키마의 stop_kind는 dead_letter · blocked 둘뿐 — 뉴스레터 연결 멈춤(blocked_unapproved)은 연결 멈춤과 같은
+        # «blocked»로 싣는다(사유 «연결 문제로 멈췄어요» · 다음 행동 «다시 연결한 뒤 다시 시도» · 4262 AC2).
+        "stop_kind": "blocked" if row.status == "blocked_unapproved" else row.status,
         "reason_code": row.reason_code,
         "failure_kind": row.failure_kind,
     })

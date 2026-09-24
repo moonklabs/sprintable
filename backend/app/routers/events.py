@@ -2078,7 +2078,7 @@ _RECIPE_PUBLISH_FAILED_MAPPED_REASONS = {
 
 async def _recipe_publish_retry_path(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> str | None:
     """story #4258 — 멈춘 발행을 사람이 다시 시도하는 화면(초안 관리 화면의 재시도). 채널 발행 = 채널 초안 화면 · 블로그 발행 =
-    글 초안 화면. 뉴스레터 발송은 재시도 버튼이 있는 화면이 정해지지 않아 싣지 않는다(지어내지 않는다)."""
+    글 초안 화면. story #4262 AC2 — 뉴스레터 발송 = 발송 게이트 상세(«발송 상태» 한 줄 + 사람 재시도가 선 자리)."""
     from app.models.channel_post_version import ChannelPostVersion
     from app.models.gate import Gate
     from app.models.publication_command import PublicationCommand
@@ -2089,6 +2089,11 @@ async def _recipe_publish_retry_path(db: AsyncSession, *, org_id: uuid.UUID, pay
         return None
     if command is None or command.org_id != org_id:
         return None
+    if command.content_kind == "newsletter_send":
+        gate_id = (await db.execute(
+            select(Gate.id).where(Gate.id == command.gate_id, Gate.org_id == org_id)
+        )).scalar_one_or_none()
+        return f"/gates/{gate_id}" if gate_id else None
     # 까디르 4621 델타 codex ② — 딸린 조회도 조직으로 묶는다(명령 조직 대조만으로는 다른 조직 게이트 · 초안 id가 링크로 샌다).
     if command.content_kind == "site_post":
         gate = (await db.execute(

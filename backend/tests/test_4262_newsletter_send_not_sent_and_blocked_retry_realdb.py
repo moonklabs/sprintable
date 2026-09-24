@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -43,11 +43,15 @@ def _command():
 @pytest.mark.anyio
 async def test_a_definitely_unsent_newsletter_code_stops_at_once_without_retries(code):
     """뮤테이션: `apply_command_failure`의 not_sent 갈래를 지우면 백오프 재시도(pending)로 떨어져 RED."""
-    from app.services.publication_command import FAILURE_KIND_NOT_SENT, apply_command_failure, classify_failure_kind
+    from app.services.publication_command import (
+        FAILURE_KIND_NOT_SENT,
+        apply_command_failure,
+        classify_failure_kind,
+    )
 
     assert classify_failure_kind(code) == FAILURE_KIND_NOT_SENT
     command = _command()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await apply_command_failure(None, command, error_code=code, last_error="x", now=now)
     assert (command.status, command.failure_kind, command.reason_code) == ("dead_letter", "not_sent", code)
     assert command.next_attempt_at is None and command.dead_letter_at == now and command.attempt_count == 1
@@ -96,7 +100,7 @@ async def _dispose_global_engine_after_test():
     await _global_engine.dispose()
 
 
-async def _blocked_send(Session):
+async def _blocked_send(Session, *, break_campaign: bool = False):
     """발송 요청 → 발송 게이트 승인 → 크론이 명령을 만든 뒤 연결이 끊긴 채 워커가 돈다 → blocked_unapproved."""
     from fastapi import BackgroundTasks
     from sqlalchemy import select
@@ -107,11 +111,15 @@ async def _blocked_send(Session):
     from app.services.publication_command import process_due_publication_commands
     from tests.test_3312_approve_stage_gate_auto_creation import _auth, _fake_request
     from tests.test_3806_ads_boost_gate import _approve_gate
-    from tests.test_4242_server_stage_routes_to_next_agent_realdb import _SEED, _bind_agent, _setup_newsletter
+    from tests.test_4242_server_stage_routes_to_next_agent_realdb import (
+        _SEED,
+        _bind_agent,
+        _setup_newsletter,
+    )
 
     ctx = await _setup_newsletter(Session)
     await _bind_agent(Session, ctx, definition_key=_SEED._KEY, stage="send_requested", agent_id=ctx["sender_id"])
-    scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
+    scheduled_at = datetime.now(UTC) + timedelta(hours=2)
     async with Session() as s:
         await publish_registry_event(
             EventPublishRequest(definition_key=_SEED._KEY, payload={
@@ -126,7 +134,14 @@ async def _blocked_send(Session):
         await _approve_gate(s, gate.id, ctx["owner_member_id"])
     async with Session() as s:
         assert (await process_due_newsletter_sends(s, now=scheduled_at + timedelta(minutes=1))).get("queued") == 1
-    await _set_connection(Session, ctx, "expired")
+    if break_campaign:  # 캠페인(발행물 외부 id)이 사라진 멈춤 — 사람 재시도 대상 아님
+        from app.models.channel_publication import ChannelPublication
+
+        async with Session() as s:
+            (await s.get(ChannelPublication, ctx["pub"].id)).external_id = None
+            await s.commit()
+    else:
+        await _set_connection(Session, ctx, "expired")
     async with Session() as s:
         await process_due_publication_commands(s, now=scheduled_at + timedelta(minutes=2))
     return ctx, scheduled_at
@@ -232,4 +247,100 @@ async def test_only_a_person_can_retry_through_the_endpoint():
         assert (await _send_command(Session, ctx)).status == "blocked_unapproved"
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ── AC2(PO 14:11Z · 14:13Z · 14:41Z) — 멈춤 통지가 이 자리로 · 연결 멈춤도 통지 · not_sent도 표식 ──────────────────
+
+
+def test_a_not_sent_stop_is_marked_for_the_stop_notice_in_the_same_commit():
+    """PO 14:11Z — not_sent 갈래도 4621의 다른 dead_letter 갈래처럼 전이와 같은 커밋에 `pending`(빠지면 not_sent 멈춤만 통지 0)."""
+    import asyncio
+
+    from app.services.publication_command import apply_command_failure
+
+    command = _command()
+    asyncio.run(apply_command_failure(
+        None, command, error_code="NEWSLETTER_SEND_CHANNEL_UNSUPPORTED", last_error="x", now=datetime.now(UTC),
+    ))
+    assert (command.status, command.stop_notice_state) == ("dead_letter", "pending")
+
+
+def test_the_human_retryable_block_codes_match_the_gate_screen():
+    """짝 테스트(PO 14:13Z 조건 1) — 통지 · 재시도 수용이 읽는 BE 모음 = 게이트 화면이 «연결 문제로 멈춤 + 다시 시도»를 여는 FE 코드."""
+    import re
+    from pathlib import Path
+
+    from app.services.publication_command import NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
+
+    source = (Path(__file__).resolve().parents[2] / "apps/web/src/components/cage/newsletter-send-status.tsx").read_text()
+    fe = set(re.findall(r"const CONNECTION_UNAVAILABLE = '([A-Z_]+)'", source))
+    assert fe == set(NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES)
+
+
+async def _notices(Session, org_id):
+    from tests.test_4258_recipe_publish_stopped_notice_realdb import (
+        _notices as notices_of,
+    )
+
+    return await notices_of(Session, org_id)
+
+
+@pytest.mark.anyio
+async def test_a_connection_blocked_send_is_notified_with_the_gate_link_and_again_after_a_failed_retry():
+    """연결 비활성 멈춤(실행기가 직접 세움) → 표식 `pending` → 다음 틱 통지 1(연결 사유 · 다시 연결한 뒤 다시 시도 · `/gates/{id}`) ·
+    고치지 않은 채 재시도 → 다시 막힘 → 새 통지 1. 뮤테이션: 실행기의 표식 줄을 지우면 RED."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.services.i18n_catalog import t
+    from tests.test_4258_recipe_publish_stopped_notice_realdb import (
+        _install_notice_definition,
+    )
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session = await _session_factory()
+    try:
+        _install_notice_definition()
+        ctx, scheduled_at = await _blocked_send(Session)
+        # 멈춘 그 틱 끝의 통지 단계가 바로 보낸다(전이와 같은 커밋에 표식 → 같은 틱 끝에 «통지 + sent»).
+        command = await _send_command(Session, ctx)
+        assert (command.status, command.stop_notice_state) == ("blocked_unapproved", "sent")
+        notices = await _notices(Session, ctx["org_id"])
+        assert len(notices) == 1
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.org_id == ctx["org_id"], Gate.gate_type == "newsletter_send"))).scalar_one()
+        payload = notices[0].msg_metadata["event"]["payload"]
+        assert payload["stop_kind"] == "blocked"
+        assert t("events.recipe_publish_failed_reason_blocked", "ko") in notices[0].content
+        assert t("events.recipe_publish_failed_next_blocked", "ko", retry_url=f"/gates/{gate.id}") in notices[0].content
+
+        assert await _retry(Session, ctx, command.id) is not None
+        await _tick(Session, scheduled_at + timedelta(minutes=6))  # 연결은 그대로 — 다시 막히고 같은 틱 끝에 새 통지
+        assert (await _send_command(Session, ctx)).status == "blocked_unapproved"
+        assert len(await _notices(Session, ctx["org_id"])) == 2, "재시도 뒤 다시 막혔는데 새 통지가 없다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_stop_a_person_cannot_retry_is_not_notified():
+    """음성 대조 — 캠페인 없음으로 멈춘 뉴스레터(`blocked_unapproved` · 사람 재시도 대상 아님)는 표식 · 통지 0 · 재시도도 거부."""
+    from tests.test_4258_recipe_publish_stopped_notice_realdb import (
+        _install_notice_definition,
+    )
+    from tests.test_e4fc29fa_site_post_orchestration import _session_factory
+
+    engine, Session = await _session_factory()
+    try:
+        _install_notice_definition()
+        ctx, scheduled_at = await _blocked_send(Session, break_campaign=True)
+        command = await _send_command(Session, ctx)
+        assert (command.status, command.reason_code, command.stop_notice_state) == (
+            "blocked_unapproved", "NEWSLETTER_SEND_CAMPAIGN_MISSING", None,
+        )
+        await _tick(Session, scheduled_at + timedelta(minutes=3))
+        assert await _notices(Session, ctx["org_id"]) == []
+        assert await _retry(Session, ctx, command.id) is None
+    finally:
         await engine.dispose()
