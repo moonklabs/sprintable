@@ -167,11 +167,21 @@ async def test_publish_stage_with_unmapped_channel_states_missing_mapping_not_si
     assert "발행 도구를 쓰세요" not in text
 
 
-async def test_non_publish_stage_keeps_generic_text_regression():
-    """publish가 아닌 stage(예: approve)는 리졸버를 안 타고 옛 제네릭 문구 그대로."""
+async def test_non_publish_stage_without_recipe_key_has_no_next_action_line():
+    """publish가 아닌 stage(예: approve)는 리졸버를 안 탄다. story #4265(유나 확정) — 레시피 정의 키가 없는 행(옛 행 · 레시피 밖)은
+    «다음 행동» 줄을 싣지 않는다(예전엔 레시피 폴백 «이 정의의 다음 stage 이벤트를 발행하세요»)."""
     text = await _render(_FakeGateRow({"stage": "approve", "channel": "threads"}))
-    assert "이 정의의 다음 stage 이벤트를 발행하세요" in text
+    assert "다음 stage 이벤트를 발행하세요" not in text
+    assert "다음 행동" not in text
     assert "커넥터로 발행하세요" not in text
+
+
+async def test_non_recipe_gate_approval_has_no_next_action_line():
+    """⭐story #4265 AC1 — 레시피 문맥이 없는 게이트(스토리 design · QA 등: stage · triggered_by_event 없음) 승인 알림엔 «다음 행동» 줄 0."""
+    for facts in (None, {}, {"requested_by_member_id": str(uuid.uuid4())}):
+        text = await _render(_FakeGateRow(facts))
+        assert "다음 stage 이벤트를 발행하세요" not in text
+        assert "다음 행동" not in text
 
 
 async def test_publish_stage_without_channel_keeps_generic_text_regression():
@@ -180,3 +190,25 @@ async def test_publish_stage_without_channel_keeps_generic_text_regression():
     text = await _render(_FakeGateRow({"stage": "publish", "channel": "미확認"}))
     assert "이 정의의 다음 stage 이벤트를 발행하세요" in text
     assert "커넥터로 발행하세요" not in text
+
+
+async def test_rejection_without_recipe_key_has_no_recipe_revise_line():
+    """⭐story #4265 — 반려 갈래의 «같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요»는 레시피 문맥 전제다. 레시피 정의 키가 없는
+    게이트(스토리 design · QA 등 · 옛 행) 반려엔 싣지 않는다."""
+    from app.routers.events import _render_gate_verdict_message
+
+    for facts in (None, {}, {"stage": "review"}):
+        text = await _render_gate_verdict_message(_fake_db(_FakeGateRow(facts)), org_id=uuid.uuid4(), payload=_payload(verdict="rejected"))
+        assert "approve stage 이벤트를 다시 발행하세요" not in text
+        assert "다음 행동" not in text
+
+
+async def test_rejection_with_recipe_key_keeps_revise_line_byte_for_byte():
+    """story #4265 AC2 — 레시피 게이트 반려 문장은 바이트 무변."""
+    from app.routers.events import _render_gate_verdict_message
+    from app.services.i18n_catalog import t
+
+    text = await _render_gate_verdict_message(
+        _fake_db(_FakeGateRow({"triggered_by_event": "org.acme.recipe", "stage": "review"})), org_id=uuid.uuid4(), payload=_payload(verdict="rejected"),
+    )
+    assert f"- {t('events.gate_verdict_next_action_revise_and_republish', 'ko')}" in text

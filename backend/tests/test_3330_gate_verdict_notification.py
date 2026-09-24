@@ -479,10 +479,10 @@ async def test_approved_non_external_publish_verdict_gives_concrete_publish_exam
 
 @_REAL_DB_SKIP
 @pytest.mark.anyio
-async def test_approved_verdict_without_triggered_by_event_falls_back_to_generic_text():
-    """⭐story #4076 — triggered_by_event 키가 없는 옛 게이트 row(이 필드가 생기기 前에
-    만들어진 shape)는 크래시 대신 기존 제네릭 문구로 폴백한다(페드루 PO 明示 요구, 이
-    갈래도 테스트로 고정)."""
+async def test_approved_verdict_without_triggered_by_event_has_no_next_action_line():
+    """⭐story #4076 — triggered_by_event 키가 없는 옛 게이트 row(이 필드가 생기기 前에 만들어진 shape)는 크래시하지 않는다.
+    story #4265(유나 확정 · PO 14:28Z) 개정 — 예전엔 제네릭 레시피 문구로 폴백했지만, 정의를 모르는 행은 «다음 행동» 줄을 싣지 않는다
+    (모르는 것을 지어내지 않음)."""
     from app.services.gate_service import transition_gate
 
     engine, Session = await _realdb_session()
@@ -503,7 +503,42 @@ async def test_approved_verdict_without_triggered_by_event_falls_back_to_generic
 
             content = await _latest_message_content_for(s, executor_id, org_id)
             assert content is not None
-            assert "이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면" in content
+            assert "다음 stage 이벤트를 발행하세요" not in content
+            assert "다음 행동" not in content
+            assert "publish_event(" not in content
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_approved_verdict_on_recipe_last_stage_says_no_next_stage():
+    """⭐story #4265(유나 확정) — 레시피 게이트인데 다음 stage가 없음(마지막 단계) → «다음 행동: 할 일 없음 — 레시피의 마지막 단계라 더 낼
+    단계가 없어요.» 끝났다고 하지 않는다. 레시피 폴백(«다음 stage 이벤트를 발행하세요») 0."""
+    from app.services.gate_service import transition_gate
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_with_owner(s, slug="e4265a")
+            await _seed_preset_gate_verdict_definition(s)
+            await _seed_system_publisher(s, org_id, project_id)
+            executor_id = await _seed_agent(s, org_id, project_id)
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=executor_id)
+            recipe_key = await _seed_recipe_cycle_definition(s, org_id, slug="e4265a")
+            gate = await _seed_gate(
+                s, org_id, work_item_id=story_id, gate_type="checkpoint",
+                neutral_facts={"triggered_by_event": recipe_key, "stage": "publish"},  # 마지막 enum
+            )
+
+            await transition_gate(s, org_id, gate.id, "approved", resolver_id=owner_id)
+            await s.commit()
+
+            content = await _latest_message_content_for(s, executor_id, org_id)
+            assert content is not None
+            assert t("events.gate_verdict_next_action_recipe_last_stage", "ko") in content
+            assert "다음 stage 이벤트를 발행하세요" not in content
             assert "publish_event(" not in content
     finally:
         await engine.dispose()

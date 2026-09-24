@@ -1854,7 +1854,10 @@ async def _render_gate_verdict_message(
     # 다음 stage 이벤트 발행」. ⚠️story #3387 — 이 갈래는 external_publish 이외
     # gate_type 전용이다(회귀 0, 위에서 이미 갈라냈다).
     elif verdict == "rejected":
-        lines.append(f"- {t('events.gate_verdict_next_action_revise_and_republish', resolved_locale)}")
+        # story #4265 — «같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요»는 레시피 문맥을 전제한다. 레시피 정의 키가 없는
+        # 게이트(스토리 design · QA 등 · 옛 행)엔 싣지 않는다(승인 갈래와 같은 원칙 · 유나 확정 표 — 서버는 반려 뒤 누가 무엇을 하는지 모른다).
+        if triggered_by_event_key:
+            lines.append(f"- {t('events.gate_verdict_next_action_revise_and_republish', resolved_locale)}")
     elif verdict == "approved":
         # story #3359 — publish stage면 channel→connector_key를 리졸버로 구체화한다
         # (예전엔 "발행 도구를 쓰세요"뿐이라 모든 채널이 정의에 박힌 connector_key
@@ -1933,11 +1936,18 @@ async def _render_gate_verdict_message(
                             _example_line += f" — {t('events.stage_gate_opens_on_publish', resolved_locale)}"
                             for _spec in _sealed_specs:
                                 _example_line += f"\n- {t(_spec.explanation_catalog_key, resolved_locale)}"
-        lines.append(
-            _connector_line
-            or _example_line
-            or f"- {t('events.gate_verdict_next_action_publish_next_stage', resolved_locale)}"
-        )
+                else:
+                    # story #4265(유나 확정) — 레시피의 마지막 단계: 발행할 다음 단계가 없다는 사실까지만(끝났다고 하지 않는다 —
+                    # 마지막 단계에도 할 일이 남는 레시피가 있다 · 4249 · 4261과 같은 기준).
+                    _example_line = f"- {t('events.gate_verdict_next_action_recipe_last_stage', resolved_locale)}"
+        # story #4265(유나 확정 · PO 14:28Z) — 레시피 문맥이 없는 게이트(스토리 design · QA 등)나 정의를 못 찾음 · 옛 행이면 «다음 행동» 줄을
+        # 싣지 않는다(서버는 승인 뒤 누가 무엇을 하는지 모른다 — 레시피 stage 지시는 없는 동작이고 «할 일 없음»도 머지 같은 실제 일을
+        # 지울 수 있다). 예전엔 이 경우 모두 레시피 폴백(«이 정의의 다음 stage 이벤트를 발행하세요»)으로 떨어졌다.
+        # publish 단계인데 채널을 모르는 경우만 지금 문장을 유지한다(이 카드 범위 밖).
+        if _connector_line or _example_line:
+            lines.append(_connector_line or _example_line)
+        elif gate_stage == "publish" and not gate_channel:
+            lines.append(f"- {t('events.gate_verdict_next_action_publish_next_stage', resolved_locale)}")
 
     return "\n".join(lines)
 

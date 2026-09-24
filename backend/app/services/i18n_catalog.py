@@ -505,6 +505,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: channel={channel}에 대한 커넥터 매핑이 없어요 — 조직 설정에 channel_connector_map을 등록하세요.",
         "en": "Next action: there is no connector mapping for channel={channel} — register channel_connector_map in the organization settings.",
     },
+    # story #4265(유나 확정) — 레시피 게이트 승인인데 다음 stage가 없음(마지막 단계). 끝났다고 하지 않는다 — 발행할 다음 단계가 없다는 사실만.
+    "events.gate_verdict_next_action_recipe_last_stage": {
+        "ko": "다음 행동: 할 일 없음 — 레시피의 마지막 단계라 더 낼 단계가 없어요.",
+        "en": "Next action: nothing — this is the recipe's last stage, so there is no next stage to publish.",
+    },
     "events.gate_verdict_next_action_publish_next_stage": {
         "ko": "다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 승인 게이트를 확인하는 발행 도구를 쓰세요).",
         "en": "Next action: publish this definition's next stage event (at a publish stage, use the publishing tool that checks this approval gate).",
