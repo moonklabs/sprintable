@@ -203,4 +203,3 @@ export function parseCompletionNotifications(json: unknown): RawCompletionNotifi
   }
   return out;
 }
-

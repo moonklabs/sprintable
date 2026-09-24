@@ -120,4 +120,3 @@ describe('parseCompletionNotifications', () => {
     expect(parseCompletionNotifications({ data: 'nope' })).toEqual([]);
   });
 });
-

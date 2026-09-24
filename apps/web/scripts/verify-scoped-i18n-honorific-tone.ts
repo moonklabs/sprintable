@@ -26,7 +26,7 @@
  * `SCOPED_NAMESPACES`·`honorific-scope/*.json`·`loadHonorificScopeDir`·
  * `checkScopedNamespaceMinimums`(네임스페이스별 leaf 하한)는 전량 삭제 — 대신 ko.json
  * **전체** leaf 수 하한 하나(`checkTotalLeafFloor`, 대량 삭제·로더 고장 감지)로 대체됐다.
- * `SCOPED_KEYS`(104개)는 삭제하지 않았다 — story #3877 원 표의 count-lock 회귀 테스트와
+ * `SCOPED_KEYS`(104개 · story #4231 3차 (b)에서 죽은 orgBriefing 5키를 빼 99개)는 삭제하지 않았다 — story #3877 원 표의 count-lock 회귀 테스트와
  * per-story 전용 테스트 파일(`*.3903/3921/3923.test.ts`)이 여전히 참조하는 레거시
  * 데이터이자, `findHonorificToneInScopedKeys`의 기본 인자 값으로 남아있다(더 이상 어떤
  * 필터링도 하지 않는다 — 이제 "스코프"는 언제나 ko.json 전체다).
@@ -44,7 +44,7 @@ const MESSAGES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const KO_FILE = 'ko.json';
 
 // story #3877 AC1 표(doc 5590a4c5 §4①) 94키 + AC4 orgBriefing 9키 + AC5 docs.emptyDescription
-// 1키 = 104키. story #3927(전역 스캔 승격) 이후로는 더 이상 어떤 필터링에도 쓰이지 않는
+// 1키 = 104키(story #4231 3차 (b) — 죽은 orgBriefing decide*/signal*Context 5키 삭제로 99키). story #3927(전역 스캔 승격) 이후로는 더 이상 어떤 필터링에도 쓰이지 않는
 // 레거시 데이터다 — findHonorificToneInScopedKeys의 기본 인자 값 + 회귀 count-lock 테스트
 // + per-story 전용 테스트 파일(3903/3921/3923)의 "이 실 사고 키는 SCOPED_KEYS 정적 목록
 // 안에 없었다"는 역사적 증거로만 남는다. 새 키를 추가하지 않는다(전역 스캔이 이미 본다).
@@ -113,11 +113,6 @@ export const SCOPED_KEYS = [
   'orgBriefing.clusterUnclosedOutcomeMissingTitle',
   'orgBriefing.clusterUnclosedOverdueGoalTitle',
   'orgBriefing.clusterUnclosedOverdueHypothesisTitle',
-  'orgBriefing.decideBlockerContext',
-  'orgBriefing.decideGateContext',
-  'orgBriefing.decideReviewContext',
-  'orgBriefing.signalAgentStuckContext',
-  'orgBriefing.signalBlockerContext',
   'orgBriefing.signalHypothesisFalsifiedTitle',
   'retro.addActionFailed',
   'retro.addItemFailed',
