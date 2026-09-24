@@ -689,3 +689,86 @@ describe('ApplyRecipeDialog — 워크플로우 프리셋 제목 로케일(story
     }
   });
 });
+
+// story #4243 AC2 — 역할별 사람/에이전트 선언(role_actor_kinds)으로 stage 한 줄의 선택지와 필수 여부가 갈린다.
+// loop_agency(시드 0260 · 0403 선언 그대로의 역할 배치): Human → 사람만(비워도 됨) · PO·Any → 사람 + 에이전트 · Agent → 에이전트만.
+describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
+  const LOOP_AGENCY = {
+    ...TARGET,
+    key: 'preset.workflow.loop_agency',
+    payload_schema: { properties: { stage: { enum: [
+      'goal_hypothesis', 'brief_doc_approval', 'generate_variants', 'loop_decision', 'execute', 'track_and_learn',
+    ] } } },
+    stage_metadata: {
+      goal_hypothesis: { role: 'Human', action: 'a' },
+      brief_doc_approval: { role: 'PO', action: 'b' },
+      generate_variants: { role: 'Agent', action: 'c' },
+      loop_decision: { role: 'Human', action: 'd' },
+      execute: { role: 'Any', action: 'e' },
+      track_and_learn: { role: 'Any', action: 'f' },
+    },
+    role_actor_kinds: { Human: 'human', PO: 'either', Agent: 'agent', Any: 'either' } as const,
+  };
+
+  function stubMixedMembers(capture: { body: unknown }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [
+          { id: 'agent-1', name: '디디군', type: 'agent' },
+          { id: 'human-1', name: '윤재신', type: 'human' },
+        ] }) };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 4, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+  }
+
+  it('사람 역할 줄엔 에이전트 선택 0 · either 줄엔 사람 + 에이전트 · 사람 줄을 비워도 에이전트·either 줄만 채우면 적용되고 빈 줄은 싣지 않는다', async () => {
+    const capture = { body: null as unknown };
+    stubMixedMembers(capture);
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog target={LOOP_AGENCY} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const rows = [...document.body.querySelectorAll('select')].slice(1) as HTMLSelectElement[];
+    const values = (s: HTMLSelectElement) => [...s.options].map((o) => o.value).filter(Boolean);
+    const [goal, brief, variants, decision, run, learn] = rows;
+    expect(values(goal)).toEqual(['human-1']);
+    expect(values(decision)).toEqual(['human-1']);
+    expect(values(brief)).toEqual(['agent-1', 'human-1']);
+    expect(values(variants)).toEqual(['agent-1']);
+
+    const submitBtn = () => [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit') as HTMLButtonElement;
+    expect(submitBtn().disabled).toBe(true);
+    for (const [select, value] of [[brief, 'human-1'], [variants, 'agent-1'], [run, 'agent-1'], [learn, 'human-1']] as const) {
+      await act(async () => {
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    await flush();
+    expect(submitBtn().disabled).toBe(false);
+
+    await act(async () => { submitBtn().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(capture.body).toEqual({
+      project_id: 'proj-1',
+      role_mapping: { brief_doc_approval: 'human-1', generate_variants: 'agent-1', execute: 'agent-1', track_and_learn: 'human-1' },
+    });
+  });
+});

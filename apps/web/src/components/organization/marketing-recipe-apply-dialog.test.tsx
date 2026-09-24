@@ -1170,3 +1170,47 @@ describe('허용 채널 안내 문구(story #4239 유나 확정)', () => {
     expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')?.textContent).toBe(ORG.eventApplyChannelsEmpty);
   });
 });
+
+// story #4243 D4 — 에이전트 역할 stage에 걸린 사람 승인 게이트(영상 «애니매틱» structure_approval)가 멤버 자리에 한 줄로 보인다.
+// story #4243 either — either 역할 자리는 사람 + 에이전트를 함께 보여 주고 배지·기본 문구가 그 뜻이다.
+describe('MarketingRecipeApplyDialog — story #4243', () => {
+  it('D4: 크리에이터(에이전트) 자리에 «애니매틱 승인: 조직 소유자» 줄 · 게이트 없는 자리엔 없음', async () => {
+    stubMemberFetch();
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={{ ...VIDEO_PRODUCTION_RECIPE, id: 'mkt-video' }} open onOpenChange={() => {}}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    await flush();
+    const notes = [...document.body.querySelectorAll('[data-testid="member-gate-note"]')].map((n) => n.textContent);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain(koMessages.organization.recipeGateApproverOrgOwner);
+    expect(notes[0]).toContain(koMessages.organization.recipeStageLabelAnimatic);
+  });
+
+  it('either: 사람 + 에이전트 선택지 · «사람 또는 에이전트» 배지 · «담당 선택…»', async () => {
+    stubMemberFetch();
+    const eitherRecipe = { ...RECIPE, role_actor_kinds: { 크리에이터: 'either' as const } };
+    await act(async () => {
+      root.render(wrap(
+        <MarketingRecipeApplyDialog
+          recipe={eitherRecipe} open onOpenChange={() => {}}
+          projects={[{ id: 'proj-1', name: 'Proj' }]} onSubmit={async () => ({ ok: true })}
+        />,
+      ));
+    });
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    const slot = document.body.querySelector('[data-testid="slot-creator"]')!;
+    const options = [...slot.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options).toEqual([koMessages.organization.recipeApplyV2MemberPlaceholder, '댄', '윤재']);
+    expect(slot.textContent).toContain(koMessages.organization.recipeApplyV2EitherBadge);
+  });
+});

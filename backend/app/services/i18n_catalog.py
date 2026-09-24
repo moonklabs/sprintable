@@ -381,12 +381,12 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 대신 이 카탈로그로. 플레이스홀더 뒤 고정 조사 결합(#4086류 결함) 회피 위해 값 자리는
     # 전부 "라벨: 값" 콜론 형태로 — 받침 유무와 무관하게 항상 맞는다.
     "events.role_actor_kinds_not_object": {
-        "ko": "role_actor_kinds는 role명과 human/agent 값으로 이루어진 객체여야 해요 — 받은 타입: {type_name}",
-        "en": "role_actor_kinds must be an object mapping role names to human/agent — received type: {type_name}",
+        "ko": "role_actor_kinds는 role명과 human/agent/either 값으로 이루어진 객체여야 해요 — 받은 타입: {type_name}",
+        "en": "role_actor_kinds must be an object mapping role names to human/agent/either — received type: {type_name}",
     },
     "events.role_actor_kinds_value_outside_vocabulary": {
-        "ko": "role_actor_kinds[{role}]의 값이 닫힌 어휘(human/agent) 밖이에요 — 받은 값: {kind}",
-        "en": "role_actor_kinds[{role}] value is outside the closed vocabulary (human/agent) — received: {kind}",
+        "ko": "role_actor_kinds[{role}]의 값이 닫힌 어휘(human/agent/either) 밖이에요 — 받은 값: {kind}",
+        "en": "role_actor_kinds[{role}] value is outside the closed vocabulary (human/agent/either) — received: {kind}",
     },
     "events.role_actor_kinds_role_not_declared": {
         "ko": "role_actor_kinds에 선언한 role명이 stage_metadata 어디에도 없어요(오타로 의심돼요) — "

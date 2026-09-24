@@ -13,10 +13,12 @@ import type { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { requiredMappingStages } from '@/lib/recipe-role-slots';
 
-interface AgentOption {
+interface MemberOption {
   id: string;
   name: string;
+  type?: string;
   runtime_type?: string | null;
 }
 
@@ -43,7 +45,8 @@ export function ApplyRecipeDialog({
   const tPreset = useTranslations('recipePreset');
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId] = useState('');
-  const [agents, setAgents] = useState<AgentOption[]>([]);
+  // story #4243 — 사람 + 에이전트(예전엔 `?type=agent`로 에이전트만). stage마다 정의의 role_actor_kinds로 거른다.
+  const [members, setMembers] = useState<MemberOption[]>([]);
   // story #4090(alembic 0385) — org 스코프(project 무관, channel-connections는 org
   // 소속)라 project 전환 useEffect가 아니라 다이얼로그 open 시 1회만 불러온다.
   const [channelConnections, setChannelConnections] = useState<ChannelConnectionOption[]>([]);
@@ -103,7 +106,7 @@ export function ApplyRecipeDialog({
   useEffect(() => {
     if (!open) return;
     setProjectId('');
-    setAgents([]);
+    setMembers([]);
     setChannelConnections([]);
     setGenerationConnectors([]);
     setRoleMapping({});
@@ -120,7 +123,7 @@ export function ApplyRecipeDialog({
   }, [open, orgId, loadChannelConnections, loadGenerationConnectors]);
 
   const loadProjectData = useCallback(() => {
-    if (!projectId || !target) { setAgents([]); setRoleMapping({}); setAgentsLoadFailed(false); return; }
+    if (!projectId || !target) { setMembers([]); setRoleMapping({}); setAgentsLoadFailed(false); return; }
     setLoadingProjectData(true);
     setError(null);
     setWarnings([]);
@@ -131,20 +134,20 @@ export function ApplyRecipeDialog({
         // 없이 같은 Promise.all 안에 있어, 하나가 네트워크단 reject하면 나머지도 조용히
         // 빈 값이 됐다 — "에이전트 없음"처럼 보이지만 실은 네트워크 실패인 자리.
         const [memberRes, bindingsRes] = await Promise.all([
-          fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`).catch(() => null),
+          fetchWithAuth(`/api/team-members?project_id=${projectId}`).catch(() => null),
           fetchWithAuth(`/api/events/definitions/${target.id}/bindings?project_id=${projectId}`).catch(() => null),
         ]);
         // story #3521(유나 §22-2, PO 確定 2026-09-05) — memberRes 실패는 "에이전트 없음"
         // (진짜 0명)과 다른 사실이다. 여기서만 갈린다 — agents가 빈 배열인 건 둘 다
         // 동일하니 별도 플래그로 원인을 들고 나간다.
         if (memberRes?.ok) {
-          const json = await memberRes.json() as { data?: AgentOption[] } | AgentOption[];
-          const members = Array.isArray(json) ? json : (json.data ?? []);
+          const json = await memberRes.json() as { data?: MemberOption[] } | MemberOption[];
+          const loaded = Array.isArray(json) ? json : (json.data ?? []);
           // story #3994 — 「시스템 발행」에 워크플로 역할을 매핑하는 것 자체가 의미
           // 없다(연결 대상이 아닌 내부 멤버) — 고르는 자리에서 제외.
-          setAgents(members.filter((m) => !isSystemPublisher(m.runtime_type)));
+          setMembers(loaded.filter((m) => !isSystemPublisher(m.runtime_type)));
         } else {
-          setAgents([]);
+          setMembers([]);
           setAgentsLoadFailed(true);
         }
         if (bindingsRes?.ok) {
@@ -163,6 +166,8 @@ export function ApplyRecipeDialog({
 
   if (!target) return null;
   const stages = cyclicStages(target);
+  // story #4243 — 사람 역할(human 선언) stage는 비워도 적용된다. 그 밖은 예전처럼 필수.
+  const requiredStages = requiredMappingStages(stages, target.stage_metadata, target.role_actor_kinds);
   // story #4090 — 채널-대상 stage가 아예 없는 정의(레시피 1호 외 대부분)면 채널 목록
   // 로딩/빈 상태 문구 자체가 노이즈다(#4075 "0건이면 섹션 숨김" 원칙과 동형).
   const hasChannelStage = stages.some((s) => target.stage_metadata[s]?.capability?.target === 'channel_connection');
@@ -172,7 +177,7 @@ export function ApplyRecipeDialog({
 
   const submit = async () => {
     if (!projectId) return;
-    const missing = stages.filter((s) => !roleMapping[s]);
+    const missing = requiredStages.filter((s) => !roleMapping[s]);
     if (missing.length > 0) {
       setError(t('eventApplyMissingRoles', { stages: missing.join(', ') }));
       return;
@@ -180,11 +185,13 @@ export function ApplyRecipeDialog({
     setApplying(true);
     setError(null);
     setWarnings([]);
+    // story #4243 — 비워 둔 선택(사람 stage 등)은 싣지 않는다(빈 문자열은 id가 아니다).
+    const chosen = Object.fromEntries(Object.entries(roleMapping).filter(([, v]) => v));
     try {
       const res = await fetchWithAuth(`/api/events/definitions/${target.id}/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, role_mapping: roleMapping }),
+        body: JSON.stringify({ project_id: projectId, role_mapping: chosen }),
       });
       const data = await res.json() as {
         ok?: boolean; bindings_upserted?: number; warnings?: string[]; error?: { message?: string };
@@ -252,7 +259,7 @@ export function ApplyRecipeDialog({
                 <span>{t('eventApplyAgentsLoadError')}</span>
                 <Button variant="outline" size="sm" onClick={loadProjectData}>{t('eventApplyAgentsRetry')}</Button>
               </div>
-            ) : agents.length === 0 ? (
+            ) : members.length === 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-agents-empty">{t('eventApplyAgentsEmpty')}</p>
             ) : null}
             {/* story #4106(페드루 PO 실측, PR #4478/#4479 리뷰 계기) — hasChannelStage/
@@ -286,12 +293,15 @@ export function ApplyRecipeDialog({
             <RecipeRoleMappingFields
               stages={stages}
               stageMetadata={target.stage_metadata}
-              agents={agents}
+              members={members}
+              roleActorKinds={target.role_actor_kinds}
               channelConnections={channelConnections}
               generationConnectors={generationConnectors}
               roleMapping={roleMapping}
               onChange={(stage, value) => setRoleMapping((prev) => ({ ...prev, [stage]: value }))}
               agentPlaceholder={t('eventApplyAgentPlaceholder')}
+              personPlaceholder={t('recipeApplyV2PersonPlaceholder')}
+              memberPlaceholder={t('recipeApplyV2MemberPlaceholder')}
               channelPlaceholder={t('eventApplyChannelPlaceholder')}
               generationConnectorPlaceholder={t('eventApplyGenerationConnectorPlaceholder')}
             />
@@ -317,7 +327,7 @@ export function ApplyRecipeDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>{tc('cancel')}</Button>
           <Button
             onClick={() => void submit()}
-            disabled={applying || !projectId || loadingProjectData || stages.some((s) => !roleMapping[s])}
+            disabled={applying || !projectId || loadingProjectData || requiredStages.some((s) => !roleMapping[s])}
           >
             {applying ? t('eventApplySubmitting') : t('eventApplySubmit')}
           </Button>

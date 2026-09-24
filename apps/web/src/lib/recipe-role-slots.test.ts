@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  groupStagesByRole, orderedRecipeRoles, recipeConnectionTargets, recipeKeyDomain,
-  allowedChannelsForSlot, recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
+  allowedChannelsForSlot, groupStagesByRole, membersForKind, orderedRecipeRoles, requiredMappingStages, stageMemberKind, recipeConnectionTargets, recipeKeyDomain,
+  recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
   type RecipeRoleSlot, type RecipeStageMetadata,
 } from './recipe-role-slots';
 import { VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE } from './video-production-seed.test.fixture';
@@ -337,5 +337,38 @@ describe('allowedChannelsForSlot(story #4239)', () => {
     expect(allowedChannelsForSlot(slot(['a', 'b', 'c']), {
       a: pub(['threads', 'x', 'facebook']), b: pub(['x', 'facebook', 'instagram']), c: pub(),
     })).toEqual(['x', 'facebook']);
+  });
+});
+
+// story #4243 — role_actor_kinds 세 번째 값 `either`.
+describe('either(story #4243)', () => {
+  const META = {
+    goal: { role: 'Human', action: '목표' },
+    brief: { role: 'PO', action: '브리프' },
+    review: { role: 'PO', action: '검토', gate: { type: 'x', approver: 'org_owner' } },
+    variants: { role: 'Agent', action: '실행안' },
+    run: { role: 'Any', action: '실행' },
+  };
+  const FLOW = ['goal', 'brief', 'review', 'variants', 'run'];
+  const KINDS = { Human: 'human', PO: 'either', Agent: 'agent', Any: 'either' } as const;
+
+  it('either 역할은 사람 + 에이전트 멤버 자리 — 게이트 stage도 승인 자리가 아니라 같은 멤버 자리(게이트 승인자는 게이트 규칙)', () => {
+    const slots = recipeRoleSlots(META, FLOW, KINDS);
+    const po = slots.filter((s) => s.role === 'PO');
+    expect(po).toEqual([{ key: 'PO:member', role: 'PO', kind: 'member', stages: ['brief', 'review'], memberType: 'either', gateApprovers: [] }]);
+    expect(slots.find((s) => s.role === 'Any')?.memberType).toBe('either');
+    expect(slots.find((s) => s.role === 'Human')?.memberType).toBe('human');
+    expect(slots.find((s) => s.role === 'Agent')?.memberType).toBe('agent');
+    expect(uncoveredRecipeStages(META, FLOW, slots)).toEqual([]);
+  });
+
+  it('범용 창: 멤버 종류 · 필수 stage(사람 stage만 선택) · 선택지', () => {
+    expect(FLOW.map((s) => stageMemberKind(s, META, KINDS))).toEqual(['human', 'either', 'either', 'agent', 'either']);
+    expect(stageMemberKind('run', META, null)).toBe('agent'); // 선언 없음 → 예전 그대로 에이전트
+    expect(requiredMappingStages(FLOW, META, KINDS)).toEqual(['brief', 'review', 'variants', 'run']);
+    const members = [{ id: 'a', type: 'agent' }, { id: 'h', type: 'human' }, { id: 'x' }];
+    expect(membersForKind(members, 'either').map((m) => m.id)).toEqual(['a', 'h', 'x']);
+    expect(membersForKind(members, 'human').map((m) => m.id)).toEqual(['h']);
+    expect(membersForKind(members, 'agent').map((m) => m.id)).toEqual(['a', 'x']);
   });
 });

@@ -44,7 +44,10 @@ APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
 # actor_kinds(정의 레벨 옵션 사전, {role명: kind})의 **값** 어휘. role 이름 자체는
 # APPROVER_ROLE_REFERENCES와 달리 닫지 않는다(role은 저자 자유 문자열 — 기존 계약,
 # recipe-role-slots.ts 참조) — 닫는 건 "이 role이 사람인가 에이전트인가"라는 값 축뿐이다.
-ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent"})
+# story #4243(PO 2026-09-24) — 세 번째 값 `either`: 사람도 에이전트도 맡을 수 있는 자리(적용 창이 사람 + 에이전트를 함께
+# 보여 주는 멤버 자리). `human`·`agent`는 이름부터 한쪽인 역할만. 대부분의 일반 역할(PO·QA·Reviewer 등)은 `either`다 —
+# 에이전트가 PO·QA를 맡는 조직(customer-zero)이 반례라 `human`으로 박으면 결함을 반대 방향으로 다시 만든다.
+ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent", "either"})
 # story #4090(alembic 0387·페드루 PO 確定 2026-09-21) — capability.target의 닫힌 어휘.
 # gate.approver·server_derived 축과 동형 설계 — apply_recipe_role_bindings가 role_mapping의
 # stage별 값을 어느 테이블(TeamMember/ChannelConnection)로 검증할지 이 값 하나로 가른다.

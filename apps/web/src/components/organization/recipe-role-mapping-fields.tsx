@@ -1,10 +1,14 @@
 'use client';
 
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
+import { membersForKind, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
 
-interface AgentOption {
+// story #4243 — 멤버 선택지는 사람 + 에이전트(`type`). stage마다 정의의 role_actor_kinds로 거른다(human → 사람 ·
+// agent/선언 없음 → 에이전트 · either → 함께).
+export interface MemberOption {
   id: string;
   name: string;
+  type?: string;
 }
 
 // story #4090(alembic 0385) — GET .../channel-connections 응답의 부분집합(select 렌더에
@@ -39,23 +43,29 @@ export interface GenerationConnectorOption {
 export function RecipeRoleMappingFields({
   stages,
   stageMetadata,
-  agents,
+  members,
+  roleActorKinds,
   channelConnections,
   generationConnectors,
   roleMapping,
   onChange,
   agentPlaceholder,
+  personPlaceholder,
+  memberPlaceholder,
   channelPlaceholder,
   generationConnectorPlaceholder,
 }: {
   stages: string[];
   stageMetadata: EventDefinitionResponse['stage_metadata'];
-  agents: AgentOption[];
+  members: MemberOption[];
+  roleActorKinds?: RoleActorKinds | null;
   channelConnections: ChannelConnectionOption[];
   generationConnectors: GenerationConnectorOption[];
   roleMapping: Record<string, string>;
   onChange: (stage: string, value: string) => void;
   agentPlaceholder: string;
+  personPlaceholder: string;
+  memberPlaceholder: string;
   channelPlaceholder: string;
   generationConnectorPlaceholder: string;
 }) {
@@ -70,6 +80,7 @@ export function RecipeRoleMappingFields({
       {stages.map((stage) => {
         const meta = stageMetadata[stage];
         const target = meta?.capability?.target;
+        const memberKind = stageMemberKind(stage, stageMetadata, roleActorKinds) ?? 'agent';
         return (
           <div key={stage} className="flex items-center gap-3">
             <span className="w-32 shrink-0 text-xs font-medium text-foreground">
@@ -103,8 +114,10 @@ export function RecipeRoleMappingFields({
                 value={roleMapping[stage] ?? ''}
                 onChange={(e) => onChange(stage, e.target.value)}
               >
-                <option value="">{agentPlaceholder}</option>
-                {agents.map((a) => (
+                <option value="">
+                  {memberKind === 'human' ? personPlaceholder : memberKind === 'either' ? memberPlaceholder : agentPlaceholder}
+                </option>
+                {membersForKind(members, memberKind).map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>

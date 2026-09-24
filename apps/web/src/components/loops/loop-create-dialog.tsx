@@ -67,7 +67,7 @@ export interface EventDefinitionResponse {
   // story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로
   // 선언하는 옵션 사전({role명: "human"|"agent"}). 선언 없으면 undefined/null("모름") —
   // recipe-role-slots.ts::roleActorKind가 이 선언을 읽는다.
-  role_actor_kinds?: Record<string, 'human' | 'agent'> | null;
+  role_actor_kinds?: Record<string, 'human' | 'agent' | 'either'> | null;
   enabled: boolean;
 }
 

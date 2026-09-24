@@ -592,6 +592,13 @@ def test_role_actor_kinds_accepts_well_formed_declaration():
     validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "human", "QA": "agent"})
 
 
+def test_role_actor_kinds_accepts_either():
+    """story #4243 — 세 번째 값 `either`(사람도 에이전트도 맡는 자리)."""
+    from app.services.event_definition_registry import validate_role_actor_kinds
+
+    validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "either", "QA": "agent"})
+
+
 def test_role_actor_kinds_rejects_value_outside_closed_vocabulary():
     """⭐AC1 핵심 — role 이름 자체는 자유 문자열이라 안 막지만, kind 값은 {"human","agent"}
     로 닫혀 있다(PO 확定: "닫힌 어휘는 값이지 role 이름이 아니다")."""
@@ -638,11 +645,11 @@ def test_role_actor_kinds_error_messages_route_through_i18n_catalog_not_raw_hard
 
     with pytest.raises(InvalidRoleActorKindsError) as ei:
         validate_role_actor_kinds(_STAGE_METADATA_2ROLE, "human")
-    assert str(ei.value) == "role_actor_kinds는 role명과 human/agent 값으로 이루어진 객체여야 해요 — 받은 타입: str"
+    assert str(ei.value) == "role_actor_kinds는 role명과 human/agent/either 값으로 이루어진 객체여야 해요 — 받은 타입: str"
 
     with pytest.raises(InvalidRoleActorKindsError) as ei:
         validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"PO": "bot"})
-    assert str(ei.value) == "role_actor_kinds[PO]의 값이 닫힌 어휘(human/agent) 밖이에요 — 받은 값: bot"
+    assert str(ei.value) == "role_actor_kinds[PO]의 값이 닫힌 어휘(human/agent/either) 밖이에요 — 받은 값: bot"
 
     with pytest.raises(InvalidRoleActorKindsError) as ei:
         validate_role_actor_kinds(_STAGE_METADATA_2ROLE, {"Product Owner": "human"})

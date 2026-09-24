@@ -88,8 +88,9 @@ class EventDefinition(Base):
     # 사람인가 에이전트인가"는 role 문자열 자체로 유도할 수 없다. 정의가 자기 role 어휘에 맞게
     # 선언하는 옵션 사전(예: {"Creator":"agent","Director":"human"}) — 선언 없으면(레거시
     # 정의 전부) "모름"이라 zero_reach 판정이 오늘과 동일하게 동작한다(개선은 선언한 정의만).
-    # 값 어휘는 event_definition_registry.validate_role_actor_kinds가 {"human","agent"}로
-    # 닫아 강제(stage_metadata.role/action과 동일 관례 — 쓰기 시점만).
+    # 값 어휘는 event_definition_registry.validate_role_actor_kinds가 {"human","agent","either"}로
+    # 닫아 강제(stage_metadata.role/action과 동일 관례 — 쓰기 시점만). `either`(story #4243)는 사람도 에이전트도
+    # 맡을 수 있는 자리.
     role_actor_kinds: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
