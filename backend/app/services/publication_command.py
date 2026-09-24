@@ -60,6 +60,21 @@ FAILURE_KIND_PAUSED = "paused"
 STOP_NOTICE_PENDING = "pending"
 STOP_NOTICE_SENT = "sent"
 
+
+def awaits_stop_notice(status: str | None, failure_kind: str | None) -> bool:
+    """story #4258 — 이 명령이 «사람 손이 필요한 멈춤»인가(통지 대상). 표식을 세우는 쪽(`mark_stop_notice`)과 보내는 쪽
+    (`recipe_publish_failure._deliver_one_stop_notice`)이 같은 판정을 읽는다(까디르 4621 델타 codex ① · PO 14:23Z) — 취소 ·
+    voided · 완료 · 재시도 뒤 pending처럼 멈춤에서 벗어난 행은 표식이 남아 있어도 보내지 않는다.
+    - dead_letter(재시도 소진 · 확인 필요): 사람 재시도.
+    - 연결 실패 blocked: 사람이 다시 연결한 뒤 재시도(조직 일시정지 blocked는 해제하면 서버가 스스로 재큐 — 제외)."""
+    return status == "dead_letter" or (status == "blocked" and failure_kind == FAILURE_KIND_CONNECTION)
+
+
+def mark_stop_notice(command: "PublicationCommand") -> None:
+    """전이와 같은 커밋에 통지 표식을 세운다 — 판정(`awaits_stop_notice`)이 참일 때만."""
+    if awaits_stop_notice(command.status, command.failure_kind):
+        command.stop_notice_state = STOP_NOTICE_PENDING
+
 # story #3414 — 어떤 서버 error code가 어느 failure_kind인지의 유일한 매핑 표. 새 코드가
 # 추가되면 여기 등재하지 않는 한 자동으로 needs_check(fail-closed)로 떨어진다 — "일단
 # transient로"류 추측 금지(story #3405/#3406 "미지 code는 추측 안 함" 원칙과 동일 사상).
@@ -985,7 +1000,7 @@ async def apply_command_failure(
             mark_connection_failed(connection, error_code=error_code, message=last_error, now=now)
         command.status = "blocked"
         # story #4258(까디르 4621 codex P2) — 사람 손이 필요한 멈춤. 전이와 같은 커밋에 통지 표식(워커가 따로 보낸다).
-        command.stop_notice_state = STOP_NOTICE_PENDING
+        mark_stop_notice(command)
         return
 
     if failure_kind == FAILURE_KIND_NEEDS_CHECK:
@@ -1000,7 +1015,7 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
-        command.stop_notice_state = STOP_NOTICE_PENDING
+        mark_stop_notice(command)
         return
 
     # transient만 지수 백오프 재시도 큐로.
@@ -1027,7 +1042,7 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
-        command.stop_notice_state = STOP_NOTICE_PENDING
+        mark_stop_notice(command)
         return
     command.status = "pending"
     command.next_attempt_at = compute_next_attempt_at(

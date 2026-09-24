@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select, update
@@ -225,7 +226,11 @@ async def test_the_failure_context_and_recipients_stay_inside_the_command_org():
         resolve_recipe_publish_failure_context,
     )
     from tests.conftest import seed_org_with_human_owner
-    from tests.test_4093_scheduled_publish_event_realdb import _realdb_session, _seed_agent, _seed_story
+    from tests.test_4093_scheduled_publish_event_realdb import (
+        _realdb_session,
+        _seed_agent,
+        _seed_story,
+    )
 
     engine, Session = await _realdb_session()
     try:
@@ -262,5 +267,117 @@ async def test_the_failure_context_and_recipients_stay_inside_the_command_org():
             assert await recipe_publish_failure_recipients(s, org_id=org_a, ctx=ctx) == set()
             own = RecipePublishFailureContext("newsletter_send", "org.t4621.recipe", "send_requested", "story", story_a, owner_a)
             assert await recipe_publish_failure_recipients(s, org_id=org_a, ctx=own) == {owner_a}
+    finally:
+        await engine.dispose()
+
+
+# ── 까디르 4621 델타 codex(PO 14:23Z) ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("left_to", ["cancelled", "voided"])
+@pytest.mark.anyio
+async def test_a_stop_that_was_cancelled_or_voided_before_the_notice_is_not_notified(monkeypatch, left_to):
+    """① 표식이 선 뒤 멈춤에서 벗어났으면(취소 · voided) 보내지 않고 표식을 비운다 — 틱마다 재시도하는 독 행 0.
+    뮤테이션: 전달기의 멈춤 판정을 빼면 RED."""
+    from app.models.publication_command import PublicationCommand
+    from tests.test_4093_scheduled_publish_event_realdb import _realdb_session
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        await _stop_without_notice(Session, monkeypatch)
+        async with Session() as s:
+            await s.execute(update(PublicationCommand).where(PublicationCommand.org_id == w["org_id"]).values(status=left_to))
+            await s.commit()
+        counts = await _run_channel_worker(Session)
+        assert counts["stop_notices"] == 0
+        assert await _notices(Session, w["org_id"]) == []
+        assert (await _command(Session, w)).stop_notice_state is None, "멈춤에서 벗어났는데 표식이 남았다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_retry_link_lookups_stay_inside_the_org():
+    """② 재시도 링크의 딸린 조회(게이트 · 채널 판)도 명령의 조직으로 묶는다 — 다른 조직 것을 가리키면 링크 없음."""
+    from app.models.gate import Gate
+    from app.models.publication_command import PublicationCommand
+    from app.routers.events import _recipe_publish_retry_path
+    from tests.conftest import seed_org_with_human_owner
+    from tests.test_4093_scheduled_publish_event_realdb import (
+        _realdb_session,
+        _seed_story,
+    )
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)  # 조직 A의 채널 게시 명령(판은 A의 초안)
+        async with Session() as s:
+            org_b, project_b, owner_b = await seed_org_with_human_owner(s, slug=f"x4621-{uuid.uuid4().hex[:6]}", org_name="B")
+            story_b = await _seed_story(s, org_b, project_b)
+            gate_b = Gate(
+                id=uuid.uuid4(), org_id=org_b, work_item_id=story_b, work_item_type="story", gate_type="external_publish",
+                status="approved", neutral_facts={"draft_id": str(uuid.uuid4())},
+            )
+            s.add(gate_b)
+            a_command = (await s.execute(select(PublicationCommand).where(PublicationCommand.org_id == w["org_id"]))).scalar_one()
+            site_command = PublicationCommand(
+                id=uuid.uuid4(), org_id=w["org_id"], gate_id=gate_b.id, destination=uuid.uuid4(), approved_version=uuid.uuid4(),
+                content_kind="site_post", status="dead_letter", requested_by_member_id=owner_b,
+            )
+            # 조직 B 명령인 척 A의 판을 가리키는 채널 명령 — 판의 초안이 조직 A라 B 기준 링크는 없어야 한다.
+            channel_command_b = PublicationCommand(
+                id=uuid.uuid4(), org_id=org_b, gate_id=uuid.uuid4(), destination=uuid.uuid4(),
+                approved_version=a_command.approved_version, content_kind="channel_post", status="dead_letter",
+                requested_by_member_id=owner_b,
+            )
+            s.add_all([site_command, channel_command_b])
+            await s.commit()
+
+            assert await _recipe_publish_retry_path(s, org_id=w["org_id"], payload={"command_id": str(a_command.id)}) == (
+                f"/content/channel-posts/{w['draft_id']}"
+            )  # 대조: 같은 조직이면 링크
+            assert await _recipe_publish_retry_path(s, org_id=w["org_id"], payload={"command_id": str(site_command.id)}) is None
+            assert await _recipe_publish_retry_path(s, org_id=org_b, payload={"command_id": str(channel_command_b.id)}) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_failing_notice_does_not_starve_the_rows_behind_it(monkeypatch):
+    """③ 실패한 행은 줄 뒤로 간다 — 한 번에 1건만 집어도 다음 틱엔 뒤의 행이 나간다."""
+    import app.services.recipe_publish_failure as module
+    from app.models.publication_command import PublicationCommand
+    from tests.test_4093_scheduled_publish_event_realdb import _realdb_session
+
+    engine, Session = await _realdb_session()
+    try:
+        good = await _world(Session)
+        await _stop_without_notice(Session, monkeypatch)
+        good_command = await _command(Session, good)
+        bad_id = uuid.uuid4()
+        async with Session() as s:  # 같은 조직의 다른 멈춘 명령 — 줄 머리에 두고 전달이 매번 실패하게 한다
+            s.add(PublicationCommand(
+                id=bad_id, org_id=good["org_id"], gate_id=good_command.gate_id, destination=uuid.uuid4(),
+                approved_version=uuid.uuid4(), content_kind="channel_post", status="dead_letter",
+                requested_by_member_id=good_command.requested_by_member_id, stop_notice_state="pending",
+                updated_at=datetime(2000, 1, 1, tzinfo=UTC),
+            ))
+            await s.commit()
+
+        real = module.resolve_recipe_publish_failure_context
+
+        async def _broken(side, row):
+            if row.id == bad_id:
+                raise RuntimeError("문맥 조회 실패(주입)")
+            return await real(side, row)
+
+        monkeypatch.setattr(module, "resolve_recipe_publish_failure_context", _broken)
+        for _ in range(2):
+            async with Session() as s:
+                await module.deliver_pending_stop_notices(s, limit=1)
+        assert len(await _notices(Session, good["org_id"])) == 1, "실패한 행이 줄 머리를 막아 뒤의 통지가 굶었다"
+        async with Session() as s:
+            assert (await s.get(PublicationCommand, bad_id)).stop_notice_state == "pending"  # 실패 행은 다음에 다시
     finally:
         await engine.dispose()

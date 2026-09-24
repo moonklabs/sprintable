@@ -162,7 +162,7 @@ async def _deliver_one_stop_notice(side: AsyncSession, command_id: uuid.UUID) ->
     import logging
 
     from app.routers.events import publish_preset_event
-    from app.services.publication_command import STOP_NOTICE_PENDING, STOP_NOTICE_SENT
+    from app.services.publication_command import STOP_NOTICE_PENDING, STOP_NOTICE_SENT, awaits_stop_notice
 
     row = (await side.execute(
         select(PublicationCommand)
@@ -170,6 +170,12 @@ async def _deliver_one_stop_notice(side: AsyncSession, command_id: uuid.UUID) ->
         .with_for_update(skip_locked=True)
     )).scalar_one_or_none()
     if row is None:
+        return False
+    # 까디르 4621 델타 codex ①(PO 14:23Z) — 표식이 선 뒤 멈춤에서 벗어난 행(취소 · voided · 완료 · 재시도 뒤 pending 등)은 보낼
+    # 멈춤이 아니다. 표식을 세운 쪽과 같은 판정으로 보고 비운다 — 쓰는 곳마다 비우기를 흩지 않고 여기 한 곳에서 막는다(안
+    # 그러면 `stop_kind`가 이벤트 스키마 enum 밖이라 롤백 → 틱마다 재시도하는 독 행이 된다).
+    if not awaits_stop_notice(row.status, row.failure_kind):
+        row.stop_notice_state = None
         return False
     ctx = await resolve_recipe_publish_failure_context(side, row)
     if ctx is None:
@@ -217,6 +223,24 @@ async def deliver_pending_stop_notices(db: AsyncSession, *, limit: int = 50) -> 
         async def _work(side: AsyncSession, command_id: uuid.UUID = command_id) -> None:
             outcome.append(await _deliver_one_stop_notice(side, command_id))
 
-        if await run_side_effect_in_own_session(db, _work, describe=f"recipe publish stop notice command={command_id}") and outcome[0]:
-            sent += 1
+        if await run_side_effect_in_own_session(db, _work, describe=f"recipe publish stop notice command={command_id}"):
+            if outcome[0]:
+                sent += 1
+        else:
+            # 까디르 4621 델타 codex ③ — 실패한 행은 롤백돼 `updated_at`이 그대로라 `order_by(updated_at)`의 머리에 계속 남아
+            # 뒤의 새 표식을 굶길 수 있다. 줄 뒤로 보낸다(표식은 pending 그대로 · 다음 틱에 다시).
+            await _requeue_failed_stop_notice(db, command_id)
     return sent
+
+
+async def _requeue_failed_stop_notice(db: AsyncSession, command_id: uuid.UUID) -> None:
+    from sqlalchemy import func, update
+
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    async def _touch(side: AsyncSession) -> None:
+        await side.execute(
+            update(PublicationCommand).where(PublicationCommand.id == command_id).values(updated_at=func.now())
+        )
+
+    await run_side_effect_in_own_session(db, _touch, describe=f"recipe publish stop notice requeue command={command_id}")

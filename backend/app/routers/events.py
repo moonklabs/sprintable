@@ -2089,13 +2089,20 @@ async def _recipe_publish_retry_path(db: AsyncSession, *, org_id: uuid.UUID, pay
         return None
     if command is None or command.org_id != org_id:
         return None
+    # 까디르 4621 델타 codex ② — 딸린 조회도 조직으로 묶는다(명령 조직 대조만으로는 다른 조직 게이트 · 초안 id가 링크로 샌다).
     if command.content_kind == "site_post":
-        gate = await db.get(Gate, command.gate_id)
+        gate = (await db.execute(
+            select(Gate).where(Gate.id == command.gate_id, Gate.org_id == org_id)
+        )).scalar_one_or_none()
         draft_id = (gate.neutral_facts or {}).get("draft_id") if gate is not None else None
         return f"/content/{draft_id}" if draft_id else None
     if (command.content_kind or "channel_post") == "channel_post":
+        from app.models.channel_post_draft import ChannelPostDraft
+
         draft_id = (await db.execute(
-            select(ChannelPostVersion.draft_id).where(ChannelPostVersion.id == command.approved_version)
+            select(ChannelPostVersion.draft_id)
+            .join(ChannelPostDraft, ChannelPostDraft.id == ChannelPostVersion.draft_id)
+            .where(ChannelPostVersion.id == command.approved_version, ChannelPostDraft.org_id == org_id)
         )).scalar_one_or_none()
         return f"/content/channel-posts/{draft_id}" if draft_id else None
     return None
