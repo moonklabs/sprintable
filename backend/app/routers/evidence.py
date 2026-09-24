@@ -100,9 +100,6 @@ class EvidenceResponse(BaseModel):
     # story join 불요, #2168 DocPreviewResponse와 동형 org_slug/project_slug 개념).
     org_slug: str | None = None
     project_slug: str | None = None
-    # story #4231 다음 조각(PO 14:56Z) — 위 slug와 같은 값(접근 판정에 이미 쓴 _project_id_of_evidence)의 id. project_slug가 없는 옛 프로젝트에서도
-    # FE 미리보기 «상위 스토리로» 폴백이 현재 p 대신 증거 자기 프로젝트를 싣게(embed-card resolveScopedEntityHref 폴백 · #4253). 단건 GET만.
-    project_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -115,6 +112,15 @@ class EvidenceResponse(BaseModel):
         from app.services.reference_token import build_reference_token
         return build_reference_token("evidence", self.id, f"[{self.type}] {self.ref}")
 
+
+
+class EvidenceDetailResponse(EvidenceResponse):
+    """story #4253(PO 14:56Z · 까디르 codex 4612 델타 P2) — 단건 GET 전용. 위 slug와 같은 값(접근 판정에 이미 쓴 _project_id_of_evidence)의
+    id를 싣는다 — project_slug가 없는 옛 프로젝트에서도 FE 미리보기 «상위 스토리로» 폴백이 현재 p 대신 증거 자기 프로젝트를 싣게(embed-card
+    resolveScopedEntityHref 폴백). 공용 EvidenceResponse에 두면 POST · 목록 GET에도 계산 안 한 `"project_id": null`이 새로 나가 «프로젝트
+    없음»처럼 읽히므로, 계산하는 이 응답에만 둔다."""
+
+    project_id: uuid.UUID | None = None
 
 async def _assert_work_item_access(
     session: AsyncSession, work_item_id: uuid.UUID, work_item_type: str,
@@ -519,13 +525,13 @@ async def list_evidence(
     return await _attach_artifact_denorm(session, items)
 
 
-@router.get("/{id}", response_model=EvidenceResponse)
+@router.get("/{id}", response_model=EvidenceDetailResponse)
 async def get_evidence(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> EvidenceResponse:
+) -> EvidenceDetailResponse:
     """story #2314 AC1 — 형제 단건 라우트(get_story 등)와 같은 관례. AC2: 못 보는 evidence는
     「있다는 사실」도 새지 않는다 — org 안·project 밖도 404로 통일한다(#2322가 story 헬퍼에서
     막 세운 그 방향과 동형 — evidence.py는 #2322의 4개 헬퍼 목록엔 없지만, 신규 라우트는
@@ -556,12 +562,14 @@ async def get_evidence(
     project_slug_map = await resolve_project_slugs(session, {project_id})
 
     [denorm] = await _attach_artifact_denorm(session, [evidence])
-    return denorm.model_copy(
+    return EvidenceDetailResponse(
+        **denorm.model_dump(exclude={"reference_token"}),
+        project_id=project_id,
+    ).model_copy(
         update={
             "resolved_story_id": resolved_story_id,
             "org_slug": org_slug,
             "project_slug": project_slug_map.get(project_id),
-            "project_id": project_id,
         }
     )
 
