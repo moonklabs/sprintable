@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -59,6 +59,16 @@ class PublicationCommand(Base):
         CheckConstraint(
             "initiated_by IS NULL OR initiated_by IN ('scheduler', 'human')",
             name="ck_publication_commands_initiated_by",
+        ),
+        # story #4258(까디르 4621 codex P2 · PO 12:38Z) — 0405 마이그의 정본 미러(이름 일치 유지 · create_all 기반 테스트가
+        # 이 제약 · 인덱스를 보게).
+        CheckConstraint(
+            "stop_notice_state IS NULL OR stop_notice_state IN ('pending', 'sent')",
+            name="ck_publication_commands_stop_notice_state",
+        ),
+        Index(
+            "ix_publication_commands_stop_notice_pending", "id",
+            postgresql_where=text("stop_notice_state = 'pending'"),
         ),
     )
 
@@ -102,6 +112,11 @@ class PublicationCommand(Base):
     # null=이 정보를 모르는 기존 행(이 컬럼 도입 전 데이터·다른 content_kind는
     # 채울 이유가 없어 계속 null로 둔다 — ads_boost의 boost_start만 채움).
     initiated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4258(까디르 4621 codex P2 · PO 12:38Z) — 레시피 멈춤 통지 표식. `apply_command_failure`가 dead_letter · 연결
+    # blocked로 **전이하는 같은 트랜잭션**에서 `pending`을 세우고, 워커가 행마다 자기 트랜잭션에서 «통지 발행 + `sent`»를 한
+    # 커밋으로 한다(사라짐 0 · 같은 멈춤 중복 0). 사람 재시도가 NULL로 되돌려, 다시 멈추면 새 통지다. NULL = 보낼 것 없음(이
+    # 컬럼 전의 옛 멈춤도 NULL — 소급하지 않는다).
+    stop_notice_state: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,

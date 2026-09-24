@@ -6,6 +6,8 @@
 - 수신자 = routing broadcast `server_derived` target `recipe_publish_failure`(event_routing_resolver) — 그 발행을 연 게이트를
   실제로 승인한 사람 ∪ 요청 stage에 바인딩된 에이전트. 이벤트를 낸 쪽과 같은 함수가 해소한다.
 - 레시피는 다음 단계로 넘어가지 않는다(이 이벤트는 레시피 정의의 stage 이벤트가 아니다).
+- `publication_commands.stop_notice_state`(까디르 4621 codex P2 · PO 12:38Z): 멈춤 전이와 같은 커밋에 `pending` → 워커가 행마다
+  «통지 + `sent`»를 한 커밋으로. CHECK · 부분 인덱스. 옛 멈춤 행은 NULL(소급 0).
 
 Revision ID: 0405
 Revises: 0404
@@ -81,6 +83,24 @@ event_definitions = sa.table(
 
 
 def upgrade() -> None:
+    # 까디르 4621 codex P2(PO 12:38Z) — 멈춤 통지 표식. 전이와 같은 커밋에 `pending`, 통지와 같은 커밋에 `sent`. 값은 DB가 막는다
+    # (모델 `PublicationCommand.__table_args__`가 이 정본의 미러). 이미 멈춘 옛 행은 NULL 그대로(소급 통지 0).
+    op.add_column("publication_commands", sa.Column("stop_notice_state", sa.Text(), nullable=True))
+    op.create_check_constraint(
+        "ck_publication_commands_stop_notice_state", "publication_commands",
+        "stop_notice_state IS NULL OR stop_notice_state IN ('pending', 'sent')",
+    )
+    op.create_index(
+        "ix_publication_commands_stop_notice_pending", "publication_commands", ["id"],
+        postgresql_where=sa.text("stop_notice_state = 'pending'"),
+    )
+
+    seed_notice_definition()
+
+
+def seed_notice_definition() -> None:
+    """통지 이벤트 정의 시드(이미 있으면 그대로). create_all 하네스 테스트는 스키마(컬럼 · CHECK · 인덱스)를 모델 미러로 이미
+    갖고 있어 이 함수만 부른다."""
     bind = op.get_bind()
     if bind.execute(
         sa.text("SELECT 1 FROM event_definitions WHERE key = :key AND org_id IS NULL"), {"key": _EVENT_KEY},
@@ -95,3 +115,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(sa.text("DELETE FROM event_definitions WHERE key = :key AND org_id IS NULL").bindparams(key=_EVENT_KEY))
+    op.drop_index("ix_publication_commands_stop_notice_pending", table_name="publication_commands")
+    op.drop_constraint("ck_publication_commands_stop_notice_state", "publication_commands", type_="check")
+    op.drop_column("publication_commands", "stop_notice_state")

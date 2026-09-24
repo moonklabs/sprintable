@@ -50,7 +50,8 @@ def _configure_secrets(monkeypatch):
 
 
 def _install_notice_definition() -> None:
-    """이 PR의 시드 마이그레이션(`preset.recipe.publish_failed`) `upgrade()`를 alembic과 같은 동기 드라이버로 그대로."""
+    """이 PR의 시드 마이그레이션(`preset.recipe.publish_failed`)의 시드 단계를 alembic과 같은 동기 드라이버로 그대로. 스키마 쪽
+    (`stop_notice_state` 컬럼 · CHECK · 인덱스)은 create_all 하네스가 모델 미러로 이미 갖고 있다."""
     import importlib.util
     from pathlib import Path
 
@@ -70,7 +71,7 @@ def _install_notice_definition() -> None:
     engine = create_engine(url)
     try:
         with engine.begin() as conn, Operations.context(MigrationContext.configure(connection=conn)):
-            module.upgrade()
+            module.seed_notice_definition()
     finally:
         engine.dispose()
 

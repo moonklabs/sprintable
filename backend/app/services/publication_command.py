@@ -56,6 +56,9 @@ FAILURE_KIND_TRANSIENT = "transient"
 # 재큐가 이 값으로 "pause 때문에 blocked"만 골라낸다(connection 복구 대기 blocked와
 # 절대 안 섞인다).
 FAILURE_KIND_PAUSED = "paused"
+# story #4258(까디르 4621 codex P2) — `stop_notice_state` 값(0405 CHECK와 같은 어휘).
+STOP_NOTICE_PENDING = "pending"
+STOP_NOTICE_SENT = "sent"
 
 # story #3414 — 어떤 서버 error code가 어느 failure_kind인지의 유일한 매핑 표. 새 코드가
 # 추가되면 여기 등재하지 않는 한 자동으로 needs_check(fail-closed)로 떨어진다 — "일단
@@ -278,6 +281,8 @@ async def retry_dead_letter_command(
     command.status = "pending"
     command.next_attempt_at = None
     command.dead_letter_at = None
+    # story #4258 — 사람이 다시 시도했다. 다시 멈추면 그건 새 멈춤이라 통지가 한 번 더 간다(표식을 비운다).
+    command.stop_notice_state = None
     command.last_error = None
     command.failure_kind = None
     return command
@@ -979,6 +984,8 @@ async def apply_command_failure(
             # 4필드 다 채움). 공용 헬퍼로 갭을 닫는다(message만 서는 자리 0).
             mark_connection_failed(connection, error_code=error_code, message=last_error, now=now)
         command.status = "blocked"
+        # story #4258(까디르 4621 codex P2) — 사람 손이 필요한 멈춤. 전이와 같은 커밋에 통지 표식(워커가 따로 보낸다).
+        command.stop_notice_state = STOP_NOTICE_PENDING
         return
 
     if failure_kind == FAILURE_KIND_NEEDS_CHECK:
@@ -993,6 +1000,7 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
+        command.stop_notice_state = STOP_NOTICE_PENDING
         return
 
     # transient만 지수 백오프 재시도 큐로.
@@ -1019,6 +1027,7 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
+        command.stop_notice_state = STOP_NOTICE_PENDING
         return
     command.status = "pending"
     command.next_attempt_at = compute_next_attempt_at(
@@ -1157,11 +1166,6 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
         try:
             await _process_one_command(db, command, now=now)
             await db.commit()
-            # story #4258 — 이번 틱에 사람 손이 필요한 멈춤(dead_letter · blocked)이 됐으면(클레임 때 in_progress로 바꿨으니
-            # 여기서 그 상태면 방금 전이한 것) 레시피 문맥에 실패 통지. 격리 세션 · 실패해도 이 커밋은 그대로.
-            from app.services.recipe_publish_failure import notify_recipe_publish_stopped
-
-            await notify_recipe_publish_stopped(db, command)
             key = (
                 command.status
                 if command.status in ("completed", "dead_letter", "blocked", "voided", "blocked_unapproved")
@@ -1172,4 +1176,9 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
             await db.rollback()
             counts["error"] += 1
             logger.exception("publication command batch item 처리 실패 command_id=%s", command.id)
+    # story #4258(까디르 4621 codex P2) — 멈춤 통지는 표식(`stop_notice_state = pending`)을 보고 보낸다. 이번 틱에 방금 멈춘 것
+    # · 지난 틱에 전이 커밋 뒤 통지 전에 죽은 것 · 통지가 실패해 남은 것을 모두 여기서 줍는다(행마다 자기 트랜잭션).
+    from app.services.recipe_publish_failure import deliver_pending_stop_notices
+
+    counts["stop_notices"] = await deliver_pending_stop_notices(db)
     return counts
