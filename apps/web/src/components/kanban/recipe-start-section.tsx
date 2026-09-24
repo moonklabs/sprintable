@@ -115,6 +115,12 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         // event-block-card.tsx::EventPublishActionButton과 동일 관례 — BE가 완성 문장을
         // 주면(allowlist/contract) 그대로, 아니면 generic 폴백.
         const body = await res.json().catch(() => null);
+        // story #4261(4075 AC7 개정) — 이미 시작된 회차(두 클릭 · 두 탭 · 새로고침 재클릭 포함)는 BE가 409 RECIPE_ALREADY_STARTED로
+        // 알린다. 에러가 아니라 **상태**다 — 다시 읽어 «진행 중/완료» 표시로 돌아간다(메시지는 새로 안 생겼다).
+        if (res.status === 409 && isRecipeAlreadyStarted(body)) {
+          refresh();
+          return;
+        }
         const msg = extractBackendErrorMessage(body, t) ?? t('recipeStartErrorGeneric');
         throw new Error(msg);
       }
@@ -206,4 +212,12 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       )}
     </>,
   );
+}
+
+
+/** story #4261 — BE 409 본문에서 RECIPE_ALREADY_STARTED 코드(error.code 또는 detail.code 어느 쪽이든). */
+function isRecipeAlreadyStarted(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as { error?: { code?: unknown }; detail?: { code?: unknown } };
+  return b.error?.code === 'RECIPE_ALREADY_STARTED' || b.detail?.code === 'RECIPE_ALREADY_STARTED';
 }

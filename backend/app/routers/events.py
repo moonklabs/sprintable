@@ -2581,17 +2581,28 @@ async def _publish_registry_event_core(
             work_item_type=work_item_type, work_item_id=str(work_item_id), stage=str(stage),
         )
         if existing_publish is not None:
-            return {
+            # story #4261(PO 09:08Z · 4075 AC7 개정) — 레시피 실행은 **스토리당 1회**. 예전엔 200 + deduplicated로 조용히 흡수해, 두 번째
+            # 회차를 시작하려던 호출자(특히 에이전트)가 막힌 줄 모르고 이어서 낸 단계가 1회차의 승인된 게이트에 걸려 카드 · 알림 · 다음 멘션
+            # 없이 멈췄다(디디 실측). 09-21 결정의 목적(두 클릭 · 새로고침에 메시지 2건 0 · 사람 화면엔 에러 대신 상태)은 그대로 — 메시지는
+            # 새로 안 만들고, 신호만 409 + 사유(completed / in_progress) + 기존 conversation/message id로 바꾼다. FE는 이 409를 상태로 받는다.
+            latest = await _find_latest_stage_publish(
+                db, org_id=org_id, definition_key=definition.key,
+                work_item_type=work_item_type, work_item_id=str(work_item_id),
+            )
+            latest_stage = ((((latest.msg_metadata or {}).get("event") or {}).get("payload") or {}).get("stage")
+                            if latest is not None else None)
+            reason = "completed" if latest_stage is not None and latest_stage == first_stage[-1] else "in_progress"
+            raise HTTPException(status_code=409, detail={
+                "code": "RECIPE_ALREADY_STARTED",
+                "reason": reason,
+                "message": (
+                    t("events.recipe_already_started_completed", resolved_locale) if reason == "completed"
+                    else t("events.recipe_already_started_in_progress", resolved_locale)
+                ),
                 "conversation_id": str(existing_publish.conversation_id),
                 "message_id": str(existing_publish.id),
-                "escalation_member_ids": [],
-                "broadcast_member_ids": [],
-                "zero_reach_warning": False,
-                # story #4075 — 호출자(FE·에이전트)가 "새로 발행됐다"와 "이미 발행돼
-                # 있었다(그 기존 발행분을 그대로 돌려줬다)"를 가를 수 있게 조용히 삼키지
-                # 않는다.
-                "deduplicated": True,
-            }
+                "current_stage": latest_stage,
+            })
 
     from app.services.event_routing_resolver import (
         InvalidWorkItemReferenceError,

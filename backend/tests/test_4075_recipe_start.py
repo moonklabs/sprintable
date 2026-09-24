@@ -5,7 +5,9 @@ AC6 — «시작됨» 근거는 발행된 draft 이벤트 자체(`_find_existing
 다른 탭·다른 사람 화면에서도 같게 보인다.
 AC7 — 서버가 같은 work_item+definition의 draft 재발행을 거부(설계 정정 2026-09-21, 페드루 PO
 채널 재확定 — 409 거부가 아니라 200 + `deduplicated: true` + 기존 conversation_id/message_id
-반환). 두 탭 동시 클릭에도 메시지 2건이 생기면 안 된다 — check-then-insert는 그 자체로 TOCTOU라
+반환). ⛔story #4261(PO 2026-09-24 09:08Z 개정): 200 dedup은 두 번째 회차 시작을 조용히 흡수해 그 뒤 단계가 1회차 게이트에 걸려
+멈추는 결함을 낳았다 — 신호만 409 `RECIPE_ALREADY_STARTED` + 사유(completed / in_progress) + 기존 conversation_id/message_id로
+바꾼다(메시지 2건 0 · 사람 화면엔 상태라는 09-21 목적은 그대로). 두 탭 동시 클릭에도 메시지 2건이 생기면 안 된다 — check-then-insert는 그 자체로 TOCTOU라
 ([[feedback_check_then_insert_toctou]] 동형) `pg_advisory_xact_lock`으로 직렬화
 (`app/repositories/story.py::allocate_story_number`와 동형 패턴).
 
@@ -186,13 +188,19 @@ async def test_ac7_duplicate_draft_publish_returns_existing_not_new_message():
             )
             assert first.get("deduplicated") is not True
 
-            second = await _publish_stage(
-                s, org_id=org_id, definition_key=definition.key, story_id=story_id,
-                stage="draft", requester_id=owner_id,
-            )
-            assert second["deduplicated"] is True
-            assert second["conversation_id"] == first["conversation_id"]
-            assert second["message_id"] == first["message_id"]
+            from fastapi import HTTPException
+            with pytest.raises(HTTPException) as exc:
+                await _publish_stage(
+                    s, org_id=org_id, definition_key=definition.key, story_id=story_id,
+                    stage="draft", requester_id=owner_id,
+                )
+            assert exc.value.status_code == 409
+            detail = exc.value.detail
+            assert detail["code"] == "RECIPE_ALREADY_STARTED"
+            assert detail["reason"] == "in_progress"  # draft만 발행됨 — 마지막 단계 전
+            assert detail["message"]  # 사람 말 사유(카탈로그)
+            assert detail["conversation_id"] == first["conversation_id"]
+            assert detail["message_id"] == first["message_id"]
 
             from sqlalchemy import func, select
             from app.models.conversation import Conversation, ConversationMessage
@@ -227,9 +235,16 @@ async def test_ac7_concurrent_double_click_still_creates_only_one_message():
             results = await asyncio.gather(
                 _publish_stage(s1, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id),
                 _publish_stage(s2, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id),
+                return_exceptions=True,
             )
-        deduplicated_flags = sorted(bool(r.get("deduplicated")) for r in results)
-        assert deduplicated_flags == [False, True], f"둘 다 새로 발행되거나 둘 다 dedup됨(경합 미방어): {results}"
+        from fastapi import HTTPException
+        # story #4261 — 한쪽은 새 발행(dict), 다른 쪽은 409 RECIPE_ALREADY_STARTED.
+        outcomes = sorted(
+            "409" if isinstance(r, HTTPException) and r.status_code == 409 and r.detail["code"] == "RECIPE_ALREADY_STARTED"
+            else ("201" if isinstance(r, dict) else repr(r))
+            for r in results
+        )
+        assert outcomes == ["201", "409"], f"둘 다 새로 발행되거나 둘 다 거절됨(경합 미방어): {results}"
 
         async with Session() as s:
             from sqlalchemy import func, select
@@ -244,6 +259,30 @@ async def test_ac7_concurrent_double_click_still_creates_only_one_message():
                 )
             )).scalar_one()
             assert count == 1, "동시 두 탭 클릭이 메시지를 2건 만들었다(AC7 실패)"
+    finally:
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_restart_after_last_stage_is_409_completed():
+    """story #4261 — 마지막 단계까지 간 회차 뒤 다시 시작하면 409 · reason=completed(사람 말 «이미 끝났어요»)."""
+    from fastapi import HTTPException
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            definition = await _seed_cyclic_definition(s, org_id=org_id, key="org.e4261.completed")
+            story_id = await _seed_story(s, org_id, project_id)
+            for stage in ("draft", "review", "publish"):
+                await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage=stage, requester_id=owner_id)
+            with pytest.raises(HTTPException) as exc:
+                await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id)
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "RECIPE_ALREADY_STARTED"
+        assert exc.value.detail["reason"] == "completed"
+        assert exc.value.detail["current_stage"] == "publish"
     finally:
         await engine.dispose()
 

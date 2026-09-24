@@ -357,6 +357,10 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 스토리에 발행 전 블로그 초안이 여럿이라 {field}를 자동으로 채우지 않았어요. 이번 회차에 submit_site_post_draft로 제출하는 초안의 id를 후보에서 골라 {field}에 넣어요. 후보: {ids}",
         "en": "This story has several unpublished blog drafts, so {field} was not filled in automatically. Pick the id of the draft you submit with submit_site_post_draft in this run and put it in {field}. Candidates: {ids}",
     },
+    "events.recipe_already_started": {
+        "ko": "이 스토리에서 이 레시피는 이미 시작됐어요 — 지금 단계: {stage}. 레시피는 스토리마다 한 번만 실행돼요. 다시 하려면 새 스토리에서 시작해요.",
+        "en": "This recipe has already started on this story — current stage: {stage}. A recipe runs once per story. To run it again, start it on a new story.",
+    },
     "events.stage_next_publish_example": {
         "ko": "다음 단계로 넘기는 발행 예시: publish_event({example})",
         "en": "Publish example for the next stage: publish_event({example})",
