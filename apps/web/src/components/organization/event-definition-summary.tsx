@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, type ReactNode } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { EventBlockCard } from '@/components/chat/event-block-card';
 import type { BlockTemplate, EventDefinitionSummary as EventDefinitionSummaryDef } from '@/lib/block-template';
 
@@ -29,7 +29,9 @@ function classifyFormat(properties: Record<string, SchemaProperty>): 'cycle' | '
 }
 
 function sampleValueForProperty(def: SchemaProperty, name: string): unknown {
-  if (def.enum && def.enum.length > 0) return def.enum[0];
+  // enum이 null로 시작해도(비어도 되는 선택지) 예시는 첫 실제 값.
+  const firstValue = def.enum?.find((v) => v !== null);
+  if (firstValue !== undefined) return firstValue;
   const type = valueTypes(def)[0];
   if (type === 'number' || type === 'integer') return 0;
   if (type === 'boolean') return true;
@@ -51,7 +53,7 @@ function valueTypeLabel(type: string, format: string | undefined, t: ReturnType<
 // 이어 그렸고, enum은 내부어 «enum(…)», integer 등은 원문 그대로였다.
 // - 유니언: `null`을 뺀 첫 형식의 라벨(«비어도 됨»은 옆 «필수/선택» 칸이 말한다).
 // - enum: «다음 중 하나: …» — 값은 페이로드에 그대로 보낼 원문이라 번역하지 않고 값마다 `<code>`(줄이지 않고 칸 안에서 줄바꿈).
-function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslations>): ReactNode {
+function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslations>, locale: string): ReactNode {
   if (def.enum) {
     const values = def.enum.filter((v): v is string => v !== null);
     // 머리말(«다음 중 하나:» / «One of:») 뒤에 값 목록 — ko·en 모두 값이 문장 끝이라 메시지에 자리 태그를 두지 않는다.
@@ -64,8 +66,11 @@ function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslation
       </>
     );
   }
-  const type = valueTypes(def)[0];
-  return type ? valueTypeLabel(type, def.format, t) : t('definerFieldTypeAny'); // 형식 없음 = 아무 값이나 받는다
+  // 까디르 4603 QA ① — 등록 API는 여러 형식 유니언(`["string","number"]`)도 받고 둘 다 검증하므로, 라벨도 null 아닌 형식
+  // 전부를 «또는»으로 잇는다(첫 것만 쓰면 조직 정의에서 거짓 라벨). 시드엔 null 빼면 형식 하나인 유니언뿐이다.
+  const labels = Array.from(new Set(valueTypes(def).map((type) => valueTypeLabel(type, def.format, t))));
+  if (labels.length === 0) return t('definerFieldTypeAny'); // 형식 없음 = 아무 값이나 받는다
+  return new Intl.ListFormat(locale, { type: 'disjunction' }).format(labels);
 }
 
 // noRecipientLabel — 「받는 사람」(broadcast) 축과 「즉시 알림」(escalation) 축은 "없음"의
@@ -103,6 +108,7 @@ export function EventDefinitionSummary({
   definition?: EventDefinitionSummaryDef | null;
 }) {
   const t = useTranslations('organization');
+  const locale = useLocale();
   const properties = (payloadSchema.properties ?? {}) as Record<string, SchemaProperty>;
   const required = new Set((payloadSchema.required as string[] | undefined) ?? []);
   const fieldNames = Object.keys(properties);
@@ -152,7 +158,7 @@ export function EventDefinitionSummary({
                 {fieldNames.map((name) => (
                   <tr key={name} className="border-t border-border">
                     <td className="px-2 py-1 font-mono text-foreground">{name}</td>
-                    <td className="break-words px-2 py-1 text-muted-foreground" data-testid={`event-def-field-type-${name}`}>{fieldTypeLabel(properties[name]!, t)}</td>
+                    <td className="break-words px-2 py-1 text-muted-foreground" data-testid={`event-def-field-type-${name}`}>{fieldTypeLabel(properties[name]!, t, locale)}</td>
                     {/* story #4223(유나) — 390 ko에서 «필수»가 «필/수»로 세로 접혔다 · 낱말 줄바꿈 금지(좁으면 다른 열이 양보). */}
                     <td className="whitespace-nowrap px-2 py-1 text-muted-foreground" data-testid={`event-def-field-required-${name}`}>
                       {required.has(name) ? t('definerFieldRequired') : t('definerFieldOptional')}

@@ -45,6 +45,7 @@ const PAYLOAD_SCHEMA = {
     free: {},
     weird: { type: 'uuid-ish' },
     tagsNullable: { type: ['array', 'null'] },
+    multi: { type: ['string', 'number', 'null'] },
   },
   required: ['verdict'],
 };
@@ -79,6 +80,8 @@ describe('EventDefinitionSummary 필드 형식 칸(story #4246)', () => {
       free: o.definerFieldTypeAny,
       weird: o.definerFieldTypeOther,
       tagsNullable: o.definerFieldTypeList,
+      // 까디르 4603 QA ① — null 아닌 형식이 여럿이면 전부(첫 것만이면 거짓 라벨).
+      multi: `${o.definerFieldTypeString} 또는 ${o.definerFieldTypeNumber}`,
     });
     const text = container.querySelector('table')?.textContent ?? '';
     for (const raw of ['stringnull', 'enum(', 'integer', 'array', 'object', 'null']) expect(text).not.toContain(raw);
@@ -88,6 +91,40 @@ describe('EventDefinitionSummary 필드 형식 칸(story #4246)', () => {
     const o = enMessages.organization;
     const types = await renderTypes('en');
     expect(types.reason_note).toBe(o.definerFieldTypeString);
+    expect(types.multi).toBe(`${o.definerFieldTypeString} or ${o.definerFieldTypeNumber}`);
     expect(types.verdict).toBe(`${o.definerFieldTypeEnum} approved, rejected`);
+  });
+});
+
+// 까디르 4603 QA ② ③ — 실물 카드 미리보기 예시값도 같은 규칙: 비어도 되는 숫자·참거짓·날짜는 형식에 맞는 예시, null로 시작하는
+// enum은 첫 실제 값. (예전 테스트는 형식 칸만 봐서 유니언 해제를 빼도 미리보기 쪽이 초록이었다.)
+describe('EventDefinitionSummary 미리보기 예시값(story #4246 · 까디르 QA)', () => {
+  const PREVIEW_SCHEMA = {
+    properties: {
+      attempt: { type: ['integer', 'null'] },
+      cost: { type: ['number', 'null'] },
+      flag: { type: ['boolean', 'null'] },
+      decided_at: { type: ['string', 'null'], format: 'date-time' },
+      pick: { enum: [null, 'approved', 'rejected'] },
+    },
+  };
+  const TEMPLATE = { blocks: [{ type: 'fields', fields: Object.keys(PREVIEW_SCHEMA.properties).map((name) => ({ label: `L_${name}`, value: `V[{{payload.${name}}}]` })) }] };
+
+  it('형식에 맞는 예시(숫자 0 · 참 · 1970 날짜 · 첫 실제 enum 값)', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EventDefinitionSummary payloadSchema={PREVIEW_SCHEMA} routing={{}} actionAuth={null} blockTemplate={TEMPLATE} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = container.textContent ?? '';
+    expect(text).toContain('V[0]');
+    expect(text).toContain('V[true]');
+    expect(text).toContain('V[1970-01-01T00:00:00.000Z]');
+    expect(text).toContain('V[approved]');
+    expect(text).not.toContain('V[예시');
+    expect(text).not.toContain('V[]');
   });
 });
