@@ -306,7 +306,8 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                     {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? (
                       <Link
                         href={flatHref(`/organization/workforce/${agent.id}`)}
-                        className="whitespace-nowrap text-xs font-medium text-primary hover:underline"
+                        // [SID:4282 · 유나 추가 결정] 카드 · 화살표와 같은 곳으로 가는 중복 링크 — lg 미만에선 숨겨 이름 칸을 돌려준다(390 en 이름 22px).
+                        className="hidden whitespace-nowrap text-xs font-medium text-primary hover:underline lg:inline"
                       >
                         {ta('viewConnectionSettings')}
                       </Link>

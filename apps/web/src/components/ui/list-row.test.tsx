@@ -79,3 +79,26 @@ describe('ListRow — 부제 줄바꿈 · 다크 표식 테두리(SID:4282)', ()
     await act(async () => { root.unmount(); });
   });
 });
+
+// [SID:4282 · 유나 추가 결정] 390에서 글자 칸이 50px로 줄던 것 — 글자 칸 바탕 너비 10rem · 상태/동작/메뉴 한 묶음(같이 줄바꿈).
+describe('ListRow — 좁은 폭 배치(SID:4282)', () => {
+  it('글자 칸은 flex-[1_1_10rem] · 상태/동작/메뉴는 ml-auto shrink-0 묶음 안에 순서대로', async () => {
+    const { container, root } = await mount(
+      <ListRow title="송윤재 · 소유자" subtitle="개발 · 아직 판정한 가설이 없어요"
+        status={<span data-testid="st">데이터 부족</span>} action={<button type="button">추이 보기</button>} menu={<button type="button">⋯</button>} />,
+    );
+    const title = Array.from(container.querySelectorAll('p')).find((el) => el.textContent === '송윤재 · 소유자');
+    expect(title?.parentElement?.className.split(/\s+/)).toContain('flex-[1_1_10rem]');
+    const st = container.querySelector('[data-testid="st"]');
+    const group = st?.parentElement;
+    expect(group?.className.split(/\s+/)).toEqual(expect.arrayContaining(['ml-auto', 'shrink-0', 'flex']));
+    expect(Array.from(group?.children ?? []).map((el) => el.textContent)).toEqual(['데이터 부족', '추이 보기', '⋯']);
+    expect(group?.parentElement?.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-wrap', 'gap-x-3', 'gap-y-2']));
+    await act(async () => { root.unmount(); });
+  });
+  it('상태/동작/메뉴가 하나도 없으면 빈 묶음을 안 만든다', async () => {
+    const { container, root } = await mount(<ListRow title="이름만" />);
+    expect(container.querySelector('.ml-auto')).toBeNull();
+    await act(async () => { root.unmount(); });
+  });
+});

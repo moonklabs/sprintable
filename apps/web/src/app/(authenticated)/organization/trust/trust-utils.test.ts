@@ -274,3 +274,26 @@ describe('disambiguatedNames (SID:4282 — 같은 이름 두 줄 구분)', () =>
     expect(lookup.get('t')?.role).toBeUndefined();
   });
 });
+
+// [SID:4282 · 까디르 P2] 같은 이름 행 순서는 입력(BE 응답) 순서와 무관해야 한다 — 새로고침마다 두 줄이 자리를 바꾸지 않게.
+describe('sortGroupMembersByName — 같은 이름은 member_id · role_key로 끊는다(SID:4282)', () => {
+  const row = (member_id: string, role_key = 'dev') => ({ member_id, role_key, role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 });
+  const lookup = new Map([
+    ['e75ca548', { id: 'e75ca548', name: '송윤재' }],
+    ['2fd14616', { id: '2fd14616', name: '송윤재' }],
+    ['c3', { id: 'c3', name: 'dosunyun' }],
+  ]);
+  it('입력 순서를 뒤집어도 출력 순서가 같다', () => {
+    const a = sortGroupMembersByName([row('e75ca548'), row('2fd14616'), row('c3')], lookup).map((r) => r.member_id);
+    const b = sortGroupMembersByName([row('2fd14616'), row('c3'), row('e75ca548')], lookup).map((r) => r.member_id);
+    expect(a).toEqual(b);
+    expect(a).toEqual(['c3', '2fd14616', 'e75ca548']);
+  });
+  it('같은 사람의 직무 두 행도 순서가 고정(role_key)', () => {
+    const one = new Map([['p1', { id: 'p1', name: '박' }]]);
+    const a = sortGroupMembersByName([row('p1', 'qa'), row('p1', 'dev')], one).map((r) => r.role_key);
+    const b = sortGroupMembersByName([row('p1', 'dev'), row('p1', 'qa')], one).map((r) => r.role_key);
+    expect(a).toEqual(['dev', 'qa']);
+    expect(b).toEqual(['dev', 'qa']);
+  });
+});

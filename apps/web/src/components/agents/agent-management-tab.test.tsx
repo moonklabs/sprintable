@@ -63,6 +63,9 @@ describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story 
     await mount();
     expect(container.textContent).toContain('연결 안 됨');
     expect(container.textContent).toContain('연결 설정 보기');
+    // [SID:4282 · 유나 추가 결정] 카드 · 화살표와 같은 곳으로 가는 중복 링크는 lg 미만에서 숨김(390 이름 칸 확보).
+    const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '연결 설정 보기');
+    expect(link?.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:inline']));
   });
 
   it('⭐「시스템 발행」(runtime_type=system-publisher, verified=false)은 행은 뜨되 경고·CTA 0, 중립 설명 1줄', async () => {

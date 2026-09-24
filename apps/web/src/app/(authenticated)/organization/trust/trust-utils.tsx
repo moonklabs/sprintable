@@ -106,10 +106,14 @@ export function sortGroupMembersByName(rows: OrgSummaryRow[], lookup: Map<string
   return [...rows].sort((a, b) => {
     const nameA = lookup.get(a.member_id)?.name;
     const nameB = lookup.get(b.member_id)?.name;
-    if (nameA && nameB) return nameA.localeCompare(nameB);
-    if (nameA) return -1;
-    if (nameB) return 1;
-    return a.member_id.localeCompare(b.member_id);
+    if (nameA && nameB) {
+      // [SID:4282 · 까디르 P2] 이름이 같으면(«송윤재» 두 계정) 비교기가 0이라 BE 응답 순서(ORDER BY 없음)를 따라가
+      // 새로고침마다 두 줄 순서가 바뀔 수 있었다 → member_id(같은 사람의 직무 두 행이면 role_key)로 끊는다.
+      const byName = nameA.localeCompare(nameB);
+      if (byName !== 0) return byName;
+    } else if (nameA) return -1;
+    else if (nameB) return 1;
+    return a.member_id.localeCompare(b.member_id) || a.role_key.localeCompare(b.role_key);
   });
 }
 
