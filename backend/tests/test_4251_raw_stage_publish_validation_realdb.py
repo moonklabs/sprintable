@@ -447,3 +447,47 @@ async def test_the_http_request_cannot_carry_the_internal_exemption():
         assert d["status"] in (400, 409)  # 스키마 밖 키(400) 또는 순서 거부(409) — 어느 쪽이든 발행 0
     finally:
         await engine.dispose()
+
+
+# ── 프로젝트 원천 통일(PO 4251 · 11:18Z) ────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_one_project_source_for_validation_recipients_and_the_conversation_outside_stories():
+    """story 밖 작업 항목(doc · visual_artifact)에서 «누가 이 stage인가(바인딩 · 검증)»와 «어디서 발행되는가(대화방)»가 같은
+    프로젝트를 읽는다. 예전엔 수신자 쪽 함수가 doc · visual_artifact를 몰라 «프로젝트 없음»(org 전역 바인딩만)을 냈고, 대화방은
+    그 항목의 프로젝트에 섰다. 끝단: doc 항목의 첫 stage를 **프로젝트 바인딩** 에이전트가 내면 통과하고, 그 에이전트가 수신자이며,
+    대화방은 doc의 프로젝트다."""
+    from app.models.conversation import Conversation
+    from app.models.doc import Doc
+    from app.models.visual_artifact import VisualArtifact
+    from app.routers.events import _resolve_event_project_id
+    from app.services.event_routing_resolver import _resolve_work_item_project_id
+    from app.services.gate_service import resolve_work_item_project_id
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session, bindings={"draft": "writer"})
+        async with Session() as s:
+            doc = Doc(id=uuid.uuid4(), org_id=w["org_id"], project_id=w["project_id"], title="문서", slug=f"d-{uuid.uuid4().hex[:6]}")
+            art = VisualArtifact(id=uuid.uuid4(), org_id=w["org_id"], project_id=w["project_id"], title="시안")
+            s.add_all([doc, art])
+            await s.commit()
+            for work_item_type, item_id in (("doc", doc.id), ("visual_artifact", art.id), ("story", w["story_id"])):
+                payload = {"work_item_type": work_item_type, "work_item_id": str(item_id)}
+                answers = {
+                    await _resolve_work_item_project_id(s, org_id=w["org_id"], payload=payload),
+                    await _resolve_event_project_id(s, org_id=w["org_id"], payload=payload),
+                    await resolve_work_item_project_id(s, w["org_id"], work_item_type, item_id),
+                }
+                assert answers == {w["project_id"]}, (work_item_type, answers)
+
+        result = await _publish(Session, w, "draft", as_member="writer", payload={
+            "stage": "draft", "work_item_type": "doc", "work_item_id": str(doc.id),
+        })
+        assert set(result["broadcast_member_ids"]) == {str(w["writer"])}
+        async with Session() as s:
+            conversation = await s.get(Conversation, uuid.UUID(result["conversation_id"]))
+        assert conversation.project_id == w["project_id"]
+    finally:
+        await engine.dispose()
