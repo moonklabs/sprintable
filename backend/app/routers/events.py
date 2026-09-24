@@ -1015,18 +1015,18 @@ class EventPublishRequest(BaseModel):
 async def _resolve_event_project_id(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> uuid.UUID | None:
-    """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project(gate_service.
-    resolve_work_item_project_id 재사용, 신규 쿼리 만들지 않음), goal_id만 있으면(preset.
-    goal.measured) Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부)."""
-    from app.services.event_routing_resolver import _parse_uuid
+    """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project, goal_id만 있으면(preset.goal.measured)
+    Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부).
+
+    story #4249(까디르 4623 델타 codex) — 작업 항목 쪽은 수신자(바인딩) · 완료 검증과 같은 원천(`event_routing_resolver.
+    _resolve_work_item_project_id`)을 읽는다 — 발행되는 프로젝트와 «누가 이 stage인가»가 다른 프로젝트를 읽지 않게."""
+    from app.services.event_routing_resolver import (
+        _parse_uuid,
+        _resolve_work_item_project_id,
+    )
 
     if payload.get("work_item_type") and payload.get("work_item_id"):
-        from app.services.gate_service import resolve_work_item_project_id
-
-        return await resolve_work_item_project_id(
-            db, org_id, payload["work_item_type"],
-            _parse_uuid(payload["work_item_id"], field_name="work_item_id"),
-        )
+        return await _resolve_work_item_project_id(db, org_id=org_id, payload=payload)
     if payload.get("goal_id"):
         from app.models.pm import Goal
 
@@ -4349,7 +4349,8 @@ async def get_recipe_start_candidates(
 
 
 class CompleteStageRequest(BaseModel):
-    project_id: uuid.UUID
+    # 까디르 4623 codex P1 — 판정은 작업 항목에서 푼 프로젝트로 한다. 보내면 대조만(다르면 422) · 안 보내면 푼 값.
+    project_id: uuid.UUID | None = None
     work_item_type: str
     work_item_id: uuid.UUID
     # complete: 끝낼 stage(지금 stage와 같아야 함 — 겹친 클릭 · 낡은 화면 방지).

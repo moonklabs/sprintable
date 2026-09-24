@@ -151,40 +151,34 @@ async def _resolve_none(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -
 async def _resolve_work_item_project_id(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> uuid.UUID | None:
-    """story #3288 — recipe_role_binding이 project 스코프 바인딩을 찾으려면 work_item의
-    project_id가 필요하다. _resolve_work_item_stakeholders와 동일 타입 분기(중복이지만 그
-    함수는 담당자 id를, 이건 project_id를 뽑아 반환 shape이 달라 별도 함수로 유지 — 이후
-    공통화는 후속 리팩터, 이 스토리 스코프 밖)."""
+    """story #3288 — recipe_role_binding이 project 스코프 바인딩을 찾으려면 work_item의 project_id가 필요하다.
+
+    story #4249(까디르 4623 델타 codex · PO 12:54Z) — 작업 항목 → 프로젝트의 **한 원천**. 예전엔 이 함수(story · task · goal ·
+    epic)와 발행 코어가 대화방 프로젝트를 푸는 `gate_service.resolve_work_item_project_id`(story · task · epic · doc ·
+    visual_artifact · loop · hypothesis · sprint)가 따로 있어, «누가 이 stage인가(바인딩 · 완료 검증)»와 «어디서 발행되는가»가
+    종류에 따라 다른 프로젝트를 읽었다. 이 함수의 task 갈래는 Task에 없는 `project_id` 칼럼을 골라 500이었다(Task는 story를
+    거친다). 이제 이 함수가 그 함수에 위임하고 goal만 덧붙인다 — 완료 · 후보 판정(`work_item_project`) · 수신자 · 대화방
+    (events.py `_resolve_event_project_id`)이 모두 이 함수를 읽는다."""
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
     if not work_item_type or not work_item_id_raw:
         return None
     work_item_id = _parse_uuid(work_item_id_raw, field_name="work_item_id")
 
-    if work_item_type == "story":
-        from app.models.pm import Story
-
-        return (await db.execute(
-            select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
-        )).scalar_one_or_none()
-    if work_item_type == "task":
-        from app.models.pm import Task
-
-        return (await db.execute(
-            select(Task.project_id).where(Task.id == work_item_id, Task.org_id == org_id)
-        )).scalar_one_or_none()
-    if work_item_type in ("goal", "epic"):
+    if work_item_type == "goal":
         from app.models.pm import Goal
 
         return (await db.execute(
             select(Goal.project_id).where(Goal.id == work_item_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
+    from app.services.gate_service import resolve_work_item_project_id
 
-    logger.warning(
-        "event_routing_resolver: unsupported work_item_type=%s for recipe_role_binding project lookup",
-        work_item_type,
-    )
-    return None
+    project_id = await resolve_work_item_project_id(db, org_id, work_item_type, work_item_id)
+    if project_id is None:
+        logger.warning(
+            "event_routing_resolver: work_item_type=%s id=%s did not resolve to a project", work_item_type, work_item_id,
+        )
+    return project_id
 
 
 async def resolve_broad_crew_member_ids(

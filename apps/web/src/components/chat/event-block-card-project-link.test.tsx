@@ -59,4 +59,25 @@ describe('EventBlockCard «스토리 보기» — story 주소가 이미 p를 �
     expect(href).toContain('p=proj-C');
     expect(href).not.toContain('p=proj-B');
   });
+
+  it('refs에 프로젝트가 없으면 payload.project_id로 — 화면 B · payload C → p=C', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentMemberType: 'human', role: 'admin', orgId: 'org-1', currentTeamMemberId: 'me-1', projectId: 'proj-B',
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EventBlockCard
+            template={{ blocks: [{ type: 'header', text: '헤더' }] }}
+            payload={{ stage: 'assign_step_1', work_item_type: 'story', work_item_id: 'story-9', project_id: 'proj-C' }}
+            refs={{ stage_assignee: 'me-1' }}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); });
+    const href = container.querySelector('[data-testid="event-card-view-story"]')?.getAttribute('href') ?? '';
+    expect(href).toContain('p=proj-C');
+    expect(href).not.toContain('p=proj-B');
+  });
 });

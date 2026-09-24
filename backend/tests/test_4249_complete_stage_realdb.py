@@ -425,3 +425,72 @@ async def test_the_project_comes_from_the_work_item_not_the_request():
         assert resp.candidates == []  # B엔 적용된 레시피(바인딩)가 없다
     finally:
         await engine.dispose()
+
+
+async def _complete_raw(Session, w, *, work_item_type="story", work_item_id=None, project_id=None, stage="assign_step_1",
+                        definition_id=None, org_id=None):
+    from app.routers.events import CompleteStageRequest, complete_recipe_stage
+
+    async with Session() as s:
+        result = await complete_recipe_stage(
+            definition_id or w["definition"].id,
+            CompleteStageRequest(
+                project_id=project_id, work_item_type=work_item_type, work_item_id=work_item_id or w["story_id"], stage=stage,
+            ),
+            BackgroundTasks(), _fake_request(), db=s, auth=_human_auth(w["me_user"], org_id or w["org_id"]),
+            org_id=org_id or w["org_id"],
+        )
+        await s.commit()
+        return result
+
+
+@pytest.mark.anyio
+async def test_one_project_source_for_completion_and_publish_across_work_item_kinds():
+    """까디르 4623 델타 codex(PO 12:54Z) — 완료 판정 · 수신자 · 발행이 작업 항목 → 프로젝트를 **한 함수**로 푼다.
+
+    - task 작업 항목: 200(예전 라우팅 쪽 task 갈래는 Task에 없는 칼럼을 골라 500).
+    - 요청 프로젝트를 안 보내면 푼 값으로 판정한다(뮤테이션: 불일치 확인 뒤 바인딩 판정에 요청 값을 쓰면 여기서 403 → RED).
+    - 없는 작업 항목 · 다른 조직의 작업 항목 → 404(발행 0) · 다른 조직 정의 id → 404."""
+    from app.models.conversation import Conversation
+    from app.models.pm import Task
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        async with Session() as s:
+            task = Task(id=uuid.uuid4(), org_id=w["org_id"], story_id=w["story_id"], title="레시피 태스크")
+            s.add(task)
+            await s.commit()
+        from app.routers.events import EventPublishRequest, publish_registry_event
+
+        async with Session() as s:
+            await publish_registry_event(
+                EventPublishRequest(definition_key=w["definition"].key, payload={
+                    "stage": "assign_step_1", "work_item_type": "task", "work_item_id": str(task.id),
+                }),
+                BackgroundTasks(), _fake_request(), db=s, auth=_human_auth(w["me_user"], w["org_id"]), org_id=w["org_id"],
+            )
+            await s.commit()
+        result = await _complete_raw(Session, w, work_item_type="task", work_item_id=task.id)
+        assert result["next_stage"] == "submit_step_1"
+        async with Session() as s:
+            conversation = await s.get(Conversation, uuid.UUID(result["conversation_id"]))
+        assert conversation.project_id == w["project_id"]  # 발행도 같은 프로젝트
+
+        await _start(Session, w)
+        result = await _complete_raw(Session, w)  # 프로젝트 없이 — 작업 항목에서 푼 값
+        assert result["next_stage"] == "submit_step_1"
+
+        with pytest.raises(HTTPException) as info:
+            await _complete_raw(Session, w, work_item_id=uuid.uuid4())
+        assert info.value.status_code == 404 and info.value.detail["code"] == "WORK_ITEM_NOT_FOUND"
+
+        other = await _world(Session)
+        with pytest.raises(HTTPException) as info:  # 내 조직으로 들어와 다른 조직의 스토리를 가리킨다
+            await _complete_raw(Session, w, work_item_id=other["story_id"])
+        assert info.value.status_code == 404 and info.value.detail["code"] == "WORK_ITEM_NOT_FOUND"
+        with pytest.raises(HTTPException) as info:  # 다른 조직의 정의 id
+            await _complete_raw(Session, w, definition_id=other["definition"].id, stage="submit_step_1")
+        assert info.value.status_code == 404
+    finally:
+        await engine.dispose()
