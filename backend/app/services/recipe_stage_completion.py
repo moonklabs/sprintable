@@ -24,6 +24,10 @@ from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# 이 게이트가 승인되면 서버가 일을 하고 다음 stage를 낸다(뉴스레터 발송 승인 → 크론 발송 → «발송 결과 확인» · story 4214).
+# 승인 알림의 «다음 행동»(story 4254)과 같은 상수를 읽는다 — 사본을 두지 않는다.
+from app.services.recipe_gate_hooks import SERVER_ADVANCING_GATE_TYPES
+
 CompletionMode = Literal[
     "complete", "last_stage", "server_continues", "gate_approval", "needs_fields", "not_member_stage", "unknown_stage",
 ]
@@ -32,8 +36,6 @@ CompletionMode = Literal[
 _CONNECTION_TARGETS = frozenset({"channel_connection", "generation_connector"})
 # 초안 게이트 승인 뒤 서버가 다음 stage를 잇는 승인 자리.
 _SERVER_CONTINUING_SURFACES = frozenset({"draft_gate"})
-# 이 게이트가 승인되면 서버가 일을 하고 다음 stage를 낸다(뉴스레터 발송 승인 → 크론 발송 → «발송 결과 확인», story 4214).
-_SERVER_CONTINUING_GATE_TYPES = frozenset({"newsletter_send"})
 # 다음 stage가 이 승인 자리를 선언하면 그 stage를 내는 쪽이 초안 연결을 실어야 한다(events.py `RECIPE_SITE_DRAFT_LINK_FIELD`).
 _LINK_FIELDS_BY_SURFACE = {"draft_gate": ("site_post_draft_id",)}
 
@@ -90,7 +92,7 @@ def completion_mode(definition, stage: str) -> CompletionMode:
     nxt = next_stage_of(definition, stage)
     gate = meta.get("gate")
     if isinstance(gate, dict) and gate.get("type"):
-        if gate.get("type") in _SERVER_CONTINUING_GATE_TYPES or (nxt is not None and _server_publishes(definition, nxt)):
+        if gate.get("type") in SERVER_ADVANCING_GATE_TYPES or (nxt is not None and _server_publishes(definition, nxt)):
             return "server_continues"
         return "gate_approval"
     if nxt is None:
