@@ -297,14 +297,29 @@ async def enforce_gate(
             wi, work_type,
         )
         raise ValueError("gate park project_id is required")
+    # story #4270(PO 16:04Z) — agent_id · requested_for(멤버 id 자리 · NOT NULL)도 org id로 채우지 않는다(예전 `actor_id or org_id`).
+    # 이쪽은 닿을 수 있다(/bulk가 actor 해소 실패 시 None을 넘긴다) — 틀린 데이터를 park하는 대신 명확한 4xx로 거절한다(게이트
+    # fail-closed와 같은 방향 · 조용한 대체 0). /bulk는 항목별 HTTPException을 그 항목의 violation으로 돌려준다(다른 항목은 계속).
+    if actor_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "GATE_ACTOR_UNRESOLVED",
+                "work_type": work_type,
+                "level": "ask",
+                "requires_human": True,
+                # 사람에게 닿는 문구는 code로 FE가 번역한다(새 한국어 서버 문구 금지 가드 · story #3779 축) — message는 운영자용 영문.
+                "message": f"could not resolve the requesting member for the {work_type} approval request",
+            },
+        )
     req = HitlRequest(
         org_id=org_id,
         project_id=project_id,
-        agent_id=actor_id or org_id,
+        agent_id=actor_id,
         request_type=_GATE_REQUEST_TYPE,
         title=f"승인 필요: {work_item_title or wi} → {work_type}",
         prompt=f"{work_type} 전이에 사람 승인이 필요합니다(게이트 레벨 ask).",
-        requested_for=actor_id or org_id,
+        requested_for=actor_id,
         status="pending",
         hitl_metadata={
             "work_item_id": wi,

@@ -273,3 +273,26 @@ async def test_ask_park_requires_project_id_no_org_fallback(caplog):
             )
     assert _hitl_reqs_added(session) == 0
     assert any("project_id 없음" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_ask_park_unresolved_actor_rejected_not_org_filled():
+    """story #4270(PO 16:04Z) — actor를 못 풀면(/bulk actor 해소 실패) agent_id · requested_for(멤버 id · NOT NULL)를 org id로 채우지 않고
+    명확한 4xx로 거절한다(HitlRequest 0). 뮤테이션: 예전 `actor_id or org_id`로 되돌리면 org id를 멤버 자리에 park하고 409 → RED."""
+    from fastapi import HTTPException
+
+    from app.services import gate_enforce as ge
+
+    session = _session(execute_side_effect=[_first(None)])
+    with patch.object(ge, "gate_config_enforce_active", return_value=True), patch.object(
+        ge, "resolve_gate_level", new=AsyncMock(return_value="ask")
+    ):
+        with pytest.raises(HTTPException) as ei:
+            await ge.enforce_gate(
+                session, org_id=uuid.uuid4(), project_id=uuid.uuid4(),
+                work_type="done", actor_type="agent", actor_id=None,
+                work_item_id=uuid.uuid4(), work_item_title="X",
+            )
+    assert ei.value.status_code == 403
+    assert ei.value.detail["code"] == "GATE_ACTOR_UNRESOLVED"
+    assert _hitl_reqs_added(session) == 0
