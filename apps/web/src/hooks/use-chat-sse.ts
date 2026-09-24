@@ -6,7 +6,7 @@ import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/real
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
-import { createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
+import { createSseLivenessTracker, createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
 import { createPollBackoffState, POLL_THRESHOLD_MS } from '@/lib/realtime/sse-polling-fallback';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
@@ -286,6 +286,8 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     // backoff.isReconnect()를 안 거치므로(onError 미경유) 이 플래그로 onReconnect(=backfill)를
     // 확실히 태운다.
     let pendingForcedReconnect = false;
+    // story #4252 — sse-multiplexer.ts와 같은 처방: 최근에 받은 게 있는 OPEN 커넥션은 focus에서 끊지 않는다.
+    const liveness = createSseLivenessTracker();
 
     function connect() {
       sourceRef.current?.close();
@@ -297,8 +299,14 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
 
       const source = new EventSource(url.toString());
       sourceRef.current = source;
+      liveness.reset();
+      // story #4252 — heartbeat(BE가 쉬는 동안 30초마다) · 이 훅이 받는 이벤트를 생존 신호로 센다.
+      for (const name of ['heartbeat', 'conversation.message_created', 'conversation.working', 'conversation.read']) {
+        source.addEventListener(name, () => { if (sourceRef.current === source) liveness.markActivity(); });
+      }
 
       source.onopen = () => {
+        liveness.markActivity();
         const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
         pendingForcedReconnect = false;
         setConnected(true);
@@ -375,7 +383,7 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     // 포커스만 잃었다 되찾는 경우 위 handleVisibilityChange는 안 fire한다(sse-visibility-
     // reconnect.ts의 onFocusRegained 주석 참고). sse-multiplexer.ts와 동일 처방.
     const handleWindowFocus = () => {
-      if (visibilityState.onFocusRegained()) {
+      if (visibilityState.onFocusRegained(liveness.isAlive(sourceRef.current?.readyState))) {
         pendingForcedReconnect = true;
         connect();
       }

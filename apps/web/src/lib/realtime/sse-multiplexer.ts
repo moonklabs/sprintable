@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
 import { isSessionAlive } from './sse-session-guard';
 import { isCursorEligibleEventName } from './sse-cursor-eligibility';
-import { createVisibilityReconnectState } from './sse-visibility-reconnect';
+import { createSseLivenessTracker, createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -74,6 +74,8 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   const esRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
+  // story #4252 — 이 커넥션이 최근에 무엇이든 받았는지(open · heartbeat · 이벤트). focus 때 살아 있는 커넥션을 끊지 않는 판정용.
+  const livenessRef = useRef(createSseLivenessTracker());
   const memberIdRef = useRef(memberId);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
   // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트·enabled 단독
@@ -94,6 +96,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     attachedEventNamesRef.current.add(eventName);
     es.addEventListener(eventName, (e: Event) => {
       const me = e as MessageEvent<string>;
+      livenessRef.current.markActivity();
       dispatchNamed(eventName, me.data, me.lastEventId || undefined);
     });
   }, [dispatchNamed]);
@@ -145,11 +148,15 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
       const es = new EventSource(url.toString(), { withCredentials: true });
       esRef.current = es;
+      livenessRef.current.reset();
+      // story #4252 — BE가 쉬는 동안 30초마다 보내는 heartbeat을 생존 신호로 받는다(구독자 없음 · 판정 전용).
+      es.addEventListener('heartbeat', () => { if (esRef.current === es) livenessRef.current.markActivity(); });
       // 새 커넥션이므로 지금까지 구독된 이름을 전부 다시 attach(지연 attach 캐시 초기화).
       attachedEventNamesRef.current = new Set();
       for (const eventName of namedSubscribersRef.current.keys()) attachIfNeeded(eventName);
 
       es.onopen = () => {
+        livenessRef.current.markActivity();
         const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
         pendingForcedReconnect = false;
         backoff.onOpen();
@@ -158,6 +165,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       };
 
       es.onmessage = (e: MessageEvent<string>) => {
+        livenessRef.current.markActivity();
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
         for (const handler of messageSubscribersRef.current) handler(e.data, e.lastEventId || undefined);
       };
@@ -210,8 +218,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     // OS 포커스만 오간" 복귀를 못 잡는다(sse-visibility-reconnect.ts 모듈 docstring 참고 —
     // onVisible()은 hidden 이력이 없으면 구조적으로 항상 false). window.focus를 독립
     // 신호로 추가 — hidden 이력과 무관하게 강제 재연결하되 짧은 throttle로 중복 억제.
+    // story #4252 — 단, OPEN이면서 최근(heartbeat 주기 + 여유 안)에 받은 게 있으면 살아 있는 커넥션이라 그대로 둔다.
     const handleWindowFocus = () => {
-      if (visibilityState.onFocusRegained()) {
+      if (visibilityState.onFocusRegained(livenessRef.current.isAlive(esRef.current?.readyState))) {
         pendingForcedReconnect = true;
         connect();
       }

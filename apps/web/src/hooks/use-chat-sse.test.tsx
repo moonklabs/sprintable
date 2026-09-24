@@ -291,6 +291,7 @@ describe('useChatSse — 가시성 복귀 강제 재연결(#2987, standalone-fal
 // story #3081(선생님 P0 지시, standalone-fallback 경로) — sse-multiplexer.test.tsx의
 // "window.focus 강제 재연결" 회귀가드와 동형. 위 #2987 스위트(visibilitychange 축)와 달리
 // hidden 이력 없이 focus만으로도 재연결이 걸려야 한다.
+// story #4252 — 아래 세 개는 fake의 readyState가 OPEN이 아닌(=생존 확認 안 된) 커넥션이라 예전처럼 강제 재연결한다.
 describe('useChatSse — window.focus 강제 재연결(#3081, 가시성 축과 독립, standalone-fallback)', () => {
   it('hidden 이력 없이 window.focus만 와도 기존 커넥션을 닫고 새로 연다', async () => {
     await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
@@ -321,6 +322,39 @@ describe('useChatSse — window.focus 강제 재연결(#3081, 가시성 축과 �
     act(() => { FakeEventSource.instances[1]!.onopen?.(); });
 
     expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story #4252 — sse-multiplexer.test.tsx «살아 있는 커넥션은 끊지 않는다»와 같은 처방.
+describe('useChatSse — window.focus: 살아 있는 커넥션은 끊지 않는다(#4252)', () => {
+  it('⭐OPEN · 방금 열림 → focus가 와도 재연결하지 않는다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+    act(() => { FakeEventSource.instances[0]!.readyState = 1; FakeEventSource.instances[0]!.onopen?.(); });
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+  });
+
+  it('⭐OPEN을 자칭해도 45초 넘게 조용하면(좀비) 재연결 · heartbeat을 받으면 생존이 이어진다', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+      act(() => { FakeEventSource.instances[0]!.readyState = 1; FakeEventSource.instances[0]!.onopen?.(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+      act(() => { FakeEventSource.instances[0]!.emit('heartbeat', {}); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(FakeEventSource.instances).toHaveLength(1);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(FakeEventSource.instances).toHaveLength(2);
+      expect(FakeEventSource.instances[0]!.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

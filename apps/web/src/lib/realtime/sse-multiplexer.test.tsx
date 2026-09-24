@@ -457,6 +457,7 @@ describe('useSseMultiplexer — story #2078', () => {
   // story #3081(선생님 P0 지시) — visibilitychange만으론 "창은 계속 visible인 채 OS 포커스만
   // 오간" 복귀를 못 잡는다(document.visibilityState가 한 번도 'hidden'이 안 되므로 위 #2987
   // 로직 자체가 안 걸림). window.focus를 hidden 이력과 무관한 독립 신호로 추가.
+  // story #4252 — 아래 세 개는 fake의 readyState가 OPEN이 아닌(=생존 확認 안 된) 커넥션이라 예전처럼 강제 재연결한다.
   describe('window.focus 강제 재연결(#3081, 가시성 축과 독립)', () => {
     it('document.visibilityState가 계속 visible이었어도(hidden 이력 0) window.focus만으로 강제 재연결한다', async () => {
       await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
@@ -496,6 +497,53 @@ describe('useSseMultiplexer — story #2078', () => {
       act(() => { instances[1]!.onopen?.(); });
 
       expect(onReconnect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // story #4252(민 하네스 실측) — 웜 기동 뒤 첫 탭의 focus가 OPEN 커넥션을 닫고 4ms 뒤 다시 열었다(재조회 2 · 끼어든 요청 6).
+  // OPEN이면서 heartbeat 주기 + 여유(45초) 안에 받은 게 있으면 살아 있는 커넥션이라 focus에서 끊지 않는다. 좀비(오래 조용함)는 그대로 재연결.
+  describe('window.focus — 살아 있는 커넥션은 끊지 않는다(#4252)', () => {
+    it('⭐OPEN · 방금 열림 → focus가 와도 재연결하지 않는다(커넥션 1 · 닫힘 없음 · backfill 없음)', async () => {
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      const onReconnect = vi.fn();
+      await act(async () => { handle!.subscribeReconnect(onReconnect); });
+      act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0]!.closed).toBe(false);
+      expect(onReconnect).not.toHaveBeenCalled();
+    });
+
+    it('⭐OPEN을 자칭해도 45초 넘게 아무것도 못 받았으면(좀비) focus에서 강제 재연결한다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+
+      expect(instances).toHaveLength(2);
+      expect(instances[0]!.closed).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it('⭐heartbeat이 생존을 이어 준다 — 40초 뒤 heartbeat, 다시 40초 뒤 focus → 재연결 없음 · 그 뒤 46초 조용하면 재연결', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+      act(() => { dispatchNamed(instances[0]!, 'heartbeat', {}); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(instances).toHaveLength(1);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(instances).toHaveLength(2);
+      vi.useRealTimers();
     });
   });
 });

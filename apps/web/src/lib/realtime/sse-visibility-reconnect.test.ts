@@ -6,7 +6,7 @@
 //    커넥션은 OPEN을 self-report할 수 있어 그 체크로는 못 잡는다는 게 이 fix의 핵심 근거).
 // ③ hidden 없이(mount 직후 등) onVisible이 불려도 안전하게 false.
 import { describe, expect, it } from 'vitest';
-import { createVisibilityReconnectState } from './sse-visibility-reconnect';
+import { SSE_LIVENESS_WINDOW_MS, createSseLivenessTracker, createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 describe('createVisibilityReconnectState — story #2987', () => {
   it('숨겨진 시간이 임계값(3s) 미만이면 재연결이 필요 없다(false) — 짧은 탭 전환', () => {
@@ -82,5 +82,33 @@ describe('createVisibilityReconnectState.onFocusRegained — story #3081', () =>
     state.onHidden();
     t += 3_000;
     expect(state.onVisible()).toBe(true);
+  });
+});
+
+// story #4252 — 생존 판정(OPEN + 최근 수신) · 살아 있으면 focus 재연결을 건너뛰고 throttle 창도 쓰지 않는다.
+describe('createSseLivenessTracker · onFocusRegained(alive) (#4252)', () => {
+  it('OPEN이면서 45초 안에 받은 게 있을 때만 살아 있다 — 경계 45초는 죽음 · OPEN 아님 · 기록 없음 · reset 뒤도 죽음', () => {
+    let t = 1_000_000;
+    const lv = createSseLivenessTracker(() => t);
+    expect(lv.isAlive(1)).toBe(false);
+    lv.markActivity();
+    expect(lv.isAlive(1)).toBe(true);
+    expect(lv.isAlive(0)).toBe(false);
+    expect(lv.isAlive(2)).toBe(false);
+    expect(lv.isAlive(undefined)).toBe(false);
+    t += SSE_LIVENESS_WINDOW_MS - 1;
+    expect(lv.isAlive(1)).toBe(true);
+    t += 1;
+    expect(lv.isAlive(1)).toBe(false);
+    lv.markActivity();
+    lv.reset();
+    expect(lv.isAlive(1)).toBe(false);
+  });
+
+  it('alive면 false이고 throttle 창을 쓰지 않는다 — 바로 뒤 죽은 커넥션의 focus는 재연결', () => {
+    const st = createVisibilityReconnectState(() => 5_000);
+    expect(st.onFocusRegained(true)).toBe(false);
+    expect(st.onFocusRegained(false)).toBe(true);
+    expect(st.onFocusRegained()).toBe(false); // 그 뒤는 기존 throttle
   });
 });
