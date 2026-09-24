@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames, withSummaryNames, rosterDisplayName } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames, withSummaryNames, rosterDisplayName, rosterRealName, rosterSortLookup } from './trust-utils';
 import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 // story #3735(D1) — groupRosterByRole이 이제 t(Translator)를 받아 기본 5키(role_key)면
@@ -152,12 +152,14 @@ describe('mergeMemberLookup (org-members 우선, team-members는 보강만 — i
     expect(lookup.get('x2')).toEqual({ id: 'x2', name: 'Team-only Name' });
   });
 
-  it('falls back to email local-part when org-member has no name (nullish/빈문자열 폴백)', () => {
+  // story #4285(까디르 P2 둘째) — 예전엔 이메일 앞부분을 이름으로 채웠다(«nobody»). BE는 같은 행에 이메일 폴백 없이 name null(#3755)이라
+  // 화면만 이메일을 냈다 — 이제 이름은 빈 채로 두고(표시는 rosterDisplayName이 «이름 없는 구성원») 이메일은 구분 꼬리 재료로만 남는다.
+  it('does not turn the email local-part into a name when org-member has no name (이메일 폴백 0)', () => {
     const lookup = mergeMemberLookup(
       [{ id: 'x1', name: '  ', email: 'nobody@example.com' }],
       [],
     );
-    expect(lookup.get('x1')?.name).toBe('nobody');
+    expect(lookup.get('x1')).toEqual({ id: 'x1', name: '', email: 'nobody@example.com' });
   });
 
   it('returns an empty map for two empty sources', () => {
@@ -322,7 +324,7 @@ describe('rosterDisplayName · mergeMemberLookup — 날것 `?` 0(story #4285 ·
     const lookup = new Map([['a', { id: 'a', name: '페드루' }]]);
     expect(rosterDisplayName({ ...base, member_id: 'x', member_deleted: true }, lookup, labels)).toBe(labels.unknown);
     expect(rosterDisplayName({ ...base, member_id: 'y', name: null, member_deleted: false }, lookup, labels)).toBe(labels.unnamed);
-    expect(rosterDisplayName({ ...base, member_id: 'a', member_deleted: false }, lookup, labels)).toBe('페드루');
+    expect(rosterDisplayName({ ...base, member_id: 'a', name: '페드루', member_deleted: false }, lookup, labels)).toBe('페드루');
     expect(rosterDisplayName({ ...base, member_id: 'z' }, lookup, labels)).toBe(labels.unknown);
   });
 
@@ -330,5 +332,29 @@ describe('rosterDisplayName · mergeMemberLookup — 날것 `?` 0(story #4285 ·
     const lookup = mergeMemberLookup([{ id: 'o1', name: null, email: null }], [{ id: 't1', name: null }, { id: 't2', name: '  ' }]);
     expect(lookup.size).toBe(0);
     expect([...lookup.values()].map((m) => m.name)).not.toContain('?');
+  });
+});
+
+
+describe('새 서버는 요약 이름만 · 이메일 폴백 0(story #4285 · 까디르 P2 둘째)', () => {
+  const base = { role_key: 'dev', role_label: null, hit_rate: null, resolved: 0, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+  const lookup = new Map([['h', { id: 'h', name: 'jane.doe', email: 'jane.doe@x.dev' }]]);
+
+  it('member_deleted가 있으면 조회 이름을 안 본다 — name null → 없음 · 옛 서버(플래그 없음)만 조회 이름', () => {
+    expect(rosterRealName({ ...base, member_id: 'h', name: null, member_deleted: false }, lookup)).toBeNull();
+    expect(rosterRealName({ ...base, member_id: 'h' }, lookup)).toBe('jane.doe');
+  });
+
+  it('mergeMemberLookup은 이메일 앞부분을 이름으로 만들지 않는다(이메일은 꼬리 재료로만 남김)', () => {
+    const m = mergeMemberLookup([{ id: 'h', name: null, email: 'jane.doe@x.dev' }], []);
+    expect(m.get('h')).toEqual({ id: 'h', name: '', email: 'jane.doe@x.dev' });
+  });
+
+  it('정렬 조회엔 진짜 이름만 — 이름 없는 행은 싣지 않는다(이름 있는 행 뒤로)', () => {
+    const out = rosterSortLookup([
+      { ...base, member_id: 'h', name: null, member_deleted: false },
+      { ...base, member_id: 'n', name: '가나다', member_deleted: false },
+    ], lookup);
+    expect([...out.keys()]).toEqual(['n']);
   });
 });

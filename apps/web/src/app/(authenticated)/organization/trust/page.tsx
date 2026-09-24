@@ -20,6 +20,7 @@ import {
   sortGroupMembersByName,
   withSummaryNames,
   rosterDisplayName,
+  rosterSortLookup,
   useHistoryDrilldown,
   HistoryDrilldownPanel,
   HistoryDrilldownTrigger,
@@ -119,7 +120,8 @@ export default function OrganizationTrustPage() {
   // 그룹은 groupRosterByRole을 그대로 재사용(SectionCard로 안 그리고 칩 라벨+수만
   // 뽑는다) — 새 그룹 함수를 또 만들지 않는다.
   const groupedByRole = groupRosterByRole(rosterRows, t);
-  const sortedRows = sortGroupMembersByName(rosterRows, rosterMembers);
+  // story #4285 — 정렬도 제목과 같은 판정(rosterRealName)으로 — 조회의 다른 이름으로 앞에 서지 않게.
+  const sortedRows = sortGroupMembersByName(rosterRows, rosterSortLookup(rosterRows, rosterMembers));
   const visibleRows = roleFilter === ALL_ROLES
     ? sortedRows
     : sortedRows.filter((row) => resolveRoleLabel(row.role_key, row.role_label, t) === roleFilter);

@@ -522,3 +522,32 @@ describe('OrganizationTrustPage — 이름 빈 구성원 · 지워진 구성원(
     expect(rowNames).not.toContain('?');
   });
 });
+
+
+// story #4285(까디르 P2 둘째 · PO 렌즈) — 사람인데 이름 · display_name이 둘 다 비어 BE가 name null(이메일 폴백 0)을 준 행. 예전엔
+// 조직 구성원 조회의 이메일 앞부분이 제목 · 이니셜로 뜨고 정렬에서 이름 있는 행 앞에 섰다. 뮤테이션: rosterRealName이 새 서버에서도
+// 조회 이름을 보게 되돌리면 RED.
+describe('OrganizationTrustPage — 이메일 폴백 0(story #4285 · 까디르 P2 둘째)', () => {
+  it('⭐name null · 이메일 있음 → «이름 없는 구성원» · 이메일 앞부분 0 · 이름 있는 행 뒤', async () => {
+    mountAsAdmin();
+    const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const rows = [
+      { ...base, member_id: 'nameless-human', name: null, member_type: 'human' as const, member_deleted: false },
+      { ...base, member_id: 'named', name: '하늘', member_type: 'human' as const, member_deleted: false },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/trust-scores/org-summary') return { ok: true, status: 200, json: async () => ({ members: rows }) };
+      if (url === '/api/org-members') return { ok: true, status: 200, json: async () => ({ data: [{ id: 'nameless-human', name: null, email: 'zeta.person@x.dev' }] }) };
+      if (url.startsWith('/api/team-members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.textContent).not.toContain('zeta.person');
+    const titles = [...container.querySelectorAll('[data-testid="trust-roster-row"]')].map((el) => el.textContent ?? '');
+    expect(titles).toHaveLength(2);
+    expect(titles[0]).toContain('하늘');
+    expect(titles[1]).toContain(koMessages.common.memberUnnamed);
+  });
+});

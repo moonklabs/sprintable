@@ -132,9 +132,10 @@ export function mergeMemberLookup(
 ): Map<string, RosterMember> {
   const lookup = new Map<string, RosterMember>();
   for (const m of orgMembers) {
-    // story #4285(까디르 P2) — 이름을 못 정하면 항목을 만들지 않는다(예전엔 리터럴 '?'가 화면까지 갔다). 표시 이름은 rosterDisplayName이 정한다.
-    const name = (m.name?.trim() || null) ?? (m.email?.split('@')[0] || null);
-    if (name) lookup.set(m.id, { id: m.id, name, email: m.email ?? undefined, role: m.role ?? undefined });
+    // story #4285(까디르 P2 ×2) — 리터럴 '?'도 이메일 앞부분도 이름으로 만들지 않는다(#3755 «이메일 폴백 0» — BE는 같은 행에 name null).
+    // 이메일은 같은 이름 구분 꼬리 재료라 항목은 남기되 이름은 빈 채로. 표시 이름은 rosterDisplayName이 정한다.
+    const name = m.name?.trim() || '';
+    if (name || m.email) lookup.set(m.id, { id: m.id, name, email: m.email ?? undefined, role: m.role ?? undefined });
   }
   for (const m of teamMembers) {
     const name = m.name?.trim();
@@ -337,17 +338,30 @@ export function withSummaryNames(lookup: Map<string, RosterMember>, rows: OrgSum
   return out;
 }
 
-// story #4285(까디르 P2 · PO 처방) — 신뢰 센터 행 이름을 한 곳에서 정한다. 지워진 구성원(member_deleted) → «알 수 없는 구성원» ·
-// 살아 있는데 이름이 빈 구성원(에이전트 PATCH가 name null을 받는다) → «이름 없는 구성원» · 그 밖엔 조회 이름(응답 이름이 정본 —
-// withSummaryNames). 옛 서버처럼 member_deleted를 모르면 «알 수 없는 구성원». 날것 `?`가 나올 길은 없다(조회가 이름 없는 항목을
-// 만들지 않는다 — mergeMemberLookup).
+// story #4285(까디르 P2 · PO 처방 ×2) — 신뢰 센터 행 이름을 한 곳에서 정한다. 제목 · 이니셜 · 정렬이 모두 이 판정을 읽는다.
+// 새 서버(요약 행에 member_deleted가 있음)면 **요약 이름만** — 조회 이름(조직 구성원 · 팀원 목록)은 보지 않는다(BE가 이메일 폴백 없이
+// null을 준 행에 화면이 이메일 앞부분을 내던 부딪힘 · #3755). 옛 서버(플래그 없음)만 조회 이름으로 폴백.
+export function rosterRealName(row: OrgSummaryRow, lookup: Map<string, RosterMember>): string | null {
+  if (row.member_deleted !== undefined) return row.member_deleted ? null : (row.name?.trim() || null);
+  return lookup.get(row.member_id)?.name?.trim() || null;
+}
+
+// 이름이 없을 때의 낱말: 지워진 구성원 → «알 수 없는 구성원» · 살아 있는데 이름이 빈 구성원(에이전트 PATCH가 name null을 받는다 ·
+// 사람의 이름 · display_name이 둘 다 빔) → «이름 없는 구성원» · 옛 서버에서 못 찾음 → «알 수 없는 구성원». 날것 `?` · 이메일 0.
 export function rosterDisplayName(
   row: OrgSummaryRow,
   lookup: Map<string, RosterMember>,
   labels: { unknown: string; unnamed: string },
 ): string {
-  if (row.member_deleted) return labels.unknown;
-  const name = lookup.get(row.member_id)?.name?.trim();
-  if (name) return name;
-  return row.member_deleted === false ? labels.unnamed : labels.unknown;
+  return rosterRealName(row, lookup) ?? (row.member_deleted === false ? labels.unnamed : labels.unknown);
+}
+
+/** 정렬용 조회 — 진짜 이름만 싣는다(«이름 없는 구성원» 같은 대체 낱말은 이름이 아니라 이름 있는 행 뒤로 간다). */
+export function rosterSortLookup(rows: OrgSummaryRow[], lookup: Map<string, RosterMember>): Map<string, RosterMember> {
+  const out = new Map<string, RosterMember>();
+  for (const row of rows) {
+    const name = rosterRealName(row, lookup);
+    if (name) out.set(row.member_id, { id: row.member_id, name });
+  }
+  return out;
 }
