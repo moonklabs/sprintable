@@ -538,7 +538,9 @@ async def test_a_stage_whose_gate_is_already_approved_cannot_be_republished():
         await _set_gate(Session, w, "approved")
         d = await _rejected(Session, w, "review", as_member="writer")
         assert (d["status"], d["code"]) == (409, "STAGE_ALREADY_APPROVED")
-        assert "이미 승인됐어요" in d["message"]
+        assert d["message"].startswith(
+            "review(Director) 단계는 다시 낼 수 없어요 — 이미 승인됐어요. 다음에 낼 단계: revise(Editor)\n지금 단계: review(Director)"
+        ), d["message"]
     finally:
         await engine.dispose()
 
