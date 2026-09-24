@@ -2550,7 +2550,7 @@ async def send_message_core(
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
     if after_commit is not None and sender.type != "agent":
-        raise ValueError("호출자 트랜잭션 참여형 send_message는 서버 발신(에이전트) 메시지 전용")
+        raise ValueError("send_message_core(after_commit=...) is for server-issued (agent) messages only")
 
     # 참여자 검증
     participant = (await db.execute(
