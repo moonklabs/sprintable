@@ -2685,7 +2685,7 @@ async def publish_recipe_approved_draft(
 
     await emit_recipe_published_stage_event(
         db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
-        definition_key=definition.key, next_stage=next_stage,
+        definition_key=definition.key, next_stage=next_stage, publication_id=publication.id,
     )
 
 
@@ -2767,6 +2767,7 @@ async def emit_recipe_published_stage_event(
     definition_key: str | None = None, next_stage: str | None = None,
     resolve: Callable[[AsyncSession], Awaitable[tuple[str, str] | None]] | None = None,
     extra_payload: dict | None = None,
+    publication_id: uuid.UUID | None = None,
 ) -> None:
     """story #4090 AC2 + story #4093(공통 훅으로 추출, 페드루 PO 確定 2026-09-21) —
     즉시-발행 경로(`publish_recipe_approved_draft`)·예약-발행 워커 경로(publication_
@@ -2806,7 +2807,7 @@ async def emit_recipe_published_stage_event(
             return
         await _emit_recipe_published_stage_event_locked(
             event_db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
-            definition_key=key, next_stage=stage, extra_payload=extra_payload,
+            definition_key=key, next_stage=stage, extra_payload=extra_payload, publication_id=publication_id,
         )
 
     await run_side_effect_in_own_session(
@@ -2814,9 +2815,25 @@ async def emit_recipe_published_stage_event(
     )
 
 
+async def _definition_declares_payload_field(db: AsyncSession, org_id: uuid.UUID, definition_key: str, field: str) -> bool:
+    """그 정의(조직 커스텀 우선 · 없으면 플랫폼)의 payload_schema.properties가 `field`를 선언하는가."""
+    from sqlalchemy import or_
+
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.key == definition_key, EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        ).order_by(EventDefinition.org_id.is_(None)).limit(1)
+    )).scalars().first()
+    return definition is not None and field in ((definition.payload_schema or {}).get("properties") or {})
+
+
 async def _emit_recipe_published_stage_event_locked(
     event_db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
     definition_key: str, next_stage: str, extra_payload: dict | None = None,
+    publication_id: uuid.UUID | None = None,
 ) -> None:
     """조회~발행을 한 트랜잭션으로 묶고 그 트랜잭션 수준 advisory lock으로 직렬화한다(커밋·롤백 때 PG가 자동 해제 —
     세션 수준 잠금은 비동기 세션이 커밋 뒤 연결을 풀에 돌려줄 수 있어 해제가 다른 연결로 갈 위험이 있다). 이 구간의
@@ -2847,11 +2864,13 @@ async def _emit_recipe_published_stage_event_locked(
         claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
     )
     background_tasks = BackgroundTasks()
-    await _publish_registry_event_core(
-        event_db, org_id, auth, definition_key,
-        {**(extra_payload or {}), "stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)},
-        background_tasks,
-    )
+    payload = {**(extra_payload or {}), "stage": next_stage, "work_item_type": work_item_type, "work_item_id": str(work_item_id)}
+    # story #4242 — 서버가 낸 발행 단계에 방금 만든 발행물 id를 싣는다(뉴스레터: 다음 단계 «발송 요청»의 봉인 필드
+    # `publication_id` = 이 ChannelPublication.id). 정의의 payload_schema가 그 필드를 선언할 때만 — SNS·영상 정의는
+    # `additionalProperties: false`라 모르는 키를 실으면 발행 자체가 검증에서 막힌다.
+    if publication_id is not None and await _definition_declares_payload_field(event_db, org_id, definition_key, "publication_id"):
+        payload["publication_id"] = str(publication_id)
+    await _publish_registry_event_core(event_db, org_id, auth, definition_key, payload, background_tasks)
     await event_db.commit()
     await background_tasks()
 
