@@ -3,8 +3,9 @@
 (4242가 감사로만 드러난 부류).
 
 체인 한 회차:
-- 적용: 실 시드 정의에 에이전트 멤버(Creator · Publisher) + 테스트 사람 멤버(Director = org owner) + 0-reach 채널 연결을
-  적용 엔드포인트로 묶는다.
+- 적용: 적용 엔드포인트에 **화면(마케팅 레시피 적용 창)이 실제로 보내는 role_mapping**을 보낸다 — 에이전트 자리(Creator ·
+  Publisher)와 0-reach 채널 연결뿐이다. 사람(Director) 자리는 게이트 승인 · 초안 게이트 승인 자리라 읽기 전용이고 싣지 않는다
+  (marketing-recipe-apply-dialog: approver · approval_elsewhere 자리 제외).
 - 시작: 사람이 스토리에서 첫 단계를 발행한다(FE «레시피 시작»과 같은 `POST /api/v2/events/publish`).
 - 에이전트 단계: 직전 멘션(단계 이벤트 본문 또는 게이트 승인 알림)의 `publish_event({...})` 예시를 **그대로** 발행한다.
   테스트가 예시를 새로 쓰지 않는다(최저 지능 기준). 예외 1곳만 이름 붙여 둔다 — 블로그 `pending_approval` 예시의
@@ -13,8 +14,9 @@
 - 발행: 0-reach 어댑터(블로그 WordPress 스텁 · 뉴스레터 stibee_sandbox · SNS sandbox). 실 채널 · 실 도메인 · 실 수신자 0.
 - 끝: 마지막 단계 이벤트 정확히 1.
 
-이음매 단언: 모든 단계 이벤트의 수신자 ≥ 1(서버가 낸 단계 포함, 리졸버 결과 그 자체 — 대화 참가자엔 시스템 발신자가
-섞여 수로 못 잰다) · 게이트 봉인 필드 안내가 다음 담당자의 멘션에 도달.
+이음매 단언: 에이전트 · 서버 단계 이벤트의 수신자 ≥ 1(리졸버 결과 그 자체 — 대화 참가자엔 시스템 발신자가 섞여 수로 못
+잰다) · 사람 승인 단계는 승인 카드가 승인자(테스트 사람 멤버)에게 닿는다(고객 경로의 이음매 — PO 07:14Z) · 게이트 봉인 필드
+안내가 다음 담당자의 멘션에 도달.
 
 실 시드: 이 하네스는 스키마 재생성(create_all) 위에서 돈다. 시드 행은 시드 마이그레이션의 `upgrade()`를 **그대로 실행**해
 심는다(상수를 테스트에 옮겨 적지 않는다 · 뒤따른 패치 0400 · 0401 · 0402도 그대로). 이 레시피들을 건드리는 마이그레이션이
@@ -317,6 +319,22 @@ async def _verdict_message(Session, w, gate_id: uuid.UUID):
     return message
 
 
+async def _assert_approval_card_reaches(Session, w, gate_id: uuid.UUID, approver_id: uuid.UUID) -> None:
+    """사람 승인 단계의 이음매 — 그 게이트의 결재 카드(approval_target.gate_id)가 승인자를 멘션해 그 사람에게 닿는다."""
+    from sqlalchemy import select, text
+
+    from app.models.conversation import ConversationMessage
+
+    async with Session() as s:
+        cards = (await s.execute(
+            select(ConversationMessage).where(
+                text("conversation_messages.metadata->'approval_target'->>'gate_id' = :gate_id"),
+            ).params(gate_id=str(gate_id))
+        )).scalars().all()
+    assert cards, f"게이트 {gate_id} 결재 카드가 안 났다 — 승인자가 모른다"
+    assert any(approver_id in (c.mentioned_ids or []) for c in cards), (approver_id, [c.mentioned_ids for c in cards])
+
+
 # ── 0-reach 초안 ───────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -377,8 +395,8 @@ async def test_blog_article_seed_runs_start_to_publish_checked(live_wordpress_st
         async with Session() as s:
             wordpress_id = await _seed_wordpress_connection(s, w["org_id"], site_url=live_wordpress_stub)
         await _apply(app, Session, w, _BLOG, {
-            "planning": creator, "concept_confirmed": owner, "writing": creator, "verification": creator,
-            "pending_approval": owner, "published": publisher, "publish_checked": publisher,
+            "planning": creator, "writing": creator, "verification": creator,
+            "published": publisher, "publish_checked": publisher,
         })
         posts_before = len(_POSTS)
 
@@ -387,9 +405,9 @@ async def test_blog_article_seed_runs_start_to_publish_checked(live_wordpress_st
 
         example = _publish_example((await _stage_message(Session, w, _BLOG, "planning")).content)
         await _publish(app, Session, w, actor="creator_id", body=example)
-        await _assert_reaches(Session, w, _BLOG, "concept_confirmed", owner)
-
         concept_gate = await _gate(Session, w, "concept_approval")
+        await _assert_approval_card_reaches(Session, w, concept_gate.id, owner)
+
         await _approve(app, Session, w, concept_gate.id, note="컨셉 승인")
         example = _publish_example((await _verdict_message(Session, w, concept_gate.id)).content)
         await _publish(app, Session, w, actor="creator_id", body=example)
@@ -421,7 +439,8 @@ async def test_blog_article_seed_runs_start_to_publish_checked(live_wordpress_st
             substitutions += 1
         assert substitutions == _SITE_DRAFT_PLACEHOLDER_SUBSTITUTIONS
         await _publish(app, Session, w, actor="creator_id", body=example)
-        await _assert_reaches(Session, w, _BLOG, "pending_approval", owner)
+        assert await _stage_event_count(Session, w, _BLOG, "pending_approval") == 1
+        await _assert_approval_card_reaches(Session, w, site_gate_id, owner)
 
         # 사람이 초안 게이트를 승인 → 발행 명령 → 워커가 WordPress 스텁에 발행 → 서버가 published를 낸다.
         await _approve(app, Session, w, site_gate_id, note="발행 승인")
@@ -465,7 +484,7 @@ async def _newsletter_chain_to_send_approval(app, Session, w):
     async with Session() as s:
         stibee = await _seed_channel_connection(s, w["org_id"], channel="stibee_sandbox")
     await _apply(app, Session, w, _NEWSLETTER, {
-        "collect": creator, "draft": creator, "review": owner, "campaign_created": stibee.id,
+        "collect": creator, "draft": creator, "campaign_created": stibee.id,
         "send_requested": publisher, "send_checked": publisher,
     })
 
@@ -482,10 +501,10 @@ async def _newsletter_chain_to_send_approval(app, Session, w):
     )
     example = _publish_example((await _stage_message(Session, w, _NEWSLETTER, "draft")).content)
     await _publish(app, Session, w, actor="creator_id", body=example)
-    await _assert_reaches(Session, w, _NEWSLETTER, "review", owner)
+    review_gate = await _gate(Session, w, "external_publish")
+    await _assert_approval_card_reaches(Session, w, review_gate.id, owner)
 
     # 사람이 검수 게이트를 승인 → 서버가 sandbox 캠페인을 만들고 campaign_created를 낸다 → 발송 요청 담당에게 간다(4242).
-    review_gate = await _gate(Session, w, "external_publish")
     await _approve(app, Session, w, review_gate.id, note="캠페인 만들기 승인")
     assert await _stage_event_count(Session, w, _NEWSLETTER, "campaign_created") == 1
     await _assert_reaches(Session, w, _NEWSLETTER, "campaign_created", publisher)
@@ -500,6 +519,7 @@ async def _newsletter_chain_to_send_approval(app, Session, w):
     await _assert_reaches(Session, w, _NEWSLETTER, "send_requested", publisher)
 
     send_gate = await _gate(Session, w, "newsletter_send")
+    await _assert_approval_card_reaches(Session, w, send_gate.id, owner)
     await _approve(app, Session, w, send_gate.id, note="발송 승인")
     return example, send_gate
 
@@ -566,8 +586,7 @@ async def _social_text_chain_to_published(app, Session, w) -> None:
     async with Session() as s:
         sandbox_id = await _seed_sandbox_connection(s, w["org_id"])
     await _apply(app, Session, w, _SNS_TEXT, {
-        "draft": creator, "concept_confirmed": owner, "editing": creator, "pending_approval": owner,
-        "published": sandbox_id,
+        "draft": creator, "editing": creator, "published": sandbox_id,
     })
 
     await _start(app, Session, w, _SNS_TEXT, "draft")
@@ -575,9 +594,9 @@ async def _social_text_chain_to_published(app, Session, w) -> None:
 
     example = _publish_example((await _stage_message(Session, w, _SNS_TEXT, "draft")).content)
     await _publish(app, Session, w, actor="creator_id", body=example)
-    await _assert_reaches(Session, w, _SNS_TEXT, "concept_confirmed", owner)
-
     concept_gate = await _gate(Session, w, "concept_approval")
+    await _assert_approval_card_reaches(Session, w, concept_gate.id, owner)
+
     await _approve(app, Session, w, concept_gate.id, note="컨셉 승인")
     example = _publish_example((await _verdict_message(Session, w, concept_gate.id)).content)
     await _publish(app, Session, w, actor="creator_id", body=example)
@@ -587,9 +606,9 @@ async def _social_text_chain_to_published(app, Session, w) -> None:
     await _submit_channel_draft(app, Session, w, sandbox_id, text="체인 게시 본문 #레시피")
     example = _publish_example((await _stage_message(Session, w, _SNS_TEXT, "editing")).content)
     await _publish(app, Session, w, actor="creator_id", body=example)
-    await _assert_reaches(Session, w, _SNS_TEXT, "pending_approval", owner)
-
     publish_gate = await _gate(Session, w, "external_publish")
+    await _assert_approval_card_reaches(Session, w, publish_gate.id, owner)
+
     await _approve(app, Session, w, publish_gate.id, note="최종 발행 승인")
     async with Session() as s:
         publications = (await s.execute(
