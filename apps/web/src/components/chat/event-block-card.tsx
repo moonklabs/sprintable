@@ -424,10 +424,14 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   const eventProjectId = typeof refs?.['project_id'] === 'string'
     ? refs['project_id'] as string
     : typeof payload['project_id'] === 'string' ? payload['project_id'] : null;
+  // 유나 10:32Z — 프로젝트를 고르는 함수 자체를 `getEntityHref`에 넘긴다. story 주소가 이미 `?p=`를 싣고 오는 모양(4612)이면
+  // `withProjectParam`은 «이미 실은 p는 그대로»라 뒤에서 얹는 방식은 이벤트 프로젝트를 버린다. 결과에 한 번 더 거는 것은 story가
+  // 프로젝트 함수를 안 쓰는 모양(4612 전)을 위한 것이다 — 이미 p가 있으면 그대로라 두 번 걸어도 값이 같다.
+  const pickProject = (href: string) => (eventProjectId ? withProjectParam(href, eventProjectId) : flatHref(href));
   const storyPath = storyId && typeof stageAssignee === 'string' && currentTeamMemberId && stageAssignee === currentTeamMemberId
-    ? getEntityHref('story', storyId, flatHref)
+    ? getEntityHref('story', storyId, pickProject)
     : null;
-  const storyHref = storyPath ? (eventProjectId ? withProjectParam(storyPath, eventProjectId) : flatHref(storyPath)) : null;
+  const storyHref = storyPath ? pickProject(storyPath) : null;
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
