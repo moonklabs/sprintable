@@ -198,6 +198,118 @@ async def test_realdb_inbox_combines_gate_and_hitl_sources():
 
 @_REAL_DB_SKIP
 @pytest.mark.anyio
+async def test_realdb_inbox_items_carry_their_own_project_id():
+    """story #4241 — 결재함은 조직 전체 목록이다. 각 항목이 **자기** 프로젝트 id를 싣는다(행 링크 `?p=`의 원천) —
+    Gate는 work_item의 프로젝트(list_gates 배치 해소) · HitlRequest는 행의 project_id. 두 프로젝트에 나눠 심어 서로 섞이지 않음을 본다."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.pm import Story
+    from app.models.project import Project
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_users(s)
+            org_id, project_c, a_id = seeded["org_id"], seeded["project_id"], seeded["user_a_id"]
+            project_d = Project(id=uuid.uuid4(), org_id=org_id, name="Project D")
+            s.add(project_d)
+            await s.flush()
+
+            story_c = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_c, title="c")
+            story_d = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_d.id, title="d")
+            s.add_all([story_c, story_d])
+            await s.flush()
+            gate_c = Gate(id=uuid.uuid4(), org_id=org_id, work_item_id=story_c.id, work_item_type="story",
+                          gate_type="merge", status="pending")
+            gate_d = Gate(id=uuid.uuid4(), org_id=org_id, work_item_id=story_d.id, work_item_type="story",
+                          gate_type="merge", status="pending")
+            hitl_d = _hitl_request(org_id=org_id, project_id=project_d.id, work_item_id=story_d.id)
+            s.add_all([gate_c, gate_d, hitl_d])
+            await s.commit()
+
+        await _setup_app(app, Session, org_id, a_id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/gates/inbox")
+            assert resp.status_code == 200, resp.text
+            by_id = {row["id"]: row for row in resp.json()}
+            assert by_id[str(gate_c.id)]["project_id"] == str(project_c)
+            assert by_id[str(gate_d.id)]["project_id"] == str(project_d.id)
+            assert by_id[str(hitl_d.id)]["project_id"] == str(project_d.id)
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_inbox_every_gate_kind_resolves_its_project_id():
+    """story #4241(까디르 QA 367369b2e [P2]) — story·task·doc·visual_artifact 밖의 종류도 결재함 항목이 자기 프로젝트를 싣는다.
+    종류별 한 줄: loop · hypothesis · epic(=Goal) · sprint · wf_line_version(프로젝트 라인 = 그 프로젝트 · 조직 단위 라인 = None) ·
+    agent_decision/support_escalation(자기 참조 앵커 — neutral_facts.project_id). 전부 다른 프로젝트(D)에 심어 현재/기본값과 섞이지 않게."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.hypothesis import Hypothesis
+    from app.models.loop import LoopRun
+    from app.models.pm import Goal, Sprint
+    from app.models.project import Project
+    from app.models.workflow_line import WorkflowLineDefinitionVersion
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_users(s)
+            org_id, a_id = seeded["org_id"], seeded["user_a_id"]
+            project_d = Project(id=uuid.uuid4(), org_id=org_id, name="Project D")
+            s.add(project_d)
+            await s.flush()
+            pid = project_d.id
+            loop = LoopRun(id=uuid.uuid4(), org_id=org_id, project_id=pid, title="loop", goal_tags=[], created_by_member_id=seeded["org_member_a_id"])
+            hyp = Hypothesis(id=uuid.uuid4(), org_id=org_id, project_id=pid, owner_member_id=seeded["org_member_a_id"], statement="h",
+                             metric_definition={"metric": "signups", "source": "manual", "target": 100, "direction": "up"},
+                             measure_after=datetime.now(timezone.utc) + timedelta(days=1), status="measuring")
+            goal = Goal(id=uuid.uuid4(), org_id=org_id, project_id=pid, title="g")
+            sprint = Sprint(id=uuid.uuid4(), org_id=org_id, project_id=pid, title="sp")
+            ver_proj = WorkflowLineDefinitionVersion(id=uuid.uuid4(), org_id=org_id, project_id=pid, entity_type="story",
+                                                     version=1, config_hash="h1", created_by_member_id=seeded["org_member_a_id"])
+            ver_org = WorkflowLineDefinitionVersion(id=uuid.uuid4(), org_id=org_id, project_id=None, entity_type="story",
+                                                    version=1, config_hash="h2", created_by_member_id=seeded["org_member_a_id"])
+            s.add_all([loop, hyp, goal, sprint, ver_proj, ver_org])
+            await s.flush()
+            gates = {}
+            for key, wtype, wid in (("loop", "loop", loop.id), ("hypothesis", "hypothesis", hyp.id), ("epic", "epic", goal.id),
+                                    ("sprint", "sprint", sprint.id), ("wf_proj", "wf_line_version", ver_proj.id),
+                                    ("wf_org", "wf_line_version", ver_org.id)):
+                gates[key] = Gate(id=uuid.uuid4(), org_id=org_id, work_item_id=wid, work_item_type=wtype,
+                                  gate_type="merge", status="pending")
+            for key, wtype in (("agent_decision", "agent_decision"), ("support_escalation", "support_escalation")):
+                gid = uuid.uuid4()
+                gates[key] = Gate(id=gid, org_id=org_id, work_item_id=gid, work_item_type=wtype, gate_type="merge",
+                                  status="pending", neutral_facts={"project_id": str(pid)})
+            s.add_all(gates.values())
+            await s.commit()
+
+        await _setup_app(app, Session, org_id, a_id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/gates/inbox")
+            assert resp.status_code == 200, resp.text
+            by_id = {row["id"]: row for row in resp.json()}
+            expected = {key: str(pid) for key in gates}
+            expected["wf_org"] = None  # 조직 단위 라인 — 프로젝트 없음이 정직한 값
+            got = {key: by_id[str(g.id)]["project_id"] for key, g in gates.items()}
+            assert got == expected
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
 async def test_realdb_inbox_excludes_non_gate_approval_hitl_requests():
     """request_type != 'gate_approval' 인 HitlRequest(수동 승인 등)는 #2054 스코프 밖 — 인박스에 안 뜬다."""
     from app.main import app

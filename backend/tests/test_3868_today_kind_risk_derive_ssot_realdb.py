@@ -201,6 +201,42 @@ async def test_doc_approval_conservative_posture_yields_signature_realdb():
         await engine.dispose()
 
 
+async def test_needs_me_items_carry_their_own_project_id_realdb():
+    """story #4241 — 「오늘」은 조직 전체 목록이다. needs-me 항목이 **자기** 프로젝트 id를 싣는다(FE 행 링크 `/gates/{id}?p=`의
+    원천). 두 프로젝트(C·D)에 문서 결재를 하나씩 두고, 각 항목이 자기 프로젝트를 싣는지(현재 프로젝트로 뭉개지지 않는지) 본다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project_c = await _make_project(s, org.id, name="C")
+            project_d = await _make_project(s, org.id, name="D")
+            caller_id, caller_user_id = await _make_member(s, org.id, project_c.id, org_role="owner")
+            requester_id, _ = await _make_member(s, org.id, project_c.id, org_role="member", name="requester")
+            doc_c = await _make_doc(s, org.id, project_c.id, title="C 문서", author_id=requester_id)
+            doc_d = await _make_doc(s, org.id, project_d.id, title="D 문서", author_id=requester_id)
+            for doc in (doc_c, doc_d):
+                await _make_gate(
+                    s, org.id, work_item_type="doc", work_item_id=doc.id, gate_type="doc_approval",
+                    neutral_facts={"requested_by_member_id": str(requester_id)},
+                )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/today")
+            assert resp.status_code == 200, resp.text
+            by_work_item = {i["work_item"]["id"]: i for i in resp.json()["needs_me"]}
+            assert by_work_item[str(doc_c.id)]["project_id"] == str(project_c.id)
+            assert by_work_item[str(doc_d.id)]["project_id"] == str(project_d.id)
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 async def test_external_publish_permissive_posture_yields_approval_realdb():
     """AC2(b) — posture=permissive가 1차축을 이겨 external_publish(2차축 high 멤버)도
     low로 내린다. 옛 규칙(gate_type=="external_publish" 리터럴 비교)으로 되돌리면

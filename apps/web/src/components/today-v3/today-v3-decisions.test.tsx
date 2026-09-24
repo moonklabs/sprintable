@@ -44,7 +44,7 @@ afterEach(async () => {
 const base: TodayNeedsMeItem = {
   id: 'g1', source: 'gate', state: 'signature', risk: 'high',
   workItemType: 'channel_post', workItemId: 'w1', workItemTitle: '블로그 글 발행',
-  requestedByName: null, reason: null, createdAt: '2026-09-17T00:00:00Z', conversationId: null, recipePublish: false,
+  requestedByName: null, reason: null, createdAt: '2026-09-17T00:00:00Z', conversationId: null, recipePublish: false, projectId: null,
 };
 
 async function mount(items: TodayNeedsMeItem[], opts?: { isAdminOrOwner?: boolean; onActionSuccess?: () => void }) {

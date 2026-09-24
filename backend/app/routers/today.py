@@ -56,6 +56,9 @@ class NeedsMeItem(BaseModel):
     # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트(초안을 보고 승인해야 함). true면 「오늘」이 저위험 일괄
     # 승인에서 빼고 개별 카드(«초안 보고 승인» → 게이트 상세)로 둔다. gate 소스만 true가 될 수 있다.
     recipe_publish: bool = False
+    # story #4241 — 이 항목의 프로젝트(gate = work_item 프로젝트 · hitl = 요청 행). 「오늘」은 조직 전체 목록이라 FE 행 링크가
+    # «현재 프로젝트»가 아니라 이 값을 `?p=`로 싣는다. workflow_step은 결재함(조직 단위)으로 가서 null.
+    project_id: uuid.UUID | None = None
 
 
 class AgentRunCancelState(BaseModel):

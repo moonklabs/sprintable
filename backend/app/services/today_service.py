@@ -114,6 +114,8 @@ async def _needs_me_from_gate_inbox(
                 # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트는 초안을 보고 승인해야 해 「오늘」 저위험 일괄에서
                 # 빠진다(FE가 이 값으로 가른다 — 판정은 봉인과 같은 BE 함수 하나).
                 "recipe_publish": _is_recipe_external_publish_gate(r),
+                # story #4241 — 행 링크(`/gates/{id}`)가 «현재 프로젝트»가 아니라 이 결재의 프로젝트를 싣게(list_gates 배치 해소값).
+                "project_id": r.project_id,
             })
         else:  # r.source == "hitl"
             # HitlRequest.work_item_id는 실무상 항상 Story(gates.py 기존 주석 근거).
@@ -135,6 +137,7 @@ async def _needs_me_from_gate_inbox(
                 "reason": r.prompt,
                 "created_at": r.created_at,
                 "actions": ["answer"],
+                "project_id": r.project_id,  # story #4241 — HitlRequest 행의 프로젝트.
             })
     return items
 

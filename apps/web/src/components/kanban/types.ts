@@ -56,6 +56,9 @@ export interface GateItem {
   // story #1960(P2-S4): 결재함 통합 큐가 org 이름 표시에 사용(BE GateResponse엔 항상 존재하는
   // 필드인데 이 타입에 이제껏 누락돼 있었음 — additive, 기존 소비부 무영향).
   org_id?: string;
+  // story #4241 — 결재 대상(work_item)의 프로젝트(BE list_gates 배치 해소 · 프로젝트 무관 대상은 null). 결재함은 조직 전체 목록이라
+  // 행 링크는 «현재 프로젝트»가 아니라 이 값을 `?p=`로 싣는다.
+  project_id?: string | null;
   work_item_id: string;
   work_item_type: string;
   gate_type: string;
@@ -257,6 +260,8 @@ export interface HitlInboxItem {
   work_type: string | null;
   created_at: string;
   expires_at: string | null;
+  // story #4241 — GateItem.project_id와 짝(이 요청의 프로젝트).
+  project_id?: string | null;
 }
 
 export type GateInboxItem = GateItem | HitlInboxItem;
