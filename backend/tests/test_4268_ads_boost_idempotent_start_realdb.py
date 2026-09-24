@@ -150,6 +150,18 @@ async def test_created_ids_survive_a_rollback_after_activation(monkeypatch):
         await db.execute(text("SELECT 1/0"))
 
     monkeypatch.setattr(snapshots, "schedule_ads_spend_snapshots", db_error)
+    # 4272(develop) — «공급자에 나갔는가»는 provider_client의 쓰기 요청 훅이 표시한다. sandbox 어댑터는 HTTP를 안 쓰니, 실제 Meta 어댑터의
+    # ACTIVE 전환(POST)처럼 표시를 남기게 감싼다 — 그래야 «쓰기 뒤의 미분류 예외 = needs_check»(사람 확인 뒤 재시도)라는 운영 갈래를 잰다.
+    import app.services.ads_sandbox_campaign as sandbox
+    from app.services.provider_call_mark import mark_provider_call
+
+    real_status = sandbox.set_campaign_status
+
+    async def status_as_a_provider_write(client, **kwargs):
+        mark_provider_call()
+        return await real_status(client, **kwargs)
+
+    monkeypatch.setattr(sandbox, "set_campaign_status", status_as_a_provider_write)
     engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory())
     try:
         command_id = await _start_command(Session, org_id, gate_id, owner_id)
