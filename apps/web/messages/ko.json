@@ -2982,6 +2982,7 @@
     "channelPostsFailureDeadLetter": "자동 재시도를 멈췄어요.",
     "channelPostsBlockedReasonApprovalRequired": "발행 승인이 다시 필요해요.",
     "channelPostsBlockedNextApprovalScheduled": "결재함에서 승인하면 예약이 새로 잡혀요.",
+    "channelPostsBlockedNextApprovalScheduledPassed": "예약 시각이 지나서, 결재함에서 승인하면 바로 발행을 시작해요.",
     "channelPostsBlockedNextApprovalImmediate": "결재함에서 승인한 뒤 새로 발행해 주세요.",
     "channelPostsBlockedNextResubmit": "승인 요청을 새로 올려 주세요.",
     "channelPostsFailureYoutubeQuotaExceeded": "오늘 YouTube 사용량을 다 썼어요 — 사용량은 매일 태평양 시간 자정에 초기화돼요(플랫폼 공유 한도).",

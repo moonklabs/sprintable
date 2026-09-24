@@ -52,6 +52,7 @@ export interface BlockedApprovalContext {
 // 문장 키는 표 값으로 둔다(죽은 키 가드가 표 값을 소비로 읽는다 — voided · blocked 사유 표와 같은 관례).
 const BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS: Record<string, string> = {
   scheduled: 'channelPostsBlockedNextApprovalScheduled',
+  scheduledPassed: 'channelPostsBlockedNextApprovalScheduledPassed',
   immediate: 'channelPostsBlockedNextApprovalImmediate',
   resubmit: 'channelPostsBlockedNextResubmit',
 };
@@ -61,9 +62,10 @@ function blockedApprovalNextKey(ctx: BlockedApprovalContext | undefined): string
   if (ctx.gateStatus === 'pending') {
     if (ctx.sealedScheduledAt === undefined) return undefined;
     if (!ctx.sealedScheduledAt) return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.immediate;
-    // PO 18:13Z — 봉인된 예약 시각이 이미 지났으면 승인 훅이 그 과거 시각으로 명령을 만들고 워커가 다음 tick에 곧바로 집는다
-    // (gate_service 승인 훅 · 과거 시각 가드 없음) — «예약이 새로 잡혀요»가 거짓이 되니 앞문장만.
-    if (Date.parse(ctx.sealedScheduledAt) <= Date.now()) return undefined;
+    // PO 18:13Z · 18:20Z — 봉인된 예약 시각이 이미 지났으면 승인 훅이 그 과거 시각으로 명령을 만들고 워커가 다음 tick에 곧바로
+    // 집는다(gate_service 승인 훅 · 과거 시각 가드 없음) — «예약이 새로 잡혀요»는 거짓, 앞문장만 두면 «승인 = 곧 나감»을 감춘다.
+    // 사실 경고 문장(유나 D).
+    if (Date.parse(ctx.sealedScheduledAt) <= Date.now()) return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.scheduledPassed;
     return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.scheduled;
   }
   if (ctx.gateStatus === 'rejected' || ctx.gateStatus === null) return BLOCKED_APPROVAL_NEXT_MESSAGE_KEYS.resubmit;

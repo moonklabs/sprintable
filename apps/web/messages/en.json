@@ -2982,6 +2982,7 @@
     "channelPostsFailureDeadLetter": "Automatic retries have stopped.",
     "channelPostsBlockedReasonApprovalRequired": "This needs approval again before it can publish.",
     "channelPostsBlockedNextApprovalScheduled": "Once it's approved in Approvals, the scheduled post is queued again.",
+    "channelPostsBlockedNextApprovalScheduledPassed": "The scheduled time has passed, so approving it in Approvals starts publishing right away.",
     "channelPostsBlockedNextApprovalImmediate": "Approve it in Approvals, then publish it again.",
     "channelPostsBlockedNextResubmit": "Send a new approval request.",
     "channelPostsFailureYoutubeQuotaExceeded": "Today's YouTube usage limit has been reached — it resets daily at midnight Pacific Time (shared platform-wide limit).",

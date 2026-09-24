@@ -206,8 +206,8 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
   it.each([
     [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() + 86_400_000).toISOString() }, 'channelPostsBlockedNextApprovalScheduled'],
     [{ gateStatus: 'pending', sealedScheduledAt: null }, 'channelPostsBlockedNextApprovalImmediate'],
-    // 봉인된 예약 시각이 이미 지났다 — 승인하면 곧바로 워커가 집어 «예약이 새로 잡혀요»가 거짓 → 앞문장만.
-    [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() - 86_400_000).toISOString() }, null],
+    // 봉인된 예약 시각이 이미 지났다 — 승인하면 곧바로 워커가 집는다 → 사실 경고(D).
+    [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() - 86_400_000).toISOString() }, 'channelPostsBlockedNextApprovalScheduledPassed'],
     [{ gateStatus: 'rejected', sealedScheduledAt: null }, 'channelPostsBlockedNextResubmit'],
     [{ gateStatus: null, sealedScheduledAt: null }, 'channelPostsBlockedNextResubmit'],
     [{ gateStatus: 'approved', sealedScheduledAt: null }, null],
