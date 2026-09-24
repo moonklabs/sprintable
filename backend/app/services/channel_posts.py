@@ -2686,6 +2686,7 @@ async def publish_recipe_approved_draft(
     await emit_recipe_published_stage_event(
         db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
         definition_key=definition.key, next_stage=next_stage, publication_id=publication.id,
+        trigger_gate_id=gate.id,
     )
 
 
@@ -2768,6 +2769,7 @@ async def emit_recipe_published_stage_event(
     resolve: Callable[[AsyncSession], Awaitable[tuple[str, str] | None]] | None = None,
     extra_payload: dict | None = None,
     publication_id: uuid.UUID | None = None,
+    trigger_gate_id: uuid.UUID | None = None,
 ) -> None:
     """story #4090 AC2 + story #4093(공통 훅으로 추출, 페드루 PO 確定 2026-09-21) —
     즉시-발행 경로(`publish_recipe_approved_draft`)·예약-발행 워커 경로(publication_
@@ -2808,6 +2810,7 @@ async def emit_recipe_published_stage_event(
         await _emit_recipe_published_stage_event_locked(
             event_db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
             definition_key=key, next_stage=stage, extra_payload=extra_payload, publication_id=publication_id,
+            trigger_gate_id=trigger_gate_id,
         )
 
     await run_side_effect_in_own_session(
@@ -2834,6 +2837,7 @@ async def _emit_recipe_published_stage_event_locked(
     event_db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
     definition_key: str, next_stage: str, extra_payload: dict | None = None,
     publication_id: uuid.UUID | None = None,
+    trigger_gate_id: uuid.UUID | None = None,
 ) -> None:
     """조회~발행을 한 트랜잭션으로 묶고 그 트랜잭션 수준 advisory lock으로 직렬화한다(커밋·롤백 때 PG가 자동 해제 —
     세션 수준 잠금은 비동기 세션이 커밋 뒤 연결을 풀에 돌려줄 수 있어 해제가 다른 연결로 갈 위험이 있다). 이 구간의
@@ -2870,7 +2874,14 @@ async def _emit_recipe_published_stage_event_locked(
     # `additionalProperties: false`라 모르는 키를 실으면 발행 자체가 검증에서 막힌다.
     if publication_id is not None and await _definition_declares_payload_field(event_db, org_id, definition_key, "publication_id"):
         payload["publication_id"] = str(publication_id)
-    await _publish_registry_event_core(event_db, org_id, auth, definition_key, payload, background_tasks)
+    # story #4255(까디르 P1) — 이 발행을 촉발한 게이트 · 발행물을 이벤트 문맥으로 싣는다(payload 스키마 밖 · refs에 남는다).
+    # 마지막 서버 stage의 수신자(촉발 게이트의 실제 승인자)와 결과 줄의 공개 주소가 «그 시점 최신»을 추측하지 않고 이 값을 쓴다.
+    routing_context = {
+        k: str(v) for k, v in (("trigger_gate_id", trigger_gate_id), ("publication_id", publication_id)) if v is not None
+    }
+    await _publish_registry_event_core(
+        event_db, org_id, auth, definition_key, payload, background_tasks, routing_context=routing_context or None,
+    )
     await event_db.commit()
     await background_tasks()
 

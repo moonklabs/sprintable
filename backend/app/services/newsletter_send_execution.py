@@ -375,7 +375,7 @@ async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: Publi
     from app.services.channel_posts import emit_recipe_published_stage_event
 
     # 새 세션은 워커 세션의 ORM 객체를 공유하지 않는다 — 필요한 값을 먼저 잡아 둔다.
-    org_id, work_item_type, work_item_id = gate.org_id, gate.work_item_type, gate.work_item_id
+    org_id, work_item_type, work_item_id, gate_id = gate.org_id, gate.work_item_type, gate.work_item_id, gate.id
     facts = dict(gate.neutral_facts or {})
     await db.commit()  # 발송 성공 기록 확정 — 아래 이벤트가 어떻게 실패해도 이것을 되돌릴 수 없게.
 
@@ -384,4 +384,5 @@ async def _emit_recipe_next_stage_after_send(db: AsyncSession, *, command: Publi
     await emit_recipe_published_stage_event(
         db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
         resolve=lambda side: _resolve_recipe_next_stage(side, org_id=org_id, facts=facts),
+        trigger_gate_id=gate_id,  # story #4255 — 발송을 촉발한 발송 게이트(추측 없이)
     )

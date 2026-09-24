@@ -277,8 +277,86 @@ async def _stage_approval_is_elsewhere(
     return (kinds.get(meta.get("role")) or "agent") != "agent"
 
 
+async def _context_trigger_gate(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_id: uuid.UUID | None, context: dict | None,
+):
+    """story #4255(까디르 P1) — 서버가 이벤트 문맥으로 실어 보낸 «이 발행을 촉발한 게이트». 없거나, 다른 조직이거나, 이 이벤트의
+    작업 항목이 아니면 None(PO 10:15Z — 엉뚱한 id가 실려 와도 다른 항목의 승인자에게 새지 않게)."""
+    from app.models.gate import Gate
+
+    raw = (context or {}).get("trigger_gate_id")
+    if not raw:
+        return None
+    try:
+        gate = await db.get(Gate, uuid.UUID(str(raw)))
+    except (TypeError, ValueError):
+        return None
+    if gate is None or gate.org_id != org_id or gate.work_item_id != work_item_id:
+        if gate is not None:
+            logger.warning("recipe_role_binding: trigger gate %s does not belong to this event's work item — ignored", gate.id)
+        return None
+    return gate
+
+
+async def _last_server_stage_recipients(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition, stage: str, payload: dict,
+    context: dict | None = None,
+) -> set[uuid.UUID]:
+    """story #4255 — 마지막 단계가 서버 stage(채널 연결 발행)면 받을 «다음 단계 담당»이 없다. 수신자(PO 확정 규칙):
+    ① 그 발행을 촉발한 게이트를 **실제로 승인한 사람**(게이트 행 resolver · 없으면 지정 승인자) ∪ ② 직전 stage에 바인딩된
+    **에이전트**. 촉발 게이트는 직전 stage가 연 이 레시피의 게이트다(`neutral_facts.stage` · `triggered_by_event` — 게이트
+    생성 훅이 싣는 사실 그대로 · 추측 없음). 마케팅 적용 창은 사람 승인 stage를 바인딩하지 않으므로 ①이 실사용의
+    수신자다(4177 체인 실측). 둘 다 없으면 0 + 경고(«모르면 안 준다»)."""
+    from app.models.gate import Gate
+    from app.models.team import TeamMember
+    from app.routers.events import _previous_recipe_stage
+
+    previous_stage = _previous_recipe_stage(definition, stage)
+    recipients: set[uuid.UUID] = set()
+    try:
+        work_item_id = uuid.UUID(str(payload.get("work_item_id")))
+    except (TypeError, ValueError):
+        work_item_id = None
+    trigger_gate = await _context_trigger_gate(db, org_id=org_id, work_item_id=work_item_id, context=context)
+    if previous_stage is not None and work_item_id is not None:
+        gate = trigger_gate or (await db.execute(
+            select(Gate).where(
+                Gate.org_id == org_id,
+                Gate.work_item_id == work_item_id,
+                Gate.work_item_type == payload.get("work_item_type"),
+                Gate.status == "approved",
+                Gate.neutral_facts["stage"].astext == previous_stage,
+                Gate.neutral_facts["triggered_by_event"].astext == definition.key,
+            )
+            .order_by(Gate.resolved_at.desc().nulls_last()).limit(1)
+        )).scalars().first()
+        if trigger_gate is None and gate is not None:
+            # 촉발 게이트 id가 실려 오지 않은 옛 경로 — 그 시점 최신 승인 게이트로 폴백한다(같은 작업 항목의 다음 회차가 그 사이
+            # 승인되면 틀릴 수 있어 경고를 남긴다 · 까디르 P1).
+            logger.warning(
+                "recipe_role_binding: last channel stage %r without trigger gate id — falling back to the latest approved gate %s "
+                "(definition=%s)", stage, gate.id, definition.key,
+            )
+        approver = (gate.resolver_id or gate.designated_approver_id) if gate is not None else None
+        if approver is not None:
+            recipients.add(approver)
+        bound = await _bound_member_for_stage(
+            db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=previous_stage,
+        )
+        if bound is not None and (await db.execute(
+            select(TeamMember.id).where(TeamMember.id == bound, TeamMember.org_id == org_id, TeamMember.type == "agent")
+        )).first() is not None:
+            recipients.add(bound)
+    if not recipients:
+        logger.warning(
+            "recipe_role_binding: last channel stage %r has no approved trigger gate on %r and no bound agent — 0 recipients (definition=%s)",
+            stage, previous_stage, definition.key,
+        )
+    return recipients
+
+
 async def _resolve_recipe_role_binding(
-    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str, context: dict | None = None,
 ) -> set[uuid.UUID]:
     """story #3288(축2-ⓐ) — stage_metadata.role은 표시 텍스트뿐이라, 발행 시점에 "이 stage는
     실제로 누구인가"를 recipe_role_bindings에서 조회한다. project 스코프 바인딩이 org 전역
@@ -298,11 +376,6 @@ async def _resolve_recipe_role_binding(
         # 빠진 stage를 지우지 않는다). 그 행을 수신자로 잡으면 옛 사람(바뀌었으면 엉뚱한 사람)에게 간다 — 해소에서 뺀다.
         # 승인 쪽 이음매는 그 게이트의 결재 카드다.
         return set()
-    member_id = await _bound_member_for_stage(
-        db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=stage,
-    )
-    if member_id is not None:
-        return {member_id}
 
     # story #4110(#4109 PO 결정, 2026-09-21) — generation_connector-target stage(예:
     # live_generation)는 agent_member_id가 원천적으로 없다(그 stage의 바인딩 행은
@@ -326,9 +399,21 @@ async def _resolve_recipe_role_binding(
         .order_by(EventDefinition.org_id.is_(None))
         .limit(1)
     )).scalar_one_or_none()
+    capability = (
+        ((definition.stage_metadata or {}).get(stage) or {}).get("capability") or {} if definition is not None else {}
+    )
+    # story #4255(까디르 P2) — stage의 방식(capability.target)이 먼저 정한다. 채널 연결 stage의 바인딩은 채널 연결 행이어야
+    # 하고, 0387 전에 남은 옛 **에이전트** 바인딩 행(dev 실측: 조직 1 · 영상 published)이 있어도 해소에 쓰지 않는다(4606 ⓑ
+    # «종류가 안 맞는 바인딩은 해소에서 뺀다»와 같은 원칙 · 데이터는 지우지 않는다) — 안 그러면 아래 4242 · 4255 규칙이 통째로
+    # 건너뛰어진다.
+    if capability.get("target") != "channel_connection":
+        member_id = await _bound_member_for_stage(
+            db, org_id=org_id, project_id=project_id, definition_key=definition_key, stage=stage,
+        )
+        if member_id is not None:
+            return {member_id}
     if definition is None:
         return set()
-    capability = (definition.stage_metadata.get(stage) or {}).get("capability") or {}
     if capability.get("target") == "channel_connection":
         # story #4242 — 채널 연결 stage(뉴스레터 «캠페인 생성» 등)는 서버가 대신 수행하는 자리라 바인딩된 멤버가 원래
         # 없다(그 stage의 바인딩 행은 channel_connection_id). 그 이벤트는 **다음 stage에 바인딩된 멤버**(에이전트·사람 종류
@@ -340,7 +425,10 @@ async def _resolve_recipe_role_binding(
 
         next_stage = _next_recipe_stage(definition, stage)
         if next_stage is None:
-            return set()
+            return await _last_server_stage_recipients(
+                db, org_id=org_id, project_id=project_id, definition=definition, stage=stage, payload=payload,
+                context=context,
+            )
         next_capability = (definition.stage_metadata.get(next_stage) or {}).get("capability") or {}
         next_member = None
         if next_capability.get("target") in (None, "agent"):
@@ -390,7 +478,7 @@ assert set(_SERVER_DERIVED_RESOLVERS) == set(SERVER_DERIVED_TARGETS), (
 
 async def resolve_routing_leg(
     leg: dict, *, payload: dict, org_id: uuid.UUID, db: AsyncSession,
-    definition_key: str | None = None,
+    definition_key: str | None = None, context: dict | None = None,
 ) -> set[uuid.UUID]:
     """routing.escalation 또는 routing.broadcast 한 leg를 실제 member_id 집합으로. leg는
     이미 validate_event_routing()을 통과한 정의에서 온 것을 전제(등록 시점 계약 검증 완료 —
@@ -402,7 +490,7 @@ async def resolve_routing_leg(
         if not definition_key:
             raise ValueError("recipe_role_binding 해석에는 definition_key가 필요합니다.")
         return await _resolve_recipe_role_binding(
-            db, org_id=org_id, payload=payload, definition_key=definition_key,
+            db, org_id=org_id, payload=payload, definition_key=definition_key, context=context,
         )
 
     if leg["kind"] == "payload_field":

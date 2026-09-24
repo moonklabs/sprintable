@@ -1452,6 +1452,48 @@ def gate_verdict_next_action_kind(definition, gate_stage: str, gate_type: str | 
     return "publish_example"
 
 
+async def _latest_published_permalink(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, context: dict | None = None,
+) -> str | None:
+    """story #4255 — 이 결과의 공개 주소. 서버가 발행물 id를 실어 보냈으면 그 행(까디르 P1 · 추측 없이), 없으면(옛 경로) 이 작업
+    항목의 가장 최근 게시(`status = published`). 없으면 None."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+
+    publication_id_raw = (context or {}).get("publication_id")
+    if publication_id_raw:
+        try:
+            publication = await db.get(ChannelPublication, uuid.UUID(str(publication_id_raw)))
+        except (TypeError, ValueError):
+            publication = None
+        return publication.permalink if publication is not None and publication.org_id == org_id else None
+
+    try:
+        work_item_id = uuid.UUID(str(payload.get("work_item_id")))
+    except (TypeError, ValueError):
+        return None
+    return (await db.execute(
+        select(ChannelPublication.permalink)
+        .join(Gate, Gate.id == ChannelPublication.gate_id)
+        .where(
+            ChannelPublication.org_id == org_id,
+            ChannelPublication.status == "published",
+            Gate.work_item_id == work_item_id,
+        )
+        .order_by(ChannelPublication.published_at.desc().nulls_last())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+def _previous_recipe_stage(definition, stage: str) -> str | None:
+    """story #4255 — `_next_recipe_stage`의 반대 방향(같은 enum · 첫 stage면 None)."""
+    enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+    if stage not in enum:
+        return None
+    idx = enum.index(stage)
+    return enum[idx - 1] if idx > 0 else None
+
+
 def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: dict) -> str:
     """story #4076 — `next_stage`로 넘어가는 `publish_event` 호출의 JSON 페이로드만(라벨·
     "publish_event(" 감싸기는 호출부가 i18n_catalog 문구로 한다 — BE 한글 사용자 문장 가드
@@ -1980,6 +2022,7 @@ async def _resolve_stage_gate_approver_clause(
 
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
+    context: dict | None = None,
 ) -> str:
     """story #3313(마케팅자동화·온보딩 결함) — `block_template`가 없는 사이클형 정의(stage
     이벤트)의 알림 본문이 "stage/work_item_id뿐"이라 수신 에이전트가 `list_event_definitions`
@@ -2124,6 +2167,14 @@ async def _render_event_message_content(
                 lines.append(f"- {t('events.gate_hint_external_publish_auto_satisfy', resolved_locale)}")
     else:
         lines.append(f"- {t('events.stage_next_none', resolved_locale)}")
+        # story #4255 — 마지막 단계가 서버의 채널 게시면 이 멘션이 레시피의 결과 통지다(받는 사람 = 게시를 승인한 사람 ·
+        # 직전 stage 에이전트). 게시 주소를 싣고 할 일이 없음을 알린다 — 주소는 이 작업 항목의 가장 최근 게시 행 그대로.
+        if (stage_meta.get("capability") or {}).get("target") == "channel_connection":
+            _permalink = await _latest_published_permalink(db, org_id=org_id, payload=payload, context=context)
+            if _permalink:
+                lines.append(f"- {t('events.stage_last_channel_published', resolved_locale, permalink=_permalink)}")
+            else:
+                lines.append(f"- {t('events.stage_last_channel_published_no_link', resolved_locale)}")
 
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
@@ -2363,6 +2414,9 @@ async def _publish_registry_event_core(
     # story #4230 — 넘기면 호출자 트랜잭션에 참여(`send_message_core` 참조 — 커밋 없음 · 커밋 뒤 배달은 이 목록에).
     # `publish_preset_event`만 쓴다. HTTP 발행 · 레시피 stage · repeat 스케줄러는 None(예전대로 즉시 커밋).
     after_commit: list | None = None,
+    # story #4255(까디르 P1) — 서버가 낸 stage 이벤트의 문맥(촉발 게이트 · 발행물 id). payload 스키마 밖이라 routing 해석과 본문
+    # 렌더에만 넘기고 refs에 남긴다. 사람 · 에이전트 발행은 None.
+    routing_context: dict | None = None,
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -2491,11 +2545,11 @@ async def _publish_registry_event_core(
     try:
         escalation_ids = await resolve_routing_leg(
             definition.routing["escalation"], payload=payload, org_id=org_id, db=db,
-            definition_key=definition.key,
+            definition_key=definition.key, context=routing_context,
         )
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=payload, org_id=org_id, db=db,
-            definition_key=definition.key,
+            definition_key=definition.key, context=routing_context,
         )
     except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
@@ -2763,9 +2817,10 @@ async def _publish_registry_event_core(
     send_body = SendMessageRequest(
         content=await _render_event_message_content(
             db, org_id=org_id, definition=definition, payload=payload, resolved_locale=resolved_locale,
+            context=routing_context,
         ),
         mentioned_ids=list(escalation_ids),
-        event_context={"event_key": definition.key, "payload": payload, "refs": refs},
+        event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
     msg_response = await send_message_core(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
