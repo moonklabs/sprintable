@@ -277,6 +277,54 @@ async def _stage_approval_is_elsewhere(
     return (kinds.get(meta.get("role")) or "agent") != "agent"
 
 
+async def _last_server_stage_recipients(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition, stage: str, payload: dict,
+) -> set[uuid.UUID]:
+    """story #4255 — 마지막 단계가 서버 stage(채널 연결 발행)면 받을 «다음 단계 담당»이 없다. 수신자(PO 확정 규칙):
+    ① 그 발행을 촉발한 게이트를 **실제로 승인한 사람**(게이트 행 resolver · 없으면 지정 승인자) ∪ ② 직전 stage에 바인딩된
+    **에이전트**. 촉발 게이트는 직전 stage가 연 이 레시피의 게이트다(`neutral_facts.stage` · `triggered_by_event` — 게이트
+    생성 훅이 싣는 사실 그대로 · 추측 없음). 마케팅 적용 창은 사람 승인 stage를 바인딩하지 않으므로 ①이 실사용의
+    수신자다(4177 체인 실측). 둘 다 없으면 0 + 경고(«모르면 안 준다»)."""
+    from app.models.gate import Gate
+    from app.models.team import TeamMember
+    from app.routers.events import _previous_recipe_stage
+
+    previous_stage = _previous_recipe_stage(definition, stage)
+    recipients: set[uuid.UUID] = set()
+    try:
+        work_item_id = uuid.UUID(str(payload.get("work_item_id")))
+    except (TypeError, ValueError):
+        work_item_id = None
+    if previous_stage is not None and work_item_id is not None:
+        gate = (await db.execute(
+            select(Gate).where(
+                Gate.org_id == org_id,
+                Gate.work_item_id == work_item_id,
+                Gate.work_item_type == payload.get("work_item_type"),
+                Gate.status == "approved",
+                Gate.neutral_facts["stage"].astext == previous_stage,
+                Gate.neutral_facts["triggered_by_event"].astext == definition.key,
+            )
+            .order_by(Gate.resolved_at.desc().nulls_last()).limit(1)
+        )).scalars().first()
+        approver = (gate.resolver_id or gate.designated_approver_id) if gate is not None else None
+        if approver is not None:
+            recipients.add(approver)
+        bound = await _bound_member_for_stage(
+            db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=previous_stage,
+        )
+        if bound is not None and (await db.execute(
+            select(TeamMember.id).where(TeamMember.id == bound, TeamMember.type == "agent")
+        )).first() is not None:
+            recipients.add(bound)
+    if not recipients:
+        logger.warning(
+            "recipe_role_binding: last channel stage %r has no approved trigger gate on %r and no bound agent — 0 recipients (definition=%s)",
+            stage, previous_stage, definition.key,
+        )
+    return recipients
+
+
 async def _resolve_recipe_role_binding(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict, definition_key: str,
 ) -> set[uuid.UUID]:
@@ -340,7 +388,9 @@ async def _resolve_recipe_role_binding(
 
         next_stage = _next_recipe_stage(definition, stage)
         if next_stage is None:
-            return set()
+            return await _last_server_stage_recipients(
+                db, org_id=org_id, project_id=project_id, definition=definition, stage=stage, payload=payload,
+            )
         next_capability = (definition.stage_metadata.get(next_stage) or {}).get("capability") or {}
         next_member = None
         if next_capability.get("target") in (None, "agent"):

@@ -1452,6 +1452,37 @@ def gate_verdict_next_action_kind(definition, gate_stage: str, gate_type: str | 
     return "publish_example"
 
 
+async def _latest_published_permalink(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> str | None:
+    """story #4255 — 이 작업 항목(게시 게이트의 work item)의 가장 최근 게시(`status = published`) 주소. 없으면 None."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+
+    try:
+        work_item_id = uuid.UUID(str(payload.get("work_item_id")))
+    except (TypeError, ValueError):
+        return None
+    return (await db.execute(
+        select(ChannelPublication.permalink)
+        .join(Gate, Gate.id == ChannelPublication.gate_id)
+        .where(
+            ChannelPublication.org_id == org_id,
+            ChannelPublication.status == "published",
+            Gate.work_item_id == work_item_id,
+        )
+        .order_by(ChannelPublication.published_at.desc().nulls_last())
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+def _previous_recipe_stage(definition, stage: str) -> str | None:
+    """story #4255 — `_next_recipe_stage`의 반대 방향(같은 enum · 첫 stage면 None)."""
+    enum = ((definition.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+    if stage not in enum:
+        return None
+    idx = enum.index(stage)
+    return enum[idx - 1] if idx > 0 else None
+
+
 def _next_stage_publish_payload_json(definition, next_stage: str, base_payload: dict) -> str:
     """story #4076 — `next_stage`로 넘어가는 `publish_event` 호출의 JSON 페이로드만(라벨·
     "publish_event(" 감싸기는 호출부가 i18n_catalog 문구로 한다 — BE 한글 사용자 문장 가드
@@ -2124,6 +2155,14 @@ async def _render_event_message_content(
                 lines.append(f"- {t('events.gate_hint_external_publish_auto_satisfy', resolved_locale)}")
     else:
         lines.append(f"- {t('events.stage_next_none', resolved_locale)}")
+        # story #4255 — 마지막 단계가 서버의 채널 게시면 이 멘션이 레시피의 결과 통지다(받는 사람 = 게시를 승인한 사람 ·
+        # 직전 stage 에이전트). 게시 주소를 싣고 할 일이 없음을 알린다 — 주소는 이 작업 항목의 가장 최근 게시 행 그대로.
+        if (stage_meta.get("capability") or {}).get("target") == "channel_connection":
+            _permalink = await _latest_published_permalink(db, org_id=org_id, payload=payload)
+            if _permalink:
+                lines.append(f"- {t('events.stage_last_channel_published', resolved_locale, permalink=_permalink)}")
+            else:
+                lines.append(f"- {t('events.stage_last_channel_published_no_link', resolved_locale)}")
 
     work_item_type = payload.get("work_item_type")
     work_item_id_raw = payload.get("work_item_id")
