@@ -16,6 +16,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { parseInsightsBoardApiError } from './insights-board-error';
 import type { FollowUpCreateResponse, FollowUpKind } from './types';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3503 — hypothesis-resolve-dialog.tsx의 다이얼로그 골격(Dialog>DialogContent
@@ -36,6 +37,7 @@ export interface FollowUpDialogProps {
 const KIND_OPTIONS: FollowUpKind[] = ['republish', 'edit', 'stop'];
 
 export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }: FollowUpDialogProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const t = useTranslations('insightsBoard');
   const tc = useTranslations('common');
   const [kind, setKind] = useState<FollowUpKind>('republish');
@@ -86,7 +88,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
     }
   }
 
-  const storyHref = successStoryId ? getEntityHref('story', successStoryId) : null;
+  const storyHref = successStoryId ? getEntityHref('story', successStoryId, flatHref) : null;
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>

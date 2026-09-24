@@ -672,7 +672,7 @@ export function WorkListDetailPanel({
             ) : (
               <ul className="space-y-1.5" data-testid="panel-docs-list">
                 {docs.filter((d) => d.doc !== null).map((d) => {
-                  const href = getEntityHref('doc', d.doc!.id);
+                  const href = getEntityHref('doc', d.doc!.id, flatHref);
                   return (
                     <li key={d.id} className="flex items-center gap-2 text-xs">
                       <FileText className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />

@@ -38,6 +38,7 @@ import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
 import { ServerCommandResultCard } from './server-command-result-card';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -204,6 +205,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
    * 사본 분화 금지 재사용)로 뜰 때 그 컴포넌트가 요구하는 카탈로그를 그대로 물려준다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   // story #2921 S4(유나 확定) — 「내 메시지=blue-soft」로 바뀌며 isMine 버블도 밝은 배경이
   // 됐다(옛 solid bg-primary 위 흰 글자 전제가 깨졌다). 이제 양쪽 다 밝은 무채/blue-soft
   // 패널 위 어두운 ink라 isMine으로 갈릴 이유가 없다 — Proof Capsule(proof-capsule.tsx)도
@@ -338,7 +340,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
               entityType={ref.entityType}
               entityId={ref.entityId}
               label={String(children)}
-              href={getEntityHref(ref.entityType, ref.entityId)}
+              href={getEntityHref(ref.entityType, ref.entityId, flatHref)}
               ghost={decision.ghost}
               referenceMeta={decision.referenceMeta}
               entityStatus={entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`]}
@@ -348,7 +350,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey]);
+  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (

@@ -573,7 +573,9 @@ describe('scanRepo — 양성대조(실 develop 소스)', () => {
       'components/attention-queue/derive-attention-queue.ts',
       'components/command-palette/command-palette-actions.ts',
       'components/org-briefing/derive-workforce-face.ts',
-      'components/org-briefing/derive-now-face.ts',
+      // story #4231 3차(b) — derive-now-face.ts의 buildNowFace(유일한 번역자 파라미터 호출) 삭제(프로덕션 호출처 0) — 같은 성격
+      // (번역자를 파라미터로 받는 함수)이고 이 스캐너가 실제로 세는 실 파일로 교체, 개수 10 유지.
+      'lib/invite-error-message.ts',
       // story #3831 착지(옛 org-briefing derive-loop-face.ts 삭제 — 「오늘」 화면이 그
       // 컴포넌트를 대체) — 같은 성격(번역자 파라미터 호출)의 실 파일로 교체, 개수 10 유지.
       'components/loop-queue/derive-loop-queue.ts',

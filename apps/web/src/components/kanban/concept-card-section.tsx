@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
 import { getEntityHref } from '@/components/chat/embed-card';
 import type { BacklinkItem } from '@/components/shared/entity-backlinks-section';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06 — 화면 자리 ④ 채택: 새
 // 화면 0) — 컨셉 카드=Doc(§3560 FE 조각 確定 ①-c). 「이것을 가리키는 것들」
@@ -49,6 +50,7 @@ export function ConceptCardSection({
   gates: GateSealedDocItem[];
   gatesLoaded: boolean;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const t = useTranslations('board');
   const [backlinkItems, setBacklinkItems] = useState<BacklinkItem[] | null>(null);
 
@@ -90,7 +92,7 @@ export function ConceptCardSection({
       <p className="mb-2 text-xs font-medium text-muted-foreground">{t('conceptCardTitle')}</p>
       <ul className="flex flex-col gap-1.5">
         {docs.map((doc) => {
-          const href = getEntityHref('doc', doc.id);
+          const href = getEntityHref('doc', doc.id, flatHref);
           return (
             <li key={doc.id} className="flex items-start gap-2 text-xs text-foreground">
               <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />

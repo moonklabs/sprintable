@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -24,6 +24,7 @@ import type { ReferenceForm } from './embed-renderer';
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { keepHref } from '@/lib/with-project-param';
 
 export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
 
@@ -37,10 +38,12 @@ export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
  * 승격됐다 — work_item_type이 story든 task든 응답의 resolved_story_id(BE가 이미 한 번에
  * 해소해 준다) 하나로 EntityPreviewModal이 판정한다.
  */
-export function getEntityHref(entityType: string, entityId: string): string | null {
+/** withProject — flat 목적지(문서 `/docs`)에 프로젝트를 싣는 함수(story #4231 3차 · **필수**). 프로젝트 단위 화면은 useFlatHref()를,
+ * 항목마다 프로젝트가 있는 목록은 «그 항목의 프로젝트를 싣는 함수»를 넘긴다. 이동하지 않고 «자기 주소가 있나»만 보는 판정은 keepHref. */
+export function getEntityHref(entityType: string, entityId: string, withProject: (href: string) => string): string | null {
   switch (entityType) {
     case 'story': return `/board?story=${entityId}`;
-    case 'doc': return `/docs?id=${entityId}`;
+    case 'doc': return withProject(`/docs?id=${entityId}`);
     // AC1 — 은퇴한 이름(/epics/)이 주소로 남아 404였다. 모델은 Goal, 화면은 goals/[id]/page.tsx.
     case 'epic': return `/goals/${entityId}`;
     // sprint는 sprints-client.tsx가 `?id=`를 실제로 읽어 자동선택한다(딥링크 주석 확認됨) — ①.
@@ -138,7 +141,8 @@ const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothe
 // 이 함수 하나만 부른다. getEntityHref는 entityId 값과 무관하게 entityType만으로 null 여부가
 // 갈리므로(switch가 타입 단위 분기) 더미 id로도 정확하다.
 export function canPreviewEntity(entityType: string): boolean {
-  return RICH_PREVIEW_TYPES.has(entityType) || Boolean(ENTITY_API[entityType]) || getEntityHref(entityType, '') !== null;
+  // «자기 주소가 있나» 판정만(이동 아님) — keepHref.
+  return RICH_PREVIEW_TYPES.has(entityType) || Boolean(ENTITY_API[entityType]) || getEntityHref(entityType, '', keepHref) !== null;
 }
 
 const MdBadge = ({ label }: { label: string }) => (
@@ -149,9 +153,9 @@ const MdBadge = ({ label }: { label: string }) => (
 
 // story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
-// 이 객체는 props/상태에 의존하지 않는 순수 상수이고 자식도 전부 stateless라 useMemo조차
-// 불필요 — 모듈 스코프로 끌어올려 참조를 영구 고정한다.
-const mdBodyComponents = {
+// 그래서 모듈 스코프 팩토리로 두고 MdBody가 useMemo로 참조를 고정한다 — story #4231 3차: 엔티티 칩 링크가 프로젝트(`?p=`)를
+// 싣도록 withProject를 받아, 참조는 목표 프로젝트가 바뀔 때만 바뀐다(그 외 리마운트 0).
+const makeMdBodyComponents = (withProject: (href: string) => string) => ({
   // story #2639(미르코 리뷰 ⑤) — 결재 카드 문서 미리보기(EntityPreviewModal→EntityDetail doc
   // 분기)가 이 경량 렌더러를 쓴다. doc-content-renderer와 동일하게 entity: 참조를 EntityChip으로
   // 잇는다(같은 파일의 EntityChip 재사용·사본 0). 비-UUID/asset은 평문 링크 폴백(무동작 0).
@@ -161,7 +165,7 @@ const mdBodyComponents = {
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
     const ref = parseEntityRef(href);
     if (ref && ref.entityType.toLowerCase() !== 'asset') {
-      return <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId)} />;
+      return <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId, withProject)} />;
     }
     return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
   },
@@ -178,24 +182,28 @@ const mdBodyComponents = {
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 pl-3 border-border text-muted-foreground">{children}</blockquote>,
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
-};
+});
 
 // story #2639 — entity: 스킴 보존(이 렌더러는 rehype-sanitize를 안 써서 이 한 겹이면 충분).
 // 그 외 스킴은 기본 sanitize 유지(javascript:/data: 차단). export: MdBody 격리 테스트용.
-export const MdBody = ({ content }: { content: string }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
-    components={mdBodyComponents}
-  >
-    {content}
-  </ReactMarkdown>
-);
+export const MdBody = ({ content }: { content: string }) => {
+  const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서)은 현재 프로젝트를 싣는다
+  const components = useMemo(() => makeMdBodyComponents(flatHref), [flatHref]);
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
+      components={components}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+};
 
 // story #2780 — 컴포넌트가 아니라 순수 함수로 둔다: 호출부(embed-card 모달 body)가 반환값이
 // null인지(=보여줄 내용 없음) 직접 검사해야 하는데, JSX `<EntityDetail/>` 호출은 그 반환값을
 // 렌더 트리 밖에서 들여다볼 수 없다(엘리먼트 서술자는 항상 non-null이다 — 안이 null이어도).
-function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>, tc: (key: string) => string, t: (key: string) => string): React.ReactNode | null {
+function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>, tc: (key: string) => string, t: (key: string) => string, withProject: (href: string) => string): React.ReactNode | null {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -303,7 +311,7 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
     const d = detail as { title?: string; status?: string; story_id?: string };
     if (!d.title) return null;
     const statusLabel = d.status ? translateEntityStatus('task', d.status) : null;
-    const parentHref = d.story_id ? getEntityHref('story', d.story_id) : null;
+    const parentHref = d.story_id ? getEntityHref('story', d.story_id, withProject) : null;
     if (!statusLabel && !parentHref) return null;
     return (
       <div className="space-y-2">
@@ -397,6 +405,7 @@ export function EntityPreviewModal({
    * 자체 크기의 plain div)뿐이다. */
   embedded?: boolean;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   // story #2302 — hypothesis·evidence는 fetch 자체를 안 한다(항상 고정 ③, ENTITY_API에 항목
   // 없음) — 예전 코드는 'task'만 예외 취급해 loading을 false로 시작했는데, ENTITY_API에 없는
   // 다른 타입(hypothesis·evidence·미등록 타입)은 아래 effect의 `if (!url) return` 이 loading을
@@ -582,7 +591,7 @@ export function EntityPreviewModal({
     resolvedHref = docPreview
       ? (docPreview.orgSlug && docPreview.projectSlug
           ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
-          : `/docs/${docPreview.slug}/view`)
+          : flatHref(`/docs/${docPreview.slug}/view`))
       : null;
     linkKind = resolvedHref ? 'own' : null;
   } else if (entityType === 'task') {
@@ -619,7 +628,7 @@ export function EntityPreviewModal({
       : d?.doc_id
         ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
             ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
-            : `/docs?id=${d.doc_id}`)
+            : flatHref(`/docs?id=${d.doc_id}`))
         : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
@@ -645,7 +654,7 @@ export function EntityPreviewModal({
     // gate 상세(/gates/[id])는 story #1954부터 이미 org-scope 플랫 라우트(워크스페이스/
     // 프로젝트 slug 세그먼트 없음, gates/[id]/page.tsx 그대로) — story/epic처럼 슬러그 해소가
     // 필요 없다. getEntityHref의 parity 스위치는 안 거친다(gate는 그 계약 밖).
-    resolvedHref = `/gates/${entityId}`;
+    resolvedHref = flatHref(`/gates/${entityId}`);
     linkKind = 'own';
   } else {
     // story·epic·sprint·asset — own-href ①. story #2642(BE #3044)부터 각 detail 응답이
@@ -695,7 +704,7 @@ export function EntityPreviewModal({
   // sprint) EntityDetail이 null을 반환해 몸통이 완전 공백이었다(옛 "미리보기 없음" 문구보다
   // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
-  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t) : null;
+  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t, flatHref) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
   const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList) : null;
 
@@ -770,12 +779,13 @@ export function EmbedCard({
    * Dialog 모달 그대로 — 회귀 없음. */
   onOpenReadingPanel?: (entityType: string, entityId: string, title: string | null, status: string | null, href: string | null) => void;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('chats');
   const [showModal, setShowModal] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const router = useRouter();
   const colorClass = ENTITY_COLORS[entity_type] ?? GRAY_STATE_COLOR;
-  const href = getEntityHref(entity_type, entity_id);
+  const href = getEntityHref(entity_type, entity_id, flatHref);
   const label = title ?? entity_id;
   // story #2522 — EmbedCard 자신의 인라인 카드(모달과 별개 렌더 경로)도 원시값을 그대로
   // 노출하던 같은 클래스의 gap. translateEntityStatus로 통과시킨다(미매핑=null=뱃지 안 그림).
@@ -822,12 +832,12 @@ export function EmbedCard({
       };
       const target = (data.orgSlug && data.projectSlug)
         ? docViewUrl(data.orgSlug, data.projectSlug, data.slug)
-        : `/docs/${data.slug}/view`;
+        : flatHref(`/docs/${data.slug}/view`);
       router.push(target);
     } catch {
       setNavigating(false);
     }
-  }, [entity_id, router]);
+  }, [entity_id, router, flatHref]);
 
   // story #2905(S2c①) — artifact/mockup 실 렌더 인라인. version_number를 아직 못 받았으면(fetch
   // 중/실패) 기존 아이콘+라벨 폼으로 정직하게 폴백(renderEntityDetail의 "있으면 열고 없으면
@@ -1139,7 +1149,7 @@ export function EntityChip({
     const docCta = entityType === 'doc' && !ghost ? (
       effectiveDocStatus === 'draft' && canSubmit ? (
         <Link
-          href={getEntityHref('doc', entityId) ?? '#'}
+          href={getEntityHref('doc', entityId, flatHref) ?? '#'}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >

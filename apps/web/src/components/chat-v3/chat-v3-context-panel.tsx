@@ -15,6 +15,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import type { EvidenceItem, EvidenceType } from '@/services/verify';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ArtifactDetail {
   title: string | null;
@@ -203,6 +204,7 @@ export function ChatV3ContextPanel({
   // 한 겹 감싼 것뿐) — ChatV3Screen이 실 flags로 한 번 구해 내려준다.
   todayHref: string;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('chatV3');
   const tVerify = useTranslations('verify');
   const tCommon = useTranslations('common');
@@ -212,7 +214,7 @@ export function ChatV3ContextPanel({
   const relatedNeedsMe = needsMe.find((item) => item.conversationId === conversationId) ?? null;
   // OFF 폴백(/inbox)은 이 화면 고유 맥락("오늘 결정 아니면 옛 큐로")이라 목적지 모듈이
   // 정할 대상이 아니다 — 그대로 유지.
-  const todayHref = todayV3Enabled ? todayV3Href : '/inbox';
+  const todayHref = todayV3Enabled ? todayV3Href : flatHref('/inbox');
 
   const [evidence, retryEvidence] = useWorkItemScopedList<EvidenceItem>(
     workItemRef,
@@ -237,7 +239,7 @@ export function ChatV3ContextPanel({
   // 되니(#3990 최초 구현이 놓친 지점), workItemRef만 있으면 줄을 유지하고 라벨만
   // 「이어진 일 열기」로 대체한다(산출물의 「제목 없음」=라벨 없는 제목과 다른 개념 —
   // 이건 "열 수 있는 행동" 문구, 유나 구별).
-  const scopeHref = workItemRef ? getEntityHref(workItemRef.type, workItemRef.id) : null;
+  const scopeHref = workItemRef ? getEntityHref(workItemRef.type, workItemRef.id, flatHref) : null;
   const scopeLabel = scopeTitle
     ? t('contextWorkItemScopeLabel', { title: scopeTitle })
     : (workItemRef ? t('contextOpenLinkedWorkItem') : null);

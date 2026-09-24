@@ -234,7 +234,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }, [open, contextStoryId]);
 
   const actionItems = useMemo(
-    () => buildActionCommands(t, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title, boardHref } : undefined),
+    () => buildActionCommands(t, flatHref, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title, boardHref } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t는 로케일 불변 함수
     [contextStory, boardHref],
   );

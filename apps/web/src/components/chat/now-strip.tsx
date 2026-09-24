@@ -29,6 +29,7 @@ import { useAutoRefresh } from '@/hooks/use-auto-refresh';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import type { AttentionItem, MyActions } from '@/components/dashboard/command-center/types';
 import { buildNowStripItems, summarizeSeverity, type NowStripItem, type NowStripSeverity } from './derive-now-strip';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // 카드 좌측 심각도 바 + 점 요약(둘 다 solid 배경색, 텍스트 아님) — tint 배경 위 계열색
 // «글자» 조합은 만들지 않는다(story #2420 회귀가드 — bg-tint+text-family 공존 금지).
@@ -144,6 +145,7 @@ export interface NowStripProps {
 }
 
 export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange }: NowStripProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 결재함·에이전트 상세(flat) 행 링크는 현재 프로젝트를 싣는다
   const t = useTranslations('chats');
   const tDashboard = useTranslations('dashboard');
   const [items, setItems] = useState<AttentionItem[] | null>(null);
@@ -184,8 +186,8 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
 
   const noopResolveName = useCallback((): string | null => null, []);
   const stripItems = useMemo(
-    () => buildNowStripItems(items ?? [], tDashboard, resolveName ?? noopResolveName, {}),
-    [items, tDashboard, resolveName, noopResolveName],
+    () => buildNowStripItems(items ?? [], tDashboard, flatHref, resolveName ?? noopResolveName, {}),
+    [items, tDashboard, resolveName, noopResolveName, flatHref],
   );
 
   if (stripItems.length === 0) return null;

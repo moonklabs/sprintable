@@ -26,6 +26,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -118,6 +119,7 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * 건드리지 않는다(AC③, 언마운트 없음).
  */
 export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }: ApprovalRequestCardProps) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const t = useTranslations('chats');
   // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
   // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
@@ -346,7 +348,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           if (readingPanel) {
             readingPanel.open({
               kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
-              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id),
+              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id, flatHref),
             });
             return;
           }
@@ -381,7 +383,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           entityId={gate.work_item_id}
           title={title}
           status={null}
-          href={getEntityHref(previewEntityType, gate.work_item_id)}
+          href={getEntityHref(previewEntityType, gate.work_item_id, flatHref)}
           onClose={() => setShowPreview(false)}
         />
       )}
@@ -407,6 +409,7 @@ function ApprovalRequestBody({
   /** story #3084(층3) — 토스 성공/409 안내 토스트(카드 인스턴스가 소유한 useToast, 부모가 전달). */
   addToast: (toast: { type?: 'info' | 'warning' | 'success' | 'error'; title: string; body?: string }) => void;
 }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
@@ -676,9 +679,9 @@ function ApprovalRequestBody({
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
                 {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i))}
+                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, flatHref))}
               </div>
-              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i))}
+              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, flatHref))}
             </div>
           ) : (
             <div className="space-y-1">

@@ -175,16 +175,18 @@ function safeInternalPath(path: string): string | null {
  *   - doc: `/docs/{doc_slug}`
  *   - story: `/board?story={story_id}` (notification-bell 관례 재사용)
  */
-export function resolveDeeplinkHref(link: AssetSourceLink): string | null {
+/** withProject — flat 목적지(대화 · 문서)에 프로젝트를 싣는 함수(story #4231 3차 · 필수). 호출처는 useFlatHref()를 넘긴다. */
+export function resolveDeeplinkHref(link: AssetSourceLink, withProject: (href: string) => string): string | null {
   const d = link.deeplink;
   if (d == null) return null;
   if (typeof d === 'string') return safeInternalPath(d);
   if ('conversation_id' in d && d.conversation_id) {
-    const base = `/chats/${encodeURIComponent(d.conversation_id)}`;
     const messageId = 'message_id' in d ? d.message_id : undefined;
-    return messageId ? `${base}?messageId=${encodeURIComponent(messageId)}` : base;
+    return withProject(messageId
+      ? `/chats/${encodeURIComponent(d.conversation_id)}?messageId=${encodeURIComponent(messageId)}`
+      : `/chats/${encodeURIComponent(d.conversation_id)}`);
   }
-  if ('doc_slug' in d && d.doc_slug) return `/docs/${encodeURIComponent(d.doc_slug)}`;
+  if ('doc_slug' in d && d.doc_slug) return withProject(`/docs/${encodeURIComponent(d.doc_slug)}`);
   if ('story_id' in d && d.story_id) return `/board?story=${encodeURIComponent(d.story_id)}`;
   return null;
 }
