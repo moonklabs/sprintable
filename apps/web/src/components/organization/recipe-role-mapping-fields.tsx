@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { RECIPE_STAGE_LABEL_SLUGS, recipeStageLabel } from '@/lib/recipe-stage-label';
 import { membersForKind, stageApprovalSurface, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
 
 // story #4243 — 멤버 선택지는 사람 + 에이전트(`type`). stage마다 정의의 role_actor_kinds로 거른다(human → 사람 ·
@@ -92,9 +92,10 @@ export function RecipeRoleMappingFields({
         const surfaceUnderPicker = !approvalSurface ? meta?.approval?.surface : undefined;
         return (
           <div key={stage} className="flex items-center gap-3">
-            {/* 유나 design(4606) — 행 이름은 단계 라벨(역할 원문 «Human»·«Any»는 번역도 안 되고 역할 kind와 어긋나 보인다). */}
+            {/* 유나 design(4606) — 행 이름은 단계 라벨(역할 원문 «Human»·«Any»는 번역도 안 되고 역할 kind와 어긋나 보인다).
+                까디르 QA — 라벨 표에 없는 조직 정의 stage(자유 slug)는 예전처럼 role(«Reviewer» 등), 그것도 없으면 slug. */}
             <span className="w-32 shrink-0 break-keep text-xs font-medium text-foreground" data-testid={`mapping-row-label-${stage}`}>
-              {recipeStageLabel(stage, t)}
+              {RECIPE_STAGE_LABEL_SLUGS.includes(stage) ? recipeStageLabel(stage, t) : (meta?.role ?? stage)}
             </span>
             {approvalSurface ? (
               // story #4243 D3 — 승인이 이 stage 밖(결재함)이라 고를 담당이 없다. 선택기 없음 · 필수 아님 · role_mapping에 안 실림.
