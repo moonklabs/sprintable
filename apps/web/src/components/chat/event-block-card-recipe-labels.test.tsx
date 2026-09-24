@@ -183,4 +183,20 @@ describe('EventBlockCard — 담당에게만 «스토리 보기»(story #4249)',
     await flush();
     expect(container.querySelector('[data-testid="event-card-view-story"]')).toBeNull();
   });
+  it('PO 4623 리뷰 — 화면 B에서 프로젝트 C 이벤트 카드: 링크는 항목 자기 프로젝트(p=C) · 모르면 보는 화면(p=B)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentMemberType: 'human', role: 'admin', orgId: 'org-1', currentTeamMemberId: 'me-1', projectId: 'proj-B',
+    });
+    await act(async () => {
+      root.render(wrap(<EventBlockCard template={TEMPLATE} payload={PAYLOAD} refs={{ stage_assignee: 'me-1', project_id: 'proj-C' }} />));
+    });
+    await flush();
+    const href = container.querySelector('[data-testid="event-card-view-story"]')?.getAttribute('href') ?? '';
+    expect(href).toContain('p=proj-C');
+    expect(href).not.toContain('p=proj-B');
+
+    await act(async () => { root.render(wrap(<EventBlockCard template={TEMPLATE} payload={PAYLOAD} refs={{ stage_assignee: 'me-1' }} />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="event-card-view-story"]')?.getAttribute('href')).toContain('p=proj-B');
+  });
 });

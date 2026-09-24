@@ -12,6 +12,7 @@ import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
@@ -418,9 +419,15 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   // 완료하기»는 현재 단계를 알 수 있을 때만 — 지난 카드에 «완료하기»가 남으면 거짓).
   const stageAssignee = refs?.['stage_assignee'];
   const storyId = payload['work_item_type'] === 'story' && typeof payload['work_item_id'] === 'string' ? payload['work_item_id'] : null;
-  const storyHref = storyId && typeof stageAssignee === 'string' && currentTeamMemberId && stageAssignee === currentTeamMemberId
+  // PO 4623 리뷰 — 채팅은 조직 전체가 보는 자리라 «항목 자기 프로젝트»(이벤트가 가진 프로젝트 · refs → payload)를 싣고, 모를
+  // 때만 보는 사람의 현재 프로젝트로 폴백한다.
+  const eventProjectId = typeof refs?.['project_id'] === 'string'
+    ? refs['project_id'] as string
+    : typeof payload['project_id'] === 'string' ? payload['project_id'] : null;
+  const storyPath = storyId && typeof stageAssignee === 'string' && currentTeamMemberId && stageAssignee === currentTeamMemberId
     ? getEntityHref('story', storyId, flatHref)
     : null;
+  const storyHref = storyPath ? (eventProjectId ? withProjectParam(storyPath, eventProjectId) : flatHref(storyPath)) : null;
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
@@ -435,7 +442,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
         />
       ))}
       {storyHref ? (
-        <Link href={flatHref(storyHref)} className="inline-block text-xs font-medium text-primary hover:underline" data-testid="event-card-view-story">
+        <Link href={storyHref} className="inline-block text-xs font-medium text-primary hover:underline" data-testid="event-card-view-story">
           {tEventCard('viewStory')}
         </Link>
       ) : null}

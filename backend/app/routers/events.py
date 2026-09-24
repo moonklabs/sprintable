@@ -3001,6 +3001,10 @@ async def _publish_registry_event_core(
         )
         if _stage_assignee is not None:
             refs["stage_assignee"] = str(_stage_assignee)
+        # PO 4623 리뷰 — 채팅은 조직 전체가 보는 자리라 카드 링크는 «항목 자기 프로젝트»를 싣는다(보는 사람의 현재 프로젝트가
+        # 아니라). 이 이벤트의 작업 항목 프로젝트.
+        if project_id is not None:
+            refs["project_id"] = str(project_id)
 
     # story #3893 CHANGES②(PO 확認 2026-09-15) — preset.goal.measured의 `goal_id`(raw UUID,
     # 실제로는 epic.id — cron.py가 그렇게 싣는다)도 work_item과 동일 원칙(key 존재 여부만

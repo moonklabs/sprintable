@@ -169,6 +169,8 @@ async def test_a_person_runs_the_whole_workflow_from_the_screen_action_alone():
                 work_item_id=str(w["story_id"]), stage="submit_step_1",
             )
         assert msg.msg_metadata["event"]["refs"]["stage_assignee"] == str(w["me"])
+        # PO 4623 리뷰 — 카드 링크가 «항목 자기 프로젝트»를 싣도록 이벤트 refs에 작업 항목의 프로젝트.
+        assert msg.msg_metadata["event"]["refs"]["project_id"] == str(w["project_id"])
 
         c = await _candidate(Session, w)
         assert (c.current_stage, c.current_completion) == ("review_step_2", "last_stage")
