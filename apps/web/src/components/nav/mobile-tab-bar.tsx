@@ -13,6 +13,7 @@ import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
   DEFAULT_NAV_V3_FLAGS,
   resolveNavV3Destinations,
@@ -178,6 +179,13 @@ function isStaticPathExact(pathname: string, staticPath: string): boolean {
 // 뿐 아니라 옛 「결재」 경로(gates/*·inbox?tab=gates)까지 흡수한다(승인 탭 폐지, §2).
 // 「일감」은 이제 key가 'now'가 아니라 'work'(V3_TABS와 정합). 플래그 전부 OFF면 기존
 // 판정 그대로(AC8 "플래그 OFF 바이트 무변").
+// story #4278(민 기기 점검 4번) — 「일감」 위 줄(WorkspaceFrameTabs: 목록 · 보드 · 스프린트 · 에픽 · 회고 · 가설)의 나머지 다섯
+// 화면에서 탭바가 «전체»를 켰다(보드만 «일감»). 사이드바는 #3844에서 같은 결함을 WORKSPACE_FRAME_TAB_PATHS(SSOT)로 고쳤는데
+// 탭바는 dest.work.path 한 조각만 봤다 — 같은 목록을 읽어 두 곳이 한 판정을 쓴다(탭을 늘리면 둘 다 자동으로 따라감).
+function isWorkPath(pathname: string, workPath: string): boolean {
+  return [workPath, ...WORKSPACE_FRAME_TAB_PATHS].some((p) => isResourcePath(pathname, p));
+}
+
 export function getActiveTabKey(
   pathname: string,
   navV3Flags: NavV3Flags = DEFAULT_NAV_V3_FLAGS,
@@ -188,10 +196,10 @@ export function getActiveTabKey(
     if (isStaticPathOrChild(pathname, dest.today.path)) return 'today';
     if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'today';
     if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
-    if (isResourcePath(pathname, dest.work.path)) return 'work';
+    if (isWorkPath(pathname, dest.work.path)) return 'work';
     return 'more';
   }
-  if (isResourcePath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
+  if (isWorkPath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
   if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'approvals';
   if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
   return 'more';
