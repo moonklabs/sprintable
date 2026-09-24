@@ -1928,16 +1928,20 @@ async def _open_site_draft_ids_for_work_item(
 ) -> list[uuid.UUID]:
     """story #4256 — 이 발행의 work item에 걸린 **아직 발행 안 된** · 삭제 안 된 블로그 초안 id들(오래된 순 · 후보 표시용 — 고르지 않는다).
 
-    까디르 QA · PO(07:07Z) — `SitePostDraft.status`는 server_default «draft»뿐이고 앱 어디서도 안 바뀐다(발행 여부는 발행 행 쪽). 그래서
-    «발행됨»은 발행 행으로 가른다: 자사 블로그 = `SitePost`(같은 조직 · source_story_id = 그 work item · slug = 초안 slug · 내렸어도 한 번
-    발행된 것) · 외부 목적지 = 그 초안 버전을 가리키는 `ChannelPublication`(status=published). 반복 회차에서 지난 회차에 발행한 초안이
-    세어지지 않는다.
+    «발행됨»은 발행 감사 로그로 가른다(까디르 QA · PO 07:39Z 확定): 이 초안의 어느 버전이든 `activity_logs`(action=site_post_published)의
+    `context.version_id`로 걸려 있으면 발행된 초안이다(SitePostVersion.draft_id로 초안에 이음). 자사 블로그(publish_site_post_from_draft)와
+    외부 목적지 워커(publish_site_post_external_command)가 둘 다 발행 성공 때 같은 트랜잭션에 이 로그를 남긴다 — 한 규칙으로 두 목적지를 덮고,
+    내린 글(한 번 발행된 것)도 발행으로 남는다.
+    - `SitePostDraft.status`로는 못 가른다(server_default «draft»뿐 · 앱이 안 바꿈).
+    - `SitePost` slug로 가르면 초안 없이 올린 레거시 글(post_site_post · 이 로그를 안 남김)과 같은 slug의 새 초안이 거짓 제외된다.
+    - 게이트로 잇지 않는다 — 게이트는 스토리 × 목적지 슬롯 하나이고 재제출 때 재봉인돼 초안을 가리키지 못한다.
+    ⚠️ 의존: 이 로그를 지우거나 줄이면(액션 이름 · context.version_id 포함) 멘션 채움이 틀어진다 — story #4256. activity_logs는 서비스 계약상
+    update/delete가 없다(activity_log.py).
     조회 실패가 멘션 발행을 죽이지 않게 savepoint(begin_nested) 안에서 돌리고, 실패하면 빈 목록(→ 자리 표시)으로 떨어진다(예외만 삼키면
-    같은 세션의 트랜잭션이 aborted로 남는 부류). work item을 모르면 빈 목록. 조직 조건으로 다른 조직 초안은 섞이지 않는다."""
+    같은 세션의 트랜잭션이 aborted로 남는 부류). work item을 모르면 빈 목록. 조직 조건으로 다른 조직 초안 · 로그는 섞이지 않는다."""
     from sqlalchemy import exists
 
-    from app.models.channel_publication import ChannelPublication
-    from app.models.site_post import SitePost
+    from app.models.activity_log import ActivityLog
     from app.models.site_post_draft import SitePostDraft
     from app.models.site_post_version import SitePostVersion
 
@@ -1946,15 +1950,10 @@ async def _open_site_draft_ids_for_work_item(
     except (ValueError, TypeError, AttributeError):
         return []
     try:
-        hosted_published = exists().where(
-            SitePost.org_id == SitePostDraft.org_id,
-            SitePost.source_story_id == SitePostDraft.work_item_id,
-            SitePost.slug == SitePostDraft.slug,
-        )
-        external_published = exists().where(
-            ChannelPublication.org_id == SitePostDraft.org_id,
-            ChannelPublication.status == "published",
-            ChannelPublication.version_id == SitePostVersion.id,
+        published = exists().where(
+            ActivityLog.org_id == SitePostDraft.org_id,
+            ActivityLog.action == "site_post_published",
+            ActivityLog.context["version_id"].astext == cast(SitePostVersion.id, String),
             SitePostVersion.draft_id == SitePostDraft.id,
         )
         async with db.begin_nested():
@@ -1963,8 +1962,7 @@ async def _open_site_draft_ids_for_work_item(
                     SitePostDraft.org_id == org_id,
                     SitePostDraft.work_item_id == work_item_id,
                     SitePostDraft.deleted_at.is_(None),
-                    ~hosted_published,
-                    ~external_published,
+                    ~published,
                 ).order_by(SitePostDraft.created_at, SitePostDraft.id)
             )).scalars().all()
     except Exception:  # 멘션은 자리 표시로라도 나가야 한다
