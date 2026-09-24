@@ -217,7 +217,12 @@ describe('nowStripItemHref — 다른 프로젝트 항목은 그 항목의 p(#42
     expect(href).toBe('/board?story=story-2&p=OTHER');
     expect(href).not.toContain('CURRENT');
   });
-  it('agent_stuck(스토리 · BE가 프로젝트를 안 실음) → 주소 그대로(지어내지 않음) · 결재 대상이면 결재함은 현재 p', () => {
+  it('agent_stuck(스토리) — 옛 응답이라 project_id가 없으면 주소 그대로(지어내지 않음)', () => {
     expect(nowStripItemHref(AGENT_STUCK, current)).toBe('/board?story=s-1');
+  });
+  it('⭐agent_stuck(스토리) — BE가 싣는 project_id(#4259)면 그 항목의 p · 현재 p 아님', () => {
+    const href = nowStripItemHref({ ...AGENT_STUCK, project_id: 'OTHER' } as typeof AGENT_STUCK, current);
+    expect(href).toBe('/board?story=s-1&p=OTHER');
+    expect(href).not.toContain('CURRENT');
   });
 });

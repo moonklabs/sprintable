@@ -44,6 +44,8 @@ export type AttentionItem =
       entity_id: string;
       gate_type: string | null;
       stuck_since: string | null;
+      /** story #4259 — step run의 프로젝트(BE command_center.py). 옛 응답이면 없음 → 링크는 주소 그대로. */
+      project_id?: string | null;
     }
   | {
       type: 'agent_auth_failure';
