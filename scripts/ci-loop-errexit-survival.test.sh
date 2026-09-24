@@ -180,6 +180,37 @@ else
 fi
 
 echo
+echo "── 실패 기록을 못 쓰면 루프가 exit 1(story #4283 — 호출부가 «실패 없음»으로 읽지 않게) ──"
+# FAILED_OUT_FILE 자리에 디렉터리를 둬 append를 실패시킨다(root로 돌아도 실패 — chmod와 달리).
+UNWRITABLE_FAILED_OUT="$WORK/unwritable-failed"
+mkdir -p "$UNWRITABLE_FAILED_OUT"
+UNWRITABLE_ELAPSED_OUT="$WORK/unwritable-elapsed.tsv"
+: > "$UNWRITABLE_ELAPSED_OUT"
+set +e
+UNWRITABLE_OUT="$(PATH="$FAKE_BIN:$PATH" \
+  WRAPPER_SCRIPT="$WRAPPER_SCRIPT" \
+  STALL_TIMEOUT_MIN=8 \
+  FILES_LIST_FILE="$FILES_LIST" \
+  ELAPSED_OUT_FILE="$UNWRITABLE_ELAPSED_OUT" \
+  FAILED_OUT_FILE="$UNWRITABLE_FAILED_OUT" \
+  "$LOOP_SCRIPT" "$WORK/fake-pytest.sh" 2>&1)"
+UNWRITABLE_CODE=$?
+set -e
+
+if [ "$UNWRITABLE_CODE" -eq 1 ] && [[ "$UNWRITABLE_OUT" == *"실패 기록(FAILED_OUT_FILE)을 못 씀"* ]]; then
+  echo "  ok   fail.py 실패를 못 적으면 exit 1 + ::error::(파일 내용만 보는 호출부가 초록으로 읽지 않음)"
+else
+  echo "  FAIL 실패 기록 불가인데 exit code=${UNWRITABLE_CODE}(기대 1) — 출력: $UNWRITABLE_OUT"
+  FAIL=1
+fi
+if [ "$(wc -l < "$UNWRITABLE_ELAPSED_OUT" | tr -d ' ')" -eq 2 ]; then
+  echo "  ok   기록 실패 뒤에도 두 파일 다 실행(#2293 — 나머지는 계속 잰다)"
+else
+  echo "  FAIL 기록 실패 뒤 루프가 멈춤"
+  FAIL=1
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0

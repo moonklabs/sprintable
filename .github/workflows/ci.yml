@@ -1336,7 +1336,21 @@ jobs:
           set -uo pipefail
           # set -e를 여기선 안 쓴다 — 첫 실패 파일이 스크립트를 즉시 죽이면 이 샤드의 나머지
           # 파일은 조용히 미실행된 것과 동일한 결과가 된다(#2293이 막으려는 바로 그 실패 유형).
-          mapfile -t files < /tmp/shard_files.txt
+          # story #4283(까디르 P1) — `shell:`을 안 적은 스텝은 GitHub 기본 `bash -e {0}`로 돌아 위 줄만으로는 -e가
+          # 안 꺼져 있었다(주석의 설계와 실제 셸이 달랐다). 명시로 끈다. 대신 -e에 기대던 네 자리(파일 목록 읽기 ·
+          # 격리 루프의 인프라 실패 · narrowing 계산 · 산출물 변환)는 아래에서 각자 종료 코드를 받아 명시로 RED.
+          set +e
+          # story #4283(까디르 P2) — -e가 꺼졌으니 임시 파일 생성 실패도 조용히 지나간다(예: `rerun_failed`가 안 생기면
+          # `[ -s ]`가 «재실행 실패 없음»으로 읽혀 테스트 실패를 초록으로 가린다). 만들 때마다 확인하고 실패면 RED.
+          must_mktemp() {
+            local f
+            f=$(mktemp) && [ -n "$f" ] && [ -f "$f" ] || { echo "::error::임시 파일 생성 실패(story #4283 — 판정 불가라 RED)" >&2; return 1; }
+            printf '%s' "$f"
+          }
+          if ! mapfile -t files < /tmp/shard_files.txt; then
+            echo "::error::샤드 파일 목록(/tmp/shard_files.txt)을 못 읽음(story #4283)"
+            exit 1
+          fi
           echo "destructive files (shard ${{ matrix.shard }}): ${#files[@]}"
 
           # story #3392(AC1) — "Determine this shard's file list" 스텝이 써 둔 unweighted
@@ -1365,7 +1379,7 @@ jobs:
           # 즉시 판정이 원리적으로 불가능) 루프 안에서는 elapsed만 기록해 두고 루프가
           # 끝난 뒤 한 번에 판정한다. exit 1은 여전히 여기서만 나므로 #2293/#3392의
           # "실측 가능한 만큼은 계속 잰다" 철학은 무변화.
-          elapsed_file=$(mktemp)
+          elapsed_file=$(must_mktemp) || exit 1
           # story #3944(2026-09-16, 페드루 PO 판정) — 30분 job timeout은 "멈춤"을 잡으려던
           # 것인데 실제로 재는 건 "오래 걸림"이라, 형제 7개 샤드가 13분대로 정상 완주하는
           # 동안 그 인스턴스 1개만(호스트 과점유 추정) 진행 中인 채 죽는 사고가 반복됐다
@@ -1383,9 +1397,9 @@ jobs:
           # 넘는 날이 오면 STALL_TIMEOUT_MIN을 8이 아니라 그 실측값×2로 다시 잡는다(같은
           # 8을 무한정 우려먹지 않는다).
           STALL_TIMEOUT_MIN=8
-          failed_out=$(mktemp)
-          overage_out=$(mktemp)
-          unweighted_file=$(mktemp)
+          failed_out=$(must_mktemp) || exit 1
+          overage_out=$(must_mktemp) || exit 1
+          unweighted_file=$(must_mktemp) || exit 1
           printf '%s\n' "${unweighted_files[@]+"${unweighted_files[@]}"}" > "$unweighted_file"
           # story #3944(카디르 뮤테이션 테스트 지적, PR#4348 3라운드) — 파일별 루프 본체
           # (DB 재생성+정지감지 래퍼 호출+exit 분류+overage 판정)를 scripts/
@@ -1393,6 +1407,7 @@ jobs:
           # 이 루프를 손으로 베껴 검증해 "ci.yml만 옛 구조로 되돌려도 그 사본 테스트는
           # 여전히 ALL PASS"인 못 틀리는 대조였다 — 이제 ci.yml과 테스트 둘 다 이 파일
           # 하나를 그대로 부른다(뮤테이션하면 테스트가 실측으로 빨개진다).
+          loop_exit=0
           WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
           STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
           FILES_LIST_FILE=/tmp/shard_files.txt \
@@ -1405,10 +1420,19 @@ jobs:
           ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
           PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
           DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-          "${{ github.workspace }}/scripts/run-destructive-shard-loop.sh" uv run pytest -q
+          "${{ github.workspace }}/scripts/run-destructive-shard-loop.sh" uv run pytest -q || loop_exit=$?
+          # story #3944 — 이 스크립트가 non-zero로 끝나는 건 파일 실패가 아니라 인프라 실패(dropdb/createdb 등)다.
+          # 예전엔 기본 셸의 -e가 여기서 스텝을 죽였다 — 같은 결과를 명시로.
+          if [ "$loop_exit" -ne 0 ]; then
+            echo "::error::격리 루프 인프라 실패(story #3944 · exit $loop_exit) — 위 ::error:: 참고"
+            exit 1
+          fi
 
-          mapfile -t failed_files < "$failed_out"
-          mapfile -t overage_files < "$overage_out"
+          if ! mapfile -t failed_files < "$failed_out" || ! mapfile -t overage_files < "$overage_out"; then
+            # 못 읽고 넘어가면 «실패 0건»으로 읽힌다 — 예전엔 -e가 막던 자리.
+            echo "::error::격리 루프 결과 파일을 못 읽음(story #4283)"
+            exit 1
+          fi
           rm -f "$failed_out" "$overage_out" "$unweighted_file"
           if [ "${#failed_files[@]}" -gt 0 ]; then
             echo "FAILED files: ${failed_files[*]}"
@@ -1445,21 +1469,66 @@ jobs:
             printf '%s\n' ${CHANGED_TEST_FILES} > /tmp/changed_test_files.txt
             changed_files_arg=(--changed-files /tmp/changed_test_files.txt)
           elif [ -n "${CHANGED_APP_FILES}" ]; then
-            uv run python scripts/shard_destructive_tests.py \
-              --resolve-app-module-dependents "${CHANGED_APP_FILES}" > /tmp/narrowed_test_files.txt
+            if ! uv run python scripts/shard_destructive_tests.py \
+              --resolve-app-module-dependents "${CHANGED_APP_FILES}" > /tmp/narrowed_test_files.txt; then
+              # 실패한 채 넘어가면 후보 목록이 비어 모든 초과가 WARN이 된다(fail-open) — 예전엔 -e가 막던 자리.
+              echo "::error::narrowing 계산 실패(story #4163 · #4283)"
+              exit 1
+            fi
             printf '%s\n' ${MIXED_TEST_FILES} >> /tmp/narrowed_test_files.txt
             echo "story #4163 narrowed(app 모듈 변경을 참조하는 테스트 + 같이 바뀐 테스트만 RED 후보):"
             cat /tmp/narrowed_test_files.txt
             changed_files_arg=(--changed-files /tmp/narrowed_test_files.txt)
           fi
-          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}"
-          slow_exit=$?
+          # story #4283 — 벽시계 한 표본으로 판정하지 않는다. 7일 실측: 파일 하나가 대조군은 정상인데 혼자 중앙값의
+          # 3.4~3.8배로 튀는 일이 판정 1회당 ~0.2%, narrowing 후보 65~154개 → PR당 14~26% 거짓 RED(테스트 전부 통과).
+          # 1차 초과 후보가 5개 이하면(exit 3) 그 파일만 같은 루프(격리 DB)로 한 번 더 돌려 두 번 다 넘을 때만 RED —
+          # PR이 테스트를 실제로 느리게 만들었으면 재실행에서도 넘는다(결정적). 재실행에서 내려온 파일은 두 값을
+          # ::warning::으로 남긴다. 5개 초과(광범위 둔화)는 예전처럼 바로 RED.
+          suspects_file=$(must_mktemp) || exit 1
+          slow_exit=0
+          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}" \
+            --suspects-out "$suspects_file" --expected-files /tmp/shard_files.txt || slow_exit=$?
+          if [ "$slow_exit" -eq 3 ]; then
+            echo "러너 정규화 가드 1차 초과 $(wc -l < "$suspects_file")개 — 재실행으로 확인(story #4283):"
+            cat "$suspects_file"
+            rerun_elapsed=$(must_mktemp) || exit 1
+            rerun_failed=$(must_mktemp) || exit 1
+            rerun_loop_exit=0
+            WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
+            STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
+            FILES_LIST_FILE="$suspects_file" \
+            ELAPSED_OUT_FILE="$rerun_elapsed" \
+            FAILED_OUT_FILE="$rerun_failed" \
+            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            "${{ github.workspace }}/scripts/run-destructive-shard-loop.sh" uv run pytest -q || rerun_loop_exit=$?
+            if [ "$rerun_loop_exit" -ne 0 ]; then
+              echo "::error::러너 정규화 가드 재실행 루프 인프라 실패(story #4283 · exit $rerun_loop_exit)"
+              slow_exit=1
+            elif [ -s "$rerun_failed" ]; then
+              echo "::error::러너 정규화 가드 재실행에서 테스트 실패(story #4283): $(tr '\n' ' ' < "$rerun_failed")"
+              slow_exit=1
+            else
+              slow_exit=0
+              uv run python scripts/shard_destructive_tests.py \
+                --confirm-elapsed "$elapsed_file" "$rerun_elapsed" "$suspects_file" "${changed_files_arg[@]}" \
+                || slow_exit=$?
+            fi
+            rm -f "$rerun_elapsed" "$rerun_failed"
+          fi
+          rm -f "$suspects_file"
           # story #3558(CI·소형) AC1 — 삭제(rm -f) 前에 등재값 대조용 산출물로 변환해
           # 둔다(DB 준비를 제외한 순수 pytest wall time, `_t0`가 dropdb/createdb 뒤에서
           # 시작하므로 이미 그 값 — 새 타이머 불요, 기존 elapsed_file을 그대로 재사용).
           # 이 변환은 위 60초 가드 판정과 무관하게 항상 시도한다(느린 러너여도 산출물은
           # 남겨야 다음 잡의 대조가 그 run을 볼 수 있다).
-          uv run python scripts/shard_destructive_tests.py --elapsed-to-json "$elapsed_file" /tmp/shard-durations-${{ matrix.shard }}.json --shard ${{ matrix.shard }}
+          if ! uv run python scripts/shard_destructive_tests.py --elapsed-to-json "$elapsed_file" /tmp/shard-durations-${{ matrix.shard }}.json --shard ${{ matrix.shard }}; then
+            # 예전엔 -e가 여기서 스텝을 죽였다 — 산출물이 조용히 빠지지 않게 같은 결과를 명시로.
+            echo "::error::샤드 경과 산출물 변환 실패(story #3558 · #4283)"
+            exit 1
+          fi
           rm -f "$elapsed_file"
           if [ "$slow_exit" -ne 0 ]; then
             echo "러너 정규화 60초 가드 초과(story #3396, 위 ::error:: 참고)"

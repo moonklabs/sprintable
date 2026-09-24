@@ -43,6 +43,10 @@ fi
 : "${FAILED_OUT_FILE:?FAILED_OUT_FILE 필요}"
 
 PYTEST_PREFIX=("$@")
+# story #4283(까디르) — 실패 기록을 못 쓰면(러너 디스크 가득 등) 호출부의 `[ -s FAILED_OUT_FILE ]`이 «실패 없음»으로 읽어
+# 테스트 실패를 초록으로 가린다. 기록 실패는 끝까지 돈 뒤(#2293 — 나머지 파일은 계속 잰다) 이 스크립트의 종료 코드로
+# 알린다 — 호출부는 파일 내용과 종료 코드를 둘 다 본다.
+record_failed=0
 
 mapfile -t files < "$FILES_LIST_FILE"
 : > "$FAILED_OUT_FILE"
@@ -85,9 +89,9 @@ for f in "${files[@]}"; do
   fi
   if [ "$_pytest_exit" -eq 124 ]; then
     echo "::error::STALL(story #3944) — $f 가 ${STALL_TIMEOUT_MIN}분 안에 안 끝나 강제 종료됨. 「오래 걸림」이 아니라 「멈춤」으로 판정 — 즉시 실패."
-    echo "$f (STALL: exceeded ${STALL_TIMEOUT_MIN}m)" >> "$FAILED_OUT_FILE"
+    echo "$f (STALL: exceeded ${STALL_TIMEOUT_MIN}m)" >> "$FAILED_OUT_FILE" || record_failed=1
   elif [ "$_pytest_exit" -ne 0 ]; then
-    echo "$f" >> "$FAILED_OUT_FILE"
+    echo "$f" >> "$FAILED_OUT_FILE" || record_failed=1
   fi
   _elapsed=$(( $(date +%s) - _t0 ))
   echo "elapsed: ${_elapsed}s"
@@ -103,3 +107,8 @@ for f in "${files[@]}"; do
   fi
   echo "::endgroup::"
 done
+
+if [ "$record_failed" -ne 0 ]; then
+  echo "::error::격리 루프가 실패 기록(FAILED_OUT_FILE)을 못 씀(story #4283) — 실패한 파일이 있는데 기록이 없다, 판정 불가라 RED"
+  exit 1
+fi
