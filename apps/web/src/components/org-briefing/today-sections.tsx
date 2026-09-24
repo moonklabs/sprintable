@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useFlatHref } from '@/hooks/use-flat-href';
 import { FileText, HelpCircle, PenLine } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
@@ -36,11 +35,11 @@ const AGENT_STATUS_KEY: Record<string, string> = {
 };
 
 function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
-  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  // story #4231 · #4241 — flat 링크 `?p=` · 게이트 상세는 결재 자신의 프로젝트(hrefForNeedsMeItem이 실음 · 보존) · 결재함 큐는 현재 프로젝트
+  const flatHref = useFlatHref();
   const t = useTranslations('orgBriefing');
   const meta = STATE_META[item.state];
   const Icon = meta.icon;
-  const flatHref = useFlatHref(); // story #4231 · #4241 — 게이트 상세는 결재 자신의 프로젝트(hrefForNeedsMeItem이 실음 · 보존) · 결재함 큐는 현재 프로젝트
   const href = flatHref(hrefForNeedsMeItem(item));
   return (
     <div className="flex items-start gap-3 border-t border-border px-3 py-3 first:border-t-0">
