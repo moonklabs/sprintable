@@ -158,8 +158,10 @@ def test_capability_field_has_exactly_five_consumers_in_codebase():
     # story #4254(RED 확인 뒤 의도적 갱신) — 승인 알림 «다음 행동» 판정(다음 stage capability.target 읽기)을
     # `_render_gate_verdict_message`에서 공용 `gate_verdict_next_action_kind`로 옮겼다(전수 표 테스트가 같은 함수를 읽는다).
     # 소비처가 는 게 아니라 자리를 옮긴 것이다.
+    # story #4255(RED 확인 뒤 의도적 갱신) — 멘션 렌더러가 마지막 stage의 capability.target(채널 연결 게시)을 읽어 «발행됐어요 ·
+    # 공개 주소» 결과 줄을 싣는다(마지막 서버 stage의 결과 통지).
     assert _capability_consumers(events_module) == [
-        "_resolve_crew_scoped_recipe_binding", "_stage_capability_kind",
+        "_render_event_message_content", "_resolve_crew_scoped_recipe_binding", "_stage_capability_kind",
         "_stage_target", "apply_recipe_role_bindings", "apply_recipe_role_bindings", "gate_verdict_next_action_kind",
     ]
     # event_definition_registry.py: validate_stage_metadata 안의 `meta["capability"]`류 —
