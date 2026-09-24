@@ -16,7 +16,6 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { useRecipeMemberOptions } from '@/hooks/use-recipe-member-options';
 import { presetName } from '@/lib/platform-preset-copy';
-import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #4048(E-RECIPE-1 ①) — 레시피 적용 다이얼로그. story #4173(E-RECIPE-2)부터 자리는
 // 정의(stage_metadata·role_actor_kinds·payload_schema 흐름)로 구동한다 — 영상 레시피 4슬롯
@@ -74,7 +73,6 @@ export function MarketingRecipeApplyDialog({
   const tChannel = useTranslations('channelConnect');
   const channelLabel = useChannelLabel();
   const locale = useLocale();
-  const flatHref = useFlatHref();
   // story #4239(유나 확정) — «이 레시피는 {channels} 연결이 필요해요»의 {channels}: 테스트 채널(sandbox · *_sandbox)은 뺀다
   // (테스트 연결이 있으면 선택지가 안 비어 이 안내가 뜨지 않으니 빼도 거짓이 아님) · 표시 이름 · 같은 이름 한 번 · 정의 순서 ·
   // «또는»으로 묶는다(하나만 연결해도 된다 — « · »는 «모두 필요»로 읽힌다). 빼고 나서 비면 null(기존 «연결 없음» 문장으로).
