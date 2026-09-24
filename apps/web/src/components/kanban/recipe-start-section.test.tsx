@@ -225,10 +225,51 @@ describe('RecipeStartSection', () => {
     expect(container.querySelector('a[href^="/chats/conv-b"]')).not.toBeNull();
   });
 
+  // story #4261(4075 AC7 개정) — 다른 탭 · 새로고침 전 화면에서 누르면 BE가 409 RECIPE_ALREADY_STARTED. 에러가 아니라 상태 —
+  // 다시 읽어 진행 상태로(알림 없음 · 메시지는 새로 안 생김).
+  it('⭐이미 시작된 회차에 시작을 누르면(409 RECIPE_ALREADY_STARTED) 에러 없이 진행 상태로 돌아간다', async () => {
+    let callCount = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/events/definitions/start-candidates')) {
+        callCount += 1;
+        const started = callCount > 1; // 첫 화면은 아직 모름(다른 탭이 방금 시작)
+        return new Response(JSON.stringify({
+          candidates: [candidateStub({
+            started, conversation_id: started ? 'conv-1' : null, message_id: started ? 'msg-1' : null,
+            current_stage: started ? 'draft' : null, current_role: started ? 'Creator' : null,
+            next_stage: started ? 'concept_confirmed' : null, next_role: started ? 'Director' : null,
+            last_published_at: started ? '2026-09-21T00:00:00Z' : null,
+            current_stage_position: started ? 1 : null, total_stages: started ? 9 : null,
+          })],
+        }));
+      }
+      if (url === '/api/events/publish' && init?.method === 'POST') {
+        // 실제 봉투(유나 측정 · 까디르 P2와 같은 부류): /api/events/publish는 proxyToFastapi → BE http_exception_handler가
+        // HTTPException(detail=dict)을 {data: null, error: {code, message, …}, meta: null}로 싼다 — {detail} 모양이 아니다.
+        return new Response(JSON.stringify({ data: null, error: {
+          code: 'RECIPE_ALREADY_STARTED', reason: 'already_started', message: '이 스토리에서 이 레시피는 이미 시작됐어요.', conversation_id: 'conv-1', message_id: 'msg-1',
+          current_stage: 'draft', is_last_stage: false,
+        }, meta: null }), { status: 409 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(withIntl(<RecipeStartSection storyId="story-1" projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const button = container.querySelector('button');
+    await act(async () => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('초안');
+    expect(container.querySelector(`a[href="/chats/conv-1?messageId=msg-1"]`)).not.toBeNull();
+  });
+
   it('발행 실패 시 사용자 문장을 보여준다(AC3, 조용한 삼킴 없음)', async () => {
     await render(
       [candidateStub()],
-      { onPublish: async () => new Response(JSON.stringify({ detail: 'boom' }), { status: 500 }) },
+      // 실제 봉투(BE 에러 핸들러) — {data: null, error: {code, message}, meta: null}.
+      { onPublish: async () => new Response(JSON.stringify({ data: null, error: { code: 'INTERNAL_ERROR', message: 'boom' }, meta: null }), { status: 500 }) },
     );
     const button = container.querySelector('button')!;
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });

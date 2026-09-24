@@ -115,12 +115,18 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         // event-block-card.tsx::EventPublishActionButton과 동일 관례 — BE가 완성 문장을
         // 주면(allowlist/contract) 그대로, 아니면 generic 폴백.
         const body = await res.json().catch(() => null);
+        // story #4261(4075 AC7 개정) — 이미 시작된 회차(두 클릭 · 두 탭 · 새로고침 재클릭 포함)는 BE가 409 RECIPE_ALREADY_STARTED로
+        // 알린다. 에러가 아니라 **상태**다 — 다시 읽어 «진행 중/완료» 표시로 돌아간다(메시지는 새로 안 생겼다).
+        if (res.status === 409 && isRecipeAlreadyStarted(body)) {
+          refresh();
+          return;
+        }
         const msg = extractBackendErrorMessage(body, t) ?? t('recipeStartErrorGeneric');
         throw new Error(msg);
       }
-      // AC2 — 성공 시 «시작됨»이 화면에 남아야 한다. dedup 응답(deduplicated:true)도 200으로
-      // 오므로 여기선 성공 분기 하나로 충분 — refresh가 started:true를 다시 읽어온다(AC6,
-      // 새로고침·다른 탭과 동일 판정 경로).
+      // AC2 — 성공(201) 시 «시작됨»이 화면에 남아야 한다 — refresh가 started:true를 다시 읽어온다(AC6, 새로고침·다른 탭과 동일
+      // 판정 경로). 이미 시작된 회차(두 클릭 · 두 탭 · 새로고침 재클릭)는 story #4261부터 200 dedup이 아니라 위의 409
+      // RECIPE_ALREADY_STARTED 분기가 상태로 받아 같은 refresh로 돌아간다.
       refresh();
     } catch (e) {
       setPublishError(e instanceof Error ? e.message : t('recipeStartErrorGeneric'));
@@ -206,4 +212,12 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       )}
     </>,
   );
+}
+
+
+/** story #4261 — BE 409 본문의 RECIPE_ALREADY_STARTED. 실제 봉투는 한 모양: /api/events/publish(proxyToFastapi) → BE http_exception_handler가
+ * HTTPException(detail=dict)을 `{data: null, error: {code, message, …}, meta: null}`로 싼다(유나 측정). */
+function isRecipeAlreadyStarted(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  return (body as { error?: { code?: unknown } }).error?.code === 'RECIPE_ALREADY_STARTED';
 }

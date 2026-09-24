@@ -5,7 +5,10 @@ AC6 — «시작됨» 근거는 발행된 draft 이벤트 자체(`_find_existing
 다른 탭·다른 사람 화면에서도 같게 보인다.
 AC7 — 서버가 같은 work_item+definition의 draft 재발행을 거부(설계 정정 2026-09-21, 페드루 PO
 채널 재확定 — 409 거부가 아니라 200 + `deduplicated: true` + 기존 conversation_id/message_id
-반환). 두 탭 동시 클릭에도 메시지 2건이 생기면 안 된다 — check-then-insert는 그 자체로 TOCTOU라
+반환). ⛔story #4261(PO 2026-09-24 09:08Z 개정): 200 dedup은 두 번째 회차 시작을 조용히 흡수해 그 뒤 단계가 1회차 게이트에 걸려
+멈추는 결함을 낳았다 — 신호만 409 `RECIPE_ALREADY_STARTED` + 사유(completed / in_progress) + 기존 conversation_id/message_id로
+바꾼다(메시지 2건 0 · 사람 화면엔 상태라는 09-21 목적은 그대로). 사유는 판정(completed/in_progress) 없이 사실 하나(already_started ·
+current_stage · is_last_stage) — 마지막 stage가 발행만 되고 사람 작업 · 게이트 대기 중일 수 있어서(까디르 codex 01a0d395 P1). 두 탭 동시 클릭에도 메시지 2건이 생기면 안 된다 — check-then-insert는 그 자체로 TOCTOU라
 ([[feedback_check_then_insert_toctou]] 동형) `pg_advisory_xact_lock`으로 직렬화
 (`app/repositories/story.py::allocate_story_number`와 동형 패턴).
 
@@ -186,13 +189,21 @@ async def test_ac7_duplicate_draft_publish_returns_existing_not_new_message():
             )
             assert first.get("deduplicated") is not True
 
-            second = await _publish_stage(
-                s, org_id=org_id, definition_key=definition.key, story_id=story_id,
-                stage="draft", requester_id=owner_id,
-            )
-            assert second["deduplicated"] is True
-            assert second["conversation_id"] == first["conversation_id"]
-            assert second["message_id"] == first["message_id"]
+            from fastapi import HTTPException
+            with pytest.raises(HTTPException) as exc:
+                await _publish_stage(
+                    s, org_id=org_id, definition_key=definition.key, story_id=story_id,
+                    stage="draft", requester_id=owner_id,
+                )
+            assert exc.value.status_code == 409
+            detail = exc.value.detail
+            assert detail["code"] == "RECIPE_ALREADY_STARTED"
+            assert detail["reason"] == "already_started"  # 판정 없이 사실 하나(까디르 codex 01a0d395 P1)
+            assert detail["current_stage"] == "draft"
+            assert detail["is_last_stage"] is False
+            assert "draft" in detail["message"]  # 사람 말 사실 문장(카탈로그) — 지금 단계를 싣는다
+            assert detail["conversation_id"] == first["conversation_id"]
+            assert detail["message_id"] == first["message_id"]
 
             from sqlalchemy import func, select
             from app.models.conversation import Conversation, ConversationMessage
@@ -212,10 +223,19 @@ async def test_ac7_duplicate_draft_publish_returns_existing_not_new_message():
 
 @_REAL_DB_SKIP
 @pytest.mark.anyio
-async def test_ac7_concurrent_double_click_still_creates_only_one_message():
-    """두 탭 동시 클릭 — pg_advisory_xact_lock 없이는 두 트랜잭션 모두 '없음'을 보고 둘 다
-    발행해버린다(체크-후-삽입 TOCTOU). 서로 다른 세션(별 커넥션) 2개로 진짜 동시성을 낸다 —
-    같은 세션 재사용은 커넥션당 순차 실행이 강제돼 경합을 재현하지 못한다."""
+async def test_ac7_concurrent_double_click_http_201_and_409_one_message(monkeypatch):
+    """두 탭 동시 클릭 — **독립 HTTP 요청 두 개**(별 세션 · 별 커넥션)로 진짜 경합을 낸다(까디르 codex 01a0d395 P2: 코어를 직접 불러 dict면
+    «201»로 이름 붙이던 예전 테스트는 락 없는 구현도 통과했다).
+    결정적 동기화: 두 요청이 «이미 발행됐나» 조회 지점에서 서로를 기다린다(최대 1초). 락이 있으면 두 번째는 락에 막혀 그 지점에 못 와
+    첫 요청이 1초 뒤 혼자 진행 → 커밋 → 두 번째가 락을 얻어 409. 락이 없으면 둘이 함께 조회 지점에 도착해 둘 다 «없음»을 보고 둘 다 201
+    (뮤테이션 RED)."""
+    import app.routers.events as events_mod
+    from app.main import app
+    from sqlalchemy import func, select
+
+    from app.models.conversation import Conversation, ConversationMessage
+    from tests.test_4090_ac2_recipe_auto_publish_realdb import _client_for, _setup_org_scoped_app
+
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
@@ -223,18 +243,41 @@ async def test_ac7_concurrent_double_click_still_creates_only_one_message():
             definition = await _seed_cyclic_definition(s, org_id=org_id)
             story_id = await _seed_story(s, org_id, project_id)
 
-        async with Session() as s1, Session() as s2:
-            results = await asyncio.gather(
-                _publish_stage(s1, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id),
-                _publish_stage(s2, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id),
+        arrived = 0
+        both_here = asyncio.Event()
+        original = events_mod._find_existing_stage_publish
+
+        async def _rendezvous_then_find(*args, **kwargs):
+            nonlocal arrived
+            arrived += 1
+            if arrived >= 2:
+                both_here.set()
+            try:
+                await asyncio.wait_for(both_here.wait(), timeout=1.0)
+            except TimeoutError:
+                pass  # 락이 두 번째를 막고 있다 — 혼자 진행
+            return await original(*args, **kwargs)
+
+        monkeypatch.setattr(events_mod, "_find_existing_stage_publish", _rendezvous_then_find)
+        from app.models.project import OrgMember
+        async with Session() as s:
+            owner_user_id = (await s.execute(select(OrgMember.user_id).where(OrgMember.id == owner_id))).scalar_one()
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_user_id)  # HTTP 인증은 사용자 id(멤버 id가 아니라)
+        body = {"definition_key": definition.key, "payload": {"stage": "draft", "work_item_type": "story", "work_item_id": str(story_id)}}
+        async with _client_for(app) as c1, _client_for(app) as c2:
+            r1, r2 = await asyncio.gather(
+                c1.post("/api/v2/events/publish", json=body),
+                c2.post("/api/v2/events/publish", json=body),
             )
-        deduplicated_flags = sorted(bool(r.get("deduplicated")) for r in results)
-        assert deduplicated_flags == [False, True], f"둘 다 새로 발행되거나 둘 다 dedup됨(경합 미방어): {results}"
+        responses = sorted([r1, r2], key=lambda r: r.status_code)
+        assert [r.status_code for r in responses] == [201, 409], [(r.status_code, r.text[:300]) for r in responses]
+        # 실제 봉투(BE http_exception_handler): {data: null, error: {code, message, ...}, meta: null}
+        err = responses[1].json()["error"]
+        assert err["code"] == "RECIPE_ALREADY_STARTED"
+        assert err["message"]
+        first = responses[0].json()
 
         async with Session() as s:
-            from sqlalchemy import func, select
-            from app.models.conversation import Conversation, ConversationMessage
-
             count = (await s.execute(
                 select(func.count()).select_from(ConversationMessage)
                 .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
@@ -243,7 +286,45 @@ async def test_ac7_concurrent_double_click_still_creates_only_one_message():
                     ConversationMessage.msg_metadata["event"]["event_key"].astext == definition.key,
                 )
             )).scalar_one()
-            assert count == 1, "동시 두 탭 클릭이 메시지를 2건 만들었다(AC7 실패)"
+        assert count == 1, "동시 두 탭 클릭이 메시지를 2건 만들었다(AC7 실패)"
+        assert first["message_id"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+@pytest.mark.parametrize("published_until, is_last", [("draft", False), ("review", False), ("publish", True)])
+async def test_restart_reports_facts_not_verdict(published_until, is_last):
+    """story #4261(까디르 codex 01a0d395 P1 · PO 13:38Z) — 첫 단계만 · 중간 단계 · 마지막 단계까지 발행된 뒤 다시 시작해도 사유는 같은
+    사실 하나(already_started) · 같은 문장 틀이고 current_stage · is_last_stage 값만 다르다. 마지막 stage가 발행돼도 «끝났다»고 말하지 않는다
+    (발행 뒤 사람 작업 · 게이트 대기 중일 수 있다)."""
+    from fastapi import HTTPException
+
+    from app.services.i18n_catalog import t
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_id = await _seed_org_project_owner(s)
+            definition = await _seed_cyclic_definition(s, org_id=org_id, key=f"org.e4261.facts_{published_until}")
+            story_id = await _seed_story(s, org_id, project_id)
+            for stage in ("draft", "review", "publish"):
+                await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage=stage, requester_id=owner_id)
+                if stage == published_until:
+                    break
+            with pytest.raises(HTTPException) as exc:
+                await _publish_stage(s, org_id=org_id, definition_key=definition.key, story_id=story_id, stage="draft", requester_id=owner_id)
+        detail = exc.value.detail
+        assert exc.value.status_code == 409
+        assert detail["code"] == "RECIPE_ALREADY_STARTED"
+        assert detail["reason"] == "already_started"
+        assert detail["current_stage"] == published_until
+        assert detail["is_last_stage"] is is_last
+        # 유나 확정 문안 · {stage} = 4251 거절 문장과 같은 모양(`stage(역할)` · _stage_label).
+        assert detail["message"] == t("events.recipe_already_started", "ko", stage=f"{published_until}({_STAGE_METADATA[published_until]['role']})")
+        assert "끝났" not in detail["message"]
     finally:
         await engine.dispose()
 
