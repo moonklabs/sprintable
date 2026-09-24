@@ -185,15 +185,14 @@ describe('RecipeRoleMappingFields — 행 이름 · 승인 자리 안내(story #
     await act(async () => {
       root.render(withIntl(
         <RecipeRoleMappingFields
-          stages={['goal_hypothesis', 'brief_doc_approval', 'custom_stage', 'my_step_2']}
+          stages={['goal_hypothesis', 'brief_doc_approval', 'generate_variants']}
           stageMetadata={{
             goal_hypothesis: { role: 'Human' },
             brief_doc_approval: { role: 'PO', approval: { surface: 'doc_approval' } },
-            custom_stage: { role: '검토 담당자' },
-            my_step_2: {},
+            generate_variants: { role: 'Agent' },
           }}
           members={[{ id: 'a-1', name: '에이전트A', type: 'agent' }]}
-          roleActorKinds={{ Human: 'agent', PO: 'agent', Worker: 'agent' }}
+          roleActorKinds={{ Human: 'agent', PO: 'agent', Agent: 'agent' }}
           channelConnections={[]}
           generationConnectors={[]}
           roleMapping={{}}
@@ -210,11 +209,38 @@ describe('RecipeRoleMappingFields — 행 이름 · 승인 자리 안내(story #
     const label = (stage: string) => container.querySelector(`[data-testid="mapping-row-label-${stage}"]`)?.textContent;
     expect(label('goal_hypothesis')).toBe(koMessages.organization.recipeStageLabelGoalHypothesis);
     expect(label('brief_doc_approval')).toBe(koMessages.organization.recipeStageLabelBriefDocApproval);
-    // 까디르 QA — 라벨 표에 없는 조직 정의 stage는 role(있으면), 없으면 slug.
-    expect(label('custom_stage')).toBe('검토 담당자');
-    expect(label('my_step_2')).toBe('my_step_2');
+    expect(label('generate_variants')).toBe(koMessages.organization.recipeStageLabelGenerateVariants);
     expect(container.textContent).not.toContain('Human');
-    expect(container.querySelectorAll('select')).toHaveLength(4); // 에이전트 역할이라 브리프도 선택기
+    expect(container.querySelectorAll('select')).toHaveLength(3); // 에이전트 역할이라 브리프도 선택기
     expect([...container.querySelectorAll('[data-testid="mapping-approval-note"]')].map((n) => n.textContent)).toEqual(['note:doc_approval']);
+  });
+});
+
+// 유나 design(4606) — 한 창의 행 이름 축은 하나. 조직 정의의 일부 slug가 플랫폼 라벨과 겹쳐도 그 행만 단계 라벨이 되지 않는다.
+describe('RecipeRoleMappingFields — 행 이름 축은 창 단위(story #4243 · 유나 design)', () => {
+  it('섞인 조직 정의(일부 slug만 라벨 표에 있음) → 전부 role(없으면 slug)', async () => {
+    await act(async () => {
+      root.render(withIntl(
+        <RecipeRoleMappingFields
+          stages={['collect_material', 'draft', 'my_review', 'my_step_2']}
+          stageMetadata={{ collect_material: { role: 'Agent' }, draft: { role: 'Writer' }, my_review: { role: '검토 담당자' }, my_step_2: {} }}
+          members={[{ id: 'a-1', name: '에이전트A', type: 'agent' }]}
+          roleActorKinds={null}
+          channelConnections={[]}
+          generationConnectors={[]}
+          roleMapping={{}}
+          onChange={() => {}}
+          agentPlaceholder="에이전트 선택…"
+          personPlaceholder="사람 선택…"
+          memberPlaceholder="담당자 선택…"
+          approvalNote={(surface) => `note:${surface}`}
+          channelPlaceholder="채널 선택…"
+          generationConnectorPlaceholder="연산 커넥터 선택…"
+        />,
+      ));
+    });
+    const labels = ['collect_material', 'draft', 'my_review', 'my_step_2'].map((st) => container.querySelector(`[data-testid="mapping-row-label-${st}"]`)?.textContent);
+    // `draft`는 플랫폼 라벨 표에 있지만(«초안») 이 창은 조직 정의라 role로 통일한다 · role이 없으면 slug(까디르 QA).
+    expect(labels).toEqual(['Agent', 'Writer', '검토 담당자', 'my_step_2']);
   });
 });

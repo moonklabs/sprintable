@@ -81,6 +81,10 @@ export function RecipeRoleMappingFields({
   // story #4101 — 같은 원칙, revoked 커넥터는 애초에 선택지에 안 나온다.
   const activeGenerationConnectors = generationConnectors.filter((c) => c.status === 'active');
 
+  // 유나 design(4606) — 행 이름 축은 창 단위로 한 번 정한다. 모든 stage가 라벨 표에 있으면(플랫폼 프리셋) 전부 단계 라벨, 하나라도
+  // 없으면(조직 정의) 전부 role → 없으면 slug. 행마다 정하면 조직 정의의 일부 slug가 플랫폼 라벨과 겹쳐 두 축이 섞인다.
+  const useStageLabels = stages.every((s) => RECIPE_STAGE_LABEL_SLUGS.includes(s));
+
   return (
     <>
       {stages.map((stage) => {
@@ -95,7 +99,7 @@ export function RecipeRoleMappingFields({
             {/* 유나 design(4606) — 행 이름은 단계 라벨(역할 원문 «Human»·«Any»는 번역도 안 되고 역할 kind와 어긋나 보인다).
                 까디르 QA — 라벨 표에 없는 조직 정의 stage(자유 slug)는 예전처럼 role(«Reviewer» 등), 그것도 없으면 slug. */}
             <span className="w-32 shrink-0 break-keep text-xs font-medium text-foreground" data-testid={`mapping-row-label-${stage}`}>
-              {RECIPE_STAGE_LABEL_SLUGS.includes(stage) ? recipeStageLabel(stage, t) : (meta?.role ?? stage)}
+              {useStageLabels ? recipeStageLabel(stage, t) : (meta?.role ?? stage)}
             </span>
             {approvalSurface ? (
               // story #4243 D3 — 승인이 이 stage 밖(결재함)이라 고를 담당이 없다. 선택기 없음 · 필수 아님 · role_mapping에 안 실림.
