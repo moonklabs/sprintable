@@ -162,6 +162,13 @@ describe('#4253 — 미리보기 «전체 보기» 폴백은 항목 자기 프�
     expect(hrefs).toContain('/goals/e-3?p=proj-C');
   });
 
+  // 까디르 codex(4612 델타) · PO 15:17Z — 이 목의 project_id는 이제 실제 계약이다(BE EvidenceResponse GET /{id}가 싣는다 · 같은 PR).
+  it('증거 — 응답에 project_id가 없으면(옛 서버) 현재 p(B) 폴백', async () => {
+    const hrefs = await renderAndOpen('evidence', 'ev-2', { '/api/evidence/': { data: { resolved_story_id: 's-6', org_slug: 'acme', project_slug: null } } });
+    expect(hrefs).toContain('/board?story=s-6&p=proj-B');
+    expect(hrefs).not.toContain('/board?story=s-6&p=proj-C');
+  });
+
   it('⭐증거 → 해소된 스토리', async () => {
     const hrefs = await renderAndOpen('evidence', 'ev-1', { '/api/evidence/': { data: { resolved_story_id: 's-4', ...noSlug } } });
     expect(hrefs).toContain('/board?story=s-4&p=proj-C');
