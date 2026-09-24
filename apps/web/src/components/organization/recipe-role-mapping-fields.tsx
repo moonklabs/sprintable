@@ -1,7 +1,7 @@
 'use client';
 
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { membersForKind, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
+import { membersForKind, stageApprovalSurface, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
 
 // story #4243 — 멤버 선택지는 사람 + 에이전트(`type`). stage마다 정의의 role_actor_kinds로 거른다(human → 사람 ·
 // agent/선언 없음 → 에이전트 · either → 함께).
@@ -54,6 +54,7 @@ export function RecipeRoleMappingFields({
   memberPlaceholder,
   channelPlaceholder,
   generationConnectorPlaceholder,
+  approvalNote,
 }: {
   stages: string[];
   stageMetadata: EventDefinitionResponse['stage_metadata'];
@@ -68,6 +69,8 @@ export function RecipeRoleMappingFields({
   memberPlaceholder: string;
   channelPlaceholder: string;
   generationConnectorPlaceholder: string;
+  /** story #4243 D3 — 승인이 stage 밖(approval.surface)인 stage의 읽기 전용 안내 문구. */
+  approvalNote: (surface: string) => string;
 }) {
   // sandbox 포함 — status로 걸러 disconnected 등은 아예 안 보인다(잘못 고를 표면 자체를
   // 없앤다, "고른 뒤 실패"보다 "애초에 못 고름"이 싸다).
@@ -81,12 +84,18 @@ export function RecipeRoleMappingFields({
         const meta = stageMetadata[stage];
         const target = meta?.capability?.target;
         const memberKind = stageMemberKind(stage, stageMetadata, roleActorKinds) ?? 'agent';
+        const approvalSurface = stageApprovalSurface(stage, stageMetadata, roleActorKinds);
         return (
           <div key={stage} className="flex items-center gap-3">
             <span className="w-32 shrink-0 text-xs font-medium text-foreground">
               {meta?.role ?? stage}
             </span>
-            {target === 'channel_connection' ? (
+            {approvalSurface ? (
+              // story #4243 D3 — 승인이 이 stage 밖(결재함)이라 고를 담당이 없다. 선택기 없음 · 필수 아님 · role_mapping에 안 실림.
+              <span className="flex-1 break-keep text-xs text-muted-foreground" data-testid="mapping-approval-elsewhere">
+                {approvalNote(approvalSurface)}
+              </span>
+            ) : target === 'channel_connection' ? (
               <select
                 className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 value={roleMapping[stage] ?? ''}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  allowedChannelsForSlot, groupStagesByRole, membersForKind, orderedRecipeRoles, requiredMappingStages, stageMemberKind, recipeConnectionTargets, recipeKeyDomain,
+  allowedChannelsForSlot, groupStagesByRole, membersForKind, orderedRecipeRoles, requiredMappingStages, stageApprovalSurface, stageMemberKind, recipeConnectionTargets, recipeKeyDomain,
   recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
   type RecipeRoleSlot, type RecipeStageMetadata,
 } from './recipe-role-slots';
@@ -370,5 +370,24 @@ describe('either(story #4243)', () => {
     expect(membersForKind(members, 'either').map((m) => m.id)).toEqual(['a', 'h', 'x']);
     expect(membersForKind(members, 'human').map((m) => m.id)).toEqual(['h']);
     expect(membersForKind(members, 'agent').map((m) => m.id)).toEqual(['a', 'x']);
+  });
+});
+
+// story #4243 D3 — either 역할의 승인 자리 선언도 읽기 전용(loop_agency «브리프»: PO=either · 승인=결재함의 문서 결재).
+describe('D3 — either + approval.surface(story #4243)', () => {
+  const META = {
+    brief: { role: 'PO', action: '브리프', approval: { surface: 'doc_approval' } },
+    kickoff: { role: 'PO', action: '기획' },
+  };
+  it('either 역할: 승인 선언 stage = 읽기 전용 자리 · 나머지는 멤버 자리(either)', () => {
+    const slots = recipeRoleSlots(META, ['brief', 'kickoff'], { PO: 'either' });
+    expect(slots.map((s) => [s.kind, s.stages, s.memberType])).toEqual([
+      ['approval_elsewhere', ['brief'], 'either'], ['member', ['kickoff'], 'either'],
+    ]);
+  });
+  it('범용 창: 승인 자리 stage는 필수 아님 · 에이전트 선언 역할은 예외(4174 후속 규칙)', () => {
+    expect(stageApprovalSurface('brief', META, { PO: 'either' })).toBe('doc_approval');
+    expect(stageApprovalSurface('brief', META, { PO: 'agent' })).toBeNull();
+    expect(requiredMappingStages(['brief', 'kickoff'], META, { PO: 'either' })).toEqual(['kickoff']);
   });
 });

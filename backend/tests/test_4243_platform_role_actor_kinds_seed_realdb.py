@@ -70,3 +70,31 @@ async def test_workflow_presets_carry_the_po_confirmed_table():
     by_key = {key: kinds for key, _meta, kinds in await _platform_rows()}
     for key, expected in _EXPECTED_WORKFLOW.items():
         assert by_key.get(key) == expected, key
+
+
+async def test_loop_agency_brief_declares_document_approval_surface_and_validates():
+    """D3 — loop_agency «브리프»의 승인은 결재함의 문서 결재(`approval.surface = doc_approval`) · 게이트 없음 · 모양 검증 통과 ·
+    다른 stage엔 선언 없음."""
+    from app.services.event_definition_registry import validate_stage_metadata
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+asyncpg://" + url[len(prefix):]
+            break
+    engine = create_async_engine(url)
+    try:
+        async with engine.connect() as conn:
+            meta, schema = (await conn.execute(text(
+                "SELECT stage_metadata, payload_schema FROM event_definitions "
+                "WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
+            ))).one()
+    finally:
+        await engine.dispose()
+    validate_stage_metadata(schema, meta)
+    assert meta["brief_doc_approval"]["approval"] == {"surface": "doc_approval"}
+    assert "gate" not in meta["brief_doc_approval"]
+    assert [s for s, m in meta.items() if "approval" in m] == ["brief_doc_approval"]

@@ -691,7 +691,8 @@ describe('ApplyRecipeDialog — 워크플로우 프리셋 제목 로케일(story
 });
 
 // story #4243 AC2 — 역할별 사람/에이전트 선언(role_actor_kinds)으로 stage 한 줄의 선택지와 필수 여부가 갈린다.
-// loop_agency(시드 0260 · 0403 선언 그대로의 역할 배치): Human → 사람만(비워도 됨) · PO·Any → 사람 + 에이전트 · Agent → 에이전트만.
+// loop_agency(시드 0260 · 0403 선언 그대로의 역할 배치): Human → 사람만(비워도 됨) · Any → 사람 + 에이전트 · Agent → 에이전트만 ·
+// PO의 «브리프»는 승인이 결재함의 문서 결재(D3 · approval.surface=doc_approval)라 선택기 없는 읽기 전용 줄.
 describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
   const LOOP_AGENCY = {
     ...TARGET,
@@ -701,7 +702,7 @@ describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
     ] } } },
     stage_metadata: {
       goal_hypothesis: { role: 'Human', action: 'a' },
-      brief_doc_approval: { role: 'PO', action: 'b' },
+      brief_doc_approval: { role: 'PO', action: 'b', approval: { surface: 'doc_approval' as const } },
       generate_variants: { role: 'Agent', action: 'c' },
       loop_decision: { role: 'Human', action: 'd' },
       execute: { role: 'Any', action: 'e' },
@@ -728,7 +729,7 @@ describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
     }));
   }
 
-  it('사람 역할 줄엔 에이전트 선택 0 · either 줄엔 사람 + 에이전트 · 사람 줄을 비워도 에이전트·either 줄만 채우면 적용되고 빈 줄은 싣지 않는다', async () => {
+  it('사람 역할 줄엔 에이전트 선택 0 · either 줄엔 사람 + 에이전트 · 브리프는 읽기 전용 · 사람 줄을 비워도 에이전트·either 줄만 채우면 적용되고 빈 줄은 싣지 않는다', async () => {
     const capture = { body: null as unknown };
     stubMixedMembers(capture);
     await act(async () => {
@@ -747,15 +748,18 @@ describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
 
     const rows = [...document.body.querySelectorAll('select')].slice(1) as HTMLSelectElement[];
     const values = (s: HTMLSelectElement) => [...s.options].map((o) => o.value).filter(Boolean);
-    const [goal, brief, variants, decision, run, learn] = rows;
+    expect(rows).toHaveLength(5); // 브리프 줄엔 선택기 없음
+    const [goal, variants, decision, run, learn] = rows;
     expect(values(goal)).toEqual(['human-1']);
     expect(values(decision)).toEqual(['human-1']);
-    expect(values(brief)).toEqual(['agent-1', 'human-1']);
+    expect(values(run)).toEqual(['agent-1', 'human-1']);
     expect(values(variants)).toEqual(['agent-1']);
+    const notes = [...document.body.querySelectorAll('[data-testid="mapping-approval-elsewhere"]')].map((n) => n.textContent);
+    expect(notes).toEqual(['recipeApplyV2ApprovalOnDocApproval']);
 
     const submitBtn = () => [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit') as HTMLButtonElement;
     expect(submitBtn().disabled).toBe(true);
-    for (const [select, value] of [[brief, 'human-1'], [variants, 'agent-1'], [run, 'agent-1'], [learn, 'human-1']] as const) {
+    for (const [select, value] of [[variants, 'agent-1'], [run, 'agent-1'], [learn, 'human-1']] as const) {
       await act(async () => {
         select.value = value;
         select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -768,7 +772,7 @@ describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
     await flush();
     expect(capture.body).toEqual({
       project_id: 'proj-1',
-      role_mapping: { brief_doc_approval: 'human-1', generate_variants: 'agent-1', execute: 'agent-1', track_and_learn: 'human-1' },
+      role_mapping: { generate_variants: 'agent-1', execute: 'agent-1', track_and_learn: 'human-1' },
     });
   });
 });

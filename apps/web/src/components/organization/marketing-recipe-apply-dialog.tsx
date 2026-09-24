@@ -248,6 +248,10 @@ export function MarketingRecipeApplyDialog({
       : memberType === 'either' ? t('recipeApplyV2MemberPlaceholder')
         : t('eventApplyAgentPlaceholder')
   );
+  // story #4243 D3 — 승인 자리 선언별 안내(초안 게이트 · 문서 결재).
+  const approvalSurfaceNote = (surface: string | undefined) => (
+    surface === 'doc_approval' ? t('recipeApplyV2ApprovalOnDocApproval') : t('recipeApplyV2ApprovalOnDraftGate')
+  );
   const badgeFor = (slot: RecipeRoleSlot) => {
     if (slot.kind === 'approver' || slot.kind === 'approval_elsewhere') return t('recipeApplyV2DirectorBadge');
     if (slot.kind === 'member') return memberBadge(slot.memberType);
@@ -294,7 +298,7 @@ export function MarketingRecipeApplyDialog({
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
           </div>
           <div className="shrink-0 break-keep text-xs text-muted-foreground" data-testid="approval-elsewhere-note">
-            {t('recipeApplyV2ApprovalOnDraftGate')}
+            {approvalSurfaceNote(recipe.stage_metadata[slot.stages[0]!]?.approval?.surface)}
           </div>
         </div>
       );

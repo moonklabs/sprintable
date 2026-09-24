@@ -64,7 +64,9 @@ _CAPABILITY_TARGETS = frozenset({"agent", "channel_connection", "generation_conn
 # 닫힌 어휘. 적용 창이 사람 역할의 이 stage를 선택 없는 읽기 전용 자리로 그린다(선언 없는 사람 비게이트 stage는 사람이
 # 실제로 일하는 자리라 지금처럼 멤버 자리 — 까디르 QA 재현 C). 승인자는 적지 않는다 — 초안 게이트의 승인자는 게이트
 # 쪽 규칙이 정하므로 여기 또 적으면 어긋날 수 있는 두 번째 원천이 된다.
-_APPROVAL_SURFACES = frozenset({"draft_gate"})
+# story #4243 D3(PO 2026-09-24) — `doc_approval`: 승인이 결재함의 **문서 결재**에서 일어남(loop_agency «브리프»). 레시피 게이트를
+# 따로 선언하면 결재가 둘로 갈라지므로 쓰지 않는다.
+_APPROVAL_SURFACES = frozenset({"draft_gate", "doc_approval"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —

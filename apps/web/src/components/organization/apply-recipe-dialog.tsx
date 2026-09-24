@@ -302,6 +302,7 @@ export function ApplyRecipeDialog({
               agentPlaceholder={t('eventApplyAgentPlaceholder')}
               personPlaceholder={t('recipeApplyV2PersonPlaceholder')}
               memberPlaceholder={t('recipeApplyV2MemberPlaceholder')}
+              approvalNote={(surface) => (surface === 'doc_approval' ? t('recipeApplyV2ApprovalOnDocApproval') : t('recipeApplyV2ApprovalOnDraftGate'))}
               channelPlaceholder={t('eventApplyChannelPlaceholder')}
               generationConnectorPlaceholder={t('eventApplyGenerationConnectorPlaceholder')}
             />

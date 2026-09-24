@@ -56,6 +56,7 @@ describe('RecipeRoleMappingFields — generation_connector 슬롯(story #4101)',
           agentPlaceholder="에이전트 선택..."
           personPlaceholder="사람 선택..."
           memberPlaceholder="담당 선택..."
+          approvalNote={(s) => `approval:${s}`}
           channelPlaceholder="채널 선택..."
           generationConnectorPlaceholder="연산 커넥터 선택..."
         />,
@@ -85,6 +86,7 @@ describe('RecipeRoleMappingFields — generation_connector 슬롯(story #4101)',
           agentPlaceholder="에이전트 선택..."
           personPlaceholder="사람 선택..."
           memberPlaceholder="담당 선택..."
+          approvalNote={(s) => `approval:${s}`}
           channelPlaceholder="채널 선택..."
           generationConnectorPlaceholder="연산 커넥터 선택..."
         />,
@@ -113,6 +115,7 @@ describe('RecipeRoleMappingFields — generation_connector 슬롯(story #4101)',
           agentPlaceholder="에이전트 선택..."
           personPlaceholder="사람 선택..."
           memberPlaceholder="담당 선택..."
+          approvalNote={(s) => `approval:${s}`}
           channelPlaceholder="채널 선택..."
           generationConnectorPlaceholder="연산 커넥터 선택..."
         />,
@@ -154,6 +157,7 @@ describe('RecipeRoleMappingFields — 멤버 종류(story #4243)', () => {
           agentPlaceholder="에이전트 선택..."
           personPlaceholder="사람 선택..."
           memberPlaceholder="담당 선택..."
+          approvalNote={(s) => `approval:${s}`}
           channelPlaceholder="채널 선택..."
           generationConnectorPlaceholder="연산 커넥터 선택..."
         />,

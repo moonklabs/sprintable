@@ -315,6 +315,7 @@ export function WorkflowTemplateGallerySection({
               agentPlaceholder={tOrg('eventApplyAgentPlaceholder')}
               personPlaceholder={tOrg('recipeApplyV2PersonPlaceholder')}
               memberPlaceholder={tOrg('recipeApplyV2MemberPlaceholder')}
+              approvalNote={(surface) => (surface === 'doc_approval' ? tOrg('recipeApplyV2ApprovalOnDocApproval') : tOrg('recipeApplyV2ApprovalOnDraftGate'))}
               channelPlaceholder={tOrg('eventApplyChannelPlaceholder')}
               generationConnectorPlaceholder={tOrg('eventApplyGenerationConnectorPlaceholder')}
             />
