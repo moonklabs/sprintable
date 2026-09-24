@@ -153,9 +153,10 @@ async def test_newsletter_send_dead_letter_notifies_approver_and_send_agent_and_
         payload = notices[0].msg_metadata["event"]["payload"]
         assert payload["stop_kind"] == "dead_letter" and payload["stage"] == "send_requested"
         assert t("events.recipe_publish_failed_what_newsletter_send", "ko") in notices[0].content
-        # 유나 10:21Z — 앱에 뉴스레터 재시도 자리가 없어 «다시 시도해야 해요» 대신 «아직 앱에서 다시 시도할 수 없어요».
-        assert t("events.recipe_publish_failed_next_newsletter_unavailable", "ko") in notices[0].content
-        assert t("events.recipe_publish_failed_next_needs_check_no_link", "ko") not in notices[0].content
+        # story #4262 AC2 — 발송 게이트 상세에 사람 재시도 자리가 섰다. «아직 앱에서 다시 시도할 수 없어요» 대신 그 자리로의 링크 줄
+        # (needs_check · 채널에서 확인 뒤 다시 시도 — 발송 코드는 보냈는지 모름).
+        assert t("events.recipe_publish_failed_next_newsletter_unavailable", "ko") not in notices[0].content
+        assert t("events.recipe_publish_failed_next_needs_check", "ko", retry_url=f"/gates/{gate.id}") in notices[0].content
         assert await _stage_event_count(Session, {**ctx, "definition_key": _SEED._KEY}, "send_checked") == 0
     finally:
         await engine.dispose()

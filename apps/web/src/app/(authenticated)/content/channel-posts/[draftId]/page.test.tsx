@@ -1238,7 +1238,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   const COMMAND_STATUS_ALL: Record<CommandStatus, true> = {
     pending: true, in_progress: true, completed: true, blocked: true, dead_letter: true, voided: true, cancelled: true,
   };
-  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true };
+  // story #4262 — `not_sent`(확실히 안 나감) 추가. 전수 곱에 그대로 들어간다.
+  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true };
   const CS_VALUES: (CommandStatus | null)[] = [null, ...(Object.keys(COMMAND_STATUS_ALL) as CommandStatus[])];
   const FK_VALUES: (FailureKind | 'unknown_kind_zzz' | null)[] = [null, ...(Object.keys(FAILURE_KIND_ALL) as FailureKind[]), 'unknown_kind_zzz'];
   const PK_VALUES: (string | null)[] = [null, 'awaiting_container'];

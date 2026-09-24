@@ -5654,6 +5654,8 @@
     "gateActivityActionAdsBoostStarted": "홍보 시작",
     "gateActivityActionAdsBoostPaused": "홍보 중지",
     "gateActivityActionAdsBoostResumed": "홍보 재개",
+    "gateActivityActionNewsletterSendSucceeded": "뉴스레터 발송",
+    "gateActivityActionNewsletterSendFailed": "뉴스레터 발송 실패",
     "gateActivityActionAdsBoostAutoPausedCapReached": "자동 중지(광고비 상한 도달)",
     "gateHeadChangedError": "게이트 대상 커밋이 승인 확인 이후 변경됐어요. 최신 내용을 다시 확인한 뒤 승인해 주세요.",
     "gateDraftChangedError": "그 사이 초안이 새 버전으로 바뀌어 승인되지 않았어요. 최신 초안을 확인한 뒤 다시 승인해 주세요.",

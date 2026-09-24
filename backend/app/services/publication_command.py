@@ -49,6 +49,10 @@ _BACKOFF_BASE_SECONDS = 60
 FAILURE_KIND_CONNECTION = "connection"
 FAILURE_KIND_NEEDS_CHECK = "needs_check"
 FAILURE_KIND_TRANSIENT = "transient"
+# story #4262(PO 13:51Z 안 A · 유나 §11-5 개정) — «확실히 안 나감»: 어댑터를 부르기 전에 막혔거나 보낼 수 없는 채널이라 밖으로
+# 아무것도 안 나갔다. 곧바로 dead_letter · 자동 재시도 0(다시 해도 같은 결과) · 화면은 «알 수 없어요»가 아니라 «자동 재시도를
+# 멈췄어요». 전 발행 종류로 넓히는 것은 4264.
+FAILURE_KIND_NOT_SENT = "not_sent"
 # story #3953(블루프린트 §1-5) — 위 3값과 같은 열(failure_kind, DB CHECK 無·psql \d
 # publication_commands 실측 확認)이지만 유나 §11-5의 원래 3분류엔 없다 — 이건 실패가
 # 아니라 조직 owner의 의도적 정지다("재시도해도 되는지 모른다"류 불확실성과 다른
@@ -61,18 +65,33 @@ STOP_NOTICE_PENDING = "pending"
 STOP_NOTICE_SENT = "sent"
 
 
-def awaits_stop_notice(status: str | None, failure_kind: str | None) -> bool:
+# story #4262 AC2(PO 14:13Z · 14:41Z) — 뉴스레터 발송이 `blocked_unapproved`로 멈췄을 때 **사람이 재시도할 수 있는** 사유 코드.
+# 멈춤 통지(`awaits_stop_notice`) · 사람 재시도 수용(`retry_dead_letter_command`) · 게이트 화면 «연결 문제로 멈춤 + 다시 시도»
+# (FE `newsletter-send-status.tsx` · 짝 테스트)가 모두 이 한 모음을 읽는다. 게이트 미승인 · 캠페인 없음은 사람 재시도 대상 아님.
+NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES = frozenset({"NEWSLETTER_SEND_CONNECTION_UNAVAILABLE"})
+
+
+def awaits_stop_notice(command: "PublicationCommand") -> bool:
     """story #4258 — 이 명령이 «사람 손이 필요한 멈춤»인가(통지 대상). 표식을 세우는 쪽(`mark_stop_notice`)과 보내는 쪽
     (`recipe_publish_failure._deliver_one_stop_notice`)이 같은 판정을 읽는다(까디르 4621 델타 codex ① · PO 14:23Z) — 취소 ·
     voided · 완료 · 재시도 뒤 pending처럼 멈춤에서 벗어난 행은 표식이 남아 있어도 보내지 않는다.
-    - dead_letter(재시도 소진 · 확인 필요): 사람 재시도.
-    - 연결 실패 blocked: 사람이 다시 연결한 뒤 재시도(조직 일시정지 blocked는 해제하면 서버가 스스로 재큐 — 제외)."""
-    return status == "dead_letter" or (status == "blocked" and failure_kind == FAILURE_KIND_CONNECTION)
+    - dead_letter(재시도 소진 · 확인 필요 · 확실히 안 나감): 사람 재시도.
+    - 연결 실패 blocked: 사람이 다시 연결한 뒤 재시도(조직 일시정지 blocked는 해제하면 서버가 스스로 재큐 — 제외).
+    - story #4262 AC2(PO 14:41Z — 명령 한 행을 받게 넓힘): 뉴스레터 `blocked_unapproved` 중 사람이 재시도할 수 있는 사유
+      (`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`) — 발송 실행기가 `apply_command_failure`를 안 거치고 직접 세우는 멈춤이라 사유
+      코드까지 봐야 가를 수 있다. 판정이 둘로 갈라지면 표식은 섰는데 전달기가 비우는(또는 그 반대) 독 행이 다시 생긴다."""
+    status = command.status
+    if status == "dead_letter" or (status == "blocked" and command.failure_kind == FAILURE_KIND_CONNECTION):
+        return True
+    return (
+        status == STATUS_BLOCKED_UNAPPROVED and command.content_kind == "newsletter_send"
+        and command.reason_code in NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
+    )
 
 
 def mark_stop_notice(command: "PublicationCommand") -> None:
     """전이와 같은 커밋에 통지 표식을 세운다 — 판정(`awaits_stop_notice`)이 참일 때만."""
-    if awaits_stop_notice(command.status, command.failure_kind):
+    if awaits_stop_notice(command):
         command.stop_notice_state = STOP_NOTICE_PENDING
 
 # story #3414 — 어떤 서버 error code가 어느 failure_kind인지의 유일한 매핑 표. 새 코드가
@@ -104,6 +123,9 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
 _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
 _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
+# story #4262 — 뉴스레터 발송 실행기만 내는 두 코드(newsletter_send_execution.py · grep 확인). 채널 게시와 겹치는
+# STIBEE_PLAN_RESTRICTED는 4264에서 부류로 다룬다.
+_NOT_SENT_CODES = frozenset({"NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED"})
 # story #3536(PO 確定 2026-09-06) — ChannelPublishProviderError.provider_code가 이
 # 집합에 있으면(어댑터가 구조적으로 실어 준 코드, 문자열 매칭 아님 — instagram_
 # publish.py::create_media_container가 ThreadsPublishError("INSTAGRAM_IMAGE_
@@ -160,6 +182,8 @@ def classify_failure_kind(error_code: str | None) -> str:
         return FAILURE_KIND_TRANSIENT
     if error_code in _NEEDS_CHECK_CODES:
         return FAILURE_KIND_NEEDS_CHECK
+    if error_code in _NOT_SENT_CODES:
+        return FAILURE_KIND_NOT_SENT
     return FAILURE_KIND_NEEDS_CHECK
 
 
@@ -285,7 +309,18 @@ async def retry_dead_letter_command(
             PublicationCommand.id == command_id, PublicationCommand.org_id == org_id,
         ).with_for_update()
     )).scalar_one_or_none()
-    if command is None or command.status not in ("dead_letter", "blocked"):
+    if command is None:
+        return None
+    # story #4262(PO 13:49Z) — 뉴스레터 발송은 연결이 비활성이면 `blocked_unapproved`로 서는데(발송 실행기가 게이트 · 캠페인 ·
+    # 연결을 확인해 막음) 이 함수가 받지 않아 연결을 고쳐도 다시 보낼 길이 없었다. 뉴스레터에 한해 받는다 — 실행기가 매번
+    # 다시 확인하므로 여전히 막혀 있으면 다시 blocked_unapproved로 설 뿐이다(무한 재시도 0). 다른 종류는 예전대로 404.
+    # story #4262 AC2(PO 14:13Z 조건 1) — 받는 사유는 멈춤 통지 · 게이트 화면 버튼과 같은 한 모음
+    # (`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`)으로 좁힌다 — 버튼 · 통지 · 재시도 수용이 어긋나지 않게.
+    newsletter_retryable_block = (
+        command.status == STATUS_BLOCKED_UNAPPROVED and command.content_kind == "newsletter_send"
+        and command.reason_code in NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
+    )
+    if command.status not in ("dead_letter", "blocked") and not newsletter_retryable_block:
         return None
     # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩
     # 잠근다. 그 사이 다른 tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면
@@ -1015,6 +1050,17 @@ async def apply_command_failure(
         command.status = "dead_letter"
         command.dead_letter_at = now
         command.next_attempt_at = None
+        mark_stop_notice(command)
+        return
+
+    if failure_kind == FAILURE_KIND_NOT_SENT:
+        # story #4262 — 확실히 안 나갔고 다시 해도 같다 — 백오프 없이 곧바로 사람 재시도(연결을 고친 뒤)로.
+        command.attempt_count += 1
+        command.status = "dead_letter"
+        command.dead_letter_at = now
+        command.next_attempt_at = None
+        # story #4262 AC2(PO 14:11Z) — 4621의 다른 dead_letter 갈래와 같이 전이와 같은 커밋에 통지 표식(빠지면 not_sent 멈춤만
+        # 통지 0인 조용한 구멍).
         mark_stop_notice(command)
         return
 

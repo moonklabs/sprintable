@@ -22,6 +22,8 @@ const { useDashboardContextMock, replaceMock, muxSubscribeMock } = vi.hoisted(()
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
+  // story #4262 — 발송 상태 줄(NewsletterSendStatus)이 연결 화면 링크에 쓴다.
+  useConnectRulesHref: () => '/organization/channels',
 }));
 
 vi.mock('next/navigation', () => ({

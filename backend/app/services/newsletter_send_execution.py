@@ -179,6 +179,14 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
         )
         command.status = STATUS_BLOCKED_UNAPPROVED
         command.last_error = str(exc)[:2000]
+        # story #4262 — 사유를 코드로 남긴다(예전엔 last_error 문자열에만). 게이트 화면이 연결 문제면 «연결 문제로 멈춤» +
+        # 사람 재시도를 연다(retry_dead_letter_command가 뉴스레터의 blocked_unapproved를 받는다).
+        command.reason_code = exc.code
+        # story #4262 AC2(PO 14:13Z) — 연결 사유면 사람이 재시도할 수 있는 멈춤이라 전이와 같은 커밋에 통지 표식(4621 표식
+        # 규칙 · 판정 `awaits_stop_notice`가 사유 코드까지 본다 — 게이트 미승인 · 캠페인 없음은 표식 없음).
+        from app.services.publication_command import mark_stop_notice
+
+        mark_stop_notice(command)
         return
 
     gate, publication, conn = ctx["gate"], ctx["publication"], ctx["connection"]
