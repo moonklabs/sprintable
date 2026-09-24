@@ -65,7 +65,14 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
     // 위계 구분이 안 됐다. 처방(유나 확定): 상위 프레임은 text-sm+하단 인디케이터(underline)로
     // — 페이지-크롬(notification-bell.tsx 필터 탭과 동형 패턴, 신규 발명 아님). 내부 뷰 탭의
     // rounded pill과 kind 자체가 달라 한눈에 "이건 다른 층"으로 읽힌다.
-    <div className="flex items-center gap-4 border-b border-border" role="tablist" aria-label={t('workspace')}>
+    // story #4277 — 402폭에서 상위 프레임 탭(보드 · 목록 · 스프린트 · 에픽 · 회고 · 가설 · text-base)이 줄 폭(370)을 넘어 셸 스크롤러가 가로로
+    // 넘쳤다(423/402). 줄 자체를 가로 스크롤(스크롤바 숨김)로 — 탭은 줄바꿈 · 축소 없이 제 폭. overflow-y-hidden은 버튼의 -mb-px(아래 선과 겹침)가
+    // 1px 세로 스크롤을 만들지 않게.
+    <div
+      className="focus-inset flex items-center gap-4 overflow-x-auto overflow-y-hidden border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="tablist"
+      aria-label={t('workspace')}
+    >
       {TABS.map((tab) => (
         <button
           key={tab.key}
@@ -74,7 +81,7 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
           aria-selected={active === tab.key}
           onClick={() => router.push(`/${params.ws}/${params.proj}/${tab.path}`)}
           className={cn(
-            'font-semibold transition',
+            'shrink-0 whitespace-nowrap font-semibold transition',
             // story #4222 — 예전엔 useIsMobile()로 클래스를 갈라 서버·첫 렌더(=데스크톱 클래스 · 30px)와 하이드레이션 뒤(모바일 · 37px)
             // 높이가 달라 390에서 밀렸다. 모바일 기본 + lg:(훅의 1024) 덮어쓰기로 서버 출력이 곧 최종.
             '-mb-px border-b-[3px] px-1 pb-2.5 text-base lg:border-b-2 lg:pb-2 lg:text-sm',

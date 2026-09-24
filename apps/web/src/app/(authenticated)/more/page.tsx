@@ -141,6 +141,7 @@ export default function MorePage() {
                   key={item.id}
                   href={href}
                   className="flex min-h-12 items-start gap-3 px-5 py-3 text-sm text-foreground hover:bg-muted sm:px-6"
+                  data-testid="more-menu-link"
                 >
                   <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
                   <span className="min-w-0">

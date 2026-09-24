@@ -32,6 +32,7 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
   const isTablet = useIsTablet();
   return (
     <div
+      data-testid="top-bar"
       className={cn(
         'flex h-12 shrink-0 items-center gap-2 border-b px-4',
         'sticky top-0 z-30 bg-background transition-transform',
@@ -72,7 +73,13 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           standup·sprints·docs 등 10+ 화면 공통이라 각 caller가 아니라 이 렌더러(슬롯 소비처)에서
           단일 정의로 막는다 — 직계 자식(title)에 min-w-0+truncate를 걸어 flex 안에서 줄바꿈 대신
           한 줄 말줄임으로 degrade. sidebar.tsx의 [&>span:last-child]:truncate와 동일 관례. */}
-      <div className="flex min-w-0 flex-1 items-center gap-2 [&>*]:min-w-0 [&>*]:truncate">
+      {/* story #4277(민 기기 6번) — flex-1(기준 폭 0)이면 제목은 «남는 폭»만 받아, 칩 · 액션이 다 차면 짧은 제목(«실행»)도 «실.»로 잘렸다.
+          flex-auto(기준 폭 = 제목 글자 폭)로 — 줄 폭이 모자라면 기준 폭이 큰 컨텍스트 칩(최대 190px · 이제 shrink)이 대부분을 양보하고, 제목은
+          긴 경우에만 말줄임. 데스크톱(칩 없음)은 전과 같이 남는 폭을 채운다.
+          «칩이 먼저 · 제목은 칩이 최소 폭(44px)에 닿은 뒤에» 우선순위는 칩 쪽 shrink-[10000]이 맡는다(칩 파일 주석). 제목 shrink는 기본 1로 둔다 —
+          1 미만(예: 0.001)이면 flex 규칙상(줄어들 항목들의 shrink 합이 1 미만이면 부족분에 그 합을 곱해 일부만 줄인다) 칩이 바닥에 닿은 뒤에도
+          제목이 거의 안 줄어 넘쳤다(스토리지 상단바 420/402 실측). */}
+      <div className="flex min-w-0 flex-auto items-center gap-2 [&>*]:min-w-0 [&>*]:truncate">
         {title}
       </div>
       <div className="flex shrink-0 items-center gap-1">

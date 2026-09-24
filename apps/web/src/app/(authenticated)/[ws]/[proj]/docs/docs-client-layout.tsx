@@ -364,14 +364,16 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   );
   const topBarActions = useMemo(
     () => (
+      // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
+      // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
       <div className="flex items-center gap-1.5">
-        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting}>
-          <FolderPlus className="mr-1.5 h-3.5 w-3.5" />
-          {t('newFolder')}
+        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')}>
+          <FolderPlus className="h-3.5 w-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{t('newFolder')}</span>
         </Button>
-        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}>
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          {isCreating ? t('loading') : t('newDoc')}
+        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating} aria-label={isCreating ? t('loading') : t('newDoc')}>
+          <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{isCreating ? t('loading') : t('newDoc')}</span>
         </Button>
       </div>
     ),

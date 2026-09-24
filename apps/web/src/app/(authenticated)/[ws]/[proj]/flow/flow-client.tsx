@@ -334,6 +334,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             <ExceptionStream items={exceptionItems} loadFailed={data?.partialErrors?.attention ?? false} />
           </div>
         </details>
+        {/* story #4277(민 기기 20번) — 맨 아래 «승인 흐름에서 멈춘 것» 상자가 탭바에 여백 0으로 붙었다. 이 뿌리의 p-4 아래 여백이 안 먹는 이유:
+            위 KanbanBoard 뿌리(h-full)가 이 뿌리 상자보다 길어 내용이 상자 밖으로 넘치고, 셸 스크롤러의 스크롤 영역은 넘친 내용의 끝까지만 잡는다
+            (뿌리 padding · 마지막 자식의 margin · 높이 0인 빈 상자는 안 들어감 — 402폭 실측: margin-bottom 16 → 틈 0 · 높이 0 빈 줄 → 틈 1 ·
+            높이 16 빈 줄 → 33). KanbanBoard는 보드 화면에서 h-full이 맞아 그대로 두고, 이 화면 끝에 1px 빈 줄을 둔다 — 그러면 위 상자가
+            «마지막 자식»이 아니게 돼 space-y-4(Tailwind v4 = 마지막 아닌 자식의 margin-bottom)의 16px가 빈 줄 앞에 깔리고 스크롤 영역이 빈 줄 끝까지 잡힌다. */}
+        <div aria-hidden="true" className="h-px" data-testid="flow-bottom-spacer" />
       </div>
     </>
   );

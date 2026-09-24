@@ -2597,6 +2597,13 @@ jobs:
       - name: Run card-surface e2e (background-adjacent surfaceless box)
         run: pnpm --filter web e2e:card-surface
 
+      # story #4277(high · 민 기기 탐색 점검 배포 27) — 402폭 전 경로 가로 넘침 가드. 목적지는 /more 메뉴 링크 + 하단 탭바 링크를 실행 때 읽어
+      # 모으고(새 화면 자동 포함), documentElement뿐 아니라 셸의 세로 스크롤러(가로도 암묵 스크롤)까지 잰다 — 옛 자(documentElement만)는
+      # 셸 스크롤러 안의 넘침을 0으로 쟀다. 데이터 있는 상태(빈 화면 = 거짓 PASS)를 spec의 beforeAll이 API로만 심는다(NEXT_PUBLIC_FASTAPI_URL).
+      # 플래그 OFF 기본 탭바 기준이라 위 두 e2e와 같은 env.
+      - name: Run mobile-width overflow e2e (story #4277)
+        run: pnpm --filter web e2e:mobile-width
+
       # story #4006(critical, 5pt) AC3 — v3 화면(오늘·대화·연결·규칙·일감·결과, 「가설」은
       # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 별도 env로 v3 플래그
       # 3개를 켠다(job 레벨 env엔 안 실음 — 위 contrast/card-surface e2e는 플래그 OFF 기준을

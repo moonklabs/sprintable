@@ -298,7 +298,10 @@ export default function ChannelPostListPage() {
         const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
         return (
           <>
-            <Link href={flatHref(`/content/channel-posts/${draft.draft_id}`)} className="truncate hover:underline">
+            {/* story #4277(민 기기 #15) — `truncate`가 인라인 <a>에 걸려 말줄임(ellipsis)이 안 붙고 카드 제목 칸(ResponsiveDataTable의
+                line-clamp-2)도 한 줄로 막혀, 402폭 카드에서 제목이 «… 재발행 경로 :»처럼 말줄임 없이 잘렸다. 표(lg 이상)에서만 한 줄
+                말줄임(block+truncate) · 카드(lg 미만)는 칸의 두 줄 말줄임에 맡긴다(content/page.tsx 목록 제목과 같은 모양). */}
+            <Link href={flatHref(`/content/channel-posts/${draft.draft_id}`)} className="hover:underline lg:block lg:truncate">
               {hasTextPreview ? draft.text_preview : `${channelLabel(draft.channel)} · v${draft.current_version}`}
             </Link>
             {draft.origin_author_kind && draft.origin_author_kind !== draft.latest_author_kind ? (
@@ -447,8 +450,9 @@ export default function ChannelPostListPage() {
       </Tabs>
 
 
+      {/* story #4277 — 콘텐츠 목록과 같은 줄(상태 탭 + «보관됨 보기») — 좁은 폭 · 긴 로케일에서 토글이 다음 줄로(같은 클래스 예방). */}
       {connections !== null && !hasNoChannels ? (
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
             <TabsList data-testid="channel-posts-status-tabs">
               <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
