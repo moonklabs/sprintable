@@ -213,6 +213,19 @@ class LinkedEvidenceItem(BaseModel):
     reference_token: str | None = None
 
 
+class NewsletterSendCommandSummary(BaseModel):
+    """story #4262 — 발송 게이트의 발송 명령(가장 최근 1) 요약. 사람이 멈춘 발송을 다시 시도하려면 명령 id가 필요하다(공용 재시도
+    `POST /organizations/{org}/publication-commands/{id}/retry`)."""
+
+    id: uuid.UUID
+    status: str
+    failure_kind: str | None = None
+    reason_code: str | None = None
+    # 유나 4262 표 — «{time}에 자동으로 다시 시도해요»(재시도 대기) · 제공자 한도 풀리는 시각.
+    next_attempt_at: datetime | None = None
+    reason_reset_at: datetime | None = None
+
+
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -425,6 +438,10 @@ class GateResponse(BaseModel):
     # publication.version_id가 가리키는 ChannelPostVersion.channel_payload에서
     # 「지금」 값을 읽는다(estimated_recipient_count와 동일 계산값 선례).
     newsletter_subject: str | None = None
+    # story #4262(PO 13:39Z) — 발송 게이트의 발송 명령 상태(dead_letter · blocked면 게이트 화면이 사람 재시도 자리를 연다).
+    # 단건 `GET /gates/{id}`만 채운다(목록은 None — 게이트마다 조회하는 N+1을 만들지 않는다). 뉴스레터 게이트가 아니거나
+    # 아직 명령이 없으면 None.
+    newsletter_send_command: NewsletterSendCommandSummary | None = None
     # story #4044(0333)가 Gate ORM 컬럼(models/gate.py)만 추가하고 이 응답 스키마 등재를
     # 빠뜨려 API가 항상 None을 냈다 — sealed_ads_*/sealed_newsletter_* PR2 재발 클래스와
     # 동형(story #4072가 그 클래스 자체를 회귀가드로 봉인). generation_budget 전용 sealing —
@@ -1904,6 +1921,25 @@ async def get_gate_endpoint(
                 resp.newsletter_subject = (version.channel_payload or {}).get("subject") if version else None
         except Exception:  # noqa: BLE001 — 카드 조회 자체를 이 계산값 실패로 죽이지 않는다.
             logger.warning("newsletter_send estimated_recipient_count/subject 조회 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
+        # story #4262 — 이 게이트에 묶인 발송 명령 중 가장 최근 1(생성 시각 내림차순 · 같으면 id). 조직 조건 + 이 게이트 id라
+        # 다른 조직 · 다른 게이트 명령이 섞이지 않는다. 사람 재시도가 같은 행을 pending으로 되돌리므로 보통 게이트당 1행이다.
+        from app.models.publication_command import PublicationCommand
+
+        command = (await session.execute(
+            select(PublicationCommand)
+            .where(
+                PublicationCommand.org_id == org_id,
+                PublicationCommand.gate_id == gate.id,
+                PublicationCommand.content_kind == "newsletter_send",
+            )
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if command is not None:
+            resp.newsletter_send_command = NewsletterSendCommandSummary(
+                id=command.id, status=command.status, failure_kind=command.failure_kind, reason_code=command.reason_code,
+                next_attempt_at=command.next_attempt_at, reason_reset_at=command.reason_reset_at,
+            )
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:
         _link = await resolve_pr_link(session, org_id, gate.work_item_id)
