@@ -611,3 +611,30 @@ describe('story #2522 — EntityDetail(모달 본문) story·epic 자기 status 
     expect(document.body.textContent).not.toContain('some-brand-new-status');
   });
 });
+
+
+// story #4253(까디르 codex · PO 09:45Z) — 채팅은 조직 전체가 보는 자리라 «항목 자기 프로젝트»: 태스크 미리보기의 부모 스토리 링크는
+// TaskResponse.project_id로 싣고, 모를 때만 현재 p(이 테스트 셸엔 현재 프로젝트가 없어 주소 그대로).
+describe('#4253 — 태스크 미리보기 부모 스토리 링크는 태스크 자기 프로젝트', () => {
+  it('⭐project_id가 오면 본문 부모 링크가 `?p=그 프로젝트`', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { title: '작업 C', status: 'todo', story_id: 's-parent-3', project_id: 'proj-C' } }) }));
+    await act(async () => {
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t3" title="작업 C" status={null} />));
+    });
+    await openCard();
+    await flush();
+    const hrefs = [...document.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/board?story=s-parent-3&p=proj-C');
+  });
+
+  it('project_id가 없으면 현재 p 폴백(여기선 현재 프로젝트 없음 → p 없음)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { title: '작업 D', status: 'todo', story_id: 's-parent-4' } }) }));
+    await act(async () => {
+      root.render(wrap(<EmbedCard entity_type="task" entity_id="t4" title="작업 D" status={null} />));
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href^="/board?story=s-parent-4&p="]')).toBeNull();
+    expect(document.querySelector('a[href="/board?story=s-parent-4"]')).not.toBeNull();
+  });
+});

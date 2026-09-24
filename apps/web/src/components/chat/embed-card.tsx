@@ -24,7 +24,7 @@ import type { ReferenceForm } from './embed-renderer';
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { keepHref } from '@/lib/with-project-param';
+import { keepHref, withProjectParam } from '@/lib/with-project-param';
 
 export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
 
@@ -311,10 +311,13 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
   // (+task는 story_id 부모링크·sprint는 start/end_date)가 실제로 있다 — 「있으면 열고 없으면
   // 안 연다」로 이번엔 포함. 필드가 없으면(과거처럼) 여전히 null 반환 — 진입점을 억지로 안 만든다.
   if (entityType === 'task') {
-    const d = detail as { title?: string; status?: string; story_id?: string };
+    const d = detail as { title?: string; status?: string; story_id?: string; project_id?: string | null };
     if (!d.title) return null;
     const statusLabel = d.status ? translateEntityStatus('task', d.status) : null;
-    const parentHref = d.story_id ? getEntityHref('story', d.story_id, withProject) : null;
+    // story #4253(까디르 codex · PO 09:45Z) — 채팅은 조직 전체가 보는 자리라 «항목 자기 프로젝트»: TaskResponse.project_id(story_id →
+    // Story.project_id 1-hop)로 싣고, 모를 때만 현재 p.
+    const parentProject = d.project_id ? (h: string) => withProjectParam(h, d.project_id ?? null) : withProject;
+    const parentHref = d.story_id ? getEntityHref('story', d.story_id, parentProject) : null;
     if (!statusLabel && !parentHref) return null;
     return (
       <div className="space-y-2">
@@ -1059,6 +1062,8 @@ export function EntityChip({
   // 딥링크 — "쓰던 자리" 원칙(#2669)은 실 제출 액션에서만 후퇴, 목적지 발견성은 유지.
   const { projectMemberships } = useDashboardContext();
   const [canSubmit, setCanSubmit] = useState(false);
+  // story #4253(PO 09:45Z) — 결재 올리기 CTA는 문서 자기 프로젝트로(canSubmit 판정에 이미 푼 값을 버리지 않는다).
+  const [docProjectId, setDocProjectId] = useState<string | null>(null);
   const rawDocStatus = entityStatus?.kind === 'resolved' ? entityStatus.raw : null;
   const effectiveDocStatus = rawDocStatus;
 
@@ -1070,8 +1075,11 @@ export function EntityChip({
         const res = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
         if (!res.ok) throw new Error();
         const json = (await res.json()) as { data?: { projectId?: string } };
-        const docProjectId = json.data?.projectId;
-        if (!cancelled) setCanSubmit(!!docProjectId && projectMemberships.some((p) => p.projectId === docProjectId));
+        const resolvedProjectId = json.data?.projectId ?? null;
+        if (!cancelled) {
+          setDocProjectId(resolvedProjectId);
+          setCanSubmit(!!resolvedProjectId && projectMemberships.some((p) => p.projectId === resolvedProjectId));
+        }
       } catch {
         if (!cancelled) setCanSubmit(false); // ㉠ 조회 실패=fail-closed(버튼 안 보임), 조용한 무권한 노출 금지.
       }
@@ -1152,7 +1160,7 @@ export function EntityChip({
     const docCta = entityType === 'doc' && !ghost ? (
       effectiveDocStatus === 'draft' && canSubmit ? (
         <Link
-          href={getEntityHref('doc', entityId, flatHref) ?? '#'}
+          href={getEntityHref('doc', entityId, docProjectId ? (h) => withProjectParam(h, docProjectId) : flatHref) ?? '#'}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >

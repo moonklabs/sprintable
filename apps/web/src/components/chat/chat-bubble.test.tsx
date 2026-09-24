@@ -1585,8 +1585,9 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     // (doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const goToDocLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '결재자 지정하고 올리기');
     expect(goToDocLink).toBeDefined();
-    // story #4231 3차 — 문서 링크(flat)는 현재 프로젝트를 싣는다.
-    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}&p=proj-1`);
+    // story #4253(까디르 codex · PO 09:45Z) — 화면(현재 p = proj-1)과 문서 프로젝트(doc-proj-1)가 다르면 문서 자기 프로젝트를 싣는다
+    // (canSubmit 판정에 푼 docProjectId를 CTA에도 쓴다 · 예전 4231 3차는 현재 p).
+    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}&p=doc-proj-1`);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
     expect(calls.some((c) => c.url === `/api/docs/${DOC_ID}/transition`)).toBe(false);
   });

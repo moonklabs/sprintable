@@ -27,6 +27,7 @@ import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -336,6 +337,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     return null;
   })();
 
+  // story #4253(까디르 codex · PO 09:45Z) — 채팅의 승인 요청 카드는 조직 전체가 보는 자리라 작업 항목 링크는 게이트 자기 프로젝트(gate.project_id)
+  // · 모를 때만 현재 p.
+  const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   return (
     <>
       <ProofCapsule
@@ -348,7 +352,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           if (readingPanel) {
             readingPanel.open({
               kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
-              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id, flatHref),
+              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id, gateProjectHref),
             });
             return;
           }
@@ -383,7 +387,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           entityId={gate.work_item_id}
           title={title}
           status={null}
-          href={getEntityHref(previewEntityType, gate.work_item_id, flatHref)}
+          href={getEntityHref(previewEntityType, gate.work_item_id, gateProjectHref)}
           onClose={() => setShowPreview(false)}
         />
       )}

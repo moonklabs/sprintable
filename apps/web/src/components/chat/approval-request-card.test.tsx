@@ -1079,3 +1079,26 @@ describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (
     expect(container.querySelector('a[href="/gates/g-1"]')).toBeNull();
   });
 });
+
+
+// story #4253(까디르 codex · PO 09:45Z) — 채팅의 승인 요청 카드는 조직 전체가 보는 자리라 작업 항목 링크는 게이트 자기 프로젝트(gate.project_id).
+describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프로젝트(#4253)', () => {
+  async function openPreviewHrefs(g: ReturnType<typeof gate>) {
+    await mount(g);
+    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 제목'));
+    await act(async () => { titleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    return Array.from(document.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+  }
+
+  it('⭐게이트 project_id가 있으면 미리보기의 작업 항목 링크가 그 프로젝트', async () => {
+    const hrefs = await openPreviewHrefs(gate({ work_item_type: 'story', work_item_id: 'w-1', work_item_summary: { title: '스토리 제목', slug: null }, project_id: 'proj-C' }));
+    expect(hrefs).toContain('/board?story=w-1&p=proj-C');
+  });
+
+  it('게이트 project_id가 없으면 현재 p 폴백 — proj-C가 실리지 않는다', async () => {
+    const hrefs = await openPreviewHrefs(gate({ work_item_type: 'story', work_item_id: 'w-1', work_item_summary: { title: '스토리 제목', slug: null } }));
+    expect(hrefs.some((h) => h?.startsWith('/board?story=w-1'))).toBe(true);
+    expect(hrefs.some((h) => h?.includes('proj-C'))).toBe(false);
+  });
+});
