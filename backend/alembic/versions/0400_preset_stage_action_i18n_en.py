@@ -4,6 +4,11 @@
 그대로 두고, `stage_metadata[stage].action_i18n.en`을 더한다. en은 ko action의 도구·게이트·필드 이름(`doc_approval` · `loop_artifacts` ·
 `outcome_snapshot` · `claim` · `APPROVE/REJECT` 등 영문 토큰)을 전부 유지한다 — 가드: tests/test_4224_preset_action_i18n_realdb.py.
 대상은 org_id IS NULL(플랫폼 프리셋)이고 그 단계가 있을 때만 쓴다(없으면 no-op). 조직 커스텀 정의는 건드리지 않는다.
+
+까디르 QA(b8353dfab [P2]) — 나중 편집을 덮지 않는다:
+- upgrade는 `action_i18n`의 **`en` 키만** 넣는다(다른 로케일 키 보존 · 객체가 없거나 객체가 아니면 새 객체).
+- downgrade는 `en`이 **이 마이그레이션이 넣은 값과 같을 때만** 지운다(이후 손본 en · 다른 로케일 보존). 지워서 객체가 비면 `action_i18n` 키째 뺀다.
+가드: tests/test_4224_migration_0400_preserve_realdb.py.
 """
 from __future__ import annotations
 
@@ -87,9 +92,11 @@ def upgrade() -> None:
     for (key, stage), en in EN_ACTIONS.items():
         bind.execute(
             sa.text(
-                "UPDATE event_definitions "
-                "SET stage_metadata = jsonb_set(stage_metadata, CAST(:path AS text[]), jsonb_build_object('en', CAST(:en AS text)), true) "
-                "WHERE key = :key AND org_id IS NULL AND stage_metadata ? :stage"
+                "UPDATE event_definitions SET stage_metadata = jsonb_set(stage_metadata, CAST(:path AS text[]), "
+                "(CASE WHEN jsonb_typeof(stage_metadata -> :stage -> 'action_i18n') = 'object' "
+                "THEN stage_metadata -> :stage -> 'action_i18n' ELSE '{}'::jsonb END) "
+                "|| jsonb_build_object('en', CAST(:en AS text)), true) "
+                "WHERE key = :key AND org_id IS NULL AND jsonb_typeof(stage_metadata -> :stage) = 'object'"
             ),
             {"path": "{" + stage + ",action_i18n}", "en": en, "key": key, "stage": stage},
         )
@@ -97,11 +104,17 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    for (key, stage) in EN_ACTIONS:
+    for (key, stage), en in EN_ACTIONS.items():
         bind.execute(
             sa.text(
-                "UPDATE event_definitions SET stage_metadata = stage_metadata #- CAST(:path AS text[]) "
-                "WHERE key = :key AND org_id IS NULL AND stage_metadata ? :stage"
+                "UPDATE event_definitions SET stage_metadata = CASE "
+                "WHEN (stage_metadata -> :stage -> 'action_i18n') - 'en' = '{}'::jsonb "
+                "THEN stage_metadata #- CAST(:path AS text[]) "
+                "ELSE stage_metadata #- CAST(:en_path AS text[]) END "
+                "WHERE key = :key AND org_id IS NULL "
+                "AND jsonb_typeof(stage_metadata -> :stage -> 'action_i18n') = 'object' "
+                "AND stage_metadata -> :stage -> 'action_i18n' ->> 'en' = CAST(:en AS text)"
             ),
-            {"path": "{" + stage + ",action_i18n}", "key": key, "stage": stage},
+            {"path": "{" + stage + ",action_i18n}", "en_path": "{" + stage + ",action_i18n,en}",
+             "en": en, "key": key, "stage": stage},
         )

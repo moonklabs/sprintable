@@ -38,49 +38,32 @@ def missing_code_tokens(ko: str, en: str) -> list[str]:
     return [tok for tok in _ASCII_TOKEN.findall(ko) if tok.lower() not in low]
 
 
-def _seeded_platform_keys() -> set[str]:
-    """시드 마이그레이션이 만든 플랫폼 프리셋 key 집합 — 0400의 EN_ACTIONS가 그 목록이다(공유 DB엔 다른 테스트가 넣은 org_id NULL
-    테스트 정의가 섞여 있어 «org_id NULL 전부»로는 못 가른다). 새 플랫폼 프리셋은 시드에 action_i18n을 싣고 이 목록에 들어가야 한다."""
-    import importlib.util
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[1] / "alembic/versions/0400_preset_stage_action_i18n_en.py"
-    spec = importlib.util.spec_from_file_location("_mig_0400", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return {key for key, _stage in mod.EN_ACTIONS}
-
-
 async def _platform_stages():
+    """까디르 QA(b8353dfab [P2]) — 검사 대상을 0400 표가 아니라 **DB의 플랫폼 정의 전 단계**에서 직접 뽑는다(이후 마이그레이션이
+    `action_i18n.en` 없는 플랫폼 프리셋을 넣으면 RED). 거르는 규칙 = 프리셋 key(`preset.*`) + org_id NULL + 사이클형(payload stage enum ·
+    4202 짝 가드와 같은 판정). 신호형 프리셋은 stage_metadata가 `{}`라 단계가 없다."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    keys = sorted(_seeded_platform_keys())
     engine = create_async_engine(_async_url())
     try:
         async with engine.connect() as conn:
             rows = (await conn.execute(text(
                 "SELECT key, stage_metadata FROM event_definitions "
-                "WHERE org_id IS NULL AND key = ANY(:keys) AND stage_metadata IS NOT NULL"
-            ), {"keys": keys})).all()
+                "WHERE org_id IS NULL AND key LIKE 'preset.%' "
+                "AND jsonb_typeof(payload_schema->'properties'->'stage'->'enum') = 'array'"
+            ))).all()
     finally:
         await engine.dispose()
-    return [(key, stage, meta) for key, sm in rows for stage, meta in sm.items() if isinstance(meta, dict)]
+    return [(key, stage, meta) for key, sm in rows for stage, meta in (sm or {}).items() if isinstance(meta, dict)]
 
 
-def test_token_check_positive_and_negative_control():
-    assert missing_code_tokens("brief를 바탕으로 loop_artifacts로 등록", "Register variants from the brief as loop_artifacts") == []
-    assert missing_code_tokens("doc_approval 게이트를 통과", "get it approved") == ["doc_approval"]
-    assert missing_code_tokens("AC 체크리스트 검증 후 APPROVE/REJECT", "Verify the AC checklist, then approve") == ["APPROVE/REJECT"]
-
-
-async def test_every_platform_stage_has_en_agent_action_keeping_code_tokens():
-    stages = await _platform_stages()
-    assert len(stages) >= 59, len(stages)  # 하한 — 시드가 사라져 공허 통과하지 않게
+def find_problems(stages) -> list[tuple[str, str, str]]:
     problems = []
     for key, stage, meta in stages:
         ko = meta.get("action") or ""
-        en = ((meta.get("action_i18n") or {}).get("en")) or ""
+        i18n = meta.get("action_i18n")
+        en = (i18n.get("en") if isinstance(i18n, dict) else None) or ""
         if not en:
             problems.append((key, stage, "action_i18n.en 없음"))
             continue
@@ -89,4 +72,31 @@ async def test_every_platform_stage_has_en_agent_action_keeping_code_tokens():
         missing = missing_code_tokens(ko, en)
         if missing:
             problems.append((key, stage, f"en에 빠진 토큰 {missing}"))
+    return problems
+
+
+def test_token_check_positive_and_negative_control():
+    assert missing_code_tokens("brief를 바탕으로 loop_artifacts로 등록", "Register variants from the brief as loop_artifacts") == []
+    assert missing_code_tokens("doc_approval 게이트를 통과", "get it approved") == ["doc_approval"]
+    assert missing_code_tokens("AC 체크리스트 검증 후 APPROVE/REJECT", "Verify the AC checklist, then approve") == ["APPROVE/REJECT"]
+
+
+def test_find_problems_negative_controls():
+    ok = ("preset.x", "s1", {"action": "doc_approval 게이트 통과", "action_i18n": {"en": "Pass the doc_approval gate"}})
+    assert find_problems([ok]) == []
+    # 새 프리셋 단계가 en 없이 들어옴(키 없음 · 객체 없음 · 객체 아님) → RED
+    assert find_problems([("preset.new", "s1", {"action": "초안 작성"})]) == [("preset.new", "s1", "action_i18n.en 없음")]
+    assert find_problems([("preset.new", "s1", {"action": "초안", "action_i18n": {"ko": "초안"}})])[0][2] == "action_i18n.en 없음"
+    assert find_problems([("preset.new", "s1", {"action": "초안", "action_i18n": "x"})])[0][2] == "action_i18n.en 없음"
+    assert find_problems([("preset.x", "s1", {"action": "초안", "action_i18n": {"en": "초안"}})])[0][2] == "en에 한글"
+
+
+async def test_every_platform_stage_has_en_agent_action_keeping_code_tokens():
+    stages = await _platform_stages()
+    assert len(stages) >= 59, len(stages)  # 하한 — 시드가 사라져 공허 통과하지 않게
+    # 양성 대조 — 0400 표 밖에서 뽑히는지(대상이 DB 전수): 알려진 사이클형 프리셋 둘이 실제로 잡힘.
+    keys = {k for k, _s, _m in stages}
+    assert {"preset.workflow.loop_agency", "preset.marketing.newsletter"} <= keys
+    assert "preset.gate.verdict" not in keys  # 신호형(단계 없음)
+    problems = find_problems(stages)
     assert problems == [], problems
