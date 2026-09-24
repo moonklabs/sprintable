@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { withProjectParam } from '@/lib/with-project-param';
 import { useRouter } from 'next/navigation';
 import {
   Bell,
@@ -56,20 +57,26 @@ export interface EventNotification {
   } | null;
   read_at: string | null;
   created_at: string;
+  // story #4244 — 목록(GET /api/v2/event-notifications) 항목만 싣는다: 대상(source_entity)의 프로젝트와 문서 slug(BE 배치 해소).
+  // `project_id`(events 행)는 수신자 멤버 행의 프로젝트라 링크에 쓰지 않는다. SSE로 막 들어온 항목엔 없다(→ 주소 그대로).
+  target_project_id?: string | null;
+  target_doc_slug?: string | null;
 }
 
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
 // 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
 export function getEntityHref(
-  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload'>,
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'>,
 ): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
+  // story #4244 — 링크는 대상 자기 프로젝트(target_project_id)를 싣는다(모르면 주소 그대로 — 틀린 p를 만들지 않는다).
+  const p = notification.target_project_id ?? null;
   switch (source_entity_type) {
     case 'story':
-      return `/board?story=${source_entity_id}`;
+      return withProjectParam(`/board?story=${source_entity_id}`, p);
     case 'task':
-      return `/board?task_id=${source_entity_id}`;
+      return withProjectParam(`/board?task_id=${source_entity_id}`, p);
     case 'epic':
       // ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — 이 딥링크는 story #2956이 지운
       // RENAMED_RESOURCES(epics→goals) 301에 얹혀 살고 있었다: `/epics/{id}`가 bare 승격
@@ -77,15 +84,18 @@ export function getEntityHref(
       // `/{ws}/{proj}/goals/{id}`로 옮겨줬다 — 신 `[ws]/[proj]/epics/`엔 목록(`page.tsx`)만
       // 있고 `[id]` 서브라우트가 없어(#3377 스코프에 상세 페이지 없음), rename 제거로
       // 404가 됐다. Goal=Epic이라 `goals/[id]`가 이미 에픽 상세 정본 — 직접 가리킨다.
-      return `/goals/${source_entity_id}`;
+      return withProjectParam(`/goals/${source_entity_id}`, p);
     case 'sprint':
       // sprints-client.tsx에서 id 파라미터 처리 추가됨
-      return `/sprints?id=${source_entity_id}`;
+      return withProjectParam(`/sprints?id=${source_entity_id}`, p);
     case 'doc': {
-      // docs-shell-client.tsx는 slug 파라미터 사용. payload에 slug가 있으면 deep link
-      const slug = notification.payload?.slug as string | undefined;
-      return slug ? `/docs/${slug}` : `/docs`;
+      // docs-shell-client.tsx는 slug 파라미터 사용. story #4244 — BE가 해소한 slug 우선, 없으면 payload slug(옛 경로).
+      const slug = notification.target_doc_slug ?? (notification.payload?.slug as string | undefined);
+      return withProjectParam(slug ? `/docs/${slug}` : `/docs`, p);
     }
+    // story #4244 — 게이트 알림(approval_delivery의 source_entity_type='gate')도 게이트 상세로 · 게이트 대상의 프로젝트.
+    case 'gate':
+      return withProjectParam(`/gates/${source_entity_id}`, p);
     default:
       return null;
   }

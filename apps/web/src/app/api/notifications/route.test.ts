@@ -23,7 +23,7 @@ describe('/api/notifications (직접 repo)', () => {
     Object.values(h).forEach((m) => m.mockReset());
     h.getAuthContext.mockResolvedValue(agent());
     h.createNotificationRepository.mockResolvedValue({ list: h.list, markRead: h.markRead, markAllRead: h.markAllRead });
-    h.attachHrefs.mockImplementation(async (_c: unknown, items: unknown[]) => items);
+    h.attachHrefs.mockImplementation((items: unknown[]) => items);
   });
 
   it('GET: 401 when unauthenticated', async () => {

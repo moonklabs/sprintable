@@ -79,46 +79,16 @@ def _notif_repo_read(
     return NotificationRepository(session, org_id)
 
 
-# story #4244 — reference_type별 대상 프로젝트 해소(종류당 IN 쿼리 1개 · N+1 0). 게이트는 대상 work item의 프로젝트(#4241 조직 전체
-# 결재함과 같은 해소기 — gate_service.resolve_gate_project_ids_batch), 나머지 work item은 resolve_work_item_project_ids_batch, 대화는
-# Conversation.project_id. 문서는 slug도 싣는다. 조직 단위(team_member)·모르는 종류는 None.
-_WORK_ITEM_REFERENCE_TYPES = frozenset({"story", "task", "doc", "visual_artifact", "epic", "sprint"})
-
-
 async def _enrich_notification_targets(db: AsyncSession, org_id: uuid.UUID, data: list[NotificationListItem]) -> None:
-    from app.models.conversation import Conversation
-    from app.models.doc import Doc
-    from app.models.gate import Gate
-    from app.services.gate_service import resolve_gate_project_ids_batch, resolve_work_item_project_ids_batch
+    """story #4244 — 목록 항목에 대상의 프로젝트 · 문서 slug(app.services.notification_targets — 종 알림 목록과 같은 해소기)."""
+    from app.services.notification_targets import resolve_reference_targets
 
-    refs = [(n.reference_type, n.reference_id) for n in data if n.reference_type and n.reference_id]
-    if not refs:
-        return
-    project: dict[tuple[str, uuid.UUID], uuid.UUID | None] = await resolve_work_item_project_ids_batch(
-        db, org_id, ((t, i) for t, i in refs if t in _WORK_ITEM_REFERENCE_TYPES),
-    )
-    gate_ids = {i for t, i in refs if t == "gate"}
-    if gate_ids:
-        gates = (await db.execute(select(Gate).where(Gate.id.in_(gate_ids), Gate.org_id == org_id))).scalars().all()
-        project.update({("gate", gid): pid for gid, pid in (await resolve_gate_project_ids_batch(db, org_id, gates)).items()})
-    conv_ids = {i for t, i in refs if t == "conversation"}
-    if conv_ids:
-        rows = (await db.execute(
-            select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id)
-        )).all()
-        project.update({("conversation", cid): pid for cid, pid in rows})
-    doc_ids = {i for t, i in refs if t == "doc"}
-    slug: dict[uuid.UUID, str] = {}
-    if doc_ids:
-        rows = (await db.execute(
-            select(Doc.id, Doc.slug).where(Doc.id.in_(doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None))
-        )).all()
-        slug = {did: s for did, s in rows}
+    targets = await resolve_reference_targets(db, org_id, ((n.reference_type, n.reference_id) for n in data))
     for n in data:
-        if n.reference_type and n.reference_id:
-            n.target_project_id = project.get((n.reference_type, n.reference_id))
-            if n.reference_type == "doc":
-                n.target_doc_slug = slug.get(n.reference_id)
+        tgt = targets.get((n.reference_type, n.reference_id)) if n.reference_type and n.reference_id else None
+        if tgt is not None:
+            n.target_project_id = tgt.project_id
+            n.target_doc_slug = tgt.doc_slug
 
 
 @router.get("/notifications")

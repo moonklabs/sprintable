@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     // 어긋나지 않는다(#2195 스코프 확認). 페이지네이션 UI(inbox 기본 탭)는 typeFilter를
     // 안 쓴다.
     const filtered = typeFilter ? items.filter((n) => n.type === typeFilter) : items;
-    const withHrefs = await attachNotificationHrefs(undefined, filtered);
+    const withHrefs = attachNotificationHrefs(filtered);
     const unreadCount = filtered.filter((n) => !n.is_read).length;
     return apiSuccess(withHrefs, { unreadCount, hasMore, nextCursor });
   } catch (err: unknown) {

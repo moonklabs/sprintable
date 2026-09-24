@@ -133,6 +133,49 @@ async def test_realdb_notification_list_carries_target_project_and_doc_slug():
 
 @_REAL_DB_SKIP
 @pytest.mark.anyio
+async def test_realdb_event_notification_list_carries_target_project_not_recipient_project():
+    """종 알림(events) — events.project_id는 수신자 멤버 행의 프로젝트(대상과 다를 수 있음)라 링크에 쓰면 안 된다. 목록 항목의
+    target_project_id는 대상(source_entity) 자신의 프로젝트 · 문서는 slug도."""
+    from app.main import app
+    from app.models.event import Event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_users(s)
+            org_id, a_id = seeded["org_id"], seeded["user_a_id"]
+            pid, t = await _seed_targets(s, seeded)
+            recipient_project = seeded["project_id"]  # 수신자 멤버 행의 프로젝트(대상 프로젝트 D와 다름)
+            assert recipient_project != pid
+            ev = {}
+            for key, stype, sid in (("story", "story", t["story"].id), ("doc", "doc", t["doc"].id), ("gate", "gate", t["gate"].id),
+                                    ("epic", "epic", t["epic"].id), ("agent", "agent", uuid.uuid4())):
+                e = Event(id=uuid.uuid4(), org_id=org_id, project_id=recipient_project, event_type="dispatched",
+                          source_entity_type=stype, source_entity_id=sid, recipient_id=seeded["org_member_a_id"],
+                          recipient_type="human", payload={}, status="delivered")
+                s.add(e)
+                ev[key] = e.id
+            await s.commit()
+
+        await _setup_app(app, Session, org_id, a_id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/event-notifications", params={"limit": 50})
+            assert resp.status_code == 200, resp.text
+            by_id = {row["id"]: row for row in resp.json()}
+            got = {k: by_id[str(i)]["target_project_id"] for k, i in ev.items()}
+            assert got == {"story": str(pid), "doc": str(pid), "gate": str(pid), "epic": str(pid), "agent": None}
+            assert by_id[str(ev["doc"])]["target_doc_slug"] == t["doc"].slug
+            assert all(by_id[str(i)]["project_id"] == str(recipient_project) for i in ev.values())  # 원래 필드는 그대로(수신자 쪽)
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
 async def test_realdb_batch_project_resolver_matches_single_per_type():
     from app.services.gate_service import resolve_work_item_project_id, resolve_work_item_project_ids_batch
 
