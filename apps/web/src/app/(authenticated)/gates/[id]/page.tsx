@@ -211,9 +211,9 @@ export default function GateDetailPage() {
   const targetLink = isDocGate && gate?.work_item_summary?.slug
     ? { href: flatHref(`/docs/${gate.work_item_summary.slug}`), labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
-    ? { href: `/artifacts/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetArtifact' as const }
+    ? { href: flatHref(`/artifacts/${gate.work_item_id}`), labelKey: 'gateDetailViewTargetArtifact' as const }
     : isLoopDecisionGate && gate?.work_item_id
-    ? { href: `/loops/${gate.work_item_id}`, labelKey: 'gateDetailViewTargetLoop' as const }
+    ? { href: flatHref(`/loops/${gate.work_item_id}`), labelKey: 'gateDetailViewTargetLoop' as const }
     : null;
   const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
   // story #2091(P0) — needsAction은 "이 게이트가 사람의 판단을 필요로 하는가"만 답한다(gate 자체의

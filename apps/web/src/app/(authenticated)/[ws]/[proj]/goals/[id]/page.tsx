@@ -26,6 +26,7 @@ import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 import { GoalTrustRail } from '@/components/goals/goal-trust-rail';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -229,6 +230,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function EpicDetailPage() {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   const t = useTranslations('goals');
   const tc = useTranslations('common');
   // story #3878(§⑤ 낱말 드리프트, PO 재실측 2026-09-14 — 이 페이지가 실 클릭 플로우의
@@ -571,7 +573,7 @@ export default function EpicDetailPage() {
                       <button
                         key={story.id}
                         type="button"
-                        onClick={() => router.push(`/board?story=${story.id}`)}
+                        onClick={() => router.push(flatHref(`/board?story=${story.id}`))}
                         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
                       >
                         <span className="flex-1 truncate text-sm">{story.title}</span>

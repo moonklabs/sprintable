@@ -25,6 +25,7 @@ import {
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface BridgedStory {
   id: string;
@@ -121,6 +122,7 @@ interface StandupClientProps {
 // story a539c649 S3a: projectId 는 이제 서버 layout(headers() 경유 resolve 결과)이 prop 으로
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
 export default function StandupPage({ projectId, embedded = false }: StandupClientProps) {
+  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   const t = useTranslations('standup');
   const tc = useTranslations('common');
   // story #3878(§⑤ 낱말 드리프트) — story.status(canonical slug)를 t() 없이 그대로
@@ -809,7 +811,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                 // 프로젝트 있으나 활성 스프린트 0: 빈 selector가 "없음"으로 오인되던 것 — 안내 + 활성화 CTA.
                                 <div className="space-y-1.5">
                                   <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoSprint')}</p>
-                                  <Link href="/sprints" className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
+                                  <Link href={flatHref('/sprints')} className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
                                 </div>
                               ) : (
                                 <p className="text-sm text-muted-foreground">{t('noSprintStories')}</p>

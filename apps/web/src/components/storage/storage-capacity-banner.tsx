@@ -148,7 +148,7 @@ export function StorageCapacityBanner() {
 
       {/* CTA — 파일 관리는 block 상태에서도 primary(red-on-red 금지) */}
       <div className="col-start-2 mt-2 flex flex-wrap gap-2">
-        <Button size="sm" variant="default" onClick={() => router.push('/storage')}>
+        <Button size="sm" variant="default" onClick={() => router.push(flatHref('/storage'))}>
           {t('capacityManageFiles')}
         </Button>
         {showUpgrade && (
