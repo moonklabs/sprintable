@@ -7,9 +7,9 @@
   실제로 승인한 사람 ∪ 요청 stage에 바인딩된 에이전트. 이벤트를 낸 쪽과 같은 함수가 해소한다.
 - 레시피는 다음 단계로 넘어가지 않는다(이 이벤트는 레시피 정의의 stage 이벤트가 아니다).
 
-Revision ID: 0407
+Revision ID: 0405
 Revises: 0404
-Create Date: 2026-09-24 — 번호는 착지 순(PO 08:51Z · 사다리): 앞 PR(0405 = 4260 · 0406 = 4249)이 먼저 들어가면 rebase 때
+Create Date: 2026-09-24 — 번호는 착지 순(PO 08:51Z · 사다리): 4260 = 0406 · 4249 = 0407이 이 뒤(PO 09:33Z 재배치 · sibling 가드 회피). 순서가 바뀌면 rebase 때
 down_revision을 그 뒤로 옮기고 번호를 고친다.
 """
 import uuid
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 
-revision = "0407"
+revision = "0405"
 down_revision = "0404"
 branch_labels = None
 depends_on = None
