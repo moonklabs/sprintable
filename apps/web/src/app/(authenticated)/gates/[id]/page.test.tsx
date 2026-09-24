@@ -1069,6 +1069,17 @@ describe('GateDetailPage — story #3128 대상 실물 진입 경로', () => {
     expect(link?.getAttribute('href')).toBe('/loops/loop-7');
   });
 
+  // story #4231 4차 B(까디르 codex 01a0d3ad ②) — 다른 프로젝트 게이트의 루프 링크는 현재 p가 아니라 게이트 자기 프로젝트(gate.project_id).
+  // 예전 픽스처엔 프로젝트가 없어 폴백만 재서, 루프 링크를 현재 p(flatHref)로 바꿔도 초록이었다.
+  it('⭐다른 프로젝트 loop_decision — /loops/{id}?p=게이트 프로젝트', async () => {
+    await mount(gate({
+      gate_type: 'loop_decision', work_item_type: 'loop', work_item_id: 'loop-8', project_id: 'proj-GATE',
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+    }));
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.cage.gateDetailViewTargetLoop);
+    expect(link?.getAttribute('href')).toBe('/loops/loop-8?p=proj-GATE');
+  });
+
   it('workflow_config_publish는 이번에도 대상 링크가 없다(실 뷰어 부재 — 억지 진입점 금지, #2118 AC④)', async () => {
     await mount(gate({
       gate_type: 'workflow_config_publish', work_item_type: 'wf_line_version', work_item_id: 'wf-9',
