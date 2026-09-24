@@ -49,6 +49,10 @@ _BACKOFF_BASE_SECONDS = 60
 FAILURE_KIND_CONNECTION = "connection"
 FAILURE_KIND_NEEDS_CHECK = "needs_check"
 FAILURE_KIND_TRANSIENT = "transient"
+# story #4262(PO 13:51Z 안 A · 유나 §11-5 개정) — «확실히 안 나감»: 어댑터를 부르기 전에 막혔거나 보낼 수 없는 채널이라 밖으로
+# 아무것도 안 나갔다. 곧바로 dead_letter · 자동 재시도 0(다시 해도 같은 결과) · 화면은 «알 수 없어요»가 아니라 «자동 재시도를
+# 멈췄어요». 전 발행 종류로 넓히는 것은 4264.
+FAILURE_KIND_NOT_SENT = "not_sent"
 # story #3953(블루프린트 §1-5) — 위 3값과 같은 열(failure_kind, DB CHECK 無·psql \d
 # publication_commands 실측 확認)이지만 유나 §11-5의 원래 3분류엔 없다 — 이건 실패가
 # 아니라 조직 owner의 의도적 정지다("재시도해도 되는지 모른다"류 불확실성과 다른
@@ -104,6 +108,9 @@ _CONNECTION_BLOCKED_CODES = frozenset({
 # needs_check(사람 재시도, AC5)로 바로 보낸다.
 _NEEDS_CHECK_CODES = frozenset({"CHANNEL_PUBLISH_IN_PROGRESS", "CHANNEL_IMAGE_CONTAINER_FAILED"})
 _TRANSIENT_CODES = frozenset({"CHANNEL_PUBLISH_PROVIDER_ERROR", "CHANNEL_RATE_LIMITED"})
+# story #4262 — 뉴스레터 발송 실행기만 내는 두 코드(newsletter_send_execution.py · grep 확인). 채널 게시와 겹치는
+# STIBEE_PLAN_RESTRICTED는 4264에서 부류로 다룬다.
+_NOT_SENT_CODES = frozenset({"NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED"})
 # story #3536(PO 確定 2026-09-06) — ChannelPublishProviderError.provider_code가 이
 # 집합에 있으면(어댑터가 구조적으로 실어 준 코드, 문자열 매칭 아님 — instagram_
 # publish.py::create_media_container가 ThreadsPublishError("INSTAGRAM_IMAGE_
@@ -160,6 +167,8 @@ def classify_failure_kind(error_code: str | None) -> str:
         return FAILURE_KIND_TRANSIENT
     if error_code in _NEEDS_CHECK_CODES:
         return FAILURE_KIND_NEEDS_CHECK
+    if error_code in _NOT_SENT_CODES:
+        return FAILURE_KIND_NOT_SENT
     return FAILURE_KIND_NEEDS_CHECK
 
 
@@ -1026,6 +1035,14 @@ async def apply_command_failure(
         # 자리에 얹었었다(CHANNEL_RATE_LIMITED만 제외). story #3646(BE·결함,
         # 페드루 PO 確定 2026-09-07, dev 실측 — PO Test Org IG sandbox 502
         # 발행 실패가 「재인증 필요」로 잘못 승격) — #3598 AC6 자신의 주석이 이미
+    if failure_kind == FAILURE_KIND_NOT_SENT:
+        # story #4262 — 확실히 안 나갔고 다시 해도 같다 — 백오프 없이 곧바로 사람 재시도(연결을 고친 뒤)로.
+        command.attempt_count += 1
+        command.status = "dead_letter"
+        command.dead_letter_at = now
+        command.next_attempt_at = None
+        return
+
         # "이 transient 분기엔 인증/권한 계열이 애초에 못 오고, 남는 error_code는
         # CHANNEL_PUBLISH_PROVIDER_ERROR뿐"이라고 못박아 놓고도 그 유일한 코드를
         # 승격 대상에 남겨 뒀다 — 결과적으로 «5xx/네트워크/타임아웃(=이 TRANSIENT
