@@ -216,9 +216,9 @@ async def test_next_stage_only_by_the_current_stage_member_and_never_skipping():
         await _publish(Session, w, "revise", as_member="editor")
         d = await _rejected(Session, w, "review", as_member="writer")  # 되돌아가기
         assert (d["code"], d["current_stage"], d["next_stage"]) == ("STAGE_NOT_NEXT", "revise", "publish")
-        # 첫 stage로 되돌아가는 발행은 검사 앞의 중복 방지(4075)가 기존 첫 발행을 돌려준다 — 새 이벤트 0.
-        again = await _publish(Session, w, "draft", as_member="writer")
-        assert again["deduplicated"] is True and await _stage_count(Session, w, "draft") == 1
+        # 첫 stage로 되돌아가는 발행은 이 검사 앞의 «레시피는 스토리당 1회»(4261 · develop)가 409로 막는다 — 새 이벤트 0.
+        d = await _rejected(Session, w, "draft", as_member="writer")
+        assert (d["status"], d["code"], d["current_stage"]) == (409, "RECIPE_ALREADY_STARTED", "revise")
     finally:
         await engine.dispose()
 
@@ -343,7 +343,8 @@ async def test_same_stage_republish_by_its_member_or_the_gate_requester_only():
     try:
         w = await _world(Session, bindings={"draft": "writer", "review": "analyst", "revise": "editor", "measure": "analyst"})
         await _publish(Session, w, "draft", as_member="writer")
-        await _publish(Session, w, "draft", as_member="writer")  # 첫 stage 재발행은 중복 방지(기존 발행을 돌려준다)
+        d = await _rejected(Session, w, "draft", as_member="writer")  # 첫 stage 재발행은 «레시피는 스토리당 1회»(4261)가 409로
+        assert (d["status"], d["code"]) == (409, "RECIPE_ALREADY_STARTED")
         await _publish(Session, w, "review", as_member="writer")  # 게이트 요청자 = writer(review 담당은 analyst)
         await _set_gate(Session, w, "rejected")
         d = await _rejected(Session, w, "review", as_member="outsider")
