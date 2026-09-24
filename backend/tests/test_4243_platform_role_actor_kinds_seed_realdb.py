@@ -16,27 +16,27 @@ pytestmark = [
     pytest.mark.anyio,
 ]
 
-# PO 판단(2026-09-24 · 까디르 QA P1) — 사람 완료 경로가 없는 역할은 human/either로 선언하지 않는다. 워크플로우 8종은 지금
-# 모든 역할에 경로가 없어 agent(either 복원은 story 4249).
+# PO 확정표(4243 첫 판 · commit 659287e20). 0403이 «사람 완료 경로 없음»으로 agent까지 줄였다가(까디르 QA P1), story 4249가 그
+# 경로(«이 단계 완료» · «다음 단계 시작»)를 만들어 0407이 되돌렸다.
 _EXPECTED_WORKFLOW = {
     "preset.workflow.agent_solo": {"Agent": "agent"},
-    "preset.workflow.solo": {"Worker": "agent"},
-    "preset.workflow.kanban": {"Member": "agent"},
-    "preset.workflow.kanban_simple": {"Any": "agent", "Dev": "agent", "Lead": "agent"},
-    "preset.workflow.scrum_3step": {"PO": "agent", "Dev": "agent", "QA": "agent"},
-    "preset.workflow.two_step": {"Maker": "agent", "Reviewer": "agent"},
-    "preset.workflow.three_step": {"Executor": "agent", "Reviewer": "agent", "Approver": "agent"},
-    "preset.workflow.loop_agency": {"Human": "agent", "PO": "agent", "Agent": "agent", "Any": "agent"},
+    "preset.workflow.solo": {"Worker": "either"},
+    "preset.workflow.kanban": {"Member": "either"},
+    "preset.workflow.kanban_simple": {"Any": "either", "Dev": "either", "Lead": "either"},
+    "preset.workflow.scrum_3step": {"PO": "either", "Dev": "either", "QA": "either"},
+    "preset.workflow.two_step": {"Maker": "either", "Reviewer": "either"},
+    "preset.workflow.three_step": {"Executor": "either", "Reviewer": "either", "Approver": "either"},
+    "preset.workflow.loop_agency": {"Human": "human", "PO": "either", "Agent": "agent", "Any": "either"},
 }
 
-# 사람이 stage를 끝낼 화면 경로 = 레시피 게이트 승인(recipe_gate_hooks가 게이트를 열고 결재함에서 승인) 또는 서버가 완료를 잇는 승인
-# 자리(`approval.surface = draft_gate` — 블로그 초안 게이트 승인 → 서버 발행 → 다음 stage, 4572). `doc_approval`은 지금 표시용 선언이라
-# (레시피 stage를 잇는 훅 없음) 경로가 아니다.
-_STAGE_COMPLETING_SURFACES = {"draft_gate"}
 
+def _has_human_completion_path(key: str, meta: dict, payload_schema: dict, stage: str) -> bool:
+    """story #4249 — 규칙 사본을 두지 않고 엔드포인트 · 적용 창과 같은 함수를 읽는다(까디르 P3)."""
+    from types import SimpleNamespace
 
-def _has_human_completion_path(stage_meta: dict) -> bool:
-    return bool(stage_meta.get("gate")) or (stage_meta.get("approval") or {}).get("surface") in _STAGE_COMPLETING_SURFACES
+    from app.services.recipe_stage_completion import human_completion_path
+
+    return human_completion_path(SimpleNamespace(key=key, stage_metadata=meta, payload_schema=payload_schema), stage)
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ async def _platform_rows():
     try:
         async with engine.connect() as conn:
             return (await conn.execute(text(
-                "SELECT key, stage_metadata, role_actor_kinds FROM event_definitions "
+                "SELECT key, stage_metadata, role_actor_kinds, payload_schema FROM event_definitions "
                 "WHERE org_id IS NULL AND key LIKE 'preset.%' AND stage_metadata <> '{}'::jsonb"
             ))).all()
     finally:
@@ -69,7 +69,7 @@ async def test_every_platform_recipe_declares_a_kind_for_every_role():
 
     rows = await _platform_rows()
     missing = []
-    for key, meta, kinds in rows:
+    for key, meta, kinds, _schema in rows:
         validate_role_actor_kinds(meta, kinds)  # 선언이 모양 검증도 통과(닫힌 어휘 · 실재하는 role)
         roles = {m.get("role") for m in (meta or {}).values() if isinstance(m, dict) and m.get("role")}
         missing += [f"{key}:{role}" for role in sorted(roles) if role not in (kinds or {})]
@@ -80,14 +80,25 @@ async def test_human_or_either_roles_have_a_human_completion_path_on_every_stage
     """클래스 가드(까디르 QA P1 · PO) — human/either로 선언한 역할은 그 역할의 모든 stage에 사람 완료 경로가 있어야 한다. 경로 없는
     역할을 사람 쪽으로 선언하면 이벤트는 가지만 사람이 끝낼 방법이 없다(«라우팅만 참»)."""
     missing = []
-    for key, meta, kinds in await _platform_rows():
+    for key, meta, kinds, schema in await _platform_rows():
         for role, kind in (kinds or {}).items():
             if kind not in ("human", "either"):
                 continue
             for stage, stage_meta in (meta or {}).items():
-                if isinstance(stage_meta, dict) and stage_meta.get("role") == role and not _has_human_completion_path(stage_meta):
+                if isinstance(stage_meta, dict) and stage_meta.get("role") == role and not _has_human_completion_path(key, meta, schema, stage):
                     missing.append(f"{key}:{role}({kind}):{stage}")
     assert missing == [], f"사람 완료 경로 없이 human/either로 선언된 역할 stage: {missing}"
+
+
+def _load_migration(pattern: str):
+    import importlib.util
+    from pathlib import Path
+
+    path = next((Path(__file__).resolve().parents[1] / "alembic" / "versions").glob(pattern))
+    spec = importlib.util.spec_from_file_location(f"_m_{path.stem}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 async def test_migration_0403_is_idempotent_and_reversible():
@@ -101,10 +112,10 @@ async def test_migration_0403_is_idempotent_and_reversible():
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
-    path = next((Path(__file__).resolve().parents[1] / "alembic" / "versions").glob("0403_*.py"))
-    spec = importlib.util.spec_from_file_location("_m0403", path)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    m = _load_migration("0403_*.py")
+    # story #4249 — 0407이 0403 값을 PO 확정표로 되돌려 둔다. 0403의 downgrade는 자기 값인 행만 걷으므로, 트랜잭션 안에서 0407을
+    # 먼저 내려 0403 직후 상태에서 잰다(그 뒤 rollback이라 공유 DB는 그대로).
+    m_restore = _load_migration("*_workflow_preset_role_actor_kinds_either_restore.py")
 
     url = _REAL_DB_URL
     for prefix in ("postgresql+asyncpg://", "postgresql://"):
@@ -130,6 +141,7 @@ async def test_migration_0403_is_idempotent_and_reversible():
                 def _state():
                     return conn.execute(_STATE_SQL).one()
 
+                _run(m_restore.downgrade)
                 applied = _state()
                 assert applied[1] is not None and applied[2] == {"surface": "doc_approval"}
                 _run(m.upgrade)
@@ -154,7 +166,7 @@ async def test_migration_0403_is_idempotent_and_reversible():
 
 
 async def test_workflow_presets_carry_the_po_confirmed_table():
-    by_key = {key: kinds for key, _meta, kinds in await _platform_rows()}
+    by_key = {key: kinds for key, _meta, kinds, _schema in await _platform_rows()}
     for key, expected in _EXPECTED_WORKFLOW.items():
         assert by_key.get(key) == expected, key
 
@@ -185,3 +197,48 @@ async def test_loop_agency_brief_declares_document_approval_surface_and_validate
     assert meta["brief_doc_approval"]["approval"] == {"surface": "doc_approval"}
     assert "gate" not in meta["brief_doc_approval"]
     assert [s for s, m in meta.items() if "approval" in m] == ["brief_doc_approval"]
+
+
+async def test_either_restore_migration_is_idempotent_and_reversible():
+    """story #4249 — 0407(either 복원): 이미 적용된 DB에 다시 돌려도 무변 · downgrade는 0403 값(agent)으로 · 다시 올리면 제자리.
+    공유 migrated DB라 한 트랜잭션 + rollback(끝 상태를 일부러 내린 쪽에 둬 커밋 뮤테이션도 RED)."""
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    m = _load_migration("*_workflow_preset_role_actor_kinds_either_restore.py")
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+psycopg2://" + url[len(prefix):]
+            break
+    engine = sa.create_engine(url)
+    state_sql = sa.text(
+        "SELECT version, role_actor_kinds FROM event_definitions WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
+    )
+    try:
+        with engine.connect() as conn:
+            before = tuple(conn.execute(state_sql).one())
+            conn.rollback()
+        assert before[1] == _EXPECTED_WORKFLOW["preset.workflow.loop_agency"]
+        with engine.connect() as conn:
+            transaction = conn.begin()
+            try:
+                def _run(fn):
+                    with Operations.context(MigrationContext.configure(conn)):
+                        fn()
+
+                _run(m.upgrade)
+                assert tuple(conn.execute(state_sql).one()) == before, "이미 적용된 DB에 다시 돌리면 무변이어야 한다"
+                _run(m.downgrade)
+                down = conn.execute(state_sql).one()
+                assert down[1] == m.NARROWED["preset.workflow.loop_agency"] and down[0] == before[0] + 1
+                _run(m.upgrade)
+                assert conn.execute(state_sql).one()[1] == before[1]
+                _run(m.downgrade)
+            finally:
+                transaction.rollback()
+        with engine.connect() as conn:
+            assert tuple(conn.execute(state_sql).one()) == before
+    finally:
+        engine.dispose()

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,13 +11,14 @@ import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 import { gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
 import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
-import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
 // INTERNAL_METRICS와 동일 닫힌 집합(outcomeLoop.metric_{slug} 낱말이 실존하는 metric
@@ -206,7 +208,8 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   const tHypotheses = useTranslations('hypotheses');
   const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
-  const { currentMemberType, role, orgId } = useDashboardContext();
+  const { currentMemberType, role, orgId, currentTeamMemberId } = useDashboardContext();
+  const flatHref = useFlatHref();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
   // (오버라이드 미설정) 아래에서 canonical i18n(STORY_STATUS_KEY_MAP→tBoard)으로 폴백한다 —
   // kanban-board.tsx 등 기존 소비처와 동일 3단 폴백(org 커스텀 → canonical i18n → 원시 slug).
@@ -410,6 +413,25 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     );
   const blocks = renderBlockTemplate(localizedTemplate, payload, refsForTemplate, labels, translations);
 
+  // story #4249(유나 design ⑥) — 레시피 stage 카드는 그 stage 담당(발행 시점 바인딩 · refs.stage_assignee)이 보는 사람일 때만
+  // 그 스토리로 가는 링크 하나. 카드가 아직 현재 단계인지는 여기서 모르므로 행동을 약속하지 않는 «스토리 보기»다(«스토리에서
+  // 완료하기»는 현재 단계를 알 수 있을 때만 — 지난 카드에 «완료하기»가 남으면 거짓).
+  const stageAssignee = refs?.['stage_assignee'];
+  const storyId = payload['work_item_type'] === 'story' && typeof payload['work_item_id'] === 'string' ? payload['work_item_id'] : null;
+  // PO 4623 리뷰 — 채팅은 조직 전체가 보는 자리라 «항목 자기 프로젝트»(이벤트가 가진 프로젝트 · refs → payload)를 싣고, 모를
+  // 때만 보는 사람의 현재 프로젝트로 폴백한다.
+  const eventProjectId = typeof refs?.['project_id'] === 'string'
+    ? refs['project_id'] as string
+    : typeof payload['project_id'] === 'string' ? payload['project_id'] : null;
+  // 유나 10:32Z — 프로젝트를 고르는 함수 자체를 `getEntityHref`에 넘긴다. story 주소가 이미 `?p=`를 싣고 오는 모양(4612)이면
+  // `withProjectParam`은 «이미 실은 p는 그대로»라 뒤에서 얹는 방식은 이벤트 프로젝트를 버린다. 결과에 한 번 더 거는 것은 story가
+  // 프로젝트 함수를 안 쓰는 모양(4612 전)을 위한 것이다 — 이미 p가 있으면 그대로라 두 번 걸어도 값이 같다.
+  const pickProject = (href: string) => (eventProjectId ? withProjectParam(href, eventProjectId) : flatHref(href));
+  const storyPath = storyId && typeof stageAssignee === 'string' && currentTeamMemberId && stageAssignee === currentTeamMemberId
+    ? getEntityHref('story', storyId, pickProject)
+    : null;
+  const storyHref = storyPath ? pickProject(storyPath) : null;
+
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
       {blocks.map((block, i) => (
@@ -422,6 +444,11 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
           t={t}
         />
       ))}
+      {storyHref ? (
+        <Link href={storyHref} className="inline-block text-xs font-medium text-primary hover:underline" data-testid="event-card-view-story">
+          {tEventCard('viewStory')}
+        </Link>
+      ) : null}
     </div>
   );
 }

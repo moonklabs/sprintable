@@ -14,6 +14,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { useRecipeStartCandidates, type RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 import { presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // story #4082(유나 design CHANGES 2026-09-21) — recipe-stage-label.ts에 미등재된 slug는
 // raw 노출 대신 「단계 n/9」로 자리표시한다(recipeStageLabel 자신의 기존 pass-through
@@ -53,6 +54,13 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  // story #4249 — «이 단계 완료» 확인 중인 레시피 key · 진행 중인 행동 · 오류(레시피 key별).
+  const { currentTeamMemberId } = useDashboardContext();
+  const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
+  const [stageActionKey, setStageActionKey] = useState<string | null>(null);
+  const [stageActionNotice, setStageActionNotice] = useState<Record<string, { tone: 'muted' | 'error'; text: string } | null>>({});
+  // 넘긴 뒤 새 현재 단계가 보일 때까지 «넘겼어요» 한 줄(그 사이 버튼이 다시 뜨지 않게).
+  const [advancedFrom, setAdvancedFrom] = useState<Record<string, string | null>>({});
 
   if (!projectId) return null;
   // story-origin-section.tsx와 동일 관례 — 로딩 중엔 깜빡임 노이즈 없이 조용히 대기.
@@ -69,7 +77,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   );
 
   if (loadError) {
-    return sectionShell(<p className="text-xs text-destructive">{t('recipeStartErrorGeneric')}</p>);
+    return sectionShell(<p className="break-keep text-xs text-destructive">{t('recipeStartErrorGeneric')}</p>);
   }
 
   // story #4075 AC1(유나 design CHANGES, 페드루 확定 2026-09-21) — 적용 레시피가 프로젝트에
@@ -135,6 +143,104 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     }
   };
 
+  // story #4249 — 사람이 자기 stage를 끝내거나(action=complete · 다음 stage를 내 명의로), 게이트 승인 뒤 다음 stage를
+  // 시작한다(action=start). 서버가 지금 stage · 담당 · 승인 · 완료 방식을 다시 검증한다(화면은 보이기만 정한다 — 방식은 BE
+  // 공용 판정 `current_completion`). 문안·상태 흐름은 유나 확정(스토리 4249 «디자인 확정» 절).
+  const runStageAction = async (c: RecipeStartCandidate, action: 'complete' | 'start', stage: string) => {
+    setStageActionKey(c.key);
+    setStageActionNotice((prev) => ({ ...prev, [c.key]: null }));
+    try {
+      const res = await fetchWithAuth(`/api/events/definitions/${c.definition_id}/complete-stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, work_item_type: 'story', work_item_id: storyId, stage, action }),
+      });
+      if (res.status === 409 || res.status === 403) {
+        // 상태 알림 — 구역을 스스로 다시 읽어 지난 버튼을 걷는다(«새로고침해 주세요»를 사람에게 시키지 않는다).
+        setStageActionNotice((prev) => ({
+          ...prev, [c.key]: { tone: 'muted', text: res.status === 409 ? t('recipeStageActionAlreadyMoved') : t('recipeStageActionNotAssignee') },
+        }));
+        setConfirmingKey(null);
+        refresh();
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(extractBackendErrorMessage(body, t) ?? t('recipeStageActionFailed'));
+      }
+      // 새 현재 단계가 보일 때까지 «넘겼어요» 한 줄(버튼이 다시 뜨면 두 번 발행된다).
+      setAdvancedFrom((prev) => ({ ...prev, [c.key]: c.current_stage }));
+      setConfirmingKey(null);
+      refresh();
+    } catch (e) {
+      setStageActionNotice((prev) => ({
+        ...prev, [c.key]: { tone: 'error', text: e instanceof Error ? e.message : t('recipeStageActionFailed') },
+      }));
+    } finally {
+      setStageActionKey(null);
+    }
+  };
+
+  const stageAction = (c: RecipeStartCandidate) => {
+    if (!c.current_stage || !currentTeamMemberId) return null;
+    const mine = c.current_bound_member_id === currentTeamMemberId;
+    const nextMine = !!c.next_stage && c.next_bound_member_id === currentTeamMemberId;
+    const busy = stageActionKey === c.key;
+    const notice = stageActionNotice[c.key];
+    let body: React.ReactNode = null;
+    if (advancedFrom[c.key] && advancedFrom[c.key] === c.current_stage) {
+      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-stage-advanced">{t('recipeCompletedStage')}</p>;
+    } else if (mine && c.current_completion === 'complete' && c.next_stage) {
+      const nextLabel = recipeStageLabel(c.next_stage, tOrg);
+      const question = nextLabel === c.next_stage
+        ? t('recipeCompleteStageConfirmUnnamed')
+        : t('recipeCompleteStageConfirm', { next: nextLabel });
+      body = confirmingKey === c.key ? (
+        <div className="flex flex-wrap items-center gap-2" data-testid="recipe-complete-confirm">
+          <span className="break-keep text-xs text-foreground">{question}</span>
+          <Button type="button" size="sm" disabled={busy} onClick={() => void runStageAction(c, 'complete', c.current_stage!)}>
+            {busy ? t('recipeCompletingStage') : t('recipeCompleteStageConfirmYes')}
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setConfirmingKey(null)}>
+            {t('recipeCompleteStageCancel')}
+          </Button>
+        </div>
+      ) : (
+        <Button type="button" size="sm" className="self-start" onClick={() => setConfirmingKey(c.key)} data-testid="recipe-complete-stage">
+          {t('recipeCompleteStage')}
+        </Button>
+      );
+    } else if (mine && c.current_completion === 'last_stage') {
+      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-last-stage-hint">{t('recipeLastStageHint')}</p>;
+    } else if (mine && c.current_completion === 'needs_fields') {
+      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
+    } else if (nextMine && c.current_completion === 'gate_approval') {
+      body = c.current_gate_status === 'approved' ? (
+        <Button type="button" size="sm" className="self-start" disabled={busy}
+          onClick={() => void runStageAction(c, 'start', c.next_stage!)} data-testid="recipe-start-my-stage">
+          {busy ? t('recipeStarting') : t('recipeStartMyStage')}
+        </Button>
+      ) : (
+        <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-start-my-stage-waiting">{t('recipeStartMyStageWaiting')}</p>
+      );
+    }
+    if (!body && !notice) return null;
+    return (
+      <div className="mt-1 flex flex-col gap-1">
+        {body}
+        {notice ? (
+          <p
+            role={notice.tone === 'error' ? 'alert' : 'status'}
+            className={notice.tone === 'error' ? 'break-keep text-xs text-destructive' : 'break-keep text-[11px] text-muted-foreground'}
+            data-testid="recipe-stage-action-notice"
+          >
+            {notice.text}
+          </p>
+        ) : null}
+      </div>
+    );
+  };
+
   // story #4082([E-RECIPE-1] 진행 위치 표시) AC1 — «시작됨» 한 줄 대신 현재
   // 단계(역할)·다음 단계(역할, 없으면 «마지막 단계»)·마지막 발행 시각 3줄
   // («stage» 내부어 대신 정의 저자가 시드한 role 낱말을 우선 노출, 유나 낱말 표 v5.1).
@@ -169,6 +275,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           {t('recipeStartViewConversation')}
         </Link>
       )}
+      {stageAction(c)}
     </div>
   );
 
@@ -211,7 +318,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         notStarted.length > 1 && <p className="text-xs text-muted-foreground">{t('recipeStartChooseRecipe')}</p>
       )}
       {publishError && (
-        <p role="alert" aria-live="assertive" className="mt-1 text-[11px] text-destructive">
+        <p role="alert" aria-live="assertive" className="mt-1 break-keep text-[11px] text-destructive">
           {publishError}
         </p>
       )}

@@ -22,7 +22,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
@@ -1015,18 +1015,18 @@ class EventPublishRequest(BaseModel):
 async def _resolve_event_project_id(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> uuid.UUID | None:
-    """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project(gate_service.
-    resolve_work_item_project_id 재사용, 신규 쿼리 만들지 않음), goal_id만 있으면(preset.
-    goal.measured) Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부)."""
-    from app.services.event_routing_resolver import _parse_uuid
+    """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project, goal_id만 있으면(preset.goal.measured)
+    Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부).
+
+    story #4249(까디르 4623 델타 codex) — 작업 항목 쪽은 수신자(바인딩) · 완료 검증과 같은 원천(`event_routing_resolver.
+    _resolve_work_item_project_id`)을 읽는다 — 발행되는 프로젝트와 «누가 이 stage인가»가 다른 프로젝트를 읽지 않게."""
+    from app.services.event_routing_resolver import (
+        _parse_uuid,
+        _resolve_work_item_project_id,
+    )
 
     if payload.get("work_item_type") and payload.get("work_item_id"):
-        from app.services.gate_service import resolve_work_item_project_id
-
-        return await resolve_work_item_project_id(
-            db, org_id, payload["work_item_type"],
-            _parse_uuid(payload["work_item_id"], field_name="work_item_id"),
-        )
+        return await _resolve_work_item_project_id(db, org_id=org_id, payload=payload)
     if payload.get("goal_id"):
         from app.models.pm import Goal
 
@@ -2990,6 +2990,22 @@ async def _publish_registry_event_core(
             db, org_id=org_id, member_id=_refs_member_id,
         )
 
+    # story #4249(유나 design ⑥) — 레시피 stage 이벤트 카드가 «이 단계 담당이 보는 사람인지» 알 수 있게 발행 시점의 그 stage 담당
+    # (바인딩 멤버 · project 우선 · org 전역)을 싣는다. 채팅 카드가 담당에게만 «스토리 보기» 링크를 그린다.
+    _refs_stage = payload.get("stage")
+    if isinstance(_refs_stage, str) and ((definition.routing or {}).get("broadcast") or {}).get("kind") == "recipe_role_binding":
+        from app.services.event_routing_resolver import _bound_member_for_stage
+
+        _stage_assignee = await _bound_member_for_stage(
+            db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=_refs_stage,
+        )
+        if _stage_assignee is not None:
+            refs["stage_assignee"] = str(_stage_assignee)
+        # PO 4623 리뷰 — 채팅은 조직 전체가 보는 자리라 카드 링크는 «항목 자기 프로젝트»를 싣는다(보는 사람의 현재 프로젝트가
+        # 아니라). 이 이벤트의 작업 항목 프로젝트.
+        if project_id is not None:
+            refs["project_id"] = str(project_id)
+
     # story #3893 CHANGES②(PO 확認 2026-09-15) — preset.goal.measured의 `goal_id`(raw UUID,
     # 실제로는 epic.id — cron.py가 그렇게 싣는다)도 work_item과 동일 원칙(key 존재 여부만
     # 트리거)으로 발행 시점에 참조 토큰을 계산한다. `_render_event_notification_work_item_ref`
@@ -4172,6 +4188,14 @@ class RecipeStartCandidate(BaseModel):
     # 1-indexed로 얹는다(새 조회 0 — next_stage 계산과 같은 자리에서 파생).
     current_stage_position: int | None = None
     total_stages: int | None = None
+    # story #4249 — 지금 stage를 맡은 멤버(바인딩 · project 우선 · org 전역)와 그 stage의 완료 방식
+    # (recipe_stage_completion.completion_mode). FE는 «나 = 이 멤버 · 방식 = complete»일 때만 «이 단계 완료»를 그린다.
+    current_bound_member_id: str | None = None
+    current_completion: str | None = None
+    # PO 4249 빈틈 — 게이트 stage(`gate_approval`) 승인 뒤엔 다음 stage 담당이 이어 간다. 담당이 사람이면 FE가 «내 단계 시작»을
+    # 그리도록 다음 stage 담당과 지금 stage 게이트 상태를 함께 준다.
+    next_bound_member_id: str | None = None
+    current_gate_status: str | None = None
 
 
 class RecipeStartCandidatesResponse(BaseModel):
@@ -4202,7 +4226,12 @@ async def get_recipe_start_candidates(
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.services.project_auth import require_project_access
+    from app.services.recipe_stage_completion import work_item_project
 
+    # 까디르 4623 codex P1 — 인가 · 바인딩 · 지금 stage 판정은 작업 항목의 실제 프로젝트 하나로(요청 값은 대조만).
+    project_id = await work_item_project(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, claimed_project_id=project_id,
+    )
     await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
 
     binding_rows = (await db.execute(
@@ -4273,6 +4302,26 @@ async def get_recipe_start_candidates(
                             next_stage = stage_enum[idx + 1]
                             next_role = (definition.stage_metadata.get(next_stage) or {}).get("role")
 
+        current_bound_member_id = current_completion = next_bound_member_id = current_gate_status = None
+        if current_stage is not None:
+            from app.services.event_routing_resolver import _bound_member_for_stage
+            from app.services.recipe_stage_completion import completion_mode, stage_gate_status
+
+            bound_member = await _bound_member_for_stage(
+                db, org_id=org_id, project_id=project_id, definition_key=key, stage=current_stage,
+            )
+            current_bound_member_id = str(bound_member) if bound_member else None
+            current_completion = completion_mode(definition, current_stage)
+            if current_completion == "gate_approval":
+                current_gate_status = await stage_gate_status(
+                    db, org_id=org_id, work_item_id=work_item_id, definition=definition, stage=current_stage,
+                )
+                if next_stage is not None:
+                    next_member = await _bound_member_for_stage(
+                        db, org_id=org_id, project_id=project_id, definition_key=key, stage=next_stage,
+                    )
+                    next_bound_member_id = str(next_member) if next_member else None
+
         candidates.append(RecipeStartCandidate(
             definition_id=str(definition.id),
             key=definition.key,
@@ -4290,9 +4339,83 @@ async def get_recipe_start_candidates(
             last_published_at=last_published_at,
             current_stage_position=current_stage_position,
             total_stages=len(stage_enum) if current_stage is not None else None,
+            current_bound_member_id=current_bound_member_id,
+            current_completion=current_completion,
+            next_bound_member_id=next_bound_member_id,
+            current_gate_status=current_gate_status,
         ))
 
     return RecipeStartCandidatesResponse(candidates=candidates)
+
+
+class CompleteStageRequest(BaseModel):
+    # 까디르 4623 codex P1 — 판정은 작업 항목에서 푼 프로젝트로 한다. 보내면 대조만(다르면 422) · 안 보내면 푼 값.
+    project_id: uuid.UUID | None = None
+    work_item_type: str
+    work_item_id: uuid.UUID
+    # complete: 끝낼 stage(지금 stage와 같아야 함 — 겹친 클릭 · 낡은 화면 방지).
+    # start: 시작할 내 stage(게이트 승인된 지금 stage 바로 다음 — PO 4249 «승인됨 → 내 단계 시작»).
+    stage: str
+    action: Literal["complete", "start"] = "complete"
+
+
+@router.post("/definitions/{definition_id}/complete-stage", status_code=201)
+async def complete_recipe_stage(
+    definition_id: uuid.UUID,
+    body: CompleteStageRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/events/definitions/{id}/complete-stage — story #4249.
+
+    사람(또는 멤버 누구나)이 자기에게 바인딩된 지금 stage를 끝낸다 → 다음 stage 이벤트를 **요청자 명의로** 낸다. 발행은
+    에이전트의 `publish_event`와 같은 코어(`_publish_registry_event_core`)라 스키마 · 봉인 필드 · 게이트 훅이 그대로 적용된다.
+    그 앞의 검증(지금 stage · 바인딩 멤버 · 이 stage 게이트 승인 · 완료 방식)은 `recipe_stage_completion.validate_stage_completion`
+    한 곳이다(원시 발행 경로에도 붙일 수 있게 분리 — story 4251)."""
+    from app.models.event_definition import EventDefinition
+    from app.services.member_resolver import resolve_member
+    from app.services.project_auth import require_project_access
+    from app.services.recipe_stage_completion import (
+        lock_stage_completion, validate_next_stage_start, validate_stage_completion, work_item_project,
+    )
+
+    # 까디르 4623 codex P1 — 요청이 보낸 프로젝트가 아니라 작업 항목의 실제 프로젝트로 인가하고 판정한다(발행 코어가 라우팅에
+    # 쓰는 것과 같은 값 — 다르면 A 권한 · A 바인딩으로 통과해 B에서 발행됐다).
+    project_id = await work_item_project(
+        db, org_id=org_id, work_item_type=body.work_item_type, work_item_id=body.work_item_id,
+        claimed_project_id=body.project_id,
+    )
+    await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id, EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    member = await resolve_member(auth, org_id, db)
+    await lock_stage_completion(
+        db, org_id=org_id, definition_key=definition.key, work_item_type=body.work_item_type, work_item_id=body.work_item_id,
+    )
+    validate = validate_next_stage_start if body.action == "start" else validate_stage_completion
+    next_stage = await validate(
+        db, org_id=org_id, definition=definition, project_id=project_id, work_item_type=body.work_item_type,
+        work_item_id=body.work_item_id, stage=body.stage, member_id=member.id,
+    )
+    _accept_language = request.headers.get("accept-language")
+    resolved_locale = resolve_locale_from_request(None, _accept_language) if _accept_language else None
+    result = await _publish_registry_event_core(
+        db, org_id, auth, definition.key,
+        {"stage": next_stage, "work_item_type": body.work_item_type, "work_item_id": str(body.work_item_id)},
+        background_tasks, request=request, resolved_locale=resolved_locale,
+    )
+    completed = body.stage if body.action == "complete" else None
+    return {**result, "completed_stage": completed, "next_stage": next_stage}
 
 
 async def _resolve_crew_scoped_recipe_binding(

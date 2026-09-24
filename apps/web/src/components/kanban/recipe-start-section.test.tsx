@@ -13,6 +13,10 @@ import enMessages from '../../../messages/en.json';
 import { RecipeStartSection } from './recipe-start-section';
 import type { RecipeStartCandidate } from '@/hooks/use-recipe-start-candidates';
 
+// story #4249 — «이 단계 완료»는 지금 stage 담당이 나일 때만. 기본은 멤버 없음(기존 테스트 무변).
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(() => ({ currentTeamMemberId: undefined as string | undefined })) }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function withIntl(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
@@ -340,5 +344,108 @@ describe('RecipeStartSection — 플랫폼 프리셋 이름 로케일(story #420
     await render([candidateStub({ key: 'org.acme.a', name: '레시피 A' }), candidateStub({ key: 'org.acme.b', name: '레시피 B' })]);
     expect(container.querySelector('[data-testid="recipe-start-name"]')).toBeNull();
     expect(container.querySelectorAll('input[type="radio"]').length).toBe(2);
+  });
+});
+
+
+// story #4249 — 사람이 자기 stage를 끝내는 행동(스토리 레시피 구역) · 문안·상태 흐름은 유나 확정.
+describe('RecipeStartSection — 이 단계 완료(story #4249)', () => {
+  const B = koMessages.board;
+  const O = koMessages.organization;
+  const startedStub = (overrides: Partial<RecipeStartCandidate> = {}) => candidateStub({
+    started: true, conversation_id: 'conv-1', message_id: 'msg-1', current_stage: 'assign_step_1', next_stage: 'submit_step_1',
+    current_stage_position: 1, total_stages: 3, current_bound_member_id: 'me-1', current_completion: 'complete', ...overrides,
+  });
+
+  async function renderWith(
+    candidates: RecipeStartCandidate[] | (() => RecipeStartCandidate[]),
+    onComplete?: (body: unknown) => Response,
+  ) {
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1' });
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/events/definitions/start-candidates')) {
+        return new Response(JSON.stringify({ candidates: typeof candidates === 'function' ? candidates() : candidates }));
+      }
+      if (url === '/api/events/definitions/def-1/complete-stage' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string);
+        bodies.push(body);
+        return onComplete ? onComplete(body) : new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(withIntl(<RecipeStartSection storyId="story-1" projectId="proj-1" />)); });
+    await flushAll();
+    return { fetchMock, bodies };
+  }
+  const flushAll = async () => { for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); }); };
+  const click = async (el: Element | null) => { await act(async () => { (el as HTMLElement).click(); }); await flushAll(); };
+  const confirmYes = () => [...container.querySelectorAll('[data-testid="recipe-complete-confirm"] button')].find((b) => b.textContent === B.recipeCompleteStageConfirmYes)!;
+  const remount = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+
+  afterEach(() => { useDashboardContextMock.mockReturnValue({ currentTeamMemberId: undefined }); });
+
+  it('내 stage → 버튼 → «{다음 단계} 단계로 넘길까요?» → 넘기기 → POST(complete) → 새 현재 단계가 보일 때까지 «넘겼어요»', async () => {
+    // 새로고침 응답은 계속 옛 단계 — 서버 반영 전에도 버튼이 다시 떠 두 번 발행되지 않는지를 잰다.
+    const { bodies } = await renderWith(() => [startedStub()]);
+    const button = container.querySelector('[data-testid="recipe-complete-stage"]');
+    expect(button?.textContent).toBe(B.recipeCompleteStage);
+    await click(button);
+    expect(container.querySelector('[data-testid="recipe-complete-confirm"]')?.textContent)
+      .toContain(B.recipeCompleteStageConfirm.replace('{next}', O.recipeStageLabelSubmitStep1));
+    await click(confirmYes());
+    expect(bodies).toEqual([{ project_id: 'proj-1', work_item_type: 'story', work_item_id: 'story-1', stage: 'assign_step_1', action: 'complete' }]);
+    // 새로고침 응답이 아직 옛 단계면 버튼 대신 «넘겼어요» 한 줄
+    expect(container.querySelector('[data-testid="recipe-stage-advanced"]')?.textContent).toBe(B.recipeCompletedStage);
+    expect(container.querySelector('[data-testid="recipe-complete-stage"]')).toBeNull();
+  });
+
+  it('다음 단계 라벨이 없으면 이름 없는 확인 줄', async () => {
+    await renderWith([startedStub({ next_stage: 'my_custom_step' })]);
+    await click(container.querySelector('[data-testid="recipe-complete-stage"]'));
+    expect(container.querySelector('[data-testid="recipe-complete-confirm"]')?.textContent).toContain(B.recipeCompleteStageConfirmUnnamed);
+  });
+
+  it('남의 stage면 버튼 0 · 마지막 단계 안내 · 입력 필요 안내', async () => {
+    await renderWith([startedStub({ current_bound_member_id: 'agent-9' })]);
+    expect(container.querySelector('[data-testid="recipe-complete-stage"]')).toBeNull();
+    await remount();
+    await renderWith([startedStub({ current_completion: 'last_stage', next_stage: null })]);
+    expect(container.querySelector('[data-testid="recipe-last-stage-hint"]')?.textContent).toBe(B.recipeLastStageHint);
+    expect(container.querySelector('[data-testid="recipe-complete-stage"]')).toBeNull();
+    await remount();
+    await renderWith([startedStub({ current_completion: 'needs_fields' })]);
+    expect(container.querySelector('[data-testid="recipe-needs-fields-hint"]')?.textContent).toBe(B.recipeNeedsFieldsHint);
+  });
+
+  it('게이트 승인 뒤 다음 stage가 내 것 → «다음 단계 시작»(start · 확인 없음) · 승인 전엔 대기 안내', async () => {
+    const gate = { current_bound_member_id: 'director-1', current_completion: 'gate_approval' as const, next_bound_member_id: 'me-1' };
+    await renderWith([startedStub({ ...gate, current_gate_status: 'pending' })]);
+    expect(container.querySelector('[data-testid="recipe-start-my-stage-waiting"]')?.textContent).toBe(B.recipeStartMyStageWaiting);
+    await remount();
+    const { bodies } = await renderWith([startedStub({ ...gate, current_gate_status: 'approved' })]);
+    expect(container.querySelector('[data-testid="recipe-start-my-stage"]')?.textContent).toBe(B.recipeStartMyStage);
+    await click(container.querySelector('[data-testid="recipe-start-my-stage"]'));
+    expect(bodies).toEqual([{ project_id: 'proj-1', work_item_type: 'story', work_item_id: 'story-1', stage: 'submit_step_1', action: 'start' }]);
+  });
+
+  it('409 «이미 넘어갔어요» · 403 «담당 아님»은 상태 알림 + 구역 다시 읽기 · 그 밖은 서버 메시지 · 없으면 실패 문장', async () => {
+    const cases: [number, unknown, string, 'status' | 'alert'][] = [
+      [409, { detail: { code: 'STAGE_NOT_CURRENT' } }, B.recipeStageActionAlreadyMoved, 'status'],
+      [403, { detail: { code: 'NOT_STAGE_ASSIGNEE' } }, B.recipeStageActionNotAssignee, 'status'],
+      [500, {}, B.recipeStageActionFailed, 'alert'],
+    ];
+    for (const [status, payload, text, role] of cases) {
+      await remount();
+      const { fetchMock } = await renderWith([startedStub()], () => new Response(JSON.stringify(payload), { status }));
+      await click(container.querySelector('[data-testid="recipe-complete-stage"]'));
+      await click(confirmYes());
+      const notice = container.querySelector('[data-testid="recipe-stage-action-notice"]');
+      expect(notice?.textContent).toBe(text);
+      expect(notice?.getAttribute('role')).toBe(role);
+      const reloads = fetchMock.mock.calls.filter(([u]) => String(u).startsWith('/api/events/definitions/start-candidates')).length;
+      expect(reloads).toBe(status === 500 ? 1 : 2);
+    }
   });
 });

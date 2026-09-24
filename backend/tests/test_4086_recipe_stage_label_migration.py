@@ -72,6 +72,10 @@ async def _seed(s) -> uuid.UUID:
         f"('{PROJ}','{ORG}','P','s4086-proj','warn')",
         f"INSERT INTO conversations (id,org_id,project_id,type,status) VALUES "
         f"('{CONV}','{ORG}','{PROJ}','group','open')",
+        # story #4249(까디르 4623 codex P1) — start-candidates는 작업 항목에서 프로젝트를 풀어 요청 프로젝트와 대조한다. 예전
+        # 시드엔 스토리 행이 없었다(발행 이력만).
+        f"INSERT INTO stories (id,org_id,project_id,title,status,priority) VALUES "
+        f"('{STORY_ID}','{ORG}','{PROJ}','S4086 story','backlog','medium')",
     ]:
         await s.execute(text(sql))
 
