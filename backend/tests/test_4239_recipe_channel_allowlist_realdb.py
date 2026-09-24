@@ -93,6 +93,9 @@ def _with(path: str, value):
         meta["campaign_created"]["capability"]["channels"] = value
     elif path == "capability.channels[]":
         meta["campaign_created"]["capability"]["channels"] = ["stibee", value]
+    elif path == "approval.surface":
+        # 4594(0401)의 승인 자리 선언 — gate 없는 사람 stage에.
+        meta["draft"] = {"role": "Creator", "action": "draft", "approval": {"surface": value}}
     elif path == "role_actor_kinds.value":
         kinds = {"Creator": value}
     else:
@@ -102,7 +105,8 @@ def _with(path: str, value):
 
 _TYPE_FIRST_PATHS = [
     "stage_metadata", "payload_schema.properties", "payload_schema.properties.stage", "stage.enum", "stage.enum[]",
-    "gate.approver", "capability.target", "capability.channels", "capability.channels[]", "role_actor_kinds.value",
+    "gate.approver", "approval.surface", "capability.target", "capability.channels", "capability.channels[]",
+    "role_actor_kinds.value",
 ]
 
 
