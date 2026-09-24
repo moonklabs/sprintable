@@ -83,7 +83,8 @@ function GateSignatureCard({ item, isAdminOrOwner, onDone }: {
   const t = useTranslations('todayV3');
   const tOrg = useTranslations('orgBriefing');
   const tc = useTranslations('common');
-  const href = hrefForNeedsMeItem(item);
+  const flatHref = useFlatHref(); // story #4231 4차 — 결재함 큐(조직 단위 화면)는 현재 p · 게이트 상세는 결재 자기 p
+  const href = hrefForNeedsMeItem(item, flatHref);
   const [dialogKind, setDialogKind] = useState<DialogKind | null>(null);
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
