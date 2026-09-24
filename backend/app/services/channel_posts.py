@@ -56,6 +56,7 @@ from app.services.site_posts import (  # noqa: F401 (재-export 편의 — 채�
     get_site_post_draft,
     is_agent_caller,
 )
+from app.services.provider_call_mark import provider_client
 from app.services.utm import attach_utm, resolve_utm_campaign
 
 # story #4192(디디 발견) — 이 모듈은 logger.warning/info/exception을 4곳에서 쓰는데 모듈 logger가 없어, side-channel
@@ -1847,7 +1848,6 @@ async def publish_channel_post_draft(
     if access_token is None:
         raise ChannelConnectionNotActiveError(connection_id=connection.id)
 
-    import httpx
     from app.services.channel_adapters import get_publish_client_module
     from app.services.channel_connection import apply_connection_failure, apply_refresh_failure
     from app.services.threads_publish import ThreadsPublishError
@@ -1884,7 +1884,7 @@ async def publish_channel_post_draft(
     _validate_youtube_metadata(channel=draft.channel, channel_payload=latest.channel_payload or {})
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with provider_client(timeout=20) as client:
             try:
                 quota_usage, quota_total, quota_duration = await get_publishing_limit(
                     client, access_token=access_token, threads_user_id=connection.account_id,
@@ -2978,11 +2978,9 @@ async def _publish_x_thread_draft(
     _publish_client = get_publish_client_module(draft.channel)
     publish_x_thread_fn = _publish_client.publish_x_thread
 
-    import httpx
-
     succeeded: list[dict] = []
     failure_exc: ThreadsPublishError | None = None
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with provider_client(timeout=20) as client:
         try:
             succeeded = await publish_x_thread_fn(
                 client, access_token=access_token, texts=remaining_texts,
@@ -3190,7 +3188,6 @@ async def unpublish_channel_post(
             provider_code="MISSING_EXTERNAL_ID", provider_message="published 행에 external_id가 없습니다",
         )
 
-    import httpx
     from app.services.channel_adapters import get_publish_client_module
     from app.services.threads_publish import ThreadsPublishError
 
@@ -3199,7 +3196,7 @@ async def unpublish_channel_post(
 
     already_absent = False
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with provider_client(timeout=15) as client:
             try:
                 await delete_media(client, access_token=access_token, media_id=pub.external_id)
             except ThreadsPublishError as exc:

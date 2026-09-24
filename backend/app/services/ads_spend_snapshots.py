@@ -238,6 +238,10 @@ async def _enforce_spend_cap(db: AsyncSession, *, gate: Gate, run, now: datetime
         )
     except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
         await db.rollback()
+        # story #4272 — rollback이 run · gate를 만료시킨다. 호출부(워커 배치 · 새로고침 라우트)가 곧바로 run.status 등을 읽으니
+        # 여기서 다시 읽어 둔다(안 그러면 비동기 지연 적재 MissingGreenlet).
+        await db.refresh(run)
+        await db.refresh(gate)
     return True
 
 
@@ -326,7 +330,8 @@ async def refresh_ads_boost_spend_now(
 
     await ActivityLogService(db).record(
         org_id=org_id, action="ads_spend_refresh_requested", actor_id=requester_member_id, actor_type="human",
-        entity_type="gate", entity_id=gate.id,
+        # story #4272(까디르 codex P2) — `_enforce_spend_cap`의 rollback 뒤라 로드된 gate 대신 원시 gate_id.
+        entity_type="gate", entity_id=gate_id,
         context={"spend_minor": spend_minor, "cap_reached": capped},
     )
     await db.commit()
@@ -364,8 +369,14 @@ async def process_due_ads_spend_snapshots(db: AsyncSession, *, now: datetime | N
     await db.commit()
 
     counts = {"captured": 0, "failed": 0, "error": 0, "capped": 0}
-    for snapshot in rows:
+    # story #4272 — rollback이 미리 읽은 행을 전부 만료시켜 뒤 건이 전부 MissingGreenlet으로 error가 되던 부류.
+    # 원시 id만 들고 돌며 건마다 다시 읽는다(publication_command.py 배치 루프와 같은 처방).
+    snapshot_ids = [snapshot.id for snapshot in rows]
+    for snapshot_id in snapshot_ids:
         try:
+            snapshot = await db.get(InsightSnapshot, snapshot_id)
+            if snapshot is None:
+                continue
             ctx = await _resolve_spend_context(db, snapshot)
             async with httpx.AsyncClient(timeout=20) as client:
                 spend_minor = await ctx["module"].get_campaign_spend_minor(

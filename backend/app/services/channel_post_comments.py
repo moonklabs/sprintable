@@ -12,6 +12,7 @@ sandbox·threads 둘 다 같은 코드를 탄다. 페드루 PO REQUIRED 2026-09-
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import decode_metric_cursor, encode_metric_cursor
 from app.models.channel_post_comment import ChannelPostComment, ChannelPostCommentReply, CommentCollectionSchedule
+
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
 _COLLECTION_OFFSETS = (timedelta(hours=1), timedelta(days=1), timedelta(days=7))
@@ -679,8 +682,15 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
     await db.commit()
 
     counts = {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0}
-    for row in rows:
+    # story #4272 — rollback이 미리 읽은 행을 전부 만료시켜 다음 건 · except의 속성 읽기가 MissingGreenlet으로 배치를
+    # 멈추던 부류. 원시 id만 들고 돌며 건마다(와 rollback 뒤에) 다시 읽는다.
+    row_ids = [row.id for row in rows]
+    for row_id in row_ids:
         try:
+            # story #4272(까디르 codex P2) — 재읽기도 행별 try 안 — 재읽기 실패도 이 행만 막는다.
+            row = await db.get(CommentCollectionSchedule, row_id)
+            if row is None:
+                continue
             try:
                 result = await collect_comments_for_publication(
                     db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
@@ -768,14 +778,22 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             counts["captured"] += 1
         except Exception:  # noqa: BLE001 — 이 행 하나만 막는다(전체 배치 안 죽음).
             await db.rollback()
-            row.status = "failed"
-            row.error_code = "COMMENT_COLLECTION_UNCLASSIFIED_ERROR"
-            await _schedule_next_continuous_poll_if_active(
-                db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
-                external_id=row.external_id, now=now,
-            )
-            await db.commit()
-            counts["failed"] += 1
+            try:
+                row = await db.get(CommentCollectionSchedule, row_id)
+                if row is None:
+                    continue
+                row.status = "failed"
+                row.error_code = "COMMENT_COLLECTION_UNCLASSIFIED_ERROR"
+                await _schedule_next_continuous_poll_if_active(
+                    db, org_id=row.org_id, publication_id=row.publication_id, channel=row.channel,
+                    external_id=row.external_id, now=now,
+                )
+                await db.commit()
+                counts["failed"] += 1
+            except Exception:  # 실패 표시마저 실패해도 이 행에서 멈춘다.
+                await db.rollback()
+                counts["error"] = counts.get("error", 0) + 1
+                logger.exception("comment collection 실패 표시 실패 schedule_id=%s", row_id)
 
     # story #3528 라이브 FAIL(2026-09-06) — 이번 틱이 방금 claim한 rows(위에서 이미
     # 스냅샷됨)와는 별개로, 이번 틱 끝에 자가회수 씨앗을 심는다. due_at=now로 심어도
