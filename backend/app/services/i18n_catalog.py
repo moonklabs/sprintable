@@ -462,6 +462,43 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "할 일: {action}",
         "en": "To do: {action}",
     },
+    # story #4224(까디르 QA P3 · AC2 «en 본문 한국어 0») — 판정 알림 본문의 나머지 줄 · 앞 단계 산출물 레이블. ko는 옛 리터럴 그대로.
+    "events.gate_verdict_gate_line": {
+        "ko": "게이트: {gate_type} → {verdict}",
+        "en": "Gate: {gate_type} → {verdict}",
+    },
+    "events.gate_verdict_reason_line": {
+        "ko": "사유: {note}",
+        "en": "Reason: {note}",
+    },
+    "events.gate_verdict_target_artifact_line": {
+        "ko": "대상 산출물: {ref}",
+        "en": "Target artifact: {ref}",
+    },
+    "events.gate_verdict_next_action_none_author_decides": {
+        "ko": "다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.",
+        "en": "Next action: nothing to do — the author decides whether to resubmit.",
+    },
+    "events.gate_verdict_next_action_revise_and_republish": {
+        "ko": "다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈됩니다.",
+        "en": "Next action: revise the artifact, then publish the same recipe definition's approve stage event again (payload.previous_output_doc_id=revised doc id) — the gate reopens automatically on that publish.",
+    },
+    "events.gate_verdict_next_action_publish_via_connector": {
+        "ko": "다음 행동: {connector_key} 커넥터로 발행하세요(channel={channel}).",
+        "en": "Next action: publish with the {connector_key} connector (channel={channel}).",
+    },
+    "events.gate_verdict_next_action_no_connector_mapping": {
+        "ko": "다음 행동: channel={channel}에 대한 커넥터 매핑이 없습니다 — 조직 설정에 channel_connector_map을 등록하세요.",
+        "en": "Next action: there is no connector mapping for channel={channel} — register channel_connector_map in the organization settings.",
+    },
+    "events.gate_verdict_next_action_publish_next_stage": {
+        "ko": "다음 행동: 이 정의의 다음 stage 이벤트를 발행하세요(publish 단계라면 이 승인 게이트를 확인하는 발행 도구를 쓰세요).",
+        "en": "Next action: publish this definition's next stage event (at a publish stage, use the publishing tool that checks this approval gate).",
+    },
+    "events.previous_output_doc_label": {
+        "ko": "앞 단계 산출물",
+        "en": "Previous stage output",
+    },
     "events.stage_next_none": {
         "ko": "다음 단계: 없음(마지막 stage)",
         "en": "Next stage: none (last stage)",

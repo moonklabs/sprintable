@@ -9,11 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_3387_gate_verdict_agent_next_action import (  # noqa: F401
-    _payload,
-    _render,
-    _stub_work_item_ref,
-)
+from tests.test_3387_gate_verdict_agent_next_action import _payload, _render
 
 _HANGUL = re.compile(r"[가-힣]")
 
@@ -21,6 +17,17 @@ _HANGUL = re.compile(r"[가-힣]")
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _stub_work_item_ref(monkeypatch):
+    """평문 알림 줄의 work item 참조 어댑터 대역 — 제목은 영문(본문 전체 «한국어 0» 판정이 픽스처 데이터에 흔들리지 않게)."""
+    from app.routers import events as events_module
+
+    async def _fake_ref(*_args, **_kwargs):
+        return "[Title](entity:story:11111111-1111-1111-1111-111111111111)"
+
+    monkeypatch.setattr(events_module, "_work_item_ref_token", _fake_ref)
 
 
 def test_generic_fallback_header_follows_locale():
@@ -60,45 +67,83 @@ async def test_gate_verdict_header_follows_locale():
     assert ko.splitlines()[0] == "[이벤트] preset.gate.verdict"
 
 
-_BLOG_STAGE_META = {
-    "planning": {"role": "Creator", "action": "주제·키워드 기획(제목 후보와 글 구성)"},
-    "writing": {"role": "Creator", "action": "블로그 초안 작성"},
+_LOOP_STAGE_META = {
+    "generate_variants": {
+        "role": "Agent",
+        "action": "brief를 바탕으로 복수의 실행안(variant)을 생성해 loop_artifacts로 등록",
+        "action_i18n": {"en": "Generate several variants from the brief and register them as loop_artifacts"},
+    },
+    "loop_decision": {"role": "Human", "action": "실행안 중 하나를 선택(choose)하고 이유를 기록"},
 }
-_BLOG_SCHEMA = {"properties": {"stage": {"enum": ["planning", "writing"]}}}
+_LOOP_SCHEMA = {"properties": {"stage": {"enum": ["generate_variants", "loop_decision"]}}}
 
 
 def _to_do_line(text: str) -> str:
     return next(line for line in text.splitlines() if line.startswith(("- To do: ", "- 할 일: ")))
 
 
-@pytest.mark.anyio
-async def test_platform_preset_to_do_line_en_from_fe_source_ko_unchanged():
-    """«To do:» 본문 — 플랫폼 프리셋 en은 FE 원천 파생물의 en 문안(한국어 0) · ko는 시드 원문 그대로."""
-    from app.routers.events import _render_event_message_content
-    from app.services.recipe_preset_actions import _table
-
-    definition = SimpleNamespace(
-        key="preset.marketing.blog_article", org_id=None, stage_metadata=_BLOG_STAGE_META, payload_schema=_BLOG_SCHEMA,
+def _definition(org_id=None, stage_metadata=None):
+    return SimpleNamespace(
+        key="preset.workflow.loop_agency", org_id=org_id, stage_metadata=stage_metadata or _LOOP_STAGE_META, payload_schema=_LOOP_SCHEMA,
     )
-    payload = {"stage": "planning", "work_item_type": "story", "work_item_id": str(uuid.uuid4())}
-    en = await _render_event_message_content(None, org_id=uuid.uuid4(), definition=definition, payload=payload, resolved_locale="en")
-    assert _to_do_line(en) == f"- To do: {_table()['preset.marketing.blog_article:planning']['en']}"
-    assert not _HANGUL.search(_to_do_line(en))
-    ko = await _render_event_message_content(None, org_id=uuid.uuid4(), definition=definition, payload=payload, resolved_locale="ko")
-    assert _to_do_line(ko) == "- 할 일: 주제·키워드 기획(제목 후보와 글 구성)"
 
 
 @pytest.mark.anyio
-async def test_org_custom_definition_keeps_its_own_action():
-    """조직 커스텀 정의는 같은 key·stage 모양이어도 원문 그대로(FE presetAction과 같은 규칙 — 번역표는 플랫폼 프리셋 전용)."""
+async def test_to_do_line_en_from_seed_action_i18n_keeps_tool_names_ko_unchanged():
+    """«To do:» 본문 — 에이전트 지시는 시드가 원천: en = 단계 메타 action_i18n.en(도구 이름 유지) · ko = 시드 원문 그대로."""
     from app.routers.events import _render_event_message_content
 
-    definition = SimpleNamespace(
-        key="preset.marketing.blog_article", org_id=uuid.uuid4(), stage_metadata=_BLOG_STAGE_META, payload_schema=_BLOG_SCHEMA,
-    )
-    payload = {"stage": "planning", "work_item_type": "story", "work_item_id": str(uuid.uuid4())}
-    en = await _render_event_message_content(None, org_id=uuid.uuid4(), definition=definition, payload=payload, resolved_locale="en")
-    assert _to_do_line(en) == "- To do: 주제·키워드 기획(제목 후보와 글 구성)"
+    payload = {"stage": "generate_variants", "work_item_type": "story", "work_item_id": str(uuid.uuid4())}
+    en = await _render_event_message_content(None, org_id=uuid.uuid4(), definition=_definition(), payload=payload, resolved_locale="en")
+    assert _to_do_line(en) == "- To do: Generate several variants from the brief and register them as loop_artifacts"
+    ko = await _render_event_message_content(None, org_id=uuid.uuid4(), definition=_definition(), payload=payload, resolved_locale="ko")
+    assert _to_do_line(ko) == "- 할 일: brief를 바탕으로 복수의 실행안(variant)을 생성해 loop_artifacts로 등록"
+
+
+@pytest.mark.anyio
+async def test_to_do_line_without_action_i18n_falls_back_to_seed_action():
+    """action_i18n이 없는 단계(조직 커스텀 등)는 원문 그대로 — 지어내지 않는다."""
+    from app.routers.events import _render_event_message_content
+
+    payload = {"stage": "loop_decision", "work_item_type": "story", "work_item_id": str(uuid.uuid4())}
+    en = await _render_event_message_content(None, org_id=uuid.uuid4(), definition=_definition(org_id=uuid.uuid4()), payload=payload, resolved_locale="en")
+    assert _to_do_line(en) == "- To do: 실행안 중 하나를 선택(choose)하고 이유를 기록"
+
+
+@pytest.mark.anyio
+async def test_cycle_body_en_has_no_korean_including_previous_output_label(monkeypatch):
+    """AC2 — 사이클 본문 전체(머리 줄 · 할 일 · 앞 단계 산출물 · 다음 단계)에 한국어 0(en)."""
+    from app.routers import events as events_module
+
+    async def _fake_doc_ref(*_a, **_k):
+        return "[Brief](entity:doc:11111111-1111-1111-1111-111111111111)"
+
+    monkeypatch.setattr(events_module, "_render_event_notification_doc_ref", _fake_doc_ref)
+    payload = {
+        "stage": "generate_variants", "work_item_type": "story", "work_item_id": str(uuid.uuid4()),
+        "previous_output_doc_id": "11111111-1111-1111-1111-111111111111",
+    }
+    en = await events_module._render_event_message_content(None, org_id=uuid.uuid4(), definition=_definition(), payload=payload, resolved_locale="en")
+    assert "- Previous stage output: [Brief]" in en
+    assert not _HANGUL.search(en), en
+    ko = await events_module._render_event_message_content(None, org_id=uuid.uuid4(), definition=_definition(), payload=payload, resolved_locale="ko")
+    assert "- 앞 단계 산출물: [Brief]" in ko
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("gate_type,verdict,note", [
+    ("qa", "approved", "Looks good"),
+    ("qa", "rejected", "Fix the title"),
+    ("qa", "rejected", "discontinue — do not publish"),
+    ("external_publish", "approved", None),
+])
+async def test_gate_verdict_body_en_has_no_korean(gate_type, verdict, note):
+    """AC2 — 판정 알림 본문 전체에 한국어 0(en · 판정 줄 · 사유 · 다음 행동 갈래)."""
+    en = await _render(_payload(gate_type=gate_type, verdict=verdict, resolution_note=note), resolved_locale="en")
+    assert not _HANGUL.search(en), en
+    assert f"- Gate: {gate_type} → {verdict}" in en
+    ko = await _render(_payload(gate_type=gate_type, verdict=verdict, resolution_note=note))
+    assert f"- 게이트: {gate_type} → {verdict}" in ko
 
 
 class _Stop(Exception):
@@ -159,3 +204,22 @@ async def test_http_publish_passes_request_locale_or_none(monkeypatch, locale, a
         db=None, auth=None, org_id=uuid.uuid4(),
     )
     assert captured["resolved_locale"] == expected
+
+
+@pytest.mark.parametrize("action_i18n,ok", [
+    ({"en": "Write the draft"}, True),
+    ({"en": ""}, False),
+    ({"fr": "Écrire"}, False),
+    ("Write the draft", False),
+])
+def test_validate_stage_metadata_action_i18n_shape(action_i18n, ok):
+    """action_i18n은 선택 필드 — 있으면 {지원 로케일: 비어있지 않은 문자열}만."""
+    from app.services.event_definition_registry import InvalidStageMetadataError, validate_stage_metadata
+
+    schema = {"properties": {"stage": {"enum": ["draft"]}}}
+    meta = {"draft": {"role": "Creator", "action": "초안 작성", "action_i18n": action_i18n}}
+    if ok:
+        validate_stage_metadata(schema, meta)
+    else:
+        with pytest.raises(InvalidStageMetadataError):
+            validate_stage_metadata(schema, meta)

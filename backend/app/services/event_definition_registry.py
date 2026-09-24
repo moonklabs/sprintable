@@ -13,6 +13,8 @@ import uuid
 
 import jsonschema
 
+from app.services.agent_onboarding_config import SUPPORTED_LOCALES
+
 _PRESET_KEY_RE = re.compile(r"^preset\.[a-z0-9_]+(\.[a-z0-9_]+)+$")
 _ORG_KEY_RE = re.compile(r"^org\.([a-z0-9-]+)\.[a-z0-9_]+(\.[a-z0-9_]+)*$")
 
@@ -430,6 +432,15 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             if not isinstance(meta.get(field), str) or not meta[field]:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].{field}는 비어있지 않은 문자열이어야 합니다."
+                )
+        # story #4224 — action_i18n은 선택 필드(에이전트 지시의 로케일별 문안 · 없으면 action 원문). 있으면 모양 강제.
+        if "action_i18n" in meta:
+            action_i18n = meta["action_i18n"]
+            if not isinstance(action_i18n, dict) or not all(
+                loc in SUPPORTED_LOCALES and isinstance(text, str) and text for loc, text in action_i18n.items()
+            ):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].action_i18n must map a supported locale ({list(SUPPORTED_LOCALES)}) to a non-empty string."
                 )
         # story #3312(M1→M3·마케팅자동화, PO 확定 2026-09-02②) — gate는 선택 필드지만, «막지
         # 않는다고 검증 안 하면 오타가 조용히 무시»되는 자리라(recipe_gate_hooks.py가 gate
