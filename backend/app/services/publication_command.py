@@ -432,34 +432,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         # story #4192(까디르 4583 P1) — «발행 뒤 레시피 처리» 전체(레시피 문맥 읽기 · 레시피 게이트 outcome 기록 · 이벤트)를
         # **격리 세션**에서. 예전엔 앞 두 단계를 워커 세션에서 해, 거기서 SQL 오류가 나면 워커 트랜잭션이 aborted →
         # 같은 배치 다음 명령이 망가졌다(4573 부류). 워커 세션은 위 completed 커밋까지만 — 여기선 값만 넘긴다.
-        from app.services.isolated_side_effect import run_side_effect_in_own_session
-
-        _org_id, _work_item_id, _connection_id = command.org_id, draft.work_item_id, draft.connection_id
-
-        async def _recipe_after_channel_publish(side: AsyncSession) -> None:
-            from app.services.channel_posts import (
-                emit_recipe_published_stage_event, resolve_recipe_context_for_scheduled_publication,
-            )
-
-            recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
-                side, org_id=_org_id, work_item_id=_work_item_id, connection_id=_connection_id,
-            )
-            if recipe_ctx is None:
-                return
-            recipe_gate, definition_key, next_stage = recipe_ctx
-            recipe_gate.publish_outcome = "published"
-            # 페드루 PO REQUIRED(PR #4473) — work_item_type은 찾은 게이트 행 자신의 값(SSOT는 행 자신).
-            work_item_type = recipe_gate.work_item_type
-            await side.commit()
-            await emit_recipe_published_stage_event(
-                side, org_id=_org_id, work_item_type=work_item_type,
-                work_item_id=_work_item_id, definition_key=definition_key, next_stage=next_stage,
-            )
-
-        await run_side_effect_in_own_session(
-            db, _recipe_after_channel_publish,
-            describe=f"recipe after scheduled channel publish command_id={command.id} draft_id={draft.id}",
-        )
+        await _emit_recipe_published_for_channel_command(db, command, draft)
         return
     except ChannelImageContainerFailedError as exc:
         error_code, last_error = "CHANNEL_IMAGE_CONTAINER_FAILED", str(exc)
@@ -611,6 +584,45 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     await apply_command_failure(
         db, command, error_code=error_code, last_error=last_error, now=now,
         retry_after_seconds=retry_after_seconds,
+    )
+
+
+async def _emit_recipe_published_for_channel_command(
+    db: AsyncSession, command: PublicationCommand, draft: ChannelPostDraft,
+) -> None:
+    """story #4093·#4192 — 예약 채널 발행 명령이 **성공으로** 끝난 순간(completed 커밋 뒤) 레시피 뒤처리: 레시피 문맥 읽기 ·
+    레시피 게이트 outcome 기록 · published 단계 이벤트. 전부 **격리 세션**에서(까디르 4583 P1) — 워커 세션은 completed
+    커밋까지만이고 여기선 `command`·`draft`의 값만 읽는다(DB 접근 0). 실패는 발행 성공을 되돌리지 않는다.
+
+    story #4229 — `_process_one_command` 안 인라인 클로저였던 것을 site 쪽 `_emit_recipe_published_for_site_post_command`와
+    같은 모양으로 뺐다(동작 무변) — «워커 세션 안 건드림» 계약을 테스트가 직접 잴 수 있게."""
+    from app.services.isolated_side_effect import run_side_effect_in_own_session
+
+    _org_id, _work_item_id, _connection_id = command.org_id, draft.work_item_id, draft.connection_id
+
+    async def _recipe_after_channel_publish(side: AsyncSession) -> None:
+        from app.services.channel_posts import (
+            emit_recipe_published_stage_event, resolve_recipe_context_for_scheduled_publication,
+        )
+
+        recipe_ctx = await resolve_recipe_context_for_scheduled_publication(
+            side, org_id=_org_id, work_item_id=_work_item_id, connection_id=_connection_id,
+        )
+        if recipe_ctx is None:
+            return
+        recipe_gate, definition_key, next_stage = recipe_ctx
+        recipe_gate.publish_outcome = "published"
+        # 페드루 PO REQUIRED(PR #4473) — work_item_type은 찾은 게이트 행 자신의 값(SSOT는 행 자신).
+        work_item_type = recipe_gate.work_item_type
+        await side.commit()
+        await emit_recipe_published_stage_event(
+            side, org_id=_org_id, work_item_type=work_item_type,
+            work_item_id=_work_item_id, definition_key=definition_key, next_stage=next_stage,
+        )
+
+    await run_side_effect_in_own_session(
+        db, _recipe_after_channel_publish,
+        describe=f"recipe after scheduled channel publish command_id={command.id} draft_id={draft.id}",
     )
 
 
