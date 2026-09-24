@@ -615,3 +615,46 @@ async def test_patch_rejects_role_actor_kinds_orphaned_by_stage_metadata_shrink(
             assert ei.value.detail["code"] == "invalid_definition"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+@pytest.mark.parametrize("value", [[], "", 0, False])
+async def test_http_register_and_patch_reject_falsy_non_dict_role_actor_kinds_with_422(value):
+    """까디르 4606 델타 P2 — HTTP 등록 · 수정 둘 다: `role_actor_kinds`가 `[]` · `""` · `0` · `false`면 요청 스키마
+    (`dict | None`)가 **422**로 막는다(검증기의 400까지 가지 않는다). 검증기가 같은 값을 거부하는 건 서비스 계약이라 따로
+    잰다(test_2632)."""
+    from app.main import app
+    from app.models.organization import Organization
+    from app.routers.events import CreateEventDefinitionRequest, create_event_definition
+    from tests.test_e4fc29fa_site_post_orchestration import _client_for, _setup_org_scoped_app
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s, slug=f"acme{uuid.uuid4().hex[:6]}")
+            user_id = await _seed_org_member(s, org_id, role="admin")
+            slug = (await s.get(Organization, org_id)).slug
+            created = await create_event_definition(
+                CreateEventDefinitionRequest(
+                    key=f"org.{slug}.widget.made", name="위젯 제작 완료",
+                    payload_schema=_CYCLIC_SCHEMA, routing=_NONE_ROUTING, stage_metadata=_CYCLIC_STAGE_METADATA,
+                ),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            await s.commit()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=user_id, agent=False)
+        async with _client_for(app) as client:
+            r_create = await client.post("/api/v2/events/definitions", json={
+                "key": f"org.{slug}.widget.other", "name": "다른 위젯",
+                "payload_schema": _CYCLIC_SCHEMA, "routing": _NONE_ROUTING,
+                "stage_metadata": _CYCLIC_STAGE_METADATA, "role_actor_kinds": value,
+            })
+            r_patch = await client.patch(f"/api/v2/events/definitions/{created.id}", json={"role_actor_kinds": value})
+        for r in (r_create, r_patch):
+            assert r.status_code == 422, r.text
+            assert "role_actor_kinds" in r.text, r.text  # 이 필드의 스키마 거부(다른 필드 탓 아님)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

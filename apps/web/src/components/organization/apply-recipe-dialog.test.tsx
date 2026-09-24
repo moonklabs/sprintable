@@ -164,6 +164,57 @@ describe('ApplyRecipeDialog', () => {
 
   // story #4118(라이브 실사고 그라운딩, 2026-09-21) — 토스트 count가 서버 실 값(리터럴
   // 1 고정 아님)을 반영하는지 진짜 번역기로 문장 자체를 고정한다.
+  it('까디르 4606 P1 — 승인이 stage 밖인 읽기 전용 stage에 예전 바인딩이 남아 있어도 제출 payload에 그 stage는 0', async () => {
+    const capture = { body: null as unknown };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
+      if (url.includes('/api/events/definitions/def-1/bindings')) {
+        return { ok: true, json: async () => ({ bindings: { brief: 'agent-old', kickoff: 'agent-1' } }) };
+      }
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 1, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    const target = {
+      ...TARGET,
+      payload_schema: { properties: { stage: { enum: ['brief', 'kickoff'] } } },
+      stage_metadata: {
+        brief: { role: 'PO', action: '브리프', approval: { surface: 'doc_approval' as const } },
+        kickoff: { role: 'PO', action: '기획' },
+      },
+      role_actor_kinds: { PO: 'either' as const },
+    };
+
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog
+          target={target}
+          open
+          onOpenChange={() => {}}
+          t={((k: string) => k) as never}
+          tc={((k: string) => k) as never}
+          addToast={() => {}}
+        />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const submitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit');
+    await act(async () => { submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(capture.body).toEqual({ project_id: 'proj-1', role_mapping: { kickoff: 'agent-1' } });
+  });
+
   it('apply 성공 토스트 count가 실제 bindings_upserted(5)를 반영한다(리터럴 1 고정 아님)', async () => {
     const capture = { body: null as unknown };
     stubFetch({ ok: true, bindings_upserted: 5, warnings: [] }, capture);
@@ -687,5 +738,93 @@ describe('ApplyRecipeDialog — 워크플로우 프리셋 제목 로케일(story
     } finally {
       LOCALE = 'ko';
     }
+  });
+});
+
+// story #4243 AC2 — 역할별 사람/에이전트 선언(role_actor_kinds)으로 stage 한 줄의 선택지와 필수 여부가 갈린다.
+// loop_agency 모양(시드 0260의 역할 배치)에 human/either를 선언했을 때의 창 동작 — 0403 시드는 사람 완료 경로가 생길 때까지
+// 전부 agent(까디르 QA P1 · story 4249에서 either 복원). 여기선 선언이 오면 창이 어떻게 그리는지를 고정한다: Human → 사람만(비워도 됨) ·
+// Any → 사람 + 에이전트 · Agent → 에이전트만 · PO(either)의 «브리프»는 승인 자리 선언(approval.surface=doc_approval)이라 선택기 없는 읽기 전용 줄.
+describe('ApplyRecipeDialog — role_actor_kinds(story #4243)', () => {
+  const LOOP_AGENCY = {
+    ...TARGET,
+    key: 'preset.workflow.loop_agency',
+    payload_schema: { properties: { stage: { enum: [
+      'goal_hypothesis', 'brief_doc_approval', 'generate_variants', 'loop_decision', 'execute', 'track_and_learn',
+    ] } } },
+    stage_metadata: {
+      goal_hypothesis: { role: 'Human', action: 'a' },
+      brief_doc_approval: { role: 'PO', action: 'b', approval: { surface: 'doc_approval' as const } },
+      generate_variants: { role: 'Agent', action: 'c' },
+      loop_decision: { role: 'Human', action: 'd' },
+      execute: { role: 'Any', action: 'e' },
+      track_and_learn: { role: 'Any', action: 'f' },
+    },
+    role_actor_kinds: { Human: 'human', PO: 'either', Agent: 'agent', Any: 'either' } as const,
+  };
+
+  function stubMixedMembers(capture: { body: unknown }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [
+          { id: 'agent-1', name: '디디군', type: 'agent' },
+          { id: 'human-1', name: '윤재신', type: 'human' },
+        ] }) };
+      }
+      if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
+      if (url === '/api/events/definitions/def-1/apply') {
+        capture.body = init?.body ? JSON.parse(init.body as string) : null;
+        return { ok: true, json: async () => ({ ok: true, bindings_upserted: 4, warnings: [] }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+  }
+
+  it('사람 역할 줄엔 에이전트 선택 0 · either 줄엔 사람 + 에이전트 · 브리프는 읽기 전용 · 사람 줄을 비워도 에이전트·either 줄만 채우면 적용되고 빈 줄은 싣지 않는다', async () => {
+    const capture = { body: null as unknown };
+    stubMixedMembers(capture);
+    await act(async () => {
+      root.render(wrap(
+        <ApplyRecipeDialog target={LOOP_AGENCY} open onOpenChange={() => {}}
+          t={((k: string) => k) as never} tc={((k: string) => k) as never} addToast={() => {}} />,
+      ));
+    });
+    await flush();
+    const projectSelect = document.body.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      projectSelect.value = 'proj-1';
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+
+    const rows = [...document.body.querySelectorAll('select')].slice(1) as HTMLSelectElement[];
+    const values = (s: HTMLSelectElement) => [...s.options].map((o) => o.value).filter(Boolean);
+    expect(rows).toHaveLength(5); // 브리프 줄엔 선택기 없음
+    const [goal, variants, decision, run, learn] = rows;
+    expect(values(goal)).toEqual(['human-1']);
+    expect(values(decision)).toEqual(['human-1']);
+    expect(values(run)).toEqual(['agent-1', 'human-1']);
+    expect(values(variants)).toEqual(['agent-1']);
+    const notes = [...document.body.querySelectorAll('[data-testid="mapping-approval-elsewhere"]')].map((n) => n.textContent);
+    expect(notes).toEqual(['recipeApplyV2ApprovalOnDocApproval']);
+
+    const submitBtn = () => [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'eventApplySubmit') as HTMLButtonElement;
+    expect(submitBtn().disabled).toBe(true);
+    for (const [select, value] of [[variants, 'agent-1'], [run, 'agent-1'], [learn, 'human-1']] as const) {
+      await act(async () => {
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    await flush();
+    expect(submitBtn().disabled).toBe(false);
+
+    await act(async () => { submitBtn().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(capture.body).toEqual({
+      project_id: 'proj-1',
+      role_mapping: { generate_variants: 'agent-1', execute: 'agent-1', track_and_learn: 'human-1' },
+    });
   });
 });

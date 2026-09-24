@@ -44,7 +44,10 @@ APPROVER_ROLE_REFERENCES = frozenset({"org_owner"})
 # actor_kinds(정의 레벨 옵션 사전, {role명: kind})의 **값** 어휘. role 이름 자체는
 # APPROVER_ROLE_REFERENCES와 달리 닫지 않는다(role은 저자 자유 문자열 — 기존 계약,
 # recipe-role-slots.ts 참조) — 닫는 건 "이 role이 사람인가 에이전트인가"라는 값 축뿐이다.
-ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent"})
+# story #4243(PO 2026-09-24) — 세 번째 값 `either`: 사람도 에이전트도 맡을 수 있는 자리(적용 창이 사람 + 에이전트를 함께
+# 보여 주는 멤버 자리). `human`·`agent`는 이름부터 한쪽인 역할만. 대부분의 일반 역할(PO·QA·Reviewer 등)은 `either`다 —
+# 에이전트가 PO·QA를 맡는 조직(customer-zero)이 반례라 `human`으로 박으면 결함을 반대 방향으로 다시 만든다.
+ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent", "either"})
 # story #4090(alembic 0387·페드루 PO 確定 2026-09-21) — capability.target의 닫힌 어휘.
 # gate.approver·server_derived 축과 동형 설계 — apply_recipe_role_bindings가 role_mapping의
 # stage별 값을 어느 테이블(TeamMember/ChannelConnection)로 검증할지 이 값 하나로 가른다.
@@ -61,7 +64,9 @@ _CAPABILITY_TARGETS = frozenset({"agent", "channel_connection", "generation_conn
 # 닫힌 어휘. 적용 창이 사람 역할의 이 stage를 선택 없는 읽기 전용 자리로 그린다(선언 없는 사람 비게이트 stage는 사람이
 # 실제로 일하는 자리라 지금처럼 멤버 자리 — 까디르 QA 재현 C). 승인자는 적지 않는다 — 초안 게이트의 승인자는 게이트
 # 쪽 규칙이 정하므로 여기 또 적으면 어긋날 수 있는 두 번째 원천이 된다.
-_APPROVAL_SURFACES = frozenset({"draft_gate"})
+# story #4243 D3(PO 2026-09-24) — `doc_approval`: 승인이 결재함의 **문서 결재**에서 일어남(loop_agency «브리프»). 레시피 게이트를
+# 따로 선언하면 결재가 둘로 갈라지므로 쓰지 않는다.
+_APPROVAL_SURFACES = frozenset({"draft_gate", "doc_approval"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
@@ -576,7 +581,10 @@ def validate_role_actor_kinds(
     거부 문구와 동일 실질 동작, 회귀 0)."""
     from app.services.i18n_catalog import t
 
-    if not role_actor_kinds:
+    # 까디르 4606 P2 — «없음»은 None과 빈 dict뿐이다. `[]` · `""` · `0` · `False`는 falsy라도 모양이 틀린 값이라 아래에서
+    # 거부한다(예전 `if not ...`는 그 넷을 «없음»으로 보고 통과시켰다). 서비스 계약이다 — HTTP 등록 · 수정은 요청 스키마
+    # (`dict | None`)가 그 넷을 먼저 422로 막는다(test_2636 HTTP 테스트).
+    if role_actor_kinds is None:
         return
     if not isinstance(role_actor_kinds, dict):
         raise InvalidRoleActorKindsError(
