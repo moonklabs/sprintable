@@ -294,7 +294,15 @@ async def retry_dead_letter_command(
             PublicationCommand.id == command_id, PublicationCommand.org_id == org_id,
         ).with_for_update()
     )).scalar_one_or_none()
-    if command is None or command.status not in ("dead_letter", "blocked"):
+    if command is None:
+        return None
+    # story #4262(PO 13:49Z) — 뉴스레터 발송은 연결이 비활성이면 `blocked_unapproved`로 서는데(발송 실행기가 게이트 · 캠페인 ·
+    # 연결을 확인해 막음) 이 함수가 받지 않아 연결을 고쳐도 다시 보낼 길이 없었다. 뉴스레터에 한해 받는다 — 실행기가 매번
+    # 다시 확인하므로 여전히 막혀 있으면 다시 blocked_unapproved로 설 뿐이다(무한 재시도 0). 다른 종류는 예전대로 404.
+    retryable = ("dead_letter", "blocked") + (
+        (STATUS_BLOCKED_UNAPPROVED,) if command.content_kind == "newsletter_send" else ()
+    )
+    if command.status not in retryable:
         return None
     # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩
     # 잠근다. 그 사이 다른 tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면
@@ -1027,14 +1035,6 @@ async def apply_command_failure(
         mark_stop_notice(command)
         return
 
-    # transient만 지수 백오프 재시도 큐로.
-    command.attempt_count += 1
-    if command.attempt_count >= MAX_RETRIES:
-        # story #3598(AC6, PO 確定 2026-09-06 · 유나 Design CHANGES 1 정정
-        # 2026-09-07)이 재시도 상한 소진 시 connection.status="error" 승격을 이
-        # 자리에 얹었었다(CHANNEL_RATE_LIMITED만 제외). story #3646(BE·결함,
-        # 페드루 PO 確定 2026-09-07, dev 실측 — PO Test Org IG sandbox 502
-        # 발행 실패가 「재인증 필요」로 잘못 승격) — #3598 AC6 자신의 주석이 이미
     if failure_kind == FAILURE_KIND_NOT_SENT:
         # story #4262 — 확실히 안 나갔고 다시 해도 같다 — 백오프 없이 곧바로 사람 재시도(연결을 고친 뒤)로.
         command.attempt_count += 1
@@ -1043,6 +1043,14 @@ async def apply_command_failure(
         command.next_attempt_at = None
         return
 
+    # transient만 지수 백오프 재시도 큐로.
+    command.attempt_count += 1
+    if command.attempt_count >= MAX_RETRIES:
+        # story #3598(AC6, PO 確定 2026-09-06 · 유나 Design CHANGES 1 정정
+        # 2026-09-07)이 재시도 상한 소진 시 connection.status="error" 승격을 이
+        # 자리에 얹었었다(CHANNEL_RATE_LIMITED만 제외). story #3646(BE·결함,
+        # 페드루 PO 確定 2026-09-07, dev 실측 — PO Test Org IG sandbox 502
+        # 발행 실패가 「재인증 필요」로 잘못 승격) — #3598 AC6 자신의 주석이 이미
         # "이 transient 분기엔 인증/권한 계열이 애초에 못 오고, 남는 error_code는
         # CHANNEL_PUBLISH_PROVIDER_ERROR뿐"이라고 못박아 놓고도 그 유일한 코드를
         # 승격 대상에 남겨 뒀다 — 결과적으로 «5xx/네트워크/타임아웃(=이 TRANSIENT

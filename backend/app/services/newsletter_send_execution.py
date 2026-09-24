@@ -179,6 +179,9 @@ async def process_one_newsletter_send_command(db: AsyncSession, command: Publica
         )
         command.status = STATUS_BLOCKED_UNAPPROVED
         command.last_error = str(exc)[:2000]
+        # story #4262 — 사유를 코드로 남긴다(예전엔 last_error 문자열에만). 게이트 화면이 연결 문제면 «연결 문제로 멈춤» +
+        # 사람 재시도를 연다(retry_dead_letter_command가 뉴스레터의 blocked_unapproved를 받는다).
+        command.reason_code = exc.code
         return
 
     gate, publication, conn = ctx["gate"], ctx["publication"], ctx["connection"]
