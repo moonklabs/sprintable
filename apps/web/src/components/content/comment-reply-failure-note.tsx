@@ -23,6 +23,9 @@ const COMMENT_REPLY_VOID_REASON_KEYS: Record<string, string> = {
 // 수 없는 상태(§22-9와 같은 축)라 액션이 없고, 모르는 사유도 액션 0(아는 척 안 함).
 const VOID_REASON_ALLOWS_RESUBMIT = new Set(['GATE_NOT_APPROVED_OR_RESEALED']);
 
+/** story #4266(까디르 codex 4634 P2) — notice: 재시도는 받아들여졌지만 목록 다시 읽기가 실패했다(«최신 상태는 불러오지 못했어요 …»). */
+export type CommentReplyRetryResult = { ok: true; notice?: string } | { ok: false; errorMessage: string };
+
 export interface CommentReplyFailureNoteProps {
   /** channel_post와 같은 축(failure-action.ts::deriveFailureAction 재사용 — 신규
    * 발명 0, command_status 우선순위 진리표는 한 곳에서만 산다). */
@@ -30,7 +33,7 @@ export interface CommentReplyFailureNoteProps {
   displayTimezone: string;
   /** dead_letter 전용 — publication-commands/{id}/retry(공용 엔드포인트, content_kind
    * 무관, BE 신설 0)를 호출한다. command_id가 없으면(레이스) 호출부가 안 넘긴다. */
-  onRetry?: () => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
+  onRetry?: () => Promise<CommentReplyRetryResult>;
   /** voided(봉인 불일치) 전용 — 기존 답변 다이얼로그를 새로 연다(재승인이 필요한
    * 전제 자체가 바뀌었으므로 "같은 명령 재시도"가 아니라 "새 답변으로 다시 시작"). */
   onResubmit?: () => void;
@@ -48,6 +51,7 @@ export function CommentReplyFailureNote({
   const t = useTranslations('content');
   const [retrying, setRetrying] = useState(false);
   const [retryOutcome, setRetryOutcome] = useState<'ok' | string | null>(null);
+  const [retryNotice, setRetryNotice] = useState<string | null>(null);
   // story #4017(PO 확定 2026-09-17) — 아래 blocked 문구의 "연결 화면" 링크를 목적지 모듈로.
   const connectRulesHref = useConnectRulesHref('/organization/channels');
 
@@ -55,9 +59,11 @@ export function CommentReplyFailureNote({
     if (!onRetry) return;
     setRetrying(true);
     setRetryOutcome(null);
+    setRetryNotice(null);
     try {
       const result = await onRetry();
       setRetryOutcome(result.ok ? 'ok' : result.errorMessage);
+      setRetryNotice(result.ok ? result.notice ?? null : null);
     } finally {
       setRetrying(false);
     }
@@ -103,7 +109,10 @@ export function CommentReplyFailureNote({
           </Button>
         </div>
         {retryOutcome === 'ok' ? (
-          <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-success">{t('commentsReplyRetrySuccess')}</p>
+          <>
+            <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-success">{t('commentsReplyRetrySuccess')}</p>
+            {retryNotice ? <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-notice">{retryNotice}</p> : null}
+          </>
         ) : retryOutcome && retryOutcome !== 'ok' ? (
           <p className="text-xs text-destructive" data-testid="comments-item-reply-retry-error">{retryOutcome}</p>
         ) : null}

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import type { CommentReplyStatus } from '@/components/content/comment-reply-status';
 import { CommentReplyStatusChip } from '@/components/content/comment-reply-status-chip';
 import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
-import { CommentReplyFailureNote } from '@/components/content/comment-reply-failure-note';
+import { CommentReplyFailureNote, type CommentReplyRetryResult } from '@/components/content/comment-reply-failure-note';
 
 // story #3517(BE #3865 조각①, PO 確定 2026-09-05) — 필드명은 BE 응답
 // (`{id, external_comment_id, author_display_name, text, external_created_at,
@@ -207,7 +207,7 @@ export interface CommentsSectionProps {
   onReply: (comment: CommentItem) => void;
   /** story #3544(§22-15) — dead_letter 답변을 공용 publication-commands/{id}/retry로
    * 다시 큐에 올린다(content_kind 무관 기존 엔드포인트, BE 신설 0). */
-  onRetryReply: (comment: CommentItem) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
+  onRetryReply: (comment: CommentItem) => Promise<CommentReplyRetryResult>;
   /** story #3544 조각⑧(§22-15 ⑧) — voided(봉인 불일치) 「다시 상신」 전용. 일반
    * onReply(빈 칸에서 새로 시작)와 달리 다이얼로그를 열기 전에 «지금 답변» 원문을
    * 먼저 가져와 prefill한다(호출부가 그 조회를 진다). */
@@ -249,7 +249,7 @@ function CommentsList({
   t: ReturnType<typeof useTranslations>;
   onConvertToTask: (comment: CommentItem) => void;
   onReply: (comment: CommentItem) => void;
-  onRetryReply: (comment: CommentItem) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
+  onRetryReply: (comment: CommentItem) => Promise<CommentReplyRetryResult>;
   onResubmitReply: (comment: CommentItem) => void;
 }) {
   return (

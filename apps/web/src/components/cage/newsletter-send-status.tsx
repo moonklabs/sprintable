@@ -18,15 +18,12 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
-import { parseSitePostApiError } from '@/components/content/api-error';
 import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
-import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { fetchWithAuth } from '@/lib/db/client';
 
 const CONNECTION_UNAVAILABLE = 'NEWSLETTER_SEND_CONNECTION_UNAVAILABLE';
 
@@ -57,8 +54,8 @@ export interface NewsletterSendStatusProps {
   /** 지금 화면의 사람이 사람 멤버인가 — 에이전트 화면엔 상태 줄만 둔다(재시도 API가 사람 전용). */
   isHuman: boolean;
   displayTimezone: string;
-  /** 재시도가 받아들여진 뒤 게이트를 다시 읽는다(명령 상태가 pending으로 바뀐다). */
-  onRetried?: () => void;
+  /** 재시도가 받아들여진 뒤(또는 404 · 재시도 대상 아님) 게이트를 다시 읽는다. true = 새 상태를 반영함 · false/예외 = 다시 읽기 실패(이전 상태 유지). */
+  onRetried?: () => Promise<boolean>;
 }
 
 export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, onRetried }: NewsletterSendStatusProps) {
@@ -68,11 +65,11 @@ export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, on
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [checklistConfirmed, setChecklistConfirmed] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+  const [result, setResult] = useState<PublicationRetryResult | null>(null);
 
   const command = gate.gate_type === 'newsletter_send' ? gate.newsletter_send_command : null;
   const view = command ? viewOf(command) : null;
-  if (!command || !view) return result ? <RetryResult result={result} /> : null;
+  if (!command || !view) return <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />;
 
   const canRetry = isHuman && !!orgId && (view.kind === 'connection_blocked' || view.retryable);
   const isNeedsCheckGate = view.kind === 'badge' && (
@@ -80,26 +77,17 @@ export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, on
   );
   const openConfirm = () => { setChecklistConfirmed(false); setConfirmOpen(true); };
 
+  // story #4266 — 채널 포스트 · 사이트 글 상세와 같은 공용 규칙: 결과가 무엇이든 확인 창을 닫고 결과 줄 · 404(재시도 대상 아님)는 게이트를
+  // 다시 읽고(onRetried) 로케일 문장 · 그 밖의 실패도 서버 원문 대신 로케일 문장.
   const handleRetry = async () => {
     if (!orgId) return;
     setRetrying(true);
     setResult(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${command.id}/retry`, { method: 'POST' });
-      if (res.ok) {
-        setConfirmOpen(false);
-        setResult({ type: 'success' });
-        onRetried?.();
-      } else {
-        const info = parseSitePostApiError(await res.json().catch(() => null));
-        setResult({
-          type: 'error',
-          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsRetryFailed')),
-          raw: info.raw,
-        });
-      }
-    } catch {
-      setResult({ type: 'error', text: t('channelPostsRetryFailed') });
+      const next = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${command.id}/retry`);
+      setConfirmOpen(false);
+      setChecklistConfirmed(false);
+      setResult(onRetried ? await withReload(next, onRetried) : next);
     } finally {
       setRetrying(false);
     }
@@ -159,23 +147,7 @@ export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, on
         destructive={false}
         onConfirm={() => void handleRetry()}
       />
-      {result ? <RetryResult result={result} /> : null}
+      <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />
     </section>
-  );
-}
-
-function RetryResult({ result }: { result: { type: 'success' } | { type: 'error'; text: string; raw?: string } }) {
-  const t = useTranslations('content');
-  return (
-    <Alert
-      variant={result.type === 'error' ? 'destructive' : 'default'}
-      role={result.type === 'error' ? 'alert' : 'status'}
-      data-testid="channel-post-retry-result"
-    >
-      <AlertDescription className="break-keep">
-        {result.type === 'success' ? t('channelPostsRetrySuccess') : result.text}
-      </AlertDescription>
-      {result.type === 'error' ? <RawDetailsToggle raw={result.raw} label={t('errorRawDetailsToggle')} /> : null}
-    </Alert>
   );
 }
