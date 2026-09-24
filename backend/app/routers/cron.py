@@ -1,5 +1,5 @@
 """
-Internal cron endpoints — called by Next.js /api/cron/* routes.
+Internal cron endpoints — called by Cloud Scheduler directly (definitions: infra/cloud-scheduler/jobs.json, story #4234).
 All endpoints require CRON_SECRET via Authorization: Bearer header.
 """
 from __future__ import annotations
@@ -123,18 +123,6 @@ async def agent_session_recovery(
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
-
-
-# ─── POST /api/v2/internal/cron/anonymize ─────────────────────────────────────
-
-@router.post("/anonymize")
-async def anonymize(
-    request: Request,
-    session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    verify_cron(request)
-    # OSS 모드에서는 Supabase auth 삭제가 없음 — no-op 반환
-    return _ok({"anonymized": [], "deleted": []})
 
 
 # ─── GET /api/v2/internal/cron/hitl-timeouts ──────────────────────────────────
