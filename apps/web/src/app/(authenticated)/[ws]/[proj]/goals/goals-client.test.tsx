@@ -136,7 +136,9 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
       { id: 'e2', title: '목표B', status: 'done', total_stories: 4, done_stories: 4 },
     ]);
     await mount();
-    expect(container.textContent).toContain('OUTCOMES');
+    // [SID:4282 · 유나 결정] ko 머리는 «목표 · 결과»(화면 이름 먼저 · 영어 대문자 0).
+    expect(container.textContent).toContain('목표 · 결과');
+    expect(container.textContent).not.toContain('OUTCOMES');
     expect(container.querySelector('h1')?.textContent).toBe('목표');
     expect(container.textContent).toContain('활성 1');
     expect(container.textContent).toContain('완료 1');

@@ -75,6 +75,51 @@ describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story 
   });
 });
 
+// [SID:4282 · 유나 결정] 배포 27 기기 탐색 점검 7번 — 역할 칩에 조직 역할 원문(«member»)이 샜고(직무 해석기에 넣어서),
+// «inactive»가 글자 그대로 이름 줄에 붙어 이름을 5자로 밀었다. 조직 역할 라벨(소유자 · 관리자 · 구성원 · 모르는 값만 원문) ·
+// 비활성은 칩 줄로(secondary) · 이름 줄엔 이름만.
+describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
+  const badges = () => Array.from(container.querySelectorAll('[data-slot="badge"]'));
+  const badgeTexts = () => badges().map((el) => el.textContent?.trim());
+  it('member → «구성원» · admin → «관리자» · owner → «소유자», 원문 0', async () => {
+    stubFetch({ agents: [
+      { id: 'a1', name: '멤버 에이전트', role: 'member', is_active: true },
+      { id: 'a2', name: '관리 에이전트', role: 'admin', is_active: true },
+      { id: 'a3', name: '소유 에이전트', role: 'owner', is_active: true },
+    ] });
+    await mount();
+    const chips = badgeTexts();
+    expect(chips).toContain(koMessages.organization.roleGroupMember);
+    expect(chips).toContain(koMessages.organization.roleGroupAdmin);
+    expect(chips).toContain(koMessages.organization.roleGroupOwner);
+    for (const raw of ['member', 'admin', 'owner']) expect(chips).not.toContain(raw);
+  });
+  it('모르는 값만 원문으로(유나 결정) — 프로토타입 이름도 원문 문자열이지 함수가 아니다', async () => {
+    stubFetch({ agents: [
+      { id: 'a1', name: '프로토 에이전트', role: 'constructor', is_active: true },
+      { id: 'a2', name: '다른 에이전트', role: 'viewer', is_active: true },
+    ] });
+    await mount();
+    const chips = badgeTexts();
+    expect(chips).toContain('constructor');
+    expect(chips).toContain('viewer');
+    expect(container.textContent ?? '').not.toContain('function');
+  });
+  it('비활성: «비활성» 칩이 칩 줄(범위 칩 뒤)에 secondary로 · 이름 줄엔 이름만 · 원문 «inactive» 0', async () => {
+    stubFetch({ agents: [{ id: 'a1', name: 'Backend-agent-with-a-long-name', role: 'member', is_active: false }] });
+    await mount();
+    const inactive = badges().find((el) => el.textContent?.trim() === koMessages.settings.agentInactiveBadge);
+    expect(inactive).toBeTruthy();
+    expect(inactive?.getAttribute('data-variant')).toBe('secondary');
+    const nameLine = container.querySelector('a .truncate')?.parentElement;
+    expect(nameLine?.textContent?.trim()).toBe('Backend-agent-with-a-long-name');
+    const chipRow = inactive?.parentElement;
+    const order = Array.from(chipRow?.querySelectorAll('[data-slot="badge"]') ?? []).map((el) => el.textContent?.trim());
+    expect(order.indexOf(koMessages.settings.agentInactiveBadge)).toBeGreaterThan(order.findIndex((x) => /프로젝트/.test(x ?? '')));
+    expect(container.textContent ?? '').not.toContain('inactive');
+  });
+});
+
 describe('AgentManagementTab — meRes/projectsRes 격리(story #3519)', () => {
   it('/api/me가 네트워크 reject해도 에이전트 목록(주 콘텐츠)은 그대로 뜬다(loadError로 승격 안 됨)', async () => {
     stubFetch({ meReject: true });

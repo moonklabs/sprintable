@@ -39,7 +39,9 @@ export function ListRow({
           {/* story #3743 CHANGES ①(페드루 PO, 2026-09-09 12:54Z) — 부제를 한 줄로
               자르면(truncate) 시안이 요구하는 긴 한 문장(Facebook 만료 안내 등)이
               말줄임된다. 문장마다 줄이는 대신 부제 자체를 2줄까지 줄바꿈 허용. */}
-          {subtitle ? <p className="line-clamp-2 text-xs text-muted-foreground">{subtitle}</p> : null}
+          {/* [SID:4282 · 유나 결정] 한국어는 띄어쓰기에서만 꺾고(break-keep · «판정한 가/설이» 방지), 띄어쓰기 없는 긴 토큰은
+              어디서든 꺾는다(overflow-wrap:anywhere · 칸을 뚫지 않게). 공용 슬롯이라 소비처 넷 모두에 같이 적용. */}
+          {subtitle ? <p className="line-clamp-2 break-keep text-xs text-muted-foreground [overflow-wrap:anywhere]">{subtitle}</p> : null}
         </div>
         {status}
         {action}
@@ -57,7 +59,8 @@ export function ListRow({
 export function ListRowMark({ label, color }: { label: string; color: string }) {
   return (
     <span
-      className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-white"
+      // [SID:4282 · 유나 결정] 다크에서 검정 계열 브랜드색(Threads · X · Ghost)이 카드에 묻힌다(대비 1.02~1.19:1) → 다크에서만 옅은 테두리.
+      className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-white dark:ring-1 dark:ring-border"
       style={{ backgroundColor: color }}
       aria-hidden="true"
     >

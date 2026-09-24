@@ -12,6 +12,7 @@ import { CountBadge } from '@/components/ui/count-badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole } from '@/lib/org-member-role';
+import { ORG_ROLE_LABEL_KEY } from '@/lib/org-role-label';
 
 interface OrgMember {
   id: string;
@@ -22,11 +23,8 @@ interface OrgMember {
 }
 
 const ROLE_ORDER = ['owner', 'admin', 'member'] as const;
-const ROLE_LABEL_KEY: Record<(typeof ROLE_ORDER)[number], string> = {
-  owner: 'roleGroupOwner',
-  admin: 'roleGroupAdmin',
-  member: 'roleGroupMember',
-};
+// [SID:4282] 라벨 키는 lib/org-role-label.ts 한 곳(에이전트 관리 · 신뢰 센터와 같은 낱말).
+const ROLE_LABEL_KEY: Record<(typeof ROLE_ORDER)[number], string> = ORG_ROLE_LABEL_KEY;
 
 export default function OrganizationRolesPage() {
   const { orgId, orgMemberships } = useDashboardContext();

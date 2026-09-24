@@ -18,11 +18,11 @@ import {
 } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
-import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { orgRoleLabel } from '@/lib/org-role-label';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -277,12 +277,15 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                   <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium text-foreground hover:underline hover:text-primary">{agent.name}</span>
-                      {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{t('agentMember')}</Badge>
-                      <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
+                      {/* [SID:4282 · 유나 결정] agent.role은 조직 역할(owner/admin/member)이다 — 직무 해석기(resolveRoleLabel)에 넣으면
+                          원문(«member»)이 샜다(배포 27 기기 탐색 점검 7번). 조직 역할 라벨로 · 모르는 값만 원문. */}
+                      {(() => { const roleText = orgRoleLabel(agent.role, to); return roleText ? <Badge variant="outline">{roleText}</Badge> : null; })()}
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
+                      {/* [SID:4282 · 유나 결정] 비활성은 칩 줄로(정체 → 범위 → 상태) · 되돌릴 수 있는 상태라 빨강 아님(secondary). 이름 줄엔 이름만. */}
+                      {!agent.is_active ? <Badge variant="secondary">{t('agentInactiveBadge')}</Badge> : null}
                       {isSystemPublisher(agent.runtime_type) ? (
                         <span className="text-xs text-muted-foreground">{ta('systemPublisherNeutralDescription')}</span>
                       ) : agent.verified === false ? (

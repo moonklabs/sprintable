@@ -57,3 +57,25 @@ describe('ListRowMark', () => {
     container.remove();
   });
 });
+
+// [SID:4282 · 유나 결정] 부제 줄바꿈(한국어 띄어쓰기에서만 · 긴 토큰은 어디서든) · 다크에서만 표식 테두리.
+describe('ListRow — 부제 줄바꿈 · 다크 표식 테두리(SID:4282)', () => {
+  it('부제 <p>에 break-keep과 [overflow-wrap:anywhere]', async () => {
+    const { container, root } = await mount(<ListRow title="송윤재" subtitle="개발 · 아직 판정한 가설이 없어요" />);
+    const p = Array.from(container.querySelectorAll('p')).find((el) => el.textContent?.includes('아직 판정한'));
+    const cls = (p?.className ?? '').split(/\s+/);
+    expect(cls).toContain('break-keep');
+    expect(cls).toContain('[overflow-wrap:anywhere]');
+    await act(async () => { root.unmount(); });
+  });
+  it('표식은 다크에서만 옅은 테두리(dark:ring-1 dark:ring-border) · 라이트 ring 없음 · 브랜드색 그대로', async () => {
+    const { container, root } = await mount(<ListRowMark label="Th" color="#121310" />);
+    const mark = container.querySelector('span[aria-hidden="true"]') as HTMLElement;
+    const cls = mark.className.split(/\s+/);
+    expect(cls).toContain('dark:ring-1');
+    expect(cls).toContain('dark:ring-border');
+    expect(cls.filter((c) => /^ring-/.test(c))).toEqual([]);
+    expect(mark.style.backgroundColor).toBe('rgb(18, 19, 16)');
+    await act(async () => { root.unmount(); });
+  });
+});
