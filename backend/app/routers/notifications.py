@@ -12,6 +12,7 @@ from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
 from app.repositories.notification import NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
+    NotificationListItem,
     NotificationResponse,
     NotificationSettingResponse,
     UpsertNotificationSetting,
@@ -78,6 +79,18 @@ def _notif_repo_read(
     return NotificationRepository(session, org_id)
 
 
+async def _enrich_notification_targets(db: AsyncSession, org_id: uuid.UUID, data: list[NotificationListItem]) -> None:
+    """story #4244 — 목록 항목에 대상의 프로젝트 · 문서 slug(app.services.notification_targets — 종 알림 목록과 같은 해소기)."""
+    from app.services.notification_targets import resolve_reference_targets
+
+    targets = await resolve_reference_targets(db, org_id, ((n.reference_type, n.reference_id) for n in data))
+    for n in data:
+        tgt = targets.get((n.reference_type, n.reference_id)) if n.reference_type and n.reference_id else None
+        if tgt is not None:
+            n.target_project_id = tgt.project_id
+            n.target_doc_slug = tgt.doc_slug
+
+
 @router.get("/notifications")
 async def list_notifications(
     unread: bool | None = Query(default=None, description="True=읽지 않은 것만, False=읽은 것만"),
@@ -113,8 +126,10 @@ async def list_notifications(
         user_id=user_id, is_read=resolved_is_read, limit=limit + 1, before=before_dt, before_id=before_id,
     )
     page, has_more, next_cursor = assemble_page(rows, limit, lambda n: (n.created_at, n.id))
+    data = [NotificationListItem(**NotificationResponse.model_validate(n).model_dump()) for n in page]
+    await _enrich_notification_targets(db, repo.org_id, data)
     return {
-        "data": [NotificationResponse.model_validate(n) for n in page],
+        "data": data,
         "meta": {"has_more": has_more, "next_cursor": next_cursor},
     }
 

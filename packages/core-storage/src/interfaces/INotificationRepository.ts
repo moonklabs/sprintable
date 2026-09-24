@@ -19,6 +19,10 @@ export interface Notification {
     payload?: Record<string, unknown>;
     refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>;
   } | null;
+  // story #4244 — 목록(GET /api/v2/notifications) 항목만 싣는다: 대상(reference)의 프로젝트와 문서 slug(목록 조회 때 BE 배치 해소).
+  // 조직 단위 대상 · 해소 불가는 null. 링크가 대상 자기 프로젝트 p를 싣는 데만 쓴다(권한 판정 아님).
+  target_project_id?: string | null;
+  target_doc_slug?: string | null;
   created_at: string;
 }
 

@@ -19,6 +19,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
 from typing import Any, Literal
 
 from sqlalchemy import and_, case, func, literal, or_, select
@@ -36,6 +37,7 @@ from app.models.loop import LoopRun
 from app.models.pm import Goal, Sprint, Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.models.workflow_line import (
+    WorkflowLineDefinitionVersion,
     WorkflowLineStepApproval,
     WorkflowLineStepRun,
     WorkflowLineStepRunEvent,
@@ -321,6 +323,63 @@ async def resolve_work_item_project_id(
             select(Sprint.project_id).where(Sprint.id == work_item_id, Sprint.org_id == org_id)
         )).scalar_one_or_none()
     return None
+
+
+# story #4244 — resolve_work_item_project_id의 배치판(종류당 IN 쿼리 1개 · N+1 0). 단건과 같은 종류 표 + 조직 전체 결재함(#4241)이 쓰던
+# wf_line_version(버전 행 project_id nullable — 조직 단위 라인이면 None). 단건 ↔ 배치 일치는 test_4244 실DB 테스트가 종류마다 고정한다.
+_BATCH_PROJECT_MODELS: tuple[tuple[str, Any], ...] = (
+    ("story", Story), ("doc", Doc), ("visual_artifact", VisualArtifact), ("loop", LoopRun), ("hypothesis", Hypothesis),
+    ("epic", Goal), ("sprint", Sprint), ("wf_line_version", WorkflowLineDefinitionVersion),
+)
+
+
+async def resolve_work_item_project_ids_batch(
+    session: AsyncSession, org_id: uuid.UUID, items: Iterable[tuple[str, uuid.UUID]],
+) -> dict[tuple[str, uuid.UUID], uuid.UUID | None]:
+    """(work_item_type, work_item_id) 여럿 → project_id. 모르는 종류 · 없는 행 · 다른 조직 행은 결과에 없다(호출부는 .get → None)."""
+    by_type: dict[str, set[uuid.UUID]] = {}
+    for wtype, wid in items:
+        if wid is not None:
+            by_type.setdefault(wtype, set()).add(wid)
+    out: dict[tuple[str, uuid.UUID], uuid.UUID | None] = {}
+    for wtype, model in _BATCH_PROJECT_MODELS:
+        ids = by_type.get(wtype)
+        if ids:
+            rows = (await session.execute(
+                select(model.id, model.project_id).where(model.id.in_(ids), model.org_id == org_id)
+            )).all()
+            out.update({(wtype, rid): pid for rid, pid in rows})
+    task_ids = by_type.get("task")
+    if task_ids:
+        rows = (await session.execute(
+            select(Task.id, Story.project_id).join(Story, Task.story_id == Story.id)
+            .where(Task.id.in_(task_ids), Task.org_id == org_id)
+        )).all()
+        out.update({("task", tid): pid for tid, pid in rows})
+    return out
+
+
+def self_anchored_gate_project_id(gate: Gate) -> uuid.UUID | None:
+    """story #4241 — 자기 참조 앵커 게이트(agent_decision · support_escalation: work_item_id == gate.id · 대상 테이블 없음)는
+    생성 때 neutral_facts.project_id에 싣는다. 그 밖의 종류이거나 값이 없거나 깨졌으면 None."""
+    if gate.work_item_type not in ("agent_decision", "support_escalation"):
+        return None
+    raw = (gate.neutral_facts or {}).get("project_id")
+    try:
+        return uuid.UUID(str(raw)) if raw else None
+    except ValueError:
+        return None
+
+
+async def resolve_gate_project_ids_batch(
+    session: AsyncSession, org_id: uuid.UUID, gates: Iterable[Gate],
+) -> dict[uuid.UUID, uuid.UUID | None]:
+    """story #4244 — 게이트 여럿 → 게이트 id별 대상 프로젝트(대상 work item의 프로젝트 · 자기 참조 앵커는 neutral_facts)."""
+    gates = list(gates)
+    by_item = await resolve_work_item_project_ids_batch(
+        session, org_id, ((g.work_item_type, g.work_item_id) for g in gates),
+    )
+    return {g.id: by_item.get((g.work_item_type, g.work_item_id)) or self_anchored_gate_project_id(g) for g in gates}
 
 
 # doc-gate v2 갭1: deliberate 인간 결재 gate — org allow_auto/deny posture 무관하게 항상 manual(pending).

@@ -324,6 +324,36 @@ describe('getEntityHref — 딥링크 계약(story #2956 QA changes)', () => {
   });
 });
 
+// story #4244 — 종 알림 링크는 대상 자기 프로젝트(target_project_id · BE 배치 해소)를 싣는다. events.project_id(수신자 멤버 행의 프로젝트)는
+// 쓰지 않는다. 모르면 주소 그대로(틀린 p 없음).
+describe('getEntityHref — 대상 프로젝트(story #4244)', () => {
+  it('⭐게이트 알림 → /gates/{id}에 게이트 대상의 프로젝트 · events.project_id(수신자 쪽)는 무시', () => {
+    const href = getEntityHref(baseNotification({
+      source_entity_type: 'gate', source_entity_id: 'g-1', target_project_id: 'proj-B',
+      ...({ project_id: 'proj-RECIPIENT' } as Partial<EventNotification>),
+    }));
+    expect(href).toBe('/gates/g-1?p=proj-B');
+  });
+
+  it('⭐문서 → BE slug 우선(payload slug보다) · 대상 프로젝트', () => {
+    const href = getEntityHref(baseNotification({
+      source_entity_type: 'doc', source_entity_id: 'd-1', target_project_id: 'P', target_doc_slug: 'ops-guide', payload: { slug: 'old-slug' },
+    }));
+    expect(href).toBe('/docs/ops-guide?p=P');
+  });
+
+  it('story · task · epic · sprint도 대상 프로젝트를 싣는다', () => {
+    const hrefs = (['story', 'task', 'epic', 'sprint'] as const).map((t) =>
+      getEntityHref(baseNotification({ source_entity_type: t, source_entity_id: 'x', target_project_id: 'P' })));
+    expect(hrefs).toEqual(['/board?story=x&p=P', '/board?task_id=x&p=P', '/goals/x?p=P', '/sprints?id=x&p=P']);
+  });
+
+  it('대상 프로젝트를 모르면(SSE로 막 들어온 항목 · 옛 응답) 주소 그대로 · 문서는 payload slug 폴백', () => {
+    expect(getEntityHref(baseNotification({ source_entity_type: 'gate', source_entity_id: 'g-2' }))).toBe('/gates/g-2');
+    expect(getEntityHref(baseNotification({ source_entity_type: 'doc', source_entity_id: 'd-2', payload: { slug: 'runbook' } }))).toBe('/docs/runbook');
+  });
+});
+
 // story #3007(로드맵 P2·PR-E, L1) — 데스크톱 드롭다운 패널은 floating이라 --elev-overlay.
 describe('NotificationBell — 로드맵 P2·PR-E L1(드롭다운 패널 elevation 토큰)', () => {
   it('데스크톱 드롭다운(.w-80)이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {

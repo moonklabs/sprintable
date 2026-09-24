@@ -1,113 +1,52 @@
-
+import { withProjectParam } from '@/lib/with-project-param';
 
 interface NotificationReference {
   reference_type: string | null;
   reference_id: string | null;
+  // story #4244 — BE 목록 항목(NotificationListItem)이 싣는 대상(reference)의 프로젝트와 문서 slug(목록 조회 때 배치 해소 · 옛 행도 채워짐).
+  // 조직 단위 대상 · 해소 불가(삭제 · 다른 조직 · 없는 대상)는 null. 표시·링크 전용.
+  target_project_id?: string | null;
+  target_doc_slug?: string | null;
 }
 
-interface DocCommentRow {
-  id: string;
-  doc_id: string;
-}
-
-interface DocRow {
-  id: string;
-  slug: string;
-}
-
-function buildDocHref(slug: string, commentId?: string) {
-  return commentId ? `/docs/${slug}?commentId=${commentId}` : `/docs/${slug}`;
-}
-
-export async function attachNotificationHrefs<T extends NotificationReference>(
-  db: any | undefined,
+/**
+ * 알림 → 클릭 목적지. story #4244 — 링크는 **현재 프로젝트가 아니라 대상 자기 프로젝트**(`target_project_id`)를 `?p=`로 싣는다
+ * (다른 프로젝트 게이트 알림을 열면 셸 = 현재 · 본문 = 게이트 프로젝트로 두 세계가 되던 결함 · 4241과 같은 규칙). 대상 프로젝트를 모르면
+ * 주소 그대로(착지 뒤 셸이 정한다 — 틀린 p를 싣지 않는다). 문서 알림은 BE가 해소한 slug(`target_doc_slug`)로 그 문서를 연다(예전엔 slug
+ * 조회용 db가 늘 undefined로 넘어와 항상 `/docs` 목록으로만 갔다).
+ */
+export function attachNotificationHrefs<T extends NotificationReference>(
   notifications: T[],
-): Promise<Array<T & { href: string | null }>> {
-  const docCommentIds = notifications
-    .filter((notification) => notification.reference_type === 'doc_comment' && notification.reference_id)
-    .map((notification) => notification.reference_id as string);
+): Array<T & { href: string | null }> {
+  return notifications.map((notification) => ({ ...notification, href: hrefForNotification(notification) }));
+}
 
-  const docIds = notifications
-    .filter((notification) => notification.reference_type === 'doc' && notification.reference_id)
-    .map((notification) => notification.reference_id as string);
+function hrefForNotification(notification: NotificationReference): string | null {
+  const referenceId = notification.reference_id;
+  if (!referenceId) return null;
+  const p = notification.target_project_id ?? null;
 
-  let docComments: DocCommentRow[] = [];
-  if (db && docCommentIds.length) {
-    const { data, error } = await db
-      .from('doc_comments')
-      .select('id, doc_id')
-      .in('id', docCommentIds);
-
-    if (error) throw error;
-    docComments = (data ?? []) as DocCommentRow[];
+  // story #2379 — '/memos' 라우트는 앱 어디에도 없다(인앱 reference_type='memo' 생성 콜사이트 0건) → 기본 fallback(href: null).
+  switch (notification.reference_type) {
+    // story a539c649 S3d — '/boards'(오탈자)+task_id 누락으로 항상 무효였던 링크를 getEntityHref와 동형(/board?task_id=)으로 정정.
+    case 'task':
+      return withProjectParam(`/board?task_id=${referenceId}`, p);
+    case 'sprint':
+      return withProjectParam('/sprints', p);
+    // f2ec5395: story 참조 알림(status_changed 등) 클릭 내비(getEntityHref 동형).
+    case 'story':
+      return withProjectParam(`/board?story=${referenceId}`, p);
+    case 'doc': {
+      const slug = notification.target_doc_slug;
+      return withProjectParam(slug ? `/docs/${slug}` : '/docs', p);
+    }
+    // doc_comment는 인앱 알림 생성 경로가 없다(BE 전수 · #4244) — 남은 옛 행은 문서 목록으로.
+    case 'doc_comment':
+      return withProjectParam('/docs', p);
+    // story #0d1c69f3(v2 4호) — 게이트 알림은 /gates/[id] 상세로 직결. #4244 — 게이트 대상의 프로젝트를 싣는다.
+    case 'gate':
+      return withProjectParam(`/gates/${referenceId}`, p);
+    default:
+      return null;
   }
-
-  const allDocIds = [...new Set([...docIds, ...docComments.map((comment) => comment.doc_id)])];
-
-  let docs: DocRow[] = [];
-  if (db && allDocIds.length) {
-    const { data, error } = await db
-      .from('docs')
-      .select('id, slug')
-      .in('id', allDocIds);
-
-    if (error) throw error;
-    docs = (data ?? []) as DocRow[];
-  }
-
-  const docCommentMap = new Map(docComments.map((comment) => [comment.id, comment]));
-  const docSlugMap = new Map(docs.map((doc) => [doc.id, doc.slug]));
-
-  return notifications.map((notification) => {
-    const referenceId = notification.reference_id;
-
-    if (!referenceId) {
-      return { ...notification, href: null };
-    }
-
-    // story #2379 — '/memos' 라우트는 앱 어디에도 없다(#2376 가드 실측, 죽은 링크). memo 기능
-    // 자체는 SaaS에서 살아 있지만(memo-assignment-dispatch.ts·memo-reply-webhook-dispatch.ts가
-    // 직접 webhook으로 발송), 인앱 notifications 테이블(reference_type='memo') 생성 콜사이트는
-    // 0건이라(backend 전수 grep) 이 분기는 도달 불가였다. 지운 뒤엔 아래 기본 fallback(href:
-    // null)으로 떨어진다 — 다른 미매치 reference_type과 동일한 처리라 새 결함이 아니다.
-
-    if (notification.reference_type === 'task') {
-      // story a539c649 S3d 그라운딩 중 발견: '/boards'(오탈자·복수형)+task_id 자체 누락이라
-      // 이 알림 클릭 자체가 항상 무효였다(존재하지 않는 라우트+참조 ID 미실림). notification-bell.tsx
-      // getEntityHref와 동형 패턴(/board?task_id=)으로 정정 — URL 이관과 무관한 별도 버그 fix.
-      return { ...notification, href: `/board?task_id=${referenceId}` };
-    }
-
-    if (notification.reference_type === 'sprint') {
-      return { ...notification, href: '/sprints' };
-    }
-
-    // f2ec5395: story 미처리 갭 — status_changed 등 story 참조 알림 클릭 내비(getEntityHref 동형).
-    if (notification.reference_type === 'story') {
-      return { ...notification, href: `/board?story=${referenceId}` };
-    }
-
-    if (notification.reference_type === 'doc') {
-      const slug = docSlugMap.get(referenceId);
-      return { ...notification, href: slug ? buildDocHref(slug) : '/docs' };
-    }
-
-    if (notification.reference_type === 'doc_comment') {
-      const comment = docCommentMap.get(referenceId);
-      if (!comment) return { ...notification, href: '/docs' };
-      const slug = docSlugMap.get(comment.doc_id);
-      return { ...notification, href: slug ? buildDocHref(slug, comment.id) : '/docs' };
-    }
-
-    // story #0d1c69f3(v2 4호) — 그룹 펼침의 항목별 CTA가 "죽은 링크 0"이려면 게이트 알림
-    // (gate.pending_approval 등, reference_type='gate')에 실제 href가 있어야 한다. 지금까지
-    // 이 분기가 없어 게이트 알림은 전부 href:null(클릭해도 아무 일도 안 일어남)이었다 —
-    // /gates/[id] 상세 라우트(이미 존재, approval-request-card.tsx가 같은 라우트로 fetch)로
-    // 직결한다. DB 조회 불필요(reference_id를 그대로 경로에 싣는다).
-    if (notification.reference_type === 'gate') {
-      return { ...notification, href: `/gates/${referenceId}` };
-    }
-
-    return { ...notification, href: null };
-  });
 }
