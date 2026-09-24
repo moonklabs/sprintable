@@ -235,3 +235,47 @@ def test_apply_fails_when_live_still_differs_afterwards(manifest, capsys):
     creates = [c for c in fake.calls if c[:3] == ["scheduler", "jobs", "create"]]
     assert [c[4] for c in creates] == ["workflow-sla-dev"]
     assert _SECRET not in capsys.readouterr().out
+
+
+def _failing_subprocess_run(fake: _FakeGcloud):
+    """`subprocess.run` 대역 — create에서 실패하고, 그 stderr에도 시크릿이 섞여 나오는 최악의 경우."""
+    import subprocess as _sp
+
+    def _run(cmd, check=False, capture_output=False, text=False, **_kw):
+        args = list(cmd[1:])
+        if args[:3] == ["scheduler", "jobs", "create"]:
+            raise _sp.CalledProcessError(1, cmd, output="", stderr=f"ERROR: bad header Authorization=Bearer {_SECRET}")
+        return _sp.CompletedProcess(cmd, 0, stdout=fake(args), stderr="")
+
+    return _run
+
+
+def _run_apply_through_real_gcloud_wrapper(mod, manifest, monkeypatch):
+    import traceback
+
+    desired = mod.desired_jobs(manifest, "dev", _SECRET, base_url=_URL)
+    fake = _FakeGcloud([_live_from_desired(j) for j in desired if j.name != "workflow-sla-dev"])
+    monkeypatch.setattr(mod.subprocess, "run", _failing_subprocess_run(fake))
+    with pytest.raises(mod.GcloudError) as info:
+        mod.main(["--env", "dev", "--apply"], run=mod._gcloud)
+    return "".join(traceback.format_exception(info.value)), str(info.value)
+
+
+def test_a_failed_apply_never_leaks_the_secret(manifest, monkeypatch, capsys):
+    """PO 4590 CHANGES① — `--apply` 중 gcloud가 실패해도 예외 문자열·트레이스백·stdout·stderr 어디에도 시크릿 0.
+    (`CalledProcessError`를 그대로 올리면 argv 전체 `--headers=Authorization=Bearer <값>`이 빌드 로그에 찍힌다.)"""
+    mod = _load_apply_module()
+    trace, message = _run_apply_through_real_gcloud_wrapper(mod, manifest, monkeypatch)
+    out = capsys.readouterr()
+    assert "gcloud 실패" in message and "workflow-sla-dev" in message and "Bearer ***" in message
+    for text in (trace, message, out.out, out.err):
+        assert _SECRET not in text
+
+
+def test_leak_guard_goes_red_without_masking(manifest, monkeypatch, capsys):
+    """뮤테이션 — 가리기(`_mask`)를 빼면 시크릿이 예외에 그대로 실린다(위 테스트가 실제로 가르는지)."""
+    mod = _load_apply_module()
+    monkeypatch.setattr(mod, "_mask", lambda text: text)
+    trace, message = _run_apply_through_real_gcloud_wrapper(mod, manifest, monkeypatch)
+    capsys.readouterr()
+    assert _SECRET in message and _SECRET in trace

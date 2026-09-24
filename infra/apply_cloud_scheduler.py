@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -35,9 +36,35 @@ AUTH_HEADER = "Authorization"
 Runner = Callable[[list[str]], str]
 
 
+# 가려야 할 값(적용 중 읽은 시크릿). `resolve_bearer`가 등록한다.
+_SECRETS: set[str] = set()
+
+
+def _mask(text: str) -> str:
+    """시크릿 값과 `Authorization=Bearer …` 헤더 인자의 값을 가린다(값을 모르는 경로도 헤더 모양으로 잡는다)."""
+    for secret in _SECRETS:
+        text = text.replace(secret, "***")
+    return re.sub(r"(Authorization=Bearer )[^,\s]+", r"\1***", text)
+
+
+class GcloudError(RuntimeError):
+    """gcloud 실패 — 메시지는 가린 명령·stderr만 담는다."""
+
+
 def _gcloud(args: list[str]) -> str:
-    """gcloud 한 번 실행 · stdout 반환 · 실패면 예외(stderr는 그대로 흘려보낸다 — 시크릿은 argv에만 있고 출력엔 없다)."""
-    result = subprocess.run(["gcloud", *args], check=True, stdout=subprocess.PIPE, text=True)
+    """gcloud 한 번 실행 · stdout 반환.
+
+    실패하면 `CalledProcessError`를 그대로 올리지 않는다 — 그 메시지는 argv 전체(`--headers=Authorization=Bearer <값>`)를
+    담아 빌드 로그에 시크릿을 찍는다(PO 4590 CHANGES①). 가린 명령과 가린 stderr로 `GcloudError`를 올리고, 원래 예외
+    연쇄도 끊는다(`from None` — 트레이스백에 원래 argv가 다시 나오지 않게). stderr도 여기서 받아 가린 뒤에만 내보낸다."""
+    try:
+        result = subprocess.run(["gcloud", *args], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        command = _mask(" ".join(["gcloud", *args]))
+        stderr = _mask(exc.stderr or "").strip()
+        raise GcloudError(f"gcloud 실패(exit {exc.returncode}): {command}\n{stderr}") from None
+    if result.stderr:
+        print(_mask(result.stderr), end="", file=sys.stderr)
     return result.stdout
 
 
@@ -200,6 +227,7 @@ def resolve_bearer(run: Runner, spec: dict, *, service: str) -> tuple[str, str]:
             value = run(["secrets", "versions", "access", version, f"--secret={ref['name']}"]).strip()
             if not value:
                 raise SystemExit(f"FAIL: 시크릿 {ref['name']}:{version} 값이 비어 있음")
+            _SECRETS.add(value)
             return value, f"secretKeyRef {ref['name']}:{version}"
     raise SystemExit(f"FAIL: {service}에 CRON_SECRET이 없음 — 스케줄러 인증 헤더를 만들 수 없다")
 
