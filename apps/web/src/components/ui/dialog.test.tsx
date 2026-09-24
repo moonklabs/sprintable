@@ -101,11 +101,14 @@ describe('DialogContent·DialogTitle — 390 규격(story #4210)', () => {
     expect(popup.className).toContain('grid-cols-[minmax(0,1fr)]');
   });
 
-  it('닫기 버튼이 있으면 팝업에 data-close-button 표지 · 제목이 그 표지로 pr-8', async () => {
+  it('⭐닫기 버튼이 있으면 팝업에 data-close-button 표지 · **첫 줄 전체**(첫 자식)가 그 표지로 pr-8 · 제목 자체엔 중복 pr-8 없음', async () => {
     const { popup, title } = await render(true);
     expect(popup.hasAttribute('data-close-button')).toBe(true);
-    expect(popup.className).toContain('group/dialog');
-    expect(title.className).toContain('group-data-[close-button]/dialog:pr-8');
+    expect(popup.className).toContain('data-[close-button]:[&>*:first-child]:pr-8');
+    expect(title.className).not.toContain('pr-8');
+    // 닫기(X)는 children 뒤에 그린다 — 첫 자식은 늘 이 다이얼로그의 첫 줄(X가 아님).
+    expect(popup.firstElementChild?.getAttribute('data-slot')).not.toBe('dialog-close');
+    expect(popup.lastElementChild?.getAttribute('data-slot')).toBe('dialog-close');
   });
 
   it('닫기 버튼이 없으면 표지도 없다(제목 오른쪽을 비우지 않음)', async () => {

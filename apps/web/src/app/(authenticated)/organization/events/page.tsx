@@ -391,6 +391,7 @@ export default function OrganizationEventsPage() {
           {marketingDetailTarget ? (
             <RecipeDetailView
               recipe={marketingDetailTarget}
+              titleAs="dialog-title"
               onApply={() => setMarketingApplyTarget(marketingDetailTarget)}
             />
           ) : null}

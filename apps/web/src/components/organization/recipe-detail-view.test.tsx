@@ -252,3 +252,36 @@ describe('RecipeDetailView — 블로그 글(story #4174)', () => {
     expect(container.textContent).not.toContain('publish_checked');
   });
 });
+
+describe('RecipeDetailView — 머리 줄(story #4210 후속 · 배포 20 라이브)', () => {
+  const dupLabel = koMessages.organization.recipeDetailDuplicateCta;
+
+  it('⭐복제 핸들러가 없으면 «복제» 버튼을 그리지 않는다(눌러도 무동작이던 버튼) · 있으면 그리고 누르면 호출', async () => {
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} onApply={() => {}} />)); });
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === dupLabel)).toBe(false);
+    const onDuplicate = vi.fn();
+    await act(async () => { root.render(wrap(<RecipeDetailView recipe={RECIPE} onApply={() => {}} onDuplicate={onDuplicate} />)); });
+    const dup = [...container.querySelectorAll('button')].find((b) => b.textContent === dupLabel);
+    expect(dup).toBeTruthy();
+    await act(async () => { dup!.click(); });
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐다이얼로그 안(titleAs="dialog-title")에선 제목이 DialogTitle — 다이얼로그의 접근 가능한 이름이 레시피 이름', async () => {
+    const { Dialog, DialogContent } = await import('@/components/ui/dialog');
+    await act(async () => {
+      root.render(wrap(
+        <Dialog open onOpenChange={() => {}}>
+          <DialogContent><RecipeDetailView recipe={RECIPE} titleAs="dialog-title" onApply={() => {}} /></DialogContent>
+        </Dialog>,
+      ));
+    });
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const labelledBy = dialog.getAttribute('aria-labelledby');
+    expect(labelledBy).toBeTruthy();
+    const titleEl = document.querySelector('[data-slot="dialog-title"]')!;
+    expect(titleEl.id).toBe(labelledBy);
+    expect(titleEl.textContent?.trim().length).toBeGreaterThan(0);
+    expect(dialog.querySelector('h3')).toBeNull(); // 다이얼로그 안에선 h3 대신 DialogTitle 하나
+  });
+});
