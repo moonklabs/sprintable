@@ -239,6 +239,7 @@ export function ChatV3ContextPanel({
   // 되니(#3990 최초 구현이 놓친 지점), workItemRef만 있으면 줄을 유지하고 라벨만
   // 「이어진 일 열기」로 대체한다(산출물의 「제목 없음」=라벨 없는 제목과 다른 개념 —
   // 이건 "열 수 있는 행동" 문구, 유나 구별).
+  // 대상-프로젝트: v3 대화는 현재 프로젝트의 대화만 연다 — 대화의 작업 항목은 현재 p가 곧 자기 프로젝트.
   const scopeHref = workItemRef ? getEntityHref(workItemRef.type, workItemRef.id, flatHref) : null;
   const scopeLabel = scopeTitle
     ? t('contextWorkItemScopeLabel', { title: scopeTitle })

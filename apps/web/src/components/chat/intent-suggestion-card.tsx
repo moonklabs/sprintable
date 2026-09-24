@@ -131,6 +131,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
         // Pedro 리뷰 PR #3435). 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로
         // route-first 딥링크한다.
         <Link
+          // 대상-프로젝트: 의도 제안 참조는 문서 id뿐이라 대상 프로젝트를 모른다(문서 페이지가 착지 뒤 자기 프로젝트로 연다).
           href={flatHref(`/docs?id=${suggestion.ref.id}`)}
           onClick={handleDismiss}
           className="rounded border border-primary/40 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10"

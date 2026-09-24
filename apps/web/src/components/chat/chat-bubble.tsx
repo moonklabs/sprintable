@@ -340,6 +340,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
               entityType={ref.entityType}
               entityId={ref.entityId}
               label={String(children)}
+              // 대상-프로젝트: 메시지 참조 토큰엔 type · id뿐이라 대상 프로젝트를 모른다 — 칩을 열면 미리보기가 응답의 자기 프로젝트로 «전체 보기»를 싣는다(#4253).
               href={getEntityHref(ref.entityType, ref.entityId, flatHref)}
               ghost={decision.ghost}
               referenceMeta={decision.referenceMeta}

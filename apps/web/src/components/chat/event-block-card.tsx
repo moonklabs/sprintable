@@ -481,6 +481,7 @@ function EventBlockRow({
 }) {
   const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
   if (block.type !== 'actions') {
+    // 대상-프로젝트: 이벤트 본문 엔티티 토큰은 type · id뿐이라 대상 프로젝트를 모른다(승인 카드처럼 게이트 프로젝트를 아는 호출처는 자기 래퍼를 넘긴다).
     return renderStaticEventBlock(block, 0, flatHref);
   }
   return (
