@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, type ReactNode } from 'react';
+import { useSampleText } from './use-sample-text';
 import { useLocale, useTranslations } from 'next-intl';
 import { EventBlockCard } from '@/components/chat/event-block-card';
 import type { BlockTemplate, EventDefinitionSummary as EventDefinitionSummaryDef } from '@/lib/block-template';
@@ -31,7 +32,7 @@ function classifyFormat(properties: Record<string, SchemaProperty>): 'cycle' | '
   return null;
 }
 
-function sampleValueForProperty(def: SchemaProperty, name: string): unknown {
+function sampleValueForProperty(def: SchemaProperty, name: string, sampleText: (name: string) => string): unknown {
   // enum이 null로 시작해도(비어도 되는 선택지) 예시는 첫 실제 값.
   const firstValue = def.enum?.find((v) => v !== null);
   if (firstValue !== undefined) return firstValue;
@@ -39,7 +40,8 @@ function sampleValueForProperty(def: SchemaProperty, name: string): unknown {
   if (type === 'number' || type === 'integer') return 0;
   if (type === 'boolean') return true;
   if (type === 'string' && def.format === 'date-time') return new Date(0).toISOString();
-  return `예시 ${name}`;
+  // story #4257 — en에서도 한국어 «예시 …»가 나오던 자리. 로케일 문구(organization.definerSampleValue).
+  return sampleText(name);
 }
 
 /** story #4246(유나 design · 390) — 식별자(필드 이름 · enum 값)는 `_` 뒤에서만 줄을 바꿀 수 있게 `<wbr>`. 코드 칩은 한 덩어리라
@@ -126,6 +128,7 @@ export function EventDefinitionSummary({
   /** PR #4575 까디르 QA — 실물 카드 미리보기도 채팅과 같은 로케일 문안으로(플랫폼 프리셋 판별에 key·org_id·name). */
   definition?: EventDefinitionSummaryDef | null;
 }) {
+  const sampleText = useSampleText();
   const t = useTranslations('organization');
   const locale = useLocale();
   const properties = (payloadSchema.properties ?? {}) as Record<string, SchemaProperty>;
@@ -145,7 +148,7 @@ export function EventDefinitionSummary({
   const authSummary = authParts.length > 0 ? authParts.join(' · ') : t('definerDerivedNone');
 
   const samplePayload: Record<string, unknown> = {};
-  for (const [name, def] of Object.entries(properties)) samplePayload[name] = sampleValueForProperty(def, name);
+  for (const [name, def] of Object.entries(properties)) samplePayload[name] = sampleValueForProperty(def, name, sampleText);
 
   return (
     <div className="space-y-3">

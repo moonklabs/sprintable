@@ -11,6 +11,7 @@ import {
   type DefinerFormState, type DefinerFormat, type DefinerField, type DefinerStage,
   deriveDefinition, makeId, slugify, validateFieldName, validateKeySuffix,
 } from './event-definer-logic';
+import { useSampleText } from './use-sample-text';
 
 const FORMATS: { value: DefinerFormat; icon: typeof GitBranch }[] = [
   { value: 'cycle', icon: GitBranch },
@@ -28,9 +29,13 @@ export function EventDefinerForm({
   testPublishing: boolean;
   testPublishResult: { ok: boolean; message?: string } | null;
 }) {
+  const sampleText = useSampleText();
   const t = useTranslations('organization');
   const keyError = state.keySuffix ? validateKeySuffix(state.keySuffix) : null;
-  const derived = useMemo(() => deriveDefinition(state, orgSlug || '{org}'), [state, orgSlug]);
+  const derived = useMemo(
+    () => deriveDefinition(state, orgSlug || '{org}', sampleText),
+    [state, orgSlug, sampleText],
+  );
 
   const set = <K extends keyof DefinerFormState>(key: K, value: DefinerFormState[K]) => onChange({ ...state, [key]: value });
 

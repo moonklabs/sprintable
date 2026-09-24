@@ -3,9 +3,12 @@
 // action_auth 화이트리스트를 여기 회귀가드로 그대로 고정한다(그라운딩 근거는 파일 상단 주석).
 import { describe, expect, it } from 'vitest';
 import {
-  deriveCycle, deriveMeasure, deriveSignal, emptyFormState, makeId,
+  deriveCycle, deriveMeasure, deriveSignal, emptyFormState, makeId, sampleValueKind,
   slugify, tryReverseParse, validateFieldName, validateKeySuffix,
 } from './event-definer-logic';
+
+// story #4257 — 예시 문자열은 호출부가 넘긴다(로케일 문구). 테스트는 결정적인 영문형.
+const SAMPLE = (name: string) => `Sample ${name}`;
 
 describe('slugify — R1(서버 _ORG_KEY_RE 접미 문자셋 [a-z0-9_]+, 하이픈 불허)', () => {
   it('영문 이름은 소문자+언더스코어로 정규화한다', () => {
@@ -66,7 +69,7 @@ describe('deriveCycle — 서식① (핸드오프 스펙 §2 사이클형 예시
     state.humanOnly = true;
     state.rolesCsv = 'owner, admin';
 
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
     expect(d.key).toBe('org.moonklabs.release_flow');
     expect(d.payload_schema).toEqual({
       type: 'object',
@@ -97,7 +100,7 @@ describe('deriveCycle — 서식① (핸드오프 스펙 §2 사이클형 예시
     state.keySuffix = 'x';
     state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
     state.routing = 'record_only';
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
     expect(d.routing.broadcast).toEqual({ kind: 'server_derived', target: 'none' });
   });
 
@@ -105,7 +108,7 @@ describe('deriveCycle — 서식① (핸드오프 스펙 §2 사이클형 예시
     const state = emptyFormState('cycle');
     state.keySuffix = 'x';
     state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
     expect(d.action_auth).toBeNull();
   });
 
@@ -114,7 +117,7 @@ describe('deriveCycle — 서식① (핸드오프 스펙 §2 사이클형 예시
     state.keySuffix = 'x';
     state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
     state.fields = [{ id: makeId(), name: 'bad-name', type: 'string', required: false }];
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
     expect(d.payload_schema.properties).not.toHaveProperty('bad-name');
   });
 });
@@ -125,7 +128,7 @@ describe('deriveSignal — 서식②', () => {
     state.keySuffix = 'x';
     state.signalKinds = ['verdict', 'scope'];
     state.includeSummary = true;
-    const d = deriveSignal(state, 'moonklabs');
+    const d = deriveSignal(state, 'moonklabs', SAMPLE);
     expect(d.payload_schema.properties).toMatchObject({
       kind: { type: 'string', enum: ['verdict', 'scope'] },
       summary: { type: 'string' },
@@ -139,7 +142,7 @@ describe('deriveSignal — 서식②', () => {
     state.keySuffix = 'x';
     state.signalKinds = ['verdict'];
     state.includeSummary = false;
-    const d = deriveSignal(state, 'moonklabs');
+    const d = deriveSignal(state, 'moonklabs', SAMPLE);
     expect(d.payload_schema.properties).not.toHaveProperty('summary');
   });
 });
@@ -150,7 +153,7 @@ describe('deriveMeasure — 서식③', () => {
     state.keySuffix = 'x';
     state.includeMetricUnit = true;
     state.includeSource = false;
-    const d = deriveMeasure(state, 'moonklabs');
+    const d = deriveMeasure(state, 'moonklabs', SAMPLE);
     expect(d.payload_schema.properties).toMatchObject({ metric_value: { type: 'number' }, metric_unit: { type: 'string' } });
     expect(d.payload_schema.properties).not.toHaveProperty('source');
     expect(d.payload_schema.required).toEqual(['metric_value', 'assignee_member_id']);
@@ -188,20 +191,20 @@ describe('판별 핀 — 파생 샘플 payload가 파생 schema를 자기 검증
     const state = emptyFormState('cycle');
     state.keySuffix = 'x';
     state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
     expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
   });
   it('신호형', () => {
     const state = emptyFormState('signal');
     state.keySuffix = 'x';
     state.signalKinds = ['verdict'];
-    const d = deriveSignal(state, 'moonklabs');
+    const d = deriveSignal(state, 'moonklabs', SAMPLE);
     expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
   });
   it('측정형', () => {
     const state = emptyFormState('measure');
     state.keySuffix = 'x';
-    const d = deriveMeasure(state, 'moonklabs');
+    const d = deriveMeasure(state, 'moonklabs', SAMPLE);
     expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
   });
   it('routing이 기록만(record_only)이면 assignee_member_id 없이도 자기검증 통과(과다 요구 금지)', () => {
@@ -209,7 +212,7 @@ describe('판별 핀 — 파생 샘플 payload가 파생 schema를 자기 검증
     state.keySuffix = 'x';
     state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
     state.routing = 'record_only';
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
     expect(d.payload_schema.properties).not.toHaveProperty('assignee_member_id');
     expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
   });
@@ -224,7 +227,7 @@ describe('tryReverseParse — AC3 JSON→폼 왕복(표현 가능 범위만, 못
     state.fields = [{ id: makeId(), name: 'note', type: 'string', required: true }];
     state.humanOnly = true;
     state.rolesCsv = 'owner';
-    const d = deriveCycle(state, 'moonklabs');
+    const d = deriveCycle(state, 'moonklabs', SAMPLE);
 
     const parsed = tryReverseParse(d.key, d.payload_schema, d.routing, d.action_auth, 'moonklabs', d.block_template as unknown as Record<string, unknown>);
     expect(parsed).not.toBeNull();
@@ -243,14 +246,14 @@ describe('tryReverseParse — AC3 JSON→폼 왕복(표현 가능 범위만, 못
   it('deriveSignal/deriveMeasure도 자기 왕복된다', () => {
     const sigState = emptyFormState('signal');
     sigState.keySuffix = 'sig'; sigState.signalKinds = ['a', 'b']; sigState.includeSummary = true;
-    const sig = deriveSignal(sigState, 'moonklabs');
+    const sig = deriveSignal(sigState, 'moonklabs', SAMPLE);
     const parsedSig = tryReverseParse(sig.key, sig.payload_schema, sig.routing, sig.action_auth, 'moonklabs');
     expect(parsedSig?.format).toBe('signal');
     expect(parsedSig?.signalKinds).toEqual(['a', 'b']);
 
     const measState = emptyFormState('measure');
     measState.keySuffix = 'meas'; measState.includeMetricUnit = true; measState.includeSource = true;
-    const meas = deriveMeasure(measState, 'moonklabs');
+    const meas = deriveMeasure(measState, 'moonklabs', SAMPLE);
     const parsedMeas = tryReverseParse(meas.key, meas.payload_schema, meas.routing, meas.action_auth, 'moonklabs');
     expect(parsedMeas?.format).toBe('measure');
     expect(parsedMeas?.includeMetricUnit).toBe(true);
@@ -321,5 +324,35 @@ describe('tryReverseParse — AC3 JSON→폼 왕복(표현 가능 범위만, 못
       'moonklabs',
     );
     expect(parsed).toBeNull();
+  });
+});
+
+
+// story #4257 — 파생 정의의 예시 payload는 호출부가 넘긴 문구(로케일)로만 만든다 — 한국어 고정 문자열 0.
+describe('예시 payload 문자열은 넘긴 sampleText로(story #4257)', () => {
+  const field = { id: 'f1', name: 'resolution_note', type: 'string' as const, required: false };
+  it('⭐신호형 — 추가 필드 · summary · 멤버 id 자리 모두 sampleText · «예시» 0', () => {
+    const state = { ...emptyFormState('signal'), keySuffix: 'x', signalKinds: ['k'], includeSummary: true, routing: 'assign_on_publish' as const, fields: [field] };
+    const { samplePayload } = deriveSignal(state, 'org', SAMPLE);
+    expect(samplePayload).toMatchObject({ resolution_note: 'Sample resolution_note', summary: 'Sample summary' });
+    expect(Object.values(samplePayload)).toContain('Sample assignee_member_id');
+    expect(JSON.stringify(samplePayload)).not.toContain('예시');
+  });
+  it('측정형 — source 자리도 sampleText', () => {
+    const state = { ...emptyFormState('measure'), keySuffix: 'x', includeSource: true, fields: [field] };
+    const { samplePayload } = deriveMeasure(state, 'org', SAMPLE);
+    expect(samplePayload).toMatchObject({ source: 'Sample source', resolution_note: 'Sample resolution_note' });
+    expect(JSON.stringify(samplePayload)).not.toContain('예시');
+  });
+});
+
+
+// story #4257(유나 · PO) — «뜻을 아는 필드는 사람 말, 이름만 아는 필드는 그 이름». 표(summary · source · assignee_member_id)를 먼저 찾는다.
+describe('sampleValueKind — 뜻을 아는 필드만 자기 문구 종류(story #4257)', () => {
+  it('⭐summary · source · assignee_member_id → 자기 종류 · 그 밖은 null(«예시 {name}»)', () => {
+    expect(sampleValueKind('summary')).toBe('summary');
+    expect(sampleValueKind('source')).toBe('source');
+    expect(sampleValueKind('assignee_member_id')).toBe('member');
+    expect(sampleValueKind('resolution_note')).toBeNull();
   });
 });
