@@ -462,7 +462,8 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "할 일: {action}",
         "en": "To do: {action}",
     },
-    # story #4224(까디르 QA P3 · AC2 «en 본문 한국어 0») — 판정 알림 본문의 나머지 줄 · 앞 단계 산출물 레이블. ko는 옛 리터럴 그대로.
+    # story #4224(까디르 QA P3 · AC2 «en 본문 한국어 0») — 판정 알림 본문의 나머지 줄 · 앞 단계 산출물 레이블. ko는 옛 리터럴 그대로이되,
+    # 카탈로그 톤 가드(verify_user_facing_tone)에 맞춰 합니다체 어미 3곳만 해요체로(정합니다→정해요 · 재오픈됩니다→재오픈돼요 · 없습니다→없어요).
     "events.gate_verdict_gate_line": {
         "ko": "게이트: {gate_type} → {verdict}",
         "en": "Gate: {gate_type} → {verdict}",
@@ -476,11 +477,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Target artifact: {ref}",
     },
     "events.gate_verdict_next_action_none_author_decides": {
-        "ko": "다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다.",
+        "ko": "다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정해요.",
         "en": "Next action: nothing to do — the author decides whether to resubmit.",
     },
     "events.gate_verdict_next_action_revise_and_republish": {
-        "ko": "다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈됩니다.",
+        "ko": "다음 행동: 산출물을 수정한 뒤, 같은 레시피 정의의 approve stage 이벤트를 다시 발행하세요(payload.previous_output_doc_id=수정본 id) — 게이트는 그 발행으로 자동 재오픈돼요.",
         "en": "Next action: revise the artifact, then publish the same recipe definition's approve stage event again (payload.previous_output_doc_id=revised doc id) — the gate reopens automatically on that publish.",
     },
     "events.gate_verdict_next_action_publish_via_connector": {
@@ -488,7 +489,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Next action: publish with the {connector_key} connector (channel={channel}).",
     },
     "events.gate_verdict_next_action_no_connector_mapping": {
-        "ko": "다음 행동: channel={channel}에 대한 커넥터 매핑이 없습니다 — 조직 설정에 channel_connector_map을 등록하세요.",
+        "ko": "다음 행동: channel={channel}에 대한 커넥터 매핑이 없어요 — 조직 설정에 channel_connector_map을 등록하세요.",
         "en": "Next action: there is no connector mapping for channel={channel} — register channel_connector_map in the organization settings.",
     },
     "events.gate_verdict_next_action_publish_next_stage": {

@@ -167,7 +167,7 @@ class TestExternalPublishAgentNextAction:
         text = await _render(_payload(
             gate_type="external_publish", verdict="rejected", resolution_note="제목 오타 수정 필요",
         ))
-        assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정합니다." in text
+        assert "- 다음 행동: 할 일 없음 — 다시 올릴지는 작성자가 정해요." in text
 
     async def test_site_post_external_destination_approved_says_worker_tick_not_human_screen(self):
         """story #3487 — site_post 외부 목적지(WordPress 등)는 승인 즉시 워커가
@@ -304,7 +304,7 @@ class TestOtherGateTypesUnchanged:
     async def test_non_external_publish_rejected_keeps_old_resubmit_text(self):
         text = await _render(_payload(gate_type="qa", verdict="rejected", resolution_note="폐기 대상"))
         assert "다시 발행하세요" in text
-        assert "자동 재오픈됩니다" in text
+        assert "자동 재오픈돼요" in text
 
 
 class TestNextActionI18nCatalogMigration:
