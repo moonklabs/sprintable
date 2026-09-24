@@ -12,6 +12,7 @@ command`, 워커가 호출)는 `activity_logs`에 `site_post_published`를 한 �
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
@@ -70,6 +71,23 @@ async def test_external_publish_records_site_post_published_activity_log(live_wo
         live_wordpress_stub_url=live_wordpress_stub,
     )
     try:
+        # 까디르 codex(4611 델타 P3) — «그 초안의 어느 버전이든»이 아니라 «발행한 그 버전»을 가르려면 옛 버전이 하나 있어야 한다.
+        # 같은 초안에 더 이른 버전 행을 하나 두어, 옛 버전 id를 찍는 회귀가 값으로 드러나게 한다.
+        from datetime import timedelta
+
+        from app.models.site_post_version import SitePostVersion
+        async with Session() as s:
+            current = (await s.execute(
+                select(SitePostVersion).where(SitePostVersion.draft_id == draft_id).order_by(SitePostVersion.version.desc())
+            )).scalars().first()
+            s.add(SitePostVersion(
+                id=uuid.uuid4(), draft_id=draft_id, version=current.version - 1, title=current.title + " (옛)", lang=current.lang,
+                summary=current.summary, tags=current.tags, body_md=current.body_md, body_sha256=current.body_sha256,
+                author_member_id=current.author_member_id, author_kind=current.author_kind,
+                created_at=current.created_at - timedelta(hours=1),
+            ))
+            await s.commit()
+
         async with Session() as s:
             counts = await process_due_publication_commands(s)
         assert counts["completed"] == 1, counts
@@ -92,13 +110,9 @@ async def test_external_publish_records_site_post_published_activity_log(live_wo
         assert log.context["gate_id"] == str(gate_id)
         assert log.context["requested_by_member_id"] == str(human_id)
         # story #4256(까디르 QA) — 블로그 레시피 멘션의 «발행됨» 판정이 이 값에 걸려 있다(activity_logs.context.version_id → SitePostVersion.draft_id).
-        # 워커가 발행한 **그 초안의 버전** id를 실어야 한다 — 빼거나 다른 값이면 이미 발행한 초안이 멘션 후보로 되살아난다.
-        from app.models.site_post_version import SitePostVersion
-        async with Session() as s:
-            version_ids = {str(v) for v in (await s.execute(
-                select(SitePostVersion.id).where(SitePostVersion.draft_id == draft_id)
-            )).scalars().all()}
-        assert log.context["version_id"] in version_ids
+        # 워커가 **발행한 그 버전** id를 실어야 한다 — 빼거나 옛 버전 · 다른 값이면 판정이 발행된 버전을 못 짚는다(까디르 codex 4611 델타 P3 ·
+        # 예전 단언 «그 초안의 어느 버전이든»은 옛 버전 id 회귀를 통과시켰다).
+        assert log.context["version_id"] == str(pub.version_id)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
