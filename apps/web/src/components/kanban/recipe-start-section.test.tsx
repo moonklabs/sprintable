@@ -313,4 +313,32 @@ describe('RecipeStartSection — 플랫폼 프리셋 이름 로케일(story #420
     expect(titles).toContain('우리 영상 흐름');
     expect(container.textContent).not.toContain('영상 제작(릴스·쇼츠)');
   });
+
+  // story #4273(유나 처방) — 시작 전 후보가 하나여도 버튼 바로 위에 그 레시피 이름(여럿일 때 라디오 라벨과 같은 presetName).
+  it('⭐진행 중 레시피 아래 시작 전 후보가 하나면 — 버튼 바로 위에 그 후보 이름(위 진행 레시피를 다시 시작으로 읽히지 않게 · 4167 자리)', async () => {
+    await render([
+      candidateStub({ definition_id: 'p1', ...PLATFORM, started: true, current_stage: 'draft', current_role: '크리에이터', current_stage_position: 1, total_stages: 3 }),
+      candidateStub({ definition_id: 'o1', key: 'org.acme.pipeline', name: '마케팅 콘텐츠 파이프라인', org_id: 'org-acme' }),
+    ]);
+    const nameLine = container.querySelector('[data-testid="recipe-start-name"]');
+    expect(nameLine?.textContent).toBe('마케팅 콘텐츠 파이프라인');
+    expect(nameLine?.nextElementSibling?.tagName).toBe('BUTTON');
+    expect(nameLine?.nextElementSibling?.textContent).toContain(koMessages.board.recipeStartButton);
+  });
+
+  it('시작 전 후보 하나뿐(진행 중 없음)이어도 이름 — ko 원문 · en은 플랫폼 영어 이름', async () => {
+    await render([candidateStub()]);
+    expect(container.querySelector('[data-testid="recipe-start-name"]')?.textContent).toBe('테스트 레시피');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render([candidateStub({ definition_id: 'p1', ...PLATFORM })], { locale: 'en' });
+    const en = container.querySelector('[data-testid="recipe-start-name"]')?.textContent;
+    expect(en).toBe(enMessages.recipePreset.videoProductionName);
+  });
+
+  it('시작 전 후보가 여럿이면 이름 줄 대신 라디오 라벨(규칙 하나 · 이름이 두 번 뜨지 않음)', async () => {
+    await render([candidateStub({ key: 'org.acme.a', name: '레시피 A' }), candidateStub({ key: 'org.acme.b', name: '레시피 B' })]);
+    expect(container.querySelector('[data-testid="recipe-start-name"]')).toBeNull();
+    expect(container.querySelectorAll('input[type="radio"]').length).toBe(2);
+  });
 });
