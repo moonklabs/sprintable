@@ -178,9 +178,14 @@ def _fail_late_in_transition(monkeypatch) -> None:
 
 
 async def _drain():
-    from app.services.after_commit import drain_after_commit_tasks
+    """커밋 뒤 배달은 `pg_pubsub.fire_and_forget`으로 뜬다 — 그 한 원천의 drain으로 기다린다. 배달이 또 태스크를 띄울 수
+    있어(pg_notify 등) 빌 때까지 몇 번 돈다."""
+    from app.services import pg_pubsub
 
-    await drain_after_commit_tasks()
+    for _ in range(5):
+        if not pg_pubsub._background_tasks:
+            return
+        await pg_pubsub.drain_background_tasks()
 
 
 # ─── AC2 · AC3 — 전이 뒷부분 실패면 승인 · step · 이벤트 메시지 · 배달이 함께 사라진다 ───────────────────────────

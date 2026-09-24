@@ -14,11 +14,11 @@
   성공한 형제 발행의 배달까지 지웠다 — 실측: SQLAlchemy 2.0.49, `after_rollback`이 `in_nested_transaction()=True`로 발화.)
 - `after_commit`은 SAVEPOINT release에서도 발화한다 → `in_nested_transaction()`이면 건너뛰고 바깥 커밋 때 실행한다.
 - 예약된 일의 오류는 **로그만** 남긴다 — 이미 커밋된 트랜잭션을 되돌리려 하지 않는다.
-- 비동기 일(코루틴을 돌려주는 호출)은 실행 중인 이벤트 루프에 태스크로 띄운다(`after_commit` 콜백은 동기).
+- 비동기 일(코루틴을 돌려주는 호출)은 `pg_pubsub.fire_and_forget`으로 띄운다(`after_commit` 콜백은 동기). 참조 보관 ·
+  종료 시 drain(`drain_background_tasks`)은 그 한 원천이 맡는다(#1970 커넥션 누수 근본 fix · 참조 미보관 가드).
 """
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 from collections.abc import Callable
@@ -28,12 +28,12 @@ from sqlalchemy import event as sa_event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
+from app.services.pg_pubsub import fire_and_forget
+
 logger = logging.getLogger(__name__)
 
 _PENDING_KEY = "_after_commit_pending"
 _HOOKED_KEY = "_after_commit_hooked"
-# 띄운 태스크를 끝날 때까지 붙잡아 둔다(가비지 컬렉션으로 중간에 사라지지 않게 — asyncio 문서 권고).
-_RUNNING: set[asyncio.Task] = set()
 
 
 def schedule_after_commit(db: AsyncSession | Session, actions: list[Callable[[], Any]]) -> None:
@@ -81,9 +81,7 @@ def _run_pending(sync_session: Session) -> None:
             logger.warning("after-commit action failed: %r", action, exc_info=True)
             continue
         if inspect.isawaitable(result):
-            task = asyncio.get_running_loop().create_task(_logged(result, action))
-            _RUNNING.add(task)
-            task.add_done_callback(_RUNNING.discard)
+            fire_and_forget(_logged(result, action))
 
 
 async def _logged(awaitable: Any, action: Callable[[], Any]) -> None:
@@ -92,8 +90,3 @@ async def _logged(awaitable: Any, action: Callable[[], Any]) -> None:
     except Exception:
         logger.warning("after-commit action failed: %r", action, exc_info=True)
 
-
-async def drain_after_commit_tasks() -> None:
-    """테스트용 — 띄운 커밋 뒤 태스크가 끝날 때까지 기다린다."""
-    while _RUNNING:
-        await asyncio.gather(*list(_RUNNING), return_exceptions=True)
