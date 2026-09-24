@@ -558,6 +558,9 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   ads_boost_started: 'gateActivityActionAdsBoostStarted',
   ads_boost_paused: 'gateActivityActionAdsBoostPaused',
   ads_boost_resumed: 'gateActivityActionAdsBoostResumed',
+  // story #4262(유나 표) — newsletter_send_execution.py `_ACTIVITY_ACTION_SEND_*`가 남기는 액션. 원시 문자열이 그대로 보였다.
+  newsletter_send_succeeded: 'gateActivityActionNewsletterSendSucceeded',
+  newsletter_send_failed: 'gateActivityActionNewsletterSendFailed',
 };
 
 // story #3806(Phase3·3-2 PR 14) — ads_boost_paused 한 action이 두 얼굴이다: 사람이

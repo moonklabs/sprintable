@@ -217,6 +217,16 @@ export interface GateItem {
   // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12) — 봉인 축 아님(gate
   // ORM 컬럼 아님), publication의 최신 channel_payload.subject를 「지금」 값으로 읽음.
   newsletter_subject?: string | null;
+  // story #4262 — 발송 게이트의 발송 명령(가장 최근 1) 요약. 단건 `GET /gates/{id}`만 채우고 목록 · 다른 gate_type은 null.
+  // dead_letter · 연결 blocked면 게이트 화면이 사람 재시도 자리를 연다(공용 publication-commands retry).
+  newsletter_send_command?: {
+    id: string;
+    status: string;
+    failure_kind: string | null;
+    reason_code: string | null;
+    next_attempt_at: string | null;
+    reason_reset_at: string | null;
+  } | null;
   // story #4044(0333)/#4072(BE 응답스키마 누락 fix, 페드루 PO 確定 2026-09-19) —
   // generation_budget 전용 sealing(sealed_ads_*/sealed_newsletter_*와 동일 선례).
   // 다른 gate_type은 전부 undefined/null. #4072 前엔 BE GateResponse에 이 필드가

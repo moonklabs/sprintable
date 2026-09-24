@@ -9,7 +9,9 @@
 //   next_retry_at / command_reason_code: string|null
 export type CommandStatus =
   | 'pending' | 'in_progress' | 'completed' | 'blocked' | 'dead_letter' | 'voided' | 'cancelled';
-export type FailureKind = 'connection' | 'needs_check' | 'transient';
+// story #4262 — `not_sent`(확실히 안 나감 · 곧바로 dead_letter). 판정은 dead_letter 갈래에서 «needs_check가 아님»으로 읽혀
+// «자동 재시도를 멈췄어요»가 된다(아래 deriveFailureAction 무변).
+export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent';
 
 export type FailureAction =
   | { kind: 'blocked' }

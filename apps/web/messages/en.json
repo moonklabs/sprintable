@@ -5654,6 +5654,8 @@
     "gateActivityActionAdsBoostStarted": "Started the ad boost",
     "gateActivityActionAdsBoostPaused": "Paused the ad boost",
     "gateActivityActionAdsBoostResumed": "Resumed the ad boost",
+    "gateActivityActionNewsletterSendSucceeded": "Newsletter sent",
+    "gateActivityActionNewsletterSendFailed": "Newsletter send failed",
     "gateActivityActionAdsBoostAutoPausedCapReached": "Auto-paused (ad spend cap reached)",
     "gateHeadChangedError": "The commit this gate targets changed after you confirmed. Please review the latest changes before approving.",
     "gateDraftChangedError": "The draft was updated in the meantime, so it wasn't approved. Review the latest draft, then approve again.",
