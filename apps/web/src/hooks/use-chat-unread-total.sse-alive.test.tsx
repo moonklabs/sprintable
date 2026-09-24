@@ -12,7 +12,8 @@ const { muxState } = vi.hoisted(() => ({ muxState: { alive: false } }));
 vi.mock('@/components/realtime-provider', () => ({
   useSseMultiplexerContext: () => ({ isAlive: () => muxState.alive, subscribe: () => () => {}, subscribeMessage: () => () => {}, subscribeReconnect: () => () => {}, connected: true }),
 }));
-vi.mock('./use-chat-sse', () => ({ useChatSse: () => ({ connected: true, polling: false }) }));
+const { sseOpts } = vi.hoisted(() => ({ sseOpts: { last: null as null | { onConversationRead?: () => void; onReconnect?: () => void } } }));
+vi.mock('./use-chat-sse', () => ({ useChatSse: (opts: { onConversationRead?: () => void }) => { sseOpts.last = opts; return { connected: true, polling: false }; } }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -88,5 +89,23 @@ describe('useChatUnreadTotal — 여러 마운트 · SSE 생존 시 포커스 �
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(unreadCalls).toBe(1);
+  });
+});
+
+describe('useChatUnreadTotal — conversation.read 이벤트 재조회는 진행 중 요청에 합류하지 않는다(#4263 ①)', () => {
+  it('⭐기동 요청이 떠 있는 동안 conversation.read → 새 요청 · 최종 값은 이벤트 뒤 값', async () => {
+    const resolvers: Array<(n: number) => void> = [];
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      resolvers.push((n: number) => resolve({ ok: true, status: 200, json: async () => ({ count: n }) }));
+    })));
+    const { useChatUnreadTotal } = await import('./use-chat-unread-total');
+    function Badge() { return <span data-testid="n">{useChatUnreadTotal('m-1')}</span>; }
+    await act(async () => { root.render(<Badge />); });
+    expect(resolvers).toHaveLength(1);
+    await act(async () => { sseOpts.last!.onConversationRead!(); });
+    expect(resolvers).toHaveLength(2);
+    await act(async () => { resolvers[1]!(0); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { resolvers[0]!(4); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="n"]')!.textContent).toBe('0');
   });
 });

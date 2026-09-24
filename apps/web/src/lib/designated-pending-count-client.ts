@@ -10,7 +10,12 @@ import { isBackfillEvent } from '@/lib/realtime/sse-multiplexer';
  * 합류는 요청 맥락(인터셉터가 싣는 org·project)이 같을 때만 — org 전환 직전에 출발한 요청에 전환 뒤
  * 호출이 붙어 이전 org의 수를 받지 않게(lib/me-client.ts와 같은 규칙).
  */
-let inFlight: { key: string; promise: Promise<number | null> } | null = null;
+let inFlight: { key: string; seq: number; turn: object | null; promise: Promise<number | null> } | null = null;
+let freshTurn: object | null = null;
+// story #4263(PO 14:57Z ①) — 요청 순번. 이벤트가 부른 재조회는 앞선 요청에 합류하지 않고 새로 묻는다(합류하면 이벤트 전 스냅숏을 받는다).
+// 늦게 도착한 옛 응답이 새 값을 덮지 않게, 더 새 요청이 뜬 뒤 끝난 응답은 그 새 요청의 값으로 풀린다(마지막 요청 값만 반영).
+let requestSeq = 0;
+let latest: { key: string; seq: number; turn: object | null; promise: Promise<number | null> } | null = null;
 
 // story #4245(까디르 QA P2 · PO 04:12Z) — 마지막으로 받은 수의 스냅숏 워터마크(BE `snapshot_xmin` = pg_snapshot_xmin(pg_current_snapshot())).
 // 시각(now() = 트랜잭션 시작)으로는 «수를 센 순간 이미 보였나»를 못 가른다 — 커밋 가시성으로 가른다. 요청 맥락(org·project) 키와 함께 둔다 —
@@ -40,26 +45,48 @@ export function isEventReflectedInLastCount(data: string): boolean {
 /** 테스트 전용 — 모듈 상태 초기화. */
 export function resetDesignatedPendingCountStateForTest(): void {
   inFlight = null;
+  latest = null;
   lastWatermark = null;
+  lastWatermarkSeq = 0;
 }
 
-export function fetchDesignatedPendingCount(): Promise<number | null> {
+let lastWatermarkSeq = 0;
+
+/**
+ * @param opts.fresh 이벤트(SSE)가 부른 재조회면 true — 진행 중 요청(이벤트 전에 떴을 수 있음)에 합류하지 않고 새로 묻는다. 기동 · 포커스 ·
+ *   폴링처럼 같은 계기끼리는 합류한다(기본).
+ */
+export function fetchDesignatedPendingCount(opts?: { fresh?: boolean }): Promise<number | null> {
   const key = getRequestContextKey();
-  if (!inFlight || inFlight.key !== key) {
-    const promise = fetchWithAuth('/api/gates/designated-pending-count')
-      .then(async (res) => {
-        if (!res.ok) return null;
-        const json = await res.json() as { count?: number; snapshot_xmin?: string | null };
-        const xmin = parseXid(json.snapshot_xmin);
-        if (xmin !== null) lastWatermark = { key, xmin };
-        return typeof json.count === 'number' ? json.count : 0;
-      })
-      .catch(() => null);
-    const current = { key, promise };
-    inFlight = current;
-    void promise.then(() => { if (inFlight === current) inFlight = null; });
+  if (!opts?.fresh && inFlight && inFlight.key === key) return inFlight.promise;
+  // 같은 이벤트의 구독자 여럿(사이드바 · 탭바 · 훅 여러 마운트)은 한 동기 디스패치 안에서 잇달아 부른다 — 그 안의 fresh 호출끼리는 합류한다
+  // (이벤트당 요청 1). 디스패치가 끝나면(마이크로태스크) 다음 fresh는 새로 묻는다.
+  if (opts?.fresh && inFlight && inFlight.key === key && inFlight.turn !== null && inFlight.turn === freshTurn) return inFlight.promise;
+  let turn: object | null = null;
+  if (opts?.fresh) {
+    if (freshTurn === null) { freshTurn = {}; queueMicrotask(() => { freshTurn = null; }); }
+    turn = freshTurn;
   }
-  return inFlight.promise;
+  const seq = ++requestSeq;
+  const raw = fetchWithAuth('/api/gates/designated-pending-count')
+    .then(async (res) => {
+      if (!res.ok) return null;
+      const json = await res.json() as { count?: number; snapshot_xmin?: string | null };
+      const xmin = parseXid(json.snapshot_xmin);
+      // 워터마크도 더 새 요청이 이미 남긴 값을 옛 응답이 덮지 않는다.
+      if (xmin !== null && seq >= lastWatermarkSeq) { lastWatermark = { key, xmin }; lastWatermarkSeq = seq; }
+      return typeof json.count === 'number' ? json.count : 0;
+    })
+    .catch(() => null);
+  const promise: Promise<number | null> = raw.then((value) => {
+    const newer = latest;
+    return newer && newer.key === key && newer.seq > seq ? newer.promise : value;
+  });
+  const current = { key, seq, turn, promise };
+  inFlight = current;
+  latest = current;
+  void raw.then(() => { if (inFlight === current) inFlight = null; });
+  return promise;
 }
 
 /** story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 모바일 탭바가 같은 목록 · 같은 판정을 쓴다. */
@@ -75,7 +102,8 @@ export function subscribeDesignatedPendingCount(
 ): () => void {
   const refetch = (data: string) => {
     if (isEventReflectedInLastCount(data)) return;
-    void fetchDesignatedPendingCount().then((count) => { if (count !== null) onCount(count); });
+    // story #4263 ① — 이벤트가 부른 재조회는 이벤트 전에 뜬 요청에 합류하지 않는다(fresh).
+    void fetchDesignatedPendingCount({ fresh: true }).then((count) => { if (count !== null) onCount(count); });
   };
   const unsubs = DESIGNATED_PENDING_COUNT_EVENTS.map((name) => mux.subscribe(name, refetch));
   return () => { for (const unsub of unsubs) unsub(); };

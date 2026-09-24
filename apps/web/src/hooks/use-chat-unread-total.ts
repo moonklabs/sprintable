@@ -26,12 +26,13 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchTotal() {
+    async function fetchTotal(fresh = false) {
       // story #4263 AC1 — 공용 요청(진행 중이면 합류): 이 훅이 한 화면에 여럿 마운트돼도 같은 순간 1번(fetchWithAuth · 401 처리는 그 안).
-      const count = await fetchChatUnreadTotal();
+      // ① 이벤트가 부른 재조회(fresh)는 이벤트 전에 뜬 요청에 합류하지 않는다.
+      const count = await fetchChatUnreadTotal({ fresh });
       if (!cancelled && count !== null) setTotal(count);
     }
-    fetchTotalRef.current = () => void fetchTotal();
+    fetchTotalRef.current = () => void fetchTotal(true); // SSE 이벤트(conversation.read · 재연결)용
 
     void fetchTotal();
     const handleVisibility = () => {
