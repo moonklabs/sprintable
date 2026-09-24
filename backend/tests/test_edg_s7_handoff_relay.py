@@ -12,6 +12,8 @@ from unittest.mock import patch
 import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+# story #4270 — step run project_id는 필수(폴백 제거). 실제 호출처처럼 엔터티 project_id를 넘긴다(라인 정의는 org 수준 그대로).
+_ENTITY_PROJECT = uuid.uuid4()
 
 # story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
 # DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
@@ -194,10 +196,10 @@ async def test_engine_sets_relay_only_for_enforcing_agent_handoff(monkeypatch):
         await _seed_line(s, org_enf, "enforcing")
         await _seed_line(s, org_shadow, "shadow")
         d_enf = await evaluate_line_for_transition(
-            s, org_id=org_enf, project_id=None, entity_type="story", entity_id=uuid.uuid4(),
+            s, org_id=org_enf, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=uuid.uuid4(),
             from_status="ready-for-dev", to_status="in-progress")
         d_shadow = await evaluate_line_for_transition(
-            s, org_id=org_shadow, project_id=None, entity_type="story", entity_id=uuid.uuid4(),
+            s, org_id=org_shadow, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=uuid.uuid4(),
             from_status="ready-for-dev", to_status="in-progress")
         assert d_enf.mode == "advisory_only" and d_enf.proceeds and d_enf.relay_step_run_id is not None
         assert d_shadow.relay_step_run_id is None  # shadow=관측만·relay 안 함

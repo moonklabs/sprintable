@@ -287,9 +287,19 @@ async def enforce_gate(
 
     # 결정 이력 없음 → 신규 pending park. agent_id·requested_for 는 NOT NULL — v1 은 actor 멤버 id
     # 사용(self-approval 정교화는 S-GATE-3·§6-5).
+    # story #4270(PO 15:46Z) — project_id는 필수: 예전엔 None이면 NOT NULL 자리를 org id로 채웠다(«org 단위 표기»). 호출처 셋(stories /status ·
+    # /bulk · workflow_report merge)이 전부 스토리 자기 project_id를 넘기고 dev 실측도 org id 행 0이라 닿지 않는 자리 채움이었다 — 채우지 않고
+    # 드러낸다(로그 + 예외 · 게이트는 fail-closed라 전이는 통과하지 않는다). agent_id · requested_for의 `actor_id or org_id`는 /bulk의 actor
+    # 해소 실패로 닿을 수 있어 이 스토리 범위 밖(표에 기록).
+    if project_id is None:
+        logger.error(
+            "gate_enforce: HitlRequest park project_id 없음(work_item=%s work_type=%s) — 호출처가 작업 항목 project_id를 넘겨야 한다",
+            wi, work_type,
+        )
+        raise ValueError("gate park project_id is required")
     req = HitlRequest(
         org_id=org_id,
-        project_id=project_id or org_id,  # project_id NOT NULL — 오버라이드 없으면 org 단위 표기
+        project_id=project_id,
         agent_id=actor_id or org_id,
         request_type=_GATE_REQUEST_TYPE,
         title=f"승인 필요: {work_item_title or wi} → {work_type}",

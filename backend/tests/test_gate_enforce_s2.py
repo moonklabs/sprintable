@@ -251,3 +251,25 @@ def test_enforce_active_flag_off_default():
 
     # default settings(enabled=False) → 항상 False
     assert gate_config_enforce_active(uuid.uuid4()) is False
+
+
+@pytest.mark.anyio
+async def test_ask_park_requires_project_id_no_org_fallback(caplog):
+    """story #4270(PO 15:46Z) — park할 때 project_id 없음 → org id로 채우지 않고 로그 + 예외(HitlRequest 추가 0).
+    뮤테이션: 예전 `project_id or org_id`로 되돌리면 org id 행을 park하고 409 → RED."""
+    import logging
+
+    from app.services import gate_enforce as ge
+
+    session = _session(execute_side_effect=[_first(None)])
+    with patch.object(ge, "gate_config_enforce_active", return_value=True), patch.object(
+        ge, "resolve_gate_level", new=AsyncMock(return_value="ask")
+    ), caplog.at_level(logging.ERROR, logger="app.services.gate_enforce"):
+        with pytest.raises(ValueError):
+            await ge.enforce_gate(
+                session, org_id=uuid.uuid4(), project_id=None,
+                work_type="done", actor_type="agent", actor_id=uuid.uuid4(),
+                work_item_id=uuid.uuid4(), work_item_title="X",
+            )
+    assert _hitl_reqs_added(session) == 0
+    assert any("project_id 없음" in r.getMessage() for r in caplog.records)

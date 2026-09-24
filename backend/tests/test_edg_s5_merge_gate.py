@@ -13,6 +13,8 @@ from unittest.mock import patch
 import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+# story #4270 — step run project_id는 필수(폴백 제거). 실제 호출처처럼 엔터티 project_id를 넘긴다(라인 정의는 org 수준 그대로).
+_ENTITY_PROJECT = uuid.uuid4()
 
 # story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
 # DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
@@ -109,7 +111,7 @@ async def test_merge_gate_wrapper_ask_human_uses_h1_gate_no_double(monkeypatch):
         with patch("app.services.merge_verdict_gate.evaluate_merge_gate",
                    return_value=_decision(ASK_HUMAN, h1_gate)) as m:
             d = await eng.evaluate_line_for_transition(
-                s, org_id=org, project_id=None, entity_type="story", entity_id=eid,
+                s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=eid,
                 from_status="in-review", to_status="done", actor_id=uuid.uuid4())
         assert m.call_count == 1  # ⭐evaluate_merge_gate 정확히 1회(AC②)
         assert d.mode == "gate_pending" and not d.proceeds
@@ -138,12 +140,12 @@ async def test_merge_gate_wrapper_auto_merge_and_block(monkeypatch):
         g = uuid.uuid4()
         with patch("app.services.merge_verdict_gate.evaluate_merge_gate", return_value=_decision(AUTO_MERGE, g)):
             d = await eng.evaluate_line_for_transition(
-                s, org_id=org, project_id=None, entity_type="story", entity_id=uuid.uuid4(),
+                s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=uuid.uuid4(),
                 from_status="in-review", to_status="done")
         assert d.mode == "advisory_only" and d.proceeds and d.status_to_apply == "done"
         with patch("app.services.merge_verdict_gate.evaluate_merge_gate", return_value=_decision(BLOCK, g)):
             d2 = await eng.evaluate_line_for_transition(
-                s, org_id=org, project_id=None, entity_type="story", entity_id=uuid.uuid4(),
+                s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=uuid.uuid4(),
                 from_status="in-review", to_status="done")
         assert d2.mode == "blocked_by_policy" and not d2.proceeds and d2.http_status == 409
     await engine.dispose()
@@ -190,7 +192,7 @@ async def test_merge_gate_audit_persists_after_raise_commit(monkeypatch):
         with patch("app.services.merge_verdict_gate.evaluate_merge_gate",
                    return_value=_decision(ASK_HUMAN, gid)):
             d = await eng.evaluate_line_for_transition(
-                s, org_id=org, project_id=None, entity_type="story", entity_id=eid,
+                s, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=eid,
                 from_status="in-review", to_status="done")
         assert not d.proceeds  # gate_pending → 라우터가 raise
         await s.commit()  # ⭐라우터의 raise-前 commit 모사
