@@ -1926,23 +1926,53 @@ RECIPE_SITE_DRAFT_LINK_FIELD = "site_post_draft_id"
 async def _open_site_draft_ids_for_work_item(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> list[uuid.UUID]:
-    """story #4256 — 이 발행의 work item에 걸린 아직 발행 전(status=draft) · 삭제 안 된 블로그 초안 id들(오래된 순 · 후보 표시용 — 고르지 않는다).
-    work item을 모르면 빈 목록(→ 자리 표시). 조직 조건으로 다른 조직 초안은 섞이지 않는다."""
+    """story #4256 — 이 발행의 work item에 걸린 **아직 발행 안 된** · 삭제 안 된 블로그 초안 id들(오래된 순 · 후보 표시용 — 고르지 않는다).
+
+    까디르 QA · PO(07:07Z) — `SitePostDraft.status`는 server_default «draft»뿐이고 앱 어디서도 안 바뀐다(발행 여부는 발행 행 쪽). 그래서
+    «발행됨»은 발행 행으로 가른다: 자사 블로그 = `SitePost`(같은 조직 · source_story_id = 그 work item · slug = 초안 slug · 내렸어도 한 번
+    발행된 것) · 외부 목적지 = 그 초안 버전을 가리키는 `ChannelPublication`(status=published). 반복 회차에서 지난 회차에 발행한 초안이
+    세어지지 않는다.
+    조회 실패가 멘션 발행을 죽이지 않게 savepoint(begin_nested) 안에서 돌리고, 실패하면 빈 목록(→ 자리 표시)으로 떨어진다(예외만 삼키면
+    같은 세션의 트랜잭션이 aborted로 남는 부류). work item을 모르면 빈 목록. 조직 조건으로 다른 조직 초안은 섞이지 않는다."""
+    from sqlalchemy import exists
+
+    from app.models.channel_publication import ChannelPublication
+    from app.models.site_post import SitePost
     from app.models.site_post_draft import SitePostDraft
+    from app.models.site_post_version import SitePostVersion
 
     try:
         work_item_id = uuid.UUID(str(payload.get("work_item_id")))
     except (ValueError, TypeError, AttributeError):
         return []
-    rows = (await db.execute(
-        select(SitePostDraft.id).where(
-            SitePostDraft.org_id == org_id,
-            SitePostDraft.work_item_id == work_item_id,
-            SitePostDraft.status == "draft",
-            SitePostDraft.deleted_at.is_(None),
-        ).order_by(SitePostDraft.created_at, SitePostDraft.id)
-    )).scalars().all()
+    try:
+        hosted_published = exists().where(
+            SitePost.org_id == SitePostDraft.org_id,
+            SitePost.source_story_id == SitePostDraft.work_item_id,
+            SitePost.slug == SitePostDraft.slug,
+        )
+        external_published = exists().where(
+            ChannelPublication.org_id == SitePostDraft.org_id,
+            ChannelPublication.status == "published",
+            ChannelPublication.version_id == SitePostVersion.id,
+            SitePostVersion.draft_id == SitePostDraft.id,
+        )
+        async with db.begin_nested():
+            rows = (await db.execute(
+                select(SitePostDraft.id).where(
+                    SitePostDraft.org_id == org_id,
+                    SitePostDraft.work_item_id == work_item_id,
+                    SitePostDraft.deleted_at.is_(None),
+                    ~hosted_published,
+                    ~external_published,
+                ).order_by(SitePostDraft.created_at, SitePostDraft.id)
+            )).scalars().all()
+    except Exception:  # 멘션은 자리 표시로라도 나가야 한다
+        logger.warning("site draft lookup for recipe mention failed org_id=%s work_item_id=%s", org_id, work_item_id, exc_info=True)
+        return []
     return list(rows)
+
+
 # story #4104(페드루 PO 리뷰, 2026-09-21) — 준비 경고 루프(apply_recipe_role_bindings)가
 # 같은 딕셔너리를 "이 kind는 에이전트 자기 도구로 처리(org 커넥터 무관)"라는 다른 목적으로
 # 재사용한다 — 이름을 붙여 그 의도를 다음 사람이 안 물어도 되게 한다(값은 여전히 하나뿐,
