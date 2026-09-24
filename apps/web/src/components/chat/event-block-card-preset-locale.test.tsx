@@ -93,14 +93,75 @@ describe('EventBlockCard — 플랫폼 프리셋 카드 문안 로케일(story #
     expect(text).toContain('재배정 요청');
   });
 
-  it('조직 정의는 같은 모양이어도 원문 그대로', async () => {
+  // story #4257(PO 11:27Z 개정) — «조직 정의는 원문 그대로»는 조직이 쓴 글(머리말 · 필드)에 대한 약속이다. 플랫폼이 넣어 준 기본 단계 문장
+  // (씨앗과 글자가 같은 text 블록)은 조직 정의 안에서도 보는 사람의 언어로 바뀐다.
+  it('조직 정의는 같은 모양이어도 머리말 등 원문 그대로 · 씨앗 단계 문장만 로케일', async () => {
     const text = await render('en', MARKETING_TEMPLATE, { stage: 'draft', work_item_id: 'W-1' }, def('org.acme.video', 'org-1', '우리 영상'));
     expect(text).toContain('영상 제작 워크플로우');
-    expect(text).toContain('단계로 넘어갔습니다');
+    expect(text).not.toContain('단계로 넘어갔습니다');
+    expect(text).toContain('Moved to');
   });
 
   it('정의를 모르면(구 캐시) 원문 그대로', async () => {
     const text = await render('en', MARKETING_TEMPLATE, { stage: 'draft', work_item_id: 'W-1' }, null);
     expect(text).toContain('영상 제작 워크플로우');
+  });
+});
+
+// story #4257(PO 11:27Z) — 조직 정의 폼이 넣어 주는 기본 단계 문장(옛 · 새)은 표시할 때 보는 사람의 언어로. 조직이 직접 쓴 문장은 원문 그대로.
+describe('조직 정의 — 플랫폼 기본 단계 문장만 text 블록 단위로 로케일(#4257)', () => {
+  const orgTemplate = (stageText: string, extra?: string) => ({ blocks: [
+    { type: 'header' as const, text: '우리 흐름' },
+    { type: 'text' as const, text: stageText },
+    ...(extra ? [{ type: 'text' as const, text: extra }] : []),
+  ] }) as unknown as typeof MARKETING_TEMPLATE;
+  const orgDef = def('org.acme.flow', 'org-1', '우리 흐름');
+
+  it.each([
+    ['옛 기본 문장', '단계 **{{payload.stage}}** 로 넘어갔습니다.'],
+    ['새 기본 문장(씨앗)', '**{{payload.stage}}** 로 넘어갔습니다'],
+  ])('⭐en 뷰어 — %s이 영어로', async (_label, stageText) => {
+    const text = await render('en', orgTemplate(stageText), { stage: 'draft' }, orgDef);
+    expect(text).toContain('Moved to');
+    expect(text).not.toContain('넘어갔습니다');
+    expect(text).toContain('우리 흐름'); // 조직이 쓴 머리말은 원문
+  });
+
+  it('조직이 직접 쓴 다른 문장은 원문 그대로(씨앗과 글자가 다르면 안 바꾼다)', async () => {
+    const own = '**{{payload.stage}}** 로 넘어갔습니다; 사유는 채널 참고';
+    const text = await render('en', orgTemplate('**{{payload.stage}}** 로 넘어갔습니다', own), { stage: 'draft' }, orgDef);
+    expect(text).toContain('Moved to');
+    expect(text).toContain('사유는 채널 참고');
+  });
+
+  it('ko 뷰어 — 기본 문장은 ko 문안(«단계로 넘어갔어요»)', async () => {
+    const text = await render('ko', orgTemplate('단계 **{{payload.stage}}** 로 넘어갔습니다.'), { stage: 'draft' }, orgDef);
+    expect(text).toContain('단계로 넘어갔어요');
+  });
+});
+
+// story #4257(PO 12:59Z · 유나 측정) — 이미 저장된 옛 머리말 '(이름 없음)'은 플랫폼 자리 표시 → 표시할 때 정의 이름(없으면 로케일 자리 표시).
+describe('조직 정의 — 옛 자리 표시 머리말 «(이름 없음)»은 정의 이름으로(#4257)', () => {
+  const tpl = (header: string) => ({ blocks: [
+    { type: 'header' as const, text: header },
+    { type: 'text' as const, text: '**{{payload.stage}}** 로 넘어갔습니다' },
+  ] }) as unknown as typeof MARKETING_TEMPLATE;
+
+  it('⭐en 뷰어 — 옛 머리말 대신 정의 이름', async () => {
+    const text = await render('en', tpl('(이름 없음)'), { stage: 'draft' }, def('org.acme.flow', 'org-1', 'Release flow'));
+    expect(text).toContain('Release flow');
+    expect(text).not.toContain('(이름 없음)');
+  });
+
+  it('정의를 모르면(구 캐시) 로케일 자리 표시(en «(Untitled)»)', async () => {
+    const text = await render('en', tpl('(이름 없음)'), { stage: 'draft' }, null);
+    expect(text).toContain(enMessages.organization.definerUnnamedPreview);
+    expect(text).not.toContain('(이름 없음)');
+  });
+
+  it('조직이 직접 쓴 머리말은 원문 그대로(자리 표시와 글자가 다르면 안 바꾼다)', async () => {
+    const text = await render('en', tpl('우리 릴리즈'), { stage: 'draft' }, def('org.acme.flow', 'org-1', 'Release flow'));
+    expect(text).toContain('우리 릴리즈');
+    expect(text).not.toContain('Release flow');
   });
 });

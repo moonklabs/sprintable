@@ -15,8 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { EventDefinerForm } from '@/components/organization/event-definer-form';
 import {
-  type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
+  type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix, withHeaderName,
 } from '@/components/organization/event-definer-logic';
+import { useSampleText } from '@/components/organization/use-sample-text';
 import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
 import { ApplyRecipeDialog } from '@/components/organization/apply-recipe-dialog';
 import { RecipeCardGrid } from '@/components/organization/recipe-gallery';
@@ -634,6 +635,7 @@ function EventFormDialog({
   tc: ReturnType<typeof useTranslations>;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  const sampleText = useSampleText(); // story #4257 — 테스트 발행 예시 payload도 미리보기와 같은 로케일 예시값
   const { currentTeamMemberId } = useDashboardContext();
   const prefix = `org.${orgSlug || '{org}'}.`;
   // story #3745(페드루 PO 決) — 정의 편집 폼에 이름 필드(옛 화면엔 자리 자체가 없었다).
@@ -710,7 +712,8 @@ function EventFormDialog({
       let body: Record<string, unknown>;
       if (tab === 'basic') {
         if (definerKeyError) throw new Error(definerKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset'));
-        const derived = deriveDefinition(definerState, orgSlug);
+        // story #4257(PO 11:27Z) — 머리말(#definer-name)이 비면 이벤트 이름(필수값)을 저장한다 · 자리 표시 문구를 저장하지 않는다.
+        const derived = deriveDefinition(withHeaderName(definerState, name), orgSlug, sampleText);
         body = {
           name: name.trim(),
           payload_schema: derived.payload_schema,
@@ -778,7 +781,7 @@ function EventFormDialog({
     setTestPublishing(true);
     setTestPublishResult(null);
     try {
-      const derived = deriveDefinition(definerState, orgSlug);
+      const derived = deriveDefinition(withHeaderName(definerState, name), orgSlug, sampleText);
       // PO 라이브 실측(review_changes) — 「발행할 때 지정」routing(payload_field)은 BE가
       // payload[member_id_field]에 실 멤버 id를 요구한다. 순수 파생 샘플엔 그 필드가 없어
       // 테스트 발행이 "나에게만 보내는 실 발행"(§4 약속)을 어기고 항상 실패했다 — 지금
@@ -861,6 +864,7 @@ function EventFormDialog({
               state={definerState}
               onChange={setDefinerState}
               orgSlug={orgSlug}
+              eventName={name}
               testPublish={() => void testPublish()}
               testPublishing={testPublishing}
               testPublishResult={savedKey ? testPublishResult : { ok: false, message: t('definerTestPublishSaveFirst') }}

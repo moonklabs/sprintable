@@ -15,7 +15,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
-import { isLocalizedPlatformPreset, localizePresetBlockTemplate, presetName } from '@/lib/platform-preset-copy';
+import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
@@ -393,13 +393,19 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   // story #4209(유나 확정) — 플랫폼 마케팅·워크플로우 프리셋은 시드 block_template(한 언어·옛 이름·합니다체·워크플로우는
   // stage slug 원문)을 로케일 문안으로: 머리말 «{이름} 워크플로우» · 본문 «**{단계 라벨}** 단계로 넘어갔어요» · «대상» 필드
   // 라벨. 조직 정의·정의 모름은 원문 그대로(isLocalizedPlatformPreset).
+  const stageMovedBody = typeof labels['stage'] === 'string' ? tPreset('stageMovedBody', { stage: labels['stage'] }) : null;
+  // story #4257(PO 11:27Z) — 조직 정의 · 정의 모름은 원문 그대로이되, 플랫폼이 넣어 준 기본 단계 문장(씨앗과 같은 text 블록)만 로케일로.
   const localizedTemplate = isLocalizedPlatformPreset(definition)
     ? localizePresetBlockTemplate(template, definition, {
       header: tPreset('headerTemplate', { name: presetName(definition, tPreset) }),
-      body: typeof labels['stage'] === 'string' ? tPreset('stageMovedBody', { stage: labels['stage'] }) : null,
+      body: stageMovedBody,
       targetLabel: tEventCard('targetLabel'),
     })
-    : template;
+    : localizeLegacyUnnamedHeader(
+      localizeSeedStageTextBlocks(template, stageMovedBody),
+      // story #4257(PO 12:59Z) — 옛 자리 표시 머리말은 정의 이름(필수값) · 이름을 모르면(정의 모름 · 구 캐시) 로케일 자리 표시.
+      definition?.name?.trim() || tOrg('definerUnnamedPreview'),
+    );
   const blocks = renderBlockTemplate(localizedTemplate, payload, refsForTemplate, labels, translations);
 
   return (
