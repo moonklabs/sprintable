@@ -6,6 +6,7 @@ import { Link2, MessageSquare, Newspaper, TrendingUp, Workflow } from 'lucide-re
 import { resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { destHref } from '@/components/nav/mobile-tab-bar';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 /**
  * story #4004(E-UX-OVERHAUL·셸 통합 3/N·FE) — v3 3화면(오늘·대화·연결·규칙)이 각자
@@ -59,6 +60,10 @@ export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3It
   const t = useTranslations('nav');
   const dest = resolveNavV3Destinations(flags);
   const flatHref = useFlatHref(); // story #4231 — static 목적지는 현재 프로젝트(`?p=`)를 싣는다(탭바와 같은 규칙)
+  // story #4231 다음 조각(래칫 맹점 ③) — resource 목적지(「일감」)에 slug를 아예 안 넘겨 늘 bare `/flow`였다. 탭바 · 사이드바와 같은 소스
+  // (대시보드 컨텍스트의 org slug · 현재 프로젝트 slug)로 직접 경로 · 모르면 destHref가 폴백에 현재 p를 싣는다.
+  const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  const scope = { orgSlug: orgMemberships.find((o) => o.orgId === orgId)?.orgSlug, projectSlug: currentProjectSlug };
 
   return (
     <nav className="mt-1 flex flex-col gap-0.5" data-testid="nav-v3-item-list">
@@ -72,7 +77,7 @@ export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3It
         return (
           <Link
             key={item.key}
-            href={destination.kind === 'static' ? flatHref(destHref(destination)) : destHref(destination)}
+            href={destHref(destination, scope, flatHref)}
             data-testid={`nav-v3-item-${item.key}`}
             aria-current={isActive ? 'page' : undefined}
             className={

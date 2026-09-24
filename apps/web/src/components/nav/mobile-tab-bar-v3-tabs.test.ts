@@ -104,13 +104,13 @@ describe('getActiveTabKey — v3 分岐(AC8)', () => {
 describe('resolveTabHref — V3_TABS 탭도 목적지 모듈 그대로 반영', () => {
   it('「오늘」 탭 href가 flags에 따라 /today ↔ /org-briefing', () => {
     const todayTab = V3_TABS.find((t) => t.key === 'today')!;
-    expect(resolveTabHref(todayTab, resolveNavV3Destinations(ONLY_TODAY))).toBe('/today');
-    expect(resolveTabHref(todayTab, resolveNavV3Destinations(ONLY_CHAT))).toBe('/org-briefing');
+    expect(resolveTabHref(todayTab, resolveNavV3Destinations(ONLY_TODAY), {}, (h) => h)).toBe('/today');
+    expect(resolveTabHref(todayTab, resolveNavV3Destinations(ONLY_CHAT), {}, (h) => h)).toBe('/org-briefing');
   });
 
   it('「일감」 탭 href가 anyV3Enabled에 따라 work-list ↔ flow(bare, resource kind)', () => {
     const workTab = V3_TABS.find((t) => t.key === 'work')!;
-    expect(resolveTabHref(workTab, resolveNavV3Destinations(ALL_ON))).toBe('/work-list');
+    expect(resolveTabHref(workTab, resolveNavV3Destinations(ALL_ON), {}, (h) => h)).toBe('/work-list');
   });
 
   // story #4006 AC8 PO CHANGES-1 follow-up(2026-09-22) — v3 4탭(오늘/대화/일감/더보기)엔
@@ -121,7 +121,7 @@ describe('resolveTabHref — V3_TABS 탭도 목적지 모듈 그대로 반영', 
   // v3 플래그와 무관하게 항상 참)가 이미 고정 — 두 핀이 합쳐야 AC8의 "두 진입점"이 성립.
   it('「더보기」 탭 href는 항상 /more(flags 무관) — 결과·연결·규칙은 이 안에서 나온다', () => {
     const moreTab = V3_TABS.find((t) => t.key === 'more')!;
-    expect(resolveTabHref(moreTab, resolveNavV3Destinations(ALL_ON))).toBe('/more');
-    expect(resolveTabHref(moreTab, resolveNavV3Destinations(ONLY_TODAY))).toBe('/more');
+    expect(resolveTabHref(moreTab, resolveNavV3Destinations(ALL_ON), {}, (h) => h)).toBe('/more');
+    expect(resolveTabHref(moreTab, resolveNavV3Destinations(ONLY_TODAY), {}, (h) => h)).toBe('/more');
   });
 });

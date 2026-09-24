@@ -104,8 +104,13 @@ export function resolveConnectRulesHref(flags: NavV3Flags | undefined, legacyFal
  * 매 탭 타고, 4557 전 301을 캐시한 기기는 옛 프로젝트로 갔다). 두 slug가 다 있을 때만 직접 경로, 하나라도 모르면 bare
  * `/{resource}`(미들웨어 안전망 — 로그인 직후 등 slug가 아직 없는 찰나).
  */
-export function scopedResourceHref(resource: string, orgSlug: string | undefined, projectSlug: string | undefined): string {
-  return orgSlug && projectSlug ? `/${orgSlug}/${projectSlug}/${resource}` : `/${resource}`;
+export function scopedResourceHref(
+  resource: string, orgSlug: string | undefined, projectSlug: string | undefined, withProject: (href: string) => string,
+): string {
+  // story #4231 다음 조각(래칫 맹점 ③ · 까디르 4614 codex P2) — slug를 모르는 찰나의 폴백 `/{resource}`는 bare로 못 나간다: 필수 withProject
+  // (호출처는 useFlatHref)로 감싼다. 예전엔 탭바 · 사이드바 · v3 목록 · 커맨드 팔레트가 이 폴백을 `?p=` 없이 그대로 썼고, 래칫은 헬퍼로
+  // 조립한 경로를 못 셌다(이제 래칫이 이 헬퍼 호출 = flat 목적지로 센다 · ASSEMBLERS).
+  return orgSlug && projectSlug ? `/${orgSlug}/${projectSlug}/${resource}` : withProject(`/${resource}`);
 }
 
 /**

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
@@ -117,7 +118,8 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
     if (navItem.id === 'board') {
       return {
         id: navItem.id, icon: navItem.icon, labelKey: navItem.labelKey,
-        href: `${resolveResourceHref('flow')}?view=list`, labelSource: 'nav', isWorkspaceless: false,
+        // story #4231 다음 조각 — 쿼리는 감싸기 전에(폴백이 `?p=`를 실어도 `?`가 둘이 되지 않게).
+        href: resolveResourceHref('flow?view=list'), labelSource: 'nav', isWorkspaceless: false,
       };
     }
     if (navItem.id === 'docs') {
@@ -171,8 +173,9 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
   const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  // story #4231 다음 조각 — 사이드바 · 탭바와 같은 헬퍼(slug 모름 폴백도 현재 p를 싣는다 · 사본 조립 0).
   function resourceHref(resource: string): string {
-    return orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+    return scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
   }
   const docsHref = resourceHref('docs');
   // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 라우트가 삭제되고
@@ -183,7 +186,8 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   // deriveNavigateItems()도 'board' id에 이 식과 동일한 조립(resourceHref('flow')+
   // '?view=list')을 쓴다(그 함수 안 주석 참고) — actionItems는 팔레트 navigate 목록 밖
   // 별도 소비처라 이 변수를 그대로 유지한다(사본 아님, 서로 다른 소비처의 같은 상수).
-  const boardHref = `${resourceHref('flow')}?view=list`;
+  // story #4231 다음 조각 — 쿼리는 감싸기 **전에** 붙인다(폴백이 `?p=`를 실으면 뒤에 `?view=`를 이으면 `?`가 둘이 된다).
+  const boardHref = resourceHref('flow?view=list');
   // story #3698(IA·후속, PO 確定 2026-09-08) — navigate 목적지를 NAV_GROUPS(+CHAT_CENTER_
   // ITEM)에서 파생한다(하드코딩 7→전수 25). 라벨·경로는 nav-config.ts 단일 정본 재사용
   // (사본 0) — 사이드바에 있는 목적지는 전부 ⌘K로도 도달한다(S4 AC2 실충족). go-sprints·
