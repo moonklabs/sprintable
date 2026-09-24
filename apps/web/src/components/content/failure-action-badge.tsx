@@ -102,7 +102,10 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     // 사유가 없을 때만(더 구체적인 사유가 있으면 그쪽이 이긴다). recheckGate=false
     // (기본, site_post 외부 발행 등 실제 관문이 없는 소비처)면 needsRecheck가
     // true여도 일반 dead_letter 문면 그대로 — 없는 관문을 약속하지 않는다.
-    const showRecheckWording = !deadLetterReasonKey && action.needsRecheck && recheckGate;
+    // story #4264(유나 권고 · PO 17:26Z) — compact(목록 · 캘린더 카드 · 인사이트)도 «나갔을 수 있음»을 상세와 같은 사실
+    // 문장으로 — 이 부류(200 뒤 id 없음 등)를 사람이 처음 보는 자리가 목록이다. compact는 버튼을 안 그리므로(아래) 없는
+    // 관문을 약속하지 않는다(문장만).
+    const showRecheckWording = !deadLetterReasonKey && action.needsRecheck && (recheckGate || compact);
     const canRetryNow = resetPassed && !!onRetryClick;
     const bodyText = deadLetterReasonKey
       ? t(deadLetterReasonKey)

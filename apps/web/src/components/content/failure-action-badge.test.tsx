@@ -153,6 +153,32 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
+  // story #4264(유나 권고 · PO 17:26Z) — 목록 · 캘린더 카드 · 인사이트(compact)도 «나갔을 수 있음»(needs_check dead_letter)을
+  // 상세와 같은 사실 문장으로 낸다(버튼 없이). 예전엔 목록이 «자동 재시도를 멈췄어요», 상세가 «밖에 나갔는지 알 수 없어요»로
+  // 갈렸다. 뮤테이션: showRecheckWording에서 `|| compact`를 빼면 첫 테스트 RED.
+  it('⭐dead_letter ∧ needsRecheck ∧ compact — 목록도 상세와 같은 «채널에서 확인» 문장 · 버튼 없음', async () => {
+    const action = deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'needs_check', reasonCode: 'X_POST_TWEET_MISSING_ID' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact />));
+    });
+    const listText = container.textContent;
+    expect(listText).toBe(koMessages.content.channelPostsFailureNeedsCheck);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" recheckGate onRetryClick={() => {}} />));
+    });
+    expect(container.querySelector('p')?.textContent).toBe(listText);
+  });
+
+  it('⭐dead_letter ∧ not_sent ∧ compact — «멈췄어요» 그대로(확인 문장은 나갔을 수 있는 부류만)', async () => {
+    const action = deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'not_sent', reasonCode: 'CHANNEL_TEXT_TOO_LONG' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact />));
+    });
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
+  });
+
   // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — dead_letter ∧ reasonCode가
   // CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS 표에 있으면(YOUTUBE_QUOTA_
   // EXCEEDED) needsRecheck/recheckGate보다 먼저 갈라 정적 문구를 낸다(일반
