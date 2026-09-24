@@ -536,3 +536,40 @@ async def test_site_posts_cors_preflight_open():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_legacy_publish_route_does_not_mark_a_same_slug_new_draft_as_published():
+    """story #4256(까디르 QA) — 초안 없이 올리는 레거시 발행(POST /site-posts)은 발행 감사 로그(site_post_published + context.version_id)를
+    남기지 않는다. 그래서 그 뒤 같은 스토리 · 같은 slug로 새로 만든 초안은 «아직 발행 전»이다(멘션 예시에 실제 id가 채워진다). 레거시 경로가
+    version_id 달린 로그를 쓰게 바뀌거나, 판정이 slug로 돌아가면 이 테스트가 RED."""
+    from app.main import app
+    from app.models.site_post_draft import SitePostDraft
+    from app.routers.events import _open_site_draft_ids_for_work_item
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+            _body = _publish_body(work_item_id=story_id)
+            gate_id = await _seed_gate(s, org_id, story_id, status="approved", seal_for=_body)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/site-posts",
+                json=_publish_body(work_item_id=story_id, gate_id=gate_id),
+            )
+        assert r.status_code == 201, r.text
+
+        async with Session() as s:
+            new_draft = SitePostDraft(id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, slug="hello-world")
+            s.add(new_draft)
+            await s.flush()
+            ids = await _open_site_draft_ids_for_work_item(s, org_id=org_id, payload={"work_item_id": str(story_id)})
+            await s.rollback()
+        assert ids == [new_draft.id]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

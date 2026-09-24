@@ -250,6 +250,19 @@ async def test_owner_unpublish_makes_public_404_and_list_excludes_row_preserved(
         assert len(rows) == 1
         assert rows[0].unpublished_at is not None
         assert rows[0].body_md == "# 제목\n\n본문입니다."
+
+        # story #4256(까디르 QA) — 내린 뒤에도 그 초안의 발행 감사 로그(site_post_published · context.version_id)가 남는다. 블로그 레시피 멘션의
+        # «발행됨» 판정(한 번 발행된 초안은 후보에서 뺀다)이 이 로그에 걸려 있다 — 내리기가 로그를 지우면 내린 초안이 후보로 되살아난다.
+        async with Session() as s:
+            from app.models.activity_log import ActivityLog
+            from app.models.site_post_version import SitePostVersion
+            version_ids = {str(v) for v in (await s.execute(
+                select(SitePostVersion.id).where(SitePostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalars().all()}
+            published_logs = (await s.execute(
+                select(ActivityLog).where(ActivityLog.org_id == org_id, ActivityLog.action == "site_post_published")
+            )).scalars().all()
+        assert any(log.context.get("version_id") in version_ids for log in published_logs)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

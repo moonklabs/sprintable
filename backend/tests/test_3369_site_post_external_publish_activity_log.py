@@ -66,7 +66,7 @@ async def test_external_publish_records_site_post_published_activity_log(live_wo
     from app.models.channel_publication import ChannelPublication
     from app.services.publication_command import process_due_publication_commands
 
-    engine, Session, app, org_id, _draft_id, gate_id, human_id = await _seed_and_approve(
+    engine, Session, app, org_id, draft_id, gate_id, human_id = await _seed_and_approve(
         live_wordpress_stub_url=live_wordpress_stub,
     )
     try:
@@ -91,6 +91,14 @@ async def test_external_publish_records_site_post_published_activity_log(live_wo
         assert log.entity_id == pub.id
         assert log.context["gate_id"] == str(gate_id)
         assert log.context["requested_by_member_id"] == str(human_id)
+        # story #4256(까디르 QA) — 블로그 레시피 멘션의 «발행됨» 판정이 이 값에 걸려 있다(activity_logs.context.version_id → SitePostVersion.draft_id).
+        # 워커가 발행한 **그 초안의 버전** id를 실어야 한다 — 빼거나 다른 값이면 이미 발행한 초안이 멘션 후보로 되살아난다.
+        from app.models.site_post_version import SitePostVersion
+        async with Session() as s:
+            version_ids = {str(v) for v in (await s.execute(
+                select(SitePostVersion.id).where(SitePostVersion.draft_id == draft_id)
+            )).scalars().all()}
+        assert log.context["version_id"] in version_ids
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
