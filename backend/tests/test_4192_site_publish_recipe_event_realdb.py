@@ -257,13 +257,16 @@ async def test_external_blog_worker_success_emits_published_exactly_once(live_wo
         await engine.dispose()
 
 
-async def test_external_blog_worker_failure_emits_nothing():
-    """AC1 — 발행 실패(도달 불가 사이트)면 이벤트 0."""
+async def test_external_blog_worker_failure_emits_no_next_stage_and_one_failure_notice():
+    """AC1 — 발행 실패(도달 불가 사이트)면 다음 단계(published) 이벤트 0. story #4258 — 대신 레시피 실패 통지
+    (`preset.recipe.publish_failed`) 1(예전 기대 «이벤트 0»을 갱신 · 통지 자체는 test_4258이 잰다)."""
     from app.main import app
     from app.services.publication_command import process_due_publication_commands
+    from tests.test_4258_recipe_publish_stopped_notice_realdb import _install_notice_definition, _notices
 
     engine, Session = await _session_factory()
     try:
+        _install_notice_definition()
         w = await _world(Session)
         await _walk_to_verification(Session, w)
         gate_id, draft_id = await _submit_external(app, Session, w, "https://unreachable.invalid", "ext-fail")
@@ -274,6 +277,7 @@ async def test_external_blog_worker_failure_emits_nothing():
             await s.commit()
         assert counts.get("completed", 0) == 0, counts
         assert await _published_events(Session, w) == 0
+        assert len(await _notices(Session, w["org_id"])) == 1
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -522,6 +522,69 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 발행됐어요. 공개 주소는 채널에서 아직 받지 못했어요.",
         "en": "Next action: nothing — it's published. The channel hasn't sent the public URL yet.",
     },
+    # story #4258 — 레시피 비동기 발행 멈춤 통지(preset.recipe.publish_failed · 문안 = 유나 · 4258 본문 «디자인 확정» 표). 발행물
+    # 목록 실패 배지(failure-action-badge · content.channelPostsFailure*)와 같은 말을 쓴다.
+    "events.recipe_publish_failed_what_newsletter_send": {
+        "ko": "무엇: 뉴스레터 발송이 멈췄어요.", "en": "What: the newsletter send has stopped.",
+    },
+    "events.recipe_publish_failed_what_channel_post": {
+        "ko": "무엇: 채널 발행이 멈췄어요.", "en": "What: publishing to the channel has stopped.",
+    },
+    "events.recipe_publish_failed_what_site_post": {
+        "ko": "무엇: 블로그 발행이 멈췄어요.", "en": "What: publishing to the blog has stopped.",
+    },
+    "events.recipe_publish_failed_reason_dead_letter": {
+        "ko": "사유: 자동 재시도를 멈췄어요.", "en": "Reason: automatic retries have stopped.",
+    },
+    "events.recipe_publish_failed_reason_dead_letter_code": {
+        "ko": "사유: 자동 재시도를 멈췄어요(코드 {code}).", "en": "Reason: automatic retries have stopped (code {code}).",
+    },
+    "events.recipe_publish_failed_reason_needs_check": {
+        "ko": "사유: 채널에 나갔는지 알 수 없어요.", "en": "Reason: we can't tell if it went out.",
+    },
+    "events.recipe_publish_failed_reason_needs_check_code": {
+        "ko": "사유: 채널에 나갔는지 알 수 없어요(코드 {code}).", "en": "Reason: we can't tell if it went out (code {code}).",
+    },
+    # 표에 있는 reason_code — FE `CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS`의 같은 키 문장과 같다(짝 테스트가 고정).
+    "events.recipe_publish_failed_reason_youtube_quota_exceeded": {
+        "ko": "사유: 오늘 YouTube 사용량을 다 썼어요 — 사용량은 매일 태평양 시간 자정에 초기화돼요(플랫폼 공유 한도).",
+        "en": "Reason: Today's YouTube usage limit has been reached — it resets daily at midnight Pacific Time (shared platform-wide limit).",
+    },
+    "events.recipe_publish_failed_reason_blocked": {
+        "ko": "사유: 연결 문제로 멈췄어요.", "en": "Reason: stopped by a connection problem.",
+    },
+    "events.recipe_publish_failed_next_dead_letter": {
+        "ko": "다음 행동: 사람이 다시 시도해야 해요 — {retry_url}",
+        "en": "Next action: a person needs to retry — {retry_url}",
+    },
+    "events.recipe_publish_failed_next_needs_check": {
+        "ko": "다음 행동: 사람이 채널에서 확인한 뒤 다시 시도해야 해요 — {retry_url}",
+        "en": "Next action: a person needs to check the channel, then retry — {retry_url}",
+    },
+    # 연결이 끊긴 blocked는 재연결 뒤에도 스스로 이어지지 않는다(재연결 경로에 명령 재큐 없음) — 유나 대안 문장.
+    "events.recipe_publish_failed_next_blocked": {
+        "ko": "다음 행동: 사람이 채널을 다시 연결한 뒤 다시 시도해야 해요 — {retry_url}",
+        "en": "Next action: a person needs to reconnect the channel, then retry — {retry_url}",
+    },
+    # 재시도 화면이 정해지지 않은 발행(뉴스레터 발송 — FE에 발송 명령 재시도 자리가 아직 없다)은 링크 없이 같은 문장.
+    "events.recipe_publish_failed_next_dead_letter_no_link": {
+        "ko": "다음 행동: 사람이 다시 시도해야 해요.", "en": "Next action: a person needs to retry.",
+    },
+    "events.recipe_publish_failed_next_needs_check_no_link": {
+        "ko": "다음 행동: 사람이 채널에서 확인한 뒤 다시 시도해야 해요.",
+        "en": "Next action: a person needs to check the channel, then retry.",
+    },
+    "events.recipe_publish_failed_next_blocked_no_link": {
+        "ko": "다음 행동: 사람이 채널을 다시 연결한 뒤 다시 시도해야 해요.",
+        "en": "Next action: a person needs to reconnect the channel, then retry.",
+    },
+    "events.recipe_publish_failed_next_newsletter_unavailable": {
+        "ko": "다음 행동: 뉴스레터 발송은 아직 앱에서 다시 시도할 수 없어요.",
+        "en": "Next action: newsletter sends can't be retried in the app yet.",
+    },
+    "events.recipe_publish_failed_recipe_stopped": {
+        "ko": "레시피는 이 단계에 멈춰 있어요.", "en": "The recipe is paused at this stage.",
+    },
     "events.stage_next_none": {
         "ko": "다음 단계: 없음(마지막 stage)",
         "en": "Next stage: none (last stage)",

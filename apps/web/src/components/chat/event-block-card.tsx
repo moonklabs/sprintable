@@ -374,6 +374,8 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     sourceLabel: tEventCard('sourceLabel'),
     metricValueLabel: tEventCard('metricValueLabel'),
     measuredAtLabel: tEventCard('measuredAtLabel'),
+    // story #4258 — preset.recipe.publish_failed(레시피 비동기 발행 멈춤) 카드 머리.
+    recipePublishFailedHeader: tEventCard('recipePublishFailedHeader'),
   };
 
   // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를

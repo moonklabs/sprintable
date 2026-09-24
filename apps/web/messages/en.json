@@ -5152,7 +5152,8 @@
     "unitLabel": "Unit",
     "sourceLabel": "Source",
     "metricValueLabel": "Measured value",
-    "measuredAtLabel": "Measured at"
+    "measuredAtLabel": "Measured at",
+    "recipePublishFailedHeader": "Publishing stopped"
   },
   "activityLog": {
     "title": "Activity Log",
@@ -6281,6 +6282,7 @@
     "systemLoopMeasureDueName": "Past measure date",
     "systemSteerInstructName": "Direction change",
     "systemAgentRunCancelRequestedName": "Agent run stop request",
+    "systemRecipePublishFailedName": "Recipe publishing stopped",
     "workflowLoopAgencyDescription": "Goal and hypothesis → brief → options → a person picks → run → learn from results. Good for repeated experiments like copy or campaign tests.",
     "blogArticleActionConceptConfirmed": "Approve the concept (check the topic, keywords, and outline)",
     "blogArticleActionPlanning": "Plan the topic and keywords (title ideas and outline)",

@@ -2070,6 +2070,101 @@ async def _resolve_stage_gate_approver_clause(
     return t("events.stage_gate_approver_clause_policy", resolved_locale, name=_name)
 
 
+# story #4258 — 멈춤 사유 문장이 따로 있는 reason_code(FE `CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS`와 같은 표).
+_RECIPE_PUBLISH_FAILED_MAPPED_REASONS = {
+    "YOUTUBE_QUOTA_EXCEEDED": "events.recipe_publish_failed_reason_youtube_quota_exceeded",
+}
+
+
+async def _recipe_publish_retry_path(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> str | None:
+    """story #4258 — 멈춘 발행을 사람이 다시 시도하는 화면(초안 관리 화면의 재시도). 채널 발행 = 채널 초안 화면 · 블로그 발행 =
+    글 초안 화면. 뉴스레터 발송은 재시도 버튼이 있는 화면이 정해지지 않아 싣지 않는다(지어내지 않는다)."""
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.gate import Gate
+    from app.models.publication_command import PublicationCommand
+
+    try:
+        command = await db.get(PublicationCommand, uuid.UUID(str(payload.get("command_id"))))
+    except (TypeError, ValueError):
+        return None
+    if command is None or command.org_id != org_id:
+        return None
+    # 까디르 4621 델타 codex ② — 딸린 조회도 조직으로 묶는다(명령 조직 대조만으로는 다른 조직 게이트 · 초안 id가 링크로 샌다).
+    if command.content_kind == "site_post":
+        gate = (await db.execute(
+            select(Gate).where(Gate.id == command.gate_id, Gate.org_id == org_id)
+        )).scalar_one_or_none()
+        draft_id = (gate.neutral_facts or {}).get("draft_id") if gate is not None else None
+        return f"/content/{draft_id}" if draft_id else None
+    if (command.content_kind or "channel_post") == "channel_post":
+        from app.models.channel_post_draft import ChannelPostDraft
+
+        draft_id = (await db.execute(
+            select(ChannelPostVersion.draft_id)
+            .join(ChannelPostDraft, ChannelPostDraft.id == ChannelPostVersion.draft_id)
+            .where(ChannelPostVersion.id == command.approved_version, ChannelPostDraft.org_id == org_id)
+        )).scalar_one_or_none()
+        return f"/content/channel-posts/{draft_id}" if draft_id else None
+    return None
+
+
+async def _render_recipe_publish_failed_message(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict, resolved_locale: str,
+) -> str:
+    """story #4258 — 레시피 비동기 발행 멈춤 통지(문안 = 유나). 무엇이 · 왜 멈췄는지 · 다음 행동(사람 재시도 · 재연결) ·
+    레시피가 그 stage에 멈춰 있음."""
+    from app.services.i18n_catalog import t
+
+    lines = [t("events.event_line_header", resolved_locale, event_key="preset.recipe.publish_failed")]
+    work_item_type, work_item_id_raw = payload.get("work_item_type"), payload.get("work_item_id")
+    work_item_ref: str | None = None
+    if work_item_type and work_item_id_raw:
+        try:
+            work_item_ref = await _work_item_ref_token(
+                db, org_id=org_id, work_item_type=work_item_type, work_item_id=uuid.UUID(str(work_item_id_raw)),
+            )
+        except (ValueError, AttributeError, TypeError):
+            work_item_ref = None
+    if work_item_ref:
+        lines.append(f"- work item: {work_item_ref}")
+    elif work_item_id_raw:
+        lines.append(f"- work_item_id: {work_item_id_raw}")
+    kind = payload.get("content_kind") or "channel_post"
+    stop_kind = payload.get("stop_kind") or "dead_letter"
+    code = payload.get("reason_code")
+    lines.append(f"- {t(f'events.recipe_publish_failed_what_{kind}', resolved_locale)}")
+    # 사유 · 다음 행동은 발행물 목록 배지(failure-action.ts)와 같은 판정: blocked → 연결 · 표에 있는 코드 → 그 문장 ·
+    # needs_check(밖에 나갔는지 모름) → 채널 확인 뒤 재시도 · 그 밖 → 자동 재시도 멈춤. 모르는 코드는 괄호로 남긴다.
+    if stop_kind == "blocked":
+        reason, next_key = t("events.recipe_publish_failed_reason_blocked", resolved_locale), "blocked"
+    elif code in _RECIPE_PUBLISH_FAILED_MAPPED_REASONS:
+        reason, next_key = t(_RECIPE_PUBLISH_FAILED_MAPPED_REASONS[code], resolved_locale), "dead_letter"
+    elif payload.get("failure_kind") == "needs_check":
+        reason = t(
+            "events.recipe_publish_failed_reason_needs_check_code" if code else "events.recipe_publish_failed_reason_needs_check",
+            resolved_locale, code=code,
+        )
+        next_key = "needs_check"
+    else:
+        reason = t(
+            "events.recipe_publish_failed_reason_dead_letter_code" if code else "events.recipe_publish_failed_reason_dead_letter",
+            resolved_locale, code=code,
+        )
+        next_key = "dead_letter"
+    lines.append(f"- {reason}")
+    retry_path = await _recipe_publish_retry_path(db, org_id=org_id, payload=payload)
+    if retry_path:
+        lines.append(f"- {t(f'events.recipe_publish_failed_next_{next_key}', resolved_locale, retry_url=retry_path)}")
+    elif kind == "newsletter_send":
+        # 유나 10:21Z — 뉴스레터 발송은 앱 안에 다시 시도할 자리가 아직 없다(FE 0 · 발송 요청 API는 사람 전용). 없는 버튼을
+        # 찾게 하지 않는다. 만료: 그 자리가 생기면 `_recipe_publish_retry_path`가 주소를 주고 위 링크 줄로 넘어간다.
+        lines.append(f"- {t('events.recipe_publish_failed_next_newsletter_unavailable', resolved_locale)}")
+    else:
+        lines.append(f"- {t(f'events.recipe_publish_failed_next_{next_key}_no_link', resolved_locale)}")
+    lines.append(f"- {t('events.recipe_publish_failed_recipe_stopped', resolved_locale)}")
+    return "\n".join(lines)
+
+
 async def _render_event_message_content(
     db: AsyncSession, *, org_id: uuid.UUID, definition, payload: dict, resolved_locale: str = "ko",
     context: dict | None = None,
@@ -2100,6 +2195,10 @@ async def _render_event_message_content(
     이 분기의 「block_template 있으면 스킵」 조건만 제거한다."""
     if definition.key == "preset.gate.verdict":
         return await _render_gate_verdict_message(db, org_id=org_id, payload=payload, resolved_locale=resolved_locale)
+    if definition.key == "preset.recipe.publish_failed":
+        return await _render_recipe_publish_failed_message(
+            db, org_id=org_id, payload=payload, resolved_locale=resolved_locale,
+        )
     if not definition.stage_metadata:
         return "\n".join(_generic_event_message_lines(definition.key, payload, resolved_locale))
 

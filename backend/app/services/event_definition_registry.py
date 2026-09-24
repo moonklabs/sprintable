@@ -32,7 +32,7 @@ _SEGMENT_CHARSET_RE = re.compile(r"^[a-z0-9_]+$")
 # 페드루 판정 2026-08-13) — story #2633(해석기)이 실제로 이 target들을 member_id로 풀어야
 # 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
 # — validate_event_routing이 등록 시점에 막는다(발행 시점에야 발견되는 것보다 이르게).
-SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner"})
+SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner", "recipe_publish_failure"})
 # story #3312(M1→M3·마케팅자동화) — stage_metadata[stage].gate.approver의 닫힌 어휘.
 # SERVER_DERIVED_TARGETS와 동형 설계: PO 확定(페드루, 2026-09-02) "approver는 역할 참조로만
 # 선언(조직 상수 0) — 다른 org가 같은 정의를 apply해도 그 org 자신의 owner가 승인자". 실제

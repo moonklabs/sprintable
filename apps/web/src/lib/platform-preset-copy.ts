@@ -36,6 +36,7 @@ export const PLATFORM_SYSTEM_EVENT_NAME_KEY: Record<string, string> = {
   'preset.loop.measure_due': 'systemLoopMeasureDueName',
   'preset.steer.instruct': 'systemSteerInstructName',
   'preset.agent_run.cancel_requested': 'systemAgentRunCancelRequestedName',
+  'preset.recipe.publish_failed': 'systemRecipePublishFailedName',
 };
 
 export const PLATFORM_PRESET_DESCRIPTION_KEY: Record<string, string> = {
