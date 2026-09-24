@@ -64,12 +64,14 @@ export function nowStripItemKey(item: AttentionItem): string {
 /** withProject — 조직 단위 flat 목적지(결재함 · 에이전트 상세)에 **현재** 프로젝트를 싣는 함수(story #4231 3차 · 필수 · 호출처는 useFlatHref).
  * story #4231 4차(PO 07:53Z) — my-actions attention은 **조직 전체**라 항목마다 프로젝트가 다를 수 있다. 옛 자원 경로(/board · /flow · /goals ·
  * proxy가 `?p=`로 scoped 경로를 정한다 · #4253)는 현재 프로젝트가 아니라 **항목 자기 project_id**를 싣는다(현재 p로 감싸면 «p는 붙었는데 틀린
- * 셸»). 항목이 프로젝트를 안 싣는 agent_stuck(BE 페이로드에 project_id 없음)은 주소 그대로 — 지어내지 않는다(#4259가 BE부터 닫는다). */
+ * 셸»). agent_stuck도 #4259부터 BE가 project_id를 싣는다(옛 응답이면 주소 그대로 — 지어내지 않는다). */
 export function nowStripItemHref(item: AttentionItem, withProject: (href: string) => string): string {
   switch (item.type) {
     case 'agent_stuck':
-      // story #4259 — BE agent_stuck 페이로드에 project_id가 없어 bare로 둔다(현재 p로 감싸면 틀린 셸 · 지어내지 않음). 래칫이 이 자리를 센다.
-      return item.entity_type === 'story' ? `/board?story=${item.entity_id}` : withProject('/inbox?tab=gates');
+      // story #4259 — BE가 agent_stuck에 step run의 project_id를 싣는다 → 항목 자기 프로젝트(옛 응답이라 없으면 주소 그대로 — 지어내지 않음).
+      return item.entity_type === 'story'
+        ? withProjectParam(`/board?story=${item.entity_id}`, item.project_id ?? null)
+        : withProject('/inbox?tab=gates');
     case 'agent_auth_failure':
       return withProject(`/organization/workforce/${item.member_id}`);
     case 'unanswered_blocker':

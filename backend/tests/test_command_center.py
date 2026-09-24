@@ -147,7 +147,8 @@ def _ma_seq(
     # done_no_outcome_goals 중 하나라도 있어야(그 항목들에 project_id가 실려 있어야) 이 쿼리가
     # 발생한다(approval_group_counts/blocker_weight_counts와 동형 조건부 패턴). command_center.py
     # 실 순서상 unmeasurable_goal_count(#2843) 스칼라 뒤에 이 배치가 온다(rebase 시 확認).
-    if unanswered or falsified or overdue_hyps or overdue_goals or done_no_outcome_goals:
+    # story #4259 — agent_stuck도 step run의 project_id를 싣게 돼 stuck이 있어도 이 배치가 돈다.
+    if stuck or unanswered or falsified or overdue_hyps or overdue_goals or done_no_outcome_goals:
         seq.append(_r_all(project_slugs))
     return seq
 
@@ -161,17 +162,22 @@ _OLD = datetime(2026, 6, 1, tzinfo=timezone.utc)  # 충분히 과거(정체/age 
 async def test_my_actions_scope_separation_and_items():
     approval = MagicMock(gate_id=uuid.uuid4(), approval_group_id=uuid.uuid4(), kind="approver", created_at=_DT)
     review = MagicMock(id=uuid.uuid4(), title="Ship login", status="in-review", updated_at=_DT)
+    stuck_project = uuid.uuid4()
     stuck = MagicMock(entity_type="story", entity_id=uuid.uuid4(), effective_gate_type="merge",
-                      started_at=_DT, failure_message="SECRET raw error")
+                      started_at=_DT, failure_message="SECRET raw error", project_id=stuck_project)
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
-        execute_seq=_ma_seq(approvals=[(approval, "merge")], reviews=[review], stuck=[stuck]))
+        execute_seq=_ma_seq(approvals=[(approval, "merge")], reviews=[review], stuck=[stuck],
+                            project_slugs=[(stuck_project, "acme")]))
     assert resp.status_code == 200
     d = _data(resp)
     assert d["action_queue"]["scope"] == "member"      # ⭐member-private.
     assert d["attention"]["scope"] == "org"            # ⭐org.
     assert {i["type"] for i in d["action_queue"]["items"]} == {"gate_approval", "review_merge"}
     assert d["attention"]["items"][0]["type"] == "agent_stuck" and d["attention"]["items"][0]["auto_detected"]
+    # story #4259 — 조직 전체 목록이라 링크가 항목 자기 프로젝트를 싣도록 step run의 project_id를 싣는다.
+    assert d["attention"]["items"][0]["project_id"] == str(stuck_project)
+    assert d["attention"]["items"][0]["project_slug"] == "acme"  # 기존 attention project_slug 배치에 같이 실림
     assert "SECRET raw error" not in resp.text          # ⭐민감 텍스트 비노출.
     assert d["attention"]["pending"] == ["time_sensitive"]  # CC-BE.2서 나머지 채움(my_blockers→큐로 이동).
 

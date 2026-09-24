@@ -368,6 +368,9 @@ async def my_actions(
             "entity_type": r.entity_type, "entity_id": str(r.entity_id),
             "gate_type": r.effective_gate_type,
             "stuck_since": r.started_at.isoformat() if r.started_at else None,
+            # story #4259 — 조직 전체 목록이라 링크가 항목 자기 프로젝트를 실어야 한다(4231 4차 규칙). step run의 project_id(NOT NULL ·
+            # 그 엔터티가 속한 프로젝트의 라인)를 그대로 싣는다 — 다른 멈춤 항목(unanswered_blocker · 가설 · 목표)과 같은 축.
+            "project_id": str(r.project_id),
         })
     # 1b) story #2836 — 에이전트 API키 401 연속(유나 6시간+ 침묵·미르코 revoke 실사고 근본원인).
     # windowed COUNT(agent_stuck·story_stalled와 동형 관측 패턴 — 별도 상태기계 없음). invalid
