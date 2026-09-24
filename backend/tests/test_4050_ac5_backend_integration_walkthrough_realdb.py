@@ -302,6 +302,18 @@ async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exac
             assert apply_resp.ok is True
             assert apply_resp.bindings_upserted == 5
 
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. apply 슬롯(위 5개) 밖 두 자리는 레시피 적용 창이 아니라
+            # 직접 바인딩으로 담당을 둔다(apply 결과 단언은 그대로): Director의 structure_passed = org owner(사람), 연산
+            # live_generation = 크리에이터(리허설 1호에서 댄이 스스로 이어간 형상 — 그 담당이 다음 verification을 낸다).
+            from app.models.recipe_role_binding import RecipeRoleBinding
+
+            for bound_stage, member_id in (("structure_passed", owner_member_id), ("live_generation", creator_id)):
+                s.add(RecipeRoleBinding(
+                    id=uuid.uuid4(), org_id=org_id, project_id=project_id, event_definition_key=_KEY,
+                    stage=bound_stage, agent_member_id=member_id,
+                ))
+            await s.commit()
+
             human_approvals = 0
 
             async def _publish(stage: str, *, actor_id: uuid.UUID, extra: dict | None = None):
@@ -338,6 +350,7 @@ async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exac
 
             # ⓒ 예산 — 편당 예상 비용을 실어 발행(director 역할, apply 바인딩 없음 =
             # gate.approver=org_owner로만 해소되는 자리라는 것 자체가 AC2 결론의 일부).
+            # story #4251 — 발행 담당은 위 직접 바인딩(org owner)이다.
             await _publish(
                 "structure_passed", actor_id=owner_member_id,
                 extra={"estimated_cost_minor": 80_000},
@@ -352,15 +365,17 @@ async def test_full_nine_stage_walkthrough_apply_gates4_budget_publish_with_exac
             await s.commit()
             human_approvals += 1
 
-            # live_generation — "연산" 슬롯. apply 바인딩 대상이 아니었다(캐스팅 없음) —
-            # 그래도 stage 이벤트 발행 자체는 막히지 않는다(recipe_role_binding 라우팅이
-            # 빈 집합을 반환할 뿐, 이벤트 발행은 fail-open — AC2 결론의 실측).
+            # live_generation — "연산" 슬롯. apply 바인딩 대상이 아니었다(캐스팅 없음).
+            # story #4251 — ⓒ 승인 뒤 그 게이트 요청자(org owner)가 다음 stage를 낸다. 그 다음
+            # verification은 live_generation 담당(위 직접 바인딩 · 크리에이터)이 잇는다.
             await _publish("live_generation", actor_id=owner_member_id)
 
             await _publish("verification", actor_id=creator_id)
             await _publish("editing", actor_id=creator_id)
 
-            await _publish("pending_approval", actor_id=publisher_id)
+            # story #4251 — pending_approval은 앞 stage(editing) 담당(크리에이터)이 낸다. ⓓ 승인 뒤 published는
+            # 그 stage 담당(발행자)이 낸다.
+            await _publish("pending_approval", actor_id=creator_id)
             gate_d = (await s.execute(
                 select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "external_publish")
             )).scalar_one()

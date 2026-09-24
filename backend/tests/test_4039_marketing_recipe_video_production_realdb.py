@@ -252,6 +252,7 @@ async def test_each_gate_stage_auto_creates_pending_gate_with_org_owner_approver
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.models.gate import Gate
     from sqlalchemy import select
+    from tests.recipe_stage_walk import prepare_stage_publish
 
     engine, Session = await _realdb_session()
     try:
@@ -259,7 +260,12 @@ async def test_each_gate_stage_auto_creates_pending_gate_with_org_owner_approver
             org_id, project_id, owner_member_id = await _seed_org_with_owner(s, slug=f"r4039c{stage[:6]}")
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 바로 앞 stage를 이 에이전트가 낸 상태에서 출발.
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage=stage, publisher_id=agent_id,
+            )
 
             body = EventPublishRequest(
                 definition_key=_MIG._KEY,

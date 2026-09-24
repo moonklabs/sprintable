@@ -125,6 +125,7 @@ async def _seed_definition(session):
 # conftest.seed_org_with_human_owner(스키마 형상 무관 SSOT, #4083의 반대편 증상과 함께
 # 통합)로 교체.
 from tests.conftest import seed_org_with_human_owner as _seed_org_with_owner
+from tests.recipe_stage_walk import prepare_stage_publish
 
 
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
@@ -171,7 +172,12 @@ async def test_concept_and_structure_gates_stay_independent_on_same_story():
             org_id, project_id, owner_member_id = await _seed_org_with_owner(s, slug="r4044a")
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 앞 stage(draft)를 이 에이전트가 낸 상태에서 출발.
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="concept_confirmed", publisher_id=agent_id,
+            )
 
             await publish_registry_event(
                 EventPublishRequest(
@@ -228,7 +234,13 @@ async def test_generation_budget_gate_seals_cost_and_surfaces_remaining_budget()
             org_id, project_id, owner_member_id = await _seed_org_with_owner(s, slug="r4044b")
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 앞 stage(animatic)의 구조 게이트가 승인된 상태에서
+            # 그 요청자(이 에이전트)가 structure_passed를 낸다.
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="structure_passed", publisher_id=agent_id,
+            )
             await put_org_content_rules(
                 s, org_id=org_id,
                 rules={"generation_budget": {"limit_minor": 100_000, "currency": "KRW", "period": "month"}},
@@ -281,7 +293,13 @@ async def test_generation_budget_gate_rejects_over_budget_estimate_with_422_befo
             org_id, project_id, _owner_id = await _seed_org_with_owner(s, slug="r4044c")
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 앞 stage(animatic)의 구조 게이트가 승인된 상태에서
+            # 그 요청자(이 에이전트)가 structure_passed를 낸다.
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="structure_passed", publisher_id=agent_id,
+            )
             await put_org_content_rules(
                 s, org_id=org_id,
                 rules={"generation_budget": {"limit_minor": 1_000, "currency": "KRW", "period": "month"}},
@@ -329,7 +347,13 @@ async def test_generation_budget_gate_without_estimate_rejected_422_no_gate_crea
             org_id, project_id, _owner_id = await _seed_org_with_owner(s, slug="r4044d")
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 앞 stage(animatic)의 구조 게이트가 승인된 상태에서
+            # 그 요청자(이 에이전트)가 structure_passed를 낸다.
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="structure_passed", publisher_id=agent_id,
+            )
 
             with pytest.raises(HTTPException) as exc_info:
                 await publish_registry_event(
@@ -402,7 +426,13 @@ async def test_generation_budget_gate_negative_estimate_rejected_422():
             org_id, project_id, _owner_id = await _seed_org_with_owner(s, slug="r4044f")
             agent_id = await _seed_agent(s, org_id, project_id)
             story_id = await _seed_story(s, org_id, project_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 앞 stage(animatic)의 구조 게이트가 승인된 상태에서
+            # 그 요청자(이 에이전트)가 structure_passed를 낸다.
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="structure_passed", publisher_id=agent_id,
+            )
 
             with pytest.raises(HTTPException) as exc_info:
                 await publish_registry_event(

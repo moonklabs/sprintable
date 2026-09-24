@@ -21,6 +21,7 @@ import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import select, text
 
+from tests.recipe_stage_walk import prepare_stage_publish
 from tests.test_3312_approve_stage_gate_auto_creation import _auth, _fake_request, _seed_story
 from tests.test_3475_publishing_metrics import _seed_human
 from tests.test_3497_insight_snapshots import _seed_channel_connection
@@ -198,8 +199,8 @@ async def _setup_real_stibee(Session):
         pub.external_id = "9999"  # 실 reserve는 스티비 email id를 int로 캐스팅한다(3813 관례).
         s.add(pub)
         await s.commit()
-    return {"org_id": org_id, "owner_member_id": owner_member_id, "agent_id": agent_id, "story_id": story_id,
-            "pub": pub, "conn_id": conn.id}
+    return {"org_id": org_id, "project_id": project_id, "owner_member_id": owner_member_id, "agent_id": agent_id,
+            "story_id": story_id, "pub": pub, "conn_id": conn.id}
 
 
 async def _publish_send_stage(Session, ctx, scheduled_at: datetime):
@@ -236,9 +237,14 @@ async def test_send_stage_opens_sealed_gate_and_stibee_is_not_called_until_a_per
 
     engine, Session = await _session_factory()
     try:
-        await _ensure_preset(Session)
+        definition = await _ensure_preset(Session)
         ctx = await _setup_real_stibee(Session)
         scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        # story #4251 — 발송 단계는 캠페인 생성(서버 stage) 뒤 발송 단계 담당(Publisher 에이전트)이 낸다. 그 앞 상태를 깐다.
+        await prepare_stage_publish(
+            Session, org_id=ctx["org_id"], project_id=ctx["project_id"], definition=definition,
+            work_item_id=ctx["story_id"], stage="send_requested", publisher_id=ctx["agent_id"],
+        )
         await _publish_send_stage(Session, ctx, scheduled_at)
 
         async with Session() as s:

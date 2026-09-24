@@ -55,6 +55,7 @@ async def _dispose_global_engine_after_test():
 
 
 async def _realdb_session():
+    from sqlalchemy import text as sa_text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.core.database import Base
     import app.models  # noqa: F401
@@ -67,6 +68,12 @@ async def _realdb_session():
     engine = create_async_engine(url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # story #4251 — published를 시스템 발행자로 낸다(`publish_as_server`). 0258의 부분 유니크 인덱스는 raw-SQL
+        # 마이그라 create_all이 못 세운다 — test_4090_ac2 하네스와 같은 보정.
+        await conn.execute(sa_text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_members_org_system_publisher "
+            "ON members (org_id) WHERE runtime_type = 'system-publisher' AND type = 'agent'"
+        ))
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -186,9 +193,24 @@ async def _call_endpoint(session, *, org_id, work_item_id, caller_id, work_item_
 async def _advance_to_published(session, *, org_id, project_id, story_id, drafter_id):
     """draft(첫 단계)로 "시작" 표시 후 published로 진행 — 이 엔드포인트와
     get_recipe_start_candidates 둘 다 same SSOT(첫 단계 발행=started)를 쓰므로 draft를
-    건너뛰면 "시작 안 됨"으로 판정돼 stage-mismatch 403과 구별이 안 된다."""
+    건너뛰면 "시작 안 됨"으로 판정돼 stage-mismatch 403과 구별이 안 된다.
+
+    published는 채널 연결 stage라 서버가 게시한 뒤 낸다(story #4251) — 운영과 같게 시스템 발행자로 낸다."""
+    from app.models.team import TeamMember
+    from app.routers.events import _get_or_create_system_publisher
+    from tests.recipe_stage_walk import publish_as_server
+
     await _publish_stage(session, org_id=org_id, story_id=story_id, stage="draft", requester_id=drafter_id)
-    await _publish_stage(session, org_id=org_id, story_id=story_id, stage="published", requester_id=drafter_id)
+    # team_members는 실 DB에선 VIEW라 create_all 하네스엔 시스템 발행자 행이 투영되지 않는다 — test_4090_ac2와 같은 shim.
+    system_member = await _get_or_create_system_publisher(session, org_id)
+    session.add(TeamMember(
+        id=system_member.id, org_id=org_id, project_id=project_id, type="agent", name="시스템 발행", is_active=True,
+    ))
+    await session.commit()
+    await publish_as_server(
+        session, org_id=org_id, definition_key=_DEFINITION_KEY,
+        payload={"work_item_type": "story", "work_item_id": str(story_id), "stage": "published"},
+    )
 
 
 async def _seed_full_crew_scenario(session, *, connection_status="active"):

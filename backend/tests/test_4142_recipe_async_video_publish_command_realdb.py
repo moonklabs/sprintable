@@ -340,6 +340,20 @@ async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, cr
             BackgroundTasks(), _fake_request(), db=s, auth=_auth(actor_id, org_id), org_id=org_id,
         )
 
+    # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. 레시피 적용 때 하듯 역할을 바인딩해 두고(Creator 몫 · 연산
+    # stage = 댄, structure_passed(Director) = owner) 모든 stage를 순서대로 낸다.
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    for stage, member_id in (
+        ("draft", creator_id), ("structure_passed", owner_member_id), ("live_generation", creator_id),
+        ("verification", creator_id), ("editing", creator_id),
+    ):
+        s.add(RecipeRoleBinding(
+            id=uuid.uuid4(), org_id=org_id, project_id=None, event_definition_key=_KEY,
+            stage=stage, agent_member_id=member_id,
+        ))
+    await s.commit()
+
     await _publish("draft", actor_id=creator_id)
     await _publish("concept_confirmed", actor_id=creator_id)
     gate_a = (await s.execute(
@@ -362,6 +376,9 @@ async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, cr
     await transition_gate(s, org_id, gate_c.id, "approved", owner_member_id, None)
     await s.commit()
 
+    await _publish("live_generation", actor_id=creator_id)
+    await _publish("verification", actor_id=creator_id)
+    await _publish("editing", actor_id=creator_id)
     await _publish("pending_approval", actor_id=creator_id)
     gate_d = (await s.execute(
         select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "external_publish", Gate.scope_key == "")

@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select, text
 
+from tests.recipe_stage_walk import prepare_stage_publish
 from tests.test_3806_ads_boost_gate import _approve_gate
 from tests.test_4093_scheduled_publish_event_realdb import (
     _seed_system_publisher_teammember_shim,
@@ -266,6 +267,9 @@ async def test_real_newsletter_preset_seed_send_requested_to_send_checked_once()
                     stage_metadata=seed._STAGE_METADATA, role_actor_kinds=seed._ROLE_ACTOR_KINDS, enabled=True, version=1,
                 ))
                 await s.commit()
+            definition = (await s.execute(
+                select(EventDefinition).where(EventDefinition.key == seed._KEY, EventDefinition.org_id.is_(None))
+            )).scalar_one()
         ctx = {**ctx, "definition_key": seed._KEY}
         assert seed._STAGE_SLUGS[-2:] == ["send_requested", "send_checked"]
 
@@ -273,6 +277,11 @@ async def test_real_newsletter_preset_seed_send_requested_to_send_checked_once()
         payload = {**_send_payload(ctx, scheduled_at=scheduled_at.isoformat()), "stage": "send_requested"}
         async with Session() as s:
             await _seed_system_publisher_teammember_shim(s, ctx["org_id"], ctx["project_id"])
+        # story #4251 — 발송 요청은 캠페인 생성(서버 stage) 뒤 발송 단계 담당(Publisher 에이전트)이 낸다. 그 앞 상태를 깐다.
+        await prepare_stage_publish(
+            Session, org_id=ctx["org_id"], project_id=ctx["project_id"], definition=definition,
+            work_item_id=ctx["story_id"], stage="send_requested", publisher_id=ctx["agent_id"],
+        )
         await _publish(Session, ctx, payload)
         gate = (await _newsletter_gates(Session, ctx))[0]
         assert gate.neutral_facts["triggered_by_event"] == seed._KEY

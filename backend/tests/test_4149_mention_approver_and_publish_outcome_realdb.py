@@ -22,6 +22,8 @@ import uuid
 import pytest
 from fastapi import BackgroundTasks
 
+from tests.recipe_stage_walk import prepare_stage_publish
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -297,13 +299,18 @@ async def test_ac1_stage_entry_mention_shows_policy_designated_approver_name():
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id, assignee_id=creator_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
             await _seed_preset_gate_verdict_definition(s)
 
             policy_approver_id = await _seed_human_member(s, org_id, project_id, display_name="마케팅담당자")
             s.add(OrgGatePolicy(id=uuid.uuid4(), org_id=org_id, recipe_gate_default_approver_member_id=policy_approver_id))
             await s.commit()
 
+            # story #4251 — 첫 stage(draft)를 에이전트가 내려면 그 stage 담당이어야 한다(Creator = 댄).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="draft", publisher_id=creator_id,
+            )
             await _publish_stage(s, key=_KEY, story_id=story_id, org_id=org_id, stage="draft", actor_id=creator_id)
             await _publish_stage(s, key=_KEY, story_id=story_id, org_id=org_id, stage="concept_confirmed", actor_id=creator_id)
             # concept_approval 게이트가 이 시점에 이미 열려 있다 — "concept_confirmed"
@@ -332,10 +339,15 @@ async def test_ac1_stage_entry_mention_falls_back_to_org_owner_role_when_no_poli
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id, assignee_id=creator_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
             await _seed_preset_gate_verdict_definition(s)
             # OrgGatePolicy 행 자체를 안 만든다(미설정 — 기본값 그대로).
 
+            # story #4251 — 첫 stage(draft)를 에이전트가 내려면 그 stage 담당이어야 한다(Creator = 댄).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="draft", publisher_id=creator_id,
+            )
             await _publish_stage(s, key=_KEY, story_id=story_id, org_id=org_id, stage="draft", actor_id=creator_id)
             await _publish_stage(s, key=_KEY, story_id=story_id, org_id=org_id, stage="concept_confirmed", actor_id=creator_id)
 
