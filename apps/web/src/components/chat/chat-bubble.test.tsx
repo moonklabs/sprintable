@@ -1592,6 +1592,26 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     expect(calls.some((c) => c.url === `/api/docs/${DOC_ID}/transition`)).toBe(false);
   });
 
+  // story #4253(까디르 codex 01a0d316) — 문서 프로젝트를 모르면(preview에 projectId 없음) CTA 자체가 없다 · 현재 p로 싣고 뜨는 폴백 없음.
+  it('draft인데 문서 프로젝트를 모르면 "결재자 지정하고 올리기" 링크가 안 뜬다(현재 p 폴백 없음)', async () => {
+    mockDashboardContext.projectMemberships = [{ projectId: 'proj-1', projectName: 'Current' }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재자 지정하고 올리기')).toBe(false);
+  });
+
   it('draft지만 doc의 project 멤버가 아니면 "결재자 지정하고 올리기" 링크가 안 뜬다(fail-closed)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'other-proj', projectName: 'Other' }];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

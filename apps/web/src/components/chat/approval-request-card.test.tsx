@@ -1081,24 +1081,66 @@ describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (
 });
 
 
-// story #4253(까디르 codex · PO 09:45Z) — 채팅의 승인 요청 카드는 조직 전체가 보는 자리라 작업 항목 링크는 게이트 자기 프로젝트(gate.project_id).
+// story #4253(까디르 codex · PO 09:45Z · 델타 01a0d316) — 채팅의 승인 요청 카드는 조직 전체가 보는 자리라 작업 항목 링크는 게이트 자기 프로젝트
+// (gate.project_id). 화면(현재 p)은 B로 둬서 «모르면 현재 p» 폴백까지 값으로 가른다.
 describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프로젝트(#4253)', () => {
-  async function openPreviewHrefs(g: ReturnType<typeof gate>) {
-    await mount(g);
-    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 제목'));
-    await act(async () => { titleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  beforeEach(() => {
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-1', projectId: 'proj-B' });
+  });
+
+  async function openChipHrefs(chipScope: () => ParentNode) {
+    const button = Array.from(chipScope().querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 제목'));
+    expect(button).toBeTruthy();
+    await act(async () => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     return Array.from(document.querySelectorAll('a')).map((a) => a.getAttribute('href'));
   }
 
-  it('⭐게이트 project_id가 있으면 미리보기의 작업 항목 링크가 그 프로젝트', async () => {
-    const hrefs = await openPreviewHrefs(gate({ work_item_type: 'story', work_item_id: 'w-1', work_item_summary: { title: '스토리 제목', slug: null }, project_id: 'proj-C' }));
+  it('⭐게이트 project_id가 있으면 미리보기의 작업 항목 링크가 그 프로젝트(현재 B여도 C)', async () => {
+    await mount(gate({ project_id: 'proj-C' }));
+    const hrefs = await openChipHrefs(() => container);
     expect(hrefs).toContain('/board?story=w-1&p=proj-C');
+    expect(hrefs).not.toContain('/board?story=w-1&p=proj-B');
   });
 
-  it('게이트 project_id가 없으면 현재 p 폴백 — proj-C가 실리지 않는다', async () => {
-    const hrefs = await openPreviewHrefs(gate({ work_item_type: 'story', work_item_id: 'w-1', work_item_summary: { title: '스토리 제목', slug: null } }));
-    expect(hrefs.some((h) => h?.startsWith('/board?story=w-1'))).toBe(true);
-    expect(hrefs.some((h) => h?.includes('proj-C'))).toBe(false);
+  it('게이트 project_id가 없으면 현재 p(B) 폴백', async () => {
+    await mount(gate());
+    const hrefs = await openChipHrefs(() => container);
+    expect(hrefs).toContain('/board?story=w-1&p=proj-B');
+  });
+
+  // 풀린(resolved) 카드의 preset.gate.verdict 템플릿 — «대상» 필드의 엔티티 칩(work_item_target = 게이트 대상 작업 항목).
+  const VERDICT_CATALOG = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, enabled: true, version: 2,
+    block_template: { blocks: [
+      { type: 'text', text: '{{label.gate_connective_line}}' },
+      { type: 'fields', fields: [{ label: '{{t.targetLabel}}', value: '{{label.work_item_target}}', optional: true }] },
+    ] } } };
+
+  async function mountResolved(g: GateItem) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: g }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: g.work_item_type, work_item_id: g.work_item_id, gate_id: g.id, actions: ['approve', 'reject'] }} eventDefinitionsByKey={VERDICT_CATALOG as never} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐풀린 템플릿의 «대상» 칩 링크도 게이트 자기 프로젝트(현재 B여도 C)', async () => {
+    await mountResolved(gate({ status: 'approved', project_id: 'proj-C', work_item_id: '11111111-2222-4333-8444-555555555555' }));
+    const hrefs = await openChipHrefs(() => container.querySelector('dl')!);
+    expect(hrefs).toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-C');
+    expect(hrefs).not.toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-B');
+  });
+
+  it('풀린 템플릿 칩 — 게이트 project_id가 없으면 현재 p(B) 폴백', async () => {
+    await mountResolved(gate({ status: 'approved', work_item_id: '11111111-2222-4333-8444-555555555555' }));
+    const hrefs = await openChipHrefs(() => container.querySelector('dl')!);
+    expect(hrefs).toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-B');
   });
 });

@@ -660,7 +660,10 @@ export function EntityPreviewModal({
     // gate 상세(/gates/[id])는 story #1954부터 이미 org-scope 플랫 라우트(워크스페이스/
     // 프로젝트 slug 세그먼트 없음, gates/[id]/page.tsx 그대로) — story/epic처럼 슬러그 해소가
     // 필요 없다. getEntityHref의 parity 스위치는 안 거친다(gate는 그 계약 밖).
-    resolvedHref = flatHref(`/gates/${entityId}`);
+    // story #4253(까디르 codex 01a0d316) — 채팅은 조직 전체가 보는 자리라 게이트 자기 프로젝트(GET /api/gates/{id}의 project_id)를 싣는다.
+    // 모를 때(프로젝트 없는 게이트 · fetch 전/실패)만 현재 p.
+    const gateProjectId = (detail as { project_id?: string | null } | null)?.project_id ?? null;
+    resolvedHref = gateProjectId ? withProjectParam(`/gates/${entityId}`, gateProjectId) : flatHref(`/gates/${entityId}`);
     linkKind = 'own';
   } else {
     // story·epic·sprint·asset — own-href ①. story #2642(BE #3044)부터 각 detail 응답이
@@ -1158,9 +1161,10 @@ export function EntityChip({
     // 지정이 서버 필수가 됐고, 이 인라인 칩엔 픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435).
     // 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const docCta = entityType === 'doc' && !ghost ? (
-      effectiveDocStatus === 'draft' && canSubmit ? (
+      // story #4253 — CTA는 문서 프로젝트를 안 때만(canSubmit이 그 값의 멤버십으로 판정되니 모르면 CTA 자체가 없다 · 현재 p 폴백 없음).
+      effectiveDocStatus === 'draft' && canSubmit && docProjectId ? (
         <Link
-          href={getEntityHref('doc', entityId, docProjectId ? (h) => withProjectParam(h, docProjectId) : flatHref) ?? '#'}
+          href={getEntityHref('doc', entityId, (h) => withProjectParam(h, docProjectId)) ?? '#'}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >

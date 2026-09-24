@@ -414,6 +414,8 @@ function ApprovalRequestBody({
   addToast: (toast: { type?: 'info' | 'warning' | 'success' | 'error'; title: string; body?: string }) => void;
 }) {
   const flatHref = useFlatHref(); // story #4231 3차 — 본문 엔티티 칩(문서 · flat)은 현재 프로젝트를 싣는다
+  // story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 대상 칩은 게이트 자기 프로젝트 · 모를 때만 현재 p.
+  const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
@@ -683,9 +685,10 @@ function ApprovalRequestBody({
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
                 {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, flatHref))}
+                {/* story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 엔티티 칩(work_item_target = 게이트 대상 작업 항목)도 게이트 자기 프로젝트 */}
+                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
               </div>
-              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, flatHref))}
+              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
             </div>
           ) : (
             <div className="space-y-1">
