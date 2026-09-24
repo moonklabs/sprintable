@@ -77,7 +77,11 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     목적은 데이터 유실 0 보장이 아니라 «커넥션을 붙든 채 강제종료»를 막는 것 — 유실 허용
     범위는 pg_notify 자체가 이미 best-effort(실패해도 로컬 전파는 별도 유지)라는 이 모듈
     상단 docstring과 동일선."""
-    pending = list(_background_tasks)
+    # story #4248 — 이 루프의 task만. 같은 프로세스에서 루프가 여럿 돈 경우(테스트는 테스트마다 새 루프) 앞 루프가 남긴 task는
+    # 끝날 수도(그 루프는 닫혔다) cancel될 수도 없어, 섞이면 timeout까지 기다린 뒤 닫힌 루프에 cancel을 걸다 RuntimeError가 난다.
+    # 운영은 루프 하나라 동작 변화 없음.
+    loop = asyncio.get_running_loop()
+    pending = [t for t in _background_tasks if t.get_loop() is loop]
     if not pending:
         return
     _, still_pending = await asyncio.wait(pending, timeout=timeout)
