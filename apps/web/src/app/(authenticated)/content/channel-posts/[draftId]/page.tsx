@@ -44,6 +44,7 @@ import {
   ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
 } from '@/components/content/content-rule-violation';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -485,6 +486,7 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
 }
 
 export default function ChannelPostEditPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, role } = useDashboardContext();
   // story #4017(PO 확定 2026-09-17) — 아래 4곳의 「연결 화면」 링크를 목적지 모듈로.
   const connectRulesHref = useConnectRulesHref('/organization/channels');
@@ -2048,7 +2050,7 @@ export default function ChannelPostEditPage() {
         {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
             읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
             새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
-        <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -2060,7 +2062,7 @@ export default function ChannelPostEditPage() {
         <Alert variant="destructive">
           <AlertDescription>{t('editForbidden')}</AlertDescription>
         </Alert>
-        <Link href="/content/channel-posts" className="text-sm font-medium text-primary underline">
+        <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
           {t('channelPostsCalendarBackToListCta')}
         </Link>
       </div>
@@ -2282,7 +2284,7 @@ export default function ChannelPostEditPage() {
           <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground" data-testid="channel-post-source-link">
             <span>
               {t('channelPostsSourceLabel')}{' '}
-              <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+              <Link href={flatHref(`/content/${draft.source_content_item_id}`)} className="underline">
                 {t('channelPostsSourceLinkText', { title: draft.source_title })}
               </Link>
             </span>
@@ -3595,7 +3597,7 @@ export default function ChannelPostEditPage() {
           <Alert role="status">
             <AlertDescription>
               {t('submitSuccess')}{' '}
-              <Link href={`/gates/${submitResult.gateId}`} className="underline">{t('submitGateLink')}</Link>
+              <Link href={flatHref(`/gates/${submitResult.gateId}`)} className="underline">{t('submitGateLink')}</Link>
             </AlertDescription>
           </Alert>
         ) : (
@@ -3605,7 +3607,7 @@ export default function ChannelPostEditPage() {
               {submitResult.heldByDraftId ? (
                 <>
                   {' '}
-                  <Link href={`/content/channel-posts/${submitResult.heldByDraftId}`} className="underline">
+                  <Link href={flatHref(`/content/channel-posts/${submitResult.heldByDraftId}`)} className="underline">
                     {t('errorGateAlreadyHeldLink')}
                   </Link>
                 </>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -34,6 +34,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { copyTextSafely } from '@/lib/clipboard';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
@@ -110,6 +111,7 @@ function isWebhookUrlAllowed(url: string): boolean {
 }
 
 export default function AgentDetailPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
@@ -144,10 +146,16 @@ export default function AgentDetailPage() {
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
 
+  // story #4231 — fetchAgent는 로드 효과의 의존성이라 flatHref를 의존성에 넣으면 프로젝트가 바뀔 때마다 에이전트를 다시 받는다.
+  // 실패 시 되돌리는 주소만 최신 목표 프로젝트를 쓰면 되므로 ref로 읽는다.
+  const flatHrefRef = useRef(flatHref);
+  useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
+
   const fetchAgent = useCallback(async () => {
+    const flatHref = flatHrefRef.current;
     const res = await fetchWithAuth(`/api/team-members/${id}`);
     // story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2 원칙, gate/chat/goal/loop과 동일).
-    if (!res.ok) { router.replace('/organization/workforce?tab=manage'); return; }
+    if (!res.ok) { router.replace(flatHref('/organization/workforce?tab=manage')); return; }
     const json = await res.json() as { data: AgentMember };
     setAgent(json.data);
   }, [id, router]);
@@ -402,7 +410,7 @@ export default function AgentDetailPage() {
     <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3">
         {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(§3.2). */}
-        <Link href="/organization/workforce?tab=manage" replace className="text-muted-foreground hover:text-foreground transition-colors">
+        <Link href={flatHref('/organization/workforce?tab=manage')} replace className="text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <h1 className="text-lg font-semibold text-foreground">{t('orgAgentsTitle')}</h1>

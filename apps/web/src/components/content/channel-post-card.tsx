@@ -7,6 +7,7 @@ import { deriveFailureAction, type CommandStatus } from '@/components/content/fa
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3422(doc §11 T8) — 캘린더 격자 셀과 「날짜 미정」 레인이 공유하는 유일한 렌더
 // 단위(설계 코멘트 "ChannelPostCard가 유일한 렌더 단위" 그대로). deriveChannelPostView를
@@ -20,6 +21,7 @@ export interface ChannelPostCardProps {
 }
 
 export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('content');
   const hasGateContract = 'gate_status' in item;
   const view = hasGateContract
@@ -49,7 +51,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
 
   return (
     <Link
-      href={`/content/channel-posts/${item.draft_id}`}
+      href={flatHref(`/content/channel-posts/${item.draft_id}`)}
       className="block space-y-1 rounded-md border border-border p-2 text-xs hover:bg-muted"
       data-testid="channel-post-calendar-card"
       data-status-chip={view.status ?? 'unknown'}

@@ -26,6 +26,7 @@ import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3402(Phase1·마케팅운영, AC1/AC2/AC3, doc phase1-threads-post-manager-screen-design
@@ -114,6 +115,7 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 }
 
 export default function ChannelPostListPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId } = useDashboardContext();
   // story #4017(PO 확定 2026-09-17) — 아래 대화 CTA(/chats)를 목적지 모듈로.
   const chatsHref = useChatsHref();
@@ -296,7 +298,7 @@ export default function ChannelPostListPage() {
         const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
         return (
           <>
-            <Link href={`/content/channel-posts/${draft.draft_id}`} className="truncate hover:underline">
+            <Link href={flatHref(`/content/channel-posts/${draft.draft_id}`)} className="truncate hover:underline">
               {hasTextPreview ? draft.text_preview : `${channelLabel(draft.channel)} · v${draft.current_version}`}
             </Link>
             {draft.origin_author_kind && draft.origin_author_kind !== draft.latest_author_kind ? (
@@ -315,7 +317,7 @@ export default function ChannelPostListPage() {
             {draft.source_content_item_id && draft.source_title ? (
               <p className="mt-0.5 truncate text-xs text-muted-foreground" data-testid="channel-post-source-link">
                 {t('channelPostsSourceLabel')}{' '}
-                <Link href={`/content/${draft.source_content_item_id}`} className="underline">
+                <Link href={flatHref(`/content/${draft.source_content_item_id}`)} className="underline">
                   {t('channelPostsSourceLinkText', { title: draft.source_title })}
                 </Link>
               </p>
@@ -372,7 +374,7 @@ export default function ChannelPostListPage() {
         <div className="flex items-center justify-end gap-1.5">
           {tab === 'pending' ? (
             <Button
-              variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
+              variant="outline" size="sm" onClick={() => router.push(flatHref('/inbox?tab=gates'))}
               aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
             >
               {t('approvalRequestViewCta')}
@@ -429,8 +431,8 @@ export default function ChannelPostListPage() {
           그 route로 이동한다(둘 다 별도 페이지라 탭 패널 전환이 아니라 네비게이션).
           story #3805(PR 2[FE], 유나 §절1) — 「반응」 세 번째 탭 추가, 새 사이드바 항목 0. */}
       <Tabs value="list" onValueChange={(v) => {
-        if (v === 'calendar') router.push('/content/channel-posts/calendar');
-        if (v === 'engagement') router.push('/content/channel-posts/engagement');
+        if (v === 'calendar') router.push(flatHref('/content/channel-posts/calendar'));
+        if (v === 'engagement') router.push(flatHref('/content/channel-posts/engagement'));
       }}
       >
         <TabsList data-testid="channel-posts-view-switch">

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { formatMinorCurrency, formatCount, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import type { OrgCostSummaryLoadState } from './org-cost-summary-card';
 import type { Ga4ConnectionStatus, PublishedInWindow, ViewsInWindow } from './types';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3979(시안 ④ 첫 화면 요약 4칸) — 3977 그라운딩 §1·§7 그대로: 조회는
@@ -57,6 +58,7 @@ export interface ResultsSummaryCardsProps {
 export function ResultsSummaryCards({
   publishedInWindow, viewsInWindow, ga4ConnectionStatus, boardLoading, boardLoadFailed, costSummaryState, onRetryCostSummary,
 }: ResultsSummaryCardsProps) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('insightsBoard');
   const tContent = useTranslations('content');
   const tCommon = useTranslations('common');
@@ -109,7 +111,7 @@ export function ResultsSummaryCards({
           {t('reconcileVerdictUnmeasured')}
         </p>
         <Link
-          href="/organization/channels"
+          href={flatHref('/organization/channels')}
           className={ads?.connection_status === 'needs_reauth' ? 'font-medium text-warning-strong underline' : 'text-primary underline'}
           data-testid={`results-summary-ads-${kind}-cta`}
         >
@@ -164,7 +166,7 @@ export function ResultsSummaryCards({
               {t('reconcileVerdictUnmeasured')}
             </p>
             {ga4Disconnected ? (
-              <Link href="/organization/channels" className="text-primary underline" data-testid="results-summary-organic-views-cta">
+              <Link href={flatHref('/organization/channels')} className="text-primary underline" data-testid="results-summary-organic-views-cta">
                 {t('resultsSummaryConnectCta')}
               </Link>
             ) : null}

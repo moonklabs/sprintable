@@ -36,6 +36,7 @@ import type { PublishedInWindow, ViewsInWindow } from '@/components/insights-boa
 import {
   ResponsiveDataTable, type ResponsiveDataTableColumn, type ResponsiveDataTableRenderedPair,
 } from '@/components/shared/responsive-data-table';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3503 — 성과 보드 화면. BE #3502 의존(PR 브리프 헤더 참고, 이 파일 작성 시점
@@ -125,6 +126,7 @@ type ReconcileRowState =
   | { status: 'done'; verdicts: Record<string, string> };
 
 export default function InsightsBoardPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, currentMemberType } = useDashboardContext();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -363,7 +365,7 @@ export default function InsightsBoardPage() {
       else qs.set(key, value);
     }
     const query = qs.toString();
-    router.replace(`/organization/insights-board${query ? `?${query}` : ''}`, { scroll: false });
+    router.replace(flatHref(`/organization/insights-board${query ? `?${query}` : ''}`), { scroll: false });
   }
 
   // PO REQUEST — 라벨은 지표 이름을 포함한다("D+1 조회" 등, 지표를 바꾸면 라벨도

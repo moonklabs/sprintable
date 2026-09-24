@@ -22,6 +22,7 @@ import { deriveContentPostStatus, type ContentPostStatus, type ContentPostStatus
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 2번) —
@@ -100,6 +101,7 @@ function toStatusTab(status: string | undefined): Exclude<StatusTab, 'all'> {
 }
 
 export default function ContentPostListPage() {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId } = useDashboardContext();
   // story #4017(PO 확定 2026-09-17) — 아래 대화 CTA(/chats)를 목적지 모듈로.
   const chatsHref = useChatsHref();
@@ -242,7 +244,7 @@ export default function ContentPostListPage() {
       key: 'title', header: t('columnTitle'), cardSlot: 'title',
       cellClassName: 'px-3 py-2.5 font-medium text-foreground',
       renderCell: ({ draft }) => (
-        <Link href={`/content/${draft.draft_id}`} className="hover:underline">
+        <Link href={flatHref(`/content/${draft.draft_id}`)} className="hover:underline">
           {draft.title}
         </Link>
       ),
@@ -293,7 +295,7 @@ export default function ContentPostListPage() {
               않는다 — ⋯ 메뉴엔 이제 보관/보관 해제만 남는다. */}
           {tab === 'pending' ? (
             <Button
-              variant="outline" size="sm" onClick={() => router.push('/inbox?tab=gates')}
+              variant="outline" size="sm" onClick={() => router.push(flatHref('/inbox?tab=gates'))}
               aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
             >
               {t('approvalRequestViewCta')}

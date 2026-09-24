@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
 import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
 // LoopFace·WorkforceFace, 각자 다른 BFF 4종 조합)을 시안 v3(오늘 1caf61fe)로 흡수한다.
@@ -24,6 +25,7 @@ import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-
 // 리다이렉트 복귀 안내)만 남긴다.
 
 function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('orgBriefing');
   const router = useRouter();
   const [value, setValue] = useState('');
@@ -42,7 +44,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
     if (!trimmed) return;
     // story #3831 PO 確定(c)(2026-09-13 14:04Z) — 수신자 발명 0. 「대화」의 기존 두 경로
     // (최근 대화 프리필 / 0건이면 새 대화 모달, chat-list-view.tsx 참고)로 위임만 한다.
-    router.push(`/chats?compose=${encodeURIComponent(trimmed)}`);
+    router.push(flatHref(`/chats?compose=${encodeURIComponent(trimmed)}`));
   };
 
   return (

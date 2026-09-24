@@ -31,6 +31,7 @@ import { publishHistorySenderLabel } from '@/lib/member-display';
 import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
 import { presetAction, presetName } from '@/lib/platform-preset-copy';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -570,6 +571,7 @@ interface PublishHistoryItem {
 type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: PublishHistoryItem[] } | { kind: 'error' };
 
 function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const locale = useLocale();
   const tc = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
@@ -607,7 +609,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
               <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
                 {formatRelativeTime(item.created_at, locale, displayTimezone)}
-                <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">
+                <Link href={flatHref(`/chats/${item.conversation_id}`)} className="text-primary hover:underline">
                   {t('eventPublishHistoryOpenChat')}
                 </Link>
               </span>

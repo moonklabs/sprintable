@@ -12,6 +12,7 @@ import { RecipeRoleMappingFields, type ChannelConnectionOption, type GenerationC
 import type { useToast } from '@/components/ui/toast';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { presetName } from '@/lib/platform-preset-copy';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface AgentOption {
   id: string;
@@ -34,6 +35,7 @@ export function ApplyRecipeDialog({
   tc: ReturnType<typeof useTranslations>;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId } = useDashboardContext();
   // story #4106(페드루 PO 실측 2026-09-21, PR #4478/#4479 리뷰 계기) — channelConnect ns의
   // 기존 channelLoadFailed 키 재사용(#4103과 동형, 신규 문구 발명 0).
@@ -276,7 +278,7 @@ export function ApplyRecipeDialog({
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-generation-connectors-empty">
                 {t('eventApplyGenerationConnectorsEmpty')}{' '}
                 {/* story #4116(#4112 시안 §6) — 빈 상태 문장 끝에 목적지 링크. */}
-                <Link href="/organization/generation-connectors" className="text-primary underline">
+                <Link href={flatHref('/organization/generation-connectors')} className="text-primary underline">
                   {t('eventApplyGenerationConnectorsEmptyLinkAction')}
                 </Link>
               </p>
