@@ -108,7 +108,7 @@ describe('EmbedGroup — artifact 캐러셀', () => {
 describe('EmbedGroup — gate 그룹(collapsed/expanded + 헤더 라벨 정직성)', () => {
   it('전부 pending — 「결재 대기 N건」으로 접힌 채 시작한다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => (gate({ status: 'pending' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -122,8 +122,8 @@ describe('EmbedGroup — gate 그룹(collapsed/expanded + 헤더 라벨 정직�
 
   it('pending/resolved 섞이면 「결재 N건 · 대기 M건」으로 정직하게 요약한다(pending만 세지 않는다)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/gates/g-1')) return { ok: true, json: async () => ({ data: gate({ id: 'g-1', status: 'pending' }) }) };
-      if (url.includes('/api/gates/g-2')) return { ok: true, json: async () => ({ data: gate({ id: 'g-2', status: 'approved' }) }) };
+      if (url.includes('/api/gates/g-1')) return { ok: true, json: async () => (gate({ id: 'g-1', status: 'pending' })) };
+      if (url.includes('/api/gates/g-2')) return { ok: true, json: async () => (gate({ id: 'g-2', status: 'approved' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -136,8 +136,8 @@ describe('EmbedGroup — gate 그룹(collapsed/expanded + 헤더 라벨 정직�
 
   it('헤더 클릭 시 펼쳐져 각 gate가 ApprovalRequestCard(제목 텍스트)로 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/gates/g-1')) return { ok: true, json: async () => ({ data: gate({ id: 'g-1', status: 'pending', work_item_summary: { title: '게이트 하나', slug: null } }) }) };
-      if (url.includes('/api/gates/g-2')) return { ok: true, json: async () => ({ data: gate({ id: 'g-2', status: 'pending', work_item_summary: { title: '게이트 둘', slug: null } }) }) };
+      if (url.includes('/api/gates/g-1')) return { ok: true, json: async () => (gate({ id: 'g-1', status: 'pending', work_item_summary: { title: '게이트 하나', slug: null } })) };
+      if (url.includes('/api/gates/g-2')) return { ok: true, json: async () => (gate({ id: 'g-2', status: 'pending', work_item_summary: { title: '게이트 둘', slug: null } })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {

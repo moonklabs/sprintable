@@ -91,7 +91,7 @@ afterEach(async () => {
 
 async function mount(gateFixture: GateItem) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+    if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
     return { ok: true, json: async () => ({ data: [] }) };
   }));
   const { default: GateDetailPage } = await import('./page');
@@ -169,7 +169,7 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
 describe('GateDetailPage — «제작 산출물» 칸 + 비결재자 이름 표기 (story #4136)', () => {
   async function mountWithTeamMembers(gateFixture: GateItem, members: { id: string; name: string }[]) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/team-members') return { ok: true, json: async () => ({ data: members }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -313,7 +313,7 @@ describe('GateDetailPage — 재승인 칩 (story #3813 PR4)', () => {
 describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () => {
   it('422 거부 사유(#2027 고위험 승인 사유 필수)가 raw "HTTP 422" 대신 실 메시지로 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low' }) }) };
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
       if (url === '/api/gates/gate-1/transition') {
         return {
           ok: false,
@@ -340,7 +340,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   // "HTTP {status}"가 아니라 사람말 공통 폴백(gateTransitionErrorGeneric)을 보여준다.
   it('BE가 message를 안 주면(500 등) raw "HTTP 500" 대신 사람말 폴백을 보여준다 (story #2552)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low' }) }) };
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
       if (url === '/api/gates/gate-1/transition') {
         return { ok: false, status: 500, json: async () => ({ data: null, error: null, meta: null }) };
       }
@@ -368,7 +368,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
       if (url === '/api/gates/gate-1' && !init) {
         gateFetchCount += 1;
         const sha = gateFetchCount === 1 ? 'sha-old-reviewed' : 'sha-new-race-landed';
-        return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low', github_check_run_sha: sha }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low', github_check_run_sha: sha })) };
       }
       if (url === '/api/gates/gate-1/transition') {
         return {
@@ -408,7 +408,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
       if (url === '/api/gates/gate-1' && !init) {
         gateFetchCount += 1;
         const sha = gateFetchCount === 1 ? 'sha-A-reviewed' : 'sha-B-race-landed';
-        return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'high', github_check_run_sha: sha }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'high', github_check_run_sha: sha })) };
       }
       if (url === '/api/gates/gate-1/transition') {
         return {
@@ -473,7 +473,7 @@ describe('GateDetailPage — 본 초안 버전 대조 (story #4190)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/gates/gate-1' && !init) {
         gateFetchCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: recipeGate(gateFetchCount === 1 ? 1 : 2) }) };
+        return { ok: true, status: 200, json: async () => (recipeGate(gateFetchCount === 1 ? 1 : 2)) };
       }
       if (url === '/api/gates/gate-1/transition') {
         transitionBodies.push(JSON.parse(String(init?.body)));
@@ -520,7 +520,7 @@ describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #263
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/gates/gate-1/discuss') {
         return (extra?.discussOk ?? true)
           ? { ok: true, json: async () => ({ data: gateFixture }) }
@@ -531,7 +531,7 @@ describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #263
           ? { ok: true, json: async () => ({ data: { ...gateFixture, status: 'pending', resolver_id: null, resolved_at: null } }) }
           : { ok: false, status: 403, json: async () => ({ error: { message: '해소자 본인만 취소할 수 있습니다' } }) };
       }
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -600,9 +600,9 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -681,7 +681,7 @@ describe('GateDetailPage — gate_type 사람 낱말(story #3565)', () => {
 describe('GateDetailPage — 해소자·상태 낱말 원문 노출 금지(story #3806 PR 9)', () => {
   async function mountWithTeamMembers(gateFixture: GateItem, teamMembers: { id: string; name: string }[]) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/team-members') return { ok: true, json: async () => ({ data: teamMembers }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -733,7 +733,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         getCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -757,7 +757,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         getCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -780,7 +780,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         getCount += 1;
-        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -801,7 +801,7 @@ describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
 
   it('malformed payload는 크래시 없이 무시한다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gate({ status: 'pending' })) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -833,7 +833,7 @@ describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/gates/gate-1') {
         call += 1;
-        if (call === 1) return { ok: true, status: 200, json: async () => ({ data: first }) };
+        if (call === 1) return { ok: true, status: 200, json: async () => first };
         return gateResolvedDeferred.promise; // 두 번째(mux 트리거) 호출은 응답을 붙잡아 둔다.
       }
       return { ok: true, json: async () => ({ data: [] }) };
@@ -855,7 +855,7 @@ describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #
     expect(container.textContent).toContain(koMessages.cage.gateReject);
 
     await act(async () => {
-      gateResolvedDeferred.resolve({ ok: true, status: 200, json: async () => ({ data: second }) });
+      gateResolvedDeferred.resolve({ ok: true, status: 200, json: async () => second });
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
@@ -871,7 +871,7 @@ describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #
     });
     let call = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') { call += 1; return { ok: true, status: 200, json: async () => ({ data: decisionGateFixture }) }; }
+      if (url === '/api/gates/gate-1') { call += 1; return { ok: true, status: 200, json: async () => (decisionGateFixture) }; }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -955,7 +955,7 @@ describe('GateDetailPage — story #3113 결정 게이트(agent_decision_request
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
       if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     const { default: GateDetailPage } = await import('./page');
@@ -1087,7 +1087,7 @@ describe('GateDetailPage — ads_boost 실행 블록은 needsAction/gate.status�
 
   async function mountWithSpend(gateFixture: GateItem, spend: { run_status: string | null }) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url.includes('/ads-boosts/') && url.includes('/spend')) return { ok: true, json: async () => ({ data: spend }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));

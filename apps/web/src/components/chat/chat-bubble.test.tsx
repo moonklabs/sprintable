@@ -690,7 +690,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
         return { ok: true, json: async () => ({ data: gate }) };
       }
       if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
-        return { ok: true, json: async () => ({ data: gate }) };
+        return { ok: true, json: async () => (gate) };
       }
       // story #2627 — 카드 제목 클릭 시 EntityPreviewModal(embed-card.tsx)이 doc 2단계
       // fetch를 시도한다 — 그 경로도 여기서 같이 응답한다.
@@ -908,7 +908,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
         return { ok: true, json: async () => ({ data: gate }) };
       }
       if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
-        return { ok: true, json: async () => ({ data: gate }) };
+        return { ok: true, json: async () => (gate) };
       }
       return { ok: false, json: async () => ({}) };
     }));
@@ -1780,12 +1780,10 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
         return {
           ok: true,
           json: async () => ({
-            data: {
-              id: gateId, status: 'pending', gate_type: 'doc_approval', risk_grade: 'low',
-              work_item_type: 'doc', work_item_id: 'wi-1', can_approve: true,
-              work_item_summary: { title: '기획안 v2', slug: null },
-              resolver_id: null, resolved_at: null, resolution_note: null, neutral_facts: null,
-            },
+            id: gateId, status: 'pending', gate_type: 'doc_approval', risk_grade: 'low',
+            work_item_type: 'doc', work_item_id: 'wi-1', can_approve: true,
+            work_item_summary: { title: '기획안 v2', slug: null },
+            resolver_id: null, resolved_at: null, resolution_note: null, neutral_facts: null,
           }),
         };
       }

@@ -9,7 +9,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { EmbedCard } from './embed-card';
 import koMessages from '../../../messages/ko.json';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock }) }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectId: 'proj-B', projectMemberships: [], currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member' }),
 }));
@@ -21,6 +22,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  pushMock.mockClear();
 });
 
 afterEach(() => {
@@ -30,8 +32,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function renderAndOpen(entityType: string, entityId: string, data: Record<string, unknown>) {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data }) })));
+/** URL 앞부분 → 응답 본문(각 라우트의 **실제** 모양 그대로 — 게이트 단건은 proxyToFastapi라 날 GateResponse, 나머지는 {data}). */
+function stubRoutes(routes: Record<string, unknown>) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const key = Object.keys(routes).find((k) => url.startsWith(k));
+    return key ? { ok: true, json: async () => routes[key] } : { ok: false, json: async () => ({}) };
+  }));
+}
+
+async function flush() {
+  await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+}
+
+async function renderCard(entityType: string, entityId: string) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -39,36 +52,86 @@ async function renderAndOpen(entityType: string, entityId: string, data: Record<
       </NextIntlClientProvider>,
     );
   });
+  await flush();
+}
+
+async function clickButton(index = 0) {
   await act(async () => {
-    container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    container.querySelectorAll('button')[index]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
   });
-  await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
-  return [...document.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+  await flush();
+}
+
+const hrefs = () => [...document.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+
+async function renderAndOpen(entityType: string, entityId: string, routes: Record<string, unknown>) {
+  stubRoutes(routes);
+  await renderCard(entityType, entityId);
+  await clickButton(0);
+  return hrefs();
 }
 
 describe('#4253 — 태스크 미리보기 부모 스토리 링크는 태스크 자기 프로젝트', () => {
   it('⭐project_id가 오면 부모 링크가 그 프로젝트(현재 B여도 C)', async () => {
-    const hrefs = await renderAndOpen('task', 't3', { title: '작업 C', status: 'todo', story_id: 's-parent-3', project_id: 'proj-C' });
+    const hrefs = await renderAndOpen('task', 't3', { '/api/tasks/': { data: { title: '작업 C', status: 'todo', story_id: 's-parent-3', project_id: 'proj-C' } } });
     expect(hrefs).toContain('/board?story=s-parent-3&p=proj-C');
     expect(hrefs).not.toContain('/board?story=s-parent-3&p=proj-B');
   });
 
   it('project_id가 없으면 현재 p(B) 폴백', async () => {
-    const hrefs = await renderAndOpen('task', 't4', { title: '작업 D', status: 'todo', story_id: 's-parent-4' });
+    const hrefs = await renderAndOpen('task', 't4', { '/api/tasks/': { data: { title: '작업 D', status: 'todo', story_id: 's-parent-4' } } });
     expect(hrefs).toContain('/board?story=s-parent-4&p=proj-B');
   });
 });
 
-describe('#4253 — 게이트 미리보기 링크는 게이트 자기 프로젝트(GET /api/gates/{id}의 project_id)', () => {
+// 까디르 codex 01a0d35f P1 — /api/gates/[id]는 proxyToFastapi(감싸지 않음)라 BE GateResponse 날 JSON이 온다. 목도 그 모양(예전 목은 {data}라 가렸다).
+describe('#4253 — 게이트 미리보기 링크는 게이트 자기 프로젝트(GET /api/gates/{id}의 project_id · 날 JSON)', () => {
   it('⭐project_id가 오면 /gates/{id} 링크가 그 프로젝트(현재 B여도 C)', async () => {
-    const hrefs = await renderAndOpen('gate', 'g-7', { id: 'g-7', status: 'pending', project_id: 'proj-C' });
+    const hrefs = await renderAndOpen('gate', 'g-7', { '/api/gates/': { id: 'g-7', status: 'pending', project_id: 'proj-C' } });
     expect(hrefs).toContain('/gates/g-7?p=proj-C');
     expect(hrefs).not.toContain('/gates/g-7?p=proj-B');
   });
 
   it('프로젝트 없는 게이트는 현재 p(B) 폴백(4241 계약)', async () => {
-    const hrefs = await renderAndOpen('gate', 'g-8', { id: 'g-8', status: 'pending', project_id: null });
+    const hrefs = await renderAndOpen('gate', 'g-8', { '/api/gates/': { id: 'g-8', status: 'pending', project_id: null } });
     expect(hrefs).toContain('/gates/g-8?p=proj-B');
+  });
+});
+
+// 까디르 codex 01a0d35f P2 — 문서 프로젝트 id는 아는데 project_slug가 없으면(옛 미백필) 현재 p로 떨어지던 세 자리.
+describe('#4253 — slug 없는 문서도 문서 자기 프로젝트(docs/preview의 projectId)', () => {
+  const docPreview = (projectId?: string) => ({ data: { slug: 'my-doc', orgSlug: 'acme', projectSlug: null, ...(projectId ? { projectId } : {}) } });
+
+  it('⭐문서 카드 주 클릭(이동) — /docs/{slug}/view?p=문서 프로젝트', async () => {
+    stubRoutes({ '/api/docs/preview': docPreview('proj-C') });
+    await renderCard('doc', 'doc-1');
+    await clickButton(0);
+    expect(pushMock).toHaveBeenCalledWith('/docs/my-doc/view?p=proj-C');
+  });
+
+  it('문서 카드 주 클릭 — 문서 프로젝트를 모르면 현재 p(B)', async () => {
+    stubRoutes({ '/api/docs/preview': docPreview() });
+    await renderCard('doc', 'doc-2');
+    await clickButton(0);
+    expect(pushMock).toHaveBeenCalledWith('/docs/my-doc/view?p=proj-B');
+  });
+
+  it('⭐문서 미리보기(모달) 링크 — /docs/{slug}/view?p=문서 프로젝트', async () => {
+    stubRoutes({ '/api/docs/preview': docPreview('proj-C'), '/api/docs': { data: [{ id: 'doc-3', slug: 'my-doc', title: '문서', content: '' }] } });
+    await renderCard('doc', 'doc-3');
+    await clickButton(1);
+    expect(hrefs()).toContain('/docs/my-doc/view?p=proj-C');
+  });
+
+  it('⭐아티팩트의 부모 문서 링크 — /docs?id=…&p=문서 프로젝트', async () => {
+    stubRoutes({
+      '/api/visual-artifacts/preview': { data: { projectId: 'proj-A' } },
+      '/api/visual-artifacts/art-1': { data: { id: 'art-1', title: '아티팩트', doc_id: 'd-9' } },
+      '/api/docs/preview': { data: { slug: 'parent-doc', orgSlug: 'acme', projectSlug: null, projectId: 'proj-C' } },
+    });
+    await renderCard('artifact', 'art-1');
+    await clickButton(0);
+    expect(hrefs()).toContain('/docs?id=d-9&p=proj-C');
   });
 });

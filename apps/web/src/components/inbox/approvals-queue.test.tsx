@@ -1503,7 +1503,7 @@ describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story
         bodies.push(JSON.parse(String(init?.body)));
         return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
       }
-      if (url === '/api/gates/g-recipe') { rowFetches += 1; return { ok: true, status: 200, json: async () => ({ data: recipeGate(2) }) }; }
+      if (url === '/api/gates/g-recipe') { rowFetches += 1; return { ok: true, status: 200, json: async () => (recipeGate(2)) }; }
       return { ok: true, json: async () => [] };
     }));
     await mount();

@@ -78,7 +78,8 @@ afterEach(async () => {
 
 async function mount(gateData: GateItem) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gateData }) };
+    // /api/gates/[id]는 proxyToFastapi(감싸지 않음) — BE GateResponse 날 JSON(#4253 까디르 codex 01a0d35f P1).
+    if (url.includes('/api/gates/')) return { ok: true, json: async () => gateData };
     return { ok: true, json: async () => ({}) };
   }));
   await act(async () => {
@@ -119,7 +120,7 @@ describe('ApprovalRequestCard — 제목 미리보기 진입점, canPreviewEntit
   it('target.work_item_type/work_item_id가 빈 문자열(placeholder)이어도 fetch된 gate 실물로 정상 완결된다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
-        return { ok: true, json: async () => ({ data: gate({ work_item_type: 'doc', work_item_id: 'wi-9', work_item_summary: { title: '플레이스홀더 대조', slug: null } }) }) };
+        return { ok: true, json: async () => (gate({ work_item_type: 'doc', work_item_id: 'wi-9', work_item_summary: { title: '플레이스홀더 대조', slug: null } })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -156,7 +157,7 @@ describe('ApprovalRequestCard — story #461e9a54 ReadingPanel 라우팅(채팅 
     const open = vi.fn();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
-        return { ok: true, json: async () => ({ data: gate({ work_item_type: 'story', work_item_id: 'story-9', work_item_summary: { title: '패널 라우팅 대조', slug: null } }) }) };
+        return { ok: true, json: async () => (gate({ work_item_type: 'story', work_item_id: 'story-9', work_item_summary: { title: '패널 라우팅 대조', slug: null } })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -197,7 +198,7 @@ describe('ApprovalRequestCard — 409(gate_already_resolved) 거부 처리(story
       if (url.includes('/api/gates/')) {
         getCount += 1;
         const status = getCount === 1 ? 'pending' : 'approved';
-        return { ok: true, json: async () => ({ data: gate({ status, resolver_id: 'member-2', resolved_at: new Date().toISOString() }) }) };
+        return { ok: true, json: async () => (gate({ status, resolver_id: 'member-2', resolved_at: new Date().toISOString() })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -229,7 +230,7 @@ describe('ApprovalRequestCard — 실시간 해소 반영(story #2985 AC2)', () 
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
         getCount += 1;
-        return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -258,7 +259,7 @@ describe('ApprovalRequestCard — 실시간 해소 반영(story #2985 AC2)', () 
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
         getCount += 1;
-        return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -282,7 +283,7 @@ describe('ApprovalRequestCard — 실시간 해소 반영(story #2985 AC2)', () 
 
   it('malformed payload는 크래시 없이 무시한다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => (gate({ status: 'pending' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -304,7 +305,7 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
   async function mountWithDesignated(designatedApproverId: string | null | undefined) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
-        return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: designatedApproverId ?? null }) }) };
+        return { ok: true, json: async () => (gate({ status: 'pending', designated_approver_id: designatedApproverId ?? null })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -346,7 +347,7 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
         getCount += 1;
-        return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-2' }) }) };
+        return { ok: true, json: async () => (gate({ status: 'pending', designated_approver_id: 'member-2' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -383,7 +384,7 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
           }),
         };
       }
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => (gate({ status: 'pending', designated_approver_id: 'member-1' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -411,7 +412,7 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
   async function renderDelegatePickerWithOrgMembers(members: Array<{ id: string; user_id: string; name: string; role: string }>) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/org-members')) return { ok: true, json: async () => ({ data: members }) };
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => (gate({ status: 'pending', designated_approver_id: 'member-1' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -458,7 +459,7 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
       if (url.includes('/api/org-members')) {
         return { ok: true, json: async () => ({ data: [{ id: 'member-2', user_id: 'u-2', name: '올리베이라군', role: 'admin' }] }) };
       }
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => (gate({ status: 'pending', designated_approver_id: 'member-1' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -481,7 +482,7 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
   it('403(res.ok=false) — 조용히 빈 배열로 저하되지 않고 에러 문구가 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/org-members')) return { ok: false, status: 403, json: async () => ({ error: { code: 'FORBIDDEN' } }) };
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => (gate({ status: 'pending', designated_approver_id: 'member-1' })) };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -512,12 +513,10 @@ describe('ApprovalRequestCard — 토스(story #3084) pending 3분기 + 토스 �
       if (url.includes('/api/gates/')) {
         return {
           ok: true,
-          json: async () => ({
-            data: gate({
-              status: 'pending',
-              designated_approver_id: designatedApproverId,
-              neutral_facts: requesterId ? { requested_by_member_id: requesterId } : null,
-            }),
+          json: async () => gate({
+            status: 'pending',
+            designated_approver_id: designatedApproverId,
+            neutral_facts: requesterId ? { requested_by_member_id: requesterId } : null,
           }),
         };
       }
@@ -579,7 +578,7 @@ describe('ApprovalRequestCard — 토스(story #3084) pending 3분기 + 토스 �
         return { ok: true, json: async () => ({ data: [{ id: 'member-9', name: '올리베이라군' }] }) };
       }
       if (url.includes('/api/gates/')) {
-        return { ok: true, json: async () => ({ data: gate({ status: 'approved', resolver_id: 'member-9' }) }) };
+        return { ok: true, json: async () => (gate({ status: 'approved', resolver_id: 'member-9' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -597,7 +596,7 @@ describe('ApprovalRequestCard — 토스(story #3084) pending 3분기 + 토스 �
   it('「내가 처리」 — 처리자 이름 줄이 안 붙는다(자명하므로)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
-        return { ok: true, json: async () => ({ data: gate({ status: 'approved', resolver_id: 'member-1' }) }) };
+        return { ok: true, json: async () => (gate({ status: 'approved', resolver_id: 'member-1' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -617,7 +616,7 @@ describe('ApprovalRequestCard — 토스(story #3084) pending 3분기 + 토스 �
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/gates/')) {
         getCount += 1;
-        return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+        return { ok: true, json: async () => (gate({ status: 'pending' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -653,11 +652,9 @@ describe('ApprovalRequestCard — story #3151 agent_decision 결정 재료(질�
       if (url.includes('/api/gates/')) {
         return {
           ok: true,
-          json: async () => ({
-            data: gate({
-              work_item_type: 'agent_decision', work_item_summary: null, neutral_facts: neutralFacts,
-              ...statusOverrides,
-            }),
+          json: async () => gate({
+            work_item_type: 'agent_decision', work_item_summary: null, neutral_facts: neutralFacts,
+            ...statusOverrides,
           }),
         };
       }
@@ -728,9 +725,7 @@ describe('ApprovalRequestCard — story #3263 support_escalation 카드 본문(�
       if (url.includes('/api/gates/')) {
         return {
           ok: true,
-          json: async () => ({
-            data: gate({ work_item_type: 'support_escalation', work_item_summary: null, neutral_facts: neutralFacts }),
-          }),
+          json: async () => gate({ work_item_type: 'support_escalation', work_item_summary: null, neutral_facts: neutralFacts }),
         };
       }
       return { ok: true, json: async () => ({}) };
@@ -772,11 +767,9 @@ describe('ApprovalRequestCard — story #3263 support_escalation 카드 본문(�
       if (url.includes('/api/gates/')) {
         return {
           ok: true,
-          json: async () => ({
-            data: gate({
-              work_item_type: 'support_escalation', work_item_summary: null, status: 'approved', resolver_id: 'member-1',
-              neutral_facts: { customer_org_name: '고객사 B', reason: 'cost_cap', detail: 'd', conversation_summary: 's' },
-            }),
+          json: async () => gate({
+            work_item_type: 'support_escalation', work_item_summary: null, status: 'approved', resolver_id: 'member-1',
+            neutral_facts: { customer_org_name: '고객사 B', reason: 'cost_cap', detail: 'd', conversation_summary: 's' },
           }),
         };
       }
@@ -917,7 +910,7 @@ describe('ApprovalRequestCard — story #3258 doc 요약/diff+논의요청 지�
         const neutral_facts = getCount === 1 ? null : {
           discussion_requested: { reason: '기한 조정 논의', requested_by_member_id: 'member-1', requested_at: new Date().toISOString() },
         };
-        return { ok: true, json: async () => ({ data: gate({ neutral_facts }) }) };
+        return { ok: true, json: async () => (gate({ neutral_facts })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -979,7 +972,7 @@ describe('ApprovalRequestCard — 저위험 반려는 사유 패널을 거친다
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
       if (init?.method === 'POST' && url.includes('/transition')) return { ok: true, json: async () => ({}) };
       if (url.includes('/api/gates/')) {
-        return { ok: true, json: async () => ({ data: gate({ id: 'g-low-reject', can_approve: true, risk_grade: 'low' }) }) };
+        return { ok: true, json: async () => (gate({ id: 'g-low-reject', can_approve: true, risk_grade: 'low' })) };
       }
       return { ok: true, json: async () => ({}) };
     }));
@@ -1041,7 +1034,7 @@ describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (
         bodies.push(JSON.parse(String(init.body)));
         return { ok: false, status: 409, json: async () => ({ data: null, error: { code: 'gate_draft_changed', message: 'x' }, meta: null }) };
       }
-      if (url.includes('/api/gates/')) { getCount += 1; return { ok: true, json: async () => ({ data: recipeGate(getCount === 1 ? 1 : 2) }) }; }
+      if (url.includes('/api/gates/')) { getCount += 1; return { ok: true, json: async () => (recipeGate(getCount === 1 ? 1 : 2)) }; }
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -1118,7 +1111,7 @@ describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프�
 
   async function mountResolved(g: GateItem) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: g }) };
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => g };
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
@@ -1136,6 +1129,27 @@ describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프�
     const hrefs = await openChipHrefs(() => container.querySelector('dl')!);
     expect(hrefs).toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-C');
     expect(hrefs).not.toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-B');
+  });
+
+  // 까디르 codex 01a0d35f P3 — 본문(text 블록)에 엔티티 토큰이 오는 템플릿. text 블록 렌더(:689)만 현재 p로 되돌려도 RED가 나게.
+  it('⭐풀린 템플릿 본문(text 블록) 속 대상 칩도 게이트 자기 프로젝트', async () => {
+    const W = '11111111-2222-4333-8444-555555555555';
+    const textCatalog = { 'preset.gate.verdict': { ...VERDICT_CATALOG['preset.gate.verdict'],
+      block_template: { blocks: [{ type: 'text', text: '{{label.work_item_target}} 판정' }] } } };
+    const g = gate({ status: 'approved', project_id: 'proj-C', work_item_id: W });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.includes('/api/gates/') ? { ok: true, json: async () => g } : { ok: true, json: async () => ({}) })));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: g.work_item_type, work_item_id: g.work_item_id, gate_id: g.id, actions: ['approve', 'reject'] }} eventDefinitionsByKey={textCatalog as never} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const textRow = [...container.querySelectorAll('p')].find((el) => el.textContent?.includes('판정') && el.querySelector('button'));
+    expect(textRow).toBeTruthy();
+    const got = await openChipHrefs(() => textRow!);
+    expect(got).toContain(`/board?story=${W}&p=proj-C`);
   });
 
   it('풀린 템플릿 칩 — 게이트 project_id가 없으면 현재 p(B) 폴백', async () => {

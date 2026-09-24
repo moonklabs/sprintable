@@ -23,6 +23,7 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
@@ -140,17 +141,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const { addToast } = useToast();
 
   const fetchGate = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth(`/api/gates/${target.gate_id}`);
-      if (res.status === 404) { setState({ kind: 'not-found' }); return; }
-      if (!res.ok) { setState({ kind: 'error' }); return; }
-      const json = await res.json().catch(() => null) as { data?: GateItem } | GateItem | null;
-      const gate = (json && 'data' in json ? json.data : json) as GateItem | undefined;
-      if (!gate) { setState({ kind: 'error' }); return; }
-      setState({ kind: 'ready', gate });
-    } catch {
-      setState({ kind: 'error' });
-    }
+    // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양 · 404 = not-found · 그 밖 = error).
+    const result = await fetchGateById<GateItem>(target.gate_id);
+    setState(result.kind === 'ok' ? { kind: 'ready', gate: result.gate } : { kind: result.kind });
   }, [target.gate_id]);
 
   // story #5ace2e84(2026-08-28 라이브 재측 후속) — gateByKey «맵 객체 자체»가 정의돼 있으면

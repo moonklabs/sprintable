@@ -1872,7 +1872,9 @@ async def get_gate_endpoint(
         raise HTTPException(status_code=404, detail="Gate not found")
 
     resp = await to_gate_response(session, org_id, gate)
-    resp.project_id = project_id
+    # story #4253(까디르 codex 01a0d35f P2) — 목록(list_gates)과 같은 규칙: 자기 참조 앵커(agent_decision · support_escalation)는
+    # neutral_facts.project_id. 접근 판정은 위 work item 해소값 그대로(이 값은 응답 표시 · 링크의 ?p=에만 쓰인다).
+    resp.project_id = project_id or self_anchored_gate_project_id(gate)
     resp.work_item_summary = await _resolve_work_item_summary(
         session, org_id, gate.work_item_type, gate.work_item_id,
     )

@@ -27,6 +27,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
@@ -115,11 +116,11 @@ export default function GateDetailPage() {
   const fetchGate = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
-      const res = await fetchWithAuth(`/api/gates/${id}`);
-      if (res.status === 404) { setNotFound(true); return; }
-      if (!res.ok) return;
-      const json = await res.json();
-      setGate((json?.data ?? json) as GateDetail);
+      // story #4253 — 공용 fetchGateById(날 GateResponse 한 모양).
+      const result = await fetchGateById<GateDetail>(id);
+      if (result.kind === 'not-found') { setNotFound(true); return; }
+      if (result.kind !== 'ok') return;
+      setGate(result.gate);
       setNotFound(false);
     } finally {
       if (!opts?.silent) setLoading(false);

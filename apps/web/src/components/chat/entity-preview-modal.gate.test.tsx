@@ -44,11 +44,10 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
       expect(url).toBe('/api/gates/g-1');
       return {
         ok: true,
+        // /api/gates/[id]는 proxyToFastapi — BE GateResponse 날 JSON(#4253 · 예전 {data} 목이 미리보기 본문 빈 채를 가렸다).
         json: async () => ({
-          data: {
-            id: 'g-1', status: 'pending', gate_type: 'merge', risk_grade: 'high',
-            work_item_summary: { title: 'PR#42 병합 게이트', slug: null }, work_item_id: 'wi-1',
-          },
+          id: 'g-1', status: 'pending', gate_type: 'merge', risk_grade: 'high',
+          work_item_summary: { title: 'PR#42 병합 게이트', slug: null }, work_item_id: 'wi-1',
         }),
       };
     });
@@ -71,10 +70,8 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
     stubFetchWithAuth(async () => ({
       ok: true,
       json: async () => ({
-        data: {
-          id: 'g-3', status: 'pending', gate_type: 'merge', risk_grade: 'unknown',
-          work_item_summary: { title: '위험도 미산정 게이트', slug: null }, work_item_id: 'wi-3',
-        },
+        id: 'g-3', status: 'pending', gate_type: 'merge', risk_grade: 'unknown',
+        work_item_summary: { title: '위험도 미산정 게이트', slug: null }, work_item_id: 'wi-3',
       }),
     }));
     await act(async () => {
@@ -92,7 +89,7 @@ describe('EntityPreviewModal gate 분기 — story #2889/S2d', () => {
   it('전체 보기 링크가 /gates/{id}로 향한다(own-href, parity getEntityHref 무관)', async () => {
     stubFetchWithAuth(async () => ({
       ok: true,
-      json: async () => ({ data: { id: 'g-2', status: 'pending', gate_type: 'doc_approval', risk_grade: 'low' } }),
+      json: async () => ({ id: 'g-2', status: 'pending', gate_type: 'doc_approval', risk_grade: 'low' }),
     }));
     await act(async () => {
       root.render(

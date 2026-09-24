@@ -17,6 +17,7 @@ import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchS
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
+import { fetchGateById } from '@/lib/fetch-gate';
 import { parseEntityRef } from './entity-ref';
 import { useReadingPanel } from './reading-panel-context';
 import type { ReferenceForm } from './embed-renderer';
@@ -484,15 +485,13 @@ export function EntityPreviewModal({
     }
 
     if (entityType === 'gate') {
-      // gates/[id]/page.tsx·approval-request-card.tsx와 동일 계약(GET /api/gates/{id},
-      // {data:GateItem} envelope) — parity 대상 ENTITY_API를 거치지 않는 독립 fetch.
-      // fetchWithAuth 필수([[feedback-client-fetch-use-fetchwithauth]]).
+      // GET /api/gates/{id} — 공용 fetchGateById(lib/fetch-gate.ts · 날 GateResponse). story #4253(까디르 codex 01a0d35f P1) — 예전엔 {data}
+      // envelope로 가정해 json.data만 읽어 미리보기 본문과 게이트 프로젝트(?p=)가 늘 비었다. parity 대상 ENTITY_API를 거치지 않는 독립 fetch.
       void (async () => {
         try {
-          const res = await fetchWithAuth(`/api/gates/${entityId}`);
-          if (!res.ok) throw new Error();
-          const json = (await res.json()) as { data?: Record<string, unknown> };
-          if (!cancelled) setDetail(json.data ?? null);
+          const result = await fetchGateById<Record<string, unknown> & { id: string }>(entityId);
+          if (result.kind !== 'ok') throw new Error();
+          if (!cancelled) setDetail(result.gate);
         } catch {
           if (!cancelled) setNotFound(true);
         } finally {
@@ -597,7 +596,8 @@ export function EntityPreviewModal({
     resolvedHref = docPreview
       ? (docPreview.orgSlug && docPreview.projectSlug
           ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
-          : flatHref(`/docs/${docPreview.slug}/view`))
+          // story #4253(까디르 codex 01a0d35f P2) — slug가 없어도 문서 프로젝트 id는 안다 → 현재 p 대신 문서 자기 프로젝트.
+          : withProjectParam(`/docs/${docPreview.slug}/view`, docPreview.projectId))
       : null;
     linkKind = resolvedHref ? 'own' : null;
   } else if (entityType === 'task') {
@@ -634,7 +634,8 @@ export function EntityPreviewModal({
       : d?.doc_id
         ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
             ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
-            : flatHref(`/docs?id=${d.doc_id}`))
+            // story #4253 P2 — 문서 프로젝트 id를 알면(docPreview) 그 프로젝트 · 모를 때만 현재 p.
+            : docPreview?.projectId ? withProjectParam(`/docs?id=${d.doc_id}`, docPreview.projectId) : flatHref(`/docs?id=${d.doc_id}`))
         : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
@@ -837,11 +838,12 @@ export function EmbedCard({
       const res = await fetch(`/api/docs/preview?q=${encodeURIComponent(entity_id)}`);
       if (!res.ok) throw new Error();
       const { data } = await res.json() as {
-        data: { slug: string; orgSlug?: string; projectSlug?: string | null };
+        data: { slug: string; orgSlug?: string; projectSlug?: string | null; projectId?: string | null };
       };
+      // story #4253 P2 — slug가 없어도 문서 프로젝트 id를 알면 그 프로젝트(현재 p로 떨어지지 않게) · 둘 다 모를 때만 현재 p.
       const target = (data.orgSlug && data.projectSlug)
         ? docViewUrl(data.orgSlug, data.projectSlug, data.slug)
-        : flatHref(`/docs/${data.slug}/view`);
+        : data.projectId ? withProjectParam(`/docs/${data.slug}/view`, data.projectId) : flatHref(`/docs/${data.slug}/view`);
       router.push(target);
     } catch {
       setNavigating(false);
@@ -1064,14 +1066,14 @@ export function EntityChip({
   // 딥링크(doc-gate-section.tsx가 이미 그 픽커를 가진다), pending=기존과 동일하게 결재함
   // 딥링크 — "쓰던 자리" 원칙(#2669)은 실 제출 액션에서만 후퇴, 목적지 발견성은 유지.
   const { projectMemberships } = useDashboardContext();
-  const [canSubmit, setCanSubmit] = useState(false);
-  // story #4253(PO 09:45Z) — 결재 올리기 CTA는 문서 자기 프로젝트로(canSubmit 판정에 이미 푼 값을 버리지 않는다).
-  const [docProjectId, setDocProjectId] = useState<string | null>(null);
+  // story #4253(PO 09:45Z · 까디르 codex 01a0d35f P3) — «올릴 수 있는 문서 프로젝트» 하나로 둔다: 문서 프로젝트를 알고 · 내가 그 멤버일 때만 값이
+  // 있다. CTA 노출과 링크의 ?p=가 같은 값에서 나와, «보이는데 프로젝트를 모름» 상태가 표현 자체로 없다(예전 canSubmit + docProjectId 두 상태).
+  const [submitProjectId, setSubmitProjectId] = useState<string | null>(null);
   const rawDocStatus = entityStatus?.kind === 'resolved' ? entityStatus.raw : null;
   const effectiveDocStatus = rawDocStatus;
 
   useEffect(() => {
-    if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setCanSubmit(false); return; }
+    if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setSubmitProjectId(null); return; }
     let cancelled = false;
     void (async () => {
       try {
@@ -1080,11 +1082,10 @@ export function EntityChip({
         const json = (await res.json()) as { data?: { projectId?: string } };
         const resolvedProjectId = json.data?.projectId ?? null;
         if (!cancelled) {
-          setDocProjectId(resolvedProjectId);
-          setCanSubmit(!!resolvedProjectId && projectMemberships.some((p) => p.projectId === resolvedProjectId));
+          setSubmitProjectId(resolvedProjectId && projectMemberships.some((p) => p.projectId === resolvedProjectId) ? resolvedProjectId : null);
         }
       } catch {
-        if (!cancelled) setCanSubmit(false); // ㉠ 조회 실패=fail-closed(버튼 안 보임), 조용한 무권한 노출 금지.
+        if (!cancelled) setSubmitProjectId(null); // ㉠ 조회 실패=fail-closed(버튼 안 보임), 조용한 무권한 노출 금지.
       }
     })();
     return () => { cancelled = true; };
@@ -1161,10 +1162,10 @@ export function EntityChip({
     // 지정이 서버 필수가 됐고, 이 인라인 칩엔 픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435).
     // 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const docCta = entityType === 'doc' && !ghost ? (
-      // story #4253 — CTA는 문서 프로젝트를 안 때만(canSubmit이 그 값의 멤버십으로 판정되니 모르면 CTA 자체가 없다 · 현재 p 폴백 없음).
-      effectiveDocStatus === 'draft' && canSubmit && docProjectId ? (
+      // story #4253 — CTA는 올릴 수 있는 문서 프로젝트가 있을 때만(모르면 · 멤버가 아니면 없다 · 현재 p 폴백 없음).
+      effectiveDocStatus === 'draft' && submitProjectId ? (
         <Link
-          href={getEntityHref('doc', entityId, (h) => withProjectParam(h, docProjectId)) ?? '#'}
+          href={getEntityHref('doc', entityId, (h) => withProjectParam(h, submitProjectId)) ?? '#'}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >
