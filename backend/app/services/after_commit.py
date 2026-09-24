@@ -40,7 +40,7 @@ def schedule_after_commit(db: AsyncSession, actions: list[Callable[[], Any]]) ->
         return
     sync_session = db.sync_session
     if not isinstance(sync_session, Session):
-        raise TypeError("schedule_after_commit에는 실 AsyncSession이 필요하다")
+        raise TypeError("schedule_after_commit needs a real AsyncSession")
     pending: list[Callable[[], Any]] = sync_session.info.setdefault(_PENDING_KEY, [])
     pending.extend(actions)
     if not sync_session.info.get(_HOOKED_KEY):

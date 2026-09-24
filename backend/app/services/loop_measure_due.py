@@ -24,11 +24,10 @@ outcome이 해소되지 않은 채 owner가 measure_after를 미래로 늘려 �
 재검토 — 지금은 "발행 1회 보장"이 "매 재도과마다 재알림"보다 단순·안전(무한루프 방지 원칙과
 직접 충돌)하므로 이 gap을 의도적으로 수용한다.
 
-⛔SAVEPOINT로 감싸지 않는다(hypothesis_scorer.py와 달리) — publish_preset_event는 내부
-send_message()가 자체 commit을 이미 수행하는 자기완결 트랜잭션이라, 이걸 session.
-begin_nested()로 한 번 더 감싸면 그 내부 commit이 바깥 SAVEPOINT까지 닫아버려 "closed
-transaction" 오류가 난다(실측 확認). 개별 try/except만으로 격리한다 — 실제 자매 호출부
-(cron.py의 preset.goal.measured 발행)도 동일하게 SAVEPOINT 없이 try/except뿐이다.
+story #4230 — 예전엔 «SAVEPOINT로 감싸지 않는다»였다(publish_preset_event 안의 send_message가 스스로 커밋해 바깥
+SAVEPOINT까지 닫아버렸다). 이제 publish_preset_event가 호출자 트랜잭션에 참여하고(커밋 없음) **자기 안에서** SAVEPOINT로
+감싸므로, 발행 실패는 그 SAVEPOINT만 롤백된다 — 여기서는 개별 try/except로 받기만 하면 된다. 커밋은 cron 라우트가
+끝에 한 번(cron.py `detect_unclosed_loops_cron`).
 """
 from __future__ import annotations
 

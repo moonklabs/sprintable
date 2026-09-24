@@ -104,10 +104,11 @@ def test_live_sse_always_yields_id_field():
 # ─── AC3: conversations webhook BackgroundTask 검증 ──────────────────────────
 
 def test_send_message_webhook_background_task_in_source():
-    """send_message 소스에 deliver_conversation_message_webhook BackgroundTask 추가 확인."""
+    """send_message 소스에 deliver_conversation_message_webhook BackgroundTask 추가 확인. story #4230 — 본체는
+    `send_message_core`(엔드포인트 `send_message`는 그 얇은 래퍼)."""
     import inspect
     from app.routers import conversations as cv
-    source = inspect.getsource(cv.send_message)
+    source = inspect.getsource(cv.send_message_core)
     assert "deliver_conversation_message_webhook" in source
     assert "background_tasks.add_task" in source
     # webhook에 필수 파라미터 전달 확인

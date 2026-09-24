@@ -40,19 +40,27 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _seed_presets(s, keys: tuple[str, ...]) -> None:
-    """실 시드(0245)의 프리셋 정의를 그대로 넣는다(destructive 스키마라 마이그레이션 행이 없다)."""
+def _load_migration(filename: str):
     import importlib.util
     from pathlib import Path
 
-    from app.models.event_definition import EventDefinition
-
-    path = Path(__file__).resolve().parents[1] / "alembic/versions/0245_event_definitions.py"
-    spec = importlib.util.spec_from_file_location("_mig_0245", path)
+    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(f"_mig_{filename[:4]}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    for key, payload_schema, routing in (row for row in mod._SEED if row[0] in keys):
-        s.add(EventDefinition(key=key, org_id=None, name=key, payload_schema=payload_schema, routing=routing))
+    return mod
+
+
+async def _seed_presets(s, keys: tuple[str, ...]) -> None:
+    """실 시드(0245)의 프리셋 정의를 넣는다(destructive 스키마라 마이그레이션 행이 없다). `preset.gate.verdict`의
+    payload_schema는 0245 뒤 0330이 마지막으로 바꿨다(`gate_id` 등 — 0245 원본이면 실제 판정 payload가 스키마 위반으로
+    발행 자체가 안 된다) → 0330의 `_NEW_PAYLOAD_SCHEMA`를 그대로 쓴다(그 뒤 이 키의 스키마를 바꾼 마이그레이션 없음)."""
+    from app.models.event_definition import EventDefinition
+
+    seed = _load_migration("0245_event_definitions.py")._SEED
+    latest = {_VERDICT_KEY: _load_migration("0330_preset_gate_verdict_gate_id_field.py")._NEW_PAYLOAD_SCHEMA}
+    for key, payload_schema, routing in (row for row in seed if row[0] in keys):
+        s.add(EventDefinition(key=key, org_id=None, name=key, payload_schema=latest.get(key, payload_schema), routing=routing))
     await s.flush()
 
 
