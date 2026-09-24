@@ -58,6 +58,9 @@ export interface EventDefinitionResponse {
     // 채널-연결/연산-커넥터 select로 분기한다 — kind는 여전히 열린 값이라 target을
     // 거기서 유도하지 않는다(events.py::apply_recipe_role_bindings 주석 참고).
     capability?: { kind?: string; connector_key?: string; target?: 'agent' | 'channel_connection' | 'generation_connector' };
+    // story #4174 후속(alembic 0401) — 승인이 이 stage 밖(결재함의 초안 게이트)이라는 선언. 닫힌 어휘(BE
+    // event_definition_registry.py::_APPROVAL_SURFACES). 적용 다이얼로그가 사람 역할의 이 stage를 읽기 전용 자리로 그린다.
+    approval?: { surface?: 'draft_gate' };
   }>;
   // story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21 §b) — 정의가 자기 role 어휘로
   // 선언하는 옵션 사전({role명: "human"|"agent"}). 선언 없으면 undefined/null("모름") —

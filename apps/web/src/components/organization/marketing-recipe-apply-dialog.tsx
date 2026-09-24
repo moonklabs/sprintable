@@ -188,7 +188,7 @@ export function MarketingRecipeApplyDialog({
       // 보낸다(빈 문자열은 BE uuid 파싱에서 죽고, 안 보내야 #4110 crew 폴백이 동작한다).
       const roleMapping: Record<string, string> = {};
       for (const slot of slots) {
-        if (slot.kind === 'approver') continue;
+        if (slot.kind === 'approver' || slot.kind === 'approval_elsewhere') continue;
         const value = selections[slot.key];
         if (!value) continue;
         for (const stage of slot.stages) roleMapping[stage] = value;
@@ -225,7 +225,7 @@ export function MarketingRecipeApplyDialog({
   // 이상인 역할의 줄(`grouped`)은 역할 이름을 묶음 머리로 올리고 배지 + 맡은 단계 « · » + 선택기만
   // 싣는다 — 줄 사이는 border-t(유나 판정 §9).
   const badgeFor = (slot: RecipeRoleSlot) => {
-    if (slot.kind === 'approver') return t('recipeApplyV2DirectorBadge');
+    if (slot.kind === 'approver' || slot.kind === 'approval_elsewhere') return t('recipeApplyV2DirectorBadge');
     if (slot.kind === 'member') return slot.memberType === 'human' ? t('recipeApplyV2DirectorBadge') : t('recipeApplyV2CreatorBadge');
     if (slot.kind === 'compute') return t('recipeApplyV2ComputeBadge');
     return t('recipeApplyV2PublisherBadge');
@@ -256,6 +256,21 @@ export function MarketingRecipeApplyDialog({
           </div>
           <div className="shrink-0 text-xs text-muted-foreground" data-testid="director-approver">
             {approvers.length > 0 ? approvers.join(', ') : '—'}
+          </div>
+        </div>
+      );
+    }
+    if (slot.kind === 'approval_elsewhere') {
+      // story #4174 후속 — 승인이 이 stage 밖(결재함의 초안)에서 일어나는 사람 stage. 고를 사람이 없어 선택기 없음 ·
+      // 필수 아님 · role_mapping에 안 실림(승인자는 초안 게이트 쪽 규칙이 정한다).
+      return (
+        <div key={slot.key} {...rowAttrs} data-testid="slot-approval-elsewhere">
+          <div className="min-w-0 flex-1 break-keep">
+            {heading()}
+            <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
+          </div>
+          <div className="shrink-0 break-keep text-xs text-muted-foreground" data-testid="approval-elsewhere-note">
+            {t('recipeApplyV2ApprovalOnDraftGate')}
           </div>
         </div>
       );

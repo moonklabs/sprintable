@@ -29,6 +29,9 @@ export interface RecipeStageMeta {
   action?: string;
   gate?: { type?: string; approver?: string };
   capability?: { kind?: string; connector_key?: string; target?: string };
+  /** story #4174 후속 — 이 stage의 승인이 stage 밖(결재함의 초안 게이트)에서 일어남을 정의가 선언(닫힌 어휘, BE
+   * `validate_stage_metadata`가 강제). 승인자는 싣지 않는다 — 그 게이트 쪽 규칙이 정한다. */
+  approval?: { surface?: string };
 }
 
 export type RecipeStageMetadata = Record<string, RecipeStageMeta>;
@@ -170,7 +173,7 @@ export function orderedRecipeRoles(
  * stage가 게이트. 선언 없는 역할은 다른 역할의 선언 여부와 상관없이 이 한 규칙으로 판정한다.
  * `key`(역할+방식)가 다이얼로그 선택값의 키다. 불변식: role이 있는 모든 stage가 정확히 한
  * 자리에 덮인다(uncoveredRecipeStages). */
-export type RecipeSlotKind = 'approver' | 'member' | 'compute' | 'channel';
+export type RecipeSlotKind = 'approver' | 'approval_elsewhere' | 'member' | 'compute' | 'channel';
 
 export interface RecipeRoleSlot {
   key: string;
@@ -183,7 +186,7 @@ export interface RecipeRoleSlot {
 
 function isHumanRole(roleStages: string[], stageMetadata: RecipeStageMetadata, declared: 'human' | 'agent' | null): boolean {
   if (declared !== null) return declared === 'human';
-  return roleStages.length > 0 && roleStages.every((s) => stageMetadata[s]?.gate);
+  return roleStages.length > 0 && roleStages.every((s) => stageMetadata[s]?.gate || stageMetadata[s]?.approval);
 }
 
 function stageSlotKind(meta: RecipeStageMeta, isHuman: boolean): RecipeSlotKind {
@@ -191,6 +194,9 @@ function stageSlotKind(meta: RecipeStageMeta, isHuman: boolean): RecipeSlotKind 
   if (target === 'channel_connection') return 'channel';
   if (target === 'generation_connector') return 'compute';
   if (isHuman && meta.gate) return 'approver';
+  // story #4174 후속 — 승인이 이 stage 밖(초안 게이트)이라고 정의가 선언한 사람 stage는 고를 사람이 없는 읽기 전용
+  // 자리. 선언 없는 사람 비게이트 stage는 사람이 실제로 일하는 단계라 아래 멤버 자리(까디르 QA 재현 C).
+  if (isHuman && meta.approval?.surface) return 'approval_elsewhere';
   return 'member';
 }
 

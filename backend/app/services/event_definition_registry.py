@@ -56,6 +56,12 @@ ROLE_ACTOR_KIND_VALUES = frozenset({"human", "agent"})
 # "발행할 채널"도 아니라 "org의 생성 모델 커넥터"를 가리켜야 한다 — 같은 XOR 판별축에
 # 세 번째 값만 더한다(kind='generate'는 #3317 기존 계약 그대로 무변, target만 추가).
 _CAPABILITY_TARGETS = frozenset({"agent", "channel_connection", "generation_connector"})
+
+# story #4174 후속(PO 2026-09-24) — stage의 승인이 **이 stage 밖**(예: 블로그 초안 게이트)에서 일어남을 정의가 선언하는
+# 닫힌 어휘. 적용 창이 사람 역할의 이 stage를 선택 없는 읽기 전용 자리로 그린다(선언 없는 사람 비게이트 stage는 사람이
+# 실제로 일하는 자리라 지금처럼 멤버 자리 — 까디르 QA 재현 C). 승인자는 적지 않는다 — 초안 게이트의 승인자는 게이트
+# 쪽 규칙이 정하므로 여기 또 적으면 어긋날 수 있는 두 번째 원천이 된다.
+_APPROVAL_SURFACES = frozenset({"draft_gate"})
 # story #3288(축2-ⓐ) — "recipe_role_binding": 사이클형 정의의 stage를 recipe_role_bindings
 # 테이블(org/project 스코프 role→agent 바인딩)로 조회해 푸는 3번째 kind. payload_field처럼
 # payload의 필드를 직접 읽지도, server_derived처럼 고정 닫힌 어휘로 파생하지도 않는다 —
@@ -457,10 +463,27 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].gate.type은 비어있지 않은 문자열이어야 합니다."
                 )
-            if gate.get("approver") not in APPROVER_ROLE_REFERENCES:
+            # 목록·객체는 frozenset 멤버십에서 TypeError(→ API 500)라 문자열인지 먼저 본다(까디르 4594 codex P2).
+            if not isinstance(gate.get("approver"), str) or gate["approver"] not in APPROVER_ROLE_REFERENCES:
                 raise InvalidStageMetadataError(
                     f"stage_metadata[{slug!r}].gate.approver는 {sorted(APPROVER_ROLE_REFERENCES)} "
                     f"중 하나여야 합니다 — {gate.get('approver')!r}은 닫힌 어휘 밖입니다."
+                )
+        # story #4174 후속 — approval(선택): `{"surface": <닫힌 어휘>}` 하나만. gate와 동시 선언 금지(승인 자리가 둘이 된다).
+        if "approval" in meta:
+            approval = meta["approval"]
+            if (
+                not isinstance(approval, dict) or set(approval) != {"surface"} or not isinstance(approval["surface"], str)
+                or approval["surface"] not in _APPROVAL_SURFACES
+            ):
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].approval must be exactly {{'surface': one of {sorted(_APPROVAL_SURFACES)}}} "
+                    f"— got {approval!r}."
+                )
+            if "gate" in meta:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}] must not declare both gate and approval — approval means the approval "
+                    f"happens outside this stage."
                 )
         # story #3317 PR B(마케팅자동화·레시피 결함, PO 확定 2026-09-02) — capability도 gate와
         # 동형: 선택 필드지만 있으면 shape 강제(오타 방치 금지). ⚠️kind는 gate.approver와
