@@ -1223,8 +1223,15 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
         # 안 섞는다(재시도 대상이 아니므로 그 이름이 거짓말이 된다).
         "blocked_unapproved": 0, "error": 0,
     }
-    for command in rows:
+    # story #4272 — rollback은 세션의 ORM 객체를 전부 만료시킨다. 미리 읽은 행을 그대로 돌면 한 건의 rollback 뒤
+    # 다음 건(과 except의 로그)이 만료 속성을 읽다 비동기 지연 적재로 MissingGreenlet — 배치 전체가 멈추고 이미
+    # in_progress로 잡힌 나머지는 되살리는 장치 없이 남는다. 원시 id만 들고 돌며 건마다 행을 다시 읽는다.
+    command_ids = [command.id for command in rows]
+    for command_id in command_ids:
         try:
+            command = await db.get(PublicationCommand, command_id)
+            if command is None:
+                continue
             await _process_one_command(db, command, now=now)
             await db.commit()
             key = (
@@ -1236,10 +1243,30 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
         except Exception:  # noqa: BLE001 — 2중 방어(AC4): 진짜 미분류 예외도 이 건만 격리.
             await db.rollback()
             counts["error"] += 1
-            logger.exception("publication command batch item 처리 실패 command_id=%s", command.id)
+            logger.exception("publication command batch item 처리 실패 command_id=%s", command_id)
+            await _dead_letter_unclassified_command(db, command_id, now=now)
     # story #4258(까디르 4621 codex P2) — 멈춤 통지는 표식(`stop_notice_state = pending`)을 보고 보낸다. 이번 틱에 방금 멈춘 것
     # · 지난 틱에 전이 커밋 뒤 통지 전에 죽은 것 · 통지가 실패해 남은 것을 모두 여기서 줍는다(행마다 자기 트랜잭션).
     from app.services.recipe_publish_failure import deliver_pending_stop_notices
 
     counts["stop_notices"] = await deliver_pending_stop_notices(db)
     return counts
+
+
+UNCLASSIFIED_ERROR_CODE = "PUBLICATION_COMMAND_UNCLASSIFIED_ERROR"
+
+
+async def _dead_letter_unclassified_command(db: AsyncSession, command_id: uuid.UUID, *, now: datetime) -> None:
+    """story #4272 — 미분류 예외로 rollback된 건은 in_progress로 남으면 아무도 다시 집지 않는다. 나갔는지 모르니
+    (분류표 밖 = needs_check) 사람 확인 뒤 재시도 대상인 dead_letter로 내린다. 이 기록마저 실패해도 배치는 잇는다."""
+    try:
+        command = await db.get(PublicationCommand, command_id)
+        if command is None or command.status != "in_progress":
+            return
+        await apply_command_failure(
+            db, command, error_code=UNCLASSIFIED_ERROR_CODE, last_error=UNCLASSIFIED_ERROR_CODE, now=now,
+        )
+        await db.commit()
+    except Exception:  # 기록 실패도 이 건에서 멈춘다.
+        await db.rollback()
+        logger.exception("publication command 미분류 실패 기록 실패 command_id=%s", command_id)

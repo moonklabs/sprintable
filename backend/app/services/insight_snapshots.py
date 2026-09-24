@@ -1042,8 +1042,14 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
     await db.commit()
 
     counts = {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0, "error": 0, "skipped": 0}
-    for snapshot in rows:
+    # story #4272 — rollback이 미리 읽은 행을 전부 만료시켜 다음 건 · 로그가 MissingGreenlet으로 배치를 멈추던 부류.
+    # 원시 id만 들고 돌며 건마다 다시 읽는다(publication_command.py 배치 루프와 같은 처방).
+    snapshot_ids = [snapshot.id for snapshot in rows]
+    for snapshot_id in snapshot_ids:
         try:
+            snapshot = await db.get(InsightSnapshot, snapshot_id)
+            if snapshot is None:
+                continue
             adapter = CHANNEL_ADAPTERS.get(snapshot.channel)
             declared = adapter.insight_metrics if adapter is not None else ()
             if not declared:
@@ -1149,7 +1155,7 @@ async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | Non
         except Exception:  # noqa: BLE001 — publication_command.py와 동형 2중 방어.
             await db.rollback()
             counts["error"] += 1
-            logger.exception("insight snapshot 처리 실패 snapshot_id=%s", snapshot.id)
+            logger.exception("insight snapshot 처리 실패 snapshot_id=%s", snapshot_id)
     return counts
 
 

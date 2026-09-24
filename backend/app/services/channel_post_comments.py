@@ -679,7 +679,13 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
     await db.commit()
 
     counts = {"captured": 0, "unsupported": 0, "failed": 0, "pending_retry": 0}
-    for row in rows:
+    # story #4272 — rollback이 미리 읽은 행을 전부 만료시켜 다음 건 · except의 속성 읽기가 MissingGreenlet으로 배치를
+    # 멈추던 부류. 원시 id만 들고 돌며 건마다(와 rollback 뒤에) 다시 읽는다.
+    row_ids = [row.id for row in rows]
+    for row_id in row_ids:
+        row = await db.get(CommentCollectionSchedule, row_id)
+        if row is None:
+            continue
         try:
             try:
                 result = await collect_comments_for_publication(
@@ -768,6 +774,9 @@ async def process_due_comment_collections(db: AsyncSession, *, now: datetime | N
             counts["captured"] += 1
         except Exception:  # noqa: BLE001 — 이 행 하나만 막는다(전체 배치 안 죽음).
             await db.rollback()
+            row = await db.get(CommentCollectionSchedule, row_id)
+            if row is None:
+                continue
             row.status = "failed"
             row.error_code = "COMMENT_COLLECTION_UNCLASSIFIED_ERROR"
             await _schedule_next_continuous_poll_if_active(

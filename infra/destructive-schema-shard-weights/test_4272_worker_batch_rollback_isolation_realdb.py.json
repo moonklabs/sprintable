@@ -1,0 +1,1 @@
+{"file": "tests/test_4272_worker_batch_rollback_isolation_realdb.py", "sec": 11.5, "source": "story-4272 — 신규 파일 실측(로컬 pg16, 1회 실행, 8건 wall time 약 11.5s — test_4268 등재와 같은 방법론)"}
