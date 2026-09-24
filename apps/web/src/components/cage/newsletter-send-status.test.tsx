@@ -137,4 +137,44 @@ describe('NewsletterSendStatus — 재시도', () => {
     expect(q('channel-post-retry-result')?.textContent).toBe(K.channelPostsRetrySuccess);
     expect(onRetried).toHaveBeenCalledTimes(1);
   });
+
+  // story #4266 — 채널 포스트 · 사이트 글과 같은 공용 규칙: 결과가 무엇이든 창을 닫고 결과 줄 · 404는 게이트를 다시 읽고 유나 문장.
+  async function confirmRetry(onRetried = vi.fn()) {
+    await mount(gate({ status: 'dead_letter', failure_kind: 'not_sent' }), { onRetried });
+    await click(q('channel-post-failure-retry-button'));
+    const confirm = Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent === K.channelPostsRetryConfirmAction);
+    await click(confirm ?? null);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    return onRetried;
+  }
+
+  it('⭐#4266 AC1 — 재시도 500 → 확인 창이 닫히고 결과 줄 · 서버 원문 0 · 게이트 다시 읽기 안 함', async () => {
+    fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ detail: '내부 서버 원문 문장' }), { status: 500 }));
+    const onRetried = await confirmRetry();
+    expect(document.querySelector('[role="dialog"]')?.hasAttribute('data-open') ?? false).toBe(false);
+    expect(q('channel-post-retry-result')?.querySelector('p')?.textContent).toBe(K.channelPostsRetryFailed);
+    // 서버 응답은 접힌 «서버 응답 보기»에만 남는다(#3454 관례) — 보이는 문장엔 0.
+    expect(q('channel-post-retry-result')?.querySelector('p')?.textContent).not.toContain('내부 서버 원문');
+    expect(onRetried).not.toHaveBeenCalled();
+  });
+
+  it('⭐#4266 AC2 — 재시도 404 → 창 닫힘 · 게이트를 다시 읽고 유나 문장 · 서버 원문 0', async () => {
+    fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }), { status: 404 }));
+    const onRetried = await confirmRetry();
+    expect(document.querySelector('[role="dialog"]')?.hasAttribute('data-open') ?? false).toBe(false);
+    expect(q('channel-post-retry-result')?.textContent).toBe(K.publicationRetryNotRetryableReloaded);
+    expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
+    expect(onRetried).toHaveBeenCalledTimes(1);
+  });
+
+  it('#4266 AC3 — 403(사람 전용 코드) → 로케일 문장 · 네트워크 실패 → «다시 시도하지 못했어요.»', async () => {
+    fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ detail: { code: 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', message: '서버 원문 403' } }), { status: 403 }));
+    await confirmRetry();
+    expect(q('channel-post-retry-result')?.querySelector('p')?.textContent).toBe(K.errorChannelPublishHumanOnly);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuthMock.mockRejectedValue(new TypeError('network'));
+    await confirmRetry();
+    expect(q('channel-post-retry-result')?.querySelector('p')?.textContent).toBe(K.channelPostsRetryFailed);
+  });
 });

@@ -21,6 +21,7 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+import { postPublicationRetry, PublicationRetryResultLine, type PublicationRetryResult } from '@/components/content/publication-retry';
 // story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
 // 위반. field는 title|summary|body_md(channel_post의 text|link_url과 다른 축이라
 // 컴포넌트는 field를 모른다 — 호출부가 이미 걸러 넘긴다).
@@ -311,6 +312,8 @@ export default function ContentPostEditPage() {
   // 이식한다 — 「밖에 나갔는지 모르는 실패」를 곧바로 재시도로 넘기지 않고, 채널에서
   // 확認했다는 체크가 끝나야 확認 버튼이 열린다(recheckGate 이 화면에서 켬).
   const [retryConfirmOpen, setRetryConfirmOpen] = useState(false);
+  // story #4266 — 재시도 결과 줄(예전엔 없어서 실패가 조용했다).
+  const [retryResult, setRetryResult] = useState<PublicationRetryResult | null>(null);
   const [retryChecklistConfirmed, setRetryChecklistConfirmed] = useState(false);
 
   // story 15e481ce(#3453 AC1) — 「Threads 변형 만들기」. 활성 연결 목록·이미 만든 변형
@@ -999,21 +1002,19 @@ export default function ContentPostEditPage() {
     }
   };
 
-  // story #3479(BE #3476) — 외부 목적지 발행 실패 재시도. 성공하면 publication을
-  // 다시 읽어(loadPublication, handleUnpublish와 동형) command_status가 즉시
-  // 반영되게 한다.
+  // story #3479(BE #3476) — 외부 목적지 발행 실패 재시도. 성공하면 publication을 다시 읽어(loadPublication) command_status가 즉시 반영되게.
+  // story #4266 — 예전엔 실패면 아무것도 안 보이고 확인 창만 열린 채 남았다(조용한 실패 · 네트워크 실패는 잡지도 않음). 이제 채널 포스트
+  // 상세와 같은 공용 규칙: 결과가 무엇이든 창을 닫고 결과 줄 · 404는 다시 읽고 로케일 문장 · 그 밖의 실패도 로케일 문장.
   const handleRetryPublicationCommand = async (commandId: string) => {
     if (!orgId || retryingCommand) return;
     setRetryingCommand(true);
+    setRetryResult(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`, { method: 'POST' });
-      if (res.ok) {
-        // story #3369 — channel_posts 상세 handleRetry와 동형(성공 시 다이얼로그 닫고
-        // 체크 상태 리셋).
-        setRetryConfirmOpen(false);
-        setRetryChecklistConfirmed(false);
-        void loadPublication();
-      }
+      const result = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${commandId}/retry`);
+      setRetryConfirmOpen(false);
+      setRetryChecklistConfirmed(false);
+      setRetryResult(result);
+      if (result.type !== 'error') void loadPublication();
     } finally {
       setRetryingCommand(false);
     }
@@ -1348,6 +1349,7 @@ export default function ContentPostEditPage() {
             destructive={false}
             onConfirm={() => void handleRetryPublicationCommand(publication.command!.id)}
           />
+          <PublicationRetryResultLine result={retryResult} testId="content-retry-result" />
         </div>
       ) : null}
 

@@ -2472,7 +2472,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(koMessages.content.channelPostsRetrySuccess).toContain('그래도 실패하면');
     });
 
-    it('AC1 — 403(HUMAN_ONLY)은 서버 문장을 그대로 보인다(삼키지 않음)', async () => {
+    it('AC1 — 403(HUMAN_ONLY)은 서버 원문 대신 로케일 문장(기존 매핑 · story #4266)', async () => {
       stubFetch({
         draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
         onRetry: () => ({ status: 403, body: { detail: { code: 'CHANNEL_POST_PUBLISH_HUMAN_ONLY', message: '채널 포스트 발행은 휴먼 멤버만 가능합니다(에이전트는 초안·상신까지).' } } }),
@@ -2491,6 +2491,67 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       // (AlertDescription 자체를 짚어 사람 문장만 본다, 토글 텍스트와 안 섞는다).
       expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent)
         .toBe(koMessages.content.errorChannelPublishHumanOnly);
+    });
+
+    // story #4266 — 재시도 실패면 확인 창을 닫고 결과 줄(예전엔 창이 열린 채 · 오류 줄이 오버레이 뒤). 404는 다시 읽고 유나 문장.
+    async function openAndConfirmRetry() {
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).not.toBeNull();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      expect(confirmBtn).toBeDefined();
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+    }
+    const draftGets = () => (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([u, init]) => String(u) === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}` && !(init as RequestInit | undefined)?.method).length;
+
+    it('⭐#4266 AC1 — 재시도 500 → 확인 창이 닫히고 결과 줄이 보인다 · 서버 원문 0(로케일 문장)', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 500, body: { detail: '내부 서버 원문 문장' } }),
+      });
+      await openAndConfirmRetry();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).toBeNull();
+      const line = container.querySelector('[data-testid="channel-post-retry-result"] p');
+      expect(line?.textContent).toBe(koMessages.content.channelPostsRetryFailed);
+      expect(line?.textContent).not.toContain('내부 서버 원문');
+    });
+
+    it('⭐#4266 AC2 — 재시도 404 → 창 닫힘 · 상태를 다시 읽고 유나 문장 · 서버 원문 0', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const before = draftGets();
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent)
+        .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
+      expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
+      expect(draftGets()).toBe(before + 1); // 상태를 다시 읽었다
+    });
+
+    it('#4266 — 네트워크 실패 → 창 닫힘 · «다시 시도하지 못했어요.»', async () => {
+      stubFetch({ draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' } });
+      const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+      vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+        if (String(u).endsWith('/retry') && i?.method === 'POST') throw new TypeError('network');
+        return base(u, i);
+      }));
+      await openAndConfirmRetry();
+      expect(document.body.querySelector('[data-testid="channel-post-retry-confirm-what"]')).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent).toBe(koMessages.content.channelPostsRetryFailed);
     });
 
     // AC2 — needs_check 2단계: 체크 前 확認 버튼 비활성, 체크 後 활성.
@@ -4750,7 +4811,8 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
   // HUMAN_SAFE_ERROR_MESSAGE_CODES에 못 올린다 — 이 code일 땐 항상 제네릭으로
   // 떨어지는 게 맞다(이전 버전은 code 없이 message만 봐 이 실 BE 문장도 우연히
   // 통과시켰다 — 안전 쪽으로 조인 결과지 회귀 아님).
-  it('「다시 보내기」(dead_letter) 실패 — 404(NOT_FOUND, allowlist 밖)는 제네릭 문구', async () => {
+  // story #4266 — 발행 재시도 확인 창들과 같은 공용 규칙으로: 404(재시도 대상 아님)는 제네릭 대신 목록을 다시 읽고 유나 문장(서버 원문 0은 그대로).
+  it('「다시 보내기」(dead_letter) 실패 — 404(재시도 대상 아님)는 목록을 다시 읽고 유나 문장 · 서버 원문 0', async () => {
     stubFetch({
       draftDetail: PUBLISHED_DRAFT,
       commentsResponse: {
@@ -4772,8 +4834,12 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(retryBtn).not.toBeNull();
     await act(async () => { retryBtn.click(); });
     await flush();
-    expect(document.body.textContent).toContain('요청을 처리하지 못했어요.');
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')?.textContent)
+      .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
     expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
+    const commentGets = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([u, i]) => String(u).includes('/comments') && !String(u).endsWith('/refresh') && !(i as RequestInit | undefined)?.method).length;
+    expect(commentGets).toBeGreaterThanOrEqual(2); // 첫 로드 + 404 뒤 다시 읽기
   });
 
   // story #3517(BE #3865 조각①) — 수동 재수집. 429/422/403 문장을 서버 응답 그대로

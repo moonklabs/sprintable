@@ -1839,6 +1839,59 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
     expect(retried).toBe('cmd-1');
   });
 
+  // story #4266 — 예전엔 재시도 실패가 조용했다(결과 줄 없음 · 확인 창만 열린 채). 이제 창을 닫고 결과 줄 · 404는 다시 읽고 유나 문장.
+  async function retryWith(onRetry: () => { status: number; body: unknown }) {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook',
+        channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: null, next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+      },
+      onRetryPublicationCommand: onRetry,
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+    const pubGets = () => (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(([u]) => String(u) === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`).length;
+    const before = pubGets();
+    const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+    await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).not.toBeNull();
+    const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn)
+      .find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction) as HTMLButtonElement;
+    await act(async () => { confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    await flush();
+    return { reloads: pubGets() - before };
+  }
+
+  it('⭐#4266 AC1 — 재시도 500 → 확인 창이 닫히고 결과 줄이 보인다 · 서버 원문 0(예전엔 결과 줄 자체가 없었다)', async () => {
+    await retryWith(() => ({ status: 500, body: { detail: '내부 서버 원문 문장' } }));
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
+    const line = container.querySelector('[data-testid="content-retry-result"] p');
+    expect(line?.textContent).toBe(koMessages.content.channelPostsRetryFailed);
+    expect(line?.textContent).not.toContain('내부 서버 원문');
+  });
+
+  it('⭐#4266 AC2 — 재시도 404 → 창 닫힘 · 발행 상태를 다시 읽고 유나 문장 · 서버 원문 0', async () => {
+    const { reloads } = await retryWith(() => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }));
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent)
+      .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
+    expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
+    expect(reloads).toBe(1);
+  });
+
+  it('#4266 — 재시도 성공 → 창 닫힘 · 성공 결과 줄 · 발행 상태 다시 읽음(회귀 0)', async () => {
+    const { reloads } = await retryWith(() => ({ status: 200, body: { id: 'cmd-1', status: 'pending' } }));
+    expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
+    expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent).toBe(koMessages.content.channelPostsRetrySuccess);
+    expect(reloads).toBe(1);
+  });
+
   it('⭐카디르군 REQUEST_CHANGES(2026-09-05) — permalink이 null이면(아직 미발행) 「공개 URL」 라벨을 포함해 그 행 전체가 안 보인다(<a> 부재만으론 안 잡히던 회귀)', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       publication: {

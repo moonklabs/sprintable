@@ -36,6 +36,7 @@ import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-bud
 import { ApiUsageBudgetIndicator, type ApiUsageBudgetState } from '@/components/content/api-usage-budget-indicator';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
+import { postPublicationRetry, PublicationRetryResultLine, type PublicationRetryResult } from '@/components/content/publication-retry';
 import { ImageAttachmentList } from '@/components/content/image-attachment-list';
 import { formatImageConvertedBadge } from '@/components/content/image-converted-badge';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
@@ -699,20 +700,18 @@ export default function ChannelPostEditPage() {
     comment: CommentItem,
   ): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
     if (!orgId || !comment.replyCommandId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
-    try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        // story #3601 — extractBackendErrorMessage(.error 1순위)로 통일.
-        const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string }; message?: string } | null;
-        return { ok: false, errorMessage: extractBackendErrorMessage(body, t) ?? t('commentsActionErrorGeneric') };
-      }
+    // story #4266 — 발행 재시도 확인 창들과 같은 공용 규칙(같은 엔드포인트): 404(재시도 대상 아님)는 서버 원문 대신 목록을 다시 읽고
+    // 유나 문장 · 그 밖의 실패도 서버 원문 대신 로케일 문장. 이 자리는 확인 창 없이 줄 안에 보여 «창 뒤 오류»는 해당 없음.
+    const result = await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`);
+    if (result.type === 'success') {
       loadComments();
       return { ok: true };
-    } catch {
-      return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
     }
+    if (result.type === 'not_retryable') {
+      loadComments();
+      return { ok: false, errorMessage: t('publicationRetryNotRetryableReloaded') };
+    }
+    return { ok: false, errorMessage: result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed') };
   }, [orgId, loadComments, t]);
 
   // story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
@@ -979,7 +978,7 @@ export default function ChannelPostEditPage() {
   // story #3454(유나 지적, PR#3798 Design review) — 다른 여섯 결과 state와 동형으로
   // raw를 담는다(§4-1 "원문을 접어서 함께 보존한다" — 이 state만 raw 자체가 없어서 재시도
   // 실패 시에만 원문이 안 남던 것을 맞춘다).
-  const [retryResult, setRetryResult] = useState<{ type: 'success' } | { type: 'error'; text: string; raw?: string } | null>(null);
+  const [retryResult, setRetryResult] = useState<PublicationRetryResult | null>(null);
 
   useEffect(() => {
     if (!orgId || !draftId) return;
@@ -1995,38 +1994,29 @@ export default function ChannelPostEditPage() {
     }
   };
 
-  // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤
-  // 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을 다시 불러 서버가 낸
-  // command_status(보통 pending)로 배지를 갱신한다(§3-2 "지어내지 않는다"와 같은 축 —
-  // B1(#3428)의 confirm 후 재조회 처방과 동형). 403(HUMAN_ONLY)·404(재시도 대상
-  // 아님)는 서버 문장을 그대로 보인다(BFF가 삼키지 않는다).
+  // story f061c1a3(#3422 AC3 잔여) — dead_letter 수동 재시도·needs_check 2단계 확認 뒤 재시도. 성공하면 로컬로 짐작해 만들지 않고 단건 GET을
+  // 다시 불러 서버가 낸 command_status로 배지를 갱신한다(§3-2 "지어내지 않는다").
+  // story #4266 — 결과가 무엇이든 확인 창을 닫고 결과 줄로 보인다(예전엔 실패면 창이 열린 채 · 오류 줄이 오버레이 뒤). 404(재시도 대상 아님)는
+  // 서버 원문 대신 상태를 다시 읽고 로케일 문장 · 그 밖의 실패도 로케일 문장(공용 postPublicationRetry).
+  const reloadDraft = async () => {
+    const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
+    if (draftRes.ok) {
+      const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
+      if (draftJson?.data) setDraft(draftJson.data);
+    }
+  };
   const handleRetry = async () => {
     if (!orgId || !draft?.command_id) return;
     setRetrying(true);
     setRetryResult(null);
     try {
-      const res = await fetchWithAuth(
-        `/api/organizations/${orgId}/channel-posts/publication-commands/${draft.command_id}/retry`, { method: 'POST' },
+      const result = await postPublicationRetry(
+        `/api/organizations/${orgId}/channel-posts/publication-commands/${draft.command_id}/retry`,
       );
-      if (res.ok) {
-        setRetryConfirmOpen(false);
-        setRetryResult({ type: 'success' });
-        const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
-        if (draftRes.ok) {
-          const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
-          if (draftJson?.data) setDraft(draftJson.data);
-        }
-      } else {
-        const body = await res.json().catch(() => null);
-        const info = parseSitePostApiError(body);
-        setRetryResult({
-          type: 'error',
-          text: info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('channelPostsRetryFailed')),
-          raw: info.raw,
-        });
-      }
-    } catch {
-      setRetryResult({ type: 'error', text: t('channelPostsRetryFailed') });
+      setRetryConfirmOpen(false);
+      setRetryChecklistConfirmed(false);
+      setRetryResult(result);
+      if (result.type !== 'error') await reloadDraft().catch(() => {});
     } finally {
       setRetrying(false);
     }
@@ -2402,18 +2392,7 @@ export default function ChannelPostEditPage() {
           destructive={false}
           onConfirm={() => void handleRetry()}
         />
-        {retryResult ? (
-          <Alert
-            variant={retryResult.type === 'error' ? 'destructive' : 'default'}
-            role={retryResult.type === 'error' ? 'alert' : 'status'}
-            data-testid="channel-post-retry-result"
-          >
-            <AlertDescription>
-              {retryResult.type === 'success' ? t('channelPostsRetrySuccess') : retryResult.text}
-            </AlertDescription>
-            {retryResult.type === 'error' ? <RawDetailsToggle raw={retryResult.raw} label={t('errorRawDetailsToggle')} /> : null}
-          </Alert>
-        ) : null}
+        <PublicationRetryResultLine result={retryResult} testId="channel-post-retry-result" />
         {/* AC9 — 나가는 계정. */}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">{t('channelPostsApprovalAccountLabel')}</span>
