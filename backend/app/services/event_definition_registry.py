@@ -409,11 +409,19 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
     stage_metadata가 빈 dict({})면 항상 통과(사이클형이 아닌 정의는 이 슬롯을 안 씀 — 신호형/
     측정형 정의도 이 함수를 걸어도 안전). payload_schema에 stage enum 자체가 없는데
     stage_metadata가 비어있지 않으면(가리킬 enum이 없음) 거부."""
+    if stage_metadata is None:
+        return
+    # story #4239(까디르 4598 QA P2 · 부류 전체) — 이 함수는 등록·수정 API의 입력을 그대로 받는다. 멤버십·set·`.get` 앞에서
+    # 타입을 먼저 본다 — 목록·객체가 frozenset 멤버십이나 set()에 들어가면 TypeError, dict 아닌 값의 `.get`은
+    # AttributeError가 돼 API가 400 대신 500을 낸다.
+    if not isinstance(stage_metadata, dict):
+        raise InvalidStageMetadataError(f"stage_metadata must be an object — got {type(stage_metadata).__name__}.")
     if not stage_metadata:
         return
-    stage_prop = (payload_schema.get("properties") or {}).get("stage") or {}
-    enum = stage_prop.get("enum")
-    if not isinstance(enum, list):
+    properties = payload_schema.get("properties") if isinstance(payload_schema, dict) else None
+    stage_prop = properties.get("stage") if isinstance(properties, dict) else None
+    enum = stage_prop.get("enum") if isinstance(stage_prop, dict) else None
+    if not isinstance(enum, list) or not all(isinstance(value, str) for value in enum):
         raise InvalidStageMetadataError(
             "stage_metadata가 있으려면 payload_schema.properties.stage.enum이 먼저 선언돼야 합니다."
         )
@@ -517,7 +525,29 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             # 정하는 커넥터 종류)이라 target을 kind에서 유도하지 않는다 — 명시 선언만 신뢰
             # (7건 기존 픽스처가 "kind=publish + agent 바인딩"을 pin하고 있어, kind 값
             # 자체로 판별하면 그 계약을 조용히 깬다).
-            if "target" in capability and capability["target"] not in _CAPABILITY_TARGETS:
+            # story #4239 — 허용 채널 종류(선택). 발행할 채널을 가리키는 stage(target="channel_connection")에서만 뜻이 있고,
+            # 있으면 알려진 채널 키(샌드박스 포함 · channel_adapters.ALL_CHANNEL_KEYS)의 비어 있지 않은 중복 없는 목록이어야
+            # 한다. 적용 API(apply_recipe_role_bindings)가 바인딩 연결의 채널 종류를 이 목록으로 거른다(밖이면 422).
+            if "channels" in capability:
+                from app.services.channel_adapters import ALL_CHANNEL_KEYS
+
+                channels = capability["channels"]
+                if capability.get("target") != "channel_connection":
+                    raise InvalidStageMetadataError(
+                        f"stage_metadata[{slug!r}].capability.channels is only allowed with target='channel_connection'."
+                    )
+                if (
+                    not isinstance(channels, list) or not channels
+                    or not all(isinstance(c, str) and c in ALL_CHANNEL_KEYS for c in channels)
+                    or len(set(channels)) != len(channels)
+                ):
+                    raise InvalidStageMetadataError(
+                        f"stage_metadata[{slug!r}].capability.channels must be a non-empty list of unique known channel "
+                        f"keys ({sorted(ALL_CHANNEL_KEYS)}) — got {channels!r}."
+                    )
+            if "target" in capability and (
+                not isinstance(capability["target"], str) or capability["target"] not in _CAPABILITY_TARGETS
+            ):
                 # story #3779 BE 한글 사용자 문장 가드(story #3924 "baseline은 줄기만") —
                 # 이 정의 등록 검증 에러는 내부 개발자/설정 대상(에이전트가 event
                 # definition을 신설할 때 hits)이라 sibling raise들(위)과 달리 새로 여기
@@ -552,9 +582,12 @@ def validate_role_actor_kinds(
         raise InvalidRoleActorKindsError(
             t("events.role_actor_kinds_not_object", locale, type_name=type(role_actor_kinds).__name__)
         )
-    declared_roles = {meta.get("role") for meta in stage_metadata.values() if isinstance(meta, dict)}
+    declared_roles = {
+        meta.get("role") for meta in (stage_metadata.values() if isinstance(stage_metadata, dict) else ())
+        if isinstance(meta, dict) and isinstance(meta.get("role"), str)
+    }
     for role, kind in role_actor_kinds.items():
-        if kind not in ROLE_ACTOR_KIND_VALUES:
+        if not isinstance(kind, str) or kind not in ROLE_ACTOR_KIND_VALUES:
             raise InvalidRoleActorKindsError(
                 t("events.role_actor_kinds_value_outside_vocabulary", locale, role=role, kind=kind)
             )

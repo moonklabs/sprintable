@@ -1077,3 +1077,96 @@ describe('블로그 레시피 — «승인 대기»는 선택 없는 읽기 전�
     });
   });
 });
+
+// story #4239 — 발행 자리의 채널 선택지는 그 stage가 선언한 허용 채널 종류(capability.channels)만. 예전엔 org의 active 연결
+// 전부(Instagram·WordPress·webhook…)가 떠 뉴스레터 «캠페인 생성»에 Instagram을 고를 수 있었다. 정의 모양은 0398 뉴스레터
+// «캠페인 생성»과 같은 발행 stage 하나(허용 목록은 0402 시드 · 이 테스트는 다이얼로그 동작만).
+const NEWSLETTER_LIKE: EventDefinitionResponse & { id: string } = {
+  id: 'recipe-4239', key: 'preset.marketing.newsletter', org_id: null, name: '뉴스레터', description: null,
+  payload_schema: { properties: { stage: { enum: ['draft', 'campaign_created'] } } },
+  stage_metadata: {
+    draft: { role: 'Creator', action: '뉴스레터 초안 작성' },
+    campaign_created: {
+      role: 'Publisher', action: '승인된 초안으로 Stibee 캠페인 만들기',
+      capability: { kind: 'publish', target: 'channel_connection', channels: ['stibee', 'stibee_sandbox'] },
+    },
+  },
+  role_actor_kinds: { Creator: 'agent', Publisher: 'agent' },
+  enabled: true,
+};
+
+function stubChannels(connections: { id: string; channel: string; account_label: string | null; account_id: string; status: string }[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('/api/team-members')) return { ok: true, json: async () => [{ id: 'agent-1', name: '댄', type: 'agent' }] };
+    if (url.startsWith('/api/organizations/org-1/channel-connections')) return { ok: true, json: async () => ({ data: connections }) };
+    if (url.startsWith('/api/organizations/org-1/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+    throw new Error(`unexpected fetch ${url}`);
+  }));
+}
+
+const MIXED_CONNECTIONS = [
+  { id: 'ig', channel: 'instagram', account_label: 'Instagram Sandbox', account_id: 'a', status: 'active' },
+  { id: 'wp', channel: 'wordpress', account_label: 'sample-3473', account_id: 'b', status: 'active' },
+  { id: 'wh', channel: 'webhook', account_label: null, account_id: 'https://x/api/dev/webhook-stub', status: 'active' },
+];
+
+describe('발행 자리 채널 선택지 = 레시피 허용 채널만(story #4239)', () => {
+  it('허용 밖 연결(Instagram·WordPress·webhook)이 섞여도 선택지는 허용 채널(Stibee)만 · 고르면 role_mapping에 실린다', async () => {
+    stubChannels([...MIXED_CONNECTIONS, { id: 'st', channel: 'stibee', account_label: '뭉클랩 스티비', account_id: 'c', status: 'active' }]);
+    const onSubmit = await mountDialog(NEWSLETTER_LIKE);
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
+    const options = [...select.querySelectorAll('option')].map((o) => o.value).filter(Boolean);
+    expect(options).toEqual(['st']);
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    await choose('[data-testid="creator-agent-select"]', 'agent-1');
+    await choose('[data-testid="publisher-connection-select"]', 'st');
+    expect(submitButton().hasAttribute('disabled')).toBe(false);
+    await act(async () => { submitButton().click(); });
+    await flush();
+    expect(onSubmit.mock.calls[0]![0].roleMapping).toEqual({ draft: 'agent-1', campaign_created: 'st' });
+  });
+
+  it('허용 채널 연결이 0개면 «이 레시피는 … 연결이 필요해요» + 채널 연결 링크 · 선택지 0 · 적용 비활성', async () => {
+    stubChannels(MIXED_CONNECTIONS);
+    await mountDialog(NEWSLETTER_LIKE);
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!;
+    expect([...select.querySelectorAll('option')].map((o) => o.value).filter(Boolean)).toEqual([]);
+    const note = document.body.querySelector('[data-testid="marketing-apply-channels-none-allowed"]')!;
+    // 유나 확정: 테스트 채널(stibee_sandbox)은 이름에서 뺀다 → «스티비»만.
+    expect(note.textContent).toContain(ORG.recipeApplyV2ChannelsNoneAllowed.replace('{channels}', koMessages.channelConnect.channelLabelStibee));
+    expect(note.querySelector('a')?.getAttribute('href')).toMatch(/^\/organization\/channels/);
+    expect(note.querySelector('a')?.className).toContain('whitespace-nowrap'); // ko 390에서 링크가 두 줄로 안 갈리게
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!.disabled).toBe(true); // 고를 연결 0개면 상자도 닫힘
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')).toBeNull();
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    await choose('[data-testid="creator-agent-select"]', 'agent-1');
+    expect(submitButton().hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('허용 채널 안내 문구(story #4239 유나 확정)', () => {
+  const withChannels = (channels: string[]): EventDefinitionResponse & { id: string } => ({
+    ...NEWSLETTER_LIKE,
+    stage_metadata: {
+      ...NEWSLETTER_LIKE.stage_metadata,
+      campaign_created: { ...NEWSLETTER_LIKE.stage_metadata.campaign_created, capability: { kind: 'publish', target: 'channel_connection', channels } },
+    },
+  });
+
+  it('여러 채널은 «또는»으로 묶고(Intl.ListFormat disjunction) 테스트 채널은 뺀다', async () => {
+    stubChannels(MIXED_CONNECTIONS.filter((c) => c.channel !== 'instagram'));
+    await mountDialog(withChannels(['threads', 'x', 'facebook', 'sandbox', 'x_sandbox', 'facebook_sandbox']));
+    const cc = koMessages.channelConnect;
+    const expected = new Intl.ListFormat('ko', { type: 'disjunction' }).format([cc.channelThreads, cc.channelLabelX, cc.channelLabelFacebook]);
+    const note = document.body.querySelector('[data-testid="marketing-apply-channels-none-allowed"]')!;
+    expect(note.textContent).toContain(ORG.recipeApplyV2ChannelsNoneAllowed.replace('{channels}', expected));
+    expect(note.textContent).not.toContain('Sandbox');
+  });
+
+  it('테스트 채널만 허용이면(빼고 나서 빈 목록) 기존 «연결 없음» 문장으로', async () => {
+    stubChannels(MIXED_CONNECTIONS);
+    await mountDialog(withChannels(['sandbox', 'stibee_sandbox']));
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-none-allowed"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')?.textContent).toBe(ORG.eventApplyChannelsEmpty);
+  });
+});

@@ -153,9 +153,11 @@ def test_capability_field_has_exactly_five_consumers_in_codebase():
     # `_render_gate_verdict_message`(다음 stage capability.target으로 자동발행 안내)·story #4110
     # `_resolve_crew_scoped_recipe_binding`·story #4174 `_stage_capability_kind`(capability.kind 읽기 공용 — 멘션 도구
     # 안내·서버 몫 다음 단계·블로그 레시피 문맥 판별이 같이 쓴다. 새 kind 소비처는 이 함수를 거친다).
+    # story #4239(RED 확인 뒤 의도적 갱신) — `apply_recipe_role_bindings`가 `capability.channels`(허용 채널 종류)를 읽어
+    # 허용 밖 연결 바인딩을 422로 거절하는 두 번째 읽기가 생겼다(같은 함수 안 · 새 함수 아님).
     assert _capability_consumers(events_module) == [
         "_render_gate_verdict_message", "_resolve_crew_scoped_recipe_binding", "_stage_capability_kind",
-        "_stage_target", "apply_recipe_role_bindings",
+        "_stage_target", "apply_recipe_role_bindings", "apply_recipe_role_bindings",
     ]
     # event_definition_registry.py: validate_stage_metadata 안의 `meta["capability"]`류 —
     # shape 검증 로직 안에서 "capability" 리터럴이 여러 번 등장(object 검사·에러 메시지 등)

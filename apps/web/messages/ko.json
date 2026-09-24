@@ -838,6 +838,8 @@
     "recipeApplyV2ComputeEmptyFallbackHint": "비워 두면 담당 에이전트가 자기 도구로 생성해요 — 조직 커넥터는 안 써요.",
     "recipeApplyV2PublisherBadge": "채널",
     "recipeApplyV2PublisherDesc": "승인된 소재를 채널에 게시",
+    "recipeApplyV2ChannelsNoneAllowed": "이 레시피는 {channels} 연결이 필요해요.",
+    "recipeApplyV2ChannelsConnectLink": "채널 연결하기",
     "recipeApplyV2StageCoverage": "{count}개 단계 실행",
     "recipeApplyV2CreatorMembershipError": "선택한 에이전트가 이 프로젝트 소속이 아니에요. 다시 선택해 주세요.",
     "recipeApplyV2NoOpError": "저장된 배정이 없어요(0건). 역할 배정이 실제로 반영되지 않았어요 — 다시 시도하거나 관리자에게 알려주세요.",

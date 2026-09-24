@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   groupStagesByRole, orderedRecipeRoles, recipeConnectionTargets, recipeKeyDomain,
-  recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
+  allowedChannelsForSlot, recipeRoleSlots, roleActorKind, stagesInFlowOrder, stagesWithCapability, stagesWithGate, uncoveredRecipeStages,
   type RecipeRoleSlot, type RecipeStageMetadata,
 } from './recipe-role-slots';
 import { VIDEO_PRODUCTION_FLOW, VIDEO_PRODUCTION_RECIPE } from './video-production-seed.test.fixture';
@@ -317,5 +317,25 @@ describe('approval.surface — 승인이 stage 밖인 사람 stage(story #4174 �
       wait: { role: 'Editor', approval: { surface: 'draft_gate' } },
     }, ['review', 'wait'], null);
     expect(slots.map((s) => [s.kind, s.stages])).toEqual([['approver', ['review']], ['approval_elsewhere', ['wait']]]);
+  });
+});
+
+// story #4239 — 채널 자리의 허용 채널 종류 = 그 자리 stage들이 선언한 capability.channels의 교집합(선언 없으면 null=제한 없음).
+describe('allowedChannelsForSlot(story #4239)', () => {
+  const slot = (stages: string[]): RecipeRoleSlot => ({ key: 'P:channel', role: 'P', kind: 'channel', stages, memberType: 'agent', gateApprovers: [] });
+  const pub = (channels?: string[]) => ({ role: 'P', capability: { kind: 'publish', target: 'channel_connection', ...(channels ? { channels } : {}) } });
+
+  it('선언이 없으면 null(예전대로 제한 없음)', () => {
+    expect(allowedChannelsForSlot(slot(['published']), { published: pub() })).toBeNull();
+  });
+
+  it('선언이 하나면 그 목록', () => {
+    expect(allowedChannelsForSlot(slot(['campaign_created']), { campaign_created: pub(['stibee', 'stibee_sandbox']) })).toEqual(['stibee', 'stibee_sandbox']);
+  });
+
+  it('여러 stage가 선언하면 교집합 · 선언 없는 stage는 제한을 안 더한다', () => {
+    expect(allowedChannelsForSlot(slot(['a', 'b', 'c']), {
+      a: pub(['threads', 'x', 'facebook']), b: pub(['x', 'facebook', 'instagram']), c: pub(),
+    })).toEqual(['x', 'facebook']);
   });
 });

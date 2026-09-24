@@ -3552,6 +3552,18 @@ async def apply_recipe_role_bindings(
             status_code=422,
             detail=f"role_mapping에 이 정의의 stage_metadata에 없는 stage가 있습니다: {unknown_stages}",
         )
+    # story #4239(까디르 4598 QA P2) — 값은 전부 id다. 아래 `uuid.UUID(v)`가 잘못된 문자열에서 ValueError(→ 500)가 되지
+    # 않게 먼저 거른다(422).
+    malformed_ids = []
+    for stage, value in body.role_mapping.items():
+        try:
+            uuid.UUID(value)
+        except ValueError:
+            malformed_ids.append(stage)
+    if malformed_ids:
+        raise HTTPException(
+            status_code=422, detail=f"role_mapping values must be UUIDs — malformed for stages: {sorted(malformed_ids)}",
+        )
 
     # story #4090(alembic 0385, 페드루 PO 確定 2026-09-21) — capability.target=
     # "channel_connection"인 stage(Publisher)는 알릴 사람이 아니라 **발행할 채널**을
@@ -3598,6 +3610,25 @@ async def apply_recipe_role_bindings(
             status_code=422,
             detail=f"channel connection(s) not found in this org: {missing_connections}",
         )
+
+    # story #4239 — stage가 허용 채널 종류(`capability.channels`)를 선언했으면, 바인딩한 연결의 채널 종류가 그 안이어야 한다.
+    # 예전엔 target만 보고 org 안에 있기만 하면 받아서, 뉴스레터 «캠페인 생성»에 Instagram·WordPress 연결을 묶을 수 있었다
+    # (예약 발행은 «바인딩 연결 = 초안 연결»이라 그 잘못이 발행 실패로야 드러났다). 선언 없는 stage는 예전대로(회귀 0).
+    if channel_stage_values:
+        connection_channels = dict((await db.execute(
+            select(ChannelConnection.id, ChannelConnection.channel).where(ChannelConnection.id.in_(channel_connection_ids))
+        )).all())
+        disallowed = []
+        for stage, value in sorted(channel_stage_values.items()):
+            allowed = ((definition.stage_metadata.get(stage) or {}).get("capability") or {}).get("channels")
+            channel = connection_channels[uuid.UUID(value)]
+            if allowed and channel not in allowed:
+                disallowed.append({"stage": stage, "channel": channel, "allowed": list(allowed)})
+        if disallowed:
+            raise HTTPException(
+                status_code=422,
+                detail=f"channel connection type not allowed for this recipe stage: {disallowed}",
+            )
 
     # story #4101 — generation_connector target도 org 경계 안 존재 검증 + revoke된 커넥터는
     # 바인딩 대상 불가(status='active'만 유효, 스토리 판별 조건 "revoke 뒤 바인딩 대상 불가").
