@@ -13,7 +13,10 @@ import type { BlockTemplate, EventDefinitionSummary as EventDefinitionSummaryDef
 // (payload_schema.properties/routing 두 leg/block_template은 이미 사람이 읽을 수 있는 형태의
 // 구조화 데이터이지 정의기 폼 전용 모양이 아니다 — 그 사실을 활용).
 // JSON Schema의 `type`은 문자열 하나이거나 유니언 배열(예: `["string", "null"]` — 비어도 되는 필드)이다.
-type SchemaProperty = { type?: string | string[]; format?: string; enum?: (string | null)[] };
+// enum 값은 JSON 값 아무거나다(등록 API가 숫자 · 참거짓 enum도 받는다 — 까디르 4603 QA P1). 문자열로 좁혀 선언하면 tsc가
+// 문자열 전용 처리(`.split`)를 못 잡는다.
+type EnumValue = string | number | boolean | null;
+type SchemaProperty = { type?: string | string[]; format?: string; enum?: EnumValue[] };
 
 /** story #4246 — `null`을 뺀 실제 값 타입들. 비어도 되는지는 «필수/선택» 칸이 따로 말한다. */
 function valueTypes(def: SchemaProperty): string[] {
@@ -65,13 +68,17 @@ function valueTypeLabel(type: string, format: string | undefined, t: ReturnType<
 // - enum: «다음 중 하나: …» — 값은 페이로드에 그대로 보낼 원문이라 번역하지 않고 값마다 `<code>`(줄이지 않고 칸 안에서 줄바꿈).
 function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslations>, locale: string): ReactNode {
   if (def.enum) {
-    const values = def.enum.filter((v): v is string => v !== null);
+    const values = def.enum.filter((v): v is Exclude<EnumValue, null> => v !== null);
     // 머리말(«다음 중 하나:» / «One of:») 뒤에 값 목록 — ko·en 모두 값이 문장 끝이라 메시지에 자리 태그를 두지 않는다.
     return (
       <>
         {t('definerFieldTypeEnum')}{' '}
         {values.map((value, i) => (
-          <Fragment key={value}>{i > 0 ? ', ' : null}<code className="rounded bg-muted px-1 font-mono text-[11px]">{breakableIdentifier(value)}</code></Fragment>
+          <Fragment key={`${i}:${String(value)}`}>
+            {i > 0 ? ', ' : null}
+            {/* 식별자 줄바꿈은 문자열 값만 — 숫자 · 참거짓은 원문 그대로 */}
+            <code className="rounded bg-muted px-1 font-mono text-[11px]">{typeof value === 'string' ? breakableIdentifier(value) : String(value)}</code>
+          </Fragment>
         ))}
       </>
     );

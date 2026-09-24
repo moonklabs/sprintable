@@ -144,3 +144,23 @@ describe('EventDefinitionSummary 식별자 줄바꿈 자리(story #4246 · 유�
     expect(code.querySelectorAll('wbr')).toHaveLength(1);
   });
 });
+
+// 까디르 4603 QA P1 — 등록 API는 숫자 · 참거짓 enum도 받는다. 문자열 전용 줄바꿈(`.split`)이 그 값에 불리면 표 렌더가 죽었다.
+describe('EventDefinitionSummary 숫자 · 참거짓 enum(story #4246 · 까디르 QA P1)', () => {
+  it('형식 칸은 원문 값 · 미리보기 예시는 첫 실제 값(숫자)', async () => {
+    const schema = { properties: { priority: { type: 'integer', enum: [1, 2] }, strict: { type: 'boolean', enum: [true, false] } } };
+    const template = { blocks: [{ type: 'fields', fields: [{ label: 'P', value: 'V[{{payload.priority}}]' }] }] };
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EventDefinitionSummary payloadSchema={schema} routing={{}} actionAuth={null} blockTemplate={template} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const codes = (name: string) => [...container.querySelectorAll(`[data-testid="event-def-field-type-${name}"] code`)].map((c) => c.textContent);
+    expect(codes('priority')).toEqual(['1', '2']);
+    expect(codes('strict')).toEqual(['true', 'false']);
+    expect(container.textContent).toContain('V[1]');
+  });
+});
