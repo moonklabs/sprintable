@@ -282,3 +282,152 @@ async def test_old_human_binding_on_the_previous_stage_is_not_a_recipient():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ── 까디르 4617 codex 넷(P1 · P2 · P2 · 테스트) ────────────────────────────────────────────────────────
+
+
+async def _published_event_context(Session, w) -> tuple[dict, uuid.UUID]:
+    """실제로 발행된 published 이벤트가 실어 보낸 문맥(refs)과 최종 발행 게이트 id."""
+    _recipients, message = await _published_recipients_and_message(Session, w)
+    refs = message.msg_metadata["event"]["refs"]
+    return {k: refs[k] for k in ("trigger_gate_id", "publication_id") if k in refs}, await _gate_id(Session, w, "external_publish")
+
+
+async def _resolve_published(Session, w, *, context: dict | None) -> set:
+    from app.services.event_routing_resolver import _resolve_recipe_role_binding
+
+    async with Session() as s:
+        return await _resolve_recipe_role_binding(
+            s, org_id=w["org_id"], definition_key=_KEY, context=context,
+            payload={"stage": "published", "work_item_type": "story", "work_item_id": str(w["story_id"])},
+        )
+
+
+@pytest.mark.anyio
+async def test_published_event_carries_the_trigger_gate_and_it_wins_over_a_later_approved_gate():
+    """P1 — 서버가 낸 published 이벤트는 촉발 게이트 id를 문맥으로 싣고, 해소기는 그 id로 게이트를 집는다. 같은 작업 항목에
+    더 늦게 승인된 게이트가 있어도(다음 회차 경합) 실어 보낸 게이트의 승인자가 이긴다. id가 없으면(옛 경로) 최신으로 폴백.
+    뮤테이션: 해소기가 문맥 게이트를 무시하면 늦은 게이트의 승인자에게 가 RED."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.team import TeamMember
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        await _run_to_published(app, Session, w)
+        context, gate_id = await _published_event_context(Session, w)
+        assert context.get("trigger_gate_id") == str(gate_id), context
+        assert context.get("publication_id"), context
+
+        async with Session() as s:
+            later = TeamMember(
+                id=uuid.uuid4(), org_id=w["org_id"], project_id=w["project_id"], type="human", name="다음 회차 승인자", is_active=True,
+            )
+            s.add(later)
+            first = await s.get(Gate, gate_id)
+            s.add(Gate(
+                id=uuid.uuid4(), org_id=w["org_id"], work_item_id=w["story_id"], work_item_type="story",
+                gate_type=first.gate_type, scope_key=f"next-round-{uuid.uuid4().hex[:6]}", status="approved",
+                resolver_id=later.id,
+                resolved_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                neutral_facts={**(first.neutral_facts or {})},
+            ))
+            await s.commit()
+
+        assert await _resolve_published(Session, w, context=context) == {w["owner_member_id"]}
+        assert await _resolve_published(Session, w, context=None) == {later.id}  # 옛 경로 폴백(경고 로그)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_trigger_gate_without_resolver_falls_back_to_the_designated_approver():
+    """촉발 게이트에 resolver가 비어 있으면 지정 승인자(designated)에게. 뮤테이션: 지정 승인자 폴백을 지우면 0 → RED."""
+    from app.main import app
+    from app.models.gate import Gate
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        await _run_to_published(app, Session, w)
+        context, gate_id = await _published_event_context(Session, w)
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            assert gate.designated_approver_id == w["owner_member_id"]
+            gate.resolver_id = None
+            await s.commit()
+        assert await _resolve_published(Session, w, context=context) == {w["owner_member_id"]}
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_previous_stage_agent_binding_from_another_org_is_not_a_recipient():
+    """P2 — 직전 stage 바인딩의 에이전트 판정은 이 조직의 멤버만. 다른 조직 에이전트를 가리키는 행은 빠진다.
+    뮤테이션: 에이전트 판정 쿼리에서 조직 조건을 지우면 그 멤버가 섞여 RED."""
+    from app.main import app
+    from app.models.organization import Organization
+    from app.models.project import Project
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.models.team import TeamMember
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        await _run_to_published(app, Session, w)
+        context, _gate_id_value = await _published_event_context(Session, w)
+        async with Session() as s:
+            other_org = Organization(id=uuid.uuid4(), name="Other4255", slug=f"o4255-{uuid.uuid4().hex[:6]}")
+            s.add(other_org)
+            await s.commit()
+            other_project = Project(id=uuid.uuid4(), org_id=other_org.id, name="P")
+            s.add(other_project)
+            await s.commit()
+            stranger = TeamMember(
+                id=uuid.uuid4(), org_id=other_org.id, project_id=other_project.id, type="agent", name="다른 조직 에이전트",
+                is_active=True,
+            )
+            s.add(stranger)
+            await s.commit()
+            s.add(RecipeRoleBinding(
+                id=uuid.uuid4(), org_id=w["org_id"], project_id=w["project_id"], event_definition_key=_KEY,
+                stage="pending_approval", agent_member_id=stranger.id,
+            ))
+            await s.commit()
+        assert await _resolve_published(Session, w, context=context) == {w["owner_member_id"]}
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_old_agent_binding_on_the_channel_stage_does_not_bypass_the_rule():
+    """P2 — 채널 연결 stage(published)에 0387 전의 옛 **에이전트** 바인딩이 남아 있어도(dev 실측 1행) 해소에 쓰지 않는다 —
+    마지막 서버 stage 규칙(촉발 게이트 승인자)이 그대로 선다. 뮤테이션: stage 방식보다 바인딩을 먼저 보면 그 에이전트에게 가 RED."""
+    from sqlalchemy import update
+
+    from app.main import app
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        await _run_to_published(app, Session, w)
+        context, _gate_id_value = await _published_event_context(Session, w)
+        async with Session() as s:
+            await s.execute(
+                update(RecipeRoleBinding)
+                .where(RecipeRoleBinding.org_id == w["org_id"], RecipeRoleBinding.stage == "published")
+                .values(agent_member_id=w["creator_id"], channel_connection_id=None)
+            )
+            await s.commit()
+        assert await _resolve_published(Session, w, context=context) == {w["owner_member_id"]}
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

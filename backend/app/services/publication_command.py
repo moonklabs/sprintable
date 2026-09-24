@@ -619,6 +619,7 @@ async def _emit_recipe_published_for_channel_command(
             side, org_id=_org_id, work_item_type=work_item_type,
             work_item_id=_work_item_id, definition_key=definition_key, next_stage=next_stage,
             publication_id=publication_id,  # story #4242 — 뉴스레터 «발송 요청» 봉인 필드 `publication_id`의 원천
+            trigger_gate_id=recipe_gate.id,  # story #4255 — 이 발행을 촉발한 레시피 게이트(추측 없이)
         )
 
     await run_side_effect_in_own_session(
