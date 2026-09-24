@@ -582,7 +582,8 @@ def validate_role_actor_kinds(
     from app.services.i18n_catalog import t
 
     # 까디르 4606 P2 — «없음»은 None과 빈 dict뿐이다. `[]` · `""` · `0` · `False`는 falsy라도 모양이 틀린 값이라 아래에서
-    # 400으로 거부한다(예전 `if not ...`는 그 넷을 «없음»으로 보고 통과시켰다).
+    # 거부한다(예전 `if not ...`는 그 넷을 «없음»으로 보고 통과시켰다). 서비스 계약이다 — HTTP 등록 · 수정은 요청 스키마
+    # (`dict | None`)가 그 넷을 먼저 422로 막는다(test_2636 HTTP 테스트).
     if role_actor_kinds is None:
         return
     if not isinstance(role_actor_kinds, dict):

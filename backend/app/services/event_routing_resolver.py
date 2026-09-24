@@ -251,8 +251,9 @@ async def _bound_member_for_stage(
 async def _stage_approval_is_elsewhere(
     db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, stage: str,
 ) -> bool:
-    """story #4243 — stage가 `approval.surface`를 선언했고 그 역할이 사람 · either로 선언됐는가(FE `stageApprovalSurface`와
-    같은 규칙 — 선언 없는 역할은 에이전트라 해당 없음)."""
+    """story #4243 — stage가 `approval.surface`를 선언했고 그 stage의 멤버 종류가 에이전트가 아닌가. FE `stageApprovalSurface`
+    (recipe-role-slots.ts · `stageMemberKind() !== 'agent'`)와 같은 규칙이다(까디르 4606 델타 P2): 채널 연결 · 연산 커넥터
+    stage는 멤버 종류가 없어(null) 에이전트가 아니고, 선언 없는 역할은 에이전트다."""
     from app.models.event_definition import EventDefinition
 
     definition = (await db.execute(
@@ -270,8 +271,10 @@ async def _stage_approval_is_elsewhere(
     meta = (definition.stage_metadata or {}).get(stage) or {}
     if not isinstance(meta, dict) or not (meta.get("approval") or {}).get("surface"):
         return False
+    if (meta.get("capability") or {}).get("target") in ("channel_connection", "generation_connector"):
+        return True
     kinds = definition.role_actor_kinds if isinstance(definition.role_actor_kinds, dict) else {}
-    return kinds.get(meta.get("role")) in ("human", "either")
+    return (kinds.get(meta.get("role")) or "agent") != "agent"
 
 
 async def _resolve_recipe_role_binding(

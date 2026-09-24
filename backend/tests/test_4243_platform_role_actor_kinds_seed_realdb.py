@@ -112,7 +112,14 @@ async def test_migration_0403_is_idempotent_and_reversible():
             url = "postgresql+psycopg2://" + url[len(prefix):]
             break
     engine = sa.create_engine(url)
+    _STATE_SQL = sa.text(
+        "SELECT version, role_actor_kinds, stage_metadata->'brief_doc_approval'->'approval' FROM event_definitions "
+        "WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
+    )
     try:
+        with engine.connect() as conn:
+            before = tuple(conn.execute(_STATE_SQL).one())
+            conn.rollback()
         with engine.connect() as conn:
             transaction = conn.begin()
             try:
@@ -121,10 +128,7 @@ async def test_migration_0403_is_idempotent_and_reversible():
                         fn()
 
                 def _state():
-                    return conn.execute(sa.text(
-                        "SELECT version, role_actor_kinds, stage_metadata->'brief_doc_approval'->'approval' FROM event_definitions "
-                        "WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
-                    )).one()
+                    return conn.execute(_STATE_SQL).one()
 
                 applied = _state()
                 assert applied[1] is not None and applied[2] == {"surface": "doc_approval"}
@@ -135,12 +139,16 @@ async def test_migration_0403_is_idempotent_and_reversible():
                 assert down[1] is None and down[2] is None and down[0] == applied[0] - 2
                 _run(m.upgrade)
                 assert _state() == applied
+                # 트랜잭션 끝 상태를 일부러 «내려간» 쪽에 둔다 — 위 순서는 결국 제자리라, 여기서 한 번 더 내리지 않으면 rollback 대신
+                # 커밋해도 뒤의 «전과 같음» 단언이 통과해 버린다(뮤테이션을 못 잡는다).
+                _run(m.downgrade)
             finally:
                 transaction.rollback()
         with engine.connect() as conn:
-            assert conn.execute(sa.text(
-                "SELECT role_actor_kinds IS NOT NULL FROM event_definitions WHERE org_id IS NULL AND key = 'preset.workflow.loop_agency'"
-            )).scalar_one(), "rollback 뒤 공유 DB의 0403 선언이 그대로 남아 있어야 한다"
+            after = tuple(conn.execute(_STATE_SQL).one())
+        # 까디르 4606 델타 P2 — version · 선언 · 승인 메타까지 전과 같아야 한다(rollback을 빼거나 커밋하면 version이 +2 · 선언이
+        # 바뀐 채 남아 RED).
+        assert after == before, (before, after)
     finally:
         engine.dispose()
 

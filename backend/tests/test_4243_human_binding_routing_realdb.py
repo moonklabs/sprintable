@@ -68,8 +68,9 @@ async def test_stage_bound_to_a_human_member_routes_to_that_person():
         await engine.dispose()
 
 
-async def _declare_approval_elsewhere(session, org_id, *, stage: str, kind: str | None):
-    """그 stage에 `approval.surface`(승인이 stage 밖)를 선언하고, 그 역할을 `kind`로 선언한다(None = 선언 없음)."""
+async def _declare_approval_elsewhere(session, org_id, *, stage: str, kind: str | None, capability_target: str | None = None):
+    """그 stage에 `approval.surface`(승인이 stage 밖)를 선언하고, 그 역할을 `kind`로 선언한다(None = 선언 없음).
+    `capability_target`을 주면 그 stage를 채널 연결 · 연산 커넥터 stage로 만든다(멤버 종류 없음)."""
     from sqlalchemy import select
 
     from app.models.event_definition import EventDefinition
@@ -79,14 +80,20 @@ async def _declare_approval_elsewhere(session, org_id, *, stage: str, kind: str 
     )).scalar_one()
     meta = {k: dict(v) for k, v in _STAGE_METADATA.items()}
     meta[stage]["approval"] = {"surface": "draft_gate"}
+    if capability_target:
+        meta[stage]["capability"] = {"kind": "publish", "target": capability_target}
     d.stage_metadata = meta
     d.role_actor_kinds = {meta[stage]["role"]: kind} if kind else None
     await session.commit()
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("kind, expect_routed", [("human", False), ("either", False), ("agent", True), (None, True)])
-async def test_old_binding_on_an_approval_elsewhere_stage_is_not_a_recipient(kind, expect_routed):
+@pytest.mark.parametrize("kind, capability_target, expect_routed", [
+    ("human", None, False), ("either", None, False), ("agent", None, True), (None, None, True),
+    # 까디르 4606 델타 P2 — FE와 같은 판정: 연결 stage는 멤버 종류가 없어(에이전트 아님) 역할 선언과 무관하게 승인 자리다.
+    ("agent", "generation_connector", False),
+])
+async def test_old_binding_on_an_approval_elsewhere_stage_is_not_a_recipient(kind, capability_target, expect_routed):
     """까디르 4606 렌즈 · PO ⓑ — 승인이 stage 밖(approval.surface)인 사람 · either 역할 stage에 **옛 바인딩 행**이 남아 있어도
     그 stage 이벤트 수신자로 잡지 않는다(적용 API는 빠진 stage를 지우지 않아 4594 전에 적용한 조직엔 행이 남는다). 에이전트
     역할 · 선언 없는 역할(= 에이전트)은 그 stage가 멤버 자리라 예전처럼 바인딩대로 간다.
@@ -98,7 +105,7 @@ async def test_old_binding_on_an_approval_elsewhere_stage_is_not_a_recipient(kin
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s, slug=f"e4243-{uuid.uuid4().hex[:6]}")
             await _seed_definition(s, org_id)
-            await _declare_approval_elsewhere(s, org_id, stage="approve", kind=kind)
+            await _declare_approval_elsewhere(s, org_id, stage="approve", kind=kind, capability_target=capability_target)
             publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
             old = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="human", name="옛 승인자", is_active=True)
             s.add(old)
