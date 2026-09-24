@@ -228,6 +228,27 @@ describe('useSseMultiplexer — story #2078', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  // story #4263 — 소비처(안 읽음 수 · 탭바 결재 수 · 채팅 목록)가 포커스 재조회를 생략할지 가르는 isAlive는 4252 재연결 판정과 같은 값이다.
+  it('⭐isAlive: 열리기 전 false · OPEN + 최근 수신 true · 수신 없이 45초 넘으면 false · heartbeat가 오면 다시 true', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-09-24T00:00:00Z'));
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      expect(handle!.isAlive()).toBe(false);
+      instances[0]!.readyState = 1;
+      act(() => { instances[0]!.onopen?.(); });
+      expect(handle!.isAlive()).toBe(true);
+      vi.setSystemTime(new Date('2026-09-24T00:00:50Z'));
+      expect(handle!.isAlive()).toBe(false);
+      act(() => { dispatchNamed(instances[0]!, 'heartbeat', {}); });
+      expect(handle!.isAlive()).toBe(true);
+      instances[0]!.readyState = 2;
+      expect(handle!.isAlive()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('onopen 시 connected=true, onerror 시 connected=false', async () => {
     await act(async () => {
       root.render(<Harness memberId="me-1" enabled />);

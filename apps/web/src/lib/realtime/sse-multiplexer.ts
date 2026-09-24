@@ -61,6 +61,10 @@ export interface SseMultiplexerHandle {
    * 반응해야 하는 소비처는 이 필드를 폴링하지 말고 `subscribeReconnect`를 쓴다.
    */
   connected: boolean;
+  /** story #4263 — 지금 SSE가 **살아 있는가**(OPEN · 최근 수신이 heartbeat 주기 + 여유 안). 4252가 창 포커스 때 재연결을 건너뛰는 판정
+   * (`createSseLivenessTracker` · 지금 소스의 활동만 셈)과 **같은 값**이다 — 소비처가 «SSE가 대신하는 자원»의 포커스 재조회를 생략할지 이것으로
+   * 가른다(규칙 사본 0). 호출 시점 값(리액티브 아님). 죽었거나 끊겼던 뒤엔 false → 소비처는 재조회를 유지한다(정확성 우선). */
+  isAlive: () => boolean;
 }
 
 export function useSseMultiplexer(memberId: string | undefined, enabled: boolean): SseMultiplexerHandle {
@@ -263,10 +267,12 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   // 안정적이므로(useCallback, 의존성 불변) 이 useMemo도 최초 1회 이후 재계산되지 않는다 —
   // `connected`가 몇 번을 토글해도 핸들 참조는 그대로라, 이 핸들을 effect deps에 둔
   // 소비처가 재연결마다 구독을 해지·재구독하는 일이 없다.
+  const isAlive = useCallback(() => livenessRef.current.isAlive(esRef.current?.readyState), []);
   return useMemo(() => ({
     subscribe,
     subscribeMessage,
     subscribeReconnect,
     get connected() { return connectedRef.current; },
-  }), [subscribe, subscribeMessage, subscribeReconnect]);
+    isAlive,
+  }), [subscribe, subscribeMessage, subscribeReconnect, isAlive]);
 }
