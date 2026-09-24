@@ -48,6 +48,23 @@ vi.mock('@/lib/nav-config', () => ({
   // 여러 개를 참조한다. 빈 함수로 두면 이 파일의 "2구역·3항목" 전제(legacy 쪽 0)가 그대로
   // 보존된다.
   groupVisibleLegacyByTarget: () => [],
+  // story #4278 — more/page.tsx는 이제 사이드바와 같은 resolveNavGroups(flags)로 구역을 얻는다(플래그별 목적지). 이 파일의
+  // 가짜 카탈로그를 그대로 돌려준다(위 NAV_GROUPS와 같은 두 구역 · 세 항목).
+  resolveNavGroups: () => [
+    {
+      id: 'fake-a', labelKey: 'zoneNow',
+      items: [
+        { id: 'fake-item-1', labelKey: 'orgBriefing', descriptionKey: 'descOrgBriefing', icon: AlertCircle, kind: 'static', path: '/fake-1' },
+        { id: 'fake-item-2', labelKey: 'inbox', descriptionKey: 'descInbox', icon: AlertCircle, kind: 'static', path: '/fake-2' },
+      ],
+    },
+    {
+      id: 'fake-b', labelKey: 'zoneDev',
+      items: [
+        { id: 'fake-item-3', labelKey: 'goals', descriptionKey: 'descGoals', icon: AlertCircle, kind: 'resource', path: 'fake-3' },
+      ],
+    },
+  ],
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

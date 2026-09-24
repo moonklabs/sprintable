@@ -118,6 +118,27 @@ export function resolveTabsForFlags(navV3Flags: NavV3Flags): TabConfig {
   return anyV3Enabled ? V3_TABS : TABS;
 }
 
+// story #4278(유나 결정 ①) — 탭 목적지(destKey) → 메뉴 항목 id. «전체» 메뉴는 «지금 그려진 탭»이 가는 곳만 뺀다(같은 출처 —
+// 예전 MOBILE_HUB_EXCLUDE_IDS는 플래그와 무관해 ON에서 결재함이 어디에도 없었다). «전체»(more)는 자기 자신이라 대응 없음.
+const TAB_DEST_NAV_ITEM_ID: Record<TabDef['destKey'], string | null> = {
+  work: 'board', approvals: 'inbox', chats: 'chats', today: 'org-briefing', more: null,
+};
+
+export function tabDestinationNavIds(navV3Flags: NavV3Flags): Set<string> {
+  return new Set(
+    resolveTabsForFlags(navV3Flags)
+      .map((tab) => TAB_DEST_NAV_ITEM_ID[tab.destKey])
+      .filter((id): id is string => id !== null),
+  );
+}
+
+/** story #4278 — 탭바가 지금 그리는 탭(«전체» 빼고 · 탭바 순서)의 라벨 키. «전체» 메뉴 머리 안내가 이 이름을 그대로 쓴다. */
+export function visibleTabLabels(navV3Flags: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
+  return resolveTabsForFlags(navV3Flags)
+    .filter((tab) => tab.key !== 'more')
+    .map((tab) => ({ namespace: tab.namespace, labelKey: tab.labelKey }));
+}
+
 export function resolveTabHref(tab: TabDef, dest: NavV3Destinations, scope: TabHrefScope, withProject: (href: string) => string): string {
   return destHref(dest[tab.destKey], scope, withProject);
 }
