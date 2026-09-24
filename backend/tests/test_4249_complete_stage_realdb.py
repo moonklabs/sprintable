@@ -361,3 +361,67 @@ async def test_after_the_gate_is_approved_the_next_assignee_starts_their_stage()
         assert RecipeRoleBinding  # 바인딩은 _world가 전 stage를 나에게
     finally:
         await engine.dispose()
+
+
+async def _other_project_story(Session, w):
+    """같은 org의 다른 프로젝트 B와 그 스토리 — B엔 바인딩이 없다(w의 바인딩은 프로젝트 A)."""
+    from app.models.project import Project
+
+    async with Session() as s:
+        project_b = Project(id=uuid.uuid4(), org_id=w["org_id"], name="B")
+        s.add(project_b)
+        await s.commit()
+        story_b = await _seed_story(s, w["org_id"], project_b.id)
+    return project_b.id, story_b
+
+
+@pytest.mark.anyio
+async def test_the_project_comes_from_the_work_item_not_the_request():
+    """까디르 4623 codex P1 — «A 프로젝트 + B의 작업 항목»을 보내면 예전엔 A의 바인딩으로 통과하고 코어가 B로 풀어 B에서
+    발행했다. 이제 작업 항목의 실제 프로젝트 하나로 인가 · 판정하고, 요청 프로젝트가 다르면 거절한다(발행 0). 같은 프로젝트를
+    보내면 그 프로젝트(B)의 바인딩으로 판정한다(B엔 바인딩이 없어 403). start-candidates도 같은 판정이다."""
+    from app.routers.events import (
+        CompleteStageRequest,
+        complete_recipe_stage,
+        get_recipe_start_candidates,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        project_b, story_b = await _other_project_story(Session, w)
+        wb = {**w, "story_id": story_b}
+        await _start(Session, wb)  # B 스토리에 레시피 시작(첫 stage) — 지금 stage = assign_step_1
+
+        async def complete(project_id):
+            async with Session() as s:
+                return await complete_recipe_stage(
+                    w["definition"].id,
+                    CompleteStageRequest(
+                        project_id=project_id, work_item_type="story", work_item_id=story_b, stage="assign_step_1",
+                    ),
+                    BackgroundTasks(), _fake_request(), db=s, auth=_human_auth(w["me_user"], w["org_id"]), org_id=w["org_id"],
+                )
+
+        with pytest.raises(HTTPException) as info:
+            await complete(w["project_id"])
+        assert info.value.status_code == 422 and info.value.detail["code"] == "WORK_ITEM_PROJECT_MISMATCH"
+        assert await _stage_sender(Session, wb, "submit_step_1") is None
+        with pytest.raises(HTTPException) as info:
+            await complete(project_b)
+        assert info.value.status_code == 403 and info.value.detail["code"] == "NOT_STAGE_ASSIGNEE"
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as info:
+                await get_recipe_start_candidates(
+                    w["project_id"], work_item_type="story", work_item_id=story_b, db=s,
+                    auth=_human_auth(w["me_user"], w["org_id"]), org_id=w["org_id"],
+                )
+            assert info.value.status_code == 422 and info.value.detail["code"] == "WORK_ITEM_PROJECT_MISMATCH"
+            resp = await get_recipe_start_candidates(
+                project_b, work_item_type="story", work_item_id=story_b, db=s,
+                auth=_human_auth(w["me_user"], w["org_id"]), org_id=w["org_id"],
+            )
+        assert resp.candidates == []  # B엔 적용된 레시피(바인딩)가 없다
+    finally:
+        await engine.dispose()

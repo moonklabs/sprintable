@@ -4226,7 +4226,12 @@ async def get_recipe_start_candidates(
     from app.models.event_definition import EventDefinition
     from app.models.recipe_role_binding import RecipeRoleBinding
     from app.services.project_auth import require_project_access
+    from app.services.recipe_stage_completion import work_item_project
 
+    # 까디르 4623 codex P1 — 인가 · 바인딩 · 지금 stage 판정은 작업 항목의 실제 프로젝트 하나로(요청 값은 대조만).
+    project_id = await work_item_project(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, claimed_project_id=project_id,
+    )
     await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
 
     binding_rows = (await db.execute(
@@ -4373,10 +4378,16 @@ async def complete_recipe_stage(
     from app.services.member_resolver import resolve_member
     from app.services.project_auth import require_project_access
     from app.services.recipe_stage_completion import (
-        lock_stage_completion, validate_next_stage_start, validate_stage_completion,
+        lock_stage_completion, validate_next_stage_start, validate_stage_completion, work_item_project,
     )
 
-    await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
+    # 까디르 4623 codex P1 — 요청이 보낸 프로젝트가 아니라 작업 항목의 실제 프로젝트로 인가하고 판정한다(발행 코어가 라우팅에
+    # 쓰는 것과 같은 값 — 다르면 A 권한 · A 바인딩으로 통과해 B에서 발행됐다).
+    project_id = await work_item_project(
+        db, org_id=org_id, work_item_type=body.work_item_type, work_item_id=body.work_item_id,
+        claimed_project_id=body.project_id,
+    )
+    await require_project_access(db, uuid.UUID(auth.user_id), project_id, org_id, not_found_detail="Project not found")
     definition = (await db.execute(
         select(EventDefinition).where(
             EventDefinition.id == definition_id, EventDefinition.enabled.is_(True),
@@ -4392,7 +4403,7 @@ async def complete_recipe_stage(
     )
     validate = validate_next_stage_start if body.action == "start" else validate_stage_completion
     next_stage = await validate(
-        db, org_id=org_id, definition=definition, project_id=body.project_id, work_item_type=body.work_item_type,
+        db, org_id=org_id, definition=definition, project_id=project_id, work_item_type=body.work_item_type,
         work_item_id=body.work_item_id, stage=body.stage, member_id=member.id,
     )
     _accept_language = request.headers.get("accept-language")

@@ -216,6 +216,26 @@ async def validate_next_stage_start(
     return stage
 
 
+async def work_item_project(
+    db: AsyncSession, *, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID, claimed_project_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """이 작업 항목의 실제 프로젝트 — 인가 · 지금 stage · 바인딩 판정이 모두 이 값 하나를 쓴다(까디르 4623 codex P1). 요청이 보낸
+    프로젝트는 믿지 않고 대조만 한다: 다르면 거절(A 권한으로 B 항목을 A 바인딩에 태워 B에서 발행하는 길을 막는다), 없으면 푼 값을
+    쓴다. 발행 코어도 같은 함수(`_resolve_work_item_project_id`)로 라우팅을 푼다."""
+    from app.services.event_routing_resolver import _resolve_work_item_project_id
+
+    project_id = await _resolve_work_item_project_id(
+        db, org_id=org_id, payload={"work_item_type": work_item_type, "work_item_id": str(work_item_id)},
+    )
+    if project_id is None:
+        raise HTTPException(status_code=404, detail={"code": "WORK_ITEM_NOT_FOUND", "message": "Work item not found."})
+    if claimed_project_id is not None and claimed_project_id != project_id:
+        raise HTTPException(status_code=422, detail={
+            "code": "WORK_ITEM_PROJECT_MISMATCH", "message": "The work item does not belong to this project.",
+        })
+    return project_id
+
+
 async def lock_stage_completion(
     db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, work_item_type: str, work_item_id: uuid.UUID,
 ) -> None:
