@@ -18,6 +18,8 @@ import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchGateById } from '@/lib/fetch-gate';
+import { gateStatusLabel } from '@/lib/gate-status-label';
+import { gateTypeLabel } from '@/lib/gate-type-label';
 import { parseEntityRef } from './entity-ref';
 import { useReadingPanel } from './reading-panel-context';
 import type { ReferenceForm } from './embed-renderer';
@@ -367,19 +369,25 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
 function renderGateSummary(
   detail: Record<string, unknown>,
   tWorkList: (key: string) => string,
+  tDashboard: (key: string) => string,
+  tCage: (key: string) => string,
 ): React.ReactNode | null {
   const d = detail as {
     gate_type?: string; status?: string; risk_grade?: 'low' | 'high' | 'unknown' | null;
     work_item_summary?: { title: string; slug: string | null } | null; work_item_id?: string;
   };
   if (!d.status && !d.gate_type) return null;
-  const statusLabel = d.status ? translateEntityStatus('gate', d.status) : null;
+  // story #4253(유나 CHANGES · PO 13:46Z) — 이 본문은 envelope 수정으로 이 PR에서 처음 실제로 그려진다. 원시 키를 찍지 않게 옆 카드들과 같은
+  // 공용 낱말: 종류 = gateTypeLabel(dashboard · 미등재는 일반 «게이트») · 상태 = gateStatusLabel(cage) — translateEntityStatus는 gate 맵이
+  // 없어 늘 null이었다.
+  const statusLabel = d.status ? gateStatusLabel(d.status, tCage) : null;
+  const typeLabel = d.gate_type ? gateTypeLabel(tDashboard, d.gate_type) : null;
   const title = d.work_item_summary?.title ?? (d.work_item_id ? `#${d.work_item_id.slice(0, 8)}` : null);
   return (
     <div className="space-y-2">
       {title && <p className="text-sm font-medium text-foreground">{title}</p>}
       <div className="flex flex-wrap items-center gap-1.5">
-        {d.gate_type && <MdBadge label={d.gate_type} />}
+        {typeLabel && <MdBadge label={typeLabel} />}
         {statusLabel && <MdBadge label={statusLabel} />}
         {d.risk_grade === 'high' && <MdBadge label={tWorkList('riskBadgeHigh')} />}
         {d.risk_grade === 'unknown' && <MdBadge label={tWorkList('riskBadgeUnknown')} />}
@@ -428,6 +436,8 @@ export function EntityPreviewModal({
   const t = useTranslations('chats');
   // story #3888 — renderGateSummary의 risk 배지 라벨(workList.riskBadgeHigh/riskBadgeUnknown).
   const tWorkList = useTranslations('workList');
+  const tDashboard = useTranslations('dashboard');
+  const tCage = useTranslations('cage');
   const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
@@ -716,7 +726,7 @@ export function EntityPreviewModal({
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
   const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail, tc, t, flatHref) : null;
   // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
-  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList) : null;
+  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList, tDashboard, tCage) : null;
 
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
