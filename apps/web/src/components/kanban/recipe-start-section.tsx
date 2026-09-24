@@ -77,7 +77,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
   );
 
   if (loadError) {
-    return sectionShell(<p className="text-xs text-destructive">{t('recipeStartErrorGeneric')}</p>);
+    return sectionShell(<p className="break-keep text-xs text-destructive">{t('recipeStartErrorGeneric')}</p>);
   }
 
   // story #4075 AC1(유나 design CHANGES, 페드루 확定 2026-09-21) — 적용 레시피가 프로젝트에
@@ -231,7 +231,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         {notice ? (
           <p
             role={notice.tone === 'error' ? 'alert' : 'status'}
-            className={notice.tone === 'error' ? 'text-xs text-destructive' : 'break-keep text-[11px] text-muted-foreground'}
+            className={notice.tone === 'error' ? 'break-keep text-xs text-destructive' : 'break-keep text-[11px] text-muted-foreground'}
             data-testid="recipe-stage-action-notice"
           >
             {notice.text}
@@ -318,7 +318,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         notStarted.length > 1 && <p className="text-xs text-muted-foreground">{t('recipeStartChooseRecipe')}</p>
       )}
       {publishError && (
-        <p role="alert" aria-live="assertive" className="mt-1 text-[11px] text-destructive">
+        <p role="alert" aria-live="assertive" className="mt-1 break-keep text-[11px] text-destructive">
           {publishError}
         </p>
       )}
