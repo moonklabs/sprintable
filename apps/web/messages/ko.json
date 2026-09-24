@@ -5152,7 +5152,8 @@
     "unitLabel": "단위",
     "sourceLabel": "출처",
     "metricValueLabel": "측정치",
-    "measuredAtLabel": "측정 시각"
+    "measuredAtLabel": "측정 시각",
+    "recipePublishFailedHeader": "발행이 멈췄어요"
   },
   "activityLog": {
     "title": "활동 로그",
@@ -6281,6 +6282,7 @@
     "systemLoopMeasureDueName": "측정 기한 지남",
     "systemSteerInstructName": "방향 전환",
     "systemAgentRunCancelRequestedName": "에이전트 실행 중단 요청",
+    "systemRecipePublishFailedName": "레시피 발행 멈춤",
     "workflowLoopAgencyDescription": "목표·가설 → 브리프 → 실행안 → 사람이 고름 → 실행 → 결과 학습. 카피·캠페인처럼 되풀이하는 실험에 적합.",
     "blogArticleActionConceptConfirmed": "컨셉 승인(주제·키워드·구성 확인)",
     "blogArticleActionPlanning": "주제·키워드 기획(제목 후보와 글 구성)",

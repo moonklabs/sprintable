@@ -27,7 +27,7 @@ describe('presetName / presetDescription', () => {
   });
 });
 
-describe('시스템(신호형) 이벤트 정의 7종 이름(story #4233 · 유나 확정)', () => {
+describe('시스템(신호형) 이벤트 정의 8종 이름(story #4233 · #4258 · 유나 확정)', () => {
   const ko = (key: string) => (koMessages.recipePreset as Record<string, string>)[key] ?? `MISSING:${key}`;
   const SYSTEM: Array<[string, string, string, string]> = [
     ['preset.gate.verdict', '게이트 판정', 'Gate verdict', '게이트 판정'],
@@ -37,6 +37,8 @@ describe('시스템(신호형) 이벤트 정의 7종 이름(story #4233 · 유�
     ['preset.loop.measure_due', '측정 기한 도과', 'Past measure date', '측정 기한 지남'],
     ['preset.steer.instruct', '방향 전환', 'Direction change', '방향 전환'],
     ['preset.agent_run.cancel_requested', '에이전트 실행 중단 요청', 'Agent run stop request', '에이전트 실행 중단 요청'],
+    // story #4258 — 레시피 비동기 발행 멈춤 통지.
+    ['preset.recipe.publish_failed', '레시피 발행 멈춤', 'Recipe publishing stopped', '레시피 발행 멈춤'],
   ];
 
   it('⭐en은 영어 · ko는 유나 문안(«측정 기한 도과» → «측정 기한 지남») · 시드 원문과 무관', () => {
@@ -53,7 +55,7 @@ describe('시스템(신호형) 이벤트 정의 7종 이름(story #4233 · 유�
     expect(isLocalizedPlatformPreset({ key, org_id: null, name: '', description: null })).toBe(false);
   });
 
-  it('시스템 이벤트 이름 표 = 위 7종(표와 테스트 목록이 어긋나면 RED)', () => {
+  it('시스템 이벤트 이름 표 = 위 8종(표와 테스트 목록이 어긋나면 RED)', () => {
     expect(Object.keys(PLATFORM_SYSTEM_EVENT_NAME_KEY).sort()).toEqual(SYSTEM.map(([key]) => key).sort());
   });
 

@@ -465,10 +465,32 @@ async def _resolve_recipe_role_binding(
 
 # SERVER_DERIVED_TARGETS(event_definition_registry.py) 전체를 커버해야 한다 — 모듈 로드
 # 시점에 어긋나면 즉시 ImportError로 드러나게(운영 중 조용한 미해석 대신).
+async def _resolve_recipe_publish_failure(db: AsyncSession, *, org_id: uuid.UUID, payload: dict) -> set[uuid.UUID]:
+    """story #4258 — 레시피 비동기 발행이 멈춘(dead_letter · blocked) 명령의 통지 수신자: 그 발행을 연 게이트를 실제로
+    승인한 사람 ∪ 요청 stage에 바인딩된 에이전트(`recipe_publish_failure` 한 곳이 해소 — 이벤트를 낸 쪽과 같은 답)."""
+    from app.models.publication_command import PublicationCommand
+    from app.services.recipe_publish_failure import (
+        recipe_publish_failure_recipients,
+        resolve_recipe_publish_failure_context,
+    )
+
+    command_id_raw = payload.get("command_id")
+    if not command_id_raw:
+        return set()
+    command = await db.get(PublicationCommand, _parse_uuid(command_id_raw, field_name="command_id"))
+    if command is None or command.org_id != org_id:
+        return set()
+    ctx = await resolve_recipe_publish_failure_context(db, command)
+    if ctx is None:
+        return set()
+    return await recipe_publish_failure_recipients(db, org_id=org_id, ctx=ctx)
+
+
 _SERVER_DERIVED_RESOLVERS = {
     "none": _resolve_none,
     "work_item_stakeholders": _resolve_work_item_stakeholders,
     "goal_owner": _resolve_goal_owner,
+    "recipe_publish_failure": _resolve_recipe_publish_failure,
 }
 assert set(_SERVER_DERIVED_RESOLVERS) == set(SERVER_DERIVED_TARGETS), (
     "event_routing_resolver의 server_derived resolver 어휘가 "

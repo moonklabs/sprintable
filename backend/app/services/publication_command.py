@@ -1157,6 +1157,11 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
         try:
             await _process_one_command(db, command, now=now)
             await db.commit()
+            # story #4258 — 이번 틱에 사람 손이 필요한 멈춤(dead_letter · blocked)이 됐으면(클레임 때 in_progress로 바꿨으니
+            # 여기서 그 상태면 방금 전이한 것) 레시피 문맥에 실패 통지. 격리 세션 · 실패해도 이 커밋은 그대로.
+            from app.services.recipe_publish_failure import notify_recipe_publish_stopped
+
+            await notify_recipe_publish_stopped(db, command)
             key = (
                 command.status
                 if command.status in ("completed", "dead_letter", "blocked", "voided", "blocked_unapproved")
