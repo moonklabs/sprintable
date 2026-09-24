@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
-import { RECIPE_CONNECTION_TARGETS, recipeRoleSlots, uncoveredRecipeStages, type RecipeRoleSlot } from '@/lib/recipe-role-slots';
+import { RECIPE_CONNECTION_TARGETS, allowedChannelsForSlot, recipeRoleSlots, uncoveredRecipeStages, type RecipeRoleSlot } from '@/lib/recipe-role-slots';
+import { useChannelLabel } from '@/lib/channel-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
@@ -68,6 +69,7 @@ export function MarketingRecipeApplyDialog({
   // story #4103 CHANGES-1(페드루 PO 리뷰, 2026-09-21) — channelConnect ns의 기존
   // channelLoadFailed 키 재사용(신규 문구 발명 0).
   const tChannel = useTranslations('channelConnect');
+  const channelLabel = useChannelLabel();
   const [projectId, setProjectId] = useState('');
   // story #4173 — 자리(slot.key = 역할+방식)별 선택값. member 자리는 팀 멤버 id, channel은
   // 채널 연결 id, compute는 연산 커넥터 id. approver 자리는 읽기 전용이라 값이 없다.
@@ -337,6 +339,11 @@ export function MarketingRecipeApplyDialog({
         </div>
       );
     }
+    // story #4239 — 이 자리 stage가 허용 채널 종류를 선언했으면 그 종류의 연결만 보여준다(적용 API도 밖이면 422).
+    const allowedChannels = allowedChannelsForSlot(slot, recipe.stage_metadata);
+    const slotConnections = allowedChannels
+      ? activeChannelConnections.filter((c) => allowedChannels.includes(c.channel))
+      : activeChannelConnections;
     return (
       <div key={slot.key} {...rowAttrs} data-testid="slot-publisher">
         <div className="min-w-0 flex-1 break-keep">
@@ -348,10 +355,19 @@ export function MarketingRecipeApplyDialog({
               <span>{tChannel('channelLoadFailed')}</span>
               <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
             </div>
-          ) : channelConnectionsStatus === 'loaded' && activeChannelConnections.length === 0 ? (
-            <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-empty">
-              {t('eventApplyChannelsEmpty')}
-            </p>
+          ) : channelConnectionsStatus === 'loaded' && slotConnections.length === 0 ? (
+            allowedChannels ? (
+              <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-none-allowed">
+                {t('recipeApplyV2ChannelsNoneAllowed', { channels: allowedChannels.map(channelLabel).join(' · ') })}{' '}
+                <Link href="/organization/channels" className="font-medium text-primary hover:underline">
+                  {t('recipeApplyV2ChannelsConnectLink')}
+                </Link>
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-empty">
+                {t('eventApplyChannelsEmpty')}
+              </p>
+            )
           ) : null}
         </div>
         <select
@@ -363,7 +379,7 @@ export function MarketingRecipeApplyDialog({
           data-testid="publisher-connection-select"
         >
           <option value="">{t('eventApplyChannelPlaceholder')}</option>
-          {activeChannelConnections.map((c) => (
+          {slotConnections.map((c) => (
             <option key={c.id} value={c.id}>{c.account_label || `${c.channel}(${c.account_id})`}</option>
           ))}
         </select>

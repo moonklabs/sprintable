@@ -517,6 +517,25 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             # 정하는 커넥터 종류)이라 target을 kind에서 유도하지 않는다 — 명시 선언만 신뢰
             # (7건 기존 픽스처가 "kind=publish + agent 바인딩"을 pin하고 있어, kind 값
             # 자체로 판별하면 그 계약을 조용히 깬다).
+            # story #4239 — 허용 채널 종류(선택). 발행할 채널을 가리키는 stage(target="channel_connection")에서만 뜻이 있고,
+            # 있으면 알려진 채널 키(샌드박스 포함 · channel_adapters.ALL_CHANNEL_KEYS)의 비어 있지 않은 중복 없는 목록이어야
+            # 한다. 적용 API(apply_recipe_role_bindings)가 바인딩 연결의 채널 종류를 이 목록으로 거른다(밖이면 422).
+            if "channels" in capability:
+                from app.services.channel_adapters import ALL_CHANNEL_KEYS
+
+                channels = capability["channels"]
+                if capability.get("target") != "channel_connection":
+                    raise InvalidStageMetadataError(
+                        f"stage_metadata[{slug!r}].capability.channels is only allowed with target='channel_connection'."
+                    )
+                if (
+                    not isinstance(channels, list) or not channels or len(set(channels)) != len(channels)
+                    or not all(isinstance(c, str) and c in ALL_CHANNEL_KEYS for c in channels)
+                ):
+                    raise InvalidStageMetadataError(
+                        f"stage_metadata[{slug!r}].capability.channels must be a non-empty list of unique known channel "
+                        f"keys ({sorted(ALL_CHANNEL_KEYS)}) — got {channels!r}."
+                    )
             if "target" in capability and capability["target"] not in _CAPABILITY_TARGETS:
                 # story #3779 BE 한글 사용자 문장 가드(story #3924 "baseline은 줄기만") —
                 # 이 정의 등록 검증 에러는 내부 개발자/설정 대상(에이전트가 event

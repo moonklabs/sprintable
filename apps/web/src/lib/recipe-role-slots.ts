@@ -28,7 +28,7 @@ export interface RecipeStageMeta {
   role?: string;
   action?: string;
   gate?: { type?: string; approver?: string };
-  capability?: { kind?: string; connector_key?: string; target?: string };
+  capability?: { kind?: string; connector_key?: string; target?: string; channels?: string[] };
   /** story #4174 후속 — 이 stage의 승인이 stage 밖(결재함의 초안 게이트)에서 일어남을 정의가 선언(닫힌 어휘, BE
    * `validate_stage_metadata`가 강제). 승인자는 싣지 않는다 — 그 게이트 쪽 규칙이 정한다. */
   approval?: { surface?: string };
@@ -253,4 +253,16 @@ export function uncoveredRecipeStages(
   }
   return stagesInFlowOrder(stageMetadata, flowStages)
     .filter((s) => stageMetadata[s]?.role && (count.get(s) !== 1 || wrongKind.has(s)));
+}
+
+/** story #4239 — 채널 자리가 받을 수 있는 채널 종류. 자리의 stage들이 선언한 `capability.channels`의 교집합(선언 안 한
+ * stage는 제한 없음). 아무 stage도 선언 안 했으면 null(= 제한 없음 · 예전대로). 정의가 원천 — 레시피 이름 상수 없음. */
+export function allowedChannelsForSlot(slot: RecipeRoleSlot, stageMetadata: RecipeStageMetadata): string[] | null {
+  let allowed: string[] | null = null;
+  for (const stage of slot.stages) {
+    const declared = stageMetadata[stage]?.capability?.channels;
+    if (!declared) continue;
+    allowed = allowed === null ? [...declared] : allowed.filter((c) => declared.includes(c));
+  }
+  return allowed;
 }

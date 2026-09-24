@@ -57,7 +57,9 @@ export interface EventDefinitionResponse {
     // "channel_connection"·"generation_connector"인 stage만 적용 다이얼로그가 각각
     // 채널-연결/연산-커넥터 select로 분기한다 — kind는 여전히 열린 값이라 target을
     // 거기서 유도하지 않는다(events.py::apply_recipe_role_bindings 주석 참고).
-    capability?: { kind?: string; connector_key?: string; target?: 'agent' | 'channel_connection' | 'generation_connector' };
+    // story #4239 — 허용 채널 종류(target="channel_connection"일 때만 · BE `validate_stage_metadata`가 강제). 적용
+    // 다이얼로그가 채널 선택지를 이 목록으로 거른다(적용 API도 밖이면 422).
+    capability?: { kind?: string; connector_key?: string; target?: 'agent' | 'channel_connection' | 'generation_connector'; channels?: string[] };
     // story #4174 후속(alembic 0401) — 승인이 이 stage 밖(결재함의 초안 게이트)이라는 선언. 닫힌 어휘(BE
     // event_definition_registry.py::_APPROVAL_SURFACES). 적용 다이얼로그가 사람 역할의 이 stage를 읽기 전용 자리로 그린다.
     approval?: { surface?: 'draft_gate' };
