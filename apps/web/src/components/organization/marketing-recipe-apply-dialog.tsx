@@ -370,7 +370,7 @@ export function MarketingRecipeApplyDialog({
             allowedChannels && neededChannelsPhrase(allowedChannels) ? (
               <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-none-allowed">
                 {t('recipeApplyV2ChannelsNoneAllowed', { channels: neededChannelsPhrase(allowedChannels)! })}{' '}
-                <Link href={flatHref('/organization/channels')} className="font-medium text-primary hover:underline">
+                <Link href={flatHref('/organization/channels')} className="whitespace-nowrap font-medium text-primary hover:underline">
                   {t('recipeApplyV2ChannelsConnectLink')}
                 </Link>
               </p>
@@ -385,7 +385,8 @@ export function MarketingRecipeApplyDialog({
           className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           value={selections[slot.key] ?? ''}
           onChange={(e) => select(slot.key, e.target.value)}
-          disabled={channelConnectionsStatus !== 'loaded'}
+          // 유나 4598 비차단 — 고를 연결이 0개면 상자도 닫는다(옆 안내가 사유).
+          disabled={channelConnectionsStatus !== 'loaded' || slotConnections.length === 0}
           aria-label={controlLabel}
           data-testid="publisher-connection-select"
         >

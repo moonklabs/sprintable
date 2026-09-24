@@ -1135,6 +1135,8 @@ describe('발행 자리 채널 선택지 = 레시피 허용 채널만(story #423
     // 유나 확정: 테스트 채널(stibee_sandbox)은 이름에서 뺀다 → «스티비»만.
     expect(note.textContent).toContain(ORG.recipeApplyV2ChannelsNoneAllowed.replace('{channels}', koMessages.channelConnect.channelLabelStibee));
     expect(note.querySelector('a')?.getAttribute('href')).toMatch(/^\/organization\/channels/);
+    expect(note.querySelector('a')?.className).toContain('whitespace-nowrap'); // ko 390에서 링크가 두 줄로 안 갈리게
+    expect(document.body.querySelector<HTMLSelectElement>('[data-testid="publisher-connection-select"]')!.disabled).toBe(true); // 고를 연결 0개면 상자도 닫힘
     expect(document.body.querySelector('[data-testid="marketing-apply-channels-empty"]')).toBeNull();
     await choose('#marketing-recipe-apply-project', 'proj-1');
     await choose('[data-testid="creator-agent-select"]', 'agent-1');
