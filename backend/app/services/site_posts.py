@@ -1262,6 +1262,7 @@ async def publish_recipe_approved_hosted_site_draft_after_commit(
             side, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id,
             definition_key=definition_key, next_stage=next_stage,
             extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
+            trigger_gate_id=gate_id,  # story #4255 — 발행을 촉발한 초안 게이트
         )
 
     await run_side_effect_in_own_session(db, _publish, describe=f"recipe hosted-site auto-publish gate={gate_id}")

@@ -662,6 +662,7 @@ async def _emit_recipe_published_for_site_post_command(db: AsyncSession, command
             side, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
             definition_key=definition_key, next_stage=next_stage,
             extra_payload={RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)},
+            trigger_gate_id=gate.id,  # story #4255 — 발행을 촉발한 초안 게이트
         )
 
     await run_side_effect_in_own_session(
