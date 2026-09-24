@@ -1840,6 +1840,7 @@ while IFS= read -r f; do
   printf '%s\t%s\n' "$f" "${sec:-1}" >> "$ELAPSED_OUT_FILE"
 done < "$FILES_LIST_FILE"
 [ -f "$SCENARIO_DIR/fail_$n.txt" ] && cat "$SCENARIO_DIR/fail_$n.txt" >> "$FAILED_OUT_FILE"
+[ -f "$SCENARIO_DIR/unreadable_$n" ] && chmod 000 "$FAILED_OUT_FILE"
 exit "$(cat "$SCENARIO_DIR/exit_$n" 2>/dev/null || echo 0)"
 """
 
@@ -1872,9 +1873,10 @@ def _destructive_step_run() -> str:
 
 def _run_step(
     tmp_path, *, targets, first, rerun=None, rerun_fail=None, run_text=None, uv_fail_on="", value_overrides=None,
-    drop_shard_files=False,
+    drop_shard_files=False, mktemp_fail_at=None, unreadable_failed_out_call=None,
 ):
     import re
+    import shutil
     import subprocess
 
     bash = _bash5()
@@ -1900,6 +1902,17 @@ def _run_step(
         f'shift 2\nexec "{sys.executable}" "$@"\n'
     )
     uv.chmod(0o755)
+    if mktemp_fail_at is not None:
+        # N번째 mktemp만 실패(디스크 가득 흉내) — 나머지는 진짜 mktemp.
+        real_mktemp = shutil.which("mktemp")
+        stub = bindir / "mktemp"
+        stub.write_text(
+            '#!/usr/bin/env bash\n'
+            'c=$(( $(cat "$SCENARIO_DIR/mktemp_calls" 2>/dev/null || echo 0) + 1 )); echo "$c" > "$SCENARIO_DIR/mktemp_calls"\n'
+            f'[ "$c" -eq {mktemp_fail_at} ] && exit 1\n'
+            f'exec "{real_mktemp}" "$@"\n'
+        )
+        stub.chmod(0o755)
     tmpdir = tmp_path / "t"
     tmpdir.mkdir()
     if not drop_shard_files:
@@ -1913,6 +1926,8 @@ def _run_step(
         _write_call(2, {f: rerun(mod, weights, f) for f in targets})
     if rerun_fail:
         (scen / "fail_2.txt").write_text("".join(f"{f}\n" for f in rerun_fail))
+    if unreadable_failed_out_call is not None:
+        (scen / f"unreadable_{unreadable_failed_out_call}").write_text("")
 
     values = {
         "github.workspace": str(ws), "matrix.shard": "0",
@@ -2074,3 +2089,21 @@ def test_4283_step_places_that_relied_on_bash_e_still_stop_the_step(tmp_path, la
     code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, **kwargs)
     assert code == 1, (label, out)
     assert needle in out, (label, out)
+
+
+# 스텝 안 mktemp 순서: elapsed · failed_out · overage_out · unweighted · suspects · rerun_elapsed · rerun_failed(7번째).
+@pytest.mark.parametrize("n", range(1, 8))
+def test_4283_step_mktemp_failure_is_red(tmp_path, n):
+    """까디르 P2 — `set +e` 뒤 임시 파일 생성 실패가 조용히 지나가면 안 된다: 몇 번째 mktemp가 실패하든(단발 튐 시나리오 —
+    재실행 갈래까지 가는 경로) exit 1 + ::error::. 특히 7번째(`rerun_failed`)가 안 생기면 `[ -s ]`가 «재실행 실패 없음»으로
+    읽혀 테스트 실패를 초록으로 가렸다."""
+    code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, mktemp_fail_at=n)
+    assert code == 1, (n, out)
+    assert "임시 파일 생성 실패" in out, (n, out)
+
+
+def test_4283_step_unreadable_loop_result_is_red(tmp_path):
+    """격리 루프 결과(FAILED_OUT_FILE)를 못 읽으면 «실패 0건»으로 읽지 않고 RED."""
+    code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_normal, unreadable_failed_out_call=1)
+    assert code == 1, out
+    assert "결과 파일을 못 읽음" in out
