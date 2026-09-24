@@ -124,9 +124,9 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         const msg = extractBackendErrorMessage(body, t) ?? t('recipeStartErrorGeneric');
         throw new Error(msg);
       }
-      // AC2 — 성공 시 «시작됨»이 화면에 남아야 한다. dedup 응답(deduplicated:true)도 200으로
-      // 오므로 여기선 성공 분기 하나로 충분 — refresh가 started:true를 다시 읽어온다(AC6,
-      // 새로고침·다른 탭과 동일 판정 경로).
+      // AC2 — 성공(201) 시 «시작됨»이 화면에 남아야 한다 — refresh가 started:true를 다시 읽어온다(AC6, 새로고침·다른 탭과 동일
+      // 판정 경로). 이미 시작된 회차(두 클릭 · 두 탭 · 새로고침 재클릭)는 story #4261부터 200 dedup이 아니라 위의 409
+      // RECIPE_ALREADY_STARTED 분기가 상태로 받아 같은 refresh로 돌아간다.
       refresh();
     } catch (e) {
       setPublishError(e instanceof Error ? e.message : t('recipeStartErrorGeneric'));
