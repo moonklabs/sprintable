@@ -20,7 +20,7 @@ describe('dispatched 알림 표시(story #4281 · 유나 문안)', () => {
     ['hypothesis 마감이 743h 초과됨', '가설 마감이 31일 지났어요.', 'Hypothesis deadline passed 31 days ago.'],
     ['sprint 마감이 5h 초과됨', '스프린트 마감이 5시간 지났어요.', 'Sprint deadline passed 5 hours ago.'],
     ['epic 마감까지 30h 남음(임계 72h)', '목표 마감까지 30시간 남았어요.', 'Goal deadline in 30 hours.'],
-    ['sprint 마감까지 0h 남음(임계 72h)', '스프린트 마감까지 1시간 미만 남았어요.', 'Sprint deadline in less than an hour.'],
+    ['sprint 마감까지 0h 남음(임계 72h)', '스프린트 마감까지 1시간 미만 남았어요.', 'Sprint deadline in under an hour.'],
     ['story/in-review 96h 무활동(임계 48h)', '4일째 활동이 없어요(스토리 · 리뷰 중).', 'No activity for 4 days (Story · In Review).'],
     ['sprint 120h 무활동(임계 72h)', '5일째 활동이 없어요(스프린트).', 'No activity for 5 days (Sprint).'],
     ['story 상태 변경 → in-review', '스토리 상태가 바뀌었어요: 리뷰 중.', 'Story status changed: In Review.'],

@@ -3726,7 +3726,7 @@
     "heuristicIdleWithStatus": "No activity for {duration} ({kind} · {status}).",
     "heuristicStatusChanged": "{kind} status changed.",
     "heuristicStatusChangedTo": "{kind} status changed: {status}.",
-    "heuristicDurationUnderHour": "less than an hour",
+    "heuristicDurationUnderHour": "under an hour",
     "heuristicDurationHours": "{count, plural, one {# hour} other {# hours}}",
     "heuristicDurationDays": "{count, plural, one {# day} other {# days}}",
     "heuristicKindStory": "Story",
