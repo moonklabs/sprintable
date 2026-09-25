@@ -19,13 +19,19 @@ from app.services.org_time import get_org_timezone, org_today
 from app.schemas.standup import (
     FeedbackCreate,
     FeedbackResponse,
+    FeedbackUpdate,
+    MissingStandupMember,
     PlanStorySummary,
     StandupEntryResponse,
     StandupSelfUpdate,
     StandupUpsert,
 )
 from app.services.member_resolver import canonicalize_member_id, resolve_member
-from app.services.project_auth import accessible_project_ids_in_org, has_project_access
+from app.services.project_auth import (
+    accessible_project_ids_in_org,
+    has_project_access,
+    require_project_access,
+)
 
 
 async def _entries_with_plan_stories(
@@ -358,18 +364,39 @@ async def list_standup_history(
     }
 
 
-@router.get("/missing", response_model=list[uuid.UUID])
+@router.get("/missing", response_model=list[MissingStandupMember])
 async def get_missing_standups(
     project_id: uuid.UUID = Query(...),
     date_filter: date = Query(..., alias="date"),
     repo: StandupEntryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
-) -> list[uuid.UUID]:
+) -> list[MissingStandupMember]:
     # #2237: 형제(list_standup_history)와 동일한 project_id 쿼리파라미터 접근권 가드 추가 —
     # 기존엔 auth 파라미터 자체가 없어 project_id를 caller 접근권 검증 없이 그대로 썼다.
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    return await repo.get_missing(project_id, date_filter)
+    # story #4298(PO 06:15Z) — 예전엔 UUID만 내 화면(FE는 {id, name}을 기대)의 «안 쓴 사람» 칸이 늘 비었다. 이름을 서버 한 곳에서 싣는다
+    # (members.name → 사람의 users.display_name · 이메일 폴백 0 · 모르면 null). MCP `standup_missing`도 같은 모양을 받는다.
+    ids = await repo.get_missing(project_id, date_filter)
+    if not ids:
+        return []
+    from app.models.member import Member
+    from app.models.user import User
+
+    rows = (await repo.session.execute(
+        select(Member.id, Member.type, Member.name, User.display_name)
+        .outerjoin(User, User.id == Member.user_id)
+        .where(Member.id.in_(ids), Member.org_id == repo.org_id)
+    )).all()
+    by_id = {r.id: r for r in rows}
+
+    def _name(member_id: uuid.UUID) -> str | None:
+        r = by_id.get(member_id)
+        if r is None:
+            return None
+        return (r.name or "").strip() or ((r.display_name or "").strip() if r.type == "human" else "") or None
+
+    return [MissingStandupMember(id=member_id, name=_name(member_id)) for member_id in ids]
 
 
 @router.get("/feedback", response_model=list[FeedbackResponse])
@@ -449,9 +476,16 @@ async def add_feedback(
     # 있었다(entry-access ≠ write-target). 특히 org-level entry(entry.project_id=None)는 위
     # resolve_member의 project 체크가 스킵돼 무제한이었다. persist 대상 body.project_id를
     # resource-actual has_project_access로 직접 검증(body-claimed 금지·휴먼/에이전트 공용).
-    if body.project_id is not None:
-        if not await has_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id):
-            raise HTTPException(status_code=403, detail="No access to this project")
+    # story #4298 — 피드백을 둘 프로젝트: 화면이 보는 프로젝트(body) · 없으면 엔트리의 프로젝트. 둘 다 없으면(조직 수준 엔트리 +
+    # 프로젝트 없는 요청) 어느 뷰의 피드백인지 모른다 — 지어내지 않고 422.
+    project_id = body.project_id or entry.project_id
+    if project_id is None:
+        raise HTTPException(status_code=422, detail={
+            "code": "STANDUP_FEEDBACK_PROJECT_REQUIRED",
+            "message": "project_id is required for feedback on an org-level standup entry.",
+        })
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
 
     safe_sprint_id, _ = await _filter_write_links_to_accessible(
         session, org_id, uuid.UUID(auth.user_id), body.sprint_id, [],
@@ -460,7 +494,7 @@ async def add_feedback(
     feedback_by_id = member.id
     fb_repo = StandupFeedbackRepository(session, org_id)
     feedback = await fb_repo.create(
-        project_id=body.project_id,
+        project_id=project_id,
         sprint_id=safe_sprint_id,
         standup_entry_id=id,
         feedback_by_id=feedback_by_id,
@@ -468,3 +502,75 @@ async def add_feedback(
         feedback_text=body.feedback_text,
     )
     return FeedbackResponse.model_validate(feedback)
+
+
+# story #4298 — 피드백 수정 · 삭제의 의존성(모듈 상수 — ruff B008).
+_FEEDBACK_DB = Depends(get_db)
+_FEEDBACK_AUTH = Depends(get_current_user)
+_FEEDBACK_ORG = Depends(get_verified_org_id)
+
+
+async def _find_feedback(session: AsyncSession, org_id: uuid.UUID, feedback_id: uuid.UUID) -> StandupFeedback:
+    """story #4298(PO 06:15Z) — 이 조직의 피드백만. 다른 조직 · 없는 id는 404(존재 비노출)."""
+    feedback = (await session.execute(
+        select(StandupFeedback).where(StandupFeedback.id == feedback_id, StandupFeedback.org_id == org_id)
+    )).scalar_one_or_none()
+    if feedback is None:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    return feedback
+
+
+async def _assert_feedback_author(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, feedback: StandupFeedback) -> None:
+    """story #4298 — 작성자만 고치고 지운다. 남의 것은 403."""
+    member = await resolve_member(auth, org_id, session)
+    if feedback.feedback_by_id != member.id:
+        raise HTTPException(status_code=403, detail={
+            "code": "STANDUP_FEEDBACK_NOT_AUTHOR", "message": "Only the author can change this feedback.",
+        })
+
+
+@router.patch("/feedback/{feedback_id}", response_model=FeedbackResponse)
+async def update_feedback(
+    feedback_id: uuid.UUID,
+    body: FeedbackUpdate,
+    session: AsyncSession = _FEEDBACK_DB,
+    auth: AuthContext = _FEEDBACK_AUTH,
+    org_id: uuid.UUID = _FEEDBACK_ORG,
+) -> FeedbackResponse:
+    """story #4298(PO 06:15Z) — 화면이 약속한 «피드백 고치기»(예전엔 BE 경로가 없어 늘 404). 작성자만."""
+    from app.schemas.standup import REVIEW_TYPES
+
+    if body.review_type is not None and body.review_type not in REVIEW_TYPES:
+        raise HTTPException(status_code=400, detail=f"review_type must be one of: {', '.join(REVIEW_TYPES)}")
+    feedback = await _find_feedback(session, org_id, feedback_id)
+    # 피드백은 프로젝트 소속 — 그 프로젝트 접근권이 없으면 존재도 비노출(404). 그다음 작성자 확인.
+    await require_project_access(
+        session, uuid.UUID(auth.user_id), feedback.project_id, org_id, not_found_detail="Feedback not found",
+    )
+    await _assert_feedback_author(session, auth, org_id, feedback)
+    if body.review_type is not None:
+        feedback.review_type = body.review_type
+    if body.feedback_text is not None:
+        feedback.feedback_text = body.feedback_text
+    await session.commit()
+    await session.refresh(feedback)
+    return FeedbackResponse.model_validate(feedback)
+
+
+@router.delete("/feedback/{feedback_id}", status_code=204)
+async def delete_feedback(
+    feedback_id: uuid.UUID,
+    session: AsyncSession = _FEEDBACK_DB,
+    auth: AuthContext = _FEEDBACK_AUTH,
+    org_id: uuid.UUID = _FEEDBACK_ORG,
+) -> Response:
+    """story #4298(PO 06:15Z) — 화면이 약속한 «피드백 지우기». 작성자만."""
+    feedback = await _find_feedback(session, org_id, feedback_id)
+    # 피드백은 프로젝트 소속 — 그 프로젝트 접근권이 없으면 존재도 비노출(404). 그다음 작성자 확인.
+    await require_project_access(
+        session, uuid.UUID(auth.user_id), feedback.project_id, org_id, not_found_detail="Feedback not found",
+    )
+    await _assert_feedback_author(session, auth, org_id, feedback)
+    await session.delete(feedback)
+    await session.commit()
+    return Response(status_code=204)

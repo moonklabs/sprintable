@@ -48,7 +48,7 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await fetch(`/api/standup/history?project_id=${projectId}&limit=20&cursor=${encodeURIComponent(nextCursor)}`);
+      const res = await fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20&cursor=${encodeURIComponent(nextCursor)}`);
       if (res.ok) {
         const json = await res.json();
         setEntries((prev) => [...prev, ...(json.data ?? [])]);

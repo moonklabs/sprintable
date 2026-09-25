@@ -59,7 +59,8 @@ class CheckinSprintInput(SprintableInput):
 
 
 async def standup_missing(args: StandupDateInput) -> list[TextContent]:
-    """스탠드업 미제출 멤버 조회."""
+    """스탠드업 미제출 멤버 조회 — 응답은 `[{"id": "<member id>", "name": "<이름 또는 null>"}]`(story #4298). 이름은
+    members.name → 사람의 표시 이름이고 모르면 null이다(이메일로 지어내지 않는다). 예전엔 id 배열만 왔다."""
     try:
         return ok(await client.get("/api/v2/standups/missing", params={"project_id": client.require_project_id(), "date": args.date}))
     except Exception as exc:
