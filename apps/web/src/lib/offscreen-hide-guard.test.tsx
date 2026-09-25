@@ -29,7 +29,8 @@ const STYLE_SHAPE = /translate[XY]\(.*100.*%/; // 인자 안에 괄호가 올 �
 const OFFSET_SHAPE = /(?:^|[\s'"`:])-(?:left|right|top|bottom)-(?:full|\[100%\])|(?:left|right|top|bottom)-\[calc\([^\]]*\*\s*-1\)\]/;
 const REVEAL_ON_FOCUS = /focus-within:-?translate-[xy]-0/;
 const DRAWER_HELPER = /closedDrawerProps\(/;
-const INERT_ATTR = /\binert=\{/;
+// 오프캔버스는 같은 요소의 명시 inert 식, 또는 내용 칸에 inert를 내려 주는 컨텍스트(사이드바 — 레일은 살려야 해서 컨테이너 통째 inert 금지).
+const INERT_ATTR = /\binert=\{|OffcanvasHiddenContext\.Provider/;
 const ELEMENT_WINDOW = 15; // 같은 JSX 요소의 속성 범위(줄)
 
 /** 도달 0인 자리만 — `상대경로:줄 내용 일부` → 이유. 지금은 0개. */
@@ -93,7 +94,7 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
     ['components/nav/top-bar.tsx', / focus-within:translate-y-0/, ''],
     ['components/docs/doc-editor.tsx', / focus-within:translate-y-0 focus-within:pointer-events-auto/, ''],
     ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx', / focus-within:translate-y-0/, ''],
-    ['components/ui/sidebar.tsx', /\n\s*inert=\{state === "collapsed" && collapsible === "offcanvas"\}/, ''],
+    ['components/ui/sidebar.tsx', /SidebarOffcanvasHiddenContext\.Provider/g, 'React.Fragment'],
   ] as const)('양성 대조 — %s에서 처방을 빼면 잡힌다', (file, remedy, replacement) => {
     const src = ALL.find((f) => f.file === file)!.src;
     expect(findUnguardedOffscreen(file, src)).toEqual([]);

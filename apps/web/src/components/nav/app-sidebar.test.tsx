@@ -554,3 +554,38 @@ describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', ()
     expect(workLink?.getAttribute('href')).toBe('/work-list');
   });
 });
+
+// [SID:4288 · 까디르 4653 P2 재판정] 데스크톱 오프캔버스로 접힌 사이드바 — 내용 칸은 inert지만 ⌘K 팔레트는 열린다(window keydown ·
+// 팔레트는 포털이라 inert 밖) · 레일은 inert 밖이라 다시 펼 수 있다.
+describe('AppSidebar — 오프캔버스로 접힌 상태에서 ⌘K · 레일([SID:4288])', () => {
+  async function mountCollapsed() {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <SidebarProvider defaultOpen={false}>
+            <AppSidebar projectMemberships={[]} chatUnreadTotal={0} />
+          </SidebarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('접힘 → 내용 칸 inert · ⌘K로 팔레트가 열리고 inert 밖 · 레일도 inert 밖', async () => {
+    stubMatchMedia(); stubFetch(); stubLocalStorage();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    await mountCollapsed();
+    expect(container.querySelector('[data-slot="sidebar-content"]')?.hasAttribute('inert')).toBe(true);
+    const rail = container.querySelector('[data-sidebar="rail"]');
+    expect(rail).not.toBeNull();
+    expect(rail!.closest('[inert]')).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.closest('[inert]')).toBeNull();
+  });
+});
+
