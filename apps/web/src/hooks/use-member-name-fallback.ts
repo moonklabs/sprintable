@@ -18,8 +18,8 @@ import { useAsyncResource } from './use-async-resource';
  * 합침 · 5분 뒤 다시). 받는 동안 `loaded=false` — 호출부는 4286 memberLookup 뼈대(null → 자리표시)로 «알 수 없음»이 먼저
  * 떴다가 이름으로 바뀌는 거짓을 막는다. 실패하면 `loaded=true`(빈 칸은 «알 수 없는 구성원»으로 선다).
  *
- * 조직 목록에도 없는 id는 그대로 비어 있다(«알 수 없는 구성원»). 조직을 떠난 사람(org_members.deleted_at)이 여기에 해당 —
- * 이름만 푸는 원천은 BE 카드(미르코 · PO 03:49Z)가 생기면 이 훅이 «프로젝트 → 조직 → 그 원천» 순으로 잇는다.
+ * 조직을 떠난 사람도 4303(PR 4658)부터 같은 원천에 이름만 실린다(user_id null · is_active false) — 훅은 거르지 않고 그대로 쓴다.
+ * 원천에 행 자체가 없는 id만 비어 있다(«알 수 없는 구성원»).
  */
 
 export interface OrgMember {

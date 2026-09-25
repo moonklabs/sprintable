@@ -99,6 +99,14 @@ describe('useMemberNameFallback', () => {
     expect(seen.some((s) => s.loaded && s.names['om-revoked'] === undefined)).toBe(false);
   });
 
+  it('조직 원천이 떠난 사람도 이름만 실으면(4303 · PR 4658: user_id null · is_active false) 그 이름을 쓴다 — 거르지 않는다', async () => {
+    fetchWithAuthMock.mockResolvedValue(orgOk([{ id: 'om-left', name: '떠난이', type: 'human', user_id: null, is_active: false, role: 'member' } as never]));
+    await act(async () => { root.render(<Harness orgId="org-1" ids={['om-left']} />); });
+    await flush();
+    expect(text('om-left')).toBe('떠난이');
+    expect(loadedAttr()).toBe('true');
+  });
+
   it('조직 목록에도 없으면 비어 있고 loaded=true(«알 수 없는 구성원» 자리)', async () => {
     fetchWithAuthMock.mockResolvedValue(orgOk());
     await act(async () => { root.render(<Harness orgId="org-1" ids={['om-gone']} />); });

@@ -151,3 +151,23 @@ describe('StandupHistorySection — 겹치는 폴백에만 꼬리([SID:4300])', 
   });
 });
 
+// [SID:4300 · 4303 AC1 · PR 4658] 조직을 떠난 사람도 조직 원천(ORG_NAMES_URL)에 이름만 실린다(user_id null · is_active false) — 떠난 사람이
+// 작성한 지난 기록에 «알 수 없는 구성원» 대신 그 이름이 선다.
+describe('StandupHistorySection — 떠난 사람이 작성자([SID:4300] · 4303)', () => {
+  it('부모 명단(활성)에 없는 떠난 사람 → 조직 원천의 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) {
+        return new Response(JSON.stringify({ data: [{ id: 'member-2', name: '떠난이', type: 'human', user_id: null, is_active: false, role: 'member' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [entry('1', '2026-09-24'), entry('2', '2026-09-23')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{ 'member-1': '안나' }} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('떠난이');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+  });
+});
+
