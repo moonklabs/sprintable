@@ -4,7 +4,7 @@
 // 이게 없으면 401 폴링/SSE 재연결 루프가 세션이 죽은 뒤에도 매 tick마다 refresh를 재시도해
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithAuth, loginWithPassword, refreshAuthTokens } from './client';
+import { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, fetchWithAuth, loginWithPassword, refreshAuthTokens } from './client';
 import { fetchMe } from '@/lib/me-client';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
@@ -217,5 +217,119 @@ describe('fetchMe — 세션 만료 신호 뒤(story #4184)', () => {
     signalSessionExpired();
     expect((await fetchMe()).status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story #4310 — fetchWithAuth의 기본 시간 제한(응답 헤더까지). 예전엔 제한이 없어 응답 없는 요청 하나가 화면을 ~100초(CF 524) 로딩에 묶었다.
+describe('fetchWithAuth — 응답 헤더까지 시간 제한(story #4310)', () => {
+  /** 실제 fetch처럼: 신호가 끊기면 그 이유로 reject, `respondAt`이 오면 헤더(Response)로 resolve. */
+  function hangingFetch(respond?: { afterMs: number; status?: number }) {
+    const calls: { input: unknown; init?: RequestInit }[] = [];
+    const fetchMock = vi.fn((input: unknown, init?: RequestInit) => {
+      calls.push({ input, init });
+      return new Promise<Response>((resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) { reject(signal.reason); return; }
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        if (respond) setTimeout(() => resolve(new Response('{}', { status: respond.status ?? 200 })), respond.afterMs);
+      });
+    });
+    return { fetchMock, calls };
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('⭐응답 헤더가 30s 안에 안 오면 TimeoutError로 reject(망 오류와 같은 실패 갈래 · AbortError 아님)', async () => {
+    const { fetchMock, calls } = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const p = fetchWithAuth('/api/stories');
+    const settled = p.then(() => 'resolved', (e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(calls[0]!.init?.signal?.aborted, '30s 전엔 안 끊음').toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const err = await settled;
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe('TimeoutError');
+    expect(FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it('⭐헤더가 오면 타이머를 푼다 — 그 뒤 시간이 지나도 신호가 안 끊겨 본문 읽기 · 큰 다운로드가 안 잘림', async () => {
+    const { fetchMock, calls } = hangingFetch({ afterMs: 1_000 });
+    vi.stubGlobal('fetch', fetchMock);
+    const p = fetchWithAuth('/api/docs');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await p).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls[0]!.init?.signal?.aborted).toBe(false);
+    expect(vi.getTimerCount(), '남은 타이머 0').toBe(0);
+  });
+
+  it('⭐호출자 signal을 존중 — 호출자가 끊으면 그 이유(AbortError)로 · 먼저 끊는 쪽이 이긴다', async () => {
+    const { fetchMock } = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    const p = fetchWithAuth('/api/stories', { signal: controller.signal });
+    const settled = p.then(() => 'resolved', (e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(5_000);
+    controller.abort();
+    const err = await settled;
+    expect((err as DOMException).name).toBe('AbortError');
+    expect(vi.getTimerCount(), '시간 제한 타이머도 풀림').toBe(0);
+  });
+
+  it('이미 끊긴 호출자 signal이면 바로 그 이유로 reject', async () => {
+    const { fetchMock } = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(fetchWithAuth('/api/stories', { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('⭐호출별 덮어쓰기 — timeoutMs 130s(오피스 변환)는 30s엔 안 끊고 130s에 끊음 · timeoutMs는 fetch로 새지 않음', async () => {
+    const { fetchMock, calls } = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const p = fetchWithAuth('/api/attachments/convert?asset_id=a', { method: 'POST', timeoutMs: 130_000 });
+    const settled = p.then(() => 'resolved', (e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(calls[0]!.init?.signal?.aborted).toBe(false);
+    expect(calls[0]!.init).not.toHaveProperty('timeoutMs');
+    expect(calls[0]!.init?.method).toBe('POST');
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect((await settled as DOMException).name).toBe('TimeoutError');
+  });
+
+  it('⭐긴 작업 대표 — 오피스 변환(timeoutMs 130s)은 60s 걸린 응답도 성공으로 받는다(기본 30s였다면 끊겼을 자리)', async () => {
+    const { fetchMock } = hangingFetch({ afterMs: 60_000 });
+    vi.stubGlobal('fetch', fetchMock);
+    const p = fetchWithAuth('/api/attachments/convert?asset_id=a', { method: 'POST', timeoutMs: 130_000 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await p).status).toBe(200);
+  });
+
+  it('timeoutMs: false = 제한 없음(init 그대로 · 신호 추가 없음)', async () => {
+    const { fetchMock, calls } = hangingFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    void fetchWithAuth('/api/x', { timeoutMs: false }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(calls[0]!.init?.signal).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('⭐401 → 갱신 → 재시도도 같은 제한 — 재시도가 걸리면 30s 뒤 TimeoutError', async () => {
+    let n = 0;
+    const fetchMock = vi.fn((input: unknown, init?: RequestInit) => {
+      if (String(input) === '/api/auth/refresh') return Promise.resolve(new Response(JSON.stringify({ data: { ok: true } }), { status: 200 }));
+      n += 1;
+      if (n === 1) return Promise.resolve(new Response(null, { status: 401 }));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const settled = fetchWithAuth('/api/stories').then(() => 'resolved', (e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await settled as DOMException).name).toBe('TimeoutError');
+    expect(n).toBe(2);
   });
 });

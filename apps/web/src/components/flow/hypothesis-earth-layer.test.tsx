@@ -260,7 +260,7 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     const fetchMock = vi.fn(() => jsonResponse([]));
     await renderLayer(fetchMock);
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/hypotheses?project_id=p1', { cache: 'no-store' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/hypotheses?project_id=p1', expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) }));
   });
 
   it('카드를 클릭하면 onSelectHypothesis(id)가 호출된다(story #2533 서사 패널 진입점)', async () => {

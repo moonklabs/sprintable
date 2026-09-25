@@ -56,7 +56,7 @@ const DEFINITION = {
 
 function stubFetch(overrides: Record<string, unknown> = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+    if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [DEFINITION] };
     if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
     if (url.includes('/api/events/definitions/def-1/bindings')) {
       // step_1이 이미 배정돼 있어야 requiredStages 검증(빈 매핑 차단)을 통과하고
@@ -77,7 +77,7 @@ function stubFetch(overrides: Record<string, unknown> = {}) {
 describe('WorkflowTemplateGallerySection — Promise.all 부수 격리(story #3519)', () => {
   it('/api/team-members가 네트워크 reject해도 정의 목록(주 데이터)은 그대로 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [DEFINITION] };
       if (url.includes('/api/team-members')) throw new Error('network down');
       if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
       return { ok: false, json: async () => null };
@@ -101,7 +101,7 @@ describe('WorkflowTemplateGallerySection — 제출 매핑(까디르 4606 P1)', 
     };
     const capture = { body: null as unknown };
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [definition] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [definition] };
       if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'agent-1', name: '디디군' }] }) };
       if (url.includes('/api/events/definitions/def-1/bindings')) {
         return { ok: true, json: async () => ({ bindings: { brief: 'agent-old', kickoff: 'agent-1' } }) };
@@ -194,7 +194,7 @@ describe('WorkflowTemplateGallerySection — 로드맵 P3 L1(템플릿 카드 el
 describe('WorkflowTemplateGallerySection — 축2-ⓒ 프리필(PO 확定 A)', () => {
   it('기존 배정이 있으면 확認 다이얼로그 없이 드롭다운에 프리필된다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) {
+      if (url === '/api/events/definitions' && !init?.method) {
         return { ok: true, json: async () => [{ ...DEFINITION, stage_metadata: { step_1: { role: 'Developer', action: 'do it' } } }] };
       }
       if (url.includes('/api/team-members')) {
@@ -231,7 +231,7 @@ describe('WorkflowTemplateGallerySection — 축2-ⓒ 프리필(PO 확定 A)', (
 describe('WorkflowTemplateGallerySection — 시스템 발행 제외(story #3994)', () => {
   it('⭐team-members에 「시스템 발행」이 섞여 와도 역할매핑 select 옵션엔 안 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [DEFINITION] };
       if (url.includes('/api/team-members')) {
         return {
           ok: true,
@@ -319,7 +319,7 @@ describe('WorkflowTemplateGallerySection — apply warnings[] 렌더(story #3316
 describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼굴(story #3521)', () => {
   it('defRes가 네트워크 reject하면(응답 없음) "못 불러옴" 얼굴+다시 시도가 뜨고 정의는 안 보인다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) throw new Error('network down');
+      if (url === '/api/events/definitions' && !init?.method) throw new Error('network down');
       if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
       throw new Error('unexpected fetch: ' + url);
     }));
@@ -332,7 +332,7 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
 
   it('defRes가 500이면(응답은 왔지만 실패) 위와 동형으로 "못 불러옴" 얼굴이 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: false, status: 500, json: async () => ({}) };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: false, status: 500, json: async () => ({}) };
       if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
       throw new Error('unexpected fetch: ' + url);
     }));
@@ -343,7 +343,7 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
 
   it('defRes가 200+빈 배열이면(진짜 0건) "적용 가능한 워크플로우 템플릿이 없습니다"만 뜨고 실패 얼굴은 안 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [] };
       if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
       throw new Error('unexpected fetch: ' + url);
     }));
@@ -356,7 +356,7 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
   it('「다시 시도」 클릭 — 재조회 성공 시 정상 목록으로 복구된다', async () => {
     let shouldFail = true;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) {
+      if (url === '/api/events/definitions' && !init?.method) {
         if (shouldFail) throw new Error('network down');
         return { ok: true, json: async () => [DEFINITION] };
       }
@@ -381,7 +381,7 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
   // 깨지면 안 된다(위 첫 describe 블록과 같은 계약, 다른 앵글로 재확인).
   it('memberRes가 실패해도(부수) defRes(주)가 성공이면 loadError는 안 뜨고 정의가 보인다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [DEFINITION] };
       if (url.includes('/api/team-members')) throw new Error('network down');
       if (url.includes('/api/events/definitions/def-1/bindings')) return { ok: true, json: async () => ({ bindings: {} }) };
       throw new Error('unexpected fetch: ' + url);
@@ -400,7 +400,7 @@ describe('WorkflowTemplateGallerySection — 주 leg 실패/진짜 0건 세 얼�
   it('cyclic 배지 조회 하나가 network reject해도 목록은 그대로 뜨고 loadError는 안 뜬다(항목별 격리)', async () => {
     const DEF_2 = { ...DEFINITION, id: 'def-2', key: 'preset.test.recipe2', name: '두 번째 레시피' };
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [DEFINITION, DEF_2] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [DEFINITION, DEF_2] };
       if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
       if (url.includes('/api/events/definitions/def-1/bindings')) throw new Error('network down');
       if (url.includes('/api/events/definitions/def-2/bindings')) return { ok: true, json: async () => ({ bindings: { step_1: 'agent-1' } }) };
@@ -422,7 +422,7 @@ describe('WorkflowTemplateGallerySection — 프리셋 이름 로케일(story #4
   it('en — 플랫폼 마케팅 프리셋 카드 이름·설명이 영어', async () => {
     const def = { ...DEFINITION, key: 'preset.marketing.video_production', name: '영상 제작(릴스·쇼츠)', description: '원문 설명' };
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/events/definitions' && !init) return { ok: true, json: async () => [def] };
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [def] };
       if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
       return { ok: false, json: async () => null };
     }));

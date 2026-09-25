@@ -68,14 +68,52 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
 
 let _refreshing: Promise<AuthResult> | null = null;
 
-export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+/**
+ * story #4310 — 응답 헤더를 기다리는 기본 상한. 예전엔 제한이 없어 응답 없이 걸린 요청 하나가 화면을 Cloudflare 524(~100초)까지 로딩에 묶었다.
+ * 근거(frontend Cloud Run 요청 로그 · BFF): prod 5.3일 SSE 제외 181,845건 p99 0.87s · p99.99 2.6s · 최대 10.4s. storage-api fastapiCall과 같은 30s.
+ */
+export const FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS = 30_000;
+
+export interface FetchWithAuthInit extends RequestInit {
+  /**
+   * 응답 헤더까지의 상한(ms). 헤더가 오면 타이머를 푼다 — 본문 읽기 · 큰 다운로드는 끊지 않는다. `false` = 제한 없음.
+   * 기본값보다 길게 기다려야 하는 동기 작업만 넘긴다(예: 오피스 문서 변환).
+   */
+  timeoutMs?: number | false;
+}
+
+/**
+ * 한 번의 fetch를 헤더까지 `timeoutMs`로 묶는다. 호출자 `signal`도 존중한다(먼저 끊는 쪽이 이긴다). 시간 초과는
+ * `DOMException('…', 'TimeoutError')`로 reject — 망 오류와 같은 실패 갈래(호출자가 `AbortError`만 무시해도 삼켜지지 않는다).
+ * `AbortSignal.any`를 쓰지 않는다 — 모바일 셸 WebView(Safari 17.4 미만)에 없다.
+ */
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit | undefined, timeoutMs: number | false): Promise<Response> {
+  if (timeoutMs === false) return fetch(input, init);
+  const callerSignal = init?.signal ?? undefined;
+  if (callerSignal?.aborted) return fetch(input, init); // 이미 끊긴 호출자 신호 — fetch가 그 이유로 바로 reject
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException(`fetchWithAuth: no response headers within ${timeoutMs}ms`, 'TimeoutError'));
+  }, timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', onCallerAbort);
+  }
+}
+
+export async function fetchWithAuth(input: RequestInfo | URL, init?: FetchWithAuthInit): Promise<Response> {
   // story #2160 — 세션이 이미 죽었다고 확定된 뒤(SessionExpiredDialog 노출 중)엔 네트워크를
   // 아예 타지 않는다. 안 그러면 401 폴링/재연결 루프가 매 tick마다 refresh를 다시 시도해
   // "401에는 재시도하지 않는다"는 처방이 무력화된다.
   if (typeof window !== 'undefined' && isSessionExpiredSignaled()) {
     return new Response(null, { status: 401 });
   }
-  const res = await fetch(input, init);
+  const { timeoutMs = FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, ...requestInit } = init ?? {};
+  const res = await fetchWithTimeout(input, init ? requestInit : undefined, timeoutMs);
   if (res.status !== 401) return res;
 
   // 중복 refresh 방지: 동시 호출 시 하나만 실행
@@ -107,7 +145,8 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit
     return res;
   }
 
-  return fetch(input, init);
+  // 갱신 뒤 재시도도 같은 상한(4310 — 재시도 한 번이 또 걸려 화면을 묶지 않게).
+  return fetchWithTimeout(input, init ? requestInit : undefined, timeoutMs);
 }
 
 // ─── Rate-limited fetch helper ────────────────────────────────────────────────

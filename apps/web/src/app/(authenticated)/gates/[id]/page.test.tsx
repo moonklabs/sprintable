@@ -313,7 +313,7 @@ describe('GateDetailPage — 재승인 칩 (story #3813 PR4)', () => {
 describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () => {
   it('422 거부 사유(#2027 고위험 승인 사유 필수)가 raw "HTTP 422" 대신 실 메시지로 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
       if (url === '/api/gates/gate-1/transition') {
         return {
           ok: false,
@@ -340,7 +340,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   // "HTTP {status}"가 아니라 사람말 공통 폴백(gateTransitionErrorGeneric)을 보여준다.
   it('BE가 message를 안 주면(500 등) raw "HTTP 500" 대신 사람말 폴백을 보여준다 (story #2552)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low' })) };
       if (url === '/api/gates/gate-1/transition') {
         return { ok: false, status: 500, json: async () => ({ data: null, error: null, meta: null }) };
       }
@@ -365,7 +365,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   it('409 gate_head_changed 거부 시 사유를 보여주고 gate를 재조회한다', async () => {
     let gateFetchCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) {
+      if (url === '/api/gates/gate-1' && !init?.method) {
         gateFetchCount += 1;
         const sha = gateFetchCount === 1 ? 'sha-old-reviewed' : 'sha-new-race-landed';
         return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'low', github_check_run_sha: sha })) };
@@ -405,7 +405,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
   it('409 재조회로 SHA가 바뀌면 근거열람 체크·사유가 리셋돼 재승인 버튼이 다시 비활성화된다', async () => {
     let gateFetchCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) {
+      if (url === '/api/gates/gate-1' && !init?.method) {
         gateFetchCount += 1;
         const sha = gateFetchCount === 1 ? 'sha-A-reviewed' : 'sha-B-race-landed';
         return { ok: true, status: 200, json: async () => (gate({ can_approve: true, risk_grade: 'high', github_check_run_sha: sha })) };
@@ -471,7 +471,7 @@ describe('GateDetailPage — 본 초안 버전 대조 (story #4190)', () => {
     let gateFetchCount = 0;
     const transitionBodies: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/gates/gate-1' && !init) {
+      if (url === '/api/gates/gate-1' && !init?.method) {
         gateFetchCount += 1;
         return { ok: true, status: 200, json: async () => (recipeGate(gateFetchCount === 1 ? 1 : 2)) };
       }
@@ -520,7 +520,7 @@ describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #263
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gateFixture) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/gates/gate-1/discuss') {
         return (extra?.discussOk ?? true)
           ? { ok: true, json: async () => ({ data: gateFixture }) }
@@ -600,7 +600,7 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method, body: init?.body as string | undefined });
-      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => (gateFixture) };
+      if (url === '/api/gates/gate-1' && !init?.method) return { ok: true, status: 200, json: async () => (gateFixture) };
       if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
       if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => (gateFixture) };
       return { ok: true, json: async () => ({ data: [] }) };

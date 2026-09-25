@@ -223,6 +223,32 @@ describe('ApprovalsQueue', () => {
     expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
   });
 
+  // story #4310 AC3 — 응답이 아예 안 오는(걸린) 요청도 fetchWithAuth 시간 제한(30s) 뒤 망 오류와 같은 갈래로 «못 불러옴» + 다시 시도.
+  // 예전엔 제한이 없어 «불러오는 중»이 CF 524(~100초)까지 그대로였다. 실제 fetch처럼 신호가 끊겨야만 reject한다.
+  it('⭐held 요청이 응답 없이 걸려도 30s 뒤 «못 불러옴» + 다시 시도(그 전엔 불러오는 중)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+        if (url.includes('status=held')) {
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+          });
+        }
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }));
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(container.querySelector('[data-testid="gate-inbox-load-error"]'), '30s 전').toBeNull();
+      expect(container.textContent).toContain(koMessages.cage.gateInboxLoading);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
+      expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
+      expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.cage.gateInboxRetry)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('4유형(게이트·문서결재·머지게이트·보류) 모두 렌더하고 gate_type 배지를 표시한다', async () => {
     mockFetches(
       [

@@ -85,6 +85,8 @@ describe('FileViewer pptx (story #2803)', () => {
       }
       if (url.includes('/api/attachments/convert') && init?.method === 'POST') {
         expect(url).toContain(`asset_id=${ORIGINAL_ASSET_ID}`);
+        // story #4310 — 동기 변환(BE 120s)이라 fetchWithAuth 기본 30s 대신 화면 상한과 같은 130s.
+        expect((init as { timeoutMs?: number }).timeoutMs).toBe(130_000);
         return jsonResponse({ data: { asset_id: CONVERTED_ASSET_ID, name: 'deck.pdf', content_type: 'application/pdf' } });
       }
       if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${CONVERTED_ASSET_ID}`)) {
