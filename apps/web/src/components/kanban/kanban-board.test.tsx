@@ -1800,6 +1800,75 @@ describe('KanbanBoard — 필터를 고른 뒤 초점 = 그 필터 버튼 · 다
     await act(async () => { releaseRefetch?.(); });
     await frames();
   });
+
+  // PO 10:51Z — 다시 불러오기가 실패하면(망 오류 · 5xx) 스켈레톤 · busy가 남지 않고 컬럼 자리에 오류 + 다시 시도 · 늦게 실패한 옛 요청은 새 화면을 덮지 않는다.
+  type Outcome = 'ok' | 'fail5xx' | 'network';
+  function stubControlled(plan: { sprint: Outcome; assignee?: Outcome }) {
+    const waiters: Record<string, () => void> = {};
+    const gates: Record<string, Promise<void>> = {};
+    const gate = (key: string) => (gates[key] ??= new Promise<void>((r) => { waiters[key] = r; }));
+    let retryOk = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/stories') {
+        const key = u.searchParams.get('assignee_id') ? 'assignee' : u.searchParams.get('sprint_id') ? 'sprint' : null;
+        if (key && !retryOk) {
+          await gate(key);
+          const outcome = key === 'sprint' ? plan.sprint : (plan.assignee ?? 'ok');
+          if (outcome === 'network') throw new TypeError('Failed to fetch');
+          if (outcome === 'fail5xx') return { ok: false, status: 503, json: async () => null };
+        }
+        return { ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) };
+      }
+      if (u.pathname === '/api/sprints') return { ok: true, json: async () => ({ data: [{ id: 'spr-1', title: '스프린트 A', status: 'active' }] }) };
+      if (u.pathname === '/api/members') return { ok: true, json: async () => ({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }) };
+      return { ok: false, json: async () => null };
+    }));
+    return {
+      release: async (key: string) => { await act(async () => { gate(key); waiters[key]?.(); }); await frames(); },
+      allowRetry: () => { retryOk = true; },
+    };
+  }
+  const choose = async (triggerKey: string, itemName: string) => {
+    const trigger = triggerFor(B[triggerKey]!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed(itemName)!.click(); });
+    await mount();
+    await frames();
+    return trigger;
+  };
+
+  it.each([['5xx', 'fail5xx'], ['망 오류', 'network']] as const)('⭐다시 불러오기 실패(%s) — busy가 풀리고 컬럼 자리에 오류 + 다시 시도 · 다시 시도하면 컬럼이 돌아온다', async (_n, outcome) => {
+    const ctl = stubControlled({ sprint: outcome });
+    await mount();
+    await choose('allSprints', '스프린트 A');
+    const area = () => container.querySelector('[data-testid="kanban-content-area"]');
+    expect(area()?.getAttribute('aria-busy')).toBe('true');
+    await ctl.release('sprint');
+    expect(area()?.getAttribute('aria-busy')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+    const err = container.querySelector('[data-testid="kanban-load-error"]');
+    expect(err?.getAttribute('role')).toBe('alert');
+    expect(err?.textContent).toContain((koMessages.board as unknown as Record<string, string>).boardLoadFailed);
+    ctl.allowRetry();
+    await act(async () => { (container.querySelector('[data-testid="kanban-load-retry"]') as HTMLButtonElement).click(); });
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-load-error"]')).toBeNull();
+    expect(area()?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('⭐그 사이 필터를 또 바꾸면 — 앞(스프린트) 요청이 늦게 실패해도 새(담당자) 조건 화면을 덮지 않는다', async () => {
+    const ctl = stubControlled({ sprint: 'fail5xx', assignee: 'ok' });
+    await mount();
+    await choose('allSprints', '스프린트 A');
+    await choose('allAssignees', 'Alice');
+    await ctl.release('assignee');
+    expect(container.querySelector('[data-testid="kanban-content-area"]')?.getAttribute('aria-busy')).toBeNull();
+    await ctl.release('sprint'); // 옛 요청이 이제야 실패
+    expect(container.querySelector('[data-testid="kanban-load-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+  });
 });
 
 // story #4284 — BE `team_members.name`은 nullable(표시 이름 없는 휴먼 · story #3758). FE 타입이 `name: string`이라 tsc가 못 잡았고,

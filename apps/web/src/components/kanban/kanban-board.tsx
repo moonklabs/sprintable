@@ -169,6 +169,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // story #4307(유나 · PO 10:42Z) — 첫 불러오기가 끝났는지. 전면 스켈레톤(툴바까지 갈아끼움)은 첫 불러오기에만 — 그 뒤 스프린트 · 담당자 필터로
   // 다시 불러올 때는 툴바를 그대로 둔다(예전엔 툴바째 사라져 필터 버튼으로 돌아갈 초점이 body로 빠지고 보드 전체가 깜빡였다).
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  // story #4307(PO 10:51Z) — 스토리 목록(보드 몸통) 불러오기 실패. 예전엔 5xx면 빈 컬럼(«스토리 없음»이라는 거짓)이, 망 오류면 옛 필터의
+  // 카드가 새 필터 칩 아래 그대로 남았다. 실패면 컬럼 자리에 오류 + «다시 시도»(busy는 풀림). 늦게 실패한 옛 요청은 runId로 무시.
+  const [storiesLoadFailed, setStoriesLoadFailed] = useState(false);
   // CB-S4: status별 total count + cursor
   const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
   const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
@@ -307,7 +310,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   }
 
   // CB-S4: status별 stories fetch helper
-  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null }> => {
+  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
     const params = new URLSearchParams();
     if (projectId) params.set('project_id', projectId);
     if (selectedSprintId) params.set('sprint_id', selectedSprintId);
@@ -316,7 +319,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     params.set('limit', status === 'done' ? '10' : '20');
     if (cursor) params.set('cursor', cursor);
     const res = await fetchWithAuth(`/api/stories?${params}`);
-    if (!res.ok) return { stories: [], total: 0, nextCursor: null };
+    if (!res.ok) return { stories: [], total: 0, nextCursor: null, ok: false };
     // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
     // story #3761 후속(카디르 QA 지적, PR#4109 검수 中 발견) — 은퇴한 `total` 대신 정본
     // `totalCount` 읽기. 이 status 기반 호출은 buildCursorPageMeta 경로(pagination.ts)를
@@ -327,7 +330,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const stories = json.data ?? [];
     const nextCursor = json.meta?.nextCursor ?? null;
     const total = json.meta?.totalCount ?? stories.length;
-    return { stories, total, nextCursor };
+    return { stories, total, nextCursor, ok: true };
   }, [projectId, selectedSprintId, selectedAssigneeId]);
 
   // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
@@ -516,11 +519,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       // 6건이 순차로 줄 서 있어 목록이 전부 끝날 때까지 스켈레톤이었다(첫 화면 호출 폭포의 꼬리).
       const statuses = COLUMNS.map((c) => c.id);
       const [storyResults, epicsRes, membersRes] = await Promise.all([
-        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
+        // story #4307 — 망 오류(throw)도 실패로 모은다(예전엔 그대로 새어 옛 카드가 남았다).
+        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))).catch(() => null),
         fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
         fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
       ]);
       if (stale()) return;
+      if (!storyResults || storyResults.some((r) => !r.ok)) {
+        // 늦게 실패한 옛 요청은 위 stale 판정으로 이미 빠졌다 — 여기 온 건 지금 조건의 실패.
+        setStoriesLoadFailed(true);
+        return;
+      }
+      setStoriesLoadFailed(false);
 
       const allStories: KanbanStory[] = [];
       const newTotals: Record<string, number> = {};
@@ -1699,7 +1709,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         aria-busy={refetching || undefined}
         data-testid="kanban-content-area"
       >
-        {refetching ? (viewMode === 'list' ? <KanbanListRowsSkeleton /> : <KanbanColumnsSkeleton />) : (<>
+        {refetching ? (viewMode === 'list' ? <KanbanListRowsSkeleton /> : <KanbanColumnsSkeleton />) : storiesLoadFailed ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="alert" data-testid="kanban-load-error">
+            <p className="text-sm text-muted-foreground">{t('boardLoadFailed')}</p>
+            <Button size="sm" variant="outline" onClick={() => void fetchData()} data-testid="kanban-load-retry">{t('epicSwimlaneRetry')}</Button>
+          </div>
+        ) : (<>
         {stories.length === 0 ? (
           // story bb78f14b(doc resource-view-firsttouch-identity-pattern §4 "보드" 행 — ⚠️과함
           // 주의 명시): 다른 4뷰(5요소)와 달리 여기는 3요소로 축소(아이콘+headline+CTA, explainer

@@ -1212,6 +1212,7 @@
     "epicSwimlaneUnassigned": "미할당",
     "epicSwimlaneOverflowToggle": "에픽 {count}개 더 보기",
     "epicSwimlaneLoadError": "불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+    "boardLoadFailed": "보드를 불러오지 못했어요 — 다시 시도해 주세요.",
     "epicSwimlaneLoadTimeout": "불러오는 데 시간이 너무 오래 걸려 중단했어요. 다시 시도해 주세요.",
     "epicSwimlaneLoadingElapsed": "불러오는 중… ({seconds}초)",
     "epicSwimlaneRetry": "다시 시도",
