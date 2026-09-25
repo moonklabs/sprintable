@@ -81,12 +81,30 @@ class PlanStorySummary(BaseModel):
 
 
 class FeedbackCreate(BaseModel):
-    org_id: uuid.UUID
-    project_id: uuid.UUID
+    """story #4298 — 신원은 클라이언트가 보내지 않는다: 조직은 인증된 조직(`get_verified_org_id`), 작성자는 호출자 멤버(`resolve_member`).
+    예전엔 `org_id` · `feedback_by_id`가 필수라 화면(엔트리 id · 종류 · 본문만 보냄)의 작성이 늘 422였다. `project_id`는 신원이 아니라
+    «어느 프로젝트 뷰의 피드백인가»라 받되 서버가 접근권을 검증한다 — 생략하면 엔트리의 프로젝트. (extra 필드는 pydantic 기본 무시 —
+    옛 클라이언트가 org_id · feedback_by_id를 보내도 쓰지 않는다.)"""
+
+    project_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None
-    feedback_by_id: uuid.UUID
     review_type: str = "comment"
     feedback_text: str
+
+
+class FeedbackUpdate(BaseModel):
+    """story #4298(PO 06:15Z) — 작성자만 고친다. 둘 다 생략 가능(준 것만 바꾼다)."""
+
+    review_type: str | None = None
+    feedback_text: str | None = None
+
+
+class MissingStandupMember(BaseModel):
+    """story #4298(PO 06:15Z) — «안 쓴 사람» 한 명. 이름은 members.name → 사람의 users.display_name(이메일 폴백 0 · #3755 · 4284
+    nullable 규칙) — 모르면 null(화면은 «이름 없는 구성원»)."""
+
+    id: uuid.UUID
+    name: str | None = None
 
 
 class FeedbackResponse(BaseModel):

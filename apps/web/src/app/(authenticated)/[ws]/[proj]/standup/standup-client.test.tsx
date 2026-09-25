@@ -52,7 +52,7 @@ function stubFetch(opts: { missingReject?: boolean; entries?: unknown[] } = {}) 
     if (url.includes('/api/standup/feedback')) return { ok: true, json: async () => ({ data: [] }) };
     if (url.includes('/api/standup/missing')) {
       if (opts.missingReject) throw new Error('network down');
-      return { ok: true, json: async () => ({ data: { missing: [] } }) };
+      return { ok: true, json: async () => ({ data: [] }) };  // story #4298 — BE `[{id, name}]`(BFF가 data로 감쌈)
     }
     if (url.includes('/api/stories?project_id=')) {
       return { ok: true, json: async () => ({ data: [], meta: {} }) };

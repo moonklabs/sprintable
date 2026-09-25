@@ -160,18 +160,24 @@ async def test_get_standup_404():
 
 @pytest.mark.anyio
 async def test_get_missing_standups_200():
-    """GET /standups/missing — 미제출 멤버 UUID 목록."""
+    """GET /standups/missing — 미제출 멤버 `[{id, name}]`(story #4298 — 예전엔 UUID 목록)."""
     client, session, app = await _client()
     try:
         missing_id = uuid.uuid4()
-        with patch("app.repositories.standup.StandupEntryRepository.get_missing", new_callable=AsyncMock) as mock_missing:
+        name_row = MagicMock(id=missing_id, type="human", display_name="비")
+        name_row.name = None  # MagicMock(name=...)은 목 이름이라 따로 넣는다
+        name_result = MagicMock()
+        name_result.all.return_value = [name_row]
+        session.execute = AsyncMock(return_value=name_result)
+        with patch("app.repositories.standup.StandupEntryRepository.get_missing", new_callable=AsyncMock) as mock_missing, \
+                patch("app.routers.standups.has_project_access", new_callable=AsyncMock, return_value=True):
             mock_missing.return_value = [missing_id]
 
             async with client as c:
                 resp = await c.get(f"/api/v2/standups/missing?project_id={PROJECT_ID}&date={TODAY}")
 
         assert resp.status_code == 200
-        assert str(missing_id) in resp.json()
+        assert resp.json() == [{"id": str(missing_id), "name": "비"}]
     finally:
         app.dependency_overrides.clear()
 

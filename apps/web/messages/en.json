@@ -2230,6 +2230,7 @@
     "relatedPlan": "Related plan",
     "missingOrgStandup": "No organization standup yet",
     "missingOrgHint": "Based on a single organization-level entry. Once written, it shows as submitted across every project you can access.",
+    "missingLoadFailed": "Couldn't load who hasn't written yet — refresh to try again.",
     "title": "Standup",
     "embeddedHeading": "Daily Check-in",
     "noCheckinsToday": "No check-ins yet today",

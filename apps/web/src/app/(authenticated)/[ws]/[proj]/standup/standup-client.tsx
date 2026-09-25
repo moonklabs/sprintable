@@ -147,7 +147,9 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   const [members, setMembers] = useState<StandupMemberRow[]>([]);
   const [feedback, setFeedback] = useState<StandupFeedbackRow[]>([]);
   // S3(51447ca0): Missing = org 기준(get_missing projection) — 조직 1회 미작성 멤버
-  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string }[]>([]);
+  // story #4298 — BE `[{id, name}]`(name은 모르면 null · 이메일 폴백 0). 조회 실패는 빈 목록과 다른 사실이라 따로 든다.
+  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string | null }[]>([]);
+  const [missingFailed, setMissingFailed] = useState(false);
   const [activeSprint, setActiveSprint] = useState<StandupSprintSummary | null>(null);
   const [stories, setStories] = useState<StandupStorySummary[]>([]);
   const [done, setDone] = useState('');
@@ -267,7 +269,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         // d9847ef0: project-scoped(projectId 있을 때만) — sprints·feedback·missing·sprint stories.
         // missing은 get_missing_standups가 project_id REQUIRED라 project context 필수(BE 무변경).
         let feedbackData: StandupFeedbackRow[] = [];
-        let missingList: { id: string; name: string }[] = [];
+        let missingList: { id: string; name: string | null }[] = [];
+        let missingLoadFailed = false;
         let sprint: StandupSprintSummary | null = null;
         let storySummaries: StandupStorySummary[] = [];
         let nextStoriesCursor: string | null = null;
@@ -291,8 +294,10 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           feedbackData = fbData;
 
           // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
-          const missingJson = await missingRes?.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
-          missingList = missingRes?.ok ? (missingJson?.data?.missing ?? []) : [];
+          // story #4298 — BE는 `[{id, name}]` 배열(BFF가 data로 감쌈). 예전엔 없는 `data.missing`을 읽어 늘 빈 칸이었다.
+          const missingJson = await missingRes?.json().catch(() => null) as { data?: { id: string; name: string | null }[] } | null;
+          if (missingRes?.ok && Array.isArray(missingJson?.data)) missingList = missingJson.data;
+          else missingLoadFailed = true;
 
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 
@@ -335,6 +340,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         setMembers(uniqueMembers);
         setFeedback(feedbackData);
         setMissingMembers(missingList);
+        setMissingFailed(missingLoadFailed);
         setActiveSprint(sprint);
         setStories(storySummaries);
         setStoriesNextCursor(nextStoriesCursor);
@@ -393,7 +399,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     try {
       // S2(1c2be9db): org-level write — project_id 생략 시 BE가 author 접근 프로젝트로 auto-link.
       // 하루 한 번 작성하면 접근한 모든 프로젝트 뷰에 projection 된다(재타이핑 제거).
-      const response = await fetch('/api/standup', {
+      const response = await fetchWithAuth('/api/standup', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -418,17 +424,18 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   }
 
   async function createFeedback(input: { standup_entry_id: string; review_type: StandupReviewType; feedback_text: string }) {
-    const response = await fetch('/api/standup/feedback', {
+    // story #4298 — 신원(조직 · 작성자)은 서버가 인증 문맥에서 채운다. 보는 프로젝트만 함께 보낸다(서버가 접근권 검증 · 없으면 엔트리의 것).
+    const response = await fetchWithAuth('/api/standup/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, ...(projectId ? { project_id: projectId } : {}) }),
     });
     if (!response.ok) throw new Error('Failed to create feedback');
     setRefreshToken((value) => value + 1);
   }
 
   async function updateFeedback(feedbackId: string, input: { review_type?: StandupReviewType; feedback_text?: string }) {
-    const response = await fetch(`/api/standup/feedback/${feedbackId}`, {
+    const response = await fetchWithAuth(`/api/standup/feedback/${feedbackId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
@@ -438,7 +445,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   }
 
   async function deleteFeedback(feedbackId: string) {
-    const response = await fetch(`/api/standup/feedback/${feedbackId}`, {
+    const response = await fetchWithAuth(`/api/standup/feedback/${feedbackId}`, {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete feedback');
@@ -877,7 +884,14 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
               ) : null}
 
               {/* S3(51447ca0): Missing — org 1회 작성 기준 미작성 멤버(프로젝트별 아님) */}
-              {!loading && missingMembers.length > 0 ? (
+              {/* story #4298 — 조회 실패는 «아무도 안 빠짐»(칸 없음)과 다른 사실 — 문장으로 말한다. */}
+              {!loading && missingFailed ? (
+                <section className="space-y-2">
+                  <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
+                  <p className="text-xs text-muted-foreground" data-testid="standup-missing-load-failed">{t('missingLoadFailed')}</p>
+                </section>
+              ) : null}
+              {!loading && !missingFailed && missingMembers.length > 0 ? (
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
@@ -886,7 +900,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                   <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4">
                     <div className="flex flex-wrap gap-1.5">
                       {missingMembers.map((m) => (
-                        <Badge key={m.id} variant="outline">{m.name}</Badge>
+                        <Badge key={m.id} variant="outline">{m.name ?? tc('memberUnnamed')}</Badge>
                       ))}
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">{t('missingOrgHint')}</p>

@@ -2230,6 +2230,7 @@
     "relatedPlan": "관련 계획",
     "missingOrgStandup": "조직 스탠드업 미작성",
     "missingOrgHint": "조직 1회 작성 기준이에요. 작성하면 접근한 모든 프로젝트에서 제출됨으로 표시돼요.",
+    "missingLoadFailed": "미작성 구성원을 불러오지 못했어요 — 새로고침해 주세요.",
     "title": "스탠드업",
     "embeddedHeading": "하루 체크인",
     "noCheckinsToday": "오늘 체크인이 아직 없어요",
