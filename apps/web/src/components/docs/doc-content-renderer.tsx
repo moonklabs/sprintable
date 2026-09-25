@@ -18,10 +18,13 @@ import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { cardVariants } from '@/components/ui/card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useParams, useRouter } from 'next/navigation';
+import { docUrl } from './lib/doc-project-url';
 
 interface DocContentRendererProps {
   content: string;
@@ -239,11 +242,22 @@ export function DocContentRenderer({
   suppressLeadingTitle,
   bodyEmphasis = 'default',
 }: DocContentRendererProps) {
-  // story #4231 — 문서 사이 이동(위키링크·임베드 카드 클릭)은 현재 프로젝트(`?p=`)를 싣는다. 이 컴포넌트의 DOM 조립 효과를
-  // 프로젝트 전환마다 다시 돌리지 않으려고 ref로 읽는다(클릭 시점의 최신 값).
+  // story #4309 — 본문의 문서 링크(위키 링크 · 페이지 임베드)는 진짜 `<a href>`다: 키보드 초점 · Enter · 새 탭(⌘/Ctrl · 가운데 클릭).
+  // 목적지는 처음부터 이 탭 주소의 `/{ws}/{proj}/docs/{slug}`(예전 `window.location.href = /docs/{slug}?p=` = 전체 새로고침 + 서버 307),
+  // 보통 클릭은 클라이언트 라우터로. ws/proj를 경로에서 모르는 자리만 flat + `?p=`(4231 · proxy 안전망).
   const flatHref = useFlatHref();
-  const flatHrefRef = useRef(flatHref);
-  useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
+  const params = useParams<{ ws?: string; proj?: string }>();
+  const wsSlug = params?.ws;
+  const projSlug = params?.proj;
+  const docHref = useCallback(
+    (slug: string) => (wsSlug && projSlug ? docUrl(wsSlug, projSlug, slug) : flatHref(`/docs/${slug}`)),
+    [wsSlug, projSlug, flatHref],
+  );
+  const router = useRouter();
+  // DOM 조립 효과를 프로젝트 전환마다 다시 돌리지 않으려고 ref로 읽는다. 이미 만든 링크의 href는 아래 작은 효과가 새로 쓴다.
+  const docHrefRef = useRef(docHref);
+  const routerRef = useRef(router);
+  useEffect(() => { docHrefRef.current = docHref; routerRef.current = router; }, [docHref, router]);
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
 
@@ -311,7 +325,25 @@ export function DocContentRenderer({
       return () => button.removeEventListener('click', handleClick);
     });
 
-    // Wiki link click handlers (viewer)
+    // story #4309 — 보통 클릭(수정 키 없는 주 버튼)만 클라이언트 이동으로 가로챈다. ⌘/Ctrl/Shift/Alt 클릭 · 가운데 클릭(auxclick)은
+    // 브라우저 기본 동작(새 탭 · 새 창)에 맡긴다. Enter는 링크에 click을 쏘므로 같은 길을 탄다.
+    const handleInternalLinkClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const href = (event.currentTarget as HTMLAnchorElement).getAttribute('href');
+      if (!href) return;
+      event.preventDefault();
+      routerRef.current.push(href);
+    };
+    const makeInternalLink = (slug: string, className: string): HTMLAnchorElement => {
+      const link = document.createElement('a');
+      link.setAttribute('data-doc-internal-link', slug);
+      link.setAttribute('href', docHrefRef.current(slug));
+      link.className = className;
+      link.addEventListener('click', handleInternalLinkClick);
+      return link;
+    };
+
+    // Wiki link (viewer) — HTML 포맷에만 있다(마크다운 sanitize가 span의 data-*를 걷는다) · dangerouslySetInnerHTML이라 React가 자식을 쥐지 않는다.
     const wikiLinks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]'));
     const wikiCleanup = wikiLinks.map((span) => {
       const slug = span.getAttribute('data-slug') ?? '';
@@ -323,11 +355,19 @@ export function DocContentRenderer({
         span.removeAttribute('data-slug');
         return () => { /* no handler attached */ };
       }
-      span.className = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground';
-      span.title = title;
-      const handleClick = () => { if (slug) { const flatHref = flatHrefRef.current; window.location.href = flatHref(`/docs/${slug}`); } };
-      span.addEventListener('click', handleClick);
-      return () => span.removeEventListener('click', handleClick);
+      const linkClassName = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground';
+      if (!slug) {
+        span.className = linkClassName;
+        span.title = title;
+        return () => { /* no destination — nothing to navigate to */ };
+      }
+      // 링크는 span 안에 둔다(span의 data-*는 다시 돌 때 찾는 표지 · 효과가 다시 돌면 링크를 새로 만든다).
+      span.className = '';
+      const link = makeInternalLink(slug, `${linkClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`);
+      link.title = title;
+      link.textContent = span.textContent || title;
+      span.replaceChildren(link);
+      return () => link.removeEventListener('click', handleInternalLinkClick);
     });
 
     // Page embed handlers (viewer) — story #1996(no-sloppy): 에디터 NodeView(PageEmbedExtension
@@ -343,21 +383,29 @@ export function DocContentRenderer({
       const iconMarkup = icon
         ? `<span class="shrink-0 text-lg">${escapeHtmlText(icon)}</span>`
         : '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
-      block.className = publicMode || !slug
-        ? 'not-prose my-2 flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3'
-        : 'not-prose my-2 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 transition-colors hover:bg-muted/40';
-      block.innerHTML = `
+      const displayTitle = title || `(${untitledEmbedLabel})`;
+      const cardInner = `
         ${iconMarkup}
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium">${escapeHtmlText(title || `(${untitledEmbedLabel})`)}</p>
+          <p class="truncate text-sm font-medium">${escapeHtmlText(displayTitle)}</p>
           ${slug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(slug)}</p>` : ''}
         </div>`;
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
-      // 유지하되 클릭 네비게이션만 뺀다.
-      if (publicMode || !slug) return () => { /* no handler attached */ };
-      const handleClick = () => { const flatHref = flatHrefRef.current; window.location.href = flatHref(`/docs/${slug}`); };
-      block.addEventListener('click', handleClick);
-      return () => block.removeEventListener('click', handleClick);
+      // 유지하되 링크(이동)만 뺀다.
+      // 카드 표면은 공용 cardVariants(손코딩 카드 가드 · story #3164) — 링크 카드와 공개 보기의 비활성 카드가 같은 표면.
+      const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+      if (publicMode || !slug) {
+        block.className = cn('not-prose my-2', embedCardClassName);
+        block.innerHTML = cardInner;
+        return () => { /* no handler attached */ };
+      }
+      // story #4309 — 카드 전체가 링크 하나(접근 가능한 이름 = 문서 제목 · 경로 줄은 이름에 섞지 않는다).
+      block.className = 'not-prose my-2';
+      const link = makeInternalLink(slug, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
+      link.setAttribute('aria-label', displayTitle);
+      link.innerHTML = cardInner;
+      block.replaceChildren(link);
+      return () => link.removeEventListener('click', handleInternalLinkClick);
     });
 
     // Math block rendering (viewer)
@@ -573,11 +621,24 @@ export function DocContentRenderer({
     };
   }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel]);
 
+  // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
+  useEffect(() => {
+    const root = internalRef.current;
+    if (!root) return;
+    root.querySelectorAll<HTMLAnchorElement>('a[data-doc-internal-link]').forEach((link) => {
+      link.setAttribute('href', docHref(link.getAttribute('data-doc-internal-link') ?? ''));
+    });
+  }, [docHref]);
+
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);
     if (contentFormat !== 'html') return sanitized;
     return decorateHtmlContent(sanitized, headings, codeCopyLabel);
   }, [codeCopyLabel, content, contentFormat, headings]);
+  // story #4309 — React 19는 `dangerouslySetInnerHTML` 객체가 새것이면(문자열이 같아도) innerHTML을 다시 쓴다(react-dom updateProperties:
+  // `propKey !== lastProp` → setProp). 매 렌더 `{ __html }`을 새로 만들면 부모가 다시 그릴 때마다 위 효과가 붙인 것(문서 링크 · 임베드
+  // 카드 · 코드 강조 · 복사 버튼)이 원문으로 지워지고 효과는 다시 돌지 않는다. 본문이 바뀔 때만 새 객체.
+  const htmlInnerProp = useMemo(() => ({ __html: decoratedHtml }), [decoratedHtml]);
 
   // story #2021 후속(PO 리뷰): 이 components 객체를 매 렌더 인라인으로 새로 만들면
   // hast-util-to-jsx-runtime이 그 함수 참조를 그대로 React 엘리먼트 type으로 써서([[feedback:
@@ -688,7 +749,7 @@ export function DocContentRenderer({
     return (
       <div
         ref={setContentRef}
-        dangerouslySetInnerHTML={{ __html: decoratedHtml }}
+        dangerouslySetInnerHTML={htmlInnerProp}
         className={rootClassName}
       />
     );

@@ -14,7 +14,8 @@
     "PR1이 Card primitive로 이관해 여기서 뺐다(story #3736 ⑪의 「원인 3파일」). 263키 → 270키",
     "(신규 26건 grandfather - 3건 이관 제거 - 중복/재구성에 따른 소폭 차이).",
     "story #3743 그라운딩 前 잔존(2026-09-09, 페드루 PO 지적·배포 60 실픽셀) — org-briefing-shell.tsx(FaceSkeletonPanel)·workforce-face.tsx 2건이 loop-face.tsx와 같은 카드인데 Card primitive 이관에서 빠져 있었다(#3736 ⑪ 「원인 3파일」 당시 이 둘은 안 걸렸던 것으로 보임) — 이번에 마저 이관, 여기서 뺀다. 270키 → 268키.",
-    "story #3748(잔여②, 페드루 PO 確定 2026-09-09) — org-briefing-shell.tsx:65 안내 배너는 손코딩 카드가 아니라 Card도 아닌 안내 패널이었다(판정: 집안 Alert role=\"status\"로 이관, default variant 값이 이 리터럴과 동일). 이관 뒤 이 키 소멸 — 새 부품·새 키 0. 268키 → 267키."
+    "story #3748(잔여②, 페드루 PO 確定 2026-09-09) — org-briefing-shell.tsx:65 안내 배너는 손코딩 카드가 아니라 Card도 아닌 안내 패널이었다(판정: 집안 Alert role=\"status\"로 이관, default variant 값이 이 리터럴과 동일). 이관 뒤 이 키 소멸 — 새 부품·새 키 0. 268키 → 267키.",
+    "story #4309(2026-09-25) — doc-content-renderer.tsx 페이지 임베드 카드(링크 카드 · 공개 보기 비활성 카드) 2건을 cardVariants(surface subtle · radius compact)로 이관해 여기서 뺐다. 263키 → 261키."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2",
@@ -126,9 +127,7 @@
     "components/docs/doc-content-renderer.tsx::flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground",
     "components/docs/doc-content-renderer.tsx::flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40 no-underline",
     "components/docs/doc-content-renderer.tsx::my-2 block aspect-[4/3] w-full max-w-sm animate-pulse rounded-xl border border-border bg-muted",
-    "components/docs/doc-content-renderer.tsx::not-prose my-2 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 transition-colors hover:bg-muted/40",
     "components/docs/doc-content-renderer.tsx::not-prose my-2 flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground",
-    "components/docs/doc-content-renderer.tsx::not-prose my-2 flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3",
     "components/docs/doc-content-renderer.tsx::not-prose my-4 flex justify-center rounded-xl border border-border bg-muted p-4 [&_svg]:h-auto [&_svg]:max-w-full",
     "components/docs/doc-content-renderer.tsx::not-prose my-4 rounded-xl border border-border bg-muted p-4 text-xs text-muted-foreground",
     "components/docs/doc-content-renderer.tsx::not-prose my-6 overflow-hidden rounded-xl border border-border bg-muted",
