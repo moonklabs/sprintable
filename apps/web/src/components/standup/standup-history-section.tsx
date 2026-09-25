@@ -76,8 +76,9 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
           <ClipboardList className="h-4 w-4" aria-hidden />
           {t('history')}
         </h2>
-        {/* story #4302 — 20건씩 받는 목록이라 불러온 수는 전체가 아니다: 더 남았으면 «48+»(formatAtLeast · 유나 판정). */}
-        <Badge variant="chip">{t('entryCount', { count: formatAtLeast(entries.length, nextCursor !== null) })}</Badge>
+        {/* story #4302 — 20건씩 받는 목록이라 불러온 수는 전체가 아니다: 더 남았으면 «48+»(formatAtLeast · 유나 판정). 칩은 맨 수만
+            (머리 «작성 이력»이 이미 무엇의 수인지 말한다 — 문장을 넣으면 en에서 «Standup»이 두 번). */}
+        <Badge variant="chip">{formatAtLeast(entries.length, nextCursor !== null)}</Badge>
       </div>
       <div className="space-y-4">
         {sortedDates.map((date) => (
