@@ -6,7 +6,7 @@
 //   ⓐ 닫힌 서랍 — `closedDrawerProps(progress)`(aria-hidden + inert · 닫히면 초점 · 클릭에서 빠짐)
 //   ⓑ 늘 닿아야 하는 막대(스크롤로 숨는 상단바 · 도구막대) — 같은 클래스 줄에 `focus-within:translate-…-0`(초점이 들어오면 다시 보임)
 // 새로 생기는 여섯째 자리도 이 가드에 걸린다. 도달 0인 자리만 이유와 함께 EXCEPTIONS에 둔다.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { act } from 'react';
@@ -16,9 +16,8 @@ import { closedDrawerProps } from './use-swipe-drawer';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// 웹 앱 소스 전체. `ee/apps/web/src`는 빌드 밖 옛 사본이라(apps/web/Dockerfile은 apps/web만 빌드 · tsconfig @ee/*는 ee/packages만) 훑지 않는다.
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
-// EE 웹 코드도 같은 앱 화면이라 같이 훑는다(지금 0자리 · 상대경로는 `ee:`로 구분).
-const EE_SRC = join(SRC, '..', '..', '..', 'ee', 'apps', 'web', 'src');
 
 // 화면 밖 이동 모양 — 클래스(-translate-x-full · translate-y-full · -translate-y-[calc(100%+…)] 등)와 인라인 style(translateX(-100%) ·
 // translateX(${(p - 1) * 100}%) 등). 스위치 손잡이(translate-x-[14px]) · 끌기(translate3d(px)) · 가운데 맞춤(-translate-x-1/2)은 100%가
@@ -59,16 +58,11 @@ function walk(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
-const ALL = [
-  ...walk(SRC).map((p) => ({ file: relative(SRC, p), src: readFileSync(p, 'utf8') })),
-  ...(existsSync(EE_SRC) ? walk(EE_SRC).map((p) => ({ file: `ee:${relative(EE_SRC, p)}`, src: readFileSync(p, 'utf8') })) : []),
-];
+const ALL = walk(SRC).map((p) => ({ file: relative(SRC, p), src: readFileSync(p, 'utf8') }));
 
 describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () => {
-  it('훑는 범위가 비어 있지 않다(웹 · EE 웹 뿌리)', () => {
-    expect(ALL.filter((f) => !f.file.startsWith('ee:')).length).toBeGreaterThan(500);
-    expect(existsSync(EE_SRC)).toBe(true);
-    expect(ALL.some((f) => f.file.startsWith('ee:'))).toBe(true);
+  it('훑는 범위가 비어 있지 않다(웹 앱 소스 전체)', () => {
+    expect(ALL.length).toBeGreaterThan(500);
   });
 
   it('앱 전체에서 화면 밖 이동 자리마다 닫힌 서랍 헬퍼(inert) 또는 focus-within 드러내기를 쓴다', () => {
