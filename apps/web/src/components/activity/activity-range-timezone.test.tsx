@@ -15,6 +15,11 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 let orgTimezone: string | null = 'Asia/Seoul';
+const { addToastMock } = vi.hoisted(() => ({ addToastMock: vi.fn() }));
+vi.mock('@/components/ui/toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/toast')>();
+  return { ...actual, useToast: () => ({ addToast: addToastMock, toasts: [], dismissToast: () => {} }) };
+});
 vi.mock('@/app/dashboard/dashboard-shell', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/app/dashboard/dashboard-shell')>();
   return { ...actual, useDashboardContext: () => ({ ...actual.useDashboardContext(), orgTimezone }) };
@@ -207,7 +212,8 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     expect(container.textContent).not.toContain(enMessages.teamActivity.endOfRange);
   });
 
-  it('«더 보기» 실패는 끝이 아니다 — 버튼 그대로 · 끝 문장 없음', async () => {
+  it('⭐«더 보기» 실패는 끝이 아니다 — 버튼 그대로 · 끝 문장 없음 · 실패 토스트 한 번', async () => {
+    addToastMock.mockClear();
     fetchWithAuthMock.mockImplementation(async (url: string) => {
       if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
       if (url.includes('/api/activity-stream')) {
@@ -222,6 +228,9 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(moreButton()).toBeTruthy();
     expect(container.textContent).not.toContain(enMessages.teamActivity.endOfRange);
+    // story #4297(유나 후속 · PO) — 무음 실패가 아니라 토스트 한 번(결재함과 같은 공용 문구).
+    expect(addToastMock).toHaveBeenCalledTimes(1);
+    expect(addToastMock).toHaveBeenCalledWith({ title: enMessages.common.loadMoreFailed, type: 'error' });
   });
 
   it('첫 쪽이 비어 있고 서버 커서가 없으면 «더 보기»를 그리지 않는다', async () => {

@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
@@ -179,6 +180,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const t = useTranslations('teamActivity');
   const tInbox = useTranslations('inbox'); // verb 사람카피(event* 키)는 inbox 네임스페이스
   const tc = useTranslations('common');
+  const { addToast } = useToast();
   const locale =
     typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
 
@@ -284,6 +286,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
           return [...(prev ?? []), ...page.items.filter((i) => !seen.has(i.activity_id))];
         });
         setNextBeforeSeq(page.nextBeforeSeq);
+      } else {
+        // story #4297(유나 후속 · PO) — 무음 실패였다. 알리고, 커서는 그대로라 버튼을 다시 누르면 다시 시도(결재함 알림과 같은 공용 문구).
+        addToast({ title: tc('loadMoreFailed'), type: 'error' });
       }
     } finally {
       setLoadingMore(false);
