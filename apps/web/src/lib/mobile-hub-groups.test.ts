@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import { groupVisibleLegacyByTarget, LEGACY_NAV_ITEMS, MOBILE_HUB_GROUP_ORDER, resolveNavGroups } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { tabDestinationNavIds } from '@/components/nav/mobile-tab-bar';
-import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeaderKey } from './mobile-hub-groups';
+import koMessages from '../../messages/ko.json';
+import enMessages from '../../messages/en.json';
+import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeader } from './mobile-hub-groups';
 
 const ON: NavV3Flags = { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true };
 
@@ -75,44 +77,51 @@ describe('buildMobileHubGroups(story #4278)', () => {
   });
 });
 
-// story #4292(유나 1안 확정) — 판정 한 조건: 보이는 항목 1 ∧ 그 이름 = 머리 → 머리 없음. 이름이 다르면 머리 유지 · 여러 항목이면 머리 유지.
-// 뮤테이션: sectionHeaderKey가 늘 머리를 돌려주면(예전 동작) 첫 두 줄이 RED · 한 항목이면 늘 null이면 «이름 다른 한 항목» 줄이 RED.
-describe('sectionHeaderKey(story #4292)', () => {
+// story #4292(유나 1안 확정) — 판정 한 조건: 보이는 항목 1 ∧ 그 이름 = 머리(**번역된 글자로** · 까디르 QA ①) → 머리 없음. 이름이 다르면
+// 머리 유지 · 여러 항목이면 머리 유지. ko · en 두 로케일 모두.
+// 뮤테이션: 늘 머리를 돌려주면(예전 동작) 첫 줄들이 RED · 한 항목이면 늘 null이면 «이름 다른 한 항목» 줄이 RED · 키로 비교하면 «다른 키 같은 글자» 줄이 RED.
+const translator = (messages: { nav: Record<string, string> }) => (key: string) => messages.nav[key] ?? key;
+const LOCALES = [['ko', translator(koMessages)], ['en', translator(enMessages)]] as const;
+
+describe.each(LOCALES)('sectionHeader(story #4292) — %s', (_locale, t) => {
   const byId = (flags: NavV3Flags, id: string) => hub(flags).find((x) => x.id === id)!;
 
-  it('⭐OFF «오늘»(브리핑 하나 · 머리 zoneNow = 항목 zoneNow) — 머리 없음', () => {
+  it('⭐OFF «오늘»(브리핑 하나 · 머리와 같은 글자) — 머리 없음 · 이름은 그대로(접근 이름)', () => {
     const now = byId(DEFAULT_NAV_V3_FLAGS, 'now');
     expect(ids(now)).toEqual(['org-briefing']);
-    expect(sectionHeaderKey(now)).toBeNull();
+    expect(sectionHeader(now, t)).toEqual({ headerKey: null, name: t('zoneNow') });
   });
 
   it('⭐ON «결과»(머리 없는 한 항목 구역) — 예전엔 항목 이름을 머리로 끌어와 «결과 › 결과», 이제 머리 없음', () => {
     const results = byId(ON, 'results');
     expect(results.labelKey).toBeUndefined();
-    expect(results.items).toHaveLength(1);
-    expect(sectionHeaderKey(results)).toBeNull();
+    expect(sectionHeader(results, t)).toEqual({ headerKey: null, name: t('navResults') });
   });
 
   it('검색으로 한 항목만 남아 그 이름이 머리와 같아도 — 머리 없음(거른 뒤에도 같은 함수)', () => {
     const now = byId(DEFAULT_NAV_V3_FLAGS, 'now');
-    expect(sectionHeaderKey({ ...now, items: now.items.filter((i) => i.labelKey === 'zoneNow') })).toBeNull();
+    expect(sectionHeader({ ...now, items: now.items.filter((i) => i.labelKey === 'zoneNow') }, t).headerKey).toBeNull();
   });
 
-  it('남은 한 항목 이름이 머리와 다르면 머리 유지(어느 구역인지가 정보) — ON «오늘 › 결재함» · 연결·규칙에서 하나만 남을 때', () => {
-    const now = byId(ON, 'now');
-    expect(ids(now)).toEqual(['inbox']);
-    expect(sectionHeaderKey(now)).toBe('zoneNow');
+  it('남은 한 항목 이름이 머리와 다르면 머리 유지 — ON «오늘 › 결재함» · 연결·규칙에서 하나만 남을 때', () => {
+    expect(sectionHeader(byId(ON, 'now'), t).headerKey).toBe('zoneNow');
     const connect = byId(ON, 'connect-rules');
-    expect(sectionHeaderKey({ ...connect, items: connect.items.slice(0, 1) })).toBe('zoneConnectRules');
+    expect(sectionHeader({ ...connect, items: connect.items.slice(0, 1) }, t).headerKey).toBe('zoneConnectRules');
   });
 
-  it('여러 항목 구역은 머리 그대로 · 모든 카드가 머리 없음이 되지는 않는다(구역 수 = 카드 수는 그대로)', () => {
+  it('여러 항목 구역은 머리 그대로', () => {
     for (const flags of [DEFAULT_NAV_V3_FLAGS, ON]) {
-      const g = hub(flags);
-      for (const group of g.filter((x) => x.items.length > 1)) {
-        expect(sectionHeaderKey(group)).toBe(group.labelKey ?? group.items[0]!.labelKey);
+      for (const group of hub(flags).filter((x) => x.items.length > 1)) {
+        expect(sectionHeader(group, t).headerKey).toBe(group.labelKey ?? group.items[0]!.labelKey);
       }
     }
   });
 });
 
+it('⭐키가 달라도 번역된 글자가 같으면 같은 낱말로 본다(까디르 QA ① — 규칙의 뜻은 «화면에 같은 글자 두 번»)', () => {
+  const group = { labelKey: 'zoneA', items: [{ labelKey: 'itemB' }] } as unknown as Parameters<typeof sectionHeader>[0];
+  const same = (k: string) => (k === 'zoneA' || k === 'itemB' ? '같은 글자' : k);
+  expect(sectionHeader(group, same)).toEqual({ headerKey: null, name: '같은 글자' });
+  const different = (k: string) => k;
+  expect(sectionHeader(group, different).headerKey).toBe('zoneA');
+});

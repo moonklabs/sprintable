@@ -53,15 +53,22 @@ export function buildMobileHubGroups(input: {
 }
 
 /**
- * story #4292(유나 관찰 · 선택지 1) — 구역 카드 머리의 한 규칙. 머리 낱말이 그 구역의 **유일한 항목 이름과 같으면 머리를 그리지 않는다**
- * (null) — 사이드바의 «머리 없는 한 항목 구역»(오늘 · 개발 · 결과)과 같은 모양으로, 카드는 항목 줄(이름 + 설명) 하나가 된다.
+ * story #4292(유나 관찰 · 선택지 1) — 구역 카드 머리의 한 규칙. 머리 글자가 그 구역의 **유일한 항목 이름과 같으면 머리를 그리지 않는다**
+ * (`headerKey: null`) — 사이드바의 «머리 없는 한 항목 구역»(오늘 · 개발 · 결과)과 같은 모양으로, 카드는 항목 줄(이름 + 설명) 하나가 된다.
  * 예전엔 머리 없는 구역이 첫 항목 이름을 머리로 끌어와 «결과 › 결과», «오늘»은 머리 `zoneNow` + 항목 `zoneNow`라 «오늘 › 오늘»이었다.
+ * 까디르 QA ①(PO 08:22Z) — 이 규칙의 뜻은 «화면에 같은 글자가 두 번»이라 키가 아니라 **번역된 글자**로 비교한다(`t`를 받는다 ·
+ * 다른 키가 같은 글자로 번역돼도 잡는다). `name`은 번역된 구역 이름 — 머리를 안 그릴 때 카드의 접근 이름(aria-label)으로 쓴다(까디르 ②).
  * 검색으로 걸러진 뒤의 구역에도 같은 함수를 부른다(걸러져 한 항목만 남아도 겹치지 않게).
  */
-export function sectionHeaderKey(group: Pick<MobileHubGroup, 'labelKey' | 'items'>): string | null {
+export function sectionHeader(
+  group: Pick<MobileHubGroup, 'labelKey' | 'items'>,
+  t: (key: string) => string,
+): { headerKey: string | null; name: string } {
+  const key = group.labelKey ?? group.items[0]?.labelKey;
+  const name = key ? t(key) : '';
   const only = group.items.length === 1 ? group.items[0] : undefined;
-  if (only && (!group.labelKey || group.labelKey === only.labelKey)) return null;
-  return group.labelKey ?? group.items[0]?.labelKey ?? null;
+  if (only && t(only.labelKey) === name) return { headerKey: null, name };
+  return { headerKey: key ?? null, name };
 }
 
 function rank(id: string): number {

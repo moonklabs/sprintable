@@ -8,7 +8,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { groupVisibleLegacyByTarget, LEGACY_NAV_ITEMS, MOBILE_HUB_GROUP_ORDER, resolveNavGroups } from '@/lib/nav-config';
-import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeaderKey } from '@/lib/mobile-hub-groups';
+import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeader } from '@/lib/mobile-hub-groups';
 import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -154,14 +154,20 @@ export default function MorePage() {
                 </Link>
               );
             };
-            // story #4292 — 머리 규칙은 구역 조립 한 곳(sectionHeaderKey): 한 항목 이름과 같은 머리는 그리지 않는다(사이드바와 같은 모양).
-            const headerKey = sectionHeaderKey(group);
+            // story #4292 — 머리 규칙은 구역 조립 한 곳(sectionHeader): 한 항목 이름과 같은 글자의 머리는 그리지 않는다(사이드바와 같은 모양).
+            // 머리를 안 그린 카드도 구역으로 읽히게 role=group + 번역된 구역 이름(까디르 QA ②).
+            const { headerKey, name: sectionName } = sectionHeader(group, (key) => t(key));
             return (
-              <Card key={group.id} className="overflow-hidden" data-testid="more-section-card">
+              <Card
+                key={group.id}
+                className="overflow-hidden"
+                data-testid="more-section-card"
+                {...(headerKey ? {} : { role: 'group', 'aria-label': sectionName })}
+              >
                 {headerKey ? (
                   <CardHeader>
                     {/* story #3824 → #4292 — 머리 없는 구역이 여러 항목이면 첫 항목 이름을 머리로 쓴다. 한 항목 구역은 머리 자체가
-                        없다(sectionHeaderKey — 예전엔 그 항목 이름을 끌어와 «결과 › 결과»로 두 번 보였다). */}
+                        없다(sectionHeader — 예전엔 그 항목 이름을 끌어와 «결과 › 결과»로 두 번 보였다). */}
                     <h2 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
                       <span data-testid="more-section-header">{t(headerKey)}</span>
                       {/* story #3855(픽셀 커밋, 페드루 PO 판정 2026-09-14 07:34Z ⑥) — 카드
