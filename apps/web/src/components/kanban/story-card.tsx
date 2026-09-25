@@ -10,7 +10,8 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, UserRound, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
 import { MaterialChip } from '@/components/ui/material-chip';
@@ -547,7 +548,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         )}
                         title={memberDisplayLabel(m.name, tc)}
                       >
-                        {m.name ? getInitials(m.name) : <UserRound className="size-3" aria-hidden="true" />}
+                        {m.name ? getInitials(m.name) : <UnnamedMemberIcon type={m.type} />}
                         {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
                         {m.type === 'agent' && (
                           <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />

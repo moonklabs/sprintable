@@ -1204,3 +1204,29 @@ describe('StoryDetailPanel — 담당자 배정 토글 시스템 발행 제외(s
     expect(candidateBtns.some((t) => t.includes('점검봇'))).toBe(true);
   });
 });
+
+// story #4284(유나 판정) — 담당자 고르기 목록에는 사람 · 에이전트가 섞인다. 이름 없는 구성원의 머리글자 자리는 타입대로(에이전트 Bot · 사람 UserRound).
+describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 구성원 아이콘(story #4284)', () => {
+  it('⭐이름 없는 에이전트는 Bot · 이름 없는 사람은 UserRound', async () => {
+    stubFetch();
+    const members = [
+      { id: 'a-unnamed', name: null, type: 'agent' },
+      { id: 'h-unnamed', name: null, type: 'human' },
+    ];
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} members={members} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const edit = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith("✎"));
+    expect(edit, '담당자 편집 버튼').toBeTruthy();
+    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rows = [...container.querySelectorAll('button')].filter((b) => b.textContent?.includes(koMessages.common.memberUnnamed));
+    expect(rows).toHaveLength(2);
+    const iconOf = (i: number) => rows[i]!.querySelector('svg')?.getAttribute('class') ?? '';
+    expect(iconOf(0)).toContain('lucide-bot');
+    expect(iconOf(1)).toContain('lucide-user-round');
+  });
+});
+

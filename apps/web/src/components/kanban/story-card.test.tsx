@@ -245,6 +245,12 @@ describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
     expect(markup).not.toContain('>이름<');
   });
 
+  it('⭐이름 없는 에이전트 담당자는 Bot 아이콘(사람 아이콘 + 에이전트 점으로 어긋나지 않게 · 유나 판정)', () => {
+    const markup = render(makeStory({ assignee_id: 'a-unnamed', assignee_ids: ['a-unnamed'] }), [{ id: 'a-unnamed', name: null, type: 'agent' }]);
+    expect(markup).toContain('lucide-bot');
+    expect(markup).not.toContain('lucide-user-round');
+  });
+
   it('실명 담당자는 그대로 머리글자', () => {
     const markup = render(makeStory({ assignee_id: 'm-1', assignee_ids: ['m-1'] }), [{ id: 'm-1', name: 'Pedro', type: 'human' }]);
     expect(markup).toContain('title="Pedro"');

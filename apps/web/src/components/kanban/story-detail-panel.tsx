@@ -7,7 +7,8 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, UserRound, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import type { KanbanStory, KanbanMember, DependencyEdge, GateItem } from './types';
 import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
@@ -1588,8 +1589,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
-                          {/* story #4284 — 이름 없는 구성원은 사람 아이콘(유나 4286 판정). */}
-                          {m.name ? m.name.slice(0, 2).toUpperCase() : <UserRound className="size-3" aria-hidden="true" />}
+                          {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 UserRound · 유나 판정). */}
+                          {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
                         {m.label}
                         {selected && <span className="ml-auto text-primary">✓</span>}
