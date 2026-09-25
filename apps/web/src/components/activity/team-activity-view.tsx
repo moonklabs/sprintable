@@ -13,7 +13,7 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
-import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone, shiftDayStartIso } from '@/components/content/schedule-format';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
@@ -35,6 +35,13 @@ interface ActivityStreamItem {
 interface ActivityStreamResponse {
   items: ActivityStreamItem[];
   next_after_seq: number | null;
+  // story #4297 — order=desc(최신부터) 커서. 다음(더 오래된) 쪽은 before_seq=next_before_seq. null이면 더 없음.
+  next_before_seq?: number | null;
+}
+
+interface ActivityPage {
+  items: ActivityStreamItem[];
+  nextBeforeSeq: number | null;
 }
 
 interface TeamMember {
@@ -46,7 +53,6 @@ interface TeamMember {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL = '__all__';
 const PAGE_LIMIT = 200; // BE limit 상한
-const WINDOW_DAYS = 7; // 더보기 = 과거로 달력 7일 슬라이드(표시 시간대 자정 기준 · story #4280)
 const OBJECT_TYPES = ['story', 'epic', 'sprint', 'task', 'doc', 'conversation', 'meeting', 'memo'];
 
 // story #4280 — 기본 기간(최근 7일)은 표시 시간대(조직 timezone → 없으면 브라우저) 기준 «오늘»으로(예전 UTC 날짜 자르기는 KST 00~09시에 «어제»).
@@ -178,10 +184,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [forbidden, setForbidden] = useState(false);
-  // 더보기용 과거 경계(UTC ISO) — 지금까지 받은 가장 이른 창의 시작. 첫 로드 전에만 null.
-  const [oldestSince, setOldestSince] = useState<string | null>(null);
+  // story #4297 — «더 보기» 커서: 지금까지 받은 가장 오래된 활동의 activity_seq(서버가 준 next_before_seq). null이면 더 없음.
+  const [nextBeforeSeq, setNextBeforeSeq] = useState<number | null>(null);
 
   // 필터 (AC③: project[암묵]·actor·object·verb·time range)
   const [actorFilter, setActorFilter] = useState(ALL);
@@ -214,27 +219,31 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     [members, t],
   );
 
-  // ASC 페치 → client reverse(newest-first). since/until로 윈도우 한정(BE ASC-only 우회).
-  const fetchSlice = useCallback(
-    // story #4280(까디르 검수 P2) — 경계는 UTC ISO 문자열 또는 null(날짜 칸을 비움 = 그 방향 경계 없음). 예전엔 빈 칸이 NaN ms가 되어
-    // `toISOString()`에서 RangeError로 화면이 깨졌다.
-    async (since: string | null, until: string | null): Promise<ActivityStreamItem[] | null> => {
-      const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_LIMIT) });
+  // story #4297 — 최신부터 한 쪽(order=desc) · 이전 쪽은 before_seq 커서. 예전엔 오름차순 LIMIT를 받아 뒤집어, 창 안 활동이 200건을 넘으면
+  // 가장 오래된 200건만 보였다(바쁜 조직은 최신 활동이 영영 안 보임). 기간(from/to)은 경계로만 쓰고, 끝까지 잇는 건 서버 커서다.
+  // story #4280(까디르 검수 P2) — 경계는 UTC ISO 문자열 또는 null(날짜 칸을 비움 = 그 방향 경계 없음).
+  const fetchPage = useCallback(
+    async (since: string | null, until: string | null, beforeSeq: number | null): Promise<ActivityPage | null> => {
+      const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_LIMIT), order: 'desc' });
       if (since) p.set('since', since);
       if (until) p.set('until', until);
+      if (beforeSeq !== null) p.set('before_seq', String(beforeSeq));
       if (actorFilter !== ALL) p.set('actor_id', actorFilter);
       if (verbFilter !== ALL) p.set('verb', verbFilter);
       if (objectTypeFilter !== ALL) p.set('object_type', objectTypeFilter);
 
-      const res = await fetchWithAuth(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
-      if (res.status === 403) {
-        setForbidden(true);
+      try {
+        const res = await fetchWithAuth(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
+        if (res.status === 403) {
+          setForbidden(true);
+          return null;
+        }
+        if (!res.ok) return null;
+        const json = (await res.json()) as { data?: ActivityStreamResponse };
+        return { items: json.data?.items ?? [], nextBeforeSeq: json.data?.next_before_seq ?? null };
+      } catch {
         return null;
       }
-      if (!res.ok) return null;
-      const json = (await res.json()) as { data?: ActivityStreamResponse };
-      const asc = json.data?.items ?? [];
-      return [...asc].reverse();
     },
     [projectId, actorFilter, verbFilter, objectTypeFilter],
   );
@@ -244,47 +253,41 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const rangeFrom = useMemo(() => dateKeysToInstants(fromDate, toDate, displayTimezone).from, [fromDate, toDate, displayTimezone]);
   const rangeTo = useMemo(() => dateKeysToInstants(fromDate, toDate, displayTimezone).to, [fromDate, toDate, displayTimezone]);
 
-  // 최초 / 필터 변경 → 선택 범위 [from, to] 재로드(newest-first)
+  // 최초 / 필터 변경 → 선택 범위 [from, to]의 최신 한 쪽(시작 날짜를 비우면 과거 경계 없음 — 커서가 끝까지 잇는다).
+  // story #4297 — 4280이 둔 «빈 시작 = 최근 7일 창 + 7일씩 과거로» 지름길은 이 커서로 대체(빈 주를 만나면 «더 없음»으로 끝났다).
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setItems(null);
       setForbidden(false);
-      setHasMore(true);
-      // story #4280(까디르 검수) — 시작 날짜를 비우면 «과거 경계 없음». BE 활동 스트림은 limit 상한 + **오름차순**이라 since 없이 부르면
-      // 가장 오래된 N개만 오고 그 뒤(최근)를 볼 길이 없었다(조용히 잘림). 그래서 빈 시작은 «끝 날짜(없으면 지금)에서 달력 7일 전 자정»부터
-      // 최근 쪽 한 창을 받고, «더 보기»가 경계 없이 7일씩 과거로 간다(시작 날짜가 있을 때와 같은 최신순 · 과거로 넓히는 방향).
-      const firstSince = rangeFrom ?? shiftDayStartIso(rangeTo ?? new Date().toISOString(), displayTimezone, -WINDOW_DAYS);
-      const slice = await fetchSlice(firstSince, rangeTo);
+      setNextBeforeSeq(null);
+      const page = await fetchPage(rangeFrom, rangeTo, null);
       if (cancelled) return;
-      setItems(slice ?? []);
-      setOldestSince(firstSince);
-      setHasMore((slice?.length ?? 0) > 0);
+      setItems(page?.items ?? []);
+      setNextBeforeSeq(page?.nextBeforeSeq ?? null);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [fetchSlice, rangeFrom, rangeTo, displayTimezone]);
+  }, [fetchPage, rangeFrom, rangeTo]);
 
-  // 더 보기 v1 = 선택 범위보다 과거 윈도우 슬라이스 페치 후 append(dedup). 정밀 cursor는 follow-up.
+  // 더 보기 = 같은 경계 안에서 지금까지 받은 가장 오래된 활동보다 이전 쪽(before_seq). 실패하면 커서를 그대로 둬 다시 누르면 다시 시도.
   const loadMore = async () => {
-    if (oldestSince === null) return;
+    if (nextBeforeSeq === null || loadingMore) return;
     setLoadingMore(true);
-    const until = oldestSince;
-    // story #4280(까디르 검수 P3) — 고정 168시간이 아니라 표시 시간대의 달력 7일 전 자정(서머타임 주에도 한 시간 어긋나지 않게).
-    const since = shiftDayStartIso(oldestSince, displayTimezone, -WINDOW_DAYS);
-    const slice = await fetchSlice(since, until);
-    if (slice) {
-      setItems((prev) => {
-        const seen = new Set((prev ?? []).map((i) => i.activity_id));
-        const fresh = slice.filter((i) => !seen.has(i.activity_id));
-        return [...(prev ?? []), ...fresh];
-      });
-      setHasMore(slice.length > 0);
+    try {
+      const page = await fetchPage(rangeFrom, rangeTo, nextBeforeSeq);
+      if (page) {
+        setItems((prev) => {
+          const seen = new Set((prev ?? []).map((i) => i.activity_id));
+          return [...(prev ?? []), ...page.items.filter((i) => !seen.has(i.activity_id))];
+        });
+        setNextBeforeSeq(page.nextBeforeSeq);
+      }
+    } finally {
+      setLoadingMore(false);
     }
-    setOldestSince(since);
-    setLoadingMore(false);
   };
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
@@ -408,7 +411,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                   />
                 );
               })}
-              {hasMore ? (
+              {nextBeforeSeq !== null ? (
                 <li className="pt-3 text-center">
                   <Button variant="glass" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
                     {loadingMore ? tc('loading') : t('loadMore')}
