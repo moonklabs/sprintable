@@ -806,7 +806,7 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
   const ROW_BLOCKED = {
     publication_id: 'pub-bl', kind: 'channel_publication', channel: 'threads', work_item_id: 'wi-bl',
     title: '글 BL', published_at: '2026-09-01T00:00:00Z', external_url: null, connection_id: 'conn-2',
-    d1: null, d7: null, command_status: 'blocked',
+    d1: null, d7: null, command_status: 'blocked', failure_kind: 'connection',
   };
   // 뮤테이션 대조 — dead_letter/blocked가 아닌 다른 command_status는(자동으로 풀리는
   // 갈래거나 이 화면엔 안 실리는 failure_kind가 필요한 갈래라) 배지가 안 떠야 한다.
@@ -837,6 +837,14 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     const badge = row.querySelector('[data-testid="channel-post-failure-badge"]');
     expect(badge).not.toBeNull();
     expect(badge!.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
+  });
+
+  it('blocked + 사유 모름 행 — 보드도 사유를 지어내지 않는다: 중립 머리(story #4305 · 까디르)', async () => {
+    const { failure_kind: _omit, ...unknownRow } = ROW_BLOCKED;
+    stubFetch({ page1: [unknownRow] });
+    await mount();
+    const badge = container.querySelector('[data-testid="insights-board-row"] [data-testid="channel-post-failure-badge"]');
+    expect(badge?.textContent).toBe(koMessages.content.channelPostsFailureBlockedUnknown);
   });
 
   // 뮤테이션 대조 — BE 필드(command_status)가 응답에서 빠지면(undefined) 배지도 0.

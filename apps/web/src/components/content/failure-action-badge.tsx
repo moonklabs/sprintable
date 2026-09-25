@@ -88,6 +88,30 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   const retryable = 'retryable' in action ? action.retryable : undefined;
   const canOffer = !!onRetryClick && retryable !== false;
 
+  if (action.kind === 'blocked' && action.paused) {
+    // story #4305 — 조직 «외부 발행 일시 중지»로 멈춘 것은 연결 문제가 아니다. 색은 muted(유나 반려 09:44Z — 스스로 이어지는 상태라
+    // auto_retry · processing과 같은 가족 · 같은 화면 발행 영역 줄 · 댓글 줄도 muted). connection · unknown은 빨강 그대로. 머리는 멈춘 이유(compact도) · 상세는 풀리는 길까지(소유자가 풀면
+    // 서버가 스스로 다시 올린다 — 사람 재시도 대상 아님(4654) · 버튼 · 연결 링크 없음).
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+        {t('channelPostsFailurePaused')}
+        {compact ? null : <>{' — '}{t('channelPostsFailurePausedResumes')}</>}
+      </p>
+    );
+  }
+  if (action.kind === 'blocked' && action.unknownReason) {
+    // story #4305 — 사유를 모르는 blocked: 연결이라 말하지 않는 중립 머리 · 링크 없음 · 재시도는 서버 판정대로(버튼은 아래).
+    const head = <p className="text-xs text-destructive">{t('channelPostsFailureBlockedUnknown')}</p>;
+    if (compact || !canOffer) return <div data-testid="channel-post-failure-badge">{head}</div>;
+    return (
+      <div className="space-y-1" data-testid="channel-post-failure-badge">
+        {head}
+        <Button variant="outline" size="sm" onClick={onRetryClick} data-testid="channel-post-failure-retry-button">
+          {t('channelPostsFailureRetryCta')}
+        </Button>
+      </div>
+    );
+  }
   if (action.kind === 'blocked') {
     // story #4304(유나 확정) — 머리 «연결 문제로 멈춤» ` — ` «연결 확인»(링크) 한 줄 → 아래 «다시 시도»(고치기 → 다시 시도). 링크는 재시도를
     // 못 내밀어도(서버 판정 false) 늘 둔다(댓글 답변과 같음). compact(목록 · 캘린더 · 보드)는 글만(행이 이미 상세 링크).

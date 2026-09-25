@@ -99,6 +99,26 @@ export function CommentReplyFailureNote({
     <p className="text-xs text-destructive" data-testid="comments-item-reply-retry-error">{retryOutcome}</p>
   ) : null;
 
+  if (action.kind === 'blocked' && action.paused) {
+    // story #4305 — 조직 «외부 발행 일시 중지»로 멈춤(연결 문제 아님) — 풀리면 서버가 다시 보낸다(버튼 · 연결 링크 없음).
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-failure-note">{t('commentsReplyFailurePaused')}</p>
+    );
+  }
+
+  if (action.kind === 'blocked' && action.unknownReason) {
+    // story #4305 — 사유를 모르는 blocked: 연결 문장 · 링크 없이 중립 문장(재시도는 서버 판정대로).
+    return (
+      <div className="space-y-1" data-testid="comments-item-reply-failure-note">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">{t('commentsReplyFailureBlockedUnknown')}</p>
+          {onRetry && action.retryable !== false ? retryControls : null}
+        </div>
+        {retryOutcomeLines}
+      </div>
+    );
+  }
+
   if (action.kind === 'blocked') {
     const blockedText = t.rich('commentsReplyFailureConnectionBlocked', {
       link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,

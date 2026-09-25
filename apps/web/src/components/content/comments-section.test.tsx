@@ -667,6 +667,27 @@ describe('CommentsSection — 답변 실패 얼굴(story #3544, 유나 §22-15)'
     expect(container.querySelector('[data-testid="comments-item-reply-retry-button"]')).toBeNull();
   });
 
+  it('② blocked + 조직 일시 중지(paused) — 연결 문장이 아니라 일시 중지 문장 · 링크 · 버튼 0(story #4305)', async () => {
+    const container = await mountWithReply({
+      ...FAILED_BASE, command_id: 'cmd-1', command_status: 'blocked', failure_kind: 'paused', next_attempt_at: null, reason_code: null,
+      command_retryable: false,
+    });
+    const note = container.querySelector('[data-testid="comments-item-reply-failure-note"]');
+    expect(note?.textContent).toBe(koMessages.content.commentsReplyFailurePaused);
+    expect(note?.querySelector('a, button')).toBeNull();
+  });
+
+  it('② blocked + 사유 모름(failure_kind 없음) — 중립 문장 · 연결 링크 0 · 서버가 받으면 «다시 보내기»(story #4305)', async () => {
+    const container = await mountWithReply({
+      ...FAILED_BASE, command_id: 'cmd-1', command_status: 'blocked', failure_kind: null, next_attempt_at: null, reason_code: null,
+      command_retryable: true,
+    });
+    const note = container.querySelector('[data-testid="comments-item-reply-failure-note"]');
+    expect(note?.textContent).toContain(koMessages.content.commentsReplyFailureBlockedUnknown);
+    expect(note?.querySelector('a')).toBeNull();
+    expect(note?.querySelector('[data-testid="comments-item-reply-retry-button"]')).not.toBeNull();
+  });
+
   it('모르는 command_status(미래 값) — 실패 얼굴 자체를 안 그린다(칩은 여전히 "실패", 지어내지 않는다)', async () => {
     const container = await mountWithReply({
       ...FAILED_BASE, command_id: 'cmd-1', command_status: 'some_future_status', failure_kind: null, next_attempt_at: null, reason_code: null,

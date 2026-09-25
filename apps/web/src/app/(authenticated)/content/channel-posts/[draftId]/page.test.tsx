@@ -1263,7 +1263,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     blocked_unapproved: true, // story #4264 ④
   };
   // story #4262 — `not_sent`(확실히 안 나감) 추가. 전수 곱에 그대로 들어간다.
-  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true };
+  // story #4305 — `paused`(조직 외부 발행 일시 중지) 추가.
+  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true, paused: true };
   const CS_VALUES: (CommandStatus | null)[] = [null, ...(Object.keys(COMMAND_STATUS_ALL) as CommandStatus[])];
   const FK_VALUES: (FailureKind | 'unknown_kind_zzz' | null)[] = [null, ...(Object.keys(FAILURE_KIND_ALL) as FailureKind[]), 'unknown_kind_zzz'];
   const PK_VALUES: (string | null)[] = [null, 'awaiting_container'];
@@ -2433,12 +2434,17 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(retry?.disabled).toBe(false);
     });
 
-    it('blocked — 서버가 재시도 불가(일시정지 · 에이전트 화면 등)면 문장만 · 버튼 0', async () => {
+    it('blocked — 조직 «외부 발행 일시 중지»로 멈춤(재시도 불가): 일시 중지 문장 · 버튼 0 · 연결 문구 0(story #4305)', async () => {
       stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'paused', command_retryable: false } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
-        .toBe(koMessages.content.channelPostsFailureBlocked);
+        .toBe(`${koMessages.content.channelPostsFailurePaused} — ${koMessages.content.channelPostsFailurePausedResumes}`);
+      // 발행 사유줄도 연결이 아니라 일시 중지 문장(연결 화면 링크 0).
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason?.textContent).toBe(koMessages.content.errorExternalPublishPaused);
+      expect(reason?.querySelector('a')).toBeNull();
+      expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureBlocked);
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
       // story #4304 — 일시정지는 연결 사유가 아니라 «연결 확인»도 없다.
       expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
@@ -2849,8 +2855,20 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
     // 지시가 된다. blocked 전용 문구("연결 문제")가 예약 전용 문구("예약이 서버에...")와
     // 다른 것을 pin한다.
+    it('blocked + 사유 모름 — 발행 영역 줄은 빼지 않고 중립 문장(연결 · 일시 중지 문장 0 · 링크 0 · story #4305)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked', failure_kind: null } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason?.textContent).toBe(koMessages.content.channelPostsCommandInFlightReasonBlockedUnknown);
+      expect(reason?.querySelector('a')).toBeNull();
+      // 까디르 — 배지 머리도 호출 자리에서 사유를 지어내지 않는다(중립).
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureBlockedUnknown);
+    });
+
     it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 예약 전용과 다르다', async () => {
-      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked', failure_kind: 'connection' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -2875,7 +2893,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
           publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
-          command_status: 'blocked',
+          command_status: 'blocked', failure_kind: 'connection',
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });

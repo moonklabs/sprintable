@@ -89,10 +89,17 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
   describe('⭐B3 — 실패 배지 5종이 카드에서 보인다', () => {
     it('blocked', async () => {
       await act(async () => {
-        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked' }} displayTimezone="Asia/Seoul" />));
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked', failure_kind: 'connection' }} displayTimezone="Asia/Seoul" />));
       });
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
         .toBe(koMessages.content.channelPostsFailureBlocked);
+    });
+
+    it('blocked + 사유 모름(failure_kind 없음) — 호출 자리가 사유를 지어내지 않는다: 중립 머리(story #4305 · 까디르)', async () => {
+      await act(async () => {
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked' }} displayTimezone="Asia/Seoul" />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent).toBe(koMessages.content.channelPostsFailureBlockedUnknown);
     });
 
     it('needs_check — 카드에선 compact(라벨만, 버튼 없음 — N3)', async () => {
