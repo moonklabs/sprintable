@@ -318,5 +318,10 @@ async def reply(
     external_reply_id = await publish_container(
         client, access_token=access_token, threads_user_id=threads_user_id, creation_id=str(creation_id),
     )
-    permalink = await get_permalink(client, access_token=access_token, media_id=external_reply_id)
+    # story #4264(까디르 codex P1 · PO 17:33Z) — 답글은 이미 게시됐다(external_reply_id 확보). permalink 조회 실패로 예외가 새면
+    # 워커가 답글 실패로 적고 재시도가 같은 답글을 또 단다 — id를 보존하고 permalink만 비운다(채널 게시 본류와 같은 관용).
+    try:
+        permalink = await get_permalink(client, access_token=access_token, media_id=external_reply_id)
+    except ThreadsPublishError:
+        permalink = None
     return external_reply_id, permalink

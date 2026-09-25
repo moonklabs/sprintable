@@ -188,10 +188,9 @@ async def test_dead_letter_command_shows_last_error_and_dead_letter_at():
             await transition_gate(s, org_id, gate_id, "approved", resolver_id=human_id)
             await s.commit()
 
-        # publication_command.py::apply_command_failure — 매핑표 밖 error_code(이
-        # 시나리오는 httpx 연결 실패라 SitePostExternalPublishError 자체를 안 거친다,
-        # error_code=None)는 needs_check로 fail-closed → 백오프 없이 첫 tick에서
-        # 바로 dead_letter(재시도해도 똑같이 실패할 결정적 실패로 취급).
+        # story #4264 — 이 도달 불가 URL(루프백)은 사실 발행 URL 안전 검사가 POST 전에 막는다
+        # (SITE_POST_DESTINATION_INSECURE). «확실히 안 나감»이라 not_sent로 곧바로 dead_letter(예전엔 매핑표 밖이라
+        # needs_check로 떨어졌다 — 이 주석이 httpx 실패로 오해하던 자리).
         async with Session() as s:
             from app.models.publication_command import PublicationCommand
             from sqlalchemy import select
@@ -219,7 +218,8 @@ async def test_dead_letter_command_shows_last_error_and_dead_letter_at():
         cmd_view = body["command"]
         assert cmd_view is not None
         assert cmd_view["command_status"] == "dead_letter"
-        assert cmd_view["failure_kind"] == "needs_check"
+        assert cmd_view["failure_kind"] == "not_sent"
+        assert cmd.reason_code == "SITE_POST_DESTINATION_INSECURE", cmd.reason_code
         assert cmd_view["dead_letter_at"] is not None
         assert cmd_view["last_error"] is not None
     finally:

@@ -8,7 +8,10 @@
 //   failure_kind: 'connection'|'needs_check'|'transient'|null
 //   next_retry_at / command_reason_code: string|null
 export type CommandStatus =
-  | 'pending' | 'in_progress' | 'completed' | 'blocked' | 'dead_letter' | 'voided' | 'cancelled';
+  | 'pending' | 'in_progress' | 'completed' | 'blocked' | 'dead_letter' | 'voided' | 'cancelled'
+  // story #4264 ④ — 발행 직전 승인 필요 · 예산 초과로 막힘(재시도 없음 · 다시 승인하면 새 명령). 예전엔 이 값을 아는 갈래가 없어
+  // 워커 경로는 배지 0, 즉시 발행 경로는 dead_letter로 저장돼 헛된 «다시 시도» 버튼이 떴다.
+  | 'blocked_unapproved';
 // story #4262 — `not_sent`(확실히 안 나감 · 곧바로 dead_letter). 판정은 dead_letter 갈래에서 «needs_check가 아님»으로 읽혀
 // «자동 재시도를 멈췄어요»가 된다(아래 deriveFailureAction 무변).
 export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent';
@@ -32,6 +35,8 @@ export type FailureAction =
   // needs_check 문구만 보여줬다 — 원인은 아는데 모른다고 말하는 결함.
   | { kind: 'dead_letter'; needsRecheck: boolean; reasonCode: string | null; reasonResetAt: string | null }
   | { kind: 'voided'; reasonCode: string | null }
+  // story #4264 ④ — 사유 문장만 · 버튼 0(재시도 개념이 없다).
+  | { kind: 'blocked_unapproved'; reasonCode: string | null }
   // 페드루 PO 정정(2026-09-04 09:49Z, BE #3425/PR#3776) — 이미지 글이 컨테이너 생성→
   // 완료 대기 중일 때. §17-15 "자동으로 이어서 처리 중"(중립·버튼 없음) — transient의
   // "다시 시도"(실패 후 재시도)와 뜻이 다르다(이건 실패가 아니라 진행 중), 같은 값으로
@@ -73,6 +78,14 @@ export const CHANNEL_POST_VOID_REASON_MESSAGE_KEYS: Record<string, string> = {
   API_USAGE_BUDGET_EXCEEDED: 'channelPostsVoidReasonApiUsageBudgetExceeded',
 };
 
+// story #4264 ④(까디르 codex P2 · PO 17:45Z) — blocked_unapproved 사유 → 문장. 예산 둘은 같은 사실이라 voided 문장 그대로, 승인
+// 필요는 유나 문안. 사유가 비었으면(4264 전 워커 행 — 그 갈래만 사유를 안 채웠다) 승인 필요로 읽는다.
+export const CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS: Record<string, string> = {
+  EXTERNAL_PUBLISH_APPROVAL_REQUIRED: 'channelPostsBlockedReasonApprovalRequired',
+  GENERATION_BUDGET_EXCEEDED: 'channelPostsVoidReasonGenerationBudgetExceeded',
+  API_USAGE_BUDGET_EXCEEDED: 'channelPostsVoidReasonApiUsageBudgetExceeded',
+};
+
 // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — voided의 REASON_MESSAGE_KEYS와
 // 동형 축, dead_letter 전용. reason_code→문구 표: 맵에 있으면 그 정적 문구를
 // 즉시 낸다(원인을 아는 채로 일반 dead_letter/needs_check 문구로 뭉개지 않는다),
@@ -107,6 +120,7 @@ export interface FailureActionInput {
  */
 export function deriveFailureAction(input: FailureActionInput): FailureAction | undefined {
   if (input.commandStatus === 'voided') return { kind: 'voided', reasonCode: input.reasonCode ?? null };
+  if (input.commandStatus === 'blocked_unapproved') return { kind: 'blocked_unapproved', reasonCode: input.reasonCode ?? null };
   // story #3402 갭(2026-09-10) — needsRecheck는 dead_letter로 접히기 直前의 failure_kind가
   // needs_check였는지만 본다(§17-2 층 구분: command_status가 이미 dead_letter를 확定했으니
   // 그 안에서 failure_kind는 "무엇을 보여줄지"만 고른다, "보여줄지 말지"는 안 건드린다).

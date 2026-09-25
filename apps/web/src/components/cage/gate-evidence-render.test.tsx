@@ -351,6 +351,38 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalPublishOutcomeLabel);
   });
 
+  // story #4264(유나 조건 · PO 23:40Z) — needs_check로 자동 발행이 서지 않았다: 글 화면(«확인했어요 · 다시 시도»)으로 가는 링크가
+  // 있으면 짧은 형 + 링크, 없으면 «글 화면에서» 긴 형. «다시 승인» 류 generic 문장은 어느 쪽에도 안 나온다.
+  it.each([
+    ['링크 있음 → 짧은 형 + 글 화면 링크', true],
+    ['링크 없음 → 긴 형', false],
+  ])('story #4264 — publish_failed:needs_check %s', async (_label, withDraft) => {
+    const gate = recipeApprovalGate(
+      { stage: 'published' },
+      {
+        scope_key: '', status: 'approved', publish_outcome: 'publish_failed:needs_check',
+        linked_channel_draft: withDraft ? {
+          draft_id: 'draft-nc', version: 1, channel: 'sandbox', account_id: 'acct-1', account_label: null,
+          text: '본문', image_urls: [], video_url: null, scoped_gate_status: 'approved', sealed_scheduled_at: null,
+        } : null,
+      },
+    );
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    const link = container.querySelector('[data-testid="recipe-publish-outcome-needs-check-draft-link"]');
+    if (withDraft) {
+      expect(container.textContent).toContain(koMessages.cage.publishOutcomeFailedNeedsCheck);
+      expect(link?.getAttribute('href')).toBe('/content/channel-posts/draft-nc');
+    } else {
+      expect(container.textContent).toContain(koMessages.cage.publishOutcomeFailedNeedsCheckNoLink);
+      expect(link).toBeNull();
+    }
+    expect(container.textContent).not.toContain(koMessages.cage.publishOutcomeFailedGeneric);
+  });
+
   // story #4098([E-RECIPE-1], 2026-09-21) — 「이 승인으로 발행될 채널 초안」 카드,
   // 3상태(콘텐츠 있음·초안 없음·scoped 게이트 pending) 렌더.
   // story #4190(PO 판정 2026-09-23 · 유나 site 초안 카드) — 채널 카드의 형제. BE linked_site_draft만 읽는다.

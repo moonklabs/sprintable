@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { FailureActionBadge } from './failure-action-badge';
-import type { FailureAction } from './failure-action';
+import { deriveFailureAction, type FailureAction } from './failure-action';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('next/navigation', () => ({ useParams: () => ({}) }));
@@ -153,6 +153,86 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
   });
 
+  // story #4264(유나 권고 · PO 17:26Z) — 목록 · 캘린더 카드 · 인사이트(compact)도 «나갔을 수 있음»(needs_check dead_letter)을
+  // 상세와 같은 사실 문장으로 낸다(버튼 없이). 예전엔 목록이 «자동 재시도를 멈췄어요», 상세가 «밖에 나갔는지 알 수 없어요»로
+  // 갈렸다. 뮤테이션: showRecheckWording에서 `|| compact`를 빼면 첫 테스트 RED.
+  it('⭐dead_letter ∧ needsRecheck ∧ compact — 목록도 상세와 같은 «채널에서 확인» 문장 · 버튼 없음', async () => {
+    const action = deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'needs_check', reasonCode: 'X_POST_TWEET_MISSING_ID' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact />));
+    });
+    const listText = container.textContent;
+    expect(listText).toBe(koMessages.content.channelPostsFailureNeedsCheck);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" recheckGate onRetryClick={() => {}} />));
+    });
+    expect(container.querySelector('p')?.textContent).toBe(listText);
+  });
+
+  it('⭐dead_letter ∧ not_sent ∧ compact — «멈췄어요» 그대로(확인 문장은 나갔을 수 있는 부류만)', async () => {
+    const action = deriveFailureAction({ commandStatus: 'dead_letter', failureKind: 'not_sent', reasonCode: 'CHANNEL_TEXT_TOO_LONG' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact />));
+    });
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureDeadLetter);
+  });
+
+  // story #4264 ④(까디르 codex P2 · PO 17:45Z) — 승인 필요 · 예산 초과로 발행 직전 막힘(blocked_unapproved). 워커 · 즉시 발행 두 경로가
+  // 같은 모양으로 오고, 화면은 사유 문장만 · 버튼 0(compact든 아니든). 사유가 비면(4264 전 워커 행) 승인 필요. 뮤테이션:
+  // deriveFailureAction의 blocked_unapproved 갈래를 빼면 배지가 없어 RED.
+  it.each([
+    ['EXTERNAL_PUBLISH_APPROVAL_REQUIRED', 'channelPostsBlockedReasonApprovalRequired'],
+    ['GENERATION_BUDGET_EXCEEDED', 'channelPostsVoidReasonGenerationBudgetExceeded'],
+    ['API_USAGE_BUDGET_EXCEEDED', 'channelPostsVoidReasonApiUsageBudgetExceeded'],
+    [null, 'channelPostsBlockedReasonApprovalRequired'],
+  ] as const)('⭐blocked_unapproved(%s) — 사유 문장만 · 버튼 0', async (reasonCode, key) => {
+    const action = deriveFailureAction({ commandStatus: 'blocked_unapproved', reasonCode });
+    for (const compact of [false, true]) {
+      await act(async () => {
+        root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact={compact} onRetryClick={() => {}} />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+        .toBe((koMessages.content as Record<string, string>)[key]);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+    }
+  });
+
+  // story #4264 ④(PO 18:07Z · 유나 문장) — 승인 필요 멈춤의 뒷문장은 화면이 실제로 받은 게이트 상태 · 승인된 예약 시각으로만 고른다.
+  // 근거: 결재함은 pending 게이트만(approvals-queue `/api/gates/inbox?status=pending`) · 승인 훅은 채널 게시 중 예약 글만 새 발행
+  // 명령을 만든다(gate_service `if gate.sealed_scheduled_at is None: return`). 모르면(undefined) 앞문장만 · 약속 0.
+  // 뮤테이션: 갈래 함수가 항상 A를 내게 하면 즉시 · 반려 경우가 RED.
+  it.each([
+    [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() + 86_400_000).toISOString() }, 'channelPostsBlockedNextApprovalScheduled'],
+    [{ gateStatus: 'pending', sealedScheduledAt: null }, 'channelPostsBlockedNextApprovalImmediate'],
+    // 봉인된 예약 시각이 이미 지났다 — 승인하면 곧바로 워커가 집는다 → 사실 경고(D).
+    [{ gateStatus: 'pending', sealedScheduledAt: new Date(Date.now() - 86_400_000).toISOString() }, 'channelPostsBlockedNextApprovalScheduledPassed'],
+    [{ gateStatus: 'rejected', sealedScheduledAt: null }, 'channelPostsBlockedNextResubmit'],
+    [{ gateStatus: null, sealedScheduledAt: null }, 'channelPostsBlockedNextResubmit'],
+    [{ gateStatus: 'approved', sealedScheduledAt: null }, null],
+    [{ gateStatus: 'pending', sealedScheduledAt: undefined }, null],
+    [undefined, null],
+  ] as const)('⭐blocked_unapproved 승인 필요 뒷문장 — %o → %s', async (approvalContext, nextKey) => {
+    const action = deriveFailureAction({ commandStatus: 'blocked_unapproved', reasonCode: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" compact approvalContext={approvalContext} />));
+    });
+    const content = koMessages.content as Record<string, string>;
+    expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+      .toBe(content.channelPostsBlockedReasonApprovalRequired);
+    expect(container.querySelector('[data-testid="channel-post-failure-next"]')?.textContent ?? null)
+      .toBe(nextKey ? content[nextKey] : null);
+  });
+
+  it('⭐blocked_unapproved 예산 사유엔 승인 뒷문장이 안 붙는다(결재가 아니라 한도 문제)', async () => {
+    const action = deriveFailureAction({ commandStatus: 'blocked_unapproved', reasonCode: 'GENERATION_BUDGET_EXCEEDED' });
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action as FailureAction} displayTimezone="UTC" approvalContext={{ gateStatus: 'pending', sealedScheduledAt: null }} />));
+    });
+    expect(container.querySelector('[data-testid="channel-post-failure-next"]')).toBeNull();
+  });
+
   // story #3815(페드루 PO steer②, 2026-09-12 17:34Z) — dead_letter ∧ reasonCode가
   // CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS 표에 있으면(YOUTUBE_QUOTA_
   // EXCEEDED) needsRecheck/recheckGate보다 먼저 갈라 정적 문구를 낸다(일반
@@ -168,6 +248,22 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
       .toBe(koMessages.content.channelPostsFailureYoutubeQuotaExceeded);
     expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureDeadLetter);
     expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureNeedsCheck);
+  });
+
+  // story #4264(PO 15:18Z) — 사용량 초과가 `not_sent`(확실히 안 나감)로 옮겨도 사용량 문장 · 리셋 전 재시도 비활성은 그대로다
+  // (not_sent 갈래가 일반 «자동 재시도를 멈췄어요»로 덮지 않는다). 판정을 실제 입력(failure_kind)에서 끌어낸다.
+  it('⭐dead_letter ∧ failure_kind=not_sent ∧ YOUTUBE_QUOTA_EXCEEDED — 사용량 문장 · 리셋 전 재시도 비활성 그대로', async () => {
+    const action = deriveFailureAction({
+      commandStatus: 'dead_letter', failureKind: 'not_sent',
+      reasonCode: 'YOUTUBE_QUOTA_EXCEEDED', reasonResetAt: new Date(Date.now() + 9 * 3600_000).toISOString(),
+    });
+    expect(action).toMatchObject({ kind: 'dead_letter', needsRecheck: false, reasonCode: 'YOUTUBE_QUOTA_EXCEEDED' });
+    await render(action as FailureAction);
+    expect(container.querySelector('[data-testid="channel-post-failure-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureYoutubeQuotaExceeded);
+    expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureDeadLetter);
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryAfterReset);
   });
 
   // story #3815(페드루 PO steer②) — "지정 코드만 막으면 클래스가 남는다": 표에

@@ -43,6 +43,7 @@ from app.models.gate import Gate
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.pm import Story
 from app.models.publication_command import PublicationCommand
+
 from app.models.site_post import SitePost
 from app.models.ads_boost_run import AdsBoostRun
 from app.models.site_post_draft import SitePostDraft
@@ -54,6 +55,19 @@ from app.services.insight_snapshots import (
     batch_fetch_channel_post_asset_evidence_sources,
     label_snapshot_offset,
 )
+
+
+def _command_failure_fields(command: PublicationCommand | None) -> dict:
+    """story #4264 — 채널 포스트 목록 응답(routers/channel_posts.py)과 같은 네 필드 · 같은 형식."""
+    if command is None:
+        return {"failure_kind": None, "next_retry_at": None, "command_reason_code": None, "command_reason_reset_at": None}
+    return {
+        "failure_kind": command.failure_kind,
+        "next_retry_at": command.next_attempt_at.isoformat() if command.next_attempt_at else None,
+        "command_reason_code": command.reason_code,
+        "command_reason_reset_at": command.reason_reset_at.isoformat() if command.reason_reset_at else None,
+    }
+
 
 _WINDOW_DAYS = {"7d": 7, "30d": 30, "90d": 90}  # story 確定(e) — 3475(7d·30d)에 90d 신규 편입.
 _SNAPSHOT_OFFSET_DAYS = {"d1": 1, "d7": 7}
@@ -582,6 +596,8 @@ async def list_insights_board(
             "command_status": (
                 latest_command_by_gate[r.gate_id].status if r.gate_id in latest_command_by_gate else None
             ),
+            # story #4264 — 목록과 같은 실패 필드(같은 명령 행 · 같은 형식).
+            **_command_failure_fields(latest_command_by_gate.get(r.gate_id)),
             # story #3806(Phase3·3-2 PR5 조각⑥) — ads_boost 요약. 이 publication에
             # 홍보 요청 자체가 없으면 None(유나 §절 §3 「해당 없음」의 데이터 원천 —
             # FE가 None을 「해당 없음」으로 렌더, 값을 지어내지 않는다).

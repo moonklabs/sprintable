@@ -2100,6 +2100,25 @@ async def publish_channel_post_draft_endpoint(
         approved_version=latest.id, requested_by_member_id=resolved.id, scheduled_at=None,
     )
     await db.commit()
+    # story #4264(유나 4632 · PO 처방) — «나갔는지 모름»으로 멈춘 명령이면 어댑터를 다시 부르지 않는다(409). 앞으로 가는 길은 채널
+    # 확인 뒤 재시도(`…/retry`) 하나. 사람 화면 · 사람 세션 API 요청이 이 문을 지난다(에이전트의 채널 글 발행 길은 없다 — 서버가 사람만
+    # 허용 `CHANNEL_POST_PUBLISH_HUMAN_ONLY` · BE MCP에 발행 도구 없음 · 플러그인 `publish_instagram_post`는 동결 도구, PO 00:18Z 정정).
+    from app.services.publication_command import (
+        PUBLICATION_NEEDS_CHECK_CODE,
+        PublicationNeedsCheckError,
+        raise_if_needs_check,
+    )
+
+    try:
+        raise_if_needs_check(command)
+    except PublicationNeedsCheckError as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": PUBLICATION_NEEDS_CHECK_CODE,
+            "message": t("channel_posts.publish_needs_check", resolved_locale),
+            "command_id": str(command.id),
+            "failure_kind": command.failure_kind,
+            "command_status": command.status,
+        }) from exc
     now = datetime.now(timezone.utc)
 
     # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 upsert는
@@ -2159,9 +2178,11 @@ async def publish_channel_post_draft_endpoint(
         # 이 코드 경로 자체의 재시도/종결 정책 변경은 이 스토리 스코프 밖, 원장
         # 기록만 추가).
         await _record_this_attempt(approval_check="missing", adapter_called=False, result_code=None)
-        await apply_command_failure(
-            db, command, error_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc), now=now,
-        )
+        # story #4264 ④(까디르 codex P2 · PO 17:45Z) — 워커와 같은 모양(blocked_unapproved + 사유 · 재시도 없음). 예전엔
+        # apply_command_failure로 dead_letter가 돼 «다시 시도» 버튼이 떴다 — 눌러도 같은 이유로 또 막히는 헛된 약속.
+        from app.services.publication_command import mark_blocked_unapproved
+
+        mark_blocked_unapproved(command, reason_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc))
         await db.commit()
         raise HTTPException(
             status_code=403,
@@ -2203,9 +2224,9 @@ async def publish_channel_post_draft_endpoint(
             else "GENERATION_BUDGET_EXCEEDED"
         )
         await _record_this_attempt(approval_check="budget_exceeded", adapter_called=False, result_code=None)
-        await apply_command_failure(
-            db, command, error_code=budget_exceeded_code, last_error=str(exc), now=now,
-        )
+        from app.services.publication_command import mark_blocked_unapproved
+
+        mark_blocked_unapproved(command, reason_code=budget_exceeded_code, last_error=str(exc))  # story #4264 ④ — 워커와 같은 모양
         await db.commit()
         raise HTTPException(
             status_code=422,
@@ -2377,9 +2398,14 @@ async def publish_channel_post_draft_endpoint(
             headers={"Retry-After": str(retry_after_seconds)},
         ) from exc
     except ChannelPublishProviderError as exc:
+        # story #4264(PO 15:18Z) — 워커와 같은 헬퍼로 provider_code를 푼다. 예전엔 라우터가 provider_code를 아예 안 넘겨
+        # «200인데 id 없음»(나갔을 수 있음)도 transient → 자동 재시도(이중 게시)였다.
+        from app.services.publication_command import provider_error_code
+
+        _provider_error_code = provider_error_code(exc.provider_code)
         await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="CHANNEL_PUBLISH_PROVIDER_ERROR")
         await apply_command_failure(
-            db, command, error_code="CHANNEL_PUBLISH_PROVIDER_ERROR", last_error=str(exc), now=now,
+            db, command, error_code=_provider_error_code, last_error=str(exc), now=now,
         )
         await db.commit()
         raise HTTPException(

@@ -2633,6 +2633,19 @@ async def publish_recipe_approved_draft(
             approved_version=_target_latest.id, requested_by_member_id=publisher_member_id,
             scheduled_at=None,
         )
+        # story #4264(유나 4632 · PO 처방) — 같은 승인본의 앞 시도가 «나갔는지 모름»으로 멈췄으면 자동 발행도 다시 쏘지 않는다
+        # (라우터의 409와 같은 문 — 이 경로는 HTTP 응답이 없으니 게이트 결과 코드로 남긴다).
+        from app.services.publication_command import (
+            PublicationNeedsCheckError,
+            raise_if_needs_check,
+        )
+
+        try:
+            raise_if_needs_check(command)
+        except PublicationNeedsCheckError:
+            gate.publish_outcome = "publish_failed:needs_check"
+            await db.commit()
+            return
 
         publication = await publish_channel_post_draft(
             db, org_id=gate.org_id, draft_id=target_draft.id, published_by_member_id=publisher_member_id,

@@ -69,9 +69,10 @@ def test_existing_classification_is_unchanged():
     } == {
         "CHANNEL_TOKEN_EXPIRED": "connection", "CHANNEL_CONNECTION_REVOKED": "connection",
         "CHANNEL_PUBLISH_PROVIDER_ERROR": "transient", "CHANNEL_RATE_LIMITED": "transient",
-        "CHANNEL_PUBLISH_IN_PROGRESS": "needs_check", "INSTAGRAM_IMAGE_REQUIRED": "needs_check",
-        # 채널 게시와 겹치는 코드 · 보냈는지 모르는 코드는 이 카드에서 그대로(4264).
-        "STIBEE_PLAN_RESTRICTED": "needs_check", "NEWSLETTER_SEND_PROVIDER_ERROR": "needs_check",
+        # story #4264 — 어댑터 사전 거절 · 명시 거절 코드는 «확실히 안 나감»으로 옮겼다(전수는 test_4264).
+        "CHANNEL_PUBLISH_IN_PROGRESS": "needs_check", "INSTAGRAM_IMAGE_REQUIRED": "not_sent",
+        # 보냈는지 모르는 일반 공급자 오류는 needs_check 그대로(명시 거절 코드만 not_sent — 4264 원칙).
+        "STIBEE_PLAN_RESTRICTED": "not_sent", "NEWSLETTER_SEND_PROVIDER_ERROR": "needs_check",
         "SOMETHING_UNKNOWN": "needs_check", None: "needs_check",
     }
 

@@ -236,7 +236,7 @@ async def _seed_scheduled_instagram_command(session, client, *, org_id, connecti
 async def test_instagram_permanent_provider_failure_classified_as_needs_check_dead_letter(monkeypatch):
     """AC3 — 어댑터가 INSTAGRAM_IMAGE_REQUIRED(영구 조건)로 실패하면 needs_check로
     분류돼 즉시 dead_letter(재시도 0·next_attempt_at null). 뮤테이션 자가검증 —
-    _PERMANENT_PROVIDER_CONDITION_CODES에서 이 코드를 지우면(실 소스 대입) 같은
+    `_NOT_SENT_CODES`(story #4264 — 예전 `_PERMANENT_PROVIDER_CONDITION_CODES`)에서 이 코드를 지우면 같은
     실패가 CHANNEL_PUBLISH_PROVIDER_ERROR(transient)로 떨어져 pending+next_attempt_at
     이 채워지는 것으로 되돌아간다."""
     import app.services.instagram_publish as instagram_publish_module
@@ -273,7 +273,9 @@ async def test_instagram_permanent_provider_failure_classified_as_needs_check_de
         async with Session() as s:
             cmd_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == cmd_id))).scalar_one()
             assert cmd_row.status == "dead_letter", cmd_row.status
-            assert cmd_row.failure_kind == "needs_check", cmd_row.failure_kind
+            # story #4264 — 어댑터가 HTTP 호출 전에 거절한 영구 조건이라 «확실히 안 나감»(not_sent). 곧바로 dead_letter ·
+            # 재시도 0은 그대로. 승격은 `provider_error_code`(워커 · 즉시 발행 라우터 공용 · 표 `_NOT_SENT_CODES`).
+            assert cmd_row.failure_kind == "not_sent", cmd_row.failure_kind
             assert cmd_row.next_attempt_at is None
             assert cmd_row.attempt_count == 1
     finally:

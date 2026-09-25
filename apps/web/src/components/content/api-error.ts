@@ -33,6 +33,8 @@ export type SitePostApiErrorKind =
   | 'connection_not_active'
   | 'approver_role_missing'
   | 'publish_in_progress'
+  // story #4264(유나 4632 · PO 처방) — «나갔는지 모름»으로 멈춘 명령에 새 발행 요청 → BE 409 CHANNEL_POST_NEEDS_CHECK(어댑터 0).
+  | 'publish_needs_check'
   | 'text_too_long'
   | 'provider_error'
   // story #3426(BE #3419) — 예약 취소·회수 전용 신규 kind 2개.
@@ -215,6 +217,8 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // story #3395 — 동시 발행 요청 경합에서 진 쪽이 받는 응답. "다시 발행"이 아니라
   // "상태를 다시 확認"이 맞는 다음 행동이다(두 번째 요청이 새 게시를 만들지 않는다).
   CHANNEL_PUBLISH_IN_PROGRESS: { labelKey: 'errorChannelPublishInProgress', kind: 'publish_in_progress' },
+  // story #4264 — 문구는 page.tsx가 잠금 사유와 같은 문장으로 조립한다(배지의 재시도 이름 {cta} 보간).
+  CHANNEL_POST_NEEDS_CHECK: { labelKey: '', kind: 'publish_needs_check' },
   CHANNEL_TEXT_TOO_LONG: { labelKey: '', kind: 'text_too_long' }, // maxLength·currentLength로 문구 조립(labelKey는 page.tsx가 보간)
   // story #3538(BE #3886, 유나 §17-16⑤ PO 確定) — 선알림(사유 사슬)과 같은 i18n 키.
   // 서버 message를 그대로 뿌리지 않는다(코드→화면 문구 선택, §22-15 규율).

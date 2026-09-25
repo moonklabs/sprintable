@@ -341,7 +341,11 @@ export default function ChannelPostListPage() {
       renderCell: ({ draft, failureAction }) => {
         const scheduled = realStr(draft.scheduled_at);
         return failureAction ? (
-          <FailureActionBadge action={failureAction} displayTimezone={displayTimezone} compact />
+          <FailureActionBadge
+            action={failureAction} displayTimezone={displayTimezone} compact
+            approvalContext={(('gate_status' in draft && 'scheduled_at' in draft)
+              ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
+          />
         ) : draft.published_at ? (
           formatScheduledAt(draft.published_at, displayTimezone).display
         ) : scheduled ? (

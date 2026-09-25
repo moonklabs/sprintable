@@ -98,6 +98,11 @@ export interface InsightsBoardRow {
   // PublicationCommand 행) — 새 낱말 0. 수집 상태 축(d1/d7·comments_*)과는 다른
   // 축이라 필터 대상이 아니라 행 배지 전용. site_post 행은 항상 null.
   command_status: string | null;
+  // story #4264(까디르 codex P2 · PO 18:51Z) — 채널 포스트 목록과 같은 실패 필드. 옛 응답엔 없을 수 있어 선택.
+  failure_kind?: string | null;
+  next_retry_at?: string | null;
+  command_reason_code?: string | null;
+  command_reason_reset_at?: string | null;
   // story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
   // 이 publication에 홍보 요청이 없으면 null(「해당 없음」 원천 — 지어내지 않는다).
   ads_boost: AdsBoostSummaryView | null;

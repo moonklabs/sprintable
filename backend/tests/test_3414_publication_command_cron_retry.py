@@ -188,7 +188,7 @@ async def test_cron_retryable_failure_backs_off_with_attempt_count():
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -319,7 +319,7 @@ async def test_cron_max_retries_reaches_dead_letter():
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -465,7 +465,7 @@ async def test_cron_max_retries_provider_error_reaches_dead_letter_but_connectio
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -540,7 +540,7 @@ async def test_cron_retryable_failure_below_cap_does_not_prematurely_escalate_co
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
@@ -844,7 +844,7 @@ async def test_mutation_reintroducing_transient_exhaustion_promotion_reopens_bug
         with (
             patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "create_container", AsyncMock(side_effect=ThreadsPublishError(
-                status_code=500, code="SERVER_ERROR", message="boom",
+                status_code=500, code="THREADS_CREATE_CONTAINER_FAILED", message="boom",  # 실 어댑터 코드(쓰기 前 · 4264 명시 transient)
             ))),
         ):
             async with Session() as s:
