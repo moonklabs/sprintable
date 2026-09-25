@@ -79,7 +79,7 @@ interface DocContentRendererProps {
 // story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것). 유나 4673 판: 본문 속 글자 링크라 **글자 크기 ·
 // 줄바꿈을 본문에서 물려받는다**(예전 `inline-flex text-sm px-1`은 16px 본문 속 14px 끊기지 않는 상자 — 06-23 문서 리디자인부터 · 1440에서 들쭉날쭉 빈틈 ·
 // 390 줄 간격 흔들림). 색은 링크 자신의 쪽에서 더 구체적인 선택자로 이긴다(유나 조정 14:00Z): `[&[data-doc-internal-link]]:…` =
-// `.cls[data-doc-internal-link]`(0,2,0) > 루트 `.root a`(0,1,1). 루트 `[&_a]:text-brand-soft`(본문 링크 전체 대비 · 디디 4315 몫)가 선언 색을 덮어
+// `.cls[data-doc-internal-link]`(0,2,0) > 루트 `.root a`(0,1,1). 루트 `[&_a]` 링크 색(본문 링크 전체 · 디디 4315가 brand-soft → brand-text로 대비를 고침)이 선언 색을 덮어
 // 라이트 대비 1.25:1이던 것 — 루트 규칙은 여기서 안 건드리고, 4315가 루트 색을 바꿔도 위키 링크는 foreground로 남는다.
 const WIKI_LINK_CLASS = 'rounded-sm underline decoration-muted-foreground/40 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-doc-internal-link]]:text-foreground [&[data-doc-internal-link]]:underline-offset-2';
 

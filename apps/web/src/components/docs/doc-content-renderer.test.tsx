@@ -44,7 +44,7 @@ describe('DocContentRenderer', () => {
 
   it('⭐story #4315 — 본문 링크 글자는 brand-text(밝은 = brand-strong 7.05 · 어두운 = brand-soft 10.48) · 옅은 틴트 brand-soft 아님', () => {
     const markup = renderToStaticMarkup(wrap(
-      <DocContentRenderer content={'[약관](https://example.com/terms) 본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" />,
+      <DocContentRenderer content={'[약관](https://example.com/terms) 본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />,
     ));
     expect(markup).toContain('href="https://example.com/terms"');
     expect(markup).toContain('[&amp;_a]:text-brand-text');
