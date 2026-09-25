@@ -202,16 +202,24 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   // 4277(PO 402 라이브) — 상단 «N개 자산 · 용량» 알약이 상단바 밖으로 말줄임 없이 잘리던 것: 화면 이름(h1)은 온전 · 알약은 화면 안에서
   // 끝나거나(다 보임) 말줄임으로 줄어든다(잘린 채 숨지 않음).
   expect.soft(await topBarInsideViewport(true), '/storage 상단바 — 화면 밖으로 밀린 버튼 · 제목 잘림').toBe('ok');
+  // CI 시드는 자산 0이라 알약 글자가 짧다(«0개 자산 · 0 B» — 늘 들어맞음). 글자 길이와 무관하게 재도록 **구조**를 단언한다:
+  // 브레드크럼이 폰에서 빠짐 · 알약이 줄어들 수 있음(flex-shrink ≠ 0) · 넘치면 말줄임(text-overflow) · 화면 안에서 끝남.
   const pill = await page.locator('[data-testid="storage-summary-badge"]').evaluate((b) => {
     const inner = b.querySelector('span') as HTMLElement;
+    const row = b.parentElement as HTMLElement;
     return {
       inside: b.getBoundingClientRect().right <= window.innerWidth + 1,
-      fits: inner.scrollWidth <= inner.clientWidth + 1,
-      ellipsis: getComputedStyle(inner).textOverflow === 'ellipsis',
+      shrinks: getComputedStyle(b).flexShrink !== '0',
+      ellipsis: getComputedStyle(inner).textOverflow === 'ellipsis' && getComputedStyle(inner).overflow === 'hidden',
+      // 브레드크럼 = 제목 줄의 알약 아닌 span들(알약 자신도 span이라 뺀다).
+      breadcrumbHidden: [...row.children].filter((c) => c.tagName === 'SPAN' && c !== b).every((c) => getComputedStyle(c).display === 'none'),
+      text: inner.textContent ?? '',
     };
   });
-  expect.soft(pill.inside, '스토리지 요약 알약이 화면 안에서 끝난다').toBe(true);
-  expect.soft(pill.fits || pill.ellipsis, '스토리지 요약 알약 — 다 보이거나 말줄임').toBe(true);
+  expect.soft(pill.inside, `스토리지 요약 알약이 화면 안에서 끝난다(${pill.text})`).toBe(true);
+  expect.soft(pill.shrinks, '스토리지 요약 알약이 줄어들 수 있다(flex-shrink ≠ 0)').toBe(true);
+  expect.soft(pill.ellipsis, '스토리지 요약 알약 — 넘치면 말줄임').toBe(true);
+  expect.soft(pill.breadcrumbHidden, '폰에서 브레드크럼(«작업 공간 /») 숨김').toBe(true);
 
   // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639 · 까디르 검수 P2):
   // - 명시 높이 틀(flow-board-frame) 안에서 보드가 넘치지 않는다(틀 scrollHeight − clientHeight ≤ 1 — 자동 높이 부모 기준이면 0이 당연해 뜻이 없다).
