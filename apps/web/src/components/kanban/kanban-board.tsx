@@ -36,6 +36,7 @@ import { StoryCard } from './story-card';
 import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberDisplayLabel } from '@/lib/member-display';
 
 /**
  * 터치는 드래그를 절대 시작하지 않게 — pointerType !== 'touch'만 드래그 활성(0d142311 prod 재발 근본 fix).
@@ -142,6 +143,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 동일 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
   const orgSyncVersion = useOrgSyncVersion();
   const t = useTranslations('board');
+  // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed · lib/member-display).
+  const tc = useTranslations('common');
   const locale = useLocale();
   const { addToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
@@ -1434,7 +1437,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   }`}
                 >
                   <span className="max-w-[80px] truncate">
-                    {selectedAssigneeId ? (members.find((m) => m.id === selectedAssigneeId)?.name ?? t('allAssignees')) : t('allAssignees')}
+                    {/* story #4284 — 이름 없는 구성원을 골랐을 때 «모든 담당자»로 뜨던 것(거르고 있는데 안 거른다고 보임) → «이름 없는 구성원». */}
+                    {selectedAssigneeId ? (() => {
+                      const selected = members.find((m) => m.id === selectedAssigneeId);
+                      return selected ? memberDisplayLabel(selected.name, tc) : t('allAssignees');
+                    })() : t('allAssignees')}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
                 </Button>
@@ -1459,8 +1466,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 </DropdownMenuGroup>
                 {(() => {
                   const q = assigneeSearch.toLowerCase();
-                  const humans = members.filter((m) => m.type !== 'agent' && m.name.toLowerCase().includes(q));
-                  const agents = members.filter((m) => m.type === 'agent' && m.name.toLowerCase().includes(q));
+                  // story #4284 — 이름이 null인 구성원에서 `m.name.toLowerCase()`가 throw해 일감 보드 전체가 오류 화면이었다. 보이는 라벨로 찾는다.
+                  const matches = (m: KanbanMember) => memberDisplayLabel(m.name, tc).toLowerCase().includes(q);
+                  const humans = members.filter((m) => m.type !== 'agent' && matches(m));
+                  const agents = members.filter((m) => m.type === 'agent' && matches(m));
                   const hasResults = humans.length > 0 || agents.length > 0;
                   if (!hasResults) {
                     return <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noResults')}</div>;
@@ -1473,7 +1482,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                           <DropdownMenuLabel className="text-xs text-muted-foreground">{t('filterMembers')}</DropdownMenuLabel>
                           {humans.map((m) => (
                             <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                              <span className="flex-1 truncate">{m.name}</span>
+                              <span className="flex-1 truncate">{memberDisplayLabel(m.name, tc)}</span>
                               {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
                             </DropdownMenuItem>
                           ))}
@@ -1485,7 +1494,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                           <DropdownMenuLabel className="text-xs text-muted-foreground">{t('filterAgents')}</DropdownMenuLabel>
                           {agents.map((m) => (
                             <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
-                              <span className="flex-1 truncate">{m.name}</span>
+                              <span className="flex-1 truncate">{memberDisplayLabel(m.name, tc)}</span>
                               {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
                             </DropdownMenuItem>
                           ))}

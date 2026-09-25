@@ -54,7 +54,8 @@ export interface VisualArtifact {
 
 export interface MemberRef {
   id: string;
-  name: string;
+  // story #4284 — 구성원 이름은 BE에서 nullable(표시 이름 없는 휴먼). 표시는 lib/member-display의 memberNameById로.
+  name: string | null;
 }
 
 // ─── 잠정 mock 데이터 (핸드오프 doc `e-canvas-trust-surface-mockup-render` 예시와 동일 콘텐츠) ──

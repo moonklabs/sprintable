@@ -64,8 +64,9 @@ export function avatarColor(isAgent: boolean): string {
   return isAgent ? AGENT_MARK_FILL_CLASS : 'bg-proof-sunk text-proof-ink-2';
 }
 
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+export function initials(name: string | null | undefined): string {
+  // story #4284 — 구성원 이름은 nullable(표시 이름 없는 휴먼) — 빈 이름과 같게 «?».
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
   const first = parts[0] ?? '';
   const isLatin = /[a-zA-Z]/.test(first);

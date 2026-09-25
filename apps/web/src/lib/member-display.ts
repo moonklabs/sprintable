@@ -21,6 +21,19 @@ export function memberDisplayLabel(name: string | null | undefined, t: (key: str
   return name ? name : t('memberUnnamed');
 }
 
+// story #4284 — id로 구성원 이름을 찾을 때 «목록에 있는데 이름이 없음»(→ memberDisplayLabel의 «이름 없는 구성원»)과
+// «목록에 없음»(→ 호출부가 정한 unknownFallback · 예: «—»)을 가른다. 예전 `memberMap[id]?.name ?? fallback`은 이름이 null인 실존
+// 구성원까지 fallback(id 조각 등)으로 떨어뜨려, 식별자를 이름처럼 보이던 #3755 클래스와 같은 모양이 됐다. `t`는 common 네임스페이스.
+export function memberNameById(
+  memberMap: Record<string, { name: string | null }> | undefined,
+  id: string,
+  t: (key: string) => string,
+  unknownFallback: string,
+): string {
+  const member = memberMap?.[id];
+  return member ? memberDisplayLabel(member.name, t) : unknownFallback;
+}
+
 // story #3758(9번째, PO 決 2026-09-09) — 대화 참여자 전용. `resolved === false`(진짜
 // orphan — member/alias 해소 자체가 실패)는 t('unknownMember')(「알 수 없는 구성원」,
 // 낱말 정 적용 — chats.unknownMember 값 자체는 이 스토리가 갱신) · 그 외(실존 구성원,

@@ -18,6 +18,7 @@ import {
 import { ArtifactExpandDialog } from '@/components/canvas/artifact-expand-dialog';
 import { type GalleryTimelineVersion } from '@/components/canvas/artifact-gallery-timeline';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberDisplayLabel, memberNameById } from '@/lib/member-display';
 
 const VISIBLE_LIMIT = 4;
 
@@ -152,7 +153,7 @@ interface EvidenceSectionProps {
   humanVerified: boolean | null | undefined;
   humanVerifiedBy: string | null | undefined;
   humanVerifiedAt: string | null | undefined;
-  memberMap?: Record<string, { name: string }>;
+  memberMap?: Record<string, { name: string | null }>;
   className?: string;
 }
 
@@ -282,11 +283,12 @@ export function EvidenceSection({
   const visibleItems = items && !showAll ? items.slice(0, VISIBLE_LIMIT) : items;
   const hiddenCount = items ? items.length - VISIBLE_LIMIT : 0;
   const signerId = items?.[0]?.created_by ?? null;
-  const signerName = signerId ? memberMap[signerId]?.name : null;
+  // story #4284 — 실존인데 이름 없는 구성원은 «이름 없는 구성원»(목록에 없으면 예전처럼 표시 안 함).
+  const signerName = signerId && memberMap[signerId] ? memberDisplayLabel(memberMap[signerId].name, tCommon) : null;
   // E-VERIFY P0-04 — Lv0/Lv1 씰은 이 자리에서 즉시 정확하게(evidence fetch 대기 없이): verified는
   // human_verified_by 실명(who), claimed는 "에이전트 주장"(self_reported엔 who가 없어 일반화,
   // §3 계약 그대로). 과거 무조건 초록 체크였던 자리 — human 미검증 건은 여기서 amber로 정정된다.
-  const verifiedByName = humanVerifiedBy ? (memberMap[humanVerifiedBy]?.name ?? humanVerifiedBy.slice(0, 6)) : null;
+  const verifiedByName = humanVerifiedBy ? memberNameById(memberMap, humanVerifiedBy, tCommon, humanVerifiedBy.slice(0, 6)) : null;
   const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
   const sealLabel = trustStage === 'verified'
     ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))

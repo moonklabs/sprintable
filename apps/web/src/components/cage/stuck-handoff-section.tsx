@@ -10,6 +10,7 @@ import { GateLineContext } from '@/components/cage/gate-line-context';
 import { StuckHandoffDetail } from '@/components/cage/stuck-handoff-detail';
 import type { KanbanMember, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberNameById } from '@/lib/member-display';
 
 /**
  * E-DG S12 ① — detail drawer "워크플로우 라인 상태" 섹션(story-detail-panel DISPATCH 직후 마운트).
@@ -29,6 +30,8 @@ interface StuckHandoffSectionProps {
 
 export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSectionProps) {
   const t = useTranslations('cage');
+  // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed).
+  const tc = useTranslations('common');
   const [step, setStep] = useState<WorkflowLineStepRun | null>(null);
   const [fallback, setFallback] = useState<FallbackState>('idle');
   const [withdraw, setWithdraw] = useState<WithdrawState>('idle');
@@ -115,7 +118,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           <span>{t('lineHandoffStuck')}</span>
         </Badge>
         {/* ⓑ S11 GateLineContext 재사용(무변경) */}
-        <GateLineContext step={step} resolveName={(id) => memberMap[id]?.name ?? id.slice(0, 6)} />
+        <GateLineContext step={step} resolveName={(id) => memberNameById(memberMap, id, tc, id.slice(0, 6))} />
         {/* ⓒ StuckHandoffDetail */}
         <StuckHandoffDetail step={step} />
         {/* ⓓ fallback action(상태머신) */}

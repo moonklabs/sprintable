@@ -19,6 +19,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { memberDisplayLabel } from '@/lib/member-display';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
 // #1942 재작업(까심 REQUEST_CHANGES): 카드-상대 flip(left-0/right-0)은 보드가 가로스크롤이라
@@ -48,8 +49,10 @@ function getEpicDotClass(epicId: string): string {
   return EPIC_DOT_CLASSES[hash % EPIC_DOT_CLASSES.length]!;
 }
 
-function getInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
+// story #4284 — 구성원 이름은 nullable. 이름 없는 구성원의 머리글자는 «?»(대화 · 활동 타임라인 · 메시징 정책의 기존 관례) — 라벨
+// «이름 없는 구성원»의 앞 두 자(«이름»)를 머리글자로 쓰면 실명처럼 읽힌다. 전체 라벨은 title로.
+function getInitials(name: string | null): string {
+  return name ? name.slice(0, 2).toUpperCase() : '?';
 }
 
 // E-DG S11 ①: workflow-line badge 5상태(LineStatusSummary + 기존 pending gate 두 소스 merge).
@@ -130,6 +133,7 @@ interface StoryCardProps {
 
 export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className, getStatusLabel }: StoryCardProps) {
   const t = useTranslations('board');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
@@ -541,7 +545,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                             ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
                             : 'border-border bg-muted text-muted-foreground',
                         )}
-                        title={m.name}
+                        title={memberDisplayLabel(m.name, tc)}
                       >
                         {getInitials(m.name)}
                         {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
@@ -575,7 +579,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
                   <TrustSeal
                     variant="verified"
-                    humanName={verifiedBy.name}
+                    humanName={memberDisplayLabel(verifiedBy.name, tc)}
                     when={story.human_verified_at ? formatRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
                   />
                 ) : story.status === 'done' && trustStage === 'claimed' ? (

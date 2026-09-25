@@ -33,6 +33,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
+import { memberDisplayLabel, memberNameById } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -954,7 +955,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const ciResult = mergeGate?.neutral_facts?.['ci_result'];
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
-  const humanVerifiedByName = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? story.human_verified_by.slice(0, 6)) : null;
+  // story #4284 — 실존인데 이름 없는 구성원은 «이름 없는 구성원», 목록에 없는 id만 예전처럼 id 앞 6자(memberNameById).
+  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, story.human_verified_by.slice(0, 6)) : null;
   const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
     story.human_verified && humanVerifiedByName && story.human_verified_at
       ? { variant: 'verified', humanName: humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
@@ -971,8 +973,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)
       ? {
           density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
-          human: proofHuman ? { name: proofHuman.name, role: 'human' } : undefined,
-          agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+          human: proofHuman ? { name: memberDisplayLabel(proofHuman.name, tc), role: 'human' } : undefined,
+          agent: proofAgent ? { name: memberDisplayLabel(proofAgent.name, tc), initial: initials(proofAgent.name) } : undefined,
           evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
         }
       : null;
@@ -983,7 +985,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     done: t('workcellNextNeedDone'),
   };
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
-    author: memberMap[c.created_by]?.name ?? c.created_by,
+    author: memberNameById(memberMap, c.created_by, tc, c.created_by),
     body: c.content,
   }));
 
@@ -1312,7 +1314,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
-  const memberName = (id: string | null) => (id ? (memberMap[id]?.name ?? '—') : '—');
+  const memberName = (id: string | null) => (id ? memberNameById(memberMap, id, tc, '—') : '—');
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
@@ -1529,8 +1531,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 // 문구·"본문 AC 보기" 링크는 BriefLayer가 소유(워크셀 자체 i18n으로 이관,
                 // 그 옛 board 키는 폐기).
                 dod: story.acceptance_criteria?.trim() || null,
-                owner: proofHuman ? { name: proofHuman.name, role: 'human' } : null,
-                agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+                owner: proofHuman ? { name: memberDisplayLabel(proofHuman.name, tc), role: 'human' } : null,
+                agent: proofAgent ? { name: memberDisplayLabel(proofAgent.name, tc), initial: initials(proofAgent.name) } : undefined,
                 onGoalMore: scrollToDescriptionSection,
                 onDodMore: scrollToAcceptanceCriteriaSection,
               }}
@@ -1572,7 +1574,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {/* story #3997 CHANGES(자체 그라운딩 확장 2026-09-17) — 담당자 배정
                       토글 후보에서 「시스템 발행」 제외(연결 대상이 아닌 내부 멤버).
                       memberMap 기반 기존 배정 표시는 안 건드린다(위 참고). */}
-                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type)).map((m) => {
+                  {/* story #4284 — 이름 없는 구성원은 «이름 없는 구성원»(common.memberUnnamed). 라벨을 행 데이터에 실어 `{m.label}`로 그린다. */}
+                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type)).map((m) => ({ ...m, label: memberDisplayLabel(m.name, tc) })).map((m) => {
                     const selected = localAssigneeIds.includes(m.id);
                     return (
                       <Button
@@ -1583,9 +1586,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
-                          {m.name.slice(0, 2).toUpperCase()}
+                          {m.name ? m.name.slice(0, 2).toUpperCase() : '?'}
                         </span>
-                        {m.name}
+                        {m.label}
                         {selected && <span className="ml-auto text-primary">✓</span>}
                       </Button>
                     );
@@ -1602,7 +1605,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <p className="mt-1 text-sm text-foreground">
                   {localAssigneeIds.length > 0
-                    ? localAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')
+                    ? localAssigneeIds.map((id) => memberNameById(memberMap, id, tc, '—')).join(', ')
                     : '—'}
                 </p>
               )}
@@ -2309,7 +2312,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-                            <span>{memberMap[comment.created_by]?.name ?? '—'}</span>
+                            <span>{memberNameById(memberMap, comment.created_by, tc, '—')}</span>
                             <span>·</span>
                             <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
@@ -2336,7 +2339,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => {
-                        const actorName = memberMap[activity.created_by]?.name ?? '—';
+                        const actorName = memberNameById(memberMap, activity.created_by, tc, '—');
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (

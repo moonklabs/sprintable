@@ -1686,3 +1686,46 @@ describe('KanbanBoard — 필터 메뉴를 열면 초점 = 검색칸(story #4306
   });
 });
 
+// story #4284 — BE `team_members.name`은 nullable(표시 이름 없는 휴먼 · story #3758). FE 타입이 `name: string`이라 tsc가 못 잡았고,
+// 이름 없는 구성원이 하나라도 있으면 담당자 필터 렌더(`m.name.toLowerCase()`)에서 throw → 일감 보드 전체가 오류 화면이었다.
+describe('KanbanBoard — 이름 없는 구성원(story #4284)', () => {
+  const MEMBERS = [
+    { id: 'm-unnamed', name: null, type: 'human' },
+    { id: 'm-named', name: '송윤재', type: 'human' },
+    { id: 'a-1', name: '디디', type: 'agent' },
+  ];
+
+  async function openAssigneeFilter(): Promise<HTMLElement> {
+    const trigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.board.allAssignees));
+    expect(trigger, '담당자 필터 버튼').toBeTruthy();
+    // DropdownMenu는 Base UI Menu — 클릭으로 열린다(내용은 body 포털).
+    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    expect(menu, '담당자 필터 메뉴').toBeTruthy();
+    return menu!;
+  }
+
+  it('⭐보드가 오류 화면 없이 그려지고, 담당자 필터에 «이름 없는 구성원»이 뜬다', async () => {
+    stubFetch([{ id: 's1', title: '이름 없는 담당자 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-unnamed' }], MEMBERS);
+    await mount();
+    expect(container.textContent).toContain('이름 없는 담당자 스토리');
+    const menu = await openAssigneeFilter();
+    expect(menu.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(menu.textContent).toContain('송윤재');
+  });
+
+  it('담당자 검색 — 보이는 라벨로 찾는다(«이름 없는»으로 이름 없는 구성원이 걸리고, 실명 검색에서 오류 없음)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], MEMBERS);
+    await mount();
+    const menu = await openAssigneeFilter();
+    const input = menu.querySelector('input') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, '이름 없는'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(menu.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(menu.textContent).not.toContain('송윤재');
+    await act(async () => { setter.call(input, '송윤'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(menu.textContent).toContain('송윤재');
+    expect(menu.textContent).not.toContain(koMessages.common.memberUnnamed);
+  });
+});
