@@ -11,7 +11,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { memberDisplayLabel } from '@/lib/member-display';
+import { memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
@@ -209,9 +209,11 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
 
+  // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
+  const actorLabelById = memberOptionLabels(members, tc);
   const actorOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
-    ...members.map((m) => ({ value: m.id, label: m.name ?? tc('unknown') })),
+    ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
 
   const entityTypeOptions: SelectOption[] = [
@@ -353,14 +355,17 @@ export function auditContextTooltip(item: ActivityLogItem): string | undefined {
 // `!item.actor_name`으로 뭉뚱그려져 있었다 — 전자는 실존 구성원이라 「이름 없는 구성원」으로
 // 정직하게 표시해야 하고, 후자는(액터 자체가 없음) 기존대로 빈 슬롯이 맞다. actor_id로 갈라
 // 구분한다.
+// [SID:4286 · 까디르 P2] #4284 name/label 계약(ProofCapsule · shared/avatar) — 머리글자 · 아바타는 name 그대로(null → 아이콘), 읽는 글자는
+// label. 예전엔 null 이름을 «이름 없는 구성원» 글자로 바꿔 name에 넣어, 아바타가 그 글자의 앞 두 자(«이름»)를 머리글자로 그렸다(가짜 머리글자).
 export function auditActorProps(item: ActivityLogItem, t: (key: string) => string): {
-  human?: { name: string; role: string };
-  agent?: { name: string; initial: string };
+  human?: { name: string | null; label?: string; role: string };
+  agent?: { name: string | null; label?: string };
 } {
   if (!item.actor_id) return {}; // 진짜 액터 없음(시스템 액션) — 빈 슬롯 유지.
-  const name = memberDisplayLabel(item.actor_name, t);
-  if (item.actor_type === 'agent') return { agent: { name, initial: name.slice(0, 1) } };
-  return { human: { name, role: item.actor_type ?? 'human' } };
+  const name = item.actor_name || null;
+  const label = name ? {} : { label: memberDisplayLabel(null, t) };
+  if (item.actor_type === 'agent') return { agent: { name, ...label } };
+  return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
 function ActivityRow({ item }: { item: ActivityLogItem }) {

@@ -6,9 +6,11 @@ import { useParams, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberLookup } from '@/lib/member-display';
 import { useChannelLabel } from '@/lib/channel-label';
 import {
   deriveContentPostStatus,
@@ -303,6 +305,8 @@ export default function ContentPostEditPage() {
   // 폴백) 그대로 재사용한다 — publication 계약을 늘리지 않는다(이름 필드를 새로 추가하지
   // 않는다).
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // [SID:4286] 이름 표를 다 불러왔는지(성공 · 실패 모두 끝) — 불러오는 중에는 발행자 칸을 비워 둔다.
+  const [memberNamesLoaded, setMemberNamesLoaded] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
   const [unpublishConfirmOpen, setUnpublishConfirmOpen] = useState(false);
   const [unpublishResult, setUnpublishResult] = useState<
@@ -729,7 +733,8 @@ export default function ContentPostEditPage() {
         for (const m of json.data) names[m.id] = m.name;
         setMemberNames((prev) => ({ ...prev, ...names }));
       })
-      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+      .catch(() => { /* non-critical — 표에 없으면 «알 수 없는 구성원»(id 조각 0 · story #4286) */ })
+      .finally(() => setMemberNamesLoaded(true));
   }, [publication?.published_by_member_id]);
 
   // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
@@ -1099,8 +1104,9 @@ export default function ContentPostEditPage() {
   // 안내가 아니다 — settings/page.tsx:330·org-members-section.tsx:343와 같은 role 소스
   // (useDashboardContext().role)를 재사용한다, 새 조회를 만들지 않는다.
   const canUnpublish = role === 'owner' || role === 'admin';
+  // [SID:4286] id 조각(앞 8자)을 발행자 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → null(자리표시).
   const publisherName = publication?.published_by_member_id
-    ? memberNames[publication.published_by_member_id] ?? publication.published_by_member_id.slice(0, 8)
+    ? (memberLookup(memberNames, publication.published_by_member_id, tc, { loaded: memberNamesLoaded })?.label ?? null)
     : '—';
   // story #3479 — undefined면 "보일 실패가 없다"는 뜻(예: command_status='completed').
   // FailureActionBadge 자체를 안 그린다(가짜 상태를 지어내지 않는다).
@@ -1268,7 +1274,7 @@ export default function ContentPostEditPage() {
           </div>
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoByLabel')}</span>{' '}
-            {publisherName}
+            {publisherName === null ? <Skeleton as="span" variant="text" className="h-3 w-20 align-middle" aria-hidden /> : publisherName}
           </div>
           <Button
             type="button"

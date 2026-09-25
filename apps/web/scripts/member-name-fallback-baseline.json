@@ -1,0 +1,22 @@
+[
+  {
+    "key": "services/memo.ts::id-fragment::name: (memberById.get(row.team_member_id) as any)?.name ?? row.team_member_id,",
+    "reason": "퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) — 메모 «읽은 사람» 응답을 만드는 데이터 층(PO 決 2026-09-25)"
+  },
+  {
+    "key": "lib/auth-helpers.ts::email-whole::const name = user.user_metadata?.name || user.user_metadata?.full_name || user.email || tc('unknown');",
+    "reason": "도달 0(SaaS dev 빌드) — 이메일 통째를 이름으로 저장하는 supabase 팀원 자동 생성(resolveTeamMemberFromMemberships). 호출처 getMyTeamMember · getMyMembershipContext는 apps/web/src 안 0(테스트 mock뿐 · story #3926 주석)이고 ee/apps/web/src(layout · agents)뿐인데, 그 트리는 빌드 밖이다: apps/web/Dockerfile은 apps/web만 빌드하고 tsconfig는 @ee/*→ee/packages만 가리키며, 그 파일들이 import하는 @/lib/supabase/server는 apps/web/src에 없다(컴파일되면 빌드 실패 — dev 빌드는 성공). @supabase/supabase-js도 웹 의존성에 없다."
+  },
+  {
+    "key": "services/memo.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;",
+    "reason": "퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) — 메모 답글 작성자 이름을 만드는 데이터 층(같은 파일 243줄과 같은 사유)"
+  },
+  {
+    "key": "components/chat/delivery-contract-modal.tsx::id-fragment::{t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}",
+    "reason": "기록만(PO 決 2026-09-25 · 가드 세기 뒤 드러남) — targetMemberId를 넘기는 호출처는 member-notification-preferences-summary:142 하나이고 거기서 targetMemberLabel(memberLabel: string 필수)을 늘 같이 넘긴다 · 채팅 페이지 호출은 targetMemberId 없음 → `?? targetMemberId` 갈래 도달 0"
+  },
+  {
+    "key": "services/memo-reply-webhook-dispatch.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name?.trim() || reply.created_by;",
+    "reason": "기록만(PO 決 2026-09-25 · 가드 세기 뒤 드러남) — 호출처가 services/memo.ts 하나뿐인데 memo.ts는 퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0, 같은 기준표 memo.ts 두 줄과 같은 사유)"
+  }
+]

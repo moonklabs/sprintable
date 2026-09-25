@@ -2250,6 +2250,11 @@ jobs:
       - name: "Verify no hardcoded app domain (story #3905 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-app-domain
 
+      # story #4286 회귀가드 — 구성원 이름 칸 폴백 래칫(이메일 앞부분 · 구성원 id 조각/통째 · 날것 «?»). 3755 · 3758번 스윕이
+      # `.email` grep이라 놓친 모양 셋. 남은 자리는 이유와 함께 member-name-fallback-baseline.json에 얼리고 새 자리 · 낡은 줄은 FAIL.
+      - name: "Verify no member-name fallback (story #4286 regression guard)"
+        run: pnpm --filter web verify:no-member-name-fallback
+
       # story #4017 CHANGES 2(페드루 PO 지적, "여러 곳에서 목적지를 결정" 재발 방지) —
       # TODAY_V3_ENABLED 등 3개 env 이름은 nav-v3-flags-server.ts 한 곳, '/today'·
       # '/chats' 등 목적지 리터럴은 nav-v3-destinations.ts 한 곳에서만.

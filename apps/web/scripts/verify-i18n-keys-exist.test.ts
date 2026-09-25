@@ -103,18 +103,87 @@ describe('scanFileContent — story #5ead8723 AC1/AC2/AC3(셀프테스트 6)', (
   });
 
   // ⑥ 동적 호출(변수·템플릿·삼항) — 실패 아니라 수로만 카운트.
+  // [SID:4286] 삼항은 한 가지라도 리터럴이 아니면 동적(두 가지가 다 문자열인 삼항은 아래 describe).
   it('⭐동적 키(변수·템플릿·삼항)는 실패시키지 않고 수로만 센다(fails-silent 방지)', () => {
     const src = `
       const t = useTranslations('nav');
       const key = 'someKey';
       t(key);
       t(\`prefix.\${key}\`);
-      t(cond ? 'a' : 'b');
+      t(cond ? 'a' : key);
     `;
     const result = scanFileContent(src, 'fake.tsx');
     expect(result.literalRefs).toEqual([]);
     expect(result.dynamicCount).toBe(3);
     expect(result.totalCallCount).toBe(3);
+  });
+
+  describe('삼항 첫 인자 — [SID:4286]', () => {
+    it('두 가지가 다 문자열이면 가지마다 리터럴 키(동적 0 · 그 ns는 동적 ns 아님)', () => {
+      const src = `
+        const t = useTranslations('nav');
+        t(fallback ? 'waitingOnFallback' : 'waitingOn', { name });
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.literalRefs.map((r) => r.fullKey)).toEqual(['nav.waitingOnFallback', 'nav.waitingOn']);
+      expect(result.dynamicCount).toBe(0);
+      expect(result.totalCallCount).toBe(2);
+      expect(result.dynamicNamespaces.has('nav')).toBe(false);
+    });
+
+    it('괄호 · 중첩 삼항도 모든 가지가 문자열이면 센다 · .rich/.has 경로도 같다', () => {
+      const src = `
+        const t = useTranslations('nav');
+        t((a ? ('x') : b ? 'y' : 'z'));
+        t.rich(a ? 'r1' : 'r2', {});
+        t.has(a ? 'h1' : 'h2');
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.literalRefs.map((r) => r.fullKey)).toEqual([
+        'nav.x', 'nav.y', 'nav.z', 'nav.r1', 'nav.r2', 'nav.h1', 'nav.h2',
+      ]);
+      expect(result.dynamicCount).toBe(0);
+    });
+
+    it('한 가지만 문자열(다른 가지는 변수) → 호출 전체가 동적 · 리터럴 가지 키는 «못 셈»', () => {
+      const src = `
+        const t = useTranslations('nav');
+        t(a ? 'onlyLiteral' : key);
+        t(a ? key : 'onlyLiteralRight');
+        t(a ? 'x' : b ? key : 'z');
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.literalRefs).toEqual([]);
+      expect(result.dynamicCount).toBe(3);
+      expect(result.totalCallCount).toBe(3);
+      expect(result.dynamicNamespaces.has('nav')).toBe(true);
+    });
+
+    it('ns를 모르는 번역자(③)는 두 가지 다 문자열일 때만 낱말 축에 담는다', () => {
+      const src = `
+        function label(t: (key: string) => string, a: boolean, k: string) {
+          t(a ? 'wordA' : 'wordB');
+          t(a ? 'halfWord' : k);
+        }
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect([...result.unknownNsLiteralWords].sort()).toEqual(['wordA', 'wordB']);
+      expect(result.literalRefs).toEqual([]);
+      expect(result.dynamicCount).toBe(2);
+      expect(result.totalCallCount).toBe(2);
+    });
+
+    it('리터럴+동적 = 총 호출(삼항 가지 포함)', () => {
+      const src = `
+        const t = useTranslations('nav');
+        t('a');
+        t(c ? 'b' : 'd');
+        t(c ? 'e' : key);
+      `;
+      const result = scanFileContent(src, 'fake.tsx');
+      expect(result.literalRefs.length + result.dynamicCount).toBe(result.totalCallCount);
+      expect(result.totalCallCount).toBe(4);
+    });
   });
 
   it('리터럴+동적 = 총 호출(자기 완전성)', () => {

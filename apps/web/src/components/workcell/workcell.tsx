@@ -17,11 +17,11 @@ export interface WorkcellOwner {
   role: string;
 }
 
+// [SID:4286 · 까디르 4646 codex] 머리글자 `initial`은 선언만 있고 렌더 0 — 죽은 prop이라 걷었다(ProofCapsuleAgent와 같이).
 export interface WorkcellAgent {
   // story #4284 — name/label 계약(shared/avatar.tsx): 머리글자 · 아바타는 name(null이면 아이콘), 읽는 글자는 label ?? name.
   name: string | null;
   label?: string;
-  initial: string;
 }
 
 export interface WorkcellBrief {

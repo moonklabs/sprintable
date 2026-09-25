@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { X, Check } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
+import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -43,6 +45,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   // story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용.
   const tc = useTranslations('common');
   const [members, setMembers] = useState<Member[]>([]);
+  const rowLabels = memberRowLabels(members, tc, () => '');
   // story #3194 — 별도 state로 둔다(members setter와 순서 경쟁 없이 항상 render에서만 merge).
   const [verifiedById, setVerifiedById] = useState<Record<string, boolean | null>>({});
   const [selected, setSelected] = useState<string[]>([]);
@@ -150,9 +153,11 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                     }`}
                   >
                     <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                      {m.name?.slice(0, 2)?.toUpperCase() ?? '?'}
+                      {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘(에이전트 Bot · 사람 User — 4646 공용 표식). */}
+                      {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} className="h-3 w-3" aria-hidden />}
                     </div>
-                    <span className="flex-1 truncate">{m.name}</span>
+                    {/* [SID:4286 · 유나 12:06Z] 라벨은 «이름 없는 구성원»(타입은 원 아이콘 · 표식) — 이름 없는 행이 둘 이상이면 겹친 행에만 «· ID 앞 8자»(memberRowLabels · 꼬리 규칙 한 곳). */}
+                    <span className="flex-1 truncate">{rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}</span>
                     {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
                         신호 dot) 채택, soft-fill 폐지. */}
                     {m.type === 'agent' && <AgentIdentity />}

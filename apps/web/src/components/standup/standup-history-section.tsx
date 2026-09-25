@@ -7,6 +7,7 @@ import { formatAtLeast } from '@/lib/format-at-least';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { parseCursorMeta } from '@/lib/pagination';
+import { memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface HistoryEntry {
@@ -21,9 +22,11 @@ interface HistoryEntry {
 interface Props {
   projectId: string;
   memberNameById?: Record<string, string>;
+  // [SID:4286] 부모의 이름 표를 다 불러왔는지 — 기록은 따로 불러와 표보다 먼저 그려질 수 있다.
+  memberNamesLoaded: boolean;
 }
 
-export function StandupHistorySection({ projectId, memberNameById = {} }: Props) {
+export function StandupHistorySection({ projectId, memberNameById = {}, memberNamesLoaded }: Props) {
   const t = useTranslations('standup');
   const tCommon = useTranslations('common');
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
@@ -87,7 +90,8 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
             <div className="space-y-2">
               {byDate[date].map((entry) => (
                 <div key={entry.id} className="text-xs text-foreground/80">
-                  <span className="font-medium">{memberNameById[entry.author_id] ?? entry.author_id.slice(0, 8)}</span>
+                  {/* [SID:4286] 작성자 id 조각(앞 8자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸. */}
+                  <span className="font-medium">{memberLookup(memberNameById, entry.author_id, tCommon, { loaded: memberNamesLoaded })?.label ?? ''}</span>
                   {entry.done ? <span className="ml-2 text-muted-foreground">✅ {entry.done.slice(0, 80)}{entry.done.length > 80 ? '…' : ''}</span> : null}
                 </div>
               ))}

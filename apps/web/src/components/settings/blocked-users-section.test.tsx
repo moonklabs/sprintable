@@ -187,4 +187,44 @@ describe('BlockedUsersSection', () => {
     });
     expect(container.textContent).toContain('까심');
   });
+
+  // [SID:4286 · 까디르 873bcf080] 이름 null(dev 41명)이나 조회 실패면 원시 UUID가 이름 칸에 나가던 것 — memberNameById(4646 한 벌) + 꼬리 규칙.
+  describe('이름 칸 폴백([SID:4286])', () => {
+    const IDS = ['3f2a9c10-aaaa-4bbb-8ccc-000000000001', '7b41e0d2-aaaa-4bbb-8ccc-000000000002', '9c83f4a7-aaaa-4bbb-8ccc-000000000003'];
+    async function renderWith(members: Record<string, { ok: boolean; name?: string | null } | 'throw'>) {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (url === '/api/user-blocks') {
+          return { ok: true, json: async () => ({ data: Object.keys(members).map((id) => ({ blocked_member_id: id, created_at: '2026-09-25T00:00:00Z' })) }) };
+        }
+        const id = url.replace('/api/team-members/', '');
+        const m = members[id];
+        if (m === 'throw') throw new Error('network');
+        if (!m || !m.ok) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { name: m.name ?? null } }) };
+      }));
+      await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
+      for (let i = 0; i < 3; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    }
+    const rowTexts = () => Array.from(container.querySelectorAll('span.flex.items-center')).map((el) => el.textContent ?? '');
+
+    it('이름 null → «이름 없는 구성원» · 조회 실패(!ok) → «알 수 없는 구성원» · 이름 칸에 UUID 0(꼬리 없음 — 겹치지 않음)', async () => {
+      await renderWith({ [IDS[0]!]: { ok: true, name: null }, [IDS[1]!]: { ok: false } });
+      expect(rowTexts()).toEqual([koMessages.common.memberUnnamed, koMessages.common.memberUnknown]);
+      for (const id of IDS) expect(container.textContent).not.toContain(id.slice(0, 8));
+    });
+
+    it('조회가 던지면(네트워크) «알 수 없는 구성원» · 실명은 그대로', async () => {
+      await renderWith({ [IDS[0]!]: 'throw', [IDS[1]!]: { ok: true, name: '까심' } });
+      expect(rowTexts()).toEqual([koMessages.common.memberUnknown, '까심']);
+    });
+
+    it('이름 없는 사람 둘 → 두 행에만 «· ID 앞 8자» 꼬리(실명 행은 그대로)', async () => {
+      await renderWith({ [IDS[0]!]: { ok: true, name: null }, [IDS[1]!]: { ok: true, name: null }, [IDS[2]!]: { ok: true, name: '까심' } });
+      expect(rowTexts()).toEqual([
+        `${koMessages.common.memberUnnamed} · ${IDS[0]!.slice(0, 8)}`,
+        `${koMessages.common.memberUnnamed} · ${IDS[1]!.slice(0, 8)}`,
+        '까심',
+      ]);
+    });
+  });
 });

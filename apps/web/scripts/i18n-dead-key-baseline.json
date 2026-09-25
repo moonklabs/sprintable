@@ -552,14 +552,6 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "board.epicSwimlaneLoadError",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "board.epicSwimlaneLoadTimeout",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "board.epics",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
@@ -645,14 +637,6 @@
   },
   {
     "key": "cage.corrections",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "cage.decisionCollapse",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "cage.decisionExpand",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
@@ -844,14 +828,6 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "cage.queueResolvedApproved",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "cage.queueResolvedRejected",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "cage.rankedHooksMetricLabel",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
@@ -960,22 +936,6 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "canvas.artifactInteractiveOff",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "canvas.artifactInteractiveOffHint",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "canvas.artifactInteractiveOn",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "canvas.artifactInteractiveOnHint",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "canvas.exportComingSoon",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
@@ -988,23 +948,7 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "canvas.viewerCanvasHint",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "canvas.viewerCanvasHintTouch",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "channelConnect.channelConnectAdAccountNoAccounts",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "channelConnect.channelConnectAdAccountSelectInstruction",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "channelConnect.channelConnectAdAccountSelectInvalidAccount",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
@@ -1012,23 +956,7 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "channelConnect.channelConnectFacebookNoPages",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "channelConnect.channelConnectFacebookSelectInstruction",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "channelConnect.channelConnectFacebookSelectInvalidPage",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "channelConnect.channelConnectPastedSecretAction",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "channelConnect.channelConnectPastedSecretAnotherAction",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
@@ -1168,14 +1096,6 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "chats.referenceCandidatePromptDoc",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "chats.referenceCandidatePromptStory",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
     "key": "chats.unknownError",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
@@ -1277,14 +1197,6 @@
   },
   {
     "key": "content.engagementKindReply",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "content.engagementOpenCountAtLeast",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "content.engagementOpenCountExact",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
@@ -1697,14 +1609,6 @@
   },
   {
     "key": "goals.subtitle",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "hypotheses.gateConfirmedBy",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "hypotheses.gateRejectedBy",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
@@ -2373,18 +2277,6 @@
   },
   {
     "key": "presence.authFailureTooltipRevoked",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "presence.groupOffline",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "presence.groupOnline",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "presence.groupWorking",
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {

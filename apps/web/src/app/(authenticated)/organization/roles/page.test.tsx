@@ -157,3 +157,25 @@ describe('OrganizationRolesPage — 역할 변경 게이트가 BE 인가 폭과 
     expect(optionValues).toEqual(['admin', 'member']);
   });
 });
+
+// [SID:4286] 이름 없는 구성원의 이름 칸 — 이메일 앞부분 · user_id 조각 · 날것 «?»를 지어내지 않고 «이름 없는 구성원».
+describe('OrganizationRolesPage — 이름 칸 폴백(story #4286)', () => {
+  it('⭐name null — 이름 칸은 «이름 없는 구성원» · 이메일 앞부분/user_id 조각/«?» 0(이메일은 제 줄에만)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/org-members') {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: 'm-3', user_id: 'u-abcdef123456', name: null, email: 'noname@moonklabs.com', role: 'member' }] }),
+        };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await mount();
+    const nameCells = Array.from(container.querySelectorAll('div.font-medium')).map((el) => el.textContent ?? '');
+    expect(nameCells).toContain(koMessages.common.memberUnnamed);
+    expect(nameCells).not.toContain('noname');
+    expect(nameCells).not.toContain('?');
+    expect(container.textContent).not.toContain('u-abcdef');
+    expect(container.textContent).toContain('noname@moonklabs.com');
+  });
+});

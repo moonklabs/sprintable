@@ -48,7 +48,7 @@ function stubFetchByCursor(pages: Record<string, { data: ReturnType<typeof entry
 }
 
 async function renderSection() {
-  await act(async () => { root.render(withIntl(<StandupHistorySection projectId="proj-1" />)); });
+  await act(async () => { root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNamesLoaded />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 

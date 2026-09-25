@@ -236,6 +236,66 @@ describe('runScan — 파이프라인 통합(story #3732)', () => {
   });
 });
 
+// [SID:4286] 결재 카드 · 토스 시트 · 문서 게이트가 `t(x.fallback ? 'keyFallback' : 'key', …)`로
+// 두 키를 고른다 — 두 가지가 다 문자열이면 두 키 다 소비다. 한 가지가 변수면 리터럴 가지도
+// «못 셈»(값을 지어내지 않는다), 진짜 안 쓰는 키는 여전히 죽은-키 후보.
+describe('runScan — 삼항 첫 인자([SID:4286])', () => {
+  function makeFixture(): { dir: string; srcRoot: string; enPath: string } {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'i18n-dead-key-ternary-'));
+    const srcRoot = path.join(dir, 'src', 'components');
+    mkdirSync(srcRoot, { recursive: true });
+    writeFileSync(
+      path.join(srcRoot, 'approval-card.tsx'),
+      `
+        import { useTranslations } from 'next-intl';
+        export function ApprovalCard({ fallback, name, k }: { fallback: boolean; name: string; k: string }) {
+          const t = useTranslations('nsTern');
+          return (
+            <div>
+              {t(fallback ? 'waitingOnFallback' : 'waitingOn', { name })}
+              {t(fallback ? 'halfLiteral' : k)}
+            </div>
+          );
+        }
+      `,
+    );
+    const enPath = path.join(dir, 'en.json');
+    writeFileSync(enPath, JSON.stringify({
+      nsTern: {
+        waitingOn: 'Waiting on {name}',
+        waitingOnFallback: 'Waiting on {name} (fallback)',
+        halfLiteral: 'Only one branch is a literal',
+        reallyUnused: 'Nobody uses this',
+      },
+    }));
+    return { dir, srcRoot, enPath };
+  }
+
+  it('두 가지가 다 문자열인 삼항 → 두 키 다 소비 · 한 가지가 변수면 리터럴 가지도 못 셈 · 안 쓰는 키는 RED', () => {
+    const f = makeFixture();
+    try {
+      const { deadCandidates } = runScan({ srcRoot: f.srcRoot, enPath: f.enPath, minExpectedFiles: 1 });
+      expect(deadCandidates).toEqual(['nsTern.halfLiteral', 'nsTern.reallyUnused']);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('양성 대조 — 삼항 호출이 있는 파일을 지우면 두 키가 죽은-키 후보로 넘어간다(삼항만이 두 키를 살렸다)', () => {
+    const f = makeFixture();
+    try {
+      rmSync(path.join(f.srcRoot, 'approval-card.tsx'));
+      writeFileSync(path.join(f.srcRoot, 'empty.ts'), 'export const x = 1;\n');
+      const { deadCandidates } = runScan({ srcRoot: f.srcRoot, enPath: f.enPath, minExpectedFiles: 1 });
+      expect(deadCandidates).toEqual([
+        'nsTern.halfLiteral', 'nsTern.reallyUnused', 'nsTern.waitingOn', 'nsTern.waitingOnFallback',
+      ]);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('loadBaseline — story #3732', () => {
   it('key/reason 배열을 읽는다', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'i18n-dead-key-baseline-'));

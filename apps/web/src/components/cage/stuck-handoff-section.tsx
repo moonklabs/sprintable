@@ -118,7 +118,8 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           <span>{t('lineHandoffStuck')}</span>
         </Badge>
         {/* ⓑ S11 GateLineContext 재사용(무변경) */}
-        <GateLineContext step={step} resolveName={(id) => memberNameById(memberMap, id, tc, id.slice(0, 6))} />
+        {/* [SID:4286] 승인자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». */}
+        <GateLineContext step={step} resolveName={(id) => memberNameById(memberMap, id, tc, tc('memberUnknown'))} />
         {/* ⓒ StuckHandoffDetail */}
         <StuckHandoffDetail step={step} />
         {/* ⓓ fallback action(상태머신) */}

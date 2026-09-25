@@ -39,8 +39,9 @@ import { orgRoleLabel } from '@/lib/org-role-label';
 // 소수라 좁힐 필요가 옅다 — 시안·카드 둘 다 self 뷰의 칩을 요구하지 않는다).
 const ALL_ROLES = 'all' as const;
 
+// [SID:4286] 실명(hasRealName)과 역할 라벨에만 불린다 — 빈 문자열 방어로 날것 «?»를 만들지 않는다(이름 없는 행은 PersonMark 아이콘).
 function initial(name: string): string {
-  return (name.trim()[0] ?? '?').toUpperCase();
+  return name.trim().charAt(0).toUpperCase();
 }
 
 // story #3749 CHANGES(유나 定, 2026-09-09 17:28Z) — 원래 `ListRowMark`(채널 목록·

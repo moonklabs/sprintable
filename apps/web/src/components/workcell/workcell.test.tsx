@@ -22,7 +22,7 @@ const BASE: WorkcellProps = {
     goal: '실패한 결제를 재시도로 복구',
     dod: 'AC 4 충족 · 자동검증 passed · 정본 승인',
     owner: { name: '윤재', role: '책임' },
-    agent: { name: '미르코군', initial: '미' },
+    agent: { name: '미르코군' },
   },
   run: {
     now: '재시도 로직 검증 테스트 작성 중',

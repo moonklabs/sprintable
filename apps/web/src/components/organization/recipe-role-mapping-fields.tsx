@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { memberOptionLabels } from '@/lib/member-display';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { RECIPE_STAGE_LABEL_SLUGS, recipeStageLabel } from '@/lib/recipe-stage-label';
 import { membersForKind, stageApprovalSurface, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
@@ -75,6 +76,7 @@ export function RecipeRoleMappingFields({
   approvalNote: (surface: string) => string;
 }) {
   const t = useTranslations('organization');
+  const tc = useTranslations('common');
   // sandbox 포함 — status로 걸러 disconnected 등은 아예 안 보인다(잘못 고를 표면 자체를
   // 없앤다, "고른 뒤 실패"보다 "애초에 못 고름"이 싸다).
   const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
@@ -138,9 +140,10 @@ export function RecipeRoleMappingFields({
                   <option value="">
                     {memberKind === 'human' ? personPlaceholder : memberKind === 'either' ? memberPlaceholder : agentPlaceholder}
                   </option>
-                  {membersForKind(members, memberKind).map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
+                  {/* [SID:4286] 행의 실제 타입대로 — 예전엔 사람 목록(memberKind human)도 type 'agent'로 고정해 이름 없는 사람이 «이름 없는 에이전트»였다. */}
+                  {((rows) => { const labels = memberOptionLabels(rows.map((a) => ({ ...a, type: a.type ?? (memberKind === 'agent' ? 'agent' : undefined) })), tc); return rows.map((a) => (
+                    <option key={a.id} value={a.id}>{labels.get(a.id)}</option>
+                  )); })(membersForKind(members, memberKind))}
                 </select>
                 {surfaceUnderPicker ? (
                   <p className="text-[11px] text-muted-foreground" data-testid="mapping-approval-note">{approvalNote(surfaceUnderPicker)}</p>

@@ -131,6 +131,21 @@ export function filterUnconnectedAgentParticipants(
   );
 }
 
+// [SID:4286 · 유나 결정 1] 미연결 에이전트 한 명 배너 문장 — 배너 조건이 type === 'agent'라 이름이 비면 날것 «?»(«?가 연결되지…»)
+// 대신 «이름 없는 에이전트»(common.agentUnnamed)로, 조사(이/가)도 그 폴백 글자에서(«…에이전트가»). en은 관사가 붙는 별도 문장
+// («An unnamed agent isn't connected yet — …»). 무거운 ChatView 마운트 없이 테스트하려고 순수 함수로 뽑았다.
+export function agentNotConnectedBannerText(
+  p: { name: string | null },
+  tChats: (key: string, values?: Record<string, string>) => string,
+  tc: (key: string) => string,
+): string {
+  if (!p.name) {
+    const fallback = tc('agentUnnamed');
+    return tChats('agentNotConnectedBannerUnnamed', { name: fallback, josa: pickIGaJosa(fallback) });
+  }
+  return tChats('agentNotConnectedBanner', { name: p.name, josa: pickIGaJosa(p.name) });
+}
+
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
@@ -940,10 +955,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               <UserX className="h-3.5 w-3.5 flex-shrink-0" />
               <span className="flex-1">
                 {unconnectedAgentParticipants.length === 1
-                  ? t('agentNotConnectedBanner', {
-                      name: unconnectedAgentParticipants[0]!.name ?? '?',
-                      josa: pickIGaJosa(unconnectedAgentParticipants[0]!.name ?? '?'),
-                    })
+                  ? agentNotConnectedBannerText(unconnectedAgentParticipants[0]!, t, tc)
                   : t('agentNotConnectedBannerMulti', { count: unconnectedAgentParticipants.length })}
               </span>
               <Link

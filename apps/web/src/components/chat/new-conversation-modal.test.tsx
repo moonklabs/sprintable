@@ -95,6 +95,26 @@ describe('NewConversationModal — 시스템 발행 제외(story #3997)', () => 
   });
 });
 
+describe('NewConversationModal — 이름 없는 사람 둘은 서로 다른 두 줄([SID:4286] · 유나 12:06Z)', () => {
+  it('겹친 폴백 행에만 «· ID 앞 8자»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      url.startsWith('/api/members')
+        ? { ok: true, json: async () => ({ data: [
+          { id: 'a2000000-1111', name: null, type: 'human' },
+          { id: 'b3000000-2222', name: null, type: 'human' },
+        ] }) }
+        : { ok: true, json: async () => ({ data: [] }) }
+    )));
+    await act(async () => {
+      root.render(wrap(<NewConversationModal projectId={PROJECT_ID} onClose={() => {}} onCreated={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const rows = Array.from(document.body.querySelectorAll('span.flex-1.truncate')).map((x) => x.textContent);
+    expect(rows).toContain('이름 없는 구성원 · a2000000');
+    expect(rows).toContain('이름 없는 구성원 · b3000000');
+  });
+});
+
 describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(story #2613)', () => {
   it('allowlist_miss — 대상 에이전트·멤버 이름과 워크포스 딥링크가 뜬다(AC2)', async () => {
     await mountAndSelect(mockFetches(() => ({

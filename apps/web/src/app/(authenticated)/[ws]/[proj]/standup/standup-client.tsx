@@ -912,7 +912,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 <EmptyState title={t('noMembers')} description={t('noMembersDescription')} />
               ) : null}
 
-              {projectId ? <StandupHistorySection projectId={projectId} memberNameById={memberNameById} /> : null}
+              {projectId ? <StandupHistorySection projectId={projectId} memberNameById={memberNameById} memberNamesLoaded={!loading} /> : null}
             </>
           ) : null}
         </div>

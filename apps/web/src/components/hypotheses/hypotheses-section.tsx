@@ -12,6 +12,7 @@ import { HypothesisResolveDialog, type HypothesisResolveResult } from './hypothe
 import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { memberLookup } from '@/lib/member-display';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -91,6 +92,7 @@ function HypothesisDraftPreview({
 
 export function HypothesesSection({ epicId, projectId }: { epicId: string; projectId: string }) {
   const t = useTranslations('hypotheses');
+  const tc = useTranslations('common');
   const [items, setItems] = useState<Hypothesis[] | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -101,6 +103,8 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   // S24: gate approval 축 — hypGatesMap(per-hyp gate·work_item_type=hypothesis) + 멤버 이름맵.
   const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // [SID:4286] 이름 표를 다 불러왔는지 — 가설 목록이 먼저 그려져 결론 카드가 표보다 먼저 이름을 찾을 수 있다.
+  const [memberNamesLoaded, setMemberNamesLoaded] = useState(false);
   const { currentTeamMemberId } = useDashboardContext();
   // story #2036 — measuring 가설을 달성/반증으로 닫는 다이얼로그 상태.
   const [resolving, setResolving] = useState<{ hypothesis: Hypothesis; target: 'verified' | 'falsified' } | null>(null);
@@ -128,13 +132,17 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       const names: Record<string, string> = {};
       for (const m of (membersJson as { data?: { id: string; name: string }[] }).data ?? []) names[m.id] = m.name;
       setMemberNames(names);
+      setMemberNamesLoaded(true);
     } catch {
       setItems([]);
+      setMemberNamesLoaded(true);
     }
   }, [epicId, projectId]);
 
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 재요청
   // 되게 orgSyncVersion을 얹는다(다른 opt-in 컴포넌트와 동일 패턴).
+  // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸.
+  const resolveMemberName = (id: string): string => memberLookup(memberNames, id, tc, { loaded: memberNamesLoaded })?.label ?? '';
   const orgSyncVersion = useOrgSyncVersion();
   useEffect(() => { void load(); }, [load, orgSyncVersion]);
 
@@ -341,14 +349,14 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
               <HypothesisGateBadge
                 hypothesis={h}
                 gate={hypGatesMap[h.id]}
-                resolveName={(id) => memberNames[id] ?? id.slice(0, 6)}
+                resolveName={resolveMemberName}
                 resolverId={currentTeamMemberId ?? ''}
                 onResolved={() => void load()}
               />
               {isVerdict(h) ? (
-                <HypothesisVerdictCard hypothesis={h} resolveName={(id) => memberNames[id] ?? id.slice(0, 6)} />
+                <HypothesisVerdictCard hypothesis={h} resolveName={resolveMemberName} />
               ) : (
-                <HypothesisRow hypothesis={h} actions={actions} />
+                <HypothesisRow hypothesis={h} actions={actions} resolveName={resolveMemberName} />
               )}
             </div>
           ))

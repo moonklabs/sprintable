@@ -288,7 +288,8 @@ export function EvidenceSection({
   // E-VERIFY P0-04 — Lv0/Lv1 씰은 이 자리에서 즉시 정확하게(evidence fetch 대기 없이): verified는
   // human_verified_by 실명(who), claimed는 "에이전트 주장"(self_reported엔 who가 없어 일반화,
   // §3 계약 그대로). 과거 무조건 초록 체크였던 자리 — human 미검증 건은 여기서 amber로 정정된다.
-  const verifiedByName = humanVerifiedBy ? memberNameById(memberMap, humanVerifiedBy, tCommon, humanVerifiedBy.slice(0, 6)) : null;
+  // [SID:4286] 검증자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원».
+  const verifiedByName = humanVerifiedBy ? memberNameById(memberMap, humanVerifiedBy, tCommon, tCommon('memberUnknown')) : null;
   const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
   const sealLabel = trustStage === 'verified'
     ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, Plus, TriangleAlert, X } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +11,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 
 type MessagingMode = 'creator_only' | 'org_wide' | 'list';
 const MODES: MessagingMode[] = ['creator_only', 'list', 'org_wide'];
@@ -68,21 +70,34 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
 
   useEffect(() => { void load(); }, [load]);
 
-  const nameOf = useCallback(
-    (memberId: string) => orgHumans.find((m) => m.id === memberId)?.name ?? `${t('messagingUnknownMember')} (${memberId.slice(0, 8)})`,
-    [orgHumans, t],
+  // [SID:4286] «알 수 없는 구성원 (id 앞 8자)»의 id 꼬리를 뗀다(3755번 AC1 «id 문자열 0»). 문구는 common.memberUnknown 하나로.
+  // 정책과 후보 목록을 한 load에서 같이 불러오니 불러오는 중 = loading.
+  const orgHumanNames = useMemo(
+    () => Object.fromEntries(orgHumans.map((m) => [m.id, m.name])) as Record<string, string | null>,
+    [orgHumans],
   );
-
   const creatorMemberId = useMemo(
     () => (creatorUserId ? orgHumans.find((m) => m.user_id === creatorUserId)?.id ?? null : null),
     [orgHumans, creatorUserId],
   );
+  // [SID:4286 · 유나 결정 4] 허용 목록에 지워진 사람이 둘 이상이면 같은 «알 수 없는 구성원» 두 줄 — 겹친 폴백에만 id 앞 8자 꼬리.
+  const displayNameById = useMemo(() => {
+    const ids = [...(creatorMemberId ? [creatorMemberId] : []), ...allowlist];
+    const items = ids.flatMap((id) => {
+      const r = memberLookup(orgHumanNames, id, tc, { loaded: !loading });
+      return r ? [{ id, ...r }] : [];
+    });
+    return disambiguateFallbackLabels(items);
+  }, [creatorMemberId, allowlist, orgHumanNames, loading, tc]);
+  const nameOf = useCallback((memberId: string) => displayNameById.get(memberId) ?? '', [displayNameById]);
 
   // picker 후보: org 휴먼 중 이미 allowlist에 있거나 creator인 멤버 제외
   const pickerCandidates = useMemo(
     () => orgHumans.filter((m) => !allowlist.includes(m.id) && m.id !== creatorMemberId),
     [orgHumans, allowlist, creatorMemberId],
   );
+  // [SID:4286 · PO 12:06Z] 고르기 목록 행 라벨 — 이름 없는 사람이 둘 이상이면 겹친 행에만 꼬리(꼬리 규칙 한 곳).
+  const pickerRowLabels = memberRowLabels(pickerCandidates, tc, () => '');
 
   const handleSaveMode = async () => {
     if (stagedMode === mode || savingMode) return;
@@ -268,9 +283,11 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted disabled:opacity-50"
                         >
                           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                            {m.name?.slice(0, 2)?.toUpperCase() ?? '?'}
+                            {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 이 목록은 사람만). */}
+                            {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
                           </div>
-                          <span className="flex-1 truncate">{m.name}</span>
+                          {/* [SID:4286 · PO 12:06Z 같은 부류] 이메일 없이 이름만 그리는 고르기 목록 — 이름 없는 사람이 둘 이상이면 겹친 행에만 «· ID 앞 8자». */}
+                          <span className="flex-1 truncate">{pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}</span>
                           {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-brand" />}
                         </button>
                       </li>

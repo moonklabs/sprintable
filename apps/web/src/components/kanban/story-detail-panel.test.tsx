@@ -1277,7 +1277,7 @@ describe('StoryDetailPanel — 워크셀 메시지의 모르는 작성자(story 
     });
     await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
     expect(container.textContent).toContain('모르는 작성자 댓글');
-    expect(container.textContent).toContain(koMessages.chats.unknownMember);
+    expect(container.textContent).toContain(koMessages.common.memberUnknown);
     expect(container.textContent).not.toContain(UNKNOWN);
   });
 });
@@ -1333,6 +1333,31 @@ describe('StoryDetailPanel — 댓글 탭 수 한계 표기(story #4302)', () =>
     const tabs = await mountWith(null);
     expect(tabs).toContain('댓글 (20)');
     expect(tabs.some((t) => t.includes('20+'))).toBe(false);
+  });
+});
+
+// [SID:4286 · 유나 06:48Z] 스토리 패널 작업 셀 — 이름 없는 에이전트의 읽는 글자는 «이름 없는 구성원»(4646 모양 · 타입은 Bot 아이콘이 가른다).
+// «이름 없는 에이전트»는 대화 미연결 배너 한 자리 전용.
+describe('StoryDetailPanel — 이름 없는 에이전트 라벨([SID:4286])', () => {
+  it('실행 칸에 «실행 이름 없는 구성원» · «이름 없는 에이전트» 0', async () => {
+    const AGENT_ID = 'agent-noname';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
+        return { ok: true, json: async () => [{ id: 'gate-1', gate_type: 'merge', status: 'pending', neutral_facts: { ci_result: 'pass' } }] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-review', assignee_id: AGENT_ID, assignee_ids: [AGENT_ID], trust_stage: 'claimed_done', self_reported: true })}
+          tasks={[]} onClose={() => {}} memberMap={{ [AGENT_ID]: { id: AGENT_ID, name: null as unknown as string, type: 'agent' } }}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('실행 이름 없는 구성원');
+    expect(container.textContent).not.toContain('이름 없는 에이전트');
   });
 });
 

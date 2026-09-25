@@ -77,7 +77,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
         typeBadge={item.bucket}
         claim={item.claim}
         human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
-        agent={item.actor?.isAgent ? { name: item.actor.name, initial: item.actor.name.slice(0, 1) } : undefined}
+        agent={item.actor?.isAgent ? { name: item.actor.name } : undefined}
         gate={navigable ? { action: item.actionLabel, href: item.href!, tone: item.actionTone } : undefined}
         duration={item.enteredStateAtMs !== null ? formatRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : undefined}
         className="rounded-none border-0"

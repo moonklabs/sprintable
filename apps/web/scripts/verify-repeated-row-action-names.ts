@@ -76,6 +76,24 @@ function findOpenTagEnd(content: string, tagStart: number): number {
   return -1;
 }
 
+// [SID:4286 · 까디르 P2] 행 라벨 표 조회 뒤 폴백이 id 모양인지 — `.id` · 맨 `id` · `x_id` · `memberId` · uuid(조각 `m.id.slice(…)` 포함).
+const ID_SHAPED_FALLBACK = /\bid\b|\b[\w$]+_id\b|\b[a-z][\w$]*Id\b|[uU]uid/;
+
+/** `??` · `||` 바로 뒤부터 그 JSX 표현식을 닫는 `}`(괄호 깊이 0)까지 — 폴백 식 텍스트. */
+function fallbackExpressionAt(text: string, from: number): string {
+  let depth = 0;
+  for (let i = from; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']') depth -= 1;
+    else if (c === '}') {
+      if (depth === 0) return text.slice(from, i);
+      depth -= 1;
+    }
+  }
+  return text.slice(from);
+}
+
 export interface RepeatedRowActionHit {
   file: string;
   line: number;
@@ -129,6 +147,23 @@ export function findRepeatedRowActionHits(content: string): { line: number; snip
             ? new RegExp(`\\{\\s*${loopVar}\\.[\\w$]+(?:\\.[\\w$]+)*\\s*\\}`)
             : null;
           if (bareFieldInterpolation?.test(childrenText)) {
+            continue;
+          }
+          // [SID:4286 · PO 12:42Z] 루프 변수 필드로 «행 라벨 표»를 조회한 값을 그대로 그리는 것(`{rowLabels.get(m.id)}` ·
+          // `{labels[m.id] ?? …}`)도 행마다 갈린다 — `{m.name}`을 memberRowLabels 표 조회로 바꾸자(이름 없는 행 둘 가르기)
+          // 정적 라벨로 오인했다. 조회 값이 그대로 보일 때만(`}` · `??` · `||`가 바로 뒤) — 조건식 안 조회(`{labels.get(m.id) ? A : B}`)는 여전히 히트.
+          // [까디르 cc197cc4b P2] `??` · `||` 뒤 폴백이 id 모양(`m.id` · `x_id` · `memberId` · uuid · id 조각)이면 인정하지 않는다 —
+          // 행마다 갈리긴 해도 원시 id를 라벨로 그리는 것이라 «갈림»으로 통과시키면 이 가드가 id 노출 구멍을 연다.
+          const lookupByLoopField = loopVar
+            ? new RegExp(`\\{\\s*[\\w$]+(?:\\.get\\(\\s*${loopVar}\\.[\\w$]+\\s*\\)|\\[\\s*${loopVar}\\.[\\w$]+\\s*\\])\\s*(\\}|\\?\\?|\\|\\|)`, 'g')
+            : null;
+          let lookupAccepted = false;
+          for (const m of lookupByLoopField ? childrenText.matchAll(lookupByLoopField) : []) {
+            if (m[1] === '}') { lookupAccepted = true; break; }
+            const fallback = fallbackExpressionAt(childrenText, m.index! + m[0].length);
+            if (!ID_SHAPED_FALLBACK.test(fallback)) { lookupAccepted = true; break; }
+          }
+          if (lookupAccepted) {
             continue;
           }
         }

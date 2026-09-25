@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { memberOptionLabels } from '@/lib/member-display';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -507,9 +508,9 @@ export default function ChannelPostsEngagementPage() {
                         data-testid="engagement-assignee-select"
                       >
                         <option value="">{t('engagementAssigneeNone')}</option>
-                        {members.map((m) => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
+                        {((labels) => members.map((m) => (
+                          <option key={m.id} value={m.id}>{labels.get(m.id)}</option>
+                        )))(memberOptionLabels(members, tc))}
                       </select>
                       {assignedName ? null : null}
                     </td>

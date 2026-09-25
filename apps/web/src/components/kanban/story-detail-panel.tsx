@@ -35,7 +35,7 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
-import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
+import { memberDisplayLabel, memberLookup, memberNameById, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -365,7 +365,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const t = useTranslations('board');
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
   const tc = useTranslations('common');
-  const tChats = useTranslations('chats'); // chats.unknownMember — «알 수 없는 구성원»(대화 · 토스 시트와 같은 낱말)
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
@@ -958,10 +957,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const ciResult = mergeGate?.neutral_facts?.['ci_result'];
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
-  // story #4284 — 실존인데 이름 없는 구성원은 «이름 없는 구성원», 목록에 없는 id만 예전처럼 id 앞 6자(memberNameById).
-  // story #4284 — 신원 이름(머리글자)은 name 그대로 · 읽는 글자는 label(실존인데 이름 없음 → «이름 없는 구성원» · 목록에 없는 id → 예전처럼 id 앞 6자).
-  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, story.human_verified_by.slice(0, 6)) : null;
-  const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by] ? memberMap[story.human_verified_by]!.name : story.human_verified_by.slice(0, 6)) : null;
+  // [SID:4286] 검증자 id 조각(앞 6자)을 이름 칸 · 머리글자에 싣지 않는다 — 읽는 글자: 표에 있는데 이름 빔 → «이름 없는 구성원», 표에 없음 →
+  // «알 수 없는 구성원». 신원(머리글자)은 이름 그대로 · 없거나 표에 없으면 null → 사람 아이콘(#4284 name/label 계약).
+  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, tc('memberUnknown')) : null;
+  const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? null) : null;
   const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
     story.human_verified && humanVerifiedByName && story.human_verified_at
       ? { variant: 'verified', humanName: humanVerifiedByIdentity, humanLabel: humanVerifiedByIdentity ? undefined : humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
@@ -979,7 +978,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       ? {
           density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
           human: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : undefined,
-          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc), initial: initials(proofAgent.name) } : undefined,
+          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc) } : undefined,
           evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
         }
       : null;
@@ -990,8 +989,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     done: t('workcellNextNeedDone'),
   };
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
-    // story #4284(까디르 CHANGES) — 목록에 없는 작성자 폴백이 id 통째라 워크셀 메시지 작성자로 긴 id가 그려졌다 → «알 수 없는 구성원».
-    author: memberNameById(memberMap, c.created_by, tc, tChats('unknownMember')),
+    // [SID:4286 · 까디르 P1] 작성자 id 통째를 이름 칸에 싣던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
+    author: memberLookup(memberMap, c.created_by, tc)!.label,
     body: c.content,
   }));
 
@@ -1320,7 +1319,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
-  const memberName = (id: string | null) => (id ? memberNameById(memberMap, id, tc, '—') : '—');
+  // [SID:4286 · 까디르 P1] id가 있는데 «—»이던 자리(아는 사람 · 모르는 사람 뭉갬) — id 없음만 «—».
+  const memberName = (id: string | null) => (id ? memberLookup(memberMap, id, tc)!.label : '—');
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
@@ -1538,7 +1538,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 // 그 옛 board 키는 폐기).
                 dod: story.acceptance_criteria?.trim() || null,
                 owner: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : null,
-                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc), initial: initials(proofAgent.name) } : undefined,
+                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc) } : undefined,
                 onGoalMore: scrollToDescriptionSection,
                 onDodMore: scrollToAcceptanceCriteriaSection,
               }}
@@ -1617,7 +1617,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <p className="mt-1 text-sm text-foreground">
                   {localAssigneeIds.length > 0
-                    ? localAssigneeIds.map((id) => memberNameById(memberMap, id, tc, '—')).join(', ')
+                    ? localAssigneeIds.map((id) => memberLookup(memberMap, id, tc)!.label).join(', ')
                     : '—'}
                 </p>
               )}
@@ -2324,7 +2324,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-                            <span>{memberNameById(memberMap, comment.created_by, tc, '—')}</span>
+                            <span>{memberLookup(memberMap, comment.created_by, tc)!.label}</span>
                             <span>·</span>
                             <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
@@ -2351,7 +2351,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => {
-                        const actorName = memberNameById(memberMap, activity.created_by, tc, '—');
+                        const actorName = memberLookup(memberMap, activity.created_by, tc)!.label;
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (

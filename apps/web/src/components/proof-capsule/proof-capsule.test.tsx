@@ -101,7 +101,7 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
 
   it('renders the agent avatar distinctly from the human avatar when an agent is present', () => {
     const markup = renderWithIntl(
-      <ProofCapsule {...BASE} agent={{ name: '미르코', initial: '미' }} density="full" />,
+      <ProofCapsule {...BASE} agent={{ name: '미르코' }} density="full" />,
     );
     expect(markup).toContain('실행 미르코');
     expect(markup).toContain('책임 윤재');
@@ -152,7 +152,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
       <ProofCapsule
         {...BASE}
         density="row"
-        agent={{ name: '미르코', initial: '미' }}
+        agent={{ name: '미르코' }}
         gate={{ action: '병합', tone: 'ready' }}
       />,
     );
@@ -270,7 +270,7 @@ describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)',
   it('renders a rounded-full avatar (agent shape) for an agent actor', () => {
     const { human: _human, ...withoutHuman } = BASE;
     const markup = renderWithIntl(
-      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코', initial: '미' }} />,
+      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코' }} />,
     );
     expect(markup).toContain('rounded-full');
     expect(markup).toContain('미르코');
@@ -280,6 +280,25 @@ describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)',
     const { human: _human, ...withoutHuman } = BASE;
     const markup = renderWithIntl(<ProofCapsule {...withoutHuman} density="audit" />);
     expect(markup).not.toContain('undefined');
+  });
+
+  // [SID:4286 · 까디르 873bcf080] 활동 로그가 넘긴 label을 버려 이름 없는 행위자가 빈칸이던 것 — 아바타(아이콘) · 시각 줄 둘 다 label.
+  it('이름 없는 행위자(name null + label) — 아바타는 아이콘 + 접근성 이름 label · 시각 줄에 label(사람 · 에이전트)', () => {
+    const { human: _human, ...withoutHuman } = BASE;
+    const humanMarkup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" now="3일 전" human={{ name: null, label: '이름 없는 구성원', role: 'human' }} />,
+    );
+    expect(humanMarkup).toContain('aria-label="이름 없는 구성원"');
+    expect(humanMarkup).toContain('3일 전 이름 없는 구성원');
+    expect(humanMarkup).toContain('rounded-md');
+    expect(humanMarkup).not.toContain('>이름<');
+
+    const agentMarkup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" now="3일 전" agent={{ name: null, label: '이름 없는 에이전트' }} />,
+    );
+    expect(agentMarkup).toContain('aria-label="이름 없는 에이전트"');
+    expect(agentMarkup).toContain('3일 전 이름 없는 에이전트');
+    expect(agentMarkup).toContain('rounded-full');
   });
 });
 
@@ -375,7 +394,7 @@ describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어�
     const markup = renderWithIntlEn(
       <ProofCapsule
         {...BASE}
-        agent={{ name: 'Alex', initial: 'A' }}
+        agent={{ name: 'Alex' }}
         now="2h ago"
         evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', proofCount: 3 }}
         gate={{ risk: 'low', action: 'Open merge gate' }}

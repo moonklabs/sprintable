@@ -112,6 +112,49 @@ describe('AddParticipantModal — 시스템 발행 제외(story #3997)', () => {
   });
 });
 
+// [SID:4286 · 유나 규칙 06:48Z] 이 목록 행엔 타입 표식(원 아이콘 · AgentIdentity)이 있어 라벨은 «이름 없는 구성원» 하나 — 타입은 표식이 가른다.
+describe('AddParticipantModal — 이름 없는 에이전트 행([SID:4286])', () => {
+  it('이름 없는 에이전트 → «이름 없는 구성원» 라벨 + 에이전트 표식(«이름 없는 에이전트» 글자 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      url.startsWith('/api/members')
+        ? { ok: true, json: async () => ({ data: [{ id: 'a-noname', name: null, type: 'agent', runtime_type: 'claude-code' }] }) }
+        : { ok: true, json: async () => ({}) }
+    )));
+    await act(async () => {
+      root.render(wrap(
+        <AddParticipantModal conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID} existingParticipantIds={[]} onClose={() => {}} onAdded={() => {}} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('이름 없는 구성원');
+    expect(document.body.textContent).not.toContain('이름 없는 에이전트');
+  });
+});
+
+describe('AddParticipantModal — 이름 없는 사람 둘은 서로 다른 두 줄([SID:4286] · 유나 12:06Z)', () => {
+  it('겹친 폴백 행에만 «· ID 앞 8자» — 실명 행은 꼬리 없음', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      url.startsWith('/api/members')
+        ? { ok: true, json: async () => ({ data: [
+          { id: 'a2000000-1111', name: null, type: 'human' },
+          { id: 'b3000000-2222', name: null, type: 'human' },
+          { id: 'c4000000-3333', name: '안나', type: 'human' },
+        ] }) }
+        : { ok: true, json: async () => ({}) }
+    )));
+    await act(async () => {
+      root.render(wrap(
+        <AddParticipantModal conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID} existingParticipantIds={[]} onClose={() => {}} onAdded={() => {}} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const rows = Array.from(document.body.querySelectorAll('span.flex-1.truncate')).map((x) => x.textContent);
+    expect(rows).toContain('이름 없는 구성원 · a2000000');
+    expect(rows).toContain('이름 없는 구성원 · b3000000');
+    expect(rows).toContain('안나');
+  });
+});
+
 describe('AddParticipantModal — 에이전트 정책 거부 구조화 안내(story #2613)', () => {
   it('allowlist_miss — 대상 에이전트·멤버 이름과 워크포스 딥링크가 뜬다', async () => {
     await mountAndSelectBot(mockFetches(() => ({

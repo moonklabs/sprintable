@@ -18,11 +18,11 @@ export interface ProofCapsuleHuman {
   role: string;
 }
 
+// [SID:4286 · 까디르 4646 codex] 머리글자 `initial`은 선언만 있고 렌더 0(Avatar가 name으로 그림) — 호출부가 initials(null)로 «?»를 넘기던 죽은 prop이라 걷었다.
 export interface ProofCapsuleAgent {
   // story #4284 — name/label 계약(shared/avatar.tsx): 머리글자 · 아바타는 name(null이면 아이콘), 읽는 글자는 label ?? name.
   name: string | null;
   label?: string;
-  initial: string;
 }
 
 export interface ProofCapsuleEvidence {
@@ -425,13 +425,16 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
   const dotTone: Record<ProofState, string> = {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
   };
-  const actorName = agent?.name ?? human?.name;
+  // [SID:4286 · 까디르 873bcf080] #4284 name/label 계약 — 아바타는 name(null → 아이콘), 읽는 글자는 label ?? name.
+  // 예전엔 name만 읽어 활동 로그가 넘긴 label(«이름 없는 구성원»)을 버려 이름 없는 행위자가 빈칸이었다.
+  const actor = agent ?? human;
+  const actorLabel = actor ? (actor.label ?? actor.name) : null;
   return (
     <div className={cn('flex items-center gap-2 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-2 text-[11px]', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
-      {actorName ? <Avatar name={actorName} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorName].filter(Boolean).join(' ')}</span>
+      {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
+      <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorLabel].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, FileText, Forward, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
@@ -11,6 +12,8 @@ import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-butt
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
+import { memberLookup } from '@/lib/member-display';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
 import { useReadingPanel } from '@/components/chat/reading-panel-context';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -413,6 +416,7 @@ function ApprovalRequestBody({
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
+  const tc = useTranslations('common');
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
   const { currentTeamMemberId, projectId } = useDashboardContext();
@@ -423,6 +427,8 @@ function ApprovalRequestBody({
   // gates/[id]/page.tsx의 fetchedResolverIdRef 관례와 동형으로 지연 조회한다(카드마다 독립
   // — DelegateApprovalControl의 openPicker on-demand 조회와 같은 결).
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  // [SID:4286] 이름 표를 다 불러왔는지(성공 · 실패 모두 끝) — 불러오는 중에는 «알 수 없음»을 먼저 띄우지 않는다.
+  const [memberNamesLoaded, setMemberNamesLoaded] = useState(false);
   const fetchedNameIdsRef = useRef<string | null>(null);
   const requesterId = (() => {
     const raw = gate.neutral_facts?.['requested_by_member_id'];
@@ -466,11 +472,15 @@ function ApprovalRequestBody({
         for (const m of json.data) names[m.id] = m.name;
         setMemberNames((prev) => ({ ...prev, ...names }));
       })
-      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+      .catch(() => { /* non-critical — 표에 없으면 «알 수 없는 구성원»(id 조각 0 · story #4286) */ })
+      .finally(() => setMemberNamesLoaded(true));
   }, [needsDesignatedName, needsResolverName, needsRequesterName, needsDiscussRequesterName, gate.designated_approver_id, gate.resolver_id, requesterId, discussionRequested?.requestedByMemberId]);
-  const designatedApproverName = gate.designated_approver_id
-    ? memberNames[gate.designated_approver_id] ?? gate.designated_approver_id.slice(0, 8)
+  // [SID:4286] id 조각(앞 8자)을 이름 칸에 싣지 않는다 — memberLookup(표에 없음 → «알 수 없는 구성원» · 불러오는 중 → null).
+  // fallback이면(이름 없음 · 알 수 없음) «님» 없는 문장 키로 간다(유나 결정 4).
+  const designatedApprover = gate.designated_approver_id
+    ? memberLookup(memberNames, gate.designated_approver_id, tc, { loaded: memberNamesLoaded })
     : null;
+  const designatedApproverName = designatedApprover?.label ?? null;
 
   // story #3084 층3 — 토스 시트 open state. 진입점은 아래 canToss 게이트(designated 본인
   // ⋯ 오버플로 / requester 본인 "다른 방에도 보내기" 버튼) 둘 다 공유.
@@ -568,7 +578,13 @@ function ApprovalRequestBody({
     ? (gate.neutral_facts['options'] as unknown[]).filter((o): o is string => typeof o === 'string') : [];
   const decisionAssumption = isDecisionGate && typeof gate.neutral_facts?.['assumption'] === 'string'
     ? (gate.neutral_facts['assumption'] as string) : null;
-  const requesterName = requesterId ? (memberNames[requesterId] ?? requesterId.slice(0, 8)) : null;
+  const requester = requesterId ? memberLookup(memberNames, requesterId, tc, { loaded: memberNamesLoaded }) : null;
+  const discussRequester = discussionRequested?.requestedByMemberId
+    ? memberLookup(memberNames, discussionRequested.requestedByMemberId, tc, { loaded: memberNamesLoaded })
+    : null;
+  const resolver = gate.resolver_id ? memberLookup(memberNames, gate.resolver_id, tc, { loaded: memberNamesLoaded }) : null;
+  // [SID:4286 · 유나 결정 3] 이름이 줄을 만드는 자리(요청자 · 처리자 줄)는 불러오는 중에도 줄을 그리고 이름만 자리표시(아래가 밀리지 않게).
+  const nameSkeleton = <Skeleton as="span" variant="text" className="h-3 w-20 align-middle" aria-hidden />;
   // story #3258(customer-zero 2차) AC1 — doc 결재 카드도 결정 재료(요약)를 body에 실어야
   // «채팅 밖으로 안 나가고 결정 끝나는» 계약을 만족한다(decisionQuestion과 동일 원칙,
   // doc.py transition_doc()이 심은 gate.neutral_facts.doc_summary 그대로 no-fiction 렌더).
@@ -646,8 +662,8 @@ function ApprovalRequestBody({
           {decisionAssumption ? (
             <p className="text-[11px] text-muted-foreground">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p>
           ) : null}
-          {requesterName ? (
-            <p className="text-[11px] text-muted-foreground">{t('approvalRequestRequestedBy', { name: requesterName })}</p>
+          {requesterId ? (
+            <p className="text-[11px] text-muted-foreground">{requester ? t('approvalRequestRequestedBy', { name: requester.label }) : nameSkeleton}</p>
           ) : null}
         </div>
       ) : null}
@@ -658,9 +674,11 @@ function ApprovalRequestBody({
       {gate.status === 'pending' && discussionRequested ? (
         <div className="min-w-0 rounded-lg border border-warning/30 bg-warning/8 p-2 [overflow-wrap:anywhere]">
           <p className="text-[11px] font-medium text-warning-strong">
-            {needsDiscussRequesterName
-              ? t('approvalRequestDiscussionRequestedBy', {
-                name: memberNames[discussionRequested.requestedByMemberId!] ?? discussionRequested.requestedByMemberId!.slice(0, 8),
+            {/* [SID:4286] 요청자 이름을 불러오는 중이면 이름 없는 배너 문구로 선다(id 조각 0). */}
+            {needsDiscussRequesterName && discussRequester !== null
+              ? t(discussRequester.fallback ? 'approvalRequestDiscussionRequestedByFallback' : 'approvalRequestDiscussionRequestedBy', {
+                name: discussRequester.label,
+                josa: pickIGaJosa(discussRequester.label),
                 reason: discussionRequested.reason,
               })
               : t('approvalRequestDiscussionRequestedBanner', { reason: discussionRequested.reason })}
@@ -702,10 +720,13 @@ function ApprovalRequestBody({
                   동일 어휘, DS 원칙 — 새 키 안 만듦). */}
               {gate.resolver_id && gate.resolver_id !== currentTeamMemberId ? (
                 <p className="text-[11px] text-muted-foreground">
-                  {tCage('gateDetailResolvedByStatus', {
-                    name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8),
-                    status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
-                  })}
+                  {resolver
+                    ? tCage(resolver.fallback ? 'gateDetailResolvedByStatusFallback' : 'gateDetailResolvedByStatus', {
+                      name: resolver.label,
+                      josa: pickIGaJosa(resolver.label),
+                      status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+                    })
+                    : nameSkeleton}
                 </p>
               ) : null}
               {gate.resolution_note ? (
@@ -727,7 +748,10 @@ function ApprovalRequestBody({
         <>
           <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-            {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+            {/* [SID:4286] 지정 승인자 이름을 불러오는 중엔 문장 대신 글자 없는 자리표시(«님의 결재를…» 빈칸 방지). */}
+            {designatedApprover === null
+              ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
+              : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label })}
           </div>
           <Button type="button" size="sm" variant="secondary" onClick={() => setTossOpen(true)} className="w-full">
             {t('approvalRequestTossTrigger')}
@@ -739,7 +763,9 @@ function ApprovalRequestBody({
         // "위임됨" 문구는 부정확해 안 쓴다).
         <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-          {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+          {designatedApprover === null
+            ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
+            : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label })}
         </div>
       ) : isDelegatedAway ? (
         // story #3001(선생님 정책 확定) — 이 카드의 원 수신자(=지금 보고 있는 나)가 위임으로
@@ -839,6 +865,7 @@ function ApprovalRequestBody({
           currentTeamMemberId={currentTeamMemberId ?? ''}
           designatedApproverId={gate.designated_approver_id ?? ''}
           designatedApproverName={designatedApproverName}
+          designatedApproverFallback={designatedApprover?.fallback ?? false}
           onTossed={(conversationTitle, inserted) => {
             addToast({
               type: 'info',
@@ -860,6 +887,7 @@ function ApprovalRequestBody({
 
 function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDelegated: () => void }) {
   const t = useTranslations('chats');
+  const tc = useTranslations('common');
   const { currentTeamMemberId } = useDashboardContext();
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<SelectOption[]>([]);
@@ -894,7 +922,7 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
       // 줄인다(지어낸 자격 판단이 아니라 BE와 같은 규칙 재사용 — org-members-section.tsx와 동형).
       // story #3040 v3 — label 산출(이메일 병기)·동명 경고 판정은 doc-gate-section.tsx와
       // 동일 소스(buildApproverPickerOptions)로 통일 — 지정 표면 두 곳이 갈리지 않게.
-      const { options, hasDuplicateNames: dup } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      const { options, hasDuplicateNames: dup } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId, { unnamed: tc('memberUnnamed') });
       setMembers(options);
       setHasDuplicateNames(dup);
     } catch {

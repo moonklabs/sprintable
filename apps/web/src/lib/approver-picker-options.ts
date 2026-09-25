@@ -26,13 +26,13 @@ export interface ApproverPickerOptionsResult {
 
 /**
  * org owner/admin 후보(호출부 규율 그대로 — 본인 제외는 excludeId로) → 픽커 옵션.
- * label은 항상 "이름 (이메일)" 병기(AC1) — 이름 없으면 이메일만, 이메일도 없으면(비정상 —
- * User.email은 NOT NULL이라 이 갈래는 방어적 fallback일 뿐) user_id/id 앞 8자로 후퇴한다
- * (지어내지 않는다 — 8자 hash는 최소한 "구별은 되는" 정직한 값).
+ * label은 항상 "이름 (이메일)" 병기(AC1). 이름이 없으면 «이름 없는 구성원 (이메일)»(labels.unnamed · story #4286 —
+ * 이메일 · id 조각을 이름 자리에 올리지 않는다), 이메일도 없으면(비정상 — User.email은 NOT NULL) «이름 없는 구성원»만.
  */
 export function buildApproverPickerOptions(
   members: ApproverPickerMember[],
-  excludeId?: string,
+  excludeId: string | undefined,
+  labels: { unnamed: string },
 ): ApproverPickerOptionsResult {
   const eligible = members.filter((m) => (m.role === 'owner' || m.role === 'admin') && m.id !== excludeId);
 
@@ -46,9 +46,10 @@ export function buildApproverPickerOptions(
   const options = eligible.map((m) => {
     const name = m.name?.trim() || null;
     const email = m.email?.trim() || null;
-    const label = name && email
-      ? `${name} (${email})`
-      : name ?? email ?? m.user_id?.slice(0, 8) ?? m.id.slice(0, 8);
+    // [SID:4286] 이름이 없으면 이메일을 이름 자리에 올리지 않는다(선생님 상수) — «이름 없는 구성원 (이메일)»로 병기 모양은
+    // 그대로 두고(3040 AC1 — 이메일은 동명 구별용 괄호 값), 이메일도 없으면 id 조각 대신 «이름 없는 구성원»만.
+    const shown = name ?? labels.unnamed;
+    const label = email ? `${shown} (${email})` : shown;
     return { value: m.id, label };
   });
 

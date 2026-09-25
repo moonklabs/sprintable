@@ -1158,3 +1158,60 @@ describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프�
     expect(hrefs).toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-B');
   });
 });
+
+// [SID:4286] 이름 칸 폴백 — id 조각 0 · 불러오는 중 자리표시 · 폴백 뒤 «님» 없는 문장(유나 결정 3 · 4).
+describe('ApprovalRequestCard — 구성원 이름 칸 폴백(story #4286)', () => {
+  async function mountCard(gateOverrides: Partial<GateItem>, teamMembers: 'pending' | { id: string; name: string | null }[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) {
+        if (teamMembers === 'pending') return new Promise(() => {}); // 불러오는 중에 머묾
+        return { ok: true, json: async () => ({ data: teamMembers }) };
+      }
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => gate(gateOverrides) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  const DECISION = { work_item_type: 'agent_decision', neutral_facts: { question: '어느 쪽으로 갈까요?', requested_by_member_id: 'member-3fedcba' } } as Partial<GateItem>;
+
+  it('⭐지정 승인자가 표에 없음 — «알 수 없는 구성원의 결재를 기다리는 중»(«님» 없음) · id 조각 0', async () => {
+    await mountCard({ status: 'pending', designated_approver_id: 'member-2abcdef', neutral_facts: { requested_by_member_id: 'member-3fedcba' } }, []);
+    expect(container.textContent).toContain('알 수 없는 구성원의 결재를 기다리는 중');
+    expect(container.textContent).not.toContain('구성원님');
+    expect(container.textContent).not.toContain('member-2');
+  });
+
+  it('⭐결정 게이트 요청자가 표에 없음 — «요청자: 알 수 없는 구성원» · id 조각 0', async () => {
+    await mountCard({ status: 'pending', designated_approver_id: 'member-2abcdef', ...DECISION }, []);
+    expect(container.textContent).toContain('요청자: 알 수 없는 구성원');
+    expect(container.textContent).not.toContain('member-3');
+  });
+
+  it('⭐이름 표를 불러오는 중 — 대기 문장 자리는 스켈레톤(빈칸 문장 «님의 결재…» 0 · id 조각 0)', async () => {
+    await mountCard({ status: 'pending', designated_approver_id: 'member-2abcdef', neutral_facts: { requested_by_member_id: 'member-3fedcba' } }, 'pending');
+    expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).not.toContain('님의 결재를 기다리는 중');
+    expect(container.textContent).not.toContain('member-2');
+  });
+
+  it('⭐결정 게이트 · 불러오는 중 — 요청자 줄은 그대로 서고 이름 자리만 스켈레톤(유나 결정 3 · 아래가 밀리지 않게)', async () => {
+    await mountCard({ status: 'pending', designated_approver_id: 'member-2abcdef', ...DECISION }, 'pending');
+    const lineWithSkeleton = Array.from(container.querySelectorAll('p')).some((p) => p.querySelector('[data-slot="skeleton"]'));
+    expect(lineWithSkeleton).toBe(true);
+    expect(container.textContent).not.toContain('member-3');
+  });
+
+  it('⭐처리자가 표에 있는데 이름 빔 — «이름 없는 구성원이 처리 — …»(조사 · «님» 없음)', async () => {
+    await mountCard({ status: 'approved', resolver_id: 'member-9' }, [{ id: 'member-9', name: null }]);
+    expect(container.textContent).toContain('이름 없는 구성원이 처리');
+    expect(container.textContent).not.toContain('구성원님');
+  });
+});
