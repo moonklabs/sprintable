@@ -37,26 +37,6 @@ const ALLOWED: Array<{ file: string; line: string; reason: string }> = [
     line: 'monthStart: monthStart.toISOString().slice(0, 10),',
     reason: '위와 같음(getUsageMonthRange)',
   },
-  {
-    file: 'services/sprint.ts',
-    line: "const date = startDate ? new Date(startDate.getTime() + day * 86_400_000).toISOString().slice(0, 10) : String(day);",
-    reason: 'getBurndown의 직접 DB 갈래 — 유일한 호출자(api/sprints/[id]/burndown)가 db를 넘기지 않아(dbClient = undefined) 토큰 없으면 이 줄 전에 빈 결과로 돌아간다(운영 도달 0). 날짜만 있는 start_date의 달력 산술이기도 함',
-  },
-  {
-    file: 'services/sprint.ts',
-    line: 'const today = new Date().toISOString().slice(0, 10);',
-    reason: '위와 같은 직접 DB 갈래(운영 도달 0) — 살아나면 표시 시간대 «오늘»로 바꿔야 할 자리',
-  },
-  {
-    file: 'services/sprint.ts',
-    line: 'const startDateStr = startDate ? startDate.toISOString().slice(0, 10) : today;',
-    reason: '위와 같은 직접 DB 갈래(운영 도달 0)',
-  },
-  {
-    file: 'services/standup.ts',
-    line: 'const today = new Date().toISOString().slice(0, 10);',
-    reason: 'StandupService는 운영 코드 import 0(테스트만) — 죽은 코드. 살리면 표시 시간대 «오늘»로 바꿔야 할 자리',
-  },
 ];
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
