@@ -252,6 +252,20 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(problems).toEqual([]);
   });
 
+  it('⭐v3 목적지(/today · /chat · /connect-rules) loading은 v3 셸 뼈대(V3ShellLoading · v3-shell-root) 안에 그린다', () => {
+    // 까디르 델타 — 표의 컨테이너 토큰만 보면 셸 감싸개(V3ShellLoading)를 빼도 초록이었다. 감싸개 사용 + 그 감싸개가 v3 셸 뿌리 클래스를 쓰는지.
+    const shell = codeOnly(readFileSync(join(APP_ROOT, '../components/nav/v3-shell-loading.tsx'), 'utf8'));
+    expect(shell).toMatch(/className="v3-shell-root\b/);
+    const problems: string[] = [];
+    for (const k of ['/today', '/chat', '/connect-rules']) {
+      const dir = routeDirOf(destinations.get(k)!);
+      const own = dir ? join(dir, 'loading.tsx') : null;
+      if (!own || !existsSync(own)) { problems.push(`${k}: 자기 loading.tsx 없음`); continue; }
+      if (!/<V3ShellLoading\b/.test(codeOnly(readFileSync(own, 'utf8')))) problems.push(`${k}: V3ShellLoading 감싸개 없음`);
+    }
+    expect(problems).toEqual([]);
+  });
+
   it('⭐redirect를 import해 부르는 page · layout은 어떤 loading.tsx 경계 아래에도 없다(React 오류 310 · story #3915)', () => {
     const offenders = routeFiles(APP_ROOT)
       .filter((f) => callsNavigationRedirect(readFileSync(f, 'utf8')))
