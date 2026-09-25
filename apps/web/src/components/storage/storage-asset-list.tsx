@@ -145,7 +145,12 @@ export function StorageAssetList({
       </div>
 
       {/* body */}
-      <div className="focus-inset min-h-0 flex-1 overflow-auto">
+      {/* story #4277 — e2e가 행 출현을 기다리지 않고 «다 불러온 뒤 한 번 세도록» 지금 상태를 싣는다(행 0이면 즉시 건너뜀). */}
+      <div
+        className="focus-inset min-h-0 flex-1 overflow-auto"
+        data-testid="storage-asset-list-body"
+        data-state={loading ? 'loading' : error ? 'error' : assets.length === 0 ? 'empty' : 'rows'}
+      >
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 8 }).map((_, i) => (
