@@ -2101,7 +2101,8 @@ async def publish_channel_post_draft_endpoint(
     )
     await db.commit()
     # story #4264(유나 4632 · PO 처방) — «나갔는지 모름»으로 멈춘 명령이면 어댑터를 다시 부르지 않는다(409). 앞으로 가는 길은 채널
-    # 확인 뒤 재시도(`…/retry`) 하나. 사람 화면 · 에이전트(MCP 발행 도구도 이 라우트) 모두 같은 문을 지난다.
+    # 확인 뒤 재시도(`…/retry`) 하나. 사람 화면 · 사람 세션 API 요청이 이 문을 지난다(에이전트의 채널 글 발행 길은 없다 — 서버가 사람만
+    # 허용 `CHANNEL_POST_PUBLISH_HUMAN_ONLY` · BE MCP에 발행 도구 없음 · 플러그인 `publish_instagram_post`는 동결 도구, PO 00:18Z 정정).
     from app.services.publication_command import (
         PUBLICATION_NEEDS_CHECK_CODE,
         PublicationNeedsCheckError,

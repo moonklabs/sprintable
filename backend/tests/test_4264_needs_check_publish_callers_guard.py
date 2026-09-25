@@ -15,7 +15,7 @@ _APP = pathlib.Path(__file__).resolve().parents[1] / "app"
 
 # (파일, 함수) → 가드 여부. False는 사유가 있는 예외.
 ENTRY_POINTS = {
-    ("routers/channel_posts.py", "publish_channel_post_draft_endpoint"): True,  # 즉시 발행 — 사람 화면 · MCP 발행 도구 → 409
+    ("routers/channel_posts.py", "publish_channel_post_draft_endpoint"): True,  # 즉시 발행 — 사람 화면 · 사람 세션 API → 409
     ("services/channel_posts.py", "publish_recipe_approved_draft"): True,  # 레시피 자동 발행 → 게이트 결과 publish_failed:needs_check
     ("services/publication_command.py", "_process_one_command"): False,  # 워커 — pending만 집는다
 }
