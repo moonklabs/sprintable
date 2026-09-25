@@ -371,6 +371,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                   <div className="hidden lg:flex">
                     <ChatV3ContextPanel
                       conversationId={selectedThread.id}
+                      conversationProjectId={selectedThread.project_id ?? null}
                       openArtifactId={openArtifactId}
                       workItemRef={workItemRef}
                       needsMe={needsMe}
@@ -382,6 +383,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                     <SheetContent side="right" className="w-full p-0 sm:max-w-sm">
                       <ChatV3ContextPanel
                         conversationId={selectedThread.id}
+                        conversationProjectId={selectedThread.project_id ?? null}
                         openArtifactId={openArtifactId}
                         workItemRef={workItemRef}
                         needsMe={needsMe}

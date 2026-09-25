@@ -548,6 +548,29 @@ describe('ChatV3Screen — 특정 대화 주소(story #4018)', () => {
       expect([...container.querySelectorAll('[data-testid="chat-v3-thread-row"]')].length).toBe(2);
     });
 
+    // story #4314 — id로 연 대화가 **다른 프로젝트**(단건 응답 project_id = proj-b)면 문맥 패널 «기준» 링크는 그 대화 프로젝트를 싣는다.
+    it('⭐다른 프로젝트 대화를 id로 열면 문맥 패널 작업 항목 링크 = 그 대화 프로젝트 `?p=proj-b`', async () => {
+      stubOutsidePage({ ok: true, status: 200 });
+      const inner = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === `/api/conversations/${OUTSIDE_PAGE_ID}`) {
+          return { ok: true, status: 200, json: async () => ({ ...OUTSIDE_PAGE_CONVERSATION, project_id: 'proj-b' }) };
+        }
+        if (url === `/api/conversations/${OUTSIDE_PAGE_ID}/messages`) {
+          return {
+            ok: true, status: 200,
+            json: async () => ({ data: [{ ...OUTSIDE_PAGE_MESSAGES.data[0], references: [{ target_type: 'story', target_id: 'story-77', form: 'mention' }] }] }),
+          };
+        }
+        return inner(url, init);
+      });
+      searchParamsRef.current = new URLSearchParams(`conversation=${OUTSIDE_PAGE_ID}`);
+      await mount();
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      const scope = container.querySelector('[data-testid="chat-v3-context-scope"]');
+      expect(scope?.getAttribute('href')).toBe('/board?story=story-77&p=proj-b');
+    });
+
     it('⭐404(단건 조회) — 「열 수 없어요」 중립 안내', async () => {
       stubOutsidePage({ ok: false, status: 404 });
       searchParamsRef.current = new URLSearchParams(`conversation=${OUTSIDE_PAGE_ID}`);

@@ -15,6 +15,8 @@ export interface ChatV3Thread {
   participants: ChatV3ThreadParticipant[];
   latest_message: { content: string | null; created_at: string | null } | null;
   unread_count: number;
+  // story #4314 — 대화의 프로젝트(목록 · 단건 응답 둘 다 싣는다 · ConversationResponse.project_id). 문맥 패널 작업 항목 링크의 대상 프로젝트.
+  project_id?: string | null;
 }
 
 /**

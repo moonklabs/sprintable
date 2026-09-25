@@ -16,6 +16,7 @@ import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import type { EvidenceItem, EvidenceType } from '@/services/verify';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 interface ArtifactDetail {
   title: string | null;
@@ -184,9 +185,13 @@ function useArtifactDetail(artifactId: string | null): ArtifactDetail | null {
 }
 
 export function ChatV3ContextPanel({
-  conversationId, openArtifactId, workItemRef, needsMe, todayV3Enabled, todayHref: todayV3Href,
+  conversationId, conversationProjectId, openArtifactId, workItemRef, needsMe, todayV3Enabled, todayHref: todayV3Href,
 }: {
   conversationId: string;
+  // story #4314 — 이 대화의 프로젝트(대화 응답 `project_id`). v3는 알림 · 링크 · 딥링크로 **다른 프로젝트 대화**도 id로 연다
+  // (`GET /api/v2/conversations/{id}`는 조직만 거름 · conversations.py get_conversation) — 대화 작업 항목 링크는 현재 p가 아니라 이 값.
+  // 모르면(옛 응답 · 값 없음) 현재 p 폴백.
+  conversationProjectId?: string | null;
   openArtifactId: string | null;
   // story #3990 — 「근거」·「이력」이 스코프할 일. null=아직 이 대화에 이어진 story/
   // task 참조가 없다(구조 사실 — #3971 부재 4·5 정정으로 새 BE 0, 기존 evidence·
@@ -239,8 +244,11 @@ export function ChatV3ContextPanel({
   // 되니(#3990 최초 구현이 놓친 지점), workItemRef만 있으면 줄을 유지하고 라벨만
   // 「이어진 일 열기」로 대체한다(산출물의 「제목 없음」=라벨 없는 제목과 다른 개념 —
   // 이건 "열 수 있는 행동" 문구, 유나 구별).
-  // 대상-프로젝트: v3 대화는 현재 프로젝트의 대화만 연다 — 대화의 작업 항목은 현재 p가 곧 자기 프로젝트.
-  const scopeHref = workItemRef ? getEntityHref(workItemRef.type, workItemRef.id, flatHref) : null;
+  // 대상-프로젝트: 대화의 작업 항목은 그 대화 프로젝트에 산다 — 대화 응답의 project_id로 싣는다(story #4314 · 예전 주석 «v3는 현재 프로젝트
+  // 대화만 연다»는 거짓: id로 연 다른 프로젝트 대화가 있다). 대화 프로젝트를 모를 때만 현재 p.
+  const scopeHref = workItemRef
+    ? getEntityHref(workItemRef.type, workItemRef.id, conversationProjectId ? (href) => withProjectParam(href, conversationProjectId) : flatHref)
+    : null;
   const scopeLabel = scopeTitle
     ? t('contextWorkItemScopeLabel', { title: scopeTitle })
     : (workItemRef ? t('contextOpenLinkedWorkItem') : null);
