@@ -182,3 +182,34 @@ def test_guard_repo_has_no_blocking_llm_calls_in_async():
     assert len(trees) > 200, "가드가 헛돈다(파일 수)"
     hits = find_blocking_calls_in_async(trees)
     assert hits == [], "async 안 동기 LLM/임베딩 호출(asyncio.to_thread로):\n" + "\n".join(hits)
+
+
+def test_sdk_actually_enforces_http_options_timeout():
+    """AC3 — «멈추는 가짜»: 응답을 영영 안 보내는 로컬 HTTP 서버에 google-genai SDK를 붙이면, HttpOptions.timeout(밀리초)에서
+    끊긴다(우리 클라이언트가 그 값을 싣는 건 위 테스트가 고정). timeout을 안 주면 이 호출은 서버가 답할 때까지 멈춘다."""
+    import socket
+    import threading
+
+    from google import genai
+    from google.genai import types
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    stop = threading.Event()
+
+    def hold():  # 연결을 받고 아무것도 안 보낸 채 붙잡는다(멈춘 Vertex).
+        conn, _ = srv.accept()
+        stop.wait(10)
+        conn.close()
+
+    threading.Thread(target=hold, daemon=True).start()
+    client = genai.Client(api_key="test", http_options=types.HttpOptions(base_url=f"http://127.0.0.1:{port}", timeout=300))
+    start = time.monotonic()
+    with pytest.raises(Exception):
+        client.models.generate_content(model="m", contents="p")
+    elapsed = time.monotonic() - start
+    stop.set()
+    srv.close()
+    assert elapsed < 3, f"SDK가 timeout(0.3초)에 끊지 않았다({elapsed:.2f}s)"
