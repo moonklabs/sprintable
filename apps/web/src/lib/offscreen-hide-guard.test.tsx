@@ -24,23 +24,28 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 // 아니라 부류 밖.
 const CLASS_SHAPE = /(^|[\s'"`])-?translate-[xy]-(full|\[[^\]\s]*100%[^\]\s]*\])/;
 const STYLE_SHAPE = /translate[XY]\(.*100.*%/; // 인자 안에 괄호가 올 수 있어(`(p - 1) * 100`) 같은 줄 전체로 본다
+// [까디르 4653 P2] 폭만큼 음수 위치로 밀어 내는 모양(데스크톱 오프캔버스 사이드바 `left-[calc(var(--sidebar-width)*-1)]` 등). 몇 px짜리
+// 장식 오프셋(`-left-[19px]` 점 · 손잡이)은 부류 밖.
+const OFFSET_SHAPE = /(?:^|[\s'"`:])-(?:left|right|top|bottom)-(?:full|\[100%\])|(?:left|right|top|bottom)-\[calc\([^\]]*\*\s*-1\)\]/;
 const REVEAL_ON_FOCUS = /focus-within:-?translate-[xy]-0/;
 const DRAWER_HELPER = /closedDrawerProps\(/;
+const INERT_ATTR = /\binert=\{/;
 const ELEMENT_WINDOW = 15; // 같은 JSX 요소의 속성 범위(줄)
 
 /** 도달 0인 자리만 — `상대경로:줄 내용 일부` → 이유. 지금은 0개. */
 const EXCEPTIONS: Record<string, string> = {};
 
-export interface OffscreenSite { file: string; line: number; text: string; kind: 'class' | 'style' }
+export interface OffscreenSite { file: string; line: number; text: string; kind: 'class' | 'style' | 'offset' }
 
 export function findUnguardedOffscreen(file: string, src: string): OffscreenSite[] {
   const lines = src.split('\n');
   const out: OffscreenSite[] = [];
   lines.forEach((text, i) => {
-    const kind = CLASS_SHAPE.test(text) ? 'class' : STYLE_SHAPE.test(text) ? 'style' : null;
+    const kind = CLASS_SHAPE.test(text) ? 'class' : STYLE_SHAPE.test(text) ? 'style' : OFFSET_SHAPE.test(text) ? 'offset' : null;
     if (!kind) return;
     const windowText = lines.slice(Math.max(0, i - ELEMENT_WINDOW), i + ELEMENT_WINDOW + 1).join('\n');
-    const guarded = (kind === 'class' && REVEAL_ON_FOCUS.test(text)) || DRAWER_HELPER.test(windowText);
+    // 오프캔버스(offset)는 같은 요소의 명시 inert 식도 처방으로 인정한다(사이드바처럼 서랍 훅이 아닌 자리).
+    const guarded = (kind === 'class' && REVEAL_ON_FOCUS.test(text)) || DRAWER_HELPER.test(windowText) || (kind === 'offset' && INERT_ATTR.test(windowText));
     if (guarded) return;
     const key = Object.keys(EXCEPTIONS).find((k) => k.startsWith(`${file}:`) && text.includes(k.slice(file.length + 1)));
     if (key) return;
@@ -71,13 +76,14 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
   });
 
   it('지금 잡히는 자리 전수(새 자리가 생기면 이 목록이 늘어난다 — 확인용)', () => {
-    const sites = ALL.flatMap(({ file, src }) => src.split('\n').flatMap((t, i) => (CLASS_SHAPE.test(t) || STYLE_SHAPE.test(t) ? [`${file}:${i + 1}`] : [])));
+    const sites = ALL.flatMap(({ file, src }) => src.split('\n').flatMap((t, i) => (CLASS_SHAPE.test(t) || STYLE_SHAPE.test(t) || OFFSET_SHAPE.test(t) ? [`${file}:${i + 1}`] : [])));
     expect(sites.map((s) => s.replace(/:\d+$/, '')).sort()).toEqual([
       'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx',
       'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx',
       'components/docs/doc-editor.tsx',
       'components/nav/top-bar.tsx',
       'components/storage/storage-view.tsx',
+      'components/ui/sidebar.tsx',
     ]);
   });
 
@@ -87,6 +93,7 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
     ['components/nav/top-bar.tsx', / focus-within:translate-y-0/, ''],
     ['components/docs/doc-editor.tsx', / focus-within:translate-y-0 focus-within:pointer-events-auto/, ''],
     ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx', / focus-within:translate-y-0/, ''],
+    ['components/ui/sidebar.tsx', /\n\s*inert=\{state === "collapsed" && collapsible === "offcanvas"\}/, ''],
   ] as const)('양성 대조 — %s에서 처방을 빼면 잡힌다', (file, remedy, replacement) => {
     const src = ALL.find((f) => f.file === file)!.src;
     expect(findUnguardedOffscreen(file, src)).toEqual([]);
@@ -105,6 +112,11 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
     expect(probe('transform: `translateX(${(p - 1) * 100}%)`')).toBe(1);
     // 클래스 자리는 «같은 줄»의 focus-within만 인정 — 옆 줄 다른 요소의 focus-within으로 통과하지 않는다.
     expect(probe("a && 'focus-within:translate-y-0'\nb && '-translate-y-full'")).toBe(1);
+    // 폭만큼 음수 위치(오프캔버스)는 잡고, 몇 px 장식 오프셋은 안 잡는다.
+    expect(probe('className="absolute -left-[19px] top-2 size-2"')).toBe(0);
+    expect(probe('className="-right-[22px] top-1/2"')).toBe(0);
+    expect(probe('"data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"')).toBe(1);
+    expect(probe("hidden && '-left-full'")).toBe(1);
   });
 });
 

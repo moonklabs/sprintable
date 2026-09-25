@@ -61,35 +61,50 @@ export function useSwipeDrawer(
       setProgress(p);
     };
 
+    // [SID:4288 · 까디르 P1] 손을 떼면 progress를 0 · 1로 **직접** 정착시킨다. 예전엔 onOpen/onClose만 불러 isOpen이 바뀔 때의 효과에
+    // 정착을 맡겼는데, 닫힌 서랍을 조금 끌다 놓으면(OPEN_THRESHOLD 미만) onClose가 불려도 isOpen이 이미 false라 효과가 안 돌고
+    // progress가 0.1 따위로 남았다 — 닫힘 판정(progress 0)에서 빠져 inert가 풀린 채 화면 밖 서랍이 초점을 받았다.
+    const settle = (open: boolean) => {
+      setProgress(open ? 1 : 0);
+      if (open) onOpen();
+      else onClose();
+    };
+
     const onTouchEnd = (e: TouchEvent) => {
       if (!activeRef.current) return;
       activeRef.current = false;
       setDragging(false);
 
       const touch = e.changedTouches[0];
-      if (!touch) return;
+      if (!touch) { settle(startOpenRef.current); return; } // 위치를 모르면 시작 상태로
       const dx = touch.clientX - startXRef.current;
       const p = startOpenRef.current
         ? Math.max(0, Math.min(1, 1 + dx / DRAWER_WIDTH))
         : Math.max(0, Math.min(1, dx / DRAWER_WIDTH));
 
-      if (startOpenRef.current) {
-        if (p <= 1 - OPEN_THRESHOLD) onClose();
-        else onOpen();
-      } else {
-        if (p >= OPEN_THRESHOLD) onOpen();
-        else onClose();
-      }
+      if (startOpenRef.current) settle(p > 1 - OPEN_THRESHOLD);
+      else settle(p >= OPEN_THRESHOLD);
+    };
+
+    // [SID:4288 · 까디르 P1] 시스템이 터치를 가로채면(touchcancel) 끄는 중이던 진행을 시작 상태로 되돌린다 — 예전엔 처리가 없어
+    // activeRef가 참으로 남고 progress가 중간값에 멈췄다.
+    const onTouchCancel = () => {
+      if (!activeRef.current) return;
+      activeRef.current = false;
+      setDragging(false);
+      settle(startOpenRef.current);
     };
 
     document.addEventListener('touchstart', onTouchStart, { passive: true });
     document.addEventListener('touchmove', onTouchMove, { passive: true });
     document.addEventListener('touchend', onTouchEnd, { passive: true });
+    document.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
     return () => {
       document.removeEventListener('touchstart', onTouchStart);
       document.removeEventListener('touchmove', onTouchMove);
       document.removeEventListener('touchend', onTouchEnd);
+      document.removeEventListener('touchcancel', onTouchCancel);
     };
   }, [onOpen, onClose]);
 
