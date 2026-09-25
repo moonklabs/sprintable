@@ -1,7 +1,9 @@
 """story #4332 — 요청 한 번의 DB 몫 계측(app/core/request_db_timing.py)이 실 Postgres에서 맞게 세는지.
 
-① SQL 수 · 체크아웃 수가 그 요청이 실제로 던진 만큼(Server-Timing · 로그 한 줄) — 다른 요청의 SQL이 섞이지 않는다.
-② 풀이 다 찼을 때 기다린 시간이 dbwait로 잡힌다(연결 1개짜리 풀을 다른 task가 쥔 채 · 대기 ≥ 쥔 시간 근처).
+① SQL 수 · 체크아웃 수가 그 요청이 실제로 던진 만큼(로그 한 줄) — 다른 요청의 SQL이 섞이지 않는다.
+② 풀이 다 찼을 때 기다린 시간이 wait_ms로 잡힌다(연결 1개짜리 풀을 다른 task가 쥔 채 · 대기 ≥ 쥔 시간 근처).
+③ 응답 헤더엔 계측이 없다(Server-Timing 0 · 로그 켬/끔 둘 다) — SQL 수 · 처리 시간이 응답에 실리면 «남의 자원 vs 없는 자원»이
+   헤더로 갈려 존재 여부가 샌다(test_2261_c3 참조 누출 0 절차가 PR 4697 CI에서 잡음).
 """
 from __future__ import annotations
 
@@ -45,10 +47,13 @@ def _app_with(engine):
     return RequestDbTimingMiddleware(app)
 
 
-def _parse(header: str) -> dict[str, float]:
-    out = {k: float(v) for k, v in re.findall(r"(\w+);dur=([\d.]+)", header)}
-    m = re.search(r'desc="(\d+) sql"', header)
-    out["sql_n"] = float(m.group(1)) if m else -1
+def _lines(caplog, path: str) -> list[dict[str, float]]:
+    """로그 한 줄(`db_timing … key=value …`)을 경로별로 읽는다."""
+    out = []
+    for r in caplog.records:
+        msg = r.getMessage()
+        if r.name == "app.db_timing" and f" path={path} " in msg:
+            out.append({k: float(v) for k, v in re.findall(r"(\w+)=([\d.]+)", msg) if k != "status"})
     return out
 
 
@@ -66,23 +71,26 @@ async def test_counts_only_this_requests_sql_and_checkouts(caplog, monkeypatch):
     caplog.set_level(logging.INFO, logger="app.db_timing")
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app_with(engine)), base_url="http://t") as c:
-            three, one = await asyncio.gather(c.get("/three"), c.get("/one"))
-        t3, t1 = _parse(three.headers["server-timing"]), _parse(one.headers["server-timing"])
-        assert t3["sql_n"] == 3 and t1["sql_n"] == 1, (t3, t1)  # 동시 요청의 SQL이 섞이지 않는다
-        assert t3["db"] > 0 and t1["db"] > 0
-        lines = [r.getMessage() for r in caplog.records if r.name == "app.db_timing"]
-        assert any("path=/three" in ln and "sql_n=3" in ln and "checkouts=1" in ln for ln in lines), lines
+            await asyncio.gather(c.get("/three"), c.get("/one"))
+        (t3,), (t1,) = _lines(caplog, "/three"), _lines(caplog, "/one")
+        assert (t3["sql_n"], t1["sql_n"]) == (3, 1), (t3, t1)  # 동시 요청의 SQL이 섞이지 않는다
+        assert (t3["checkouts"], t1["checkouts"]) == (1, 1)
+        assert t3["sql_ms"] > 0 and t1["sql_ms"] > 0
     finally:
         await engine.dispose()
 
 
 @pytest.mark.anyio
-async def test_pool_wait_is_measured_when_pool_is_full():
+async def test_pool_wait_is_measured_when_pool_is_full(caplog, monkeypatch):
     import httpx
     from sqlalchemy.ext.asyncio import create_async_engine
 
     from app.core.request_db_timing import TimedAsyncAdaptedQueuePool, instrument_engine
 
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "db_timing_log_enabled", True)
+    caplog.set_level(logging.INFO, logger="app.db_timing")
     engine = create_async_engine(
         _async_url(), poolclass=TimedAsyncAdaptedQueuePool, pool_size=1, max_overflow=0, pool_timeout=10,
     )
@@ -100,41 +108,34 @@ async def test_pool_wait_is_measured_when_pool_is_full():
         holder = asyncio.create_task(hold())
         await asyncio.sleep(0.05)  # 쥔 쪽이 먼저 연결을 가져가게
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app_with(engine)), base_url="http://t") as c:
-            r = await c.get("/one")
+            await c.get("/one")
         await holder
-        t = _parse(r.headers["server-timing"])
-        assert t["dbwait"] >= (held_s - 0.05) * 1000 * 0.8, t  # 쥔 시간 근처만큼 기다렸다
+        (t,) = _lines(caplog, "/one")
+        assert t["wait_ms"] >= (held_s - 0.05) * 1000 * 0.8, t  # 쥔 시간 근처만큼 기다렸다
         assert t["sql_n"] == 1
     finally:
         await engine.dispose()
 
 
 @pytest.mark.anyio
-async def test_log_line_is_off_by_default_but_header_is_always_sent(caplog, monkeypatch):
-    """로그 한 줄은 환경 값(DB_TIMING_LOG_ENABLED)으로만 — 폴링 경로 때문에 양이 크다(PO). Server-Timing은 늘."""
+@pytest.mark.parametrize("log_enabled", [False, True])
+async def test_no_timing_in_response_headers_and_log_follows_setting(caplog, monkeypatch, log_enabled):
+    """③ 응답 헤더엔 계측이 없다(켬/끔 둘 다 · 존재 여부 누출 방지) · 로그 한 줄은 DB_TIMING_LOG_ENABLED일 때만."""
     import httpx
     from sqlalchemy.ext.asyncio import create_async_engine
 
     from app.core.config import settings
     from app.core.request_db_timing import TimedAsyncAdaptedQueuePool, instrument_engine
 
-    monkeypatch.setattr(settings, "db_timing_log_enabled", False)
+    monkeypatch.setattr(settings, "db_timing_log_enabled", log_enabled)
     engine = create_async_engine(_async_url(), poolclass=TimedAsyncAdaptedQueuePool, pool_size=1, max_overflow=0)
     instrument_engine(engine.sync_engine)
     caplog.set_level(logging.INFO, logger="app.db_timing")
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app_with(engine)), base_url="http://t") as c:
             r = await c.get("/one")
-        assert _parse(r.headers["server-timing"])["sql_n"] == 1
-        assert not [rec for rec in caplog.records if rec.name == "app.db_timing"]
+        assert r.status_code == 200
+        assert "server-timing" not in {k.lower() for k in r.headers.keys()}, dict(r.headers)
+        assert len(_lines(caplog, "/one")) == (1 if log_enabled else 0)
     finally:
         await engine.dispose()
-
-
-def test_server_timing_value_shape():
-    from app.core.request_db_timing import _Stats, server_timing_value
-
-    s = _Stats()
-    s.sql_n, s.sql_ms, s.wait_ms = 19, 40.0, 5.0
-    v = server_timing_value(s, 60.0)
-    assert v == 'dbwait;dur=5.0, db;dur=40.0;desc="19 sql", app;dur=15.0'

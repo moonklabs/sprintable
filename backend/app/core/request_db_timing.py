@@ -6,8 +6,9 @@
 - SQL 수 · 합계: 엔진 cursor 이벤트(before/after_cursor_execute) — 요청 범위 contextvar에 더한다. SQLAlchemy async의 greenlet은
   드라이버 context를 그대로 쓴다(`gr_context = driver.gr_context`) — 요청 task의 contextvar가 보인다.
 - 풀 대기: 풀 클래스 `_do_get`(연결 하나를 내줄 때까지 · 새 물리 연결이면 연결 시간 포함)을 잰다.
-- 노출: 응답 헤더 `Server-Timing`(db · dbwait · 수 · 늘) + 요청마다 로그 한 줄(`db_timing ...` · 키=값 · `DB_TIMING_LOG_ENABLED`일 때만 —
-  폴링 경로 때문에 양이 크다).
+- 노출: 요청마다 로그 한 줄(`db_timing ...` · 키=값 · `DB_TIMING_LOG_ENABLED`일 때만 — 폴링 경로 때문에 양이 크다).
+  **응답 헤더에는 싣지 않는다**(Server-Timing 0): SQL 수 · 처리 시간이 응답에 실리면 «남의 자원 vs 없는 자원»이 헤더로
+  갈려 존재 여부가 샌다(test_2261_c3 참조 누출 0 절차가 잡음 · PR 4697 CI).
 
 계측 실패는 요청에 영향 0(fail-open) — 모든 기록은 try 안에서만.
 """
@@ -96,14 +97,6 @@ def instrument_engine(sync_engine: Engine) -> None:
             stats.sql_ms += (time.perf_counter() - t0) * 1000
 
 
-def server_timing_value(stats: _Stats, total_ms: float) -> str:
-    app_ms = max(total_ms - stats.sql_ms - stats.wait_ms, 0.0)
-    return (
-        f'dbwait;dur={stats.wait_ms:.1f}, db;dur={stats.sql_ms:.1f};desc="{stats.sql_n} sql", '
-        f"app;dur={app_ms:.1f}"
-    )
-
-
 class _SkipLog(Exception):
     pass
 
@@ -120,25 +113,14 @@ class RequestDbTimingMiddleware:
             return
         stats, token = begin()
         start = time.perf_counter()
-
-        async def send_wrapper(message):  # noqa: ANN001
-            if message.get("type") == "http.response.start":
-                try:
-                    total_ms = (time.perf_counter() - start) * 1000
-                    headers = list(message.get("headers") or [])
-                    headers.append((b"server-timing", server_timing_value(stats, total_ms).encode()))
-                    message = {**message, "headers": headers}
-                except Exception:  # noqa: BLE001 — 계측은 fail-open
-                    pass
-            await send(message)
-
         status = 500
         try:
+            # 응답은 손대지 않고 그대로 보낸다(헤더 0) — 상태 코드만 로그용으로 읽는다.
             async def send_and_capture(message):  # noqa: ANN001
                 nonlocal status
                 if message.get("type") == "http.response.start":
                     status = message.get("status", status)
-                await send_wrapper(message)
+                await send(message)
 
             await self.app(scope, receive, send_and_capture)
         finally:

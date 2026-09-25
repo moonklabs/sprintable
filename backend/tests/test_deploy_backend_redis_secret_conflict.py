@@ -184,7 +184,7 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   아님)뿐이고, 개인키는 `SECRETS_FLAG`(--update-secrets)로만 싣는다.
 - **story #4332(PO 판정 2026-09-25)**: `DB_TIMING_LOG_ENABLED=true`는 **dev에서만**(리터럴) — 요청마다 «풀 체크아웃
   대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(`app/core/request_db_timing.py`). 폴링 경로(designated-pending-count 등)
-  때문에 양이 커 다른 환경은 미설정 = 기본 끔. 응답 헤더 `Server-Timing`은 이 값과 무관하게 늘 실린다. 배포 설정도
+  때문에 양이 커 다른 환경은 미설정 = 기본 끔. 응답 헤더엔 싣지 않는다(존재 여부 누출 · PR 4697 CI). 배포 설정도
   코드라 PR로(PO) — 수동 env 주입 아님.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
