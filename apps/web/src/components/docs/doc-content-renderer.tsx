@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { cardVariants } from '@/components/ui/card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -391,14 +392,16 @@ export function DocContentRenderer({
         </div>`;
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
       // 유지하되 링크(이동)만 뺀다.
+      // 카드 표면은 공용 cardVariants(손코딩 카드 가드 · story #3164) — 링크 카드와 공개 보기의 비활성 카드가 같은 표면.
+      const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
       if (publicMode || !slug) {
-        block.className = 'not-prose my-2 flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3';
+        block.className = cn('not-prose my-2', embedCardClassName);
         block.innerHTML = cardInner;
         return () => { /* no handler attached */ };
       }
       // story #4309 — 카드 전체가 링크 하나(접근 가능한 이름 = 문서 제목 · 경로 줄은 이름에 섞지 않는다).
       block.className = 'not-prose my-2';
-      const link = makeInternalLink(slug, 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-foreground no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring');
+      const link = makeInternalLink(slug, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
       link.setAttribute('aria-label', displayTitle);
       link.innerHTML = cardInner;
       block.replaceChildren(link);
