@@ -22,9 +22,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -485,6 +485,11 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
     if paused:
         await _block_for_external_publish_pause(db, command, now=now, reason=pause_reason)
         return
+
+    # story #4287(PO 00:16Z) — 아래 다섯 갈래(사이트 글 · 댓글 답글 · 광고 · 뉴스레터 · 채널 글)의 어댑터 진입 **앞 한 자리**에서 영속
+    # 표식을 쓰고 커밋한다. 표식이 늦으면(쓰기 뒤) 회수가 이중 발행을 낼 수 있고, 이르면(어댑터 안 사전 검사 앞) 도중 죽음이
+    # needs_check로 한 번 더 보수적으로 갈 뿐이라 가장 이른 공통 자리에 둔다. 이 아래로 공급자 쓰기가 없는 갈래는 pause뿐(위).
+    await mark_provider_call_started(db, command)
 
     if command.content_kind == "site_post":
         await _process_one_site_post_command(db, command, now=now)
@@ -1298,6 +1303,59 @@ async def _block_for_external_publish_pause(
     command.last_error = f"EXTERNAL_PUBLISH_PAUSED: {reason}" if reason else "EXTERNAL_PUBLISH_PAUSED"
 
 
+# story #4287(PO 00:16Z) — in_progress로 집힌 채 이 시간을 넘긴 명령은 워커가 도중에 죽은 것으로 본다. 워커 요청은 Cloud Run 요청
+# 타임아웃에서 끊긴다(backend-dev 3600s · prod 300s — `.github/workflows/cloud-build.yml` backend_timeout. 스케줄러 attempt_deadline
+# 120s는 스케줄러 쪽 대기일 뿐 요청 수명이 아니다). 가장 긴 3600s + 여유 30분. 살아 있는 요청을 회수하면(표식 전 → 재시도) 두 번
+# 나가므로 이 값은 요청 수명보다 반드시 길어야 한다 — 타임아웃을 늘리면 이 값도 같이 올린다.
+STUCK_IN_PROGRESS_THRESHOLD = timedelta(minutes=90)
+# 표식 뒤(또는 표식 칸 전 옛 행) 도중에 멈춘 명령 — 코드 표 밖이라 needs_check(나갔는지 모름 · 사람 확인 뒤 재시도).
+WORKER_INTERRUPTED_ERROR_CODE = "PUBLICATION_WORKER_INTERRUPTED"
+
+
+async def mark_provider_call_started(db: AsyncSession, command: PublicationCommand) -> None:
+    """story #4287 — 공급자 쓰기 직전 영속 표식. 서비스 코드가 명시적으로 쓰고 **커밋**한다(HTTP 훅은 메모리 표시만 — 워커 공유 세션에
+    훅이 끼어들어 쓰지 않는다). 커밋이 실패하면 예외가 그대로 올라가 어댑터를 부르지 않는다(표식 없이 쓰기 0)."""
+    command.provider_call_started_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def _recover_interrupted_commands(db: AsyncSession, *, now: datetime) -> int:
+    """story #4287 — 상한 시간을 넘긴 in_progress 명령을 되살린다. 판정은 영속 표식 하나(PO 00:16Z):
+    - `claimed_at` 있음 · 표식 없음 → 공급자 쓰기 전이 확실 → `PRE_CALL_ERROR_CODE`(transient)로 자동 재시도(4272의 «호출 전» 갈래와
+      같은 코드 · 같은 백오프 · 같은 재시도 상한).
+    - 표식 있음 → 나갔는지 모름 → `PUBLICATION_WORKER_INTERRUPTED`(needs_check dead_letter · 자동 재시도 0 · 멈춤 통지).
+    - `claimed_at` 없음(이 칸이 생기기 전에 집힌 옛 행) → «호출 전 확실»로 읽지 않는다 → needs_check.
+    행마다 자기 트랜잭션 · SKIP LOCKED(겹친 틱이 같은 행을 두 번 회수하지 않는다)."""
+    threshold = now - STUCK_IN_PROGRESS_THRESHOLD
+    stuck_ids = (await db.execute(
+        select(PublicationCommand.id).where(
+            PublicationCommand.status == "in_progress",
+            func.coalesce(PublicationCommand.claimed_at, PublicationCommand.updated_at) < threshold,
+        ).order_by(PublicationCommand.created_at.asc()).limit(BATCH_SIZE)
+    )).scalars().all()
+    await db.commit()
+    recovered = 0
+    for command_id in stuck_ids:
+        try:
+            command = (await db.execute(
+                select(PublicationCommand).where(
+                    PublicationCommand.id == command_id, PublicationCommand.status == "in_progress",
+                ).with_for_update(skip_locked=True)
+            )).scalar_one_or_none()
+            if command is None:
+                await db.rollback()
+                continue
+            call_may_have_started = command.provider_call_started_at is not None or command.claimed_at is None
+            error_code = WORKER_INTERRUPTED_ERROR_CODE if call_may_have_started else PRE_CALL_ERROR_CODE
+            await apply_command_failure(db, command, error_code=error_code, last_error=error_code, now=now)
+            await db.commit()
+            recovered += 1
+        except Exception:  # 한 행의 회수 실패가 틱을 막지 않는다(다음 틱이 다시 본다).
+            await db.rollback()
+            logger.exception("publication command 회수 실패 command_id=%s", command_id)
+    return recovered
+
+
 async def process_due_publication_commands(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3414 AC3 — cron 워커의 유일한 진입점. `scheduled_at`(예약 시각, null=즉시라
     이미 동기 경로가 처리했어야 함 — 여기 남아 있다면 그 동기 경로가 중간에 죽은
@@ -1329,6 +1387,8 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
 
     await requeue_paused_commands_of_unpaused_orgs(db)
     await db.commit()
+    # story #4287 — 집힌 채 멈춘 명령을 이번 틱의 집기 전에 되살린다(«호출 전»으로 되살린 것은 백오프 뒤 다음 틱에 한 번).
+    recovered = await _recover_interrupted_commands(db, now=now)
     rows = (await db.execute(
         select(PublicationCommand).where(
             PublicationCommand.status == "pending",
@@ -1341,13 +1401,16 @@ async def process_due_publication_commands(db: AsyncSession, *, now: datetime | 
 
     for command in rows:
         command.status = "in_progress"
+        # story #4287 — 집은 시각(회수 기준) · 표식은 이번 시도 몫이라 비운다(앞 시도의 표식이 남아 이번 시도를 needs_check로 보내지 않게).
+        command.claimed_at = now
+        command.provider_call_started_at = None
     await db.commit()
 
     counts = {
         "completed": 0, "pending_retry": 0, "dead_letter": 0, "blocked": 0, "voided": 0,
         # story #3474 — 게이트 재검증 실패 전용 종결 상태. "pending_retry" 버킷에
         # 안 섞는다(재시도 대상이 아니므로 그 이름이 거짓말이 된다).
-        "blocked_unapproved": 0, "error": 0,
+        "blocked_unapproved": 0, "error": 0, "recovered": recovered,
     }
     # story #4272 — rollback은 세션의 ORM 객체를 전부 만료시킨다. 미리 읽은 행을 그대로 돌면 한 건의 rollback 뒤
     # 다음 건(과 except의 로그)이 만료 속성을 읽다 비동기 지연 적재로 MissingGreenlet — 배치 전체가 멈추고 이미
