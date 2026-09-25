@@ -281,6 +281,25 @@ describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)',
     const markup = renderWithIntl(<ProofCapsule {...withoutHuman} density="audit" />);
     expect(markup).not.toContain('undefined');
   });
+
+  // [SID:4286 · 까디르 873bcf080] 활동 로그가 넘긴 label을 버려 이름 없는 행위자가 빈칸이던 것 — 아바타(아이콘) · 시각 줄 둘 다 label.
+  it('이름 없는 행위자(name null + label) — 아바타는 아이콘 + 접근성 이름 label · 시각 줄에 label(사람 · 에이전트)', () => {
+    const { human: _human, ...withoutHuman } = BASE;
+    const humanMarkup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" now="3일 전" human={{ name: null, label: '이름 없는 구성원', role: 'human' }} />,
+    );
+    expect(humanMarkup).toContain('aria-label="이름 없는 구성원"');
+    expect(humanMarkup).toContain('3일 전 이름 없는 구성원');
+    expect(humanMarkup).toContain('rounded-md');
+    expect(humanMarkup).not.toContain('>이름<');
+
+    const agentMarkup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" now="3일 전" agent={{ name: null, label: '이름 없는 에이전트' }} />,
+    );
+    expect(agentMarkup).toContain('aria-label="이름 없는 에이전트"');
+    expect(agentMarkup).toContain('3일 전 이름 없는 에이전트');
+    expect(agentMarkup).toContain('rounded-full');
+  });
 });
 
 describe('ProofCapsule (footer slot — card·full 밀도, Board card 확산+story #2926 P0-F F2 gates/[id] 실기능 이관)', () => {

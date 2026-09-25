@@ -33,6 +33,17 @@ describe('findMemberNameFallbacks (story #4286 regression guard)', () => {
     expect(kinds("description={`${t('runId')}: ${run.id.slice(0, 8)}…`}")).toEqual([]);
   });
 
+  // [SID:4286 · 까디르 873bcf080] 인덱스 접근 · `|| id`를 놓치던 구멍 — 넓힌 뒤에도 id 아닌 폴백 · 구성원 아닌 id는 그대로 통과.
+  it('넓힌 모양(인덱스 접근 · || · 맨 id · 라벨 변수)의 음성 대조 — 고친 모양 · 구성원 아닌 id는 안 잡는다', () => {
+    expect(kinds("{nameById[row.blocked_member_id] ?? tc('memberUnknown')}")).toEqual([]);
+    expect(kinds("const label = memberNameById(memberMap, row.blocked_member_id, tc, tc('memberUnknown'));")).toEqual([]);
+    expect(kinds("const authorName = memberById.get(reply.created_by)?.name?.trim() || tc('memberUnknown');")).toEqual([]);
+    expect(kinds('const n = project?.name || projectId;')).toEqual([]);
+    expect(kinds('const label = channelLabel ?? channelId;')).toEqual([]);
+    expect(kinds('const title = docName ?? doc.id;')).toEqual([]);
+    expect(kinds('const idLabel = names[i] ?? id.slice(0, 8);')).toEqual(['id-fragment']); // 조각은 예전 패턴이 잡는다(종류 같음)
+  });
+
   it('«있는지» 조건의 이메일은 잡지 않는다 — 이름을 만드는 값 자리만(4638 trust-utils 모양)', () => {
     expect(kinds("if (name || m.email) lookup.set(m.id, { id: m.id, name, email: m.email ?? undefined, role: m.role ?? undefined });")).toEqual([]);
     expect(kinds('const label = m.name || m.email;')).toEqual(['email-whole']);

@@ -45,8 +45,14 @@ const PATTERNS: { kind: FallbackKind; re: RegExp }[] = [
   // 이름 표 조회 뒤 폴백으로 아무 id나 자름 — `memberNames[x] ?? id.slice(0, 6)` · `?.name ?? \`#${id.slice(0, 8)}\``
   { kind: 'id-fragment', re: new RegExp(String.raw`(?:\b(?:memberNames|memberMap|memberNameById|names)\[[^\]]+\]|\?\.name)[^;\n]*?(?:\?\?|\|\|)[^;\n]*?\b\w*[iI]d${SLICE}`) },
   // 이름을 못 찾으면 id 통째 — `?.name ?? memberId` · `?.label ?? approverId`
-  // (프로젝트 · 조직 id는 구성원이 아니라 뺀다 — 오른쪽이 구성원 id처럼 생긴 이름일 때만)
-  { kind: 'id-fragment', re: new RegExp(String.raw`\?\.(?:name|label)\s*\?\?\s*(?:[A-Za-z_]+\.)*${MEMBER_ID_NAME}\b(?!\s*[.(\[])`) },
+  // (프로젝트 · 조직 id는 구성원이 아니라 뺀다 — 오른쪽이 구성원 id처럼 생긴 이름이거나 한정자 없는 맨 `id`일 때만 · `doc.id`는 아님)
+  // [SID:4286 · 까디르 873bcf080] `|| id`(`?.name?.trim() || reply.created_by`) · 맨 `id`(`j.data?.name ?? id`)도 — `??`만 보던 구멍.
+  { kind: 'id-fragment', re: new RegExp(String.raw`\?\.(?:name|label)(?:\??\.trim\(\))?\s*(?:\?\?|\|\|)\s*(?:(?:[A-Za-z_]+\.)*${MEMBER_ID_NAME}|id)\b(?!\s*[.(\[])`) },
+  // [SID:4286 · 까디르 873bcf080] 이름 표를 인덱스로 조회한 값 자체 뒤 id 통째 — `nameById[row.blocked_member_id] ?? row.blocked_member_id`
+  // (표 값이 이름 문자열이라 `?.name`이 없는 모양 · 위 패턴이 못 봤다)
+  { kind: 'id-fragment', re: new RegExp(String.raw`\b(?:memberNames|memberMap|memberNameById|nameById|names|memberById)(?:\[[^\]]+\]|\.get\([^)]*\))\s*(?:\?\?|\|\|)\s*(?:(?:[A-Za-z_]+\.)*${MEMBER_ID_NAME}|id)\b(?!\s*[.(\[])`) },
+  // [SID:4286] 이름 · 라벨 변수 뒤 구성원 id 통째 — `targetMemberLabel ?? targetMemberId`
+  { kind: 'id-fragment', re: new RegExp(String.raw`\b[a-z]\w*(?:Name|Label)\s*(?:\?\?|\|\|)\s*(?:[A-Za-z_]+\.)*${MEMBER_ID_NAME}\b(?!\s*[.(\[])`) },
   // resolveName 기본값이 id를 그대로 돌림 — `resolveName = (id) => id`
   { kind: 'id-fragment', re: /\bresolveName\s*=\s*\(\s*(\w+)\s*\)\s*=>\s*\1\b\s*[,)]/ },
   { kind: 'question-mark', re: /(?:\?\?|\|\|)\s*['"`]\?['"`]/ },
@@ -189,6 +195,11 @@ export const SELF_TEST_SAMPLES: { kind: FallbackKind; code: string }[] = [
   { kind: 'dash-fallback', code: "? localAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')" },
   { kind: 'email-whole', code: "const name = user.user_metadata?.name\n    || user.user_metadata?.full_name\n    || user.email\n    || tc('unknown');" },
   { kind: 'id-fragment', code: 'const n = memberMap[id]?.name\n  ?? id.slice(0, 8);' },
+  // [SID:4286 · 까디르 873bcf080] 인덱스 접근 · `|| id` · 맨 `id` · 라벨 변수(실제 코드 모양 그대로)
+  { kind: 'id-fragment', code: '{nameById[row.blocked_member_id] ?? row.blocked_member_id}' },
+  { kind: 'id-fragment', code: 'return [id, j.data?.name ?? id] as const;' },
+  { kind: 'id-fragment', code: 'const authorName = memberById.get(reply.created_by)?.name?.trim() || reply.created_by;' },
+  { kind: 'id-fragment', code: "{t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}" },
 ];
 
 export function runSelfTest(): string[] {

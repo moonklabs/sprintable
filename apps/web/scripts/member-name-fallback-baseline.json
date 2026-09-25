@@ -10,5 +10,13 @@
   {
     "key": "services/memo.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;",
     "reason": "퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) — 메모 답글 작성자 이름을 만드는 데이터 층(같은 파일 243줄과 같은 사유)"
+  },
+  {
+    "key": "components/chat/delivery-contract-modal.tsx::id-fragment::{t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}",
+    "reason": "기록만(PO 決 2026-09-25 · 가드 세기 뒤 드러남) — targetMemberId를 넘기는 호출처는 member-notification-preferences-summary:142 하나이고 거기서 targetMemberLabel(memberLabel: string 필수)을 늘 같이 넘긴다 · 채팅 페이지 호출은 targetMemberId 없음 → `?? targetMemberId` 갈래 도달 0"
+  },
+  {
+    "key": "services/memo-reply-webhook-dispatch.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name?.trim() || reply.created_by;",
+    "reason": "기록만(PO 決 2026-09-25 · 가드 세기 뒤 드러남) — 호출처가 services/memo.ts 하나뿐인데 memo.ts는 퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0, 같은 기준표 memo.ts 두 줄과 같은 사유)"
   }
 ]
