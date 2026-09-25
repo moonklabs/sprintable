@@ -142,6 +142,63 @@ describe('EntityDispatchPanel — 시스템 발행 제외(story #3997 CHANGES)',
     expect(options.some((t) => t?.includes('홍길동'))).toBe(true);
     expect(options.some((t) => t?.includes('점검봇'))).toBe(true);
   });
+  it('⭐story #4311 — 담당자 select 행 라벨은 memberRowLabels로 · 이름 없는 둘이면 서로 갈린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'aaaaaaaa-1', name: null, type: 'human', is_active: true },
+              { id: 'bbbbbbbb-2', name: null, type: 'human', is_active: true },
+            ],
+          }),
+        };
+      }
+      if (url === '/api/stories/s1') return { ok: true, json: async () => ({ data: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId={null} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    const options = [...container.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options).toContain(`${koMessages.common.memberUnnamed} · aaaaaaaa`);
+    expect(options).toContain(`${koMessages.common.memberUnnamed} · bbbbbbbb`);
+  });
+
+  it('⭐story #4311 — 담당자 select 행 라벨은 memberRowLabels로 · 동명이인도 서로 갈린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'aaaaaaaa-1', name: '송윤재', type: 'human', is_active: true },
+              { id: 'bbbbbbbb-2', name: '송윤재', type: 'human', is_active: true },
+            ],
+          }),
+        };
+      }
+      if (url === '/api/stories/s1') return { ok: true, json: async () => ({ data: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId={null} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    const options = [...container.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options).toContain('송윤재 · aaaaaaaa');
+    expect(options).toContain('송윤재 · bbbbbbbb');
+  });
 });
 
 // story #3007(로드맵 P2·PR-E, L1) — "더보기" 드롭다운은 floating이라 --elev-overlay.

@@ -26,6 +26,7 @@ import {
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { memberRowLabels } from '@/lib/member-display';
 
 interface BridgedStory {
   id: string;
@@ -204,6 +205,10 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
 
   const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
   const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const humanRowLabels = useMemo(() => memberRowLabels(humanMembers, tc, () => ''), [humanMembers, tc]);
+  const agentRowLabels = useMemo(() => memberRowLabels(agentMembers, tc, () => ''), [agentMembers, tc]);
+  const missingRowLabels = useMemo(() => memberRowLabels(missingMembers, tc, () => ''), [missingMembers, tc]);
   const totalTasks = useMemo(() => stories.reduce((sum, story) => sum + story.task_count, 0), [stories]);
   const doneTasks = useMemo(() => stories.reduce((sum, story) => sum + story.done_task_count, 0), [stories]);
   const currentEntry = currentTeamMemberId ? entryByAuthorId[currentTeamMemberId] : undefined;
@@ -840,6 +845,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                         <StandupBoardCard
                           key={member.id}
                           member={member}
+                          rowLabel={humanRowLabels.get(member.id) ?? member.name}
                           entry={entry}
                           feedback={memberFeedback}
                           isCurrentUser={isCurrentUser}
@@ -871,6 +877,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                         <StandupBoardCard
                           key={member.id}
                           member={member}
+                          rowLabel={agentRowLabels.get(member.id) ?? member.name}
                           entry={entry}
                           feedback={memberFeedback}
                           isCurrentUser={false}
@@ -900,7 +907,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                   <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4">
                     <div className="flex flex-wrap gap-1.5">
                       {missingMembers.map((m) => (
-                        <Badge key={m.id} variant="outline">{m.name ?? tc('memberUnnamed')}</Badge>
+                        <Badge key={m.id} variant="outline">{missingRowLabels.get(m.id)}</Badge>
                       ))}
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">{t('missingOrgHint')}</p>

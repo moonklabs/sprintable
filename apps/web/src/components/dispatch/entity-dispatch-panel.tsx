@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -9,6 +9,7 @@ import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { memberRowLabels } from '@/lib/member-display';
 
 interface TeamMember {
   id: string;
@@ -38,6 +39,10 @@ export function EntityDispatchPanel({
   mobileMode,
 }: EntityDispatchPanelProps) {
   const [members, setMembers] = useState<TeamMember[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const tc = useTranslations('common');
+  const rowLabels = useMemo(() => memberRowLabels(members, tc, () => ''), [members, tc]);
+
   const [assigneeId, setAssigneeId] = useState<string>(currentAssigneeId ?? '');
   const [dispatching, setDispatching] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -142,7 +147,7 @@ export function EntityDispatchPanel({
         <option value="">{t('assigneeSelectPlaceholder')}</option>
         {members.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.name}
+            {rowLabels.get(m.id)}
           </option>
         ))}
       </select>

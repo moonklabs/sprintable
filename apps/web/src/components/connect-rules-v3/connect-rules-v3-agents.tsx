@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import {
   ConnectRulesV3SectionSkeleton,
 } from './connect-rules-v3-section-state';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { memberRowLabels } from '@/lib/member-display';
 
 /**
  * story #3982 §(c) 연결된 에이전트 — `GET /api/team-members?type=agent` 1콜만 마운트
@@ -78,6 +79,10 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
   const t = useTranslations('connectRulesV3');
   const ta = useTranslations('agents');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const tc = useTranslations('common');
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => [a.agent_role, runtimeLabel(a.runtime_type)].filter(Boolean).join(' · ')), [agents, tc]);
+
   const [projectsById, setProjectsById] = useState<Record<string, string> | null>(null);
   const [accessMatrix, setAccessMatrix] = useState<AccessMatrixRow[] | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'error' | 'ready'>('loading');
@@ -171,7 +176,7 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span className="truncate font-medium text-foreground">{agent.name}</span>
+                    <span className="truncate font-medium text-foreground">{rowLabels.get(agent.id)}</span>
                     {roleLine ? <span className="text-xs text-muted-foreground">{roleLine}</span> : null}
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{presenceLabel}</p>

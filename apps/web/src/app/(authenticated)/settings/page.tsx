@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -46,6 +46,7 @@ import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { memberRowLabels } from '@/lib/member-display';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -220,6 +221,8 @@ export default function SettingsPage() {
   const [savingProject, setSavingProject] = useState(false);
   const [memberProjectId, setMemberProjectId] = useState('');
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  // story #4311 — 휴먼 웹훅 줄은 이름만 보이니 같은 이름 구성원이 갈리게 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const webhookRowLabels = useMemo(() => memberRowLabels(projectMembers.filter((m) => m.type === 'human'), tc, () => ''), [projectMembers, tc]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
   const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
@@ -1348,7 +1351,7 @@ export default function SettingsPage() {
                           return (
                             <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{member.name}</span>
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{webhookRowLabels.get(member.id)}</span>
                                 <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
                                   <Webhook className="size-3" aria-hidden />
                                   {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}

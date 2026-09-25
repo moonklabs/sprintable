@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import {
 import { resolveRecipientPrefill } from '@/lib/epic-steer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { memberRowLabels } from '@/lib/member-display';
 
 interface AgentMember {
   id: string;
@@ -55,6 +56,10 @@ function readRemembered(projectId: string): string[] {
 export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: SteerDispatchModalProps) {
   const t = useTranslations('goals');
   const [agents, setAgents] = useState<AgentMember[] | null>(null);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const tc = useTranslations('common');
+  const rowLabels = useMemo(() => memberRowLabels(agents ?? [], tc, () => ''), [agents, tc]);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +162,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
                       }`}>
                         {on ? <Check className="size-3" strokeWidth={3} aria-hidden="true" /> : null}
                       </span>
-                      <span className="truncate">{a.name}</span>
+                      <span className="truncate">{rowLabels.get(a.id)}</span>
                     </button>
                   </li>
                 );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Bot, TrendingUp, Trophy, Zap, Clock, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberRowLabels } from '@/lib/member-display';
 
 interface AgentMember {
   id: string;
@@ -89,6 +90,9 @@ export function AgentPerformancePanel() {
   const tc = useTranslations('common');
   const { projectId } = useDashboardContext();
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, () => ''), [agents, tc]);
+
   const [velocity, setVelocity] = useState<SprintVelocityItem[]>([]);
   const [loading, setLoading] = useState(true);
   // story #4185(유나 design) — 묶음 호출 자체가 실패하면 전원이 «0»으로 보여 «실적 없음»과 갈리지 않았다.
@@ -189,7 +193,7 @@ export function AgentPerformancePanel() {
                   <div key={agent.id} className="space-y-2 bg-background p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-foreground">{agent.name}</div>
+                        <div className="truncate text-sm font-semibold text-foreground">{rowLabels.get(agent.id)}</div>
                         {agent.rank != null && (
                           <div className="mt-0.5 flex items-center gap-1">
                             <Trophy className="size-3 text-warning-strong" />
@@ -260,7 +264,7 @@ export function AgentPerformancePanel() {
                       <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning-strong' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning-strong' : 'text-muted-foreground'}`}>
                         {idx + 1}
                       </span>
-                      <span className="flex-1 truncate text-sm font-medium text-foreground">{agent.name}</span>
+                      <span className="flex-1 truncate text-sm font-medium text-foreground">{rowLabels.get(agent.id)}</span>
                       <Badge variant={idx === 0 ? 'success' : 'chip'} className="shrink-0 text-xs">
                         {agent.balance} TJSB
                       </Badge>

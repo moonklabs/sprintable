@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronRight, Plus } from 'lucide-react';
@@ -23,6 +23,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { orgRoleLabel } from '@/lib/org-role-label';
+import { memberRowLabels } from '@/lib/member-display';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -120,6 +121,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [agents, setAgents] = useState<OrgAgent[]>([]);
+  // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, () => ''), [agents, tc]);
+
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -276,7 +280,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                   <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate font-medium text-foreground hover:underline hover:text-primary">{agent.name}</span>
+                      <span className="truncate font-medium text-foreground hover:underline hover:text-primary">{rowLabels.get(agent.id)}</span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{t('agentMember')}</Badge>

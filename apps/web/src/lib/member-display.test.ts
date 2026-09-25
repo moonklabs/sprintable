@@ -220,3 +220,55 @@ describe('행 꼬리 규칙 한 곳 · 선택 목록 라벨([SID:4286])', () => 
   });
 });
 
+
+describe('story #4311 — 보이는 라벨이 같은 행(동명이인)도 갈린다(유나 확정 2026-09-25)', () => {
+  const tc = (k: string) => ({ memberUnnamed: '이름 없는 구성원', agentUnnamed: '이름 없는 에이전트' } as Record<string, string>)[k] ?? k;
+  const A = { id: 'e75ca548-aaaa', name: '송윤재' };
+  const B = { id: '2fd14616-bbbb', name: '송윤재' };
+
+  it('⭐같은 이름 둘 → 둘 다 «이름 · ID 앞 8자»', () => {
+    const m = memberRowLabels([A, B], tc, () => '');
+    expect(m.get(A.id)).toBe('송윤재 · e75ca548');
+    expect(m.get(B.id)).toBe('송윤재 · 2fd14616');
+  });
+
+  it('음성 — 이름이 다르면 꼬리 없음 · 겹치지 않는 셋째도 그대로', () => {
+    const m = memberRowLabels([A, { id: 'c-3', name: '비' }], tc, () => '');
+    expect(m.get(A.id)).toBe('송윤재');
+    expect(m.get('c-3')).toBe('비');
+    expect(memberRowLabels([A, B, { id: 'c-3', name: '비' }], tc, () => '').get('c-3')).toBe('비');
+  });
+
+  it('역할이 행에 보이고 서로 다르면 꼬리 없음(신뢰 센터 «관리자» · «소유자») · 역할이 같으면 꼬리', () => {
+    const role = (r: { id: string }) => (r.id === A.id ? '관리자' : '소유자');
+    const m = memberRowLabels([A, B], tc, role);
+    expect(m.get(A.id)).toBe('송윤재');
+    expect(m.get(B.id)).toBe('송윤재');
+    const same = memberRowLabels([A, B], tc, () => '멤버');
+    expect(same.get(A.id)).toBe('송윤재 · e75ca548');
+  });
+
+  it('타입으로 나누지 않는다 — 사람 «송윤재»와 에이전트 «송윤재»도 겹침', () => {
+    const m = memberRowLabels([{ ...A, type: 'human' }, { ...B, type: 'agent' }], tc, () => '');
+    expect(m.get(A.id)).toBe('송윤재 · e75ca548');
+    expect(m.get(B.id)).toBe('송윤재 · 2fd14616');
+  });
+
+  it('`<option>`(memberOptionLabels)도 같은 표기 · 이름 없는 사람/에이전트는 글자가 달라 자연히 갈림', () => {
+    const m = memberOptionLabels([{ ...A, type: 'human' }, { ...B, type: 'agent' }], tc);
+    expect(m.get(A.id)).toBe('송윤재 · e75ca548');
+    const u = memberOptionLabels([{ id: 'u-1', name: null, type: 'human' }, { id: 'u-2', name: null, type: 'agent' }], tc);
+    expect(u.get('u-1')).toBe('이름 없는 구성원');
+    expect(u.get('u-2')).toBe('이름 없는 에이전트');
+  });
+
+  it('disambiguateFallbackLabels(차단 목록 · 정책 목록 행)도 같은 규칙 — 규칙은 한 곳', () => {
+    const m = disambiguateFallbackLabels([{ id: A.id, label: '송윤재', fallback: false }, { id: B.id, label: '송윤재', fallback: false }]);
+    expect(m.get(A.id)).toBe('송윤재 · e75ca548');
+  });
+
+  it('같은 id가 두 번 들어와도(중복 행) 겹침이 아니다 — 서로 다른 구성원일 때만', () => {
+    const m = memberRowLabels([A, { ...A }], tc, () => '');
+    expect(m.get(A.id)).toBe('송윤재');
+  });
+});

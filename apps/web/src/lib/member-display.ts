@@ -33,22 +33,25 @@ export interface MemberRow {
 
 /**
  * [SID:4286 · 유나 06:49Z] 행 꼬리 규칙은 **여기 한 곳**에만 정의한다 — memberRowLabels · disambiguateFallbackLabels가 둘 다 이것을 부른다
- * (두 헬퍼에 따로 살면 한쪽만 고쳐져 갈린다). 규칙(#4284 · 4638 · 유나 결정 4): 같은 폴백 라벨이 서로 다른 행 둘 이상에 서면 그 행에만
- * «· ID 앞 8자» 꼬리 — 단 역할 라벨이 그 행들 사이에서 유일하면(행에 이미 보인다) 꼬리 없음. 실명 행 · 겹치지 않는 폴백은 그대로.
+ * (두 헬퍼에 따로 살면 한쪽만 고쳐져 갈린다).
+ * 규칙(#4284 · 4638 · 유나 결정 4 → story #4311 유나 확정 2026-09-25): 한 목록 안에서 **보이는 라벨 글자**가 같은 서로 다른 행이 둘 이상이면
+ * 그 행에만 «· ID 앞 8자» 꼬리. 이름이 없어서 같든(«이름 없는 구성원») 이름이 같든(«송윤재») 똑같이 — 예전엔 폴백 행끼리만 갈라
+ * 동명이인(배포 29 스탠드업 미작성 «송윤재» 둘)이 구분되지 않았다. 단 역할 라벨이 그 행들 사이에서 유일하면(행에 이미 보인다 ·
+ * roleLabel을 넘기는 곳) 꼬리 없음. 타입(사람 · 에이전트)으로 나누지 않는다(아이콘은 aria-hidden · `<option>`엔 표식 없음).
+ * 겹치지 않는 라벨은 그대로. `fallback`은 호출부 호환용으로 남긴 표시(판정엔 안 쓴다).
  */
 function tailSharedFallbacks(
-  items: ReadonlyArray<{ id: string; label: string; fallback: boolean; role?: string }>,
+  items: ReadonlyArray<{ id: string; label: string; fallback?: boolean; role?: string }>,
 ): Map<string, string> {
-  const groups = new Map<string, Map<string, string>>(); // 폴백 라벨 → (id → 역할)
+  const groups = new Map<string, Map<string, string>>(); // 보이는 라벨 → (id → 역할)
   for (const it of items) {
-    if (!it.fallback) continue;
     const g = groups.get(it.label) ?? groups.set(it.label, new Map()).get(it.label)!;
     g.set(it.id, it.role ?? '');
   }
   const out = new Map<string, string>();
   for (const it of items) {
-    const group = it.fallback ? groups.get(it.label)! : undefined;
-    if (!group || group.size < 2) { out.set(it.id, it.label); continue; }
+    const group = groups.get(it.label)!;
+    if (group.size < 2) { out.set(it.id, it.label); continue; }
     const role = it.role ?? '';
     const roleIsUnique = role !== '' && [...group.values()].filter((r) => r === role).length === 1;
     out.set(it.id, roleIsUnique ? it.label : `${it.label} · ${it.id.slice(0, 8)}`);
@@ -56,8 +59,8 @@ function tailSharedFallbacks(
   return out;
 }
 
-/** story #4284(유나 판정 · 4638 규칙) — 목록 **행** 라벨. 이름 없는 행이 둘 이상이면 서로 갈리게: 역할 라벨이 그 행들 사이에서 유일하면
- * 그걸로 충분(행에 이미 보인다) · 같거나 없으면 «· ID 앞 8자» 꼬리. 이름 있는 행 · 이름 없는 행이 하나뿐이면 꼬리 없음.
+/** story #4284(유나 판정 · 4638 규칙) · story #4311 — 목록 **행** 라벨. 보이는 라벨이 같은 행(이름 없음 · 동명이인)이 둘 이상이면 서로 갈리게:
+ * 역할 라벨이 그 행들 사이에서 유일하면 그걸로 충분(행에 이미 보인다) · 같거나 없으면 «· ID 앞 8자» 꼬리. 라벨이 겹치지 않으면 꼬리 없음.
  * 본문에 넣는 글자(예: 멘션 `@…`)엔 쓰지 않는다 — 그건 memberDisplayLabel 그대로.
  * [SID:4286] `baseLabel` — 행의 기본 라벨(기본 memberDisplayLabel). 타입 표식을 둘 수 없는 `<option>` 목록은 memberOrAgentLabel을 넘긴다(유나 규칙). */
 export function memberRowLabels<T extends { id: string; name: string | null }>(
@@ -140,8 +143,8 @@ export function memberLookup(
   return { label: t('memberUnknown'), fallback: true };
 }
 
-// [SID:4286 · 유나 결정 4] 한 목록 안에서 같은 폴백 글자(«알 수 없는 구성원» 등)가 서로 다른 id 둘 이상에 서면 그 폴백에만
-// id 앞 8자 꼬리를 붙여 가른다 — 규칙 정의는 tailSharedFallbacks 한 곳(memberRowLabels와 같은 규칙).
+// [SID:4286 · 유나 결정 4] 한 목록 안에서 같은 글자(«알 수 없는 구성원» 등 · story #4311부터 동명이인 실명도)가 서로 다른 id 둘 이상에
+// 서면 그 행에 id 앞 8자 꼬리를 붙여 가른다 — 규칙 정의는 tailSharedFallbacks 한 곳(memberRowLabels와 같은 규칙).
 export function disambiguateFallbackLabels(
   items: ReadonlyArray<{ id: string; label: string; fallback: boolean }>,
 ): Map<string, string> {
