@@ -94,7 +94,7 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
     expect(wiki.hasAttribute('data-doc-internal-link'), '선택자가 걸리는 속성').toBe(true);
     expect(wiki.classList.contains('text-foreground'), '루트 (0,1,1)에 밀리는 보통 선언 아님').toBe(false);
     // 루트 링크 규칙은 이 PR이 안 건드린다(4315 몫).
-    expect((container.firstElementChild as HTMLElement).className).toContain('[&_a]:text-brand-text');
+    expect((container.firstElementChild as HTMLElement).className).toContain('[&_a:not(:where([data-doc-part],[data-doc-part]_*))]:text-brand-text');
   });
 
   // 까디르 4673 P3 — 효과가 다시 돌 때(대응이 비거나 publicMode 전환) 이미 만든 링크가 글자로 돌아가야 한다.

@@ -127,6 +127,17 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/design-doc');
   });
 
+  // story #4316 — alias로 옮겨 간 문서의 임베드 카드: 경로 줄도 href와 같은 지금 slug(옛 `/old-design`을 보이면 링크와 다른 말).
+  it('⭐alias 임베드 카드의 경로 줄 = 지금 slug(href와 같음) · 옛 slug 0(마크다운 · HTML)', async () => {
+    for (const format of ['markdown', 'html'] as const) {
+      await renderDoc('<div data-page-embed data-title="설계" data-slug="old-design"></div>\n', { format });
+      const link = container.querySelector('[data-page-embed] a')!;
+      expect(link.getAttribute('href'), format).toBe('/ws-1/proj-b/docs/design-doc');
+      expect(link.textContent, format).toContain('/design-doc');
+      expect(link.textContent, format).not.toContain('old-design');
+    }
+  });
+
   it('HTML 포맷도 같은 규칙 — 실재 밖 위키 링크는 글자 그대로 · 실재 밖 임베드는 비활성 카드', async () => {
     await renderDoc(
       '<p><span data-type="wikiLink" data-title="설계" data-slug="design-doc">설계</span> <span data-type="wikiLink" data-title="없음" data-slug="gone-doc">없음</span></p>'
@@ -206,7 +217,11 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     expect(html).not.toContain('onmouseover');
     expect(html).not.toContain('color:red');
     expect(html).not.toContain('javascript:');
-    expect(html).not.toContain('evil.test');
+    // story #4316 — 흉내 낸 표지(렌더러 nonce 없음)는 믿지 않는다: 글쓴이가 적은 보통 외부 링크로 그려지고(마크다운 `[x](https://…)`와 같음)
+    // 표지 속성 · 문서 링크 모양 · 클라이언트 이동은 없다. 문서 링크는 진짜 위키 span 하나뿐.
+    const forged = container.querySelector('a[href="https://evil.test/x"]');
+    expect(forged, '보통 링크로 그려짐').not.toBeNull();
+    expect(forged!.hasAttribute('data-doc-internal-link')).toBe(false);
     expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc']);
   });
 });

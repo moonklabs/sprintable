@@ -22,6 +22,8 @@ export interface RemarkWikiLinksOptions {
   /** 적힌 slug → 지금 slug(열리는 문서) · 못 풀면 null. */
   resolve: (slug: string) => string | null;
   href: (slug: string) => string;
+  /** story #4316 — 링크 표지 값(지금 slug → 표지 문자열). 렌더러는 글쓴이가 흉내 낼 수 없는 인스턴스 nonce를 붙인다. 기본 = 지금 slug 그대로. */
+  marker?: (target: string) => string;
 }
 
 // BE `wiki_link_slug_candidates`(backend/app/routers/docs.py)와 같은 문법: slug 1~200자(대괄호 · 파이프 · 줄바꿈 제외) + 선택 «|글».
@@ -43,7 +45,7 @@ function splitText(value: string, options: RemarkWikiLinksOptions): MdNode[] | n
       type: 'link',
       url: options.href(target),
       children: [{ type: 'text', value: label }],
-      data: { hProperties: { dataDocInternalLink: target } },
+      data: { hProperties: { dataDocInternalLink: options.marker ? options.marker(target) : target } },
     });
     last = m.index + m[0].length;
     linked = true;

@@ -47,7 +47,7 @@ describe('DocContentRenderer', () => {
       <DocContentRenderer content={'[약관](https://example.com/terms) 본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />,
     ));
     expect(markup).toContain('href="https://example.com/terms"');
-    expect(markup).toContain('[&amp;_a]:text-brand-text');
+    expect(markup).toContain('[&amp;_a:not(:where([data-doc-part],[data-doc-part]_*))]:text-brand-text');
     expect(markup).not.toMatch(/text-brand-soft|--brand-soft/);
   });
 
