@@ -22,7 +22,7 @@ def _async_url() -> str:
     return url.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
 
 
-def _app_with(engine, *, hold: asyncio.Event | None = None):
+def _app_with(engine):
     from fastapi import FastAPI
 
     from app.core.request_db_timing import RequestDbTimingMiddleware
@@ -53,12 +53,14 @@ def _parse(header: str) -> dict[str, float]:
 
 
 @pytest.mark.anyio
-async def test_counts_only_this_requests_sql_and_checkouts(caplog):
+async def test_counts_only_this_requests_sql_and_checkouts(caplog, monkeypatch):
     import httpx
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    from app.core.config import settings
     from app.core.request_db_timing import TimedAsyncAdaptedQueuePool, instrument_engine
 
+    monkeypatch.setattr(settings, "db_timing_log_enabled", True)
     engine = create_async_engine(_async_url(), poolclass=TimedAsyncAdaptedQueuePool, pool_size=2, max_overflow=0)
     instrument_engine(engine.sync_engine)
     caplog.set_level(logging.INFO, logger="app.db_timing")
@@ -103,6 +105,28 @@ async def test_pool_wait_is_measured_when_pool_is_full():
         t = _parse(r.headers["server-timing"])
         assert t["dbwait"] >= (held_s - 0.05) * 1000 * 0.8, t  # 쥔 시간 근처만큼 기다렸다
         assert t["sql_n"] == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_log_line_is_off_by_default_but_header_is_always_sent(caplog, monkeypatch):
+    """로그 한 줄은 환경 값(DB_TIMING_LOG_ENABLED)으로만 — 폴링 경로 때문에 양이 크다(PO). Server-Timing은 늘."""
+    import httpx
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import settings
+    from app.core.request_db_timing import TimedAsyncAdaptedQueuePool, instrument_engine
+
+    monkeypatch.setattr(settings, "db_timing_log_enabled", False)
+    engine = create_async_engine(_async_url(), poolclass=TimedAsyncAdaptedQueuePool, pool_size=1, max_overflow=0)
+    instrument_engine(engine.sync_engine)
+    caplog.set_level(logging.INFO, logger="app.db_timing")
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app_with(engine)), base_url="http://t") as c:
+            r = await c.get("/one")
+        assert _parse(r.headers["server-timing"])["sql_n"] == 1
+        assert not [rec for rec in caplog.records if rec.name == "app.db_timing"]
     finally:
         await engine.dispose()
 

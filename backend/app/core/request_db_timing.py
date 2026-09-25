@@ -6,7 +6,8 @@
 - SQL 수 · 합계: 엔진 cursor 이벤트(before/after_cursor_execute) — 요청 범위 contextvar에 더한다. SQLAlchemy async의 greenlet은
   드라이버 context를 그대로 쓴다(`gr_context = driver.gr_context`) — 요청 task의 contextvar가 보인다.
 - 풀 대기: 풀 클래스 `_do_get`(연결 하나를 내줄 때까지 · 새 물리 연결이면 연결 시간 포함)을 잰다.
-- 노출: 응답 헤더 `Server-Timing`(db · dbwait · 수) + 요청마다 로그 한 줄(`db_timing ...` · 키=값).
+- 노출: 응답 헤더 `Server-Timing`(db · dbwait · 수 · 늘) + 요청마다 로그 한 줄(`db_timing ...` · 키=값 · `DB_TIMING_LOG_ENABLED`일 때만 —
+  폴링 경로 때문에 양이 크다).
 
 계측 실패는 요청에 영향 0(fail-open) — 모든 기록은 try 안에서만.
 """
@@ -103,6 +104,10 @@ def server_timing_value(stats: _Stats, total_ms: float) -> str:
     )
 
 
+class _SkipLog(Exception):
+    pass
+
+
 class RequestDbTimingMiddleware:
     """순수 ASGI — BaseHTTPMiddleware는 핸들러를 다른 task에서 돌려 contextvar가 끊길 수 있다."""
 
@@ -138,6 +143,10 @@ class RequestDbTimingMiddleware:
             await self.app(scope, receive, send_and_capture)
         finally:
             try:
+                from app.core.config import settings  # 읽는 때에 본다(테스트가 값을 바꿀 수 있게)
+
+                if not settings.db_timing_log_enabled:
+                    raise _SkipLog
                 total_ms = (time.perf_counter() - start) * 1000
                 route = scope.get("route")
                 path = getattr(route, "path", None) or scope.get("path", "")
@@ -146,6 +155,8 @@ class RequestDbTimingMiddleware:
                     scope.get("method"), path, status, total_ms, stats.wait_ms, stats.checkouts, stats.sql_n,
                     stats.sql_ms, max(total_ms - stats.sql_ms - stats.wait_ms, 0.0),
                 )
+            except _SkipLog:
+                pass
             except Exception:  # noqa: BLE001
                 pass
             end(token)
