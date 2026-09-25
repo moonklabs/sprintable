@@ -71,6 +71,26 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     expect(probe().dataset.chip).toBe('true');
   });
 
+  it('⭐«채널»(/channel) · «보상»(/rewards) 로딩 — 같은 «경로 → 제목» 표(PO 4688 · AC2 전수의 남은 둘)', async () => {
+    const { default: ChannelLoading } = await import('@/app/(authenticated)/channel/loading');
+    await render(<ChannelLoading />);
+    expect(probe().textContent).toBe(koMessages.channel.title);
+    expect(probe().dataset.chip).toBe('true');
+    const { default: RewardsLoading } = await import('@/app/(authenticated)/rewards/loading');
+    await render(<RewardsLoading />);
+    expect(probe().textContent).toBe(koMessages.rewards.title);
+  });
+
+  it('⭐표의 모든 경로가 자기 loading.tsx에서 그 표로 폴백을 쥔다(새 경로를 표에만 넣고 로딩을 빠뜨리면 RED)', async () => {
+    const { FLAT_ROUTE_TOP_BAR } = await import('./flat-tab-top-bar');
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    for (const route of Object.keys(FLAT_ROUTE_TOP_BAR)) {
+      const file = path.resolve(__dirname, `../../app/(authenticated)/${route}/loading.tsx`);
+      expect(readFileSync(file, 'utf8'), `${route}/loading.tsx`).toContain(`<RouteTopBarFallback route="${route}" />`);
+    }
+  });
+
   it('화면 슬롯이 붙으면 화면이 이긴다(폴백은 슬롯이 빈 사이에만)', async () => {
     const { default: Loading } = await import('@/app/(authenticated)/more/loading');
     await render(<><Loading /><TopBarSlot title={<h1>화면 제목</h1>} showContextChip={false} /></>);

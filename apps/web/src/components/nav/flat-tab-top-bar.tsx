@@ -66,9 +66,47 @@ export function TopBarFallbackHolder({ title, showContextChip }: { title: ReactN
   return null;
 }
 
-/** 결재 loading 전용 — 도착 탭(?tab=)의 이름을 제목으로(수는 아직 모름 → 안 붙임). */
-export function InboxTopBarFallback() {
+/** «채널»(/channel) 상단바 제목 — 연결 상태 점은 화면만 안다(폴백은 점 없이). 화면과 폴백이 같이 쓴다. */
+export function ChannelTopBarTitle({ statusDot }: { statusDot?: { className: string; label: string } }) {
+  const t = useTranslations('channel');
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-foreground">{t('title')}</span>
+      {statusDot ? <span className={`h-2 w-2 rounded-full ${statusDot.className}`} title={statusDot.label} /> : null}
+    </div>
+  );
+}
+
+/** «보상»(/rewards) 상단바 제목 — 화면과 폴백이 같이 쓴다. */
+export function RewardsTopBarTitle() {
+  const t = useTranslations('rewards');
+  return <h1 className="text-sm font-medium">{t('title')}</h1>;
+}
+
+/** 결재 폴백 제목 — 도착 탭(?tab=)의 이름(수는 아직 모름 → 안 붙임). */
+function InboxFallbackTitle() {
   const tab = useSearchParams().get('tab') ?? 'notifications';
-  // key로 탭이 바뀌면 다시 쥔다(holder effect는 제목 엘리먼트를 deps에 안 넣는다).
-  return <TopBarFallbackHolder key={tab} title={<InboxTopBarTitle tab={tab} />} showContextChip />;
+  return <InboxTopBarTitle key={tab} tab={tab} />;
+}
+
+/**
+ * PO 판단(4688) — 셸 밖 평면 목적지의 **«경로 → 제목» 표 하나**(키 = `app/(authenticated)/<키>/` 경로 폴더 이름 · 이동 주소가 아니다 — 주소는
+ * nav-v3 목적지 모듈이 정한다). 각 경로의 loading.tsx가 이 표로 폴백을 쥐고, 화면은 같은 제목 컴포넌트로
+ * 슬롯을 채운다(정의 한 곳). 일감 탭은 4291(WorkTabsFrame)이 따로 쥔다.
+ */
+export const FLAT_ROUTE_TOP_BAR = {
+  more: { Title: MoreTopBarTitle, showContextChip: true },
+  inbox: { Title: InboxFallbackTitle, showContextChip: true },
+  chats: { Title: ChatsTopBarTitle, showContextChip: true },
+  channel: { Title: () => <ChannelTopBarTitle />, showContextChip: true },
+  rewards: { Title: RewardsTopBarTitle, showContextChip: true },
+} as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
+
+export type FlatRoute = keyof typeof FLAT_ROUTE_TOP_BAR;
+
+/** loading.tsx 한 줄 — 그 경로의 제목을 폴백으로 쥔다. 결재는 탭이 바뀌면 다시 쥔다(key). */
+export function RouteTopBarFallback({ route }: { route: FlatRoute }) {
+  const entry = FLAT_ROUTE_TOP_BAR[route];
+  const tab = useSearchParams().get('tab');
+  return <TopBarFallbackHolder key={route === 'inbox' ? `inbox:${tab ?? ''}` : route} title={<entry.Title />} showContextChip={entry.showContextChip} />;
 }
