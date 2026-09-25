@@ -9,6 +9,7 @@ import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createStoryRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { withRouteTiming } from '@/lib/server-timing';
 
 export async function POST(request: Request) {
   try {
@@ -37,7 +38,8 @@ export async function POST(request: Request) {
 // story ca37b2b0 — BE 배치 lookup(#2131) cap과 동일 상한. FE에서 먼저 잘라 보내 BE 422를 피한다.
 const IDS_BATCH_CAP = 200;
 
-export async function GET(request: Request) {
+// story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+export const GET = withRouteTiming('stories', async (request: Request) => {
   try {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
@@ -121,4 +123,4 @@ export async function GET(request: Request) {
   } catch (err: unknown) {
     return handleApiError(err);
   }
-}
+});

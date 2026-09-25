@@ -1,4 +1,5 @@
 import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
+import { withRouteTiming } from '@/lib/server-timing';
 
 /**
  * GET /api/billing/status — story #40659941(#2728 픽셀 검증 블로커). billing-tab.tsx가
@@ -7,6 +8,7 @@ import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
  * /api/* 전용, #2497)+CSP connect-src(브라우저가 백엔드 origin에 직접 못 붙음, 이 스토리의
  * 실 원인) 둘 다 프록시 경유일 때만 적용된다.
  */
-export async function GET(request: Request): Promise<Response> {
+// story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+export const GET = withRouteTiming('billing-status', async (request: Request): Promise<Response> => {
   return proxyToFastapiWrapped(request, '/api/v2/billing/status');
-}
+});

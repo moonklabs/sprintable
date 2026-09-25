@@ -7,6 +7,7 @@ import { getServerSession } from '@/lib/db/server';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getLocale } from '@/i18n/request';
 import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/lib/backend-signal';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 import { formatRouteTiming, isServerTimingEnabled, logRouteTiming, routeKindForPath, startRouteTimer, withServerTiming, type RouteTimer } from '@/lib/server-timing';
 import { bffEnvelopeError } from '@/lib/bff-envelope-error';
 
@@ -17,7 +18,8 @@ import { bffEnvelopeError } from '@/lib/bff-envelope-error';
 export { fastapiCall, mapApiError } from '@sprintable/storage-api';
 export type { ApiCallError } from '@sprintable/storage-api';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+// story #4299 AC2 — 서버 연결 풀(server-dispatcher)이 «백엔드 origin에만 h2»를 거는 기준과 같은 값(한 곳에서 읽음).
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /**
  * sp_at 쿠키에서 access_token 추출 (또는 Authorization 헤더에서 API Key 추출).

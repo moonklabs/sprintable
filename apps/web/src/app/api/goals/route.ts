@@ -5,13 +5,15 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { withRouteTiming } from '@/lib/server-timing';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createGoalRepository } from '@/lib/storage/factory';
 
 // story #2262 PR②(BE #2905) — story ca37b2b0과 동일 상한, FE에서 먼저 잘라 BE 422를 피한다.
 const IDS_BATCH_CAP = 200;
 
-export async function GET(request: Request) {
+// story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+export const GET = withRouteTiming('goals', async (request: Request) => {
   try {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
@@ -93,7 +95,7 @@ export async function GET(request: Request) {
     // house 관례를 새 필드에도 적용).
     return apiSuccess(page, { ...meta, totalCount: null });
   } catch (err: unknown) { return handleApiError(err); }
-}
+});
 
 export async function POST(request: Request) {
   try {
