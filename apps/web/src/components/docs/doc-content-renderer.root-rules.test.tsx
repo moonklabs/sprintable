@@ -99,6 +99,8 @@ describe.each([['html', HTML], ['markdown', MD]] as const)('뿌리 본문 규칙
       const link = q('[data-type="embedBlock"] a');
       const fileP = q('[data-type="fileAttachment"] p');
       for (const t of THEMES) {
+        // 유나 결정: 일반 링크 카드는 brand 글자색(명시 선언이 닿음) · 밑줄 0.
+        expect(c.computed(link, 'color', t), `${t} 일반 링크 카드 글자색`).toBe(ref(c, 'brand', t));
         expect(c.computed(link, 'text-decoration-line', t), t).toBe('none');
         expect(c.computed(link, 'font-size', t), t).toBe(c.declared(link, 'font-size', t));
         expect(c.computed(fileP, 'text-decoration-line', t), t).toBe('none');

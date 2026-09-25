@@ -524,7 +524,8 @@ export function DocContentRenderer({
         a.href = url;
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
-        a.className = 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40 no-underline';
+        // story #4316(유나 결정) — 날 URL 한 줄 · 새 탭 외부 링크라 «누르는 것» 단서로 brand 글자색을 명시(밑줄은 없음 · 뿌리 본문 링크 규칙 밖이라 선언이 닿는다).
+        a.className = 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-brand-text transition-colors hover:bg-muted/40 no-underline';
         a.textContent = url;
         block.appendChild(a);
       }
