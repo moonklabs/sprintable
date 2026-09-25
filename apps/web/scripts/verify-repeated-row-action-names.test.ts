@@ -50,6 +50,20 @@ describe('findRepeatedRowActionHits (story #3592 §22-18)', () => {
     }
   });
 
+  // [까디르 cc197cc4b P2] 폴백이 원시 id면 «갈림»으로 인정하지 않는다(id 노출을 통과시키지 않게).
+  it('양성 대조 — 표 조회 뒤 폴백이 id 모양(m.id · x_id · memberId · uuid · id 조각)이면 여전히 히트', () => {
+    for (const label of ['{rowLabels.get(m.id) ?? m.id}', '{labels[m.id] || m.member_id}', '{rowLabels.get(m.id) ?? memberId}', '{rowLabels.get(m.id) ?? m.uuid}', '{rowLabels.get(m.id) ?? m.id.slice(0, 8)}']) {
+      const content = `
+        {members.map((m) => (
+          <button type="button" onClick={() => add(m.id)}>
+            <span>${label}</span>
+          </button>
+        ))}
+      `;
+      expect(findRepeatedRowActionHits(content).length, label).toBe(1);
+    }
+  });
+
   it('양성 대조 — 조회가 조건식 안이거나(같은 두 글자 중 하나) 루프 변수가 아닌 키로 조회하면 여전히 히트', () => {
     for (const label of ["{rowLabels.get(m.id) ? t('remove') : t('add')}", '{rowLabels.get(selectedId)}', "{labels[other.id]}", "{t('addCta')}"]) {
       const content = `
