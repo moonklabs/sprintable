@@ -244,7 +244,7 @@ export default function LoginPage() {
         )}
 
         <p className="text-center text-sm text-muted-foreground">
-          <Link href="/forgot-password" className="font-medium text-brand hover:text-brand/80">
+          <Link href="/forgot-password" className="font-medium text-brand-text hover:text-brand-text/85">
             {t('forgotPassword')}
           </Link>
         </p>
@@ -255,7 +255,7 @@ export default function LoginPage() {
               "회원가입"으로 넘어가는 순간 버려짐). OAuth 버튼들(위)과 동일 패턴으로 전파. */}
           <Link
             href={nextParam ? `/register?next=${encodeURIComponent(nextParam)}` : '/register'}
-            className="font-medium text-brand hover:text-brand/80"
+            className="font-medium text-brand-text hover:text-brand-text/85"
           >
             {t('signUp')}
           </Link>

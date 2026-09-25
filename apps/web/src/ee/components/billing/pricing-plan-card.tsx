@@ -151,7 +151,7 @@ export function PricingPlanCard({
       <ul className="flex flex-col gap-2 text-xs">
         <li className="flex items-start gap-2">
           <span className="min-w-[4.5rem] text-muted-foreground">{t('featureAutomation')}</span>
-          <span className="font-semibold text-brand">{formatAutomationLabel(t, limits.automationMultiplier)}</span>
+          <span className="font-semibold text-brand-text">{formatAutomationLabel(t, limits.automationMultiplier)}</span>
         </li>
         <li className="flex items-start gap-2">
           <span className="min-w-[4.5rem] text-muted-foreground">{t('featureStorage')}</span>

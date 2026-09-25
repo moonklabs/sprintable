@@ -41,17 +41,17 @@ export default async function PrivacyPage() {
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              개인정보처리방침을 준비 중입니다. 문의: <a href="mailto:legal@moonklabs.com" className="text-brand hover:underline">legal@moonklabs.com</a>
+              개인정보처리방침을 준비 중입니다. 문의: <a href="mailto:legal@moonklabs.com" className="text-brand-text hover:underline">legal@moonklabs.com</a>
             </p>
           )}
         </div>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          <Link href="/terms" className="text-brand hover:text-brand/80">이용약관</Link>
+          <Link href="/terms" className="text-brand-text hover:text-brand-text/85">이용약관</Link>
           {' · '}
-          <Link href="/refund-policy" className="text-brand hover:text-brand/80">환불정책</Link>
+          <Link href="/refund-policy" className="text-brand-text hover:text-brand-text/85">환불정책</Link>
           {' · '}
-          <Link href="/register" className="text-brand hover:text-brand/80">회원가입으로 돌아가기</Link>
+          <Link href="/register" className="text-brand-text hover:text-brand-text/85">회원가입으로 돌아가기</Link>
         </p>
 
         <div className="mt-4 text-center text-xs text-muted-foreground">

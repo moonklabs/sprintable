@@ -89,7 +89,7 @@ export default function SetPasswordConfirmPage() {
         {status === 'success' && (
           <div className="space-y-4">
             <p className="text-sm font-medium text-success" role="status" aria-live="polite" aria-atomic="true">{message}</p>
-            <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
+            <Link href="/login" className="block text-sm font-medium text-brand-text hover:text-brand-text/85">
               {t('loginButton')}
             </Link>
           </div>
@@ -98,7 +98,7 @@ export default function SetPasswordConfirmPage() {
         {status === 'neutral' && (
           <div className="space-y-4">
             <p className="text-sm font-medium text-foreground" role="status" aria-live="polite" aria-atomic="true">{message}</p>
-            <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
+            <Link href="/login" className="block text-sm font-medium text-brand-text hover:text-brand-text/85">
               {t('loginButton')}
             </Link>
           </div>
@@ -108,11 +108,11 @@ export default function SetPasswordConfirmPage() {
           <div className="space-y-4">
             <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message}</p>
             {showRetryLink && (
-              <Link href={flatHref('/settings')} className="block text-sm font-medium text-brand hover:text-brand/80">
+              <Link href={flatHref('/settings')} className="block text-sm font-medium text-brand-text hover:text-brand-text/85">
                 {t('retryLink')}
               </Link>
             )}
-            <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
+            <Link href="/login" className="block text-sm font-medium text-brand-text hover:text-brand-text/85">
               {t('backToLogin')}
             </Link>
           </div>

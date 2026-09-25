@@ -130,7 +130,7 @@ function SuggestionChips({
             disabled={attachingId !== null}
             onClick={() => void attachGoal(c.id)}
             className={cn(
-              'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-[11px] text-brand transition hover:bg-brand/10 disabled:opacity-50',
+              'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-[11px] text-brand-text transition hover:bg-brand/10 disabled:opacity-50',
             )}
           >
             {t('bucketGoalChip', { text: c.text })}
@@ -168,7 +168,7 @@ function BucketRow({ story, onAttached }: { story: BucketStory; onAttached: (sto
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-brand hover:bg-brand/10"
+          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-brand-text hover:bg-brand/10"
         >
           {expanded ? t('bucketHideSuggestion') : t('bucketShowSuggestion')}
         </button>
