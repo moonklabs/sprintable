@@ -8,7 +8,6 @@ import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
-import { memberNameById } from '@/lib/member-display';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
   open: 'rollupOpen',

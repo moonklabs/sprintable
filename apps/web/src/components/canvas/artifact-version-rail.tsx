@@ -6,7 +6,6 @@ import { useTranslations } from 'next-intl';
 import { memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
-import { memberNameById } from '@/lib/member-display';
 
 interface ArtifactVersionRailProps {
   artifact: VisualArtifact;
