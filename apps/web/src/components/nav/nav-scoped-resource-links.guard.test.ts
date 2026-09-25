@@ -47,3 +47,30 @@ describe('nav 표면의 프로젝트 자원 링크 = scopedResourceHref 한 길(
     expect(BARE_TEMPLATE.test('const href = `/${item.path}`;')).toBe(true);
   });
 });
+
+// story #4291(PO) — 글자 모양 대조(위)만으로는 헬퍼가 무엇을 돌려주는지 모른다(앵커 href가 데이터 표에 flat 글자로 있어도 헬퍼를 거치면 괜찮고,
+// 반대로 글자는 멀쩡해도 헬퍼가 flat을 돌려줄 수 있다). ⌘K 목적지 전부(nav 파생 · 레거시 · 앵커)를 **실제 헬퍼**(deriveNavigateItems)로 뽑아
+// 결과 href로 대조한다: 프로젝트 자원이면 `/{ws}/{proj}/…` · 워크스페이스 없는 목적지는 MIGRATED 자원이 아니어야(아니면 proxy 307).
+describe('⌘K 목적지 href — 헬퍼 결과로 대조(story #4291)', () => {
+  const firstSegment = (href: string) => href.split('?')[0]!.split('/').filter(Boolean)[0] ?? '';
+
+  it('⭐프로젝트 자원 목적지는 전부 `/{ws}/{proj}/…` · 워크스페이스 없는 목적지에 MIGRATED 자원 0', async () => {
+    const { deriveNavigateItems, GUARD_ANCHOR_ITEMS } = await import('@/components/command-palette/command-palette');
+    const items = deriveNavigateItems((resource) => `/ws-1/proj-1/${resource}`);
+    const problems: string[] = [];
+    for (const item of items) {
+      if (item.isWorkspaceless) {
+        if (firstSegment(item.href) in MIGRATED_RESOURCES) problems.push(`${item.id}: flat ${item.href} — 프로젝트 자원인데 워크스페이스 없는 주소(proxy 307)`);
+      } else if (!item.href.startsWith('/ws-1/proj-1/')) {
+        problems.push(`${item.id}: ${item.href} — 헬퍼가 직접 주소를 돌려주지 않음`);
+      }
+    }
+    expect(problems).toEqual([]);
+    // 앵커 전부가 실제로 직접 주소로 나왔다(목록에서 빠져 헛도는 것 방지 · 양성 하한).
+    for (const anchor of GUARD_ANCHOR_ITEMS) {
+      expect(items.find((i) => i.id === anchor.id)?.href, anchor.id).toBe(`/ws-1/proj-1${anchor.href}`);
+    }
+    expect(items.filter((i) => !i.isWorkspaceless).length).toBeGreaterThanOrEqual(GUARD_ANCHOR_ITEMS.length + 3);
+  });
+});
+

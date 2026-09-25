@@ -2,7 +2,7 @@
 //
 // story #2930(P0-G) I3(doc ia-4zone-redesign-2930, PO 스코프 확定 ①=ⓒ 2026-08-22) — flow+sprints가
 // nav에서 「보드」 단일 항목으로 접히며 사라진 sprints 진입점을 이 프레임이 메우는지, 실제로는
-// 진짜 라우트 네비게이션(router.push)인지를 고정한다.
+// 진짜 라우트 네비게이션인지를 고정한다(story #4291부터 프리패치되는 <Link> · a[href]).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -10,10 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
-
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
   useParams: () => ({ ws: 'my-ws', proj: 'my-proj' }),
 }));
 
@@ -49,7 +46,6 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
-  pushMock.mockReset();
 });
 
 describe('WorkspaceFrameTabs — story #2930 I3', () => {
@@ -69,28 +65,31 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     expect(sprintsTab?.getAttribute('aria-selected')).toBe('false');
   });
 
-  it('스프린트 탭 클릭 시 /{ws}/{proj}/sprints로 진짜 라우트 네비게이션한다(in-page 상태 아님)', async () => {
+  it('스프린트 탭 링크가 /{ws}/{proj}/sprints로 진짜 라우트 네비게이션한다(in-page 상태 아님)', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const sprintsTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '스프린트');
-    await act(async () => { sprintsTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/sprints');
+    // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
+    expect(sprintsTab!.tagName).toBe('A');
+    expect(sprintsTab!.getAttribute('href')).toBe('/my-ws/my-proj/sprints');
   });
 
-  it('보드 탭 클릭 시 /{ws}/{proj}/flow로 이동한다(nav-config path 불변과 정합)', async () => {
+  it('보드 탭 링크가 /{ws}/{proj}/flow로 이동한다(nav-config path 불변과 정합)', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="sprints" />)); });
     const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
-    await act(async () => { boardTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/flow');
+    // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
+    expect(boardTab!.tagName).toBe('A');
+    expect(boardTab!.getAttribute('href')).toBe('/my-ws/my-proj/flow');
   });
 
-  it('story #2931 — 에픽 탭 클릭 시 /{ws}/{proj}/epics로 이동한다', async () => {
+  it('story #2931 — 에픽 탭 링크가 /{ws}/{proj}/epics로 이동한다', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const epicTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '에픽');
-    await act(async () => { epicTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/epics');
+    // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
+    expect(epicTab!.tagName).toBe('A');
+    expect(epicTab!.getAttribute('href')).toBe('/my-ws/my-proj/epics');
   });
 
   it('en 로케일에서도 렌더된다(ko/en 파리티)', async () => {
@@ -100,36 +99,39 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     expect(tabs.map((t) => t.textContent)).toEqual(['List', 'Board', 'Sprints', 'Epic', 'Retro', 'Hypothesis']);
   });
 
-  it('story #3989 — 가설 탭 클릭 시 /{ws}/{proj}/hypotheses로 이동하고 active="hypothesis"면 선택 표시된다', async () => {
+  it('story #3989 — 가설 탭 링크가 /{ws}/{proj}/hypotheses로 이동하고 active="hypothesis"면 선택 표시된다', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const hypothesisTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '가설');
-    await act(async () => { hypothesisTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/hypotheses');
+    // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
+    expect(hypothesisTab!.tagName).toBe('A');
+    expect(hypothesisTab!.getAttribute('href')).toBe('/my-ws/my-proj/hypotheses');
 
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="hypothesis" />)); });
     const selected = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '가설');
     expect(selected?.getAttribute('aria-selected')).toBe('true');
   });
 
-  it('story #3845 — 회고 탭 클릭 시 /{ws}/{proj}/retro로 이동하고 active="retro"면 선택 표시된다', async () => {
+  it('story #3845 — 회고 탭 링크가 /{ws}/{proj}/retro로 이동하고 active="retro"면 선택 표시된다', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const retroTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '회고');
-    await act(async () => { retroTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/retro');
+    // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
+    expect(retroTab!.tagName).toBe('A');
+    expect(retroTab!.getAttribute('href')).toBe('/my-ws/my-proj/retro');
 
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="retro" />)); });
     const activeRetroTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '회고');
     expect(activeRetroTab?.getAttribute('aria-selected')).toBe('true');
   });
 
-  it('story #3844 — 목록 탭 클릭 시 /{ws}/{proj}/work-list로 이동하고 active="workList"면 선택 표시된다', async () => {
+  it('story #3844 — 목록 탭 링크가 /{ws}/{proj}/work-list로 이동하고 active="workList"면 선택 표시된다', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const listTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '목록');
-    await act(async () => { listTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/work-list');
+    // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
+    expect(listTab!.tagName).toBe('A');
+    expect(listTab!.getAttribute('href')).toBe('/my-ws/my-proj/work-list');
 
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="workList" />)); });
     const activeListTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '목록');
@@ -158,8 +160,7 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
       await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="sprints" />)); });
       const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
       expect(boardTab?.getAttribute('aria-selected')).toBe('false');
-      await act(async () => { boardTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/flow');
+      expect(boardTab!.getAttribute('href')).toBe('/my-ws/my-proj/flow');
     });
   });
 

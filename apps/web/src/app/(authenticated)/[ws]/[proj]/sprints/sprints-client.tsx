@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
 // story #3845(§① 2026-09-14) — 「하루 체크인」 절. 독립 /standup 라우트가 은퇴(legacy-
 // resource-tables.ts RENAMED_RESOURCES 참고)하며 이 컴포넌트의 유일한 마운트 지점이
@@ -727,7 +726,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   if (loading) {
     // story #4274(유나 판정) — 서버 page는 곧바로 끝나고 보이는 로딩은 이 분기라, 맨 글자만 그리면 보드 → 스프린트 이동 때 탭 줄이
     // ~1.4s 사라졌다(sprints/loading.tsx의 탭 줄이 여기서 끊김). 같은 프레임 스켈레톤(탭 줄 · sticky 자리)으로.
-    return <WorkspaceFrameLoading active="sprints" layout="sticky" />;
+    return <WorkspaceFrameLoading />;
   }
 
   return (
@@ -751,19 +750,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)
           이 바깥 스크롤 컬럼이 자기 높이를 잃어 안의 split(각자 독립 overflow-y-auto)도
           같이 풀린다 — 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))] — story #4131,
-          --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT).
-          story #4131 AC3 — WorkspaceFrameTabs를 이 앵커 밖(위)에 별도로 두면 그 툴바 자체
-          높이만큼 앵커 계산이 슬랙을 남긴다 — 앵커 「안」으로 끌어들이고 sticky top-0로
-          고정해(#4125 sticky 메커니즘 재사용) 슬랙을 0으로 만든다. */}
-      <div className="focus-inset flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-y-auto">
-      {/* story #2930(P0-G) I3 — flow 쪽과 짝(WorkspaceFrameTabs 컴포넌트 주석 참고). nav에서
-          sprints 1차 메뉴가 빠진 자리를 메우는 얕은 프레임. */}
-      <div className="sticky top-0 z-10 shrink-0 bg-background px-6 pt-3">
-        <WorkspaceFrameTabs active="sprints" />
-      </div>
+          --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT). */}
+      {/* story #4291 — 탭 줄은 `[ws]/[proj]` 레이아웃의 sticky 띠로 올라갔다(한 자리 · 전환 때 안 다시 그려짐). 이 칼럼의 뷰포트 앵커는
+          그 띠 높이(--work-tabs-h)만큼 뺀다(빼지 않으면 띠 높이만큼 셸이 한 번 더 스크롤된다). */}
+      <div className="focus-inset flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-y-auto">
       <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
-      <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
+      {/* story #4291(유나) — 본문 바깥 여백 24 → 16px(레이아웃 탭 띠 `px-4`와 한 왼쪽 끝). */}
+      <div className={`flex flex-col gap-3 overflow-y-auto p-4 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
         {sprints.length === 0 ? (
           <EmptyState
             icon={<Target className="size-8" />}
@@ -827,7 +821,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
   {/* Detail panel */}
   {selected ? (
-    <div className="flex w-full flex-col overflow-y-auto border-l border-border p-6 lg:w-1/2">
+    <div className="flex w-full flex-col overflow-y-auto border-l border-border p-4 lg:w-1/2">
       {/* Header */}
       <div className="mb-4 flex items-start justify-between gap-2">
         <div>

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 
@@ -56,12 +57,11 @@ export const WORKSPACE_FRAME_TABS: ReadonlyArray<{ key: WorkspaceFrameTabKey; pa
 export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey }) {
   // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이 되면서 켜진 탭이 화면 밖일 수 있다(«가설»로 들어온 경우 등) — 그릴 때 · 탭이 바뀔 때
   // 켜진 탭을 줄 안으로(block/inline 'nearest' — 이미 보이면 안 움직인다 · 페이지 세로 스크롤은 건드리지 않는다).
-  const activeRef = useRef<HTMLButtonElement | null>(null);
+  const activeRef = useRef<HTMLAnchorElement | null>(null);
   useEffect(() => {
     activeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [active]);
   const t = useTranslations('nav');
-  const router = useRouter();
   const params = useParams<{ ws: string; proj: string }>();
   // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — "「지금」 탭을 열 때 여기가 보드인 것이
   // 즉시 읽히게" 시각 위계 승격. PR#3358(유나 QA)이 세운 「상위 프레임=underline·내부 뷰
@@ -86,13 +86,14 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
         aria-label={t('workspace')}
       >
         {TABS.map((tab) => (
-          <button
+          // story #4291 — 탭 = 프리패치되는 <Link>(예전 router.push 버튼은 프리패치가 없어 형제 탭 이동이 응답까지 ~600ms 무반응).
+          // 탭 줄은 이제 `[ws]/[proj]` 레이아웃(WorkTabsFrame)에 살아 전환 때 다시 그려지지 않는다 — 두 가지는 한 묶음이다(카드 처방).
+          <Link
             key={tab.key}
             ref={active === tab.key ? activeRef : undefined}
-            type="button"
+            href={`/${params.ws}/${params.proj}/${tab.path}`}
             role="tab"
             aria-selected={active === tab.key}
-            onClick={() => router.push(`/${params.ws}/${params.proj}/${tab.path}`)}
             className={cn(
               'shrink-0 whitespace-nowrap font-semibold transition',
               // story #4222 — 예전엔 useIsMobile()로 클래스를 갈라 서버·첫 렌더(=데스크톱 클래스 · 30px)와 하이드레이션 뒤(모바일 · 37px)
@@ -102,7 +103,7 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
             )}
           >
             {t(tab.labelKey)}
-          </button>
+          </Link>
         ))}
       </div>
     </div>

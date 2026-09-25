@@ -10,7 +10,6 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
@@ -138,9 +137,6 @@ export default function RetroPage() {
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
         {/* story #3845 §③ⓑ — sprints-client.tsx와 동형(board/sprints 프레임 관례 재사용). */}
-        <div className="px-6 pt-3">
-          <WorkspaceFrameTabs active="retro" />
-        </div>
         <div className="flex h-64 items-center justify-center p-6">
           <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
         </div>
@@ -168,14 +164,11 @@ export default function RetroPage() {
           아래 목록의 로컬 min-h-0/flex-1/overflow-y-auto 경계를 걷어내고 이 탭 바를
           sticky top-0로 바꿨다(#4125가 이미 증명한 sticky 메커니즘 재사용) — 이전과 같이
           스크롤해도 탭 바가 항상 보인다. */}
-      <div className="sticky top-0 z-10 bg-background px-6 pt-3">
-        <WorkspaceFrameTabs active="retro" />
-      </div>
 
       <div className="focus-inset flex flex-col gap-0">
         {/* Create new session — toggle via TopBar button */}
         {showCreateForm && (
-          <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">
+          <div className="flex-shrink-0 border-b border-border/80 px-4 py-4">
             <div className="flex flex-wrap gap-2">
               <Input
                 id="retro-title-input"
@@ -205,7 +198,8 @@ export default function RetroPage() {
         )}
 
         {/* Session list */}
-        <div className="flex-1 px-6 py-4">
+        {/* story #4291(유나) — 본문 바깥 가로 여백 24 → 16px(레이아웃 탭 띠 `px-4`와 한 왼쪽 끝 · 모바일 거터와 같음). */}
+        <div className="flex-1 px-4 py-4">
           <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
             {t('sessionList')}
           </p>

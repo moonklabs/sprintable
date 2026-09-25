@@ -27,7 +27,9 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 // 뿐, verify-no-unlayered-css-class.test.ts가 별도로 그 사실을 pin한다).
 const EXCLUDE_FILES = new Set(['globals.css']);
 
-const ALLOWED_SUBTRAHEND = 'var(--shell-chrome-h)';
+// story #4291 — 둘째 형태는 셸 크롬이 아니라 `[ws]/[proj]` 레이아웃이 **실측**해 싣는 일감 탭 띠 높이(WorkTabsFrame · ResizeObserver)다.
+// 하드코딩이 아니고(띠가 없으면 0px) 레이아웃 한 곳이 소유 — 그 한 형태만 더 허용한다(3rem · 48px · 다른 변수 조합은 여전히 RED).
+const ALLOWED_SUBTRAHENDS = new Set(['var(--shell-chrome-h)', 'var(--shell-chrome-h)-var(--work-tabs-h,0px)']);
 // CHANGES-1 실측(페드루 PO, 첫 광역화 시도가 dialog.tsx·dropdown-menu.tsx·bottom-dock.tsx·
 // doc-mini-toc.tsx 등 무관한 max-h-[calc(100vh-...)](모달/드롭다운/TOC가 뷰포트를 안 넘치게
 // 하는, 셸 크롬과 무관한 기존 패턴)까지 전부 잡아버렸다 — 전수 실측: 그 오탐들은 전부
@@ -84,7 +86,7 @@ export function findHardcodedShellChromeAnchors(srcRoot: string): HardcodedAncho
       let m: RegExpExecArray | null;
       while ((m = VH_CALC_START_RE.exec(line)) !== null) {
         const subtrahend = extractSubtrahend(line, m.index + m[0].length);
-        if (subtrahend !== null && subtrahend !== ALLOWED_SUBTRAHEND) {
+        if (subtrahend !== null && !ALLOWED_SUBTRAHENDS.has(subtrahend)) {
           // 리포트 문구는 매치 정규식의 "h-[" 앵커 프리픽스를 뺀 순수 calc(...) 표현만
           // (앵커 판별용 lookbehind 매치와 사람이 읽을 진단 문자열은 다른 관심사).
           const calcOnly = m[0].replace(/^h-\[/, '');
@@ -107,7 +109,7 @@ function main(): number {
     );
     return 1;
   }
-  console.log('OK: 뷰포트 높이 앵커 하드코딩 0건(허용은 var(--shell-chrome-h) 하나뿐).');
+  console.log('OK: 뷰포트 높이 앵커 하드코딩 0건(허용은 var(--shell-chrome-h) · 그 뒤 레이아웃 실측 var(--work-tabs-h,0px) 한 형태).');
   return 0;
 }
 

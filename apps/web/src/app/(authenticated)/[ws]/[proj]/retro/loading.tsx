@@ -3,5 +3,5 @@
 import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
 
 export default function Loading() {
-  return <WorkspaceFrameLoading active="retro" layout="sticky" />;
+  return <WorkspaceFrameLoading />;
 }
