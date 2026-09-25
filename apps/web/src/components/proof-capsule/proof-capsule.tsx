@@ -11,12 +11,17 @@ import { TrustSeal, type TrustSealClaimedProps, type TrustSealVerifiedProps } fr
 export type { ProofState } from './proofline';
 
 export interface ProofCapsuleHuman {
-  name: string;
+  // story #4284 — 신원 이름은 nullable(표시 이름 없는 휴먼). 이름 자리(머리글자 · 아바타)엔 name 그대로(null이면 사람 아이콘), 사람이 읽는 글자는
+  // label(호출부가 memberDisplayLabel로 «이름 없는 구성원») — shared/avatar.tsx의 name/label 계약과 같다.
+  name: string | null;
+  label?: string;
   role: string;
 }
 
 export interface ProofCapsuleAgent {
-  name: string;
+  // story #4284 — name/label 계약(shared/avatar.tsx): 머리글자 · 아바타는 name(null이면 아이콘), 읽는 글자는 label ?? name.
+  name: string | null;
+  label?: string;
   initial: string;
 }
 
@@ -222,7 +227,7 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
         {t('gate.label')}
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
-        <span>{t.rich('gate.owner', { name: human.name, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
+        <span>{t.rich('gate.owner', { name: human.label ?? human.name ?? '', b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
         {gate.risk ? (
           <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${gate.risk}`) })}</span>
         ) : null}
@@ -275,14 +280,14 @@ function FullVariant({
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
           {human ? (
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={human.name} actorType="human" size={19} />
-              {t.rich('gate.owner', { name: human.name, b: (chunks) => <>{chunks}</> })}
+              <Avatar name={human.name} label={human.label} actorType="human" size={19} />
+              {t.rich('gate.owner', { name: human.label ?? human.name ?? '', b: (chunks) => <>{chunks}</> })}
             </span>
           ) : null}
           {agent ? (
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={agent.name} actorType="agent" size={19} />
-              {t('claim.executor', { name: agent.name })}
+              <Avatar name={agent.name} label={agent.label} actorType="agent" size={19} />
+              {t('claim.executor', { name: agent.label ?? agent.name ?? '' })}
             </span>
           ) : null}
           {now ? <span className="text-proof-ink-2">{t.rich('claim.now', { now, b: (chunks) => <b>{chunks}</b> })}</span> : null}
@@ -391,8 +396,8 @@ function InlineRow({
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink" title={claim}>{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
           {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
-          {human ? <Avatar name={human.name} actorType="human" size={22} /> : null}
-          {agent ? <Avatar name={agent.name} actorType="agent" size={22} /> : null}
+          {human ? <Avatar name={human.name} label={human.label} actorType="human" size={22} /> : null}
+          {agent ? <Avatar name={agent.name} label={agent.label} actorType="agent" size={22} /> : null}
           {gate ? (
             <a
               href={gate.href}

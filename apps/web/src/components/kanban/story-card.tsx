@@ -579,7 +579,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
                   <TrustSeal
                     variant="verified"
-                    humanName={memberDisplayLabel(verifiedBy.name, tc)}
+                    humanName={verifiedBy.name}
+                    humanLabel={verifiedBy.name ? undefined : memberDisplayLabel(null, tc)}
                     when={story.human_verified_at ? formatRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
                   />
                 ) : story.status === 'done' && trustStage === 'claimed' ? (

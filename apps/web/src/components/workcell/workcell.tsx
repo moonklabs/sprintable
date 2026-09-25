@@ -10,12 +10,17 @@ import { Proofline, type ProofState } from '@/components/proof-capsule/proofline
 import { Avatar } from '@/components/shared/avatar';
 
 export interface WorkcellOwner {
-  name: string;
+  // story #4284 — 신원 이름은 nullable(표시 이름 없는 휴먼). 이름 자리(머리글자 · 아바타)엔 name 그대로(null이면 사람 아이콘), 사람이 읽는 글자는
+  // label(호출부가 memberDisplayLabel로 «이름 없는 구성원») — shared/avatar.tsx의 name/label 계약과 같다.
+  name: string | null;
+  label?: string;
   role: string;
 }
 
 export interface WorkcellAgent {
-  name: string;
+  // story #4284 — name/label 계약(shared/avatar.tsx): 머리글자 · 아바타는 name(null이면 아이콘), 읽는 글자는 label ?? name.
+  name: string | null;
+  label?: string;
   initial: string;
 }
 
@@ -272,8 +277,8 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
             <span className="inline-flex items-center gap-1.5">
               {brief.owner ? (
                 <>
-                  <Avatar name={brief.owner.name} actorType="human" size={18} />
-                  {t('briefOwner')} {brief.owner.name}
+                  <Avatar name={brief.owner.name} label={brief.owner.label} actorType="human" size={18} />
+                  {t('briefOwner')} {brief.owner.label ?? brief.owner.name}
                 </>
               ) : (
                 // story #2993 — 유나 design 판정(2026-08-24): text-proof-faint는 라이트 대비
@@ -284,8 +289,8 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
             </span>
             {brief.agent ? (
               <span className="inline-flex items-center gap-1.5">
-                <Avatar name={brief.agent.name} actorType="agent" size={18} />
-                {t('briefAgent')} {brief.agent.name}
+                <Avatar name={brief.agent.name} label={brief.agent.label} actorType="agent" size={18} />
+                {t('briefAgent')} {brief.agent.label ?? brief.agent.name}
               </span>
             ) : null}
           </div>

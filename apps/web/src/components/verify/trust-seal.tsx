@@ -1,4 +1,4 @@
-import { Bot, Check } from 'lucide-react';
+import { Bot, Check, UserRound } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { cn } from '@/lib/utils';
@@ -15,7 +15,10 @@ export interface TrustSealClaimedProps {
 
 export interface TrustSealVerifiedProps {
   variant: 'verified';
-  humanName: string;
+  // story #4284 — 신원 이름은 nullable(표시 이름 없는 휴먼). 이름 자리(머리글자 · 아바타)엔 name 그대로(null이면 사람 아이콘), 사람이 읽는 글자는
+// label(호출부가 memberDisplayLabel로 «이름 없는 구성원») — shared/avatar.tsx의 name/label 계약과 같다.
+  humanName: string | null;
+  humanLabel?: string;
   when: string;
   className?: string;
 }
@@ -69,10 +72,10 @@ export function TrustSeal(props: TrustSealProps) {
     return (
       <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-green-soft px-2.5 py-2 text-[11.5px]', props.className)}>
         <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-[9px] font-bold text-white dark:text-proof-bg">
-          {initials(props.humanName)}
+          {props.humanName ? initials(props.humanName) : <UserRound className="size-3" aria-hidden="true" />}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">
-          <b className="font-bold text-proof-ink">{t('trustSealVerifiedBy', { name: props.humanName })}</b> · {props.when} · {t('trustSealSignedOff')}
+          <b className="font-bold text-proof-ink">{t('trustSealVerifiedBy', { name: props.humanLabel ?? props.humanName ?? '' })}</b> · {props.when} · {t('trustSealSignedOff')}
         </span>
         <Check className="size-3.5 shrink-0 text-proof-green" strokeWidth={3} aria-hidden="true" />
       </div>

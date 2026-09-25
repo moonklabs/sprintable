@@ -36,7 +36,7 @@ import { StoryCard } from './story-card';
 import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 import { fetchWithAuth } from '@/lib/db/client';
-import { memberDisplayLabel } from '@/lib/member-display';
+import { memberDisplayLabel, memberNameById } from '@/lib/member-display';
 
 /**
  * 터치는 드래그를 절대 시작하지 않게 — pointerType !== 'touch'만 드래그 활성(0d142311 prod 재발 근본 fix).
@@ -750,8 +750,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const titleMatch = s.title?.toLowerCase().includes(q);
-      const assigneeName = s.assignee_id ? memberMap[s.assignee_id]?.name?.toLowerCase() : '';
-      const assigneeMatch = assigneeName?.includes(q);
+      // story #4284 — 원시 name만 보면 이름 없는 담당자는 보이는 라벨(«이름 없는 구성원»)로 못 찾았다 — 카드 · 필터와 같은 라벨로 찾는다.
+      const assigneeName = s.assignee_id ? memberNameById(memberMap, s.assignee_id, tc, '').toLowerCase() : '';
+      const assigneeMatch = assigneeName !== '' && assigneeName.includes(q);
       if (!titleMatch && !assigneeMatch) return false;
     }
     return true;

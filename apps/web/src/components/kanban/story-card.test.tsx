@@ -251,3 +251,20 @@ describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
     expect(markup).toContain('>PE<');
   });
 });
+
+// story #4284(PO 검토 ②) — 신원 이름(머리글자)엔 name(null이면 사람 아이콘) · 읽는 글자엔 label. 라벨을 이름 자리에 넘기면 «이름 없는 구성원»의 첫 글자가 머리글자가 된다.
+describe('StoryCard — 이름 없는 검증자 씰(story #4284)', () => {
+  it('⭐검증 씰 머리글자가 «이»가 아니라 사람 아이콘 · 글자는 «이름 없는 구성원»', () => {
+    const markup = renderToStaticMarkup(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <DndContext>
+          <StoryCard story={makeStory({ status: 'done', human_verified: true, human_verified_at: '2026-09-01T00:00:00Z' } as Partial<KanbanStory>)} verifiedBy={{ id: 'v1', name: null, type: 'human' }} onClick={() => {}} />
+        </DndContext>
+      </NextIntlClientProvider>,
+    );
+    expect(markup).toContain(koMessages.common.memberUnnamed);
+    expect(markup).not.toMatch(/>이</);
+    expect(markup).not.toContain('null');
+  });
+});
+

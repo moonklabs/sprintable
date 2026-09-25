@@ -1715,6 +1715,21 @@ describe('KanbanBoard — 이름 없는 구성원(story #4284)', () => {
     expect(menu.textContent).toContain('송윤재');
   });
 
+  it('⭐보드 전체 검색 — 담당자의 보이는 라벨(«이름 없는»)로도 스토리가 찾힌다', async () => {
+    stubFetch([
+      { id: 's1', title: '이름 없는 사람 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-unnamed' },
+      { id: 's2', title: '실명 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-named' },
+    ], MEMBERS);
+    await mount();
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === koMessages.board.searchPlaceholder)!;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input[type="search"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, '이름 없는 구성원'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(container.textContent).toContain('이름 없는 사람 스토리');
+    expect(container.textContent).not.toContain('실명 스토리');
+  });
+
   it('담당자 검색 — 보이는 라벨로 찾는다(«이름 없는»으로 이름 없는 구성원이 걸리고, 실명 검색에서 오류 없음)', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], MEMBERS);
     await mount();

@@ -956,10 +956,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
   // story #4284 — 실존인데 이름 없는 구성원은 «이름 없는 구성원», 목록에 없는 id만 예전처럼 id 앞 6자(memberNameById).
+  // story #4284 — 신원 이름(머리글자)은 name 그대로 · 읽는 글자는 label(실존인데 이름 없음 → «이름 없는 구성원» · 목록에 없는 id → 예전처럼 id 앞 6자).
   const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, story.human_verified_by.slice(0, 6)) : null;
+  const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by] ? memberMap[story.human_verified_by]!.name : story.human_verified_by.slice(0, 6)) : null;
   const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
     story.human_verified && humanVerifiedByName && story.human_verified_at
-      ? { variant: 'verified', humanName: humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
+      ? { variant: 'verified', humanName: humanVerifiedByIdentity, humanLabel: humanVerifiedByIdentity ? undefined : humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
       : story.self_reported
         ? (proofAgent ? { variant: 'claimed', agentInitial: proofAgent.name ? initials(proofAgent.name) : undefined } : { variant: 'claimed' })
         : undefined;
@@ -973,8 +975,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)
       ? {
           density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
-          human: proofHuman ? { name: memberDisplayLabel(proofHuman.name, tc), role: 'human' } : undefined,
-          agent: proofAgent ? { name: memberDisplayLabel(proofAgent.name, tc), initial: initials(proofAgent.name) } : undefined,
+          human: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : undefined,
+          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc), initial: initials(proofAgent.name) } : undefined,
           evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
         }
       : null;
@@ -1531,8 +1533,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 // 문구·"본문 AC 보기" 링크는 BriefLayer가 소유(워크셀 자체 i18n으로 이관,
                 // 그 옛 board 키는 폐기).
                 dod: story.acceptance_criteria?.trim() || null,
-                owner: proofHuman ? { name: memberDisplayLabel(proofHuman.name, tc), role: 'human' } : null,
-                agent: proofAgent ? { name: memberDisplayLabel(proofAgent.name, tc), initial: initials(proofAgent.name) } : undefined,
+                owner: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : null,
+                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc), initial: initials(proofAgent.name) } : undefined,
                 onGoalMore: scrollToDescriptionSection,
                 onDodMore: scrollToAcceptanceCriteriaSection,
               }}
