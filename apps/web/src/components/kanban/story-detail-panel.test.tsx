@@ -1420,6 +1420,17 @@ describe('StoryDetailPanel — 이름표 조직 범위 보충([SID:4300])', () =
     expect(container.textContent).toContain('권회수 검증');
   });
 
+  it('주장(self_reported)도 있는 스토리 — 조직 표를 받는 동안 «주장만» 봉인(검증 대기)이 먼저 서지 않는다', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    orgResponse = async () => { await gate; return { ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) }; };
+    await mount({ ...verifiedStory, self_reported: true });
+    expect(container.textContent).not.toContain(koMessages.verify.trustSealAwaitingVerification);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('권회수 검증');
+  });
+
   it('조직 표에도 없으면(떠난 사람 · 비활성 에이전트 — BE 원천 대기) «알 수 없는 구성원 검증»', async () => {
     orgResponse = async () => ({ ok: true, json: async () => ({ data: [] }) });
     await mount(verifiedStory);
