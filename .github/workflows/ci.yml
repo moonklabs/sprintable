@@ -1347,6 +1347,12 @@ jobs:
             f=$(mktemp) && [ -n "$f" ] && [ -f "$f" ] || { echo "::error::임시 파일 생성 실패(story #4283 — 판정 불가라 RED)" >&2; return 1; }
             printf '%s' "$f"
           }
+          # story #4319 — 증거 폴더(디렉터리)도 같은 규율: 못 만들면 판정 불가라 RED(4283 가드 표에 칸이 있다).
+          must_mktemp_dir() {
+            local d
+            d=$(mktemp -d) && [ -n "$d" ] && [ -d "$d" ] || { echo "::error::임시 파일 생성 실패(story #4283 — 판정 불가라 RED)" >&2; return 1; }
+            printf '%s' "$d"
+          }
           if ! mapfile -t files < /tmp/shard_files.txt; then
             echo "::error::샤드 파일 목록(/tmp/shard_files.txt)을 못 읽음(story #4283)"
             exit 1
@@ -1399,7 +1405,7 @@ jobs:
           STALL_TIMEOUT_MIN=8
           # story #4319(AC5) — 정지 감지기가 죽이기 전에 DB 연결 · 잠금과 pytest 스레드 · asyncio 태스크 스택을 이 잡 로그에 남긴다
           # (scripts/stall-evidence.sh · tests/conftest.py). 정상 판엔 아무 일도 안 한다(수집기는 제한 60초 전에만 깨어난다).
-          stall_evidence_dir=$(mktemp -d) || exit 1
+          stall_evidence_dir=$(must_mktemp_dir) || exit 1
           failed_out=$(must_mktemp) || exit 1
           overage_out=$(must_mktemp) || exit 1
           unweighted_file=$(must_mktemp) || exit 1
