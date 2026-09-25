@@ -194,6 +194,12 @@ describe('shiftDayStartIso — 달력일 단위로 그 tz의 자정', () => {
     expect(shiftDayStartIso(start, 'America/Los_Angeles', -7)).toBe('2026-03-08T08:00:00.000Z'); // 3/8 00:00 PST(−8)
     expect(new Date(Date.parse(start) - 7 * 86_400_000).toISOString()).toBe('2026-03-08T07:00:00.000Z'); // 옛 계산 = 3/7 23:00 PST
   });
+  it('⭐LA 서머타임 끝(가을 되돌림) 주: 11/8 00:00 PST에서 7일 전 = 11/1 00:00 PDT(168시간 전이면 11/1 01:00 PDT)', () => {
+    const start = '2026-11-08T08:00:00.000Z'; // 11/8 00:00 PST(−8) · 전환은 11/1 02:00 PDT
+    expect(shiftDayStartIso(start, 'America/Los_Angeles', -7)).toBe('2026-11-01T07:00:00.000Z'); // 11/1 00:00 PDT(−7)
+    expect(new Date(Date.parse(start) - 7 * 86_400_000).toISOString()).toBe('2026-11-01T08:00:00.000Z'); // 옛 계산 = 11/1 01:00 PDT
+  });
+
   it('서머타임 없는 KST는 168시간과 같다', () => {
     expect(shiftDayStartIso('2026-09-17T15:00:00.000Z', 'Asia/Seoul', -7)).toBe('2026-09-10T15:00:00.000Z');
   });

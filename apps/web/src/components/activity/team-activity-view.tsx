@@ -180,7 +180,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [forbidden, setForbidden] = useState(false);
-  // 더보기용 과거 경계(UTC ISO). null = 시작 날짜를 비워 과거 경계가 없음.
+  // 더보기용 과거 경계(UTC ISO) — 지금까지 받은 가장 이른 창의 시작. 첫 로드 전에만 null.
   const [oldestSince, setOldestSince] = useState<string | null>(null);
 
   // 필터 (AC③: project[암묵]·actor·object·verb·time range)
@@ -251,18 +251,21 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       setItems(null);
       setForbidden(false);
       setHasMore(true);
-      const slice = await fetchSlice(rangeFrom, rangeTo);
+      // story #4280(까디르 검수) — 시작 날짜를 비우면 «과거 경계 없음». BE 활동 스트림은 limit 상한 + **오름차순**이라 since 없이 부르면
+      // 가장 오래된 N개만 오고 그 뒤(최근)를 볼 길이 없었다(조용히 잘림). 그래서 빈 시작은 «끝 날짜(없으면 지금)에서 달력 7일 전 자정»부터
+      // 최근 쪽 한 창을 받고, «더 보기»가 경계 없이 7일씩 과거로 간다(시작 날짜가 있을 때와 같은 최신순 · 과거로 넓히는 방향).
+      const firstSince = rangeFrom ?? shiftDayStartIso(rangeTo ?? new Date().toISOString(), displayTimezone, -WINDOW_DAYS);
+      const slice = await fetchSlice(firstSince, rangeTo);
       if (cancelled) return;
       setItems(slice ?? []);
-      setOldestSince(rangeFrom);
-      // 시작 날짜를 비웠으면 과거 경계가 없어 이미 끝까지 받은 것 — 더 볼 과거가 없다.
-      setHasMore(rangeFrom !== null && (slice?.length ?? 0) > 0);
+      setOldestSince(firstSince);
+      setHasMore((slice?.length ?? 0) > 0);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [fetchSlice, rangeFrom, rangeTo]);
+  }, [fetchSlice, rangeFrom, rangeTo, displayTimezone]);
 
   // 더 보기 v1 = 선택 범위보다 과거 윈도우 슬라이스 페치 후 append(dedup). 정밀 cursor는 follow-up.
   const loadMore = async () => {
