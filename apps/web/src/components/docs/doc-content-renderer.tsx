@@ -119,7 +119,7 @@ function isLikelyDuplicateTitle(headingText: string, docTitle: string): boolean 
 // 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
 // asset-ref(data-asset-id) + 파일첨부(data-type)가 리졸버까지 도달하지 못한다.
 // img(asset-ref 이미지) + div(fileAttachment·data-type/asset-ref/legacy data-file-data) 양쪽 허용 추가.
-const docMarkdownSanitizeSchema = {
+export const docMarkdownSanitizeSchema = {
   ...defaultSchema,
   attributes: {
     ...defaultSchema.attributes,
@@ -148,6 +148,11 @@ const docMarkdownSanitizeSchema = {
       'dataTitle',
       'dataIcon',
       'dataSlug',
+      // story #4323 — 렌더러가 읽는 콘텐츠 속성 중 빠져 있던 셋(RENDERER_CONTENT_ATTRIBUTES · 가드가 스키마와 대조): 일반 링크 임베드 주소 ·
+      // 수식 블록 원문 · 접기 블록 펼침 상태. 주소는 링크 · 틀을 만드는 자리에서 스킴을 거른다(safeHttpUrl).
+      'dataUrl',
+      'dataLatex',
+      'dataOpen',
     ],
     // story #4313 — 마크다운 속 에디터 위키 링크 span(`data-type="wikiLink"`)이 렌더러 `span` 컴포넌트까지 닿게 필요한 셋만(XSS 경계:
     // data-* 글자뿐 · on* · style 등은 여전히 기본 스키마가 막음). 링크 여부는 렌더러가 실재 집합으로 판정.
@@ -1017,6 +1022,28 @@ function ShikiCodeBlock({
 // content_format='html' doc을 마크다운 전용 렌더러(MdBody)에 먹여 태그가 텍스트로 그대로
 // 찍히던 결함을 고치며 이 sanitize 정본을 재사용한다(사본 분화 금지 — decorateHtmlContent의
 // TOC/코드카피 장식은 그 소비처 전용이라 안 가져감, 순수 sanitize만).
+/**
+ * story #4323 — 렌더러가 **문서 콘텐츠**(에디터가 만든 노드)에서 읽는 속성 전수. 렌더러 내부 표지(RENDERER_INTERNAL_MARKERS)의 짝.
+ * - 마크다운 경로: sanitize 스키마가 `elements`마다 이 속성을 통과시켜야 한다(아니면 1996 · 4323처럼 노드가 빈 칸) — 가드가 대조.
+ * - `url`: 링크 · 틀을 만드는 값이라 그 자리에서 스킴을 거른다 — `lib/safe-content-url.ts`(story #4324): http = `safeHttpUrl` · data = `safeAttachmentDataUrl`(허용 MIME의 data:만).
+ * - `htmlOnly`: HTML 포맷 경로에서만 읽는다(마크다운은 다른 부품이 처리) — 스키마 대상 아님.
+ */
+export const RENDERER_CONTENT_ATTRIBUTES: readonly { attr: string; elements: readonly string[]; readBy: string; url?: 'http' | 'data'; htmlOnly?: true }[] = [
+  { attr: 'data-type', elements: ['div', 'span'], readBy: 'node type (wikiLink · mathBlock · mathInline · embedBlock · fileAttachment · toggle*)' },
+  { attr: 'data-slug', elements: ['div', 'span'], readBy: 'wiki link / page embed target' },
+  { attr: 'data-title', elements: ['div', 'span'], readBy: 'wiki link / page embed title' },
+  { attr: 'data-icon', elements: ['div'], readBy: 'page embed icon (escaped as text)' },
+  { attr: 'data-page-embed', elements: ['div'], readBy: 'page embed marker' },
+  { attr: 'data-latex', elements: ['div'], readBy: 'math block source (falls back to text content)' },
+  { attr: 'data-url', elements: ['div'], readBy: 'generic embed URL (link card · YouTube/Figma frame)', url: 'http' },
+  { attr: 'data-filename', elements: ['div'], readBy: 'attachment filename' },
+  { attr: 'data-file-data', elements: ['div'], readBy: 'legacy attachment body (base64 data: URL · download link)', url: 'data' },
+  { attr: 'data-asset-id', elements: ['div', 'img'], readBy: 'attachment / asset image signed lookup' },
+  { attr: 'data-size', elements: ['div'], readBy: 'attachment size' },
+  { attr: 'data-open', elements: ['div'], readBy: 'toggle block open state' },
+  { attr: 'data-language', elements: ['pre'], readBy: 'HTML code block language (Shiki)', htmlOnly: true },
+];
+
 /**
  * story #4316 — 렌더러 내부 표지(렌더러가 붙이고 · 렌더러가 읽는 것). 글쓴이 입력에서 걷는다(HTML: sanitizeDocHtml FORBID_ATTR · 마크다운: sanitize
  * 스키마에 없음 / `data-doc-internal-link`는 플러그인 표지에 nonce).
