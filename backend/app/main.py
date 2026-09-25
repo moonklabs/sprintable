@@ -419,6 +419,11 @@ from app.services.tool_call_recording import ToolCallRecordingMiddleware  # noqa
 
 app.add_middleware(ToolCallRecordingMiddleware)
 
+# story #4332 — 요청마다 풀 체크아웃 대기 · SQL 수 · SQL 합계 ms(로그 한 줄 + Server-Timing). 맨 바깥에 둬 모든 미들웨어의 SQL까지 센다.
+from app.core.request_db_timing import RequestDbTimingMiddleware  # noqa: E402
+
+app.add_middleware(RequestDbTimingMiddleware)
+
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)
