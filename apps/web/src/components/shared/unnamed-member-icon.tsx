@@ -1,9 +1,9 @@
-import { Bot, UserRound } from 'lucide-react';
+import { Bot, User, type LucideProps } from 'lucide-react';
 
-// story #4284(유나 판정) — 이름 없는 구성원의 머리글자 자리. 공용 Avatar(#4638)와 같은 규칙: 에이전트는 Bot · 사람은 UserRound.
-// 이름이 없다는 사실만으로 사람 아이콘을 그리면 에이전트가 사람처럼 보인다(보드 카드는 에이전트 점까지 붙어 두 신호가 어긋났다).
-export function UnnamedMemberIcon({ type, className = 'size-3' }: { type: string | null | undefined; className?: string }) {
-  return type === 'agent'
-    ? <Bot className={className} aria-hidden="true" />
-    : <UserRound className={className} aria-hidden="true" />;
+// story #4284(유나 · PO 판정) — 이름 없는 구성원의 신원 폴백 아이콘 한 벌의 정본: 에이전트는 Bot · 사람은 User.
+// 공용 Avatar의 아이콘 단계 · 신뢰 화면 PersonMark · TrustSeal · 보드 카드 · 담당자 고르기가 모두 이걸 쓴다(자리마다 고르면 갈라진다 —
+// 이름이 없다는 것만으로 사람 아이콘을 그려 에이전트가 사람처럼 보인 자리가 있었다). 크기는 className 또는 style로.
+export function UnnamedMemberIcon({ type, className = 'size-3', ...rest }: { type: string | null | undefined } & LucideProps) {
+  const Icon = type === 'agent' ? Bot : User;
+  return <Icon className={className} aria-hidden="true" {...rest} />;
 }

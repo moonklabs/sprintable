@@ -1,4 +1,5 @@
-import { Bot, Check, UserRound } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useTranslations } from 'next-intl';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { cn } from '@/lib/utils';
@@ -56,7 +57,7 @@ export function TrustSeal(props: TrustSealProps) {
         {/* story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
             폐지) 채택. border는 이미 있었으니 배경만 투명으로 교체. */}
         <span className={cn('flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue text-[9px] font-bold', AGENT_MARK_FILL_CLASS)}>
-          {props.agentInitial ?? <Bot className="size-3" aria-hidden="true" />}
+          {props.agentInitial ?? <UnnamedMemberIcon type="agent" />}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">
           <b className="font-bold text-proof-ink">{t('trustSealClaimedBy')}</b> · {t('trustSealAwaitingVerificationLong')}
@@ -72,7 +73,7 @@ export function TrustSeal(props: TrustSealProps) {
     return (
       <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-green-soft px-2.5 py-2 text-[11.5px]', props.className)}>
         <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-[9px] font-bold text-white dark:text-proof-bg">
-          {props.humanName ? initials(props.humanName) : <UserRound className="size-3" aria-hidden="true" />}
+          {props.humanName ? initials(props.humanName) : <UnnamedMemberIcon type="human" />}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">
           <b className="font-bold text-proof-ink">{t('trustSealVerifiedBy', { name: props.humanLabel ?? props.humanName ?? '' })}</b> · {props.when} · {t('trustSealSignedOff')}

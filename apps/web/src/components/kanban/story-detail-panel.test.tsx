@@ -1205,9 +1205,9 @@ describe('StoryDetailPanel — 담당자 배정 토글 시스템 발행 제외(s
   });
 });
 
-// story #4284(유나 판정) — 담당자 고르기 목록에는 사람 · 에이전트가 섞인다. 이름 없는 구성원의 머리글자 자리는 타입대로(에이전트 Bot · 사람 UserRound).
+// story #4284(유나 판정) — 담당자 고르기 목록에는 사람 · 에이전트가 섞인다. 이름 없는 구성원의 머리글자 자리는 타입대로(에이전트 Bot · 사람 User).
 describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 구성원 아이콘(story #4284)', () => {
-  it('⭐이름 없는 에이전트는 Bot · 이름 없는 사람은 UserRound', async () => {
+  it('⭐이름 없는 에이전트는 Bot · 이름 없는 사람은 User', async () => {
     stubFetch();
     const members = [
       { id: 'a-unnamed', name: null, type: 'agent' },
@@ -1226,7 +1226,7 @@ describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 구�
     expect(rows).toHaveLength(2);
     const iconOf = (i: number) => rows[i]!.querySelector('svg')?.getAttribute('class') ?? '';
     expect(iconOf(0)).toContain('lucide-bot');
-    expect(iconOf(1)).toContain('lucide-user-round');
+    expect(iconOf(1)).toMatch(/lucide-user(?![-\w])/);
   });
 });
 

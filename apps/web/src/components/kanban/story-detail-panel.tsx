@@ -1589,7 +1589,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
-                          {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 UserRound · 유나 판정). */}
+                          {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 User · UnnamedMemberIcon 정본 · 유나 판정). */}
                           {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
                         {m.label}

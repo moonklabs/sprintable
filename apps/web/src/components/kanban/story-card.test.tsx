@@ -234,13 +234,14 @@ describe('StoryCard — deleteStoryDialogBody 조사(story #4120)', () => {
   });
 });
 
-// story #4284 — 이름 없는 구성원(BE name null)은 머리글자 대신 사람 아이콘(유나 4286 판정) · title은 «이름 없는 구성원». 예전 타입이 거짓이라
+// story #4284 — 이름 없는 구성원(BE name null)은 머리글자 대신 사람 아이콘(User · 유나 판정 신원 폴백 한 벌) · title은 «이름 없는 구성원». 예전 타입이 거짓이라
 // null이면 `name.slice` throw 또는 빈 동그라미였다.
 describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
   it('⭐담당자 동그라미가 «?» · «이름» 머리글자가 아니라 사람 아이콘이고, title은 «이름 없는 구성원»', () => {
     const markup = render(makeStory({ assignee_id: 'm-unnamed', assignee_ids: ['m-unnamed'] }), [{ id: 'm-unnamed', name: null, type: 'human' }]);
     expect(markup).toContain(`title="${koMessages.common.memberUnnamed}"`);
-    expect(markup).toContain('lucide-user-round');
+    expect(markup).toMatch(/lucide-user(?![-\w])/);
+    expect(markup).not.toContain('lucide-user-round');
     expect(markup).not.toMatch(/>\?</);
     expect(markup).not.toContain('>이름<');
   });
@@ -248,7 +249,7 @@ describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
   it('⭐이름 없는 에이전트 담당자는 Bot 아이콘(사람 아이콘 + 에이전트 점으로 어긋나지 않게 · 유나 판정)', () => {
     const markup = render(makeStory({ assignee_id: 'a-unnamed', assignee_ids: ['a-unnamed'] }), [{ id: 'a-unnamed', name: null, type: 'agent' }]);
     expect(markup).toContain('lucide-bot');
-    expect(markup).not.toContain('lucide-user-round');
+    expect(markup).not.toMatch(/lucide-user/);
   });
 
   it('실명 담당자는 그대로 머리글자', () => {

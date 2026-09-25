@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Bot, HeartHandshake, UserRound } from 'lucide-react';
+import { HeartHandshake } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -57,9 +58,7 @@ function PersonMark({ label, icon }: { label?: string; icon?: 'agent' | 'person'
       aria-hidden="true"
       className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
     >
-      {icon === 'agent' ? <Bot className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-agent" />
-        : icon === 'person' ? <UserRound className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-person" />
-        : label}
+      {icon ? <UnnamedMemberIcon type={icon === 'agent' ? 'agent' : 'human'} className="size-3.5" data-testid={`trust-mark-icon-${icon}`} /> : label}
     </span>
   );
 }
