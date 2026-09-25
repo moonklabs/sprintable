@@ -44,6 +44,7 @@
     "aiUpcomingSynthesis": "Synthesis coming up",
     "adding": "Adding…",
     "loadMore": "Load more",
+    "loadMoreFailed": "Couldn't load more. Try again.",
     "error": "An error occurred",
     "errorDescription": "An error occurred while loading the page.",
     "upgradeRequired": "Upgrade Required",
@@ -3671,6 +3672,7 @@
     "markAllRead": "Mark all read",
     "markReadFailed": "Failed to mark as read",
     "markAllReadFailed": "Failed to mark all as read",
+    "markAllReadUnconfirmed": "We couldn't confirm that \"Mark all read\" went through. Open notifications again in a moment to check.",
     "markRead": "Mark read",
     "markUnread": "Mark unread",
     "open": "Open",
@@ -3783,7 +3785,8 @@
     "daysAgo": "d ago",
     "bellAriaLabelCount": "{count, plural, one {# notification} other {# notifications}}",
     "bellAriaLabelCountCapped": "99 or more notifications",
-    "syncDegradedBanner": "Some older notifications may be missing — check the list below"
+    "syncDegradedBanner": "Some older notifications may be missing — check the list below",
+    "notificationsLoadError": "Couldn't load notifications"
   },
   "invite": {
     "title": "Organization Invitation",

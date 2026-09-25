@@ -164,19 +164,26 @@ function AgentJoinedDetailPanel({
 // cursor를 실어 보내고 그 meta를 그대로 다음 요청에 이어 붙인다.
 async function fetchInboxNotifications(typeFilter: string, cursor: string | null | undefined, scope: InboxPrefetchScope) {
 
-  // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>null) 알림
-  // 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
-  // story #4276 — inbox/loading.tsx가 먼저 출발시킨 1쪽 요청이 있으면 그 응답을 한 번 넘겨받는다(규칙은 inbox-prefetch.ts).
-  const res = await takePrefetchedOrFetch(inboxNotificationsUrl(typeFilter, cursor), scope);
-  if (!res.ok) return null;
+  // story #4295 — 예외 처리가 없어 망 오류 · 깨진 JSON이면 여기서 던졌고, 부르는 쪽(load · 더 보기)의 로딩 상태가 되돌려지지 않아
+  // 알림 목록이 영원히 «불러오는 중» · «더 보기»가 눌린 채로 막혔다. 이제 실패는 전부 null(부르는 쪽이 실패로 다룬다) — 던지지 않는다.
+  // 선출발 응답(#4276)을 넘겨받은 경우도 같다 — 그 요청이 실패(거부 · !ok · 깨진 JSON)면 같은 null로 같은 실패 상자.
+  try {
+    // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>null) 알림
+    // 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
+    // story #4276 — inbox/loading.tsx가 먼저 출발시킨 1쪽 요청이 있으면 그 응답을 한 번 넘겨받는다(규칙은 inbox-prefetch.ts).
+    const res = await takePrefetchedOrFetch(inboxNotificationsUrl(typeFilter, cursor), scope);
+    if (!res.ok) return null;
 
-  const json = await res.json();
-  return {
-    notifications: (json.data ?? []) as Notification[],
-    unreadCount: (json.meta?.unreadCount ?? 0) as number,
-    hasMore: (json.meta?.hasMore ?? false) as boolean,
-    nextCursor: (json.meta?.nextCursor ?? null) as string | null,
-  };
+    const json = await res.json();
+    return {
+      notifications: (json.data ?? []) as Notification[],
+      unreadCount: (json.meta?.unreadCount ?? 0) as number,
+      hasMore: (json.meta?.hasMore ?? false) as boolean,
+      nextCursor: (json.meta?.nextCursor ?? null) as string | null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export default function InboxPage() {
@@ -229,6 +236,8 @@ export default function InboxPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  // story #4295 — 첫 쪽을 못 불러왔으면 «알림 없음»(거짓 0건)이 아니라 실패 + 다시 시도.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -243,8 +252,10 @@ export default function InboxPage() {
   const refreshNotifications = useCallback(async () => {
     if (pagedBeyondFirst) return;
     const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
+    // 폴링 실패는 조용히(보고 있던 목록을 그대로 둔다) — 첫 쪽 실패 뒤 폴링이 성공하면 실패 표시를 걷는다.
     if (!result) return;
 
+    setLoadFailed(false);
     setNotifications(result.notifications);
     setUnreadCount(result.unreadCount);
     setHasMore(result.hasMore);
@@ -254,36 +265,62 @@ export default function InboxPage() {
   const loadMoreNotifications = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    const result = await fetchInboxNotifications('', nextCursor, prefetchScopeRef.current);
-    if (result) {
-      setNotifications((prev) => [...prev, ...result.notifications]);
-      setHasMore(result.hasMore);
-      setNextCursor(result.nextCursor);
-      setPagedBeyondFirst(true);
+    try {
+      const result = await fetchInboxNotifications('', nextCursor, prefetchScopeRef.current);
+      if (result) {
+        setNotifications((prev) => [...prev, ...result.notifications]);
+        setHasMore(result.hasMore);
+        setNextCursor(result.nextCursor);
+        setPagedBeyondFirst(true);
+      } else {
+        // story #4295 — 실패를 알린다(버튼은 그대로 남아 다시 누르면 다시 시도).
+        addToast({ title: tCommon('loadMoreFailed'), type: 'error' });
+      }
+    } finally {
+      setLoadingMore(false);
     }
-    setLoadingMore(false);
-  }, [nextCursor, loadingMore]);
+  }, [nextCursor, loadingMore, addToast, tCommon]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
+  // 첫 쪽 불러오기 — 마운트 때와 «다시 시도»가 같이 쓴다. `isCancelled`는 마운트 effect가 언마운트 뒤 상태를 안 쓰게.
+  // story #4295(까디르) — 순번으로 늦게 온 옛 응답은 버린다(늦은 실패가 성공을 덮지 않게). 진행 중 표시(ref)는 가장 최근 호출의
+  // finally에서 푼다 — «다시 시도»는 그걸 보고 연타를 막는다(아래 retryFirstPage). 마운트 effect는 막지 않는다: 개발 모드 StrictMode의
+  // 이중 effect에서 첫 호출이 취소된 채 진행 중이라, 막으면 두 번째 호출이 출발하지 않아 영원히 «불러오는 중»이 된다.
+  const firstPageInFlightRef = useRef(false);
+  const firstPageSeqRef = useRef(0);
+  const loadFirstPage = useCallback(async (isCancelled: () => boolean = () => false) => {
+    firstPageInFlightRef.current = true;
+    const seq = ++firstPageSeqRef.current;
+    const stale = () => isCancelled() || seq !== firstPageSeqRef.current;
+    setLoading(true);
+    setLoadFailed(false);
+    try {
       const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
-      if (!cancelled && result) {
+      if (stale()) return;
+      if (result) {
         setNotifications(result.notifications);
         setUnreadCount(result.unreadCount);
         setHasMore(result.hasMore);
         setNextCursor(result.nextCursor);
+      } else {
+        setLoadFailed(true);
       }
-      if (!cancelled) setLoading(false);
+    } finally {
+      if (seq === firstPageSeqRef.current) firstPageInFlightRef.current = false;
+      if (!stale()) setLoading(false);
     }
+  }, []);
+  const retryFirstPage = useCallback(() => {
+    if (firstPageInFlightRef.current) return;
+    void loadFirstPage();
+  }, [loadFirstPage]);
 
-    void load();
+  useEffect(() => {
+    let cancelled = false;
+    void loadFirstPage(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadFirstPage]);
 
   useEffect(() => {
     if (!currentTeamMemberId || !projectId) return;
@@ -307,19 +344,27 @@ export default function InboxPage() {
     return () => clearInterval(interval);
   }, [currentTeamMemberId, refreshNotifications]);
 
-  const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean) => {
-    if (currentIsRead === nextIsRead) return;
+  // story #4295 — 응답을 안 보고 읽음으로 바꾸던 자리(서버가 실패해도 화면은 읽음 · 망 오류면 처리 안 된 거부). 벨(handleMarkRead ·
+  // story #3637)과 같은 문구로 실패를 알리고 화면은 그대로 둔다. 망 오류도 실패로 친다.
+  // `silent`: 묶음처럼 여러 건을 한 번에 처리하는 호출부가 결과를 모아 토스트를 한 번만 띄우도록(4648 PO 검토).
+  const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean, opts: { silent?: boolean } = {}): Promise<boolean> => {
+    if (currentIsRead === nextIsRead) return true;
 
-    await fetch('/api/notifications', {
+    const ok = await fetch('/api/notifications', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, is_read: nextIsRead }),
-    });
+    }).then((res) => res.ok, () => false);
+    if (!ok) {
+      if (!opts.silent) addToast({ title: t('markReadFailed'), type: 'error' });
+      return false;
+    }
 
     setNotifications((prev) => prev.map((notification) => (
       notification.id === id ? { ...notification, is_read: nextIsRead } : notification
     )));
     setUnreadCount((prev) => (nextIsRead ? Math.max(0, prev - 1) : prev + 1));
+    return true;
   };
 
   const toggleRead = async (id: string, currentIsRead: boolean) => {
@@ -343,11 +388,16 @@ export default function InboxPage() {
   };
 
   const markAllRead = async () => {
-    await fetch('/api/notifications', {
+    // story #4295 — 위와 같은 부류(응답 안 봄) · 벨 handleMarkAllRead와 같은 문구.
+    const ok = await fetch('/api/notifications', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ markAllRead: true }),
-    });
+    }).then((res) => res.ok, () => false);
+    if (!ok) {
+      addToast({ title: t('markAllReadFailed'), type: 'error' });
+      return;
+    }
     setNotifications((prev) => prev.map((notification) => ({ ...notification, is_read: true })));
     setUnreadCount(0);
   };
@@ -461,7 +511,10 @@ export default function InboxPage() {
   // 항목별 구체 참조 칩+CTA(아래 렌더)로 실제 대상을 고르게 한다.
   const openGroup = async (group: Extract<InboxItem, { kind: 'group' }>) => {
     const unread = group.notifications.filter((n) => !n.is_read);
-    await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true)));
+    // story #4295(PO 검토) — 건마다 토스트를 띄우면 묶음 크기만큼(generic 묶음은 121건까지) 같은 토스트가 쏟아졌다. 조용히 처리해 결과를
+    // 모으고, 하나라도 실패면 한 번만. 실패한 건은 setNotificationReadState가 화면을 안 바꿔 안 읽음 그대로 남는다.
+    const results = await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true, { silent: true })));
+    if (results.includes(false)) addToast({ title: t('markReadFailed'), type: 'error' });
     if (group.groupKind === 'status_change' && group.latest.href) {
       router.push(group.latest.href);
     } else if (group.groupKind === 'generic') {
@@ -571,6 +624,14 @@ export default function InboxPage() {
                 {[1, 2, 3, 4, 5].map((i) => (
                   <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />
                 ))}
+              </div>
+            ) : loadFailed ? (
+              // story #4295 — 못 불러온 것은 «알림 없음»과 다른 사실 — 결재 큐(gate-inbox-load-error)와 같은 모양 · 다시 시도.
+              <div className="mx-3 mt-2 rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center" data-testid="inbox-notifications-load-error">
+                <p className="text-sm text-foreground">{t('notificationsLoadError')}</p>
+                <Button variant="outline" size="sm" className="mt-2" onClick={retryFirstPage}>
+                  {tCommon('retry')}
+                </Button>
               </div>
             ) : notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
