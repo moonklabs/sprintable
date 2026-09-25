@@ -374,6 +374,10 @@ async def test_outgoing_proof_reference_carries_conversations_own_project():
             project = await _make_project(s, org.id, "P")
             other_project = await _make_project(s, org.id, "Q")
             member_id, caller_id = await _make_human_member(s, org.id, project.id)
+            # 대화를 읽으려면 참여자 ∧ 그 대화 프로젝트 접근(conversation_readable_predicate) — 두 프로젝트에 다 있는 사용자.
+            from app.models.project_access import ProjectAccess
+            s.add(ProjectAccess(project_id=other_project.id, org_member_id=member_id, member_id=member_id, role="member"))
+            await s.commit()
             source_story = await _make_story(s, org.id, project.id, title="Source")
             conv = await _make_conversation(s, org.id, other_project.id, participant_ids=[member_id])
 

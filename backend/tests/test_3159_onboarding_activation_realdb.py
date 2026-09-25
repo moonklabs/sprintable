@@ -229,6 +229,13 @@ async def test_get_activation_state_first_instruction_carries_conversation_proje
             await s.execute(text(
                 f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
             ))
+            # team_members 뷰(0088)의 원재료 — 휴먼은 project_access · 에이전트는 agent_project_profiles(대화가 있는 프로젝트 B).
+            await s.execute(text(
+                f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES ('{_uuid()}','{agent_member}','{proj_b}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO project_access (id,project_id,member_id,role) VALUES ('{_uuid()}','{proj_b}','{human_member}','member')"
+            ))
             await s.commit()
             user = (await s.execute(select(User).where(User.id == uuid.UUID(user_id)))).scalar_one()
 
