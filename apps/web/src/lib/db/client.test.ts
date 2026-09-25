@@ -4,7 +4,7 @@
 // 이게 없으면 401 폴링/SSE 재연결 루프가 세션이 죽은 뒤에도 매 tick마다 refresh를 재시도해
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithAuth, loginWithPassword, refreshAuthTokens, registerUser } from './client';
+import { fetchWithAuth, loginWithPassword, refreshAuthTokens } from './client';
 import { fetchMe } from '@/lib/me-client';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
@@ -183,14 +183,6 @@ describe('callAuthRoute → notifySessionChanged 브릿지(story #3302 AC1/AC3)'
     await loginWithPassword('a@b.com', 'pw');
     expect(postMessage).toHaveBeenCalledTimes(1);
     expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'session-changed' }));
-  });
-
-  it('registerUser 성공 시 셸에 session-changed가 정확히 1회 간다', async () => {
-    const postMessage = vi.fn();
-    window.ReactNativeWebView = { postMessage };
-    vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
-    await registerUser('a@b.com', 'pw');
-    expect(postMessage).toHaveBeenCalledTimes(1);
   });
 
   it('refreshAuthTokens 성공 시 셸에 session-changed가 정확히 1회 간다(가장 빈번한 경로 — #2459 진단 (c)의 핵심 창)', async () => {

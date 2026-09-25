@@ -74,3 +74,31 @@ describe('POST /api/auth/register — first-touch 귀속 relay + 소비(story #3
     expect(res.cookies.get('sp_attr_src')).toBeUndefined();
   });
 });
+
+// story #4293 — 이 BFF는 이름 없이 오면 이메일 앞부분을 display_name으로 지어냈다(`body.email.split('@')[0]`) — #3755 · #3758의
+// «이메일은 이름 칸에 안 싣는다»를 우회하는 자리. 이제 받은 그대로 넘기고, 없거나 비면 BE가 422로 거절한다.
+describe('POST /api/auth/register — 이름을 지어내지 않는다(story #4293)', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    h.cookiesGetMock.mockReset();
+    h.cookiesGetMock.mockImplementation(() => undefined);
+  });
+
+  function sentBody(): Record<string, unknown> {
+    return JSON.parse(String((mockFetch.mock.calls[0]![1] as RequestInit).body)) as Record<string, unknown>;
+  }
+
+  it('⭐이름 없이 오면 display_name을 싣지 않는다(이메일 앞부분 금지) · BE 422를 그대로 돌려준다', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'display_name required' } }), { status: 422 }));
+    const res = await POST(makeRequest({ email: 'someone@example.com', password: 'Abc123!!', tos_accepted: true }));
+    expect(sentBody()).not.toHaveProperty('display_name');
+    expect(JSON.stringify(sentBody())).not.toContain('"someone"');
+    expect(res.status).toBe(422);
+  });
+
+  it('받은 이름은 그대로 · 공백뿐인 이름도 지어내지 않고 그대로(BE가 공백 거부)', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'blank' } }), { status: 422 }));
+    await POST(makeRequest({ email: 'someone@example.com', password: 'Abc123!!', display_name: '   ', tos_accepted: true }));
+    expect(sentBody()['display_name']).toBe('   ');
+  });
+});

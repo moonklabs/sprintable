@@ -45,10 +45,6 @@ export async function loginWithPassword(
   return callAuthRoute('/api/auth/login', { email, password, totp_code: totpCode ?? null });
 }
 
-export async function registerUser(email: string, password: string): Promise<AuthResult> {
-  return callAuthRoute('/api/auth/register', { email, password });
-}
-
 export async function logoutUser(refreshToken?: string): Promise<void> {
   invalidateMeCache(); // story #4184
   await fetch('/api/auth/logout', {

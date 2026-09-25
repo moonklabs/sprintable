@@ -26,11 +26,6 @@ export default defineConfig({
       // convention shared with the sibling Python tests) — its *.test.ts files use
       // bun:test, not vitest, and vitest crashes trying to resolve that import (#2578 QA).
       'connectors/**',
-      // EE billing tests require EE-specific infrastructure (payment/factory, monthly-agent-usage-dashboard)
-      // that is not available in the OSS vitest setup. These require a separate EE vitest config.
-      'ee/apps/web/src/services/billing-limit-enforcer.test.ts',
-      'ee/apps/web/src/app/api/billing/**/*.test.ts',
-      'ee/apps/web/src/app/api/v1/billing/**/*.test.ts',
       // QUARANTINE manifest (story 2d5c8662) — fully burned down (Group B, owner 디디).
       // The last quarantined file (agent-builtin-tools.test.ts) was re-included once its
       // service deps were reworked to db-stub-backed fakes (story 7a57e7b1). Keep this
