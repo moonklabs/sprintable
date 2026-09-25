@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
 import { memberNameById } from '@/lib/member-display';
@@ -37,7 +38,8 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
           const isCurrent = v.version === artifact.current_version;
           const isAnchor = v.version === artifact.anchor_version;
           const isSelected = v.version === selectedVersion;
-          const authorName = memberNameById(memberMap, v.created_by, tc, '—');
+          // [SID:4286 · 까디르 P1/P4] «—»로 아는 사람(이름 빔)과 모르는 사람을 뭉개던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
+          const authorName = memberLookup(memberMap, v.created_by, tc)!.label;
           return (
             <li key={v.id}>
               <button

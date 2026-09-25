@@ -35,7 +35,7 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
-import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
+import { memberDisplayLabel, memberLookup, memberNameById, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -990,8 +990,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     done: t('workcellNextNeedDone'),
   };
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
-    // story #4284(까디르 CHANGES) — 목록에 없는 작성자 폴백이 id 통째라 워크셀 메시지 작성자로 긴 id가 그려졌다 → «알 수 없는 구성원».
-    author: memberNameById(memberMap, c.created_by, tc, tChats('unknownMember')),
+    // [SID:4286 · 까디르 P1] 작성자 id 통째를 이름 칸에 싣던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
+    author: memberLookup(memberMap, c.created_by, tc)!.label,
     body: c.content,
   }));
 
@@ -1320,7 +1320,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
-  const memberName = (id: string | null) => (id ? memberNameById(memberMap, id, tc, '—') : '—');
+  // [SID:4286 · 까디르 P1] id가 있는데 «—»이던 자리(아는 사람 · 모르는 사람 뭉갬) — id 없음만 «—».
+  const memberName = (id: string | null) => (id ? memberLookup(memberMap, id, tc)!.label : '—');
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
@@ -1617,7 +1618,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <p className="mt-1 text-sm text-foreground">
                   {localAssigneeIds.length > 0
-                    ? localAssigneeIds.map((id) => memberNameById(memberMap, id, tc, '—')).join(', ')
+                    ? localAssigneeIds.map((id) => memberLookup(memberMap, id, tc)!.label).join(', ')
                     : '—'}
                 </p>
               )}
@@ -2324,7 +2325,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-                            <span>{memberNameById(memberMap, comment.created_by, tc, '—')}</span>
+                            <span>{memberLookup(memberMap, comment.created_by, tc)!.label}</span>
                             <span>·</span>
                             <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
@@ -2351,7 +2352,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => {
-                        const actorName = memberNameById(memberMap, activity.created_by, tc, '—');
+                        const actorName = memberLookup(memberMap, activity.created_by, tc)!.label;
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (

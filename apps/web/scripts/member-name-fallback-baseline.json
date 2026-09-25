@@ -22,5 +22,13 @@
   {
     "key": "services/memo.ts::id-fragment::name: (memberById.get(row.team_member_id) as any)?.name ?? row.team_member_id,",
     "reason": "메모 «읽은 사람» 응답을 만드는 데이터 층(id 통째 폴백 뒤 filter(Boolean(name))) — 4286 PR 본문으로 PO 보고 · 별도 판단"
+  },
+  {
+    "key": "lib/auth-helpers.ts::email-whole::const name = user.user_metadata?.name || user.user_metadata?.full_name || user.email || tc('unknown');",
+    "reason": "EE supabase 경로(agents 페이지 · 레이아웃)의 팀원 자동 생성이 이름 없으면 이메일 통째를 저장(데이터 층) — register 줄과 같은 부류 · PO 별도 판단(까디르 4651 P1 여러 줄 스캔이 찾음)"
+  },
+  {
+    "key": "services/memo.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;",
+    "reason": "메모 답글 작성자 이름을 만드는 데이터 층(id 통째 폴백) — 메모 서비스는 퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) · 같은 파일 243줄과 같은 사유"
   }
 ]

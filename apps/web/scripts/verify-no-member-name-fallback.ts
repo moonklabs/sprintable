@@ -5,6 +5,9 @@
  *   ② id-fragment  : 구성원 id 조각(길이 무관)이나 id 통째를 이름 자리에 — `memberNames[id] ?? id.slice(0, 8)` ·
  *                    `…_member_id?.slice(0, 8)` · `?.name ?? \`#${id.slice(0, 6)}\`` · `resolveName = (id) => id` · `?.label ?? approverId`
  *   ③ question-mark: `?? '?'` · `|| '?'` — 날것 «?»를 이름(또는 문장 안 이름)으로
+ *   ④ dash-fallback : 이름 표 조회 뒤 `?? '—'` · `'-'` · `''` — 아는 사람(표에 있는데 이름 빔)도 모르는 사람도 같은 «—»(까디르 4651 P1)
+ *   ⑤ email-whole   : 이름 식이 이메일 통째로 떨어짐 — `name || full_name || user.email`(① 앞부분과 같은 상수 위반)
+ * 여러 줄로 나뉜 폴백(`?? …`/`|| …`가 다음 줄에서 시작)은 한 논리 줄로 합쳐 본다(까디르 4651 P1). 줄 번호는 첫 줄.
  * 처방은 `lib/member-display.ts`의 memberDisplayLabel(이름 빔 → «이름 없는 구성원») · memberLookupLabel(id→이름 표 ·
  * 불러오는 중 → 빈 칸 · 표에 없음 → «알 수 없는 구성원»).
  *
@@ -26,10 +29,13 @@ const BASELINE_PATH = path.resolve(HERE, 'member-name-fallback-baseline.json');
 const EXT_RE = /\.(tsx?|jsx?)$/;
 const TEST_RE = /\.test\.(tsx?|jsx?)$/;
 
-export type FallbackKind = 'email-prefix' | 'id-fragment' | 'question-mark';
+export type FallbackKind = 'email-prefix' | 'id-fragment' | 'question-mark' | 'dash-fallback' | 'email-whole';
 
 // 구성원 id처럼 생긴 변수 · 필드 이름(사람 · 에이전트를 가리키는 id). 작업 항목 · 문서 · 조직 id는 넣지 않는다.
-const MEMBER_ID_NAME = String.raw`(?:user_id|userId|member_id|memberId|[A-Za-z]+_member_id|[a-z]+MemberId|author_id|authorId|approver_id|approverId|resolver_id|resolverId|requester_id|requesterId|verified_by|human_verified_by|humanVerifiedBy|owner_id|ownerId|published_by|actor_id|actorId)`;
+// [까디르 4651 P1] 작성 · 처리 · 담당 · 발신 id(created_by 등)도 구성원 id다 — 빠져 있어 `?.name ?? c.created_by`를 못 잡았다.
+const MEMBER_ID_NAME = String.raw`(?:user_id|userId|member_id|memberId|[A-Za-z]+_member_id|[a-z]+MemberId|author_id|authorId|approver_id|approverId|resolver_id|resolverId|requester_id|requesterId|verified_by|human_verified_by|humanVerifiedBy|owner_id|ownerId|published_by|actor_id|actorId|created_by|createdBy|updated_by|updatedBy|resolved_by|resolvedBy|assignee_id|assigneeId|sender_id|senderId)`;
+// 이름 표 조회 — `memberMap[id]` · `memberNames[id]` · `memberById.get(id)`(뒤에 `?.name` 선택)
+const NAME_TABLE_LOOKUP = String.raw`\b(?:memberNames|memberMap|memberNameById|nameById|names|memberById)(?:\[[^\]]+\]|\.get\([^)]*\))(?:\?\.name)?`;
 const SLICE = String.raw`!?\??\.slice\(\s*0\s*,\s*\d+\s*\)`;
 
 const PATTERNS: { kind: FallbackKind; re: RegExp }[] = [
@@ -44,6 +50,10 @@ const PATTERNS: { kind: FallbackKind; re: RegExp }[] = [
   // resolveName 기본값이 id를 그대로 돌림 — `resolveName = (id) => id`
   { kind: 'id-fragment', re: /\bresolveName\s*=\s*\(\s*(\w+)\s*\)\s*=>\s*\1\b\s*[,)]/ },
   { kind: 'question-mark', re: /(?:\?\?|\|\|)\s*['"`]\?['"`]/ },
+  // 이름 표 조회 뒤 일반 폴백 — `memberMap[id]?.name ?? '—'` · `?? ''` · `|| '-'`(까디르 4651 P1)
+  { kind: 'dash-fallback', re: new RegExp(String.raw`${NAME_TABLE_LOOKUP}\s*(?:\?\?|\|\|)\s*['"\x60](?:—|-|–|)['"\x60]`) },
+  // 이름 식이 이메일 통째로 — `name || full_name || user.email` · `m.name ?? m.email`
+  { kind: 'email-whole', re: /\b(?:name|full_name|display_name|displayName)\b[^;]*?(?:\?\?|\|\|)\s*(?:[A-Za-z_]+\??\.)*email\b(?!\s*[.(\[?])/ },
 ];
 
 export interface FallbackHit {
@@ -79,11 +89,26 @@ function memberNameByIdIdFallback(line: string): boolean {
   return false;
 }
 
+// 여러 줄로 나뉜 폴백을 한 논리 줄로 — 다음 줄이 `??` · `||`로 시작하거나 이 줄이 그것으로 끝나면 이어 붙인다. 시작 줄 번호를 남긴다.
+function logicalLines(content: string): { line: string; at: number }[] {
+  const raw = content.split('\n');
+  const out: { line: string; at: number }[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    let line = raw[i]!;
+    const at = i;
+    while (i + 1 < raw.length && (/^\s*(?:\?\?|\|\|)/.test(raw[i + 1]!) || /(?:\?\?|\|\|)\s*$/.test(line))) {
+      i += 1;
+      line = `${line} ${raw[i]!.trim()}`;
+    }
+    out.push({ line, at });
+  }
+  return out;
+}
+
 export function findMemberNameFallbacks(content: string, file: string): FallbackHit[] {
   const hits: FallbackHit[] = [];
-  const lines = content.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!;
+  for (const { line, at } of logicalLines(content)) {
+    const i = at;
     const trimmed = line.trim();
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('{/*')) continue;
     const seen = new Set<FallbackKind>();
@@ -155,6 +180,14 @@ export const SELF_TEST_SAMPLES: { kind: FallbackKind; code: string }[] = [
   { kind: 'question-mark', code: "name: unconnectedAgentParticipants[0]!.name ?? '?'," },
   { kind: 'id-fragment', code: 'resolveName={(id) => memberNameById(memberMap, id, tc, id.slice(0, 6))}' },
   { kind: 'id-fragment', code: 'author: memberNameById(memberMap, c.created_by, tc, c.created_by),' },
+  // [까디르 4651 P1] 실제 코드 모양 그대로(story-detail-panel · canvas · memo · auth-helpers에 있던 줄)
+  { kind: 'id-fragment', code: 'author: memberMap[c.created_by]?.name ?? c.created_by,' },
+  { kind: 'id-fragment', code: 'const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;' },
+  { kind: 'dash-fallback', code: "const memberName = (id: string | null) => (id ? (memberMap[id]?.name ?? '—') : '—');" },
+  { kind: 'dash-fallback', code: "<strong className=\"text-foreground\">{memberMap[c.author_id]?.name ?? '—'}</strong>" },
+  { kind: 'dash-fallback', code: "? localAssigneeIds.map((id) => memberMap[id]?.name ?? '—').join(', ')" },
+  { kind: 'email-whole', code: "const name = user.user_metadata?.name\n    || user.user_metadata?.full_name\n    || user.email\n    || tc('unknown');" },
+  { kind: 'id-fragment', code: 'const n = memberMap[id]?.name\n  ?? id.slice(0, 8);' },
 ];
 
 export function runSelfTest(): string[] {
