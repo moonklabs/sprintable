@@ -26,20 +26,24 @@
  *   ㉢ `fetchWithAuth`가 아닌 raw `fetch()`(verify-no-new-raw-fetch-api.ts의 관할).
  *   ㉣ `.ok` 검사가 있지만 실패 분기에서 여전히 `.json()`을 부르는 경우(검사 "존재
  *      여부"만 봄 — 검사 로직이 올바른지는 검산 대상 아님).
- *   ㉤ await+분리 형에서 변수명이 아예 다른 스코프 재사용 등으로 300자 윈도우를 벗어나면
- *      과소탐지(놓침) 가능 — "결함 목록"이 아니라 "열어 볼 목록"에 가깝다.
+ *   ㉤ (story #4312 AST 뒤) 검사 «존재»만 본다 — 같은 구간에 `.ok`/`.status`가 있으면 그 검사가 읽은 본문을 실제로 가르는지
+ *      (제어 흐름)는 안 본다(㉣과 같은 한계). 응답을 다른 함수에 넘겨 그 안에서 읽거나(`parse(res)`) 구조 분해(`const { ok } = res`)는
+ *      안 본다. 같은 함수 안 이름 가림(shadowing)도 구분하지 않는다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const EXT_RE = /\.tsx?$/;
 const TEST_RE = /\.test\.[tj]sx?$/;
 
-const CHAIN_RE = /fetchWithAuth\([^)]*\)\s*\.then\(\s*\(?\s*(\w*)\s*\)?\s*=>\s*\1\??\.?json\(\)/g;
-const AWAIT_ASSIGN_RE = /(\w+)\s*=\s*await\s+fetchWithAuth\(/g;
-const WINDOW = 300;
+const FETCH = 'fetchWithAuth';
+/** 응답 본문을 읽는 메서드 — 실패 응답의 에러 바디를 «데이터»로 읽는 자리. */
+const BODY_READS = new Set(['json', 'text']); // story #4312 — `.text()`도 같은 부류(에러 바디를 데이터로 읽음).
+/** 응답 상태를 보는 속성 — 같은 함수 · 같은 대입 구간 안에 있으면 검사한 것으로 친다(읽기 앞이든 뒤든 · 아래 «순서» 참고). */
+const STATUS_PROPS = new Set(['ok', 'status']);
 
 export interface FetchOkViolation {
   file: string;
@@ -54,32 +58,117 @@ function lineTextAt(content: string, index: number): string {
   return content.slice(lineStart, lineEnd).trim();
 }
 
+/** 괄호 · await · `as` · `!` · `.catch(…)`를 벗겨 fetchWithAuth 호출이면 그 호출을 돌린다. */
+function unwrapFetch(e: ts.Expression, allowAwait: boolean): ts.CallExpression | null {
+  let cur: ts.Expression = e;
+  for (;;) {
+    if (ts.isParenthesizedExpression(cur) || ts.isAsExpression(cur) || ts.isNonNullExpression(cur) || ts.isSatisfiesExpression(cur)) {
+      cur = cur.expression;
+    } else if (allowAwait && ts.isAwaitExpression(cur)) {
+      cur = cur.expression;
+    } else if (ts.isCallExpression(cur) && ts.isPropertyAccessExpression(cur.expression) && cur.expression.name.text === 'catch') {
+      cur = cur.expression.expression; // `fetchWithAuth(…).catch(() => null)` — 결과는 여전히 응답(또는 null).
+    } else break;
+  }
+  return ts.isCallExpression(cur) && ts.isIdentifier(cur.expression) && cur.expression.text === FETCH ? cur : null;
+}
+
+function isFunctionLike(n: ts.Node): n is ts.SignatureDeclaration {
+  return ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n)
+    || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) || ts.isConstructorDeclaration(n);
+}
+
+function enclosingScope(n: ts.Node): ts.Node {
+  let cur = n.parent;
+  while (cur && !isFunctionLike(cur) && !ts.isSourceFile(cur)) cur = cur.parent;
+  return cur ?? n.getSourceFile();
+}
+
+/** `name.<prop>` 접근(옵셔널 체인 포함)의 위치를 모은다 — 상태 검사 · 본문 읽기. */
+function collectUses(scope: ts.Node, name: string): { checks: number[]; reads: number[] } {
+  const checks: number[] = [];
+  const reads: number[] = [];
+  const visit = (n: ts.Node) => {
+    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) {
+      const prop = n.name.text;
+      if (STATUS_PROPS.has(prop)) checks.push(n.getStart());
+      else if (BODY_READS.has(prop) && ts.isCallExpression(n.parent) && n.parent.expression === n) reads.push(n.getStart());
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(scope);
+  return { checks, reads };
+}
+
+/** (from, to) 구간에 본문 읽기가 있는데 상태 검사가 하나도 없으면 위반.
+ * 순서(검사가 읽기 **앞**)는 요구하지 않는다 — develop 전수에서 «본문을 먼저 읽고(`.json().catch(() => null)`) `res.ok`로
+ * 갈라 실패면 그 본문의 에러 문구를 보인다» 모양이 5곳 전부 올바른 소비였다(순서 규칙이면 전부 오탐). */
+function hasUncheckedRead(uses: { checks: number[]; reads: number[] }, from: number, to: number): boolean {
+  const inRange = (x: number) => x > from && x < to;
+  return uses.reads.some(inRange) && !uses.checks.some(inRange);
+}
+
+/**
+ * story #4312 — 글자 창(300자) 대신 **AST**로 본다(주석 · 옵션이 길면 놓치거나 멀쩡한 자리를 잡던 맹점 · `res?.ok` · `res.status`를
+ * 검사로 못 보던 오탐).
+ * 셋 모양:
+ *   ㉠ 체이닝 — `fetchWithAuth(…).then((r) => …r.json()…)`: 콜백 안에 `r.json()`이 있는데 `r.ok`/`r.status`가 없으면 위반.
+ *   ㉡ 변수 — `const res = await fetchWithAuth(…)`(또는 `res = await …` · `.catch(() => null)` 포함): 같은 함수 안, 그 대입부터
+ *      다음 같은 이름 대입 전까지 `res.json()`이 있는데 `res.ok`/`res.status`(옵셔널 체인 포함)가 없으면 위반.
+ *   ㉥ 바로 읽기 — `(await fetchWithAuth(…)).json()`: 검사할 자리 자체가 없어 늘 위반.
+ * 키는 fetchWithAuth 호출이 시작하는 줄의 트림 텍스트(예전 regex 가드와 같은 키 — baseline 호환).
+ */
 export function findFetchOkViolations(content: string, file: string): FetchOkViolation[] {
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const violations: FetchOkViolation[] = [];
   const seenKeys = new Set<string>();
-
-  CHAIN_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = CHAIN_RE.exec(content)) !== null) {
-    const line = lineTextAt(content, m.index);
+  const report = (fetchCall: ts.CallExpression) => {
+    const line = lineTextAt(content, fetchCall.getStart(sf));
     const key = `${file}::${line}`;
-    if (seenKeys.has(key)) continue;
+    if (seenKeys.has(key)) return;
     seenKeys.add(key);
     violations.push({ file, key, line });
-  }
+  };
 
-  AWAIT_ASSIGN_RE.lastIndex = 0;
-  while ((m = AWAIT_ASSIGN_RE.exec(content)) !== null) {
-    const varName = m[1]!;
-    const windowText = content.slice(m.index, m.index + WINDOW);
-    const hasJson = windowText.includes(`${varName}.json()`);
-    const hasOkCheck = windowText.includes(`${varName}.ok`) || windowText.includes(`!${varName}.ok`);
-    if (!hasJson || hasOkCheck) continue;
-    const line = lineTextAt(content, m.index);
-    const key = `${file}::${line}`;
-    if (seenKeys.has(key)) continue;
-    seenKeys.add(key);
-    violations.push({ file, key, line });
+  // ㉡ 변수 대입 자리 — 스코프 · 이름별로 모아 구간을 나눈다.
+  type Site = { name: string; scope: ts.Node; pos: number; fetch: ts.CallExpression | null };
+  const sites: Site[] = [];
+
+  const visit = (n: ts.Node) => {
+    // ㉠ 체이닝
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'then') {
+      const fetchCall = unwrapFetch(n.expression.expression, false);
+      const cb = n.arguments[0];
+      if (fetchCall && cb && (ts.isArrowFunction(cb) || ts.isFunctionExpression(cb))) {
+        const param = cb.parameters[0];
+        if (param && ts.isIdentifier(param.name)) {
+          const uses = collectUses(cb.body, param.name.text);
+          if (hasUncheckedRead(uses, -1, Number.POSITIVE_INFINITY)) report(fetchCall);
+        }
+      }
+    }
+    // ㉥ 바로 읽기
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && BODY_READS.has(n.expression.name.text)) {
+      const fetchCall = unwrapFetch(n.expression.expression, true);
+      if (fetchCall) report(fetchCall);
+    }
+    // ㉡ 대입 자리(같은 이름의 다른 값 대입도 구간 끝으로 쓰려고 fetch가 아니어도 모은다)
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      sites.push({ name: n.name.text, scope: enclosingScope(n), pos: n.getStart(sf), fetch: unwrapFetch(n.initializer, true) });
+    }
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left)) {
+      sites.push({ name: n.left.text, scope: enclosingScope(n), pos: n.getStart(sf), fetch: unwrapFetch(n.right, true) });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  for (const site of sites) {
+    if (!site.fetch) continue;
+    const next = sites
+      .filter((o) => o !== site && o.name === site.name && o.scope === site.scope && o.pos > site.pos)
+      .reduce((min, o) => Math.min(min, o.pos), Number.POSITIVE_INFINITY);
+    if (hasUncheckedRead(collectUses(site.scope, site.name), site.pos, next)) report(site.fetch);
   }
 
   return violations;
