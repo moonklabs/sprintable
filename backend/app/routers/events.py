@@ -3149,10 +3149,7 @@ async def _publish_registry_event_core(
             result["zero_reach_warning"] = False
             result["notice"] = t("events.human_stage_zero_reach_notice", resolved_locale)
         else:
-            result["warning"] = (
-                "발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — "
-                "work_item이 미배정이거나 routing이 아무도 가리키지 않습니다."
-            )
+            result["warning"] = t("events.zero_reach_warning", resolved_locale)  # story #4250 — 조직/요청 로케일
     return result
 
 

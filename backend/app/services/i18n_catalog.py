@@ -439,6 +439,12 @@ _CATALOG: dict[str, dict[str, str]] = {
     # story #4092(E-RECIPE-1 팔로우업, PO 확定 2026-09-21) — 사람 역할 stage(role_actor_kinds
     # 선언 human) 발행은 애초 에이전트 바인딩이 없는 게 정상이라 zero_reach 경고 대신 이
     # 중립 안내를 싣는다(MCP 표면은 "[안내] "로 강조, tools/events.py 참조).
+    # story #4250 — zero_reach 경고(발행 응답 `warning` · MCP가 "[경고]"로 강조). 발행자가 읽는 문장이라 조직/요청 로케일로.
+    # ko는 옛 하드코딩 문장과 같은 뜻 · 카탈로그 톤 가드(test_3931)에 맞춰 해요체로(«~습니다» → «~이에요/~아요»).
+    "events.zero_reach_warning": {
+        "ko": "발행은 됐지만 escalation·broadcast 대상이 모두 0명이에요 — work_item이 미배정이거나 routing이 아무도 가리키지 않아요.",
+        "en": "Published, but escalation and broadcast both reached 0 people — the work item is unassigned or the routing points to no one.",
+    },
     "events.human_stage_zero_reach_notice": {
         "ko": "이 단계는 사람이 판단해요 — 에이전트 바인딩이 필요 없어요.",
         "en": "This stage is handled by a human — no agent binding is needed.",
