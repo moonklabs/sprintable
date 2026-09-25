@@ -5,7 +5,7 @@
 
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt, toDateKey } from '@/components/content/schedule-format';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
 export type FileTint = 'img' | 'pdf' | 'doc' | 'zip' | 'code';
@@ -146,11 +146,12 @@ export function formatStorageSize(bytes: number): string {
   return `${(gb / 1024).toFixed(1)} TB`;
 }
 
-/** ISO → YYYY-MM-DD (상세 메타 '생성' 행). */
-export function formatDate(iso: string): string {
+/** ISO → YYYY-MM-DD (상세 메타 '생성' 행 · 검증일) — tz 기준 날짜. story #4280: 예전엔 `toISOString().slice(0, 10)`(UTC 날짜)라
+ * KST 00~09시에 생긴 것이 전날로 찍혔다. 옆 줄의 formatRelativeTime과 같은 tz를 받는다(필수 — 빼먹으면 tsc가 잡는다). */
+export function formatDate(iso: string, tz: string): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return '';
-  return new Date(iso).toISOString().slice(0, 10);
+  return toDateKey(iso, tz);
 }
 
 /**

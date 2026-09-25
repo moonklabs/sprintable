@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDisplayTimezone, toDateKey, formatScheduledAt, defaultCalendarRange, shiftCalendarRange } from './schedule-format';
+import { resolveDisplayTimezone, toDateKey, formatScheduledAt, defaultCalendarRange, shiftCalendarRange, todayDateKey, defaultPastDaysDateRange, dateKeysToInstants } from './schedule-format';
 
 // story #3422(doc §11-2, 페드루 PO 지적 2026-09-04 08:57Z) — 그룹핑과 표기가 같은 tz를
 // 써야 한다. 21:30 KST(=UTC 12:30, 같은 날)와 09:00 KST(=UTC 전날 24:00 부근)를 각각
@@ -101,5 +101,61 @@ describe('resolveDisplayTimezone — 조직 tz 有/無 두 갈래', () => {
   it('인자를 아예 안 주면(기존 호출부, 하위 호환) 브라우저 폴백', () => {
     const result = resolveDisplayTimezone();
     expect(result.isOrgTimezone).toBe(false);
+  });
+});
+
+// story #4280 — 날짜 입력칸 기본값(«오늘» · 최근 N일)과 날짜 키 → 조회 경계. 경계 시각 넷(KST 00:30 · 08:59 · 09:00 · UTC 자정 전후).
+describe('todayDateKey · defaultPastDaysDateRange — 표시 시간대의 «오늘»(story #4280)', () => {
+  const cases: Array<{ label: string; utc: string; kst: string; utcDate: string }> = [
+    { label: 'KST 00:30 (UTC 전날 15:30)', utc: '2026-09-24T15:30:00Z', kst: '2026-09-25', utcDate: '2026-09-24' },
+    { label: 'KST 08:59 (UTC 전날 23:59 · UTC 자정 직전)', utc: '2026-09-24T23:59:00Z', kst: '2026-09-25', utcDate: '2026-09-24' },
+    { label: 'KST 09:00 (UTC 00:00 · UTC 자정)', utc: '2026-09-25T00:00:00Z', kst: '2026-09-25', utcDate: '2026-09-25' },
+    { label: '민 기기 실측 KST 02:49', utc: '2026-09-24T17:49:00Z', kst: '2026-09-25', utcDate: '2026-09-24' },
+  ];
+  for (const c of cases) {
+    it(`${c.label} → Asia/Seoul 오늘 ${c.kst} · UTC 오늘 ${c.utcDate}`, () => {
+      expect(todayDateKey('Asia/Seoul', new Date(c.utc))).toBe(c.kst);
+      expect(todayDateKey('UTC', new Date(c.utc))).toBe(c.utcDate);
+    });
+  }
+
+  it('⭐KST 02:49 기본 7일 = 9/18 ~ 9/25(UTC 날짜 자르기였던 예전 값 9/17 ~ 9/24가 아님)', () => {
+    expect(defaultPastDaysDateRange('Asia/Seoul', 7, new Date('2026-09-24T17:49:00Z'))).toEqual({ from: '2026-09-18', to: '2026-09-25' });
+  });
+
+  it('음의 오프셋(LA) — UTC가 이미 다음 날이어도 LA 날짜', () => {
+    // 2026-09-25T03:00Z = LA 9/24 20:00(PDT)
+    expect(defaultPastDaysDateRange('America/Los_Angeles', 7, new Date('2026-09-25T03:00:00Z'))).toEqual({ from: '2026-09-17', to: '2026-09-24' });
+  });
+
+  it('달 · 해 경계를 달력일로 넘는다', () => {
+    expect(defaultPastDaysDateRange('Asia/Seoul', 7, new Date('2026-01-02T01:00:00Z'))).toEqual({ from: '2025-12-26', to: '2026-01-02' });
+  });
+});
+
+describe('dateKeysToInstants — 날짜 키 → 표시 시간대 자정 · 자정 직전의 UTC ISO(story #4280)', () => {
+  it('⭐Asia/Seoul: 9/18 00:00 KST = 9/17 15:00Z · 9/25 23:59:59.999 KST = 9/25 14:59:59.999Z', () => {
+    expect(dateKeysToInstants('2026-09-18', '2026-09-25', 'Asia/Seoul')).toEqual({
+      from: '2026-09-17T15:00:00.000Z',
+      to: '2026-09-25T14:59:59.999Z',
+    });
+  });
+
+  it('UTC: 오프셋 0', () => {
+    expect(dateKeysToInstants('2026-09-18', '2026-09-25', 'UTC')).toEqual({
+      from: '2026-09-18T00:00:00.000Z',
+      to: '2026-09-25T23:59:59.999Z',
+    });
+  });
+
+  it('LA(PDT −7)', () => {
+    expect(dateKeysToInstants('2026-09-18', '2026-09-24', 'America/Los_Angeles')).toEqual({
+      from: '2026-09-18T07:00:00.000Z',
+      to: '2026-09-25T06:59:59.999Z',
+    });
+  });
+
+  it('빈 키는 null(날짜 칸을 비운 경우 · 경계 없이 조회)', () => {
+    expect(dateKeysToInstants('', '', 'Asia/Seoul')).toEqual({ from: null, to: null });
   });
 });

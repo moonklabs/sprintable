@@ -13,6 +13,8 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -47,12 +49,8 @@ const PAGE_LIMIT = 200; // BE limit 상한
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 더보기 = 과거로 7일 슬라이드
 const OBJECT_TYPES = ['story', 'epic', 'sprint', 'task', 'doc', 'conversation', 'meeting', 'memo'];
 
-function getDefaultDates() {
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 7);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
-}
+// story #4280 — 기본 기간(최근 7일)은 표시 시간대(조직 timezone → 없으면 브라우저) 기준 «오늘»으로(예전 UTC 날짜 자르기는 KST 00~09시에 «어제»).
+const DEFAULT_RANGE_PAST_DAYS = 7;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -189,7 +187,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [actorFilter, setActorFilter] = useState(ALL);
   const [verbFilter, setVerbFilter] = useState(ALL);
   const [objectTypeFilter, setObjectTypeFilter] = useState(ALL);
-  const [{ from: initFrom, to: initTo }] = useState(getDefaultDates);
+  const { orgTimezone } = useDashboardContext();
+  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
+  const [{ from: initFrom, to: initTo }] = useState(() => defaultPastDaysDateRange(displayTimezone, DEFAULT_RANGE_PAST_DAYS));
   const [fromDate, setFromDate] = useState(initFrom);
   const [toDate, setToDate] = useState(initTo);
 
@@ -241,8 +241,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   );
 
   // 시간 범위 경계(ms). until은 toDate 끝(23:59:59), since 하한은 fromDate 시작.
-  const rangeFromMs = useMemo(() => new Date(`${fromDate}T00:00:00`).getTime(), [fromDate]);
-  const rangeToMs = useMemo(() => new Date(`${toDate}T23:59:59`).getTime(), [toDate]);
+  // story #4280 — 날짜 칸은 표시 시간대의 날짜라 경계도 그 시간대의 자정 · 자정 직전으로(예전 `new Date('…T00:00:00')`은 브라우저 시간대 자정).
+  const rangeFromMs = useMemo(() => new Date(dateKeysToInstants(fromDate, toDate, displayTimezone).from ?? NaN).getTime(), [fromDate, toDate, displayTimezone]);
+  const rangeToMs = useMemo(() => new Date(dateKeysToInstants(fromDate, toDate, displayTimezone).to ?? NaN).getTime(), [fromDate, toDate, displayTimezone]);
 
   // 최초 / 필터 변경 → 선택 범위 [from, to] 재로드(newest-first)
   useEffect(() => {

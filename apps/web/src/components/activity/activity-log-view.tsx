@@ -12,7 +12,8 @@ import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { memberDisplayLabel } from '@/lib/member-display';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,15 +63,9 @@ const ACTION_FILTER_DEBOUNCE_MS = 300;
 // 실제 action 값들(예: "created", "updated_status")보다 압도적으로 넉넉한 상한.
 const ACTION_FILTER_MAX_LENGTH = 200;
 
-function getDefaultDates() {
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 7);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
-}
+// story #4280 — 기본 기간(최근 7일)은 표시 시간대(조직 timezone → 없으면 브라우저) 기준 «오늘»으로. 예전 `toISOString().slice(0, 10)`는
+// UTC 날짜라 KST 00~09시에 끝 날짜가 «어제»였다(민 기기 · 9/25 02:49 KST에 «~ 9. 24.»).
+const DEFAULT_RANGE_PAST_DAYS = 7;
 
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
@@ -107,7 +102,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     return () => clearTimeout(timer);
   }, [actionFilter]);
   const [entityTypeFilter, setEntityTypeFilter] = useState(ALL);
-  const [{ from: initFrom, to: initTo }] = useState(getDefaultDates);
+  const { orgTimezone } = useDashboardContext();
+  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
+  const [{ from: initFrom, to: initTo }] = useState(() => defaultPastDaysDateRange(displayTimezone, DEFAULT_RANGE_PAST_DAYS));
   const [fromDate, setFromDate] = useState(initFrom);
   const [toDate, setToDate] = useState(initTo);
 
@@ -129,11 +126,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       if (actorFilter !== ALL) p.set('actor_id', actorFilter);
       if (debouncedActionFilter !== ALL) p.set('action', debouncedActionFilter);
       if (entityTypeFilter !== ALL) p.set('entity_type', entityTypeFilter);
-      if (fromDate) p.set('from', `${fromDate}T00:00:00`);
-      if (toDate) p.set('to', `${toDate}T23:59:59`);
+      // story #4280 — 날짜 칸은 표시 시간대의 날짜라 경계도 그 시간대의 자정 · 자정 직전(오프셋 있는 UTC ISO)으로 보낸다.
+      // 예전 `${fromDate}T00:00:00`(오프셋 없음)은 BE가 UTC로 읽어 KST 첫날 00~09시를 빠뜨렸다.
+      const bounds = dateKeysToInstants(fromDate, toDate, displayTimezone);
+      if (bounds.from) p.set('from', bounds.from);
+      if (bounds.to) p.set('to', bounds.to);
       return p;
     },
-    [projectId, actorFilter, debouncedActionFilter, entityTypeFilter, fromDate, toDate],
+    [projectId, actorFilter, debouncedActionFilter, entityTypeFilter, fromDate, toDate, displayTimezone],
   );
 
   const fetchLogs = useCallback(
@@ -368,7 +368,9 @@ function ActivityRow({ item }: { item: ActivityLogItem }) {
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  // story #4280 — 기간(위 ActivityLogView)과 같은 표시 시간대 축(조직 timezone 우선).
+  const { orgTimezone } = useDashboardContext();
+  const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
   const time = formatRelativeTime(item.created_at, locale, displayTimezone);
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc);

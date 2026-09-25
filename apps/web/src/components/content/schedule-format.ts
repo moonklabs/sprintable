@@ -114,3 +114,26 @@ export function shiftCalendarRange(
     to: zonedWallClockToIso(toKey, 23, 59, 59, 999, tz),
   };
 }
+
+// story #4280(민 기기 · 배포 27) — 활동 로그 기본 기간이 `toISOString().slice(0, 10)`(UTC 날짜)로 잡혀 KST 00~09시에 끝 날짜가 «어제»였다.
+// 날짜 입력칸(YYYY-MM-DD)을 쓰는 화면의 «오늘»과 «그 날의 시작 · 끝 시각»도 이 파일의 tz 산술로 — 위 캘린더와 같은 원칙(이 파일이 tz↔UTC의 유일한 출처).
+
+/** tz 기준 «오늘»의 날짜 키(YYYY-MM-DD). */
+export function todayDateKey(tz: string, now: Date = new Date()): string {
+  return toDateKey(now.toISOString(), tz);
+}
+
+/** 날짜 입력칸 기본값 — tz 기준 «오늘로부터 pastDays일 전 ~ 오늘»(둘 다 YYYY-MM-DD). */
+export function defaultPastDaysDateRange(tz: string, pastDays: number, now: Date = new Date()): { from: string; to: string } {
+  const to = todayDateKey(tz, now);
+  return { from: addCalendarDays(to, -pastDays), to };
+}
+
+/** 날짜 키 둘(YYYY-MM-DD)을 tz 기준 «from 날 00:00 ~ to 날 23:59:59.999»의 UTC ISO로. BE는 오프셋 없는 시각을 UTC로 읽으니
+ * (`2026-09-25T00:00:00` = KST 09:00) 날짜 입력칸 값을 조회 경계로 보낼 때는 이 값을 쓴다. 빈 키는 null. */
+export function dateKeysToInstants(fromKey: string, toKey: string, tz: string): { from: string | null; to: string | null } {
+  return {
+    from: fromKey ? zonedWallClockToIso(fromKey, 0, 0, 0, 0, tz) : null,
+    to: toKey ? zonedWallClockToIso(toKey, 23, 59, 59, 999, tz) : null,
+  };
+}
