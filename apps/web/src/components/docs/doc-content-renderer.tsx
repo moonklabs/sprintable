@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MutableRefObject, ReactNode, RefObject } from 'react';
+import type { ComponentProps, MouseEvent as ReactMouseEvent, MutableRefObject, ReactNode, RefObject } from 'react';
 import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
 import { detectEmbedService } from './extensions/embed-node';
 import { renderKatex } from './extensions/math-node';
@@ -25,6 +25,7 @@ import { copyTextSafely } from '@/lib/clipboard';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useParams, useRouter } from 'next/navigation';
 import { docUrl } from './lib/doc-project-url';
+import { remarkWikiLinks } from './lib/remark-wiki-links';
 
 interface DocContentRendererProps {
   content: string;
@@ -51,6 +52,9 @@ interface DocContentRendererProps {
   // 현재·미래 호출부 전부를 지키게 한다(테스트가 아니라 타입이 자).
   /** label shown in a page-embed card when the embedded doc has no title. */
   untitledEmbedLabel: string;
+  /** story #4313(유나 4673 판) — 페이지 임베드가 열리는 문서로 안 풀릴 때(없는 · 지운 문서) 카드 문구(에디터 임베드 오류 상태와 같은 «문서를 찾을 수 없어요»).
+   * 필수 — 옵셔널 + 영문 기본값이면 새 호출부가 빼먹어도 조용히 통과한다(untitledEmbedLabel과 같은 이유 · #3935). */
+  embedNotFoundLabel: string;
   /** label shown when a mermaid diagram fails to render. */
   mermaidRenderFailedLabel?: string;
   /** label shown while a mermaid diagram is rendering. */
@@ -66,7 +70,18 @@ interface DocContentRendererProps {
    * 눌림(full=17.66과 대비). 리더만 'full'로 옵트인 — 기본(미지정)은 기존 /92 그대로라
    * 공유 렌더러의 다른 소비처(에디터 프리뷰 등) 무접촉. */
   bodyEmphasis?: 'default' | 'full';
+  /** story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(문서 상세 응답의 `wiki_link_targets` · 같은 프로젝트의 살아 있는 문서 · 옛 slug는
+   * 지금 slug로). 위키 링크 · 페이지 임베드는 여기 든 것만 문서 링크가 되고 주소는 지금 slug(alias 해소 왕복 0). 안 넘기면(이 값을 모르는
+   * 소비처) 늘 글자 그대로 · 비활성 카드 — 없는 문서로 가는 깨진 링크 0. */
+  wikiLinkTargets?: Readonly<Record<string, string>> | null;
 }
+
+// story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것). 유나 4673 판: 본문 속 글자 링크라 **글자 크기 ·
+// 줄바꿈을 본문에서 물려받는다**(예전 `inline-flex text-sm px-1`은 16px 본문 속 14px 끊기지 않는 상자 — 06-23 문서 리디자인부터 · 1440에서 들쭉날쭉 빈틈 ·
+// 390 줄 간격 흔들림). 색은 링크 자신의 쪽에서 더 구체적인 선택자로 이긴다(유나 조정 14:00Z): `[&[data-doc-internal-link]]:…` =
+// `.cls[data-doc-internal-link]`(0,2,0) > 루트 `.root a`(0,1,1). 루트 `[&_a]` 링크 색(본문 링크 전체 · 디디 4315가 brand-soft → brand-text로 대비를 고침)이 선언 색을 덮어
+// 라이트 대비 1.25:1이던 것 — 루트 규칙은 여기서 안 건드리고, 4315가 루트 색을 바꿔도 위키 링크는 foreground로 남는다.
+const WIKI_LINK_CLASS = 'rounded-sm underline decoration-muted-foreground/40 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-doc-internal-link]]:text-foreground [&[data-doc-internal-link]]:underline-offset-2';
 
 function normalizeHeadingForTitleCompare(s: string): string {
   return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
@@ -129,6 +144,11 @@ const docMarkdownSanitizeSchema = {
       'dataIcon',
       'dataSlug',
     ],
+    // story #4313 — 마크다운 속 에디터 위키 링크 span(`data-type="wikiLink"`)이 렌더러 `span` 컴포넌트까지 닿게 필요한 셋만(XSS 경계:
+    // data-* 글자뿐 · on* · style 등은 여전히 기본 스키마가 막음). 링크 여부는 렌더러가 실재 집합으로 판정.
+    span: [...(defaultSchema.attributes?.['span'] ?? []), 'dataType', 'dataSlug', 'dataTitle'],
+    // story #4313 — «[[slug]]» remark 플러그인이 만든 링크의 표지(렌더러 `a`가 이 값 + 실재 집합 + 같은 주소일 때만 클라이언트 이동).
+    a: [...(defaultSchema.attributes?.['a'] ?? []), 'dataDocInternalLink'],
   },
   // story #2639 — entity: 참조 링크(`[제목](entity:타입:id)`)의 href가 두 겹 필터에 지워지지
   // 않게 한다. rehype-sanitize의 protocols.href 허용목록에 'entity'만 추가로 열고
@@ -236,11 +256,13 @@ export function DocContentRenderer({
   publicImageLabel = 'Image unavailable in public view',
   assetImageErrorLabel = 'This image could not be loaded',
   untitledEmbedLabel,
+  embedNotFoundLabel,
   mermaidRenderFailedLabel = 'Render failed',
   mermaidRenderingLabel = 'Rendering...',
   mathRenderFailedLabel = 'KaTeX render failed',
   suppressLeadingTitle,
   bodyEmphasis = 'default',
+  wikiLinkTargets,
 }: DocContentRendererProps) {
   // story #4309 — 본문의 문서 링크(위키 링크 · 페이지 임베드)는 진짜 `<a href>`다: 키보드 초점 · Enter · 새 탭(⌘/Ctrl · 가운데 클릭).
   // 목적지는 처음부터 이 탭 주소의 `/{ws}/{proj}/docs/{slug}`(예전 `window.location.href = /docs/{slug}?p=` = 전체 새로고침 + 서버 307),
@@ -258,6 +280,12 @@ export function DocContentRenderer({
   const docHrefRef = useRef(docHref);
   const routerRef = useRef(router);
   useEffect(() => { docHrefRef.current = docHref; routerRef.current = router; }, [docHref, router]);
+  // story #4313 — 실재 문서 slug 집합(없으면 빈 집합 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 배열 모양이 매 렌더 새것이어도 값이 같으면 같은 집합.
+  // story #4313 — 적힌 slug → 지금 slug 대응(없으면 빈 대응 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 객체가 매 렌더 새것이어도 값이 같으면 같은 대응.
+  const wikiLinkTargetKey = wikiLinkTargets ? JSON.stringify(Object.entries(wikiLinkTargets).sort(([a], [b]) => a.localeCompare(b))) : '[]';
+  const wikiLinkTargetMap = useMemo(() => new Map<string, string>(JSON.parse(wikiLinkTargetKey) as [string, string][]), [wikiLinkTargetKey]);
+  // `a` 컴포넌트가 표지(지금 slug)를 검증할 때 — 대응의 값(지금 slug) 집합.
+  const wikiLinkCurrentSlugs = useMemo(() => new Set(wikiLinkTargetMap.values()), [wikiLinkTargetMap]);
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
 
@@ -343,9 +371,13 @@ export function DocContentRenderer({
       return link;
     };
 
-    // Wiki link (viewer) — HTML 포맷에만 있다(마크다운 sanitize가 span의 data-*를 걷는다) · dangerouslySetInnerHTML이라 React가 자식을 쥐지 않는다.
-    const wikiLinks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]'));
+    // Wiki link (viewer) — HTML 포맷만 여기서(dangerouslySetInnerHTML이라 React가 자식을 쥐지 않는다). 마크다운의 위키 링크 span은
+    // React가 노드를 쥐므로 DOM을 갈아끼우지 않고 렌더러 `span` 컴포넌트가 그린다(story #4313).
+    const wikiLinks = contentFormat === 'html' ? Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]')) : [];
     const wikiCleanup = wikiLinks.map((span) => {
+      // story #4313(까디르 P3) — 효과가 다시 돌 때(대응이 비거나 바뀜 · publicMode 전환) 이전에 만든 링크가 남지 않게 먼저 글자로 되돌린다.
+      const previousLink = span.querySelector(':scope > a[data-doc-internal-link]');
+      if (previousLink) span.replaceChildren(document.createTextNode(previousLink.textContent ?? ''));
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
       // Public share viewer: internal doc links are inert plain text — no navigation,
@@ -355,15 +387,15 @@ export function DocContentRenderer({
         span.removeAttribute('data-slug');
         return () => { /* no handler attached */ };
       }
-      const linkClassName = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground';
-      if (!slug) {
-        span.className = linkClassName;
-        span.title = title;
-        return () => { /* no destination — nothing to navigate to */ };
+      // story #4313 — 열리는 문서로 안 풀리면(slug 없음 · 대응 밖) 글자 그대로(없는 문서로 가는 깨진 링크 0). 풀리면 주소는 지금 slug.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!target) {
+        span.className = '';
+        return () => { /* no destination — plain text */ };
       }
       // 링크는 span 안에 둔다(span의 data-*는 다시 돌 때 찾는 표지 · 효과가 다시 돌면 링크를 새로 만든다).
       span.className = '';
-      const link = makeInternalLink(slug, `${linkClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`);
+      const link = makeInternalLink(target, WIKI_LINK_CLASS);
       link.title = title;
       link.textContent = span.textContent || title;
       span.replaceChildren(link);
@@ -394,14 +426,28 @@ export function DocContentRenderer({
       // 유지하되 링크(이동)만 뺀다.
       // 카드 표면은 공용 cardVariants(손코딩 카드 가드 · story #3164) — 링크 카드와 공개 보기의 비활성 카드가 같은 표면.
       const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
-      if (publicMode || !slug) {
+      // story #4313 — 열리는 문서로 안 풀리면(대응 밖 · 없는 · 지운 문서) 작동하는 링크 카드와 같은 모양 · `/slug`를 보이지 않는다(유나 4673 판):
+      // 에디터 임베드 오류 상태처럼 경고 아이콘 + «문서를 찾을 수 없어요» + 흐린 제목. 풀리면 주소는 지금 slug.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!publicMode && slug && !target) {
+        block.className = cn('not-prose my-2', cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+        block.setAttribute('data-embed-state', 'not-found');
+        block.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm text-muted-foreground">${escapeHtmlText(embedNotFoundLabel)}</p>
+          ${title ? `<p class="truncate text-xs text-muted-foreground">${escapeHtmlText(title)}</p>` : ''}
+        </div>`;
+        return () => { /* no destination — not found */ };
+      }
+      if (publicMode || !target) {
         block.className = cn('not-prose my-2', embedCardClassName);
         block.innerHTML = cardInner;
         return () => { /* no handler attached */ };
       }
       // story #4309 — 카드 전체가 링크 하나(접근 가능한 이름 = 문서 제목 · 경로 줄은 이름에 섞지 않는다).
       block.className = 'not-prose my-2';
-      const link = makeInternalLink(slug, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
+      const link = makeInternalLink(target, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
       link.setAttribute('aria-label', displayTitle);
       link.innerHTML = cardInner;
       block.replaceChildren(link);
@@ -619,7 +665,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
 
   // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
   useEffect(() => {
@@ -652,12 +698,34 @@ export function DocContentRenderer({
   // 잃을 게 없고, headingIndex가 ReactMarkdown이 AST를 훑는 매 패스(=매 렌더)마다 0부터 다시
   // 매겨져야 하는데 메모이즈된 클로저에 넣으면 그 리셋이 깨진다 — 그래서 h1/h2/h3는 아래
   // components 병합 시 매 렌더 새로 만드는 채로 둔다(무해 remount).
+  // story #4313 — 마크다운 문서 링크의 클릭(4309 DOM 경로와 같은 규칙): 보통 클릭만 클라이언트 이동 · 수정 키 · 가운데 클릭은 브라우저.
+  const onDocLinkClick = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const href = event.currentTarget.getAttribute('href');
+    if (!href) return;
+    event.preventDefault();
+    routerRef.current.push(href);
+  }, []);
+  // 마크다운 «[[slug]]» · «[[slug|글]]» → 실재 문서만 링크(집합 · 주소가 바뀔 때만 새 플러그인 설정).
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, [remarkWikiLinks, { resolve: (slug: string) => wikiLinkTargetMap.get(slug) ?? null, href: docHref }]] as NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']>,
+    [wikiLinkTargetMap, docHref],
+  );
+
   const stableMarkdownComponents = useMemo<Components>(() => ({
     // story #2639 — 본문 entity: 참조를 EntityChip으로 잇는다(chat/story-panel과 동일 상호작용:
     // 탭→엔티티 프리뷰 모달·그 안에 전체 열기 링크). getEntityHref가 story→/board?story=·
     // epic→/goals/·doc→/docs?id= 동일오리진 라우트를 준다(웹뷰서 SPA 착지·셸 무변경).
     // 매핑 없는 타입은 getEntityHref=null→모달만 뜨고(무동작 0), 비-UUID/asset은 평문 링크 폴백.
-    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+    a: (props) => {
+      const { href, children } = props as { href?: string; children?: ReactNode };
+      // story #4313 — «[[slug]]» 플러그인이 만든 문서 링크: 표지 slug가 실재 집합에 있고 주소가 그 문서 주소와 같을 때만(본문이 raw HTML로
+      // 같은 표지를 흉내 내도 다른 곳으로 가는 클라이언트 이동은 안 생긴다). publicMode는 평문.
+      const internalSlug = (props as Record<string, unknown>)['data-doc-internal-link'];
+      if (typeof internalSlug === 'string') {
+        if (publicMode || !wikiLinkCurrentSlugs.has(internalSlug) || href !== docHref(internalSlug)) return <span>{children}</span>;
+        return <a href={href} data-doc-internal-link={internalSlug} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
+      }
       // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유).
       const ref = parseEntityRef(href);
       // asset은 story-detail-panel과 동일하게 칩 경로에서 제외한다(자산 임베드는 별 경로).
@@ -674,6 +742,18 @@ export function DocContentRenderer({
         );
       }
       return <a href={href}>{children}</a>;
+    },
+    // story #4313 — 마크다운 속 에디터 위키 링크 span(`data-type="wikiLink"`): 실재 문서면 4309와 같은 링크 · 아니면 글자 그대로 ·
+    // publicMode는 4309 HTML 경로와 같은 비활성 평문. 그 밖의 span은 그대로.
+    span: (props) => {
+      const { node: _node, children, ...rest } = props as Record<string, unknown> & { node?: unknown; children?: ReactNode };
+      if (rest['data-type'] !== 'wikiLink') return <span {...(rest as ComponentProps<'span'>)}>{children}</span>;
+      const slug = typeof rest['data-slug'] === 'string' ? rest['data-slug'] : '';
+      const title = typeof rest['data-title'] === 'string' ? rest['data-title'] : undefined;
+      if (publicMode) return <span className="text-sm text-muted-foreground">{children}</span>;
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!target) return <span>{children}</span>;
+      return <a href={docHref(target)} data-doc-internal-link={target} title={title} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
     },
     blockquote: ({ children }: { children?: ReactNode }) => <blockquote>{children}</blockquote>,
     img: (props) => {
@@ -716,7 +796,7 @@ export function DocContentRenderer({
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref, wikiLinkTargetMap, wikiLinkCurrentSlugs, docHref, onDocLinkClick]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
@@ -763,7 +843,7 @@ export function DocContentRenderer({
   return (
     <div ref={setContentRef} className={rootClassName}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, docMarkdownSanitizeSchema]]}
         // story #2639 — entity: 스킴 보존(첫째 겹). 그 외는 기본 sanitize 유지 —
         // javascript:/data: 는 여전히 빈 문자열로 지워진다(뮤테이션 테스트로 고정).

@@ -36,11 +36,14 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
-async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean } = {}) {
+// story #4313 — 링크는 위키 링크 대응(문서 상세 응답 `wiki_link_targets` · 적힌 slug → 지금 slug)에 든 것만. 4309 테스트의 문서는 다 살아 있는 문서로 둔다.
+const EXISTING: Record<string, string> = { 'design-doc': 'design-doc', 'meeting-notes': 'meeting-notes', 'untitled-1': 'untitled-1' };
+
+async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean; wikiLinkTargets?: Record<string, string> | null } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" />
+        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets} />
       </NextIntlClientProvider>,
     );
   });
@@ -78,6 +81,34 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
       expect(accessibleName(link)).toBe('회의록');
       expect(link.textContent, '카드 모양(제목 · 경로 줄)은 그대로').toContain('/meeting-notes');
     }
+  });
+
+  // story #4313(유나 4673 판 · PO 14:00Z) — 위키 링크: (1) 16px 본문 속 14px 끊기지 않는 상자(`inline-flex text-sm px-1` · 06-23 리디자인부터) →
+  // 본문 글자 크기 · 줄바꿈 상속. (2) 루트 `[&_a]` 링크 색(본문 링크 전체 · 디디 4315가 brand-soft → brand-text로 바꿈 · 여기선 안 건드림)이 선언 색을 덮던 것 →
+  // 링크 자신의 쪽에서 더 구체적인 선택자(`[&[data-doc-internal-link]]:text-foreground` = (0,2,0) > 루트 `.root a` (0,1,1) · 유나 조정).
+  it('⭐위키 링크는 본문 글자 크기 · 줄바꿈을 물려받고(상자 아님) 색은 링크 쪽 더 구체적인 선택자가 이긴다', async () => {
+    await renderDoc(WIKI + EMBED);
+    const wiki = container.querySelector('[data-type="wikiLink"] a')!;
+    for (const cls of ['inline-flex', 'text-sm', 'px-1', 'py-0.5']) expect(wiki.classList.contains(cls), cls).toBe(false);
+    expect(wiki.classList.contains('[&[data-doc-internal-link]]:text-foreground')).toBe(true);
+    expect(wiki.hasAttribute('data-doc-internal-link'), '선택자가 걸리는 속성').toBe(true);
+    expect(wiki.classList.contains('text-foreground'), '루트 (0,1,1)에 밀리는 보통 선언 아님').toBe(false);
+    // 루트 링크 규칙은 이 PR이 안 건드린다(4315 몫).
+    expect((container.firstElementChild as HTMLElement).className).toContain('[&_a]:text-brand-text');
+  });
+
+  // 까디르 4673 P3 — 효과가 다시 돌 때(대응이 비거나 publicMode 전환) 이미 만든 링크가 글자로 돌아가야 한다.
+  it('⭐대응이 비면 · publicMode로 바뀌면 이미 만든 HTML 위키 링크가 글자로 돌아감', async () => {
+    await renderDoc(WIKI);
+    expect(container.querySelector('[data-type="wikiLink"] a')).not.toBeNull();
+    await renderDoc(WIKI, { wikiLinkTargets: null });
+    expect(container.querySelector('[data-type="wikiLink"] a'), '대응 없음').toBeNull();
+    expect(container.querySelector('[data-type="wikiLink"]')!.textContent).toBe('설계 문서');
+    await renderDoc(WIKI);
+    expect(container.querySelector('[data-type="wikiLink"] a')).not.toBeNull();
+    await renderDoc(WIKI, { publicMode: true });
+    expect(container.querySelector('[data-type="wikiLink"] a'), 'publicMode').toBeNull();
+    expect(container.querySelector('[data-type="wikiLink"]')!.textContent).toBe('설계 문서');
   });
 
   it('제목 없는 임베드의 이름 = 빈 제목 표기', async () => {

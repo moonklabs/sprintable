@@ -37,6 +37,7 @@ export default async function TermsPage() {
                 contentFormat={doc.contentFormat}
                 publicMode
                 untitledEmbedLabel={t('newDocDefaultTitle')}
+                embedNotFoundLabel={t('notFound')}
               />
             </>
           ) : (

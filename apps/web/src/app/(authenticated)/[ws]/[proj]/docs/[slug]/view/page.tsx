@@ -33,6 +33,8 @@ interface DocDetail {
   updated_at?: string;
   assignee?: { id: string; name: string } | null;
   revisions?: { count: number; latest_at: string | null } | null;
+  // story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(BE slug 단건 경로 · BFF getBySlug가 실어 옴). 여기 든 것만 링크 · 주소는 지금 slug.
+  wiki_link_targets?: Record<string, string> | null;
 }
 
 // null = 로딩 중, false = not found, DocDetail = 로드 완료
@@ -176,11 +178,13 @@ export default function DocViewPage() {
                 codeCopyFailedLabel={t('codeCopyFailed')}
                 assetImageErrorLabel={t('attachImageUnavailable')}
                 untitledEmbedLabel={t('newDocDefaultTitle')}
+                embedNotFoundLabel={t('notFound')}
                 mermaidRenderFailedLabel={t('mermaidRenderFailed')}
                 mermaidRenderingLabel={t('mermaidRendering')}
                 mathRenderFailedLabel={t('mathRenderFailed')}
                 suppressLeadingTitle={doc.title}
                 bodyEmphasis="full"
+                wikiLinkTargets={doc.wiki_link_targets}
               />
             </div>
             {/* 두 번째 backlinks 자리(첫 자리: story-detail-panel, story #2299) — 컴포넌트

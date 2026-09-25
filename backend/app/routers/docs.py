@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -77,6 +78,24 @@ router = APIRouter(prefix="/api/v2/docs", tags=["docs", "Knowledge"])
 # 실측 후 재확認: 50%만 쓰면 짧은 필드가 걸리고 절대량만 쓰면 긴 필드가 새는 동일 문제).
 _SHRINK_BLOCK_THRESHOLD = 0.5
 _SHRINK_BLOCK_MIN_LOST_CHARS = 100
+
+
+# story #4313 — 본문의 위키 링크 후보: 마크다운 «[[slug]]» · «[[slug|보이는 글]]»과 에디터가 쓴 위키 링크 span의 `data-slug="…"`.
+# 후보의 상위집합만 뽑는다(코드 블록 안 제외 같은 문맥 판정은 FE 렌더러 몫 — 여기서 더 뽑아도 FE가 링크로 안 쓴다).
+# 한 문서 후보 상한 200(비정상적으로 큰 본문이 IN 목록을 키우지 않게).
+_WIKI_LINK_CANDIDATE_RE = re.compile(r'\[\[([^\[\]|\n]{1,200})(?:\|[^\[\]\n]*)?\]\]|data-slug="([^"\n]{1,200})"')
+_WIKI_LINK_CANDIDATE_LIMIT = 200
+
+
+def wiki_link_slug_candidates(content: str | None) -> list[str]:
+    seen: dict[str, None] = {}
+    for m in _WIKI_LINK_CANDIDATE_RE.finditer(content or ""):
+        slug = (m.group(1) or m.group(2) or "").strip()
+        if slug:
+            seen.setdefault(slug, None)
+            if len(seen) >= _WIKI_LINK_CANDIDATE_LIMIT:
+                break
+    return list(seen)
 
 
 def _get_repo(
@@ -182,6 +201,9 @@ async def list_docs(
         # 일반 list/tree/search 분기는 enrich 안 함(다건 N+1 회피·페이로드 과확장 금지).
         # story #2191: 단건 lookup이라 페이지네이션 대상이 아님 — has_more는 구조적으로 항상 False.
         data = [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        if doc is not None:
+            # story #4313 — 본문 위키 링크 후보 → 지금 slug(살아 있는 문서 · alias 해소). FE가 여기 든 것만 링크 · 요청 추가 0.
+            data[0].wiki_link_targets = await repo.resolve_wiki_link_targets(doc.project_id, wiki_link_slug_candidates(doc.content))
         if response is not None:
             response.headers["X-Result-Count"] = str(len(data))
         return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
