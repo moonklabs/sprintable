@@ -48,7 +48,9 @@ if [ -n "${STALL_EVIDENCE_DIR:-}" ]; then
   timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@" &
   _cmd_pid=$!
   (
-    sleep "$_fire_at"
+    # 뒤로 돌린 sleep을 wait한다 — 앞쪽 sleep이 거둬지면(명령이 먼저 끝남) 셸이 파일마다 «Terminated»를 로그에 찍었다(CI 대조 판 실측).
+    sleep "$_fire_at" &
+    wait $! || exit 0
     if kill -0 "$_cmd_pid" 2>/dev/null; then
       "$(dirname "${BASH_SOURCE[0]}")/stall-evidence.sh" "$_cmd_pid" "$STALL_EVIDENCE_DIR"
     fi

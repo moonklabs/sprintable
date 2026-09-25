@@ -213,6 +213,11 @@ OUT_OK="$(PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDEN
 CODE_OK=$?
 set -e
 if [ "$CODE" -eq 3 ] && [ "$CODE_OK" -eq 0 ]; then echo "  ok   정상 판 종료 코드 그대로(3 · 0)"; else echo "  FAIL exit code=${CODE}/${CODE_OK}(기대 3/0)"; FAIL=1; fi
+if [[ "$OUT$OUT_OK" != *"Terminated"* ]]; then
+  echo "  ok   정상 판 로그에 «Terminated» 잡음 없음(수집기를 조용히 거둔다)"
+else
+  echo "  FAIL 정상 판 로그에 «Terminated» — 출력: $OUT $OUT_OK"; FAIL=1
+fi
 if [ ! -e "$EV_TMP/psql.log" ] && [[ "$OUT$OUT_OK" != *"STALL evidence"* ]]; then
   echo "  ok   정상 판엔 수집 0(DB 조회 · 증거 묶음 없음)"
 else
