@@ -67,8 +67,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function stubFetch(patchOk: boolean) {
+function stubFetch(patchOk: boolean, patchNetworkError = false) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    // story #4295 — 망 오류(fetch가 던짐)도 서버 실패와 같게 다뤄야 한다.
+    if (patchNetworkError && init?.method === 'PATCH') throw new TypeError('Failed to fetch');
     if (url.includes('/api/event-notifications?')) {
       return new Response(JSON.stringify({ data: [unreadNotif('n1')], meta: { hasMore: false } }), {
         status: 200, headers: { 'content-type': 'application/json' },
@@ -118,5 +120,37 @@ describe('NotificationBell — 낙관 읽음 처리 실패 시 문장(story #363
     await act(async () => { itemBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).not.toContain(koMessages.inbox.markReadFailed);
+  });
+
+  // story #4295 — 망 오류(fetch가 던짐)는 예전엔 처리 안 된 거부로 새고 낙관적 «읽음»이 남았다.
+  async function expectNoUnhandled(run: () => Promise<void>) {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    await run();
+    await new Promise((r) => setTimeout(r, 0));
+    process.off('unhandledRejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+  }
+
+  it('⭐개별 읽음이 망 오류여도 markReadFailed 토스트(처리 안 된 거부 없음)', async () => {
+    await expectNoUnhandled(async () => {
+      stubFetch(true, true);
+      await openBell();
+      const itemBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
+      await act(async () => { itemBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(container.textContent).toContain(koMessages.inbox.markReadFailed);
+    });
+  });
+
+  it('⭐전체 읽음이 망 오류여도 markAllReadFailed 토스트(처리 안 된 거부 없음)', async () => {
+    await expectNoUnhandled(async () => {
+      stubFetch(true, true);
+      await openBell();
+      const allReadBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+      await act(async () => { allReadBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    });
   });
 });

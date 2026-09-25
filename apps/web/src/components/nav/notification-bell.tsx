@@ -543,9 +543,10 @@ export function NotificationBell() {
       prev ? prev.map((n) => (n.id === id ? { ...n, read_at: readAt } : n)) : prev,
     );
     setUnreadCount((c) => Math.max(0, c - 1));
-    const res = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' });
+    // story #4295 — 망 오류(fetch가 던짐)도 서버 실패와 같게 롤백 · 알림(예전엔 낙관적 «읽음»이 남고 처리 안 된 거부).
+    const ok = await fetch(`/api/event-notifications/${id}/read`, { method: 'PATCH' }).then((res) => res.ok, () => false);
     // 서버 실패 시 롤백
-    if (!res.ok) {
+    if (!ok) {
       // story #3637(유나 silent-failure-sweep-3632) — 안읽음으로 조용히 되돌아가던 자리.
       addToast({ title: t('markReadFailed'), type: 'error' });
       setNotifications((prev) =>
@@ -561,9 +562,9 @@ export function NotificationBell() {
     setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
     setUnreadCount(0);
     const readAllParams = projectId ? `?project_id=${projectId}` : '';
-    const res = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' });
-    // 서버 실패 시 unread count 재폴링으로 보정
-    if (!res.ok) {
+    const ok = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' }).then((res) => res.ok, () => false);
+    // 서버 실패(망 오류 포함 · story #4295) 시 unread count 재폴링으로 보정
+    if (!ok) {
       // story #3637(유나 silent-failure-sweep-3632) — 배지가 조용히 다시 차오르던 자리.
       addToast({ title: t('markAllReadFailed'), type: 'error' });
       void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);

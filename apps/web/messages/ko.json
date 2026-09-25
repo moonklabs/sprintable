@@ -3783,7 +3783,9 @@
     "daysAgo": "일 전",
     "bellAriaLabelCount": "알림 {count}개",
     "bellAriaLabelCountCapped": "알림 99개 이상",
-    "syncDegradedBanner": "일부 지난 알림은 표시되지 않았어요 — 아래 목록에서 확인할 수 있어요"
+    "syncDegradedBanner": "일부 지난 알림은 표시되지 않았어요 — 아래 목록에서 확인할 수 있어요",
+    "notificationsLoadError": "알림을 불러오지 못했어요",
+    "loadMoreFailed": "더 불러오지 못했어요. 다시 눌러 주세요."
   },
   "invite": {
     "title": "조직 초대",

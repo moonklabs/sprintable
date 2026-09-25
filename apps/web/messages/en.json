@@ -3783,7 +3783,9 @@
     "daysAgo": "d ago",
     "bellAriaLabelCount": "{count, plural, one {# notification} other {# notifications}}",
     "bellAriaLabelCountCapped": "99 or more notifications",
-    "syncDegradedBanner": "Some older notifications may be missing — check the list below"
+    "syncDegradedBanner": "Some older notifications may be missing — check the list below",
+    "notificationsLoadError": "Couldn't load notifications",
+    "loadMoreFailed": "Couldn't load more. Try again."
   },
   "invite": {
     "title": "Organization Invitation",
