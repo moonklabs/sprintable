@@ -20,8 +20,9 @@ describe('toDateKey', () => {
 
 describe('formatScheduledAt', () => {
   it('MM-DD HH:mm {TZ} 형태로 낸다(doc §11-2 정본 형태) + UTC 보조줄', () => {
-    const { display, utcNote } = formatScheduledAt('2026-09-05T12:00:00Z', 'Asia/Seoul');
-    expect(display).toMatch(/^09-05 21:00 /); // KST=UTC+9
+    // story #4280 — 표기는 보는 사람 시간대에 따라 달라져(같은 오프셋이면 생략) 실행 기계의 TZ에 기대지 않게 보는 사람을 «모름»(null)으로 고정.
+    const { display, utcNote } = formatScheduledAt('2026-09-05T12:00:00Z', 'Asia/Seoul', null);
+    expect(display).toBe('09-05 21:00 GMT+9'); // KST=UTC+9
     expect(utcNote).toBe('= 09-05 12:00 UTC');
   });
 });
@@ -157,5 +158,31 @@ describe('dateKeysToInstants — 날짜 키 → 표시 시간대 자정 · 자�
 
   it('빈 키는 null(날짜 칸을 비운 경우 · 경계 없이 조회)', () => {
     expect(dateKeysToInstants('', '', 'Asia/Seoul')).toEqual({ from: null, to: null });
+  });
+});
+
+// story #4280 AC3(유나 판정) — 시간대 표기: 보는 사람과 그 시각에 같은 오프셋이면 생략 · 다르면 shortOffset(«GMT+9»). 이름 아닌 오프셋 비교.
+describe('formatScheduledAt 시간대 표기 — 같은 오프셋이면 생략 · 다르면 shortOffset(story #4280)', () => {
+  const SUMMER = '2026-09-05T12:00:00Z'; // LA PDT(−7) · Phoenix MST(−7)
+  const WINTER = '2026-01-15T12:00:00Z'; // LA PST(−8) · Phoenix MST(−7)
+  const cases: Array<[string, string, string, string | null, string]> = [
+    ['서울 표시 · 서울 사람 → 생략', SUMMER, 'Asia/Seoul', 'Asia/Seoul', '09-05 21:00'],
+    ['⭐서울 표시 · 도쿄 사람(이름 달라도 같은 +9) → 생략', SUMMER, 'Asia/Seoul', 'Asia/Tokyo', '09-05 21:00'],
+    ['⭐서울 표시 · LA 사람 → GMT+9', SUMMER, 'Asia/Seoul', 'America/Los_Angeles', '09-05 21:00 GMT+9'],
+    ['⭐LA 표시 · 서울 사람 → GMT-7(«PDT» 아님 · 로케일 무관)', SUMMER, 'America/Los_Angeles', 'Asia/Seoul', '09-05 05:00 GMT-7'],
+    ['⭐LA 표시 · 피닉스 사람 · 여름(둘 다 −7) → 생략', SUMMER, 'America/Los_Angeles', 'America/Phoenix', '09-05 05:00'],
+    ['⭐LA 표시 · 피닉스 사람 · 겨울(−8 vs −7) → GMT-8', WINTER, 'America/Los_Angeles', 'America/Phoenix', '01-15 04:00 GMT-8'],
+    ['30분 오프셋 — 콜카타 표시 · 서울 사람 → GMT+5:30', SUMMER, 'Asia/Kolkata', 'Asia/Seoul', '09-05 17:30 GMT+5:30'],
+    ['UTC 표시 · 서울 사람 → GMT', SUMMER, 'UTC', 'Asia/Seoul', '09-05 12:00 GMT'],
+    ['⭐보는 사람 모름(서버 렌더 · null) → 항상 붙임', SUMMER, 'Asia/Seoul', null, '09-05 21:00 GMT+9'],
+  ];
+  for (const [label, iso, tz, viewer, expected] of cases) {
+    it(label, () => {
+      expect(formatScheduledAt(iso, tz, viewer).display).toBe(expected);
+    });
+  }
+
+  it('UTC 보조줄은 그대로', () => {
+    expect(formatScheduledAt(SUMMER, 'Asia/Seoul', 'Asia/Seoul').utcNote).toBe('= 09-05 12:00 UTC');
   });
 });

@@ -74,7 +74,7 @@ describe('활동 로그 기본 기간 — 표시 시간대의 오늘(story #4280
     const { ActivityLogView } = await import('./activity-log-view');
     await render(<ActivityLogView projectId="p1" />);
     expect(dateInputValues()).toEqual(['2026-09-18', '2026-09-25']);
-    const call = fetchWithAuthMock.mock.calls.map(([u]: [string]) => u).find((u) => u.includes('/api/activity-logs'));
+    const call = fetchWithAuthMock.mock.calls.map((c) => String(c[0])).find((u) => u.includes('/api/activity-logs'));
     expect(call).toBeDefined();
     const params = new URL(call!, 'http://x').searchParams;
     expect(params.get('from')).toBe('2026-09-17T15:00:00.000Z');
@@ -94,7 +94,7 @@ describe('팀 활동 기본 기간 — 표시 시간대의 오늘(story #4280)',
     const { TeamActivityView } = await import('./team-activity-view');
     await render(<TeamActivityView projectId="p1" />);
     expect(dateInputValues()).toEqual(['2026-09-18', '2026-09-25']);
-    const call = fetchWithAuthMock.mock.calls.map(([u]: [string]) => u).find((u) => u.includes('/api/activity-stream'));
+    const call = fetchWithAuthMock.mock.calls.map((c) => String(c[0])).find((u) => u.includes('/api/activity-stream'));
     expect(call).toBeDefined();
     const params = new URL(call!, 'http://x').searchParams;
     expect(params.get('since')).toBe('2026-09-17T15:00:00.000Z');
