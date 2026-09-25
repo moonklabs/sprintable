@@ -1712,7 +1712,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         {refetching ? (viewMode === 'list' ? <KanbanListRowsSkeleton /> : <KanbanColumnsSkeleton />) : storiesLoadFailed ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="alert" data-testid="kanban-load-error">
             <p className="text-sm text-muted-foreground">{t('boardLoadFailed')}</p>
-            <Button size="sm" variant="outline" onClick={() => void fetchData()} data-testid="kanban-load-retry">{t('epicSwimlaneRetry')}</Button>
+            <Button size="sm" variant="outline" onClick={() => void fetchData()} data-testid="kanban-load-retry">{tc('retry')}</Button>
           </div>
         ) : (<>
         {stories.length === 0 ? (

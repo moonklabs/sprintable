@@ -1851,6 +1851,8 @@ describe('KanbanBoard — 필터를 고른 뒤 초점 = 그 필터 버튼 · 다
     const err = container.querySelector('[data-testid="kanban-load-error"]');
     expect(err?.getAttribute('role')).toBe('alert');
     expect(err?.textContent).toContain((koMessages.board as unknown as Record<string, string>).boardLoadFailed);
+    // 버튼은 공용 «다시 시도»(common.retry) — 남의 자리 키(에픽 줄)를 빌리지 않는다(PO 10:57Z).
+    expect(container.querySelector('[data-testid="kanban-load-retry"]')?.textContent).toBe(koMessages.common.retry);
     ctl.allowRetry();
     await act(async () => { (container.querySelector('[data-testid="kanban-load-retry"]') as HTMLButtonElement).click(); });
     await frames();
