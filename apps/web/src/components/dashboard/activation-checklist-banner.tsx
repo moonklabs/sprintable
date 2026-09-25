@@ -171,6 +171,7 @@ export function ActivationChecklistBanner() {
   const handleFirstInstructionClick = async () => {
     if (navigatingToInstruction) return;
     if (state?.first_instruction_conversation_id) {
+      // 대상-프로젝트: 첫 지시 대화는 온보딩이 만든 현재 프로젝트의 대화라 현재 p가 곧 대상 프로젝트.
       router.push(flatHref(`/chats/${state.first_instruction_conversation_id}`));
       return;
     }
@@ -183,6 +184,7 @@ export function ActivationChecklistBanner() {
       // 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은 null을 «건너뛰고
       // 진행»으로 의도적으로 쓰지만(범위 밖, 그쪽은 그대로 둠), 이 배너는 그 클릭 자체가
       // 유일한 목적이라 실패를 알려야 한다.
+      // 대상-프로젝트: 첫 지시 대화는 온보딩이 만든 현재 프로젝트의 대화라 현재 p가 곧 대상 프로젝트.
       if (convId) router.push(flatHref(`/chats/${convId}`));
       else setInstructionStartError(true);
     } finally {

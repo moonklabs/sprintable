@@ -610,6 +610,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
               <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
                 {formatRelativeTime(item.created_at, locale, displayTimezone)}
+                {/* 대상-프로젝트: 발행 이력 항목엔 대화의 프로젝트가 없다(대화 화면이 착지 뒤 자기 프로젝트로 연다). */}
                 <Link href={flatHref(`/chats/${item.conversation_id}`)} className="text-primary hover:underline">
                   {t('eventPublishHistoryOpenChat')}
                 </Link>

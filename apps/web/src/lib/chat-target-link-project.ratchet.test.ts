@@ -13,8 +13,25 @@ import { describe, expect, it } from 'vitest';
 const BASELINE = 0;
 
 const SRC = path.resolve(__dirname, '..');
-const DIRS = ['components/chat', 'components/chat-v3'];
+// story #4231 다음 조각 5(PO 12:17Z) — 채팅만 보던 자를 **조직 전체가 보는 화면**으로 넓힌다(항목마다 프로젝트가 다를 수 있는 곳).
+// 프로젝트 안 화면(스프린트 · 목표 · 루프 · 스토리 패널 · 작업 목록 · 스토리지)은 현재 p = 대상 프로젝트라 대상이 아니다.
+const DIRS = [
+  'components/chat', 'components/chat-v3',
+  'app/(authenticated)/organization', 'app/(authenticated)/content', 'app/(authenticated)/gates', 'app/(authenticated)/inbox',
+  'components/today-v3', 'components/org-briefing', 'components/verify', 'components/dashboard', 'components/inbox',
+];
 const CURRENT_P = 'flatHref';
+/** 이 파일에서 «현재 p» 함수로 쓰이는 이름 — `flatHref` + `const X = useFlatHref()`로 받은 별칭(맹점: 이름만 바꿔 넘기면 못 셌다). */
+function currentProjectNames(sf: ts.SourceFile): Set<string> {
+  const names = new Set([CURRENT_P]);
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isCallExpression(node.initializer)
+      && ts.isIdentifier(node.initializer.expression) && node.initializer.expression.text === 'useFlatHref') names.add(node.name.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return names;
+}
 const REASON_MARK = '대상-프로젝트:';
 // 대상(항목) 경로 — flat 목적지 중 «특정 항목»을 가리키는 것.
 const TARGET_PATH = /^\/(gates\/|docs(\?id=|\/)|board\?story=|goals\/|artifacts\/|loops\/|storage\?asset=|sprints\/|chats\/)/;
@@ -53,16 +70,22 @@ function hasReason(sf: ts.SourceFile, node: ts.Node, text: string): boolean {
 export function countCurrentProjectTargetLinks(fileName: string, text: string): number {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   let n = 0;
+  const current = currentProjectNames(sf);
+  const isCurrent = (e: ts.Node | undefined) => !!e && ts.isIdentifier(e) && current.has(e.text);
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       const callee = node.expression.text;
-      if (callee === CURRENT_P) {
+      if (current.has(callee)) {
         const head = node.arguments[0] ? literalHead(node.arguments[0]) : null;
         if (head !== null && TARGET_PATH.test(head) && !hasReason(sf, node, text)) n += 1;
-      } else if (node.arguments.some((a) => ts.isIdentifier(a) && a.text === CURRENT_P) && !hasReason(sf, node, text)) {
+      // 훅 인자(useRef · useCallback 의존성 · useMemo …)는 대상 링크 조립이 아니다.
+      } else if (!/^use[A-Z]/.test(callee) && node.arguments.some(isCurrent) && !hasReason(sf, node, text)) {
         n += 1;
       }
     }
+    // 맹점: 현재 p를 **prop으로** 대상 링크 조립 컴포넌트에 넘김(`withProject={flatHref}`) — 그 컴포넌트 안에선 이름이 달라 못 셌다.
+    if (ts.isJsxAttribute(node) && node.initializer && ts.isJsxExpression(node.initializer) && isCurrent(node.initializer.expression)
+      && !hasReason(sf, node, text)) n += 1;
     ts.forEachChild(node, visit);
   };
   visit(sf);
@@ -81,7 +104,7 @@ function scan(): { total: number; byFile: Record<string, number> } {
   return { total, byFile };
 }
 
-describe('채팅 대상 링크의 현재 p 래칫(#4231 다음 조각 · 맹점 ②)', () => {
+describe('대상 링크의 현재 p 래칫(#4231 다음 조각 · 맹점 ② · 조직 전체 화면)', () => {
   const count = (src: string) => countCurrentProjectTargetLinks('x.tsx', src);
 
   it('양성대조 — 대상 링크 조립에 현재 p · 대상 경로를 현재 p로 감쌈', () => {
@@ -89,6 +112,15 @@ describe('채팅 대상 링크의 현재 p 래칫(#4231 다음 조각 · 맹점 
     expect(count('const a = <Link href={flatHref(`/gates/${g.id}`)} />;')).toBe(1);
     expect(count("const a = <Link href={flatHref(`/docs?id=${d}`)} />;")).toBe(1);
     expect(count('const b = renderStaticEventBlock(block, 0, flatHref);')).toBe(1);
+  });
+
+  it('⭐별칭 · prop 전달 — useFlatHref() 결과를 다른 이름으로 받아도 · 컴포넌트에 prop으로 넘겨도 센다', () => {
+    expect(count('const toP = useFlatHref();\nconst h = getEntityHref(t, id, toP);')).toBe(1);
+    expect(count('const toP = useFlatHref();\nconst a = <Link href={toP(`/gates/${g.id}`)} />;')).toBe(1);
+    expect(count('const a = <EmbedCard withProject={flatHref} />;')).toBe(1);
+    expect(count('// 대상-프로젝트: 메시지 참조엔 대상 프로젝트가 없다\nconst a = <EmbedCard withProject={flatHref} />;')).toBe(0);
+    expect(count('const f = useCallback(() => 1, [flatHref]);'), '의존성 배열은 전달 아님').toBe(0);
+    expect(count('const r = useRef(flatHref);'), '훅 인자는 대상 링크 조립 아님').toBe(0);
   });
 
   it('음성대조 — 대상 프로젝트로 감쌈 · 목록/화면 경로 · 이유 주석', () => {
@@ -100,8 +132,12 @@ describe('채팅 대상 링크의 현재 p 래칫(#4231 다음 조각 · 맹점 
     expect(count('const a = <Link\n  // 대상-프로젝트: 게이트 id만 안다\n  href={flatHref(`/gates/${id}`)}\n/>;')).toBe(0);
   });
 
-  it(`⭐채팅 대상 링크의 현재 p(이유 없음) = ${BASELINE}(늘면 RED)`, () => {
+  it('자가 실제로 넓다 — 조직 전체 화면 폴더가 다 있다(이름 바뀜으로 헛돌지 않게)', () => {
+    for (const d of DIRS) expect(statSync(path.join(SRC, d)).isDirectory(), d).toBe(true);
+  });
+
+  it(`⭐대상 링크의 현재 p(이유 없음) = ${BASELINE}(늘면 RED)`, () => {
     const { total, byFile } = scan();
-    expect(total, `이유 없이 현재 p를 싣는 채팅 대상 링크 ${total}개:\n${JSON.stringify(byFile, null, 1)}`).toBe(BASELINE);
+    expect(total, `이유 없이 현재 p를 싣는 대상 링크 ${total}개:\n${JSON.stringify(byFile, null, 1)}`).toBe(BASELINE);
   });
 });

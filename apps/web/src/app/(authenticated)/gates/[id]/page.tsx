@@ -218,6 +218,10 @@ export default function GateDetailPage() {
   // story #4231 4차 B(PO 08:48Z) — 게이트 상세는 조직 수준 화면이라 bare `/gates/{id}`로 들어오면 현재 p = 쿠키 프로젝트다. 대상 링크는 현재 p가
   // 아니라 **게이트 자기 프로젝트**(GET /gates/{id}의 project_id — 4241 · 4600 해소)를 싣는다. 모르면(조직 단위 게이트) 주소 그대로.
   const gateProjectId = gate?.project_id ?? null;
+  // story #4231 — 미룬 결재는 같은 작업 항목의 레시피 결재라 이 결재의 프로젝트(gateProjectId)를 싣는다 — 현재 p가 아니다.
+  // 대상-프로젝트: 이 결재의 프로젝트를 모를 때(옛 응답)만 현재 p로 폴백.
+  const deferredGateHref = (deferredId: string) =>
+    (gateProjectId ? withProjectParam(`/gates/${deferredId}`, gateProjectId) : flatHref(`/gates/${deferredId}`));
   const targetLink = isDocGate && gate?.work_item_summary?.slug
     ? { href: withProjectParam(`/docs/${gate.work_item_summary.slug}`, gateProjectId), labelKey: 'gateDetailViewTargetDoc' as const }
     : isCanonicalizeGate && gate?.work_item_id
@@ -596,7 +600,7 @@ export default function GateDetailPage() {
               <p className="text-[11px] text-muted-foreground">
                 {t('gateDeferredToRecipeGate')}
                 {' · '}
-                <Link href={flatHref(`/gates/${gate.deferred_to_gate_id}`)} className="font-medium text-primary hover:underline">
+                <Link href={deferredGateHref(gate.deferred_to_gate_id)} className="font-medium text-primary hover:underline">
                   {t('gateDeferredToRecipeGateLink')}
                 </Link>
               </p>

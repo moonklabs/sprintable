@@ -40,6 +40,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
   const t = useTranslations('orgBriefing');
   const meta = STATE_META[item.state];
   const Icon = meta.icon;
+  // 대상-프로젝트: hrefForNeedsMeItem은 결재 자기 프로젝트(item.projectId)를 싣고, 현재 p(flatHref)는 결재함 큐 · 프로젝트 모를 때의 폴백에만 쓴다.
   const href = hrefForNeedsMeItem(item, flatHref);
   return (
     <div className="flex items-start gap-3 border-t border-border px-3 py-3 first:border-t-0">
@@ -74,6 +75,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 develop 착지,
             라이브 dev-app은 배포 86 뒤 반영). 있으면 짓지 않고 실 id로만 연다. */}
         {item.conversationId ? (
+          // 대상-프로젝트: 브리핑 항목은 대화 id만 싣는다(대화의 프로젝트 필드 없음 · 대화 화면이 착지 뒤 자기 프로젝트로 연다).
           <Link href={flatHref(`/chats/${item.conversationId}`)} className="text-[11px] text-primary hover:underline">
             {t('conversationOpenLink')}
           </Link>

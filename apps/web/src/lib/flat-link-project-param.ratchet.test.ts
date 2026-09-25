@@ -36,7 +36,7 @@ const ASSEMBLERS = new Set(['scopedResourceHref', 'destHref', 'resolveTabHref'])
 export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: string[]; reason: string }> = [
   { file: 'lib/nav-config.ts', props: ['path'], reason: '내비 설정 경로 — 소비처(사이드바·더보기·탭바·커맨드 팔레트)가 렌더에서 flatHref로 감싼다(각 flat-href 렌더 테스트)' },
   { file: 'lib/nav-v3-destinations.ts', props: ['path'], reason: 'v3 목적지 설정 경로 — 클라이언트 소비처(탭바·nav-v3-item-list·chat-v3 «오늘»·온보딩 첫 착지·온보딩 첫 지시 redirect)가 감싸고, 나머지는 서버 리다이렉트(proxy·app/page·desktop·dashboard/page·auth callback)' },
-  { file: 'components/command-palette/command-palette.tsx', props: ['href'], reason: 'GUARD_ANCHOR_ITEMS 설정 경로 — 전부 isWorkspaceless라 소비처(ITEMS useMemo)가 flatHref로 감싼다(#4231 4차 B · command-palette 앵커 테스트가 전제를 고정)' },
+  { file: 'components/command-palette/command-palette.tsx', props: ['href'], reason: 'GUARD_ANCHOR_ITEMS 설정 경로(데이터 표) — 소비처 deriveNavigateItems가 resolveResourceHref(scopedResourceHref)로 `/{ws}/{proj}/…` 직접 주소를 만든다(slug 모르면 flat + ?p=) · #4274 뒤 · nav-scoped-resource-links 가드가 헬퍼 결과 href로 고정' },
   { file: 'hooks/use-account-switcher.ts', reason: '다른 조직으로 전환하는 하드 이동 — 현재 프로젝트를 실으면 틀린 p(PO 02:02Z 예외)' },
   { file: 'app/dashboard/dashboard-shell.tsx', texts: ['/glance', '/inbox', '/chats', '/more'], reason: 'TAB_ROOT_PREFIXES — 경로 접두 판정 표(이동 아님 · /glance는 #4231 4차에서 옛 자원 경로가 flat 목적지에 들며 드러남)' },
   { file: 'proxy.ts', reason: '미들웨어 경로 판정(이동 링크 아님)' },

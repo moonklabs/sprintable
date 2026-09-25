@@ -172,6 +172,7 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
         <ChatProofEmbed
           key={ref.id}
           sourceLabel={`${t('chatProofSectionTitle')} · ${formatCitationDate(ref.createdAt)}`}
+          // 대상-프로젝트: 이 근거 칸은 스토리 상세(그 스토리의 프로젝트 화면) 안이라 현재 p가 곧 스토리 · 근거 대화의 프로젝트.
           conversationHref={flatHref(`/chats/${ref.conversationId}?messageId=${ref.startMessageId}`)}
           quotedAt={formatCitationDate(ref.createdAt)}
           status={ref.stillExists === false ? 'deleted' : 'normal'}

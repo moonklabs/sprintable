@@ -1528,6 +1528,7 @@ export default function ContentPostEditPage() {
             {submitResult.type === 'success' ? (
               <>
                 {t('submitSuccess')}{' '}
+                {/* 대상-프로젝트: 제출 응답은 게이트 id만 준다(콘텐츠 초안은 조직 단위 · 게이트 상세가 자기 프로젝트로 연다). */}
                 <Link href={flatHref(`/gates/${submitResult.gateId}`)} className="underline">{t('submitGateLink')}</Link>
               </>
             ) : submitResult.heldByDraftId ? (

@@ -243,6 +243,11 @@ describe('GateDetailPage — deferred_to_gate_id(레시피 게이트 대신 결�
     expect(link?.textContent).toBe(koMessages.cage.gateDeferredToRecipeGateLink);
   });
 
+  it('⭐story #4231 — 대신 결재 링크는 이 결재의 프로젝트를 싣는다(현재 p 아님 · 레시피 결재는 같은 작업 항목)', async () => {
+    await mount(gate({ can_approve: true, deferred_to_gate_id: 'gate-recipe-1', project_id: 'proj-of-gate' }));
+    expect(container.querySelector('a[href="/gates/gate-recipe-1?p=proj-of-gate"]')).not.toBeNull();
+  });
+
   it('deferred_to_gate_id가 없으면(일반 게이트, 회귀 0) 대신 결재 문구가 안 뜨고 기존 동작 그대로', async () => {
     await mount(gate({ can_approve: false, deferred_to_gate_id: null }));
     expect(container.textContent).not.toContain(koMessages.cage.gateDeferredToRecipeGate);
