@@ -60,9 +60,9 @@ function splitSelectorList(s: string): string[] {
 
 export interface Cascade {
   /** 요소의 계산된 값(색 · 크기는 상속 · var 해석 끝 · 밑줄은 전파 반영). theme = html.dark 유무. */
-  computed(el: Element, prop: 'color' | 'font-size' | 'text-decoration-line', theme: 'light' | 'dark'): string;
+  computed(el: Element, prop: 'color' | 'font-size' | 'line-height' | 'text-decoration-line', theme: 'light' | 'dark'): string;
   /** 요소 «자기 클래스»만으로 선언된 값(그 클래스 단독 규칙 · var 해석) — 없으면 null. */
-  declared(el: Element, prop: 'color' | 'font-size' | 'text-decoration-line', theme: 'light' | 'dark'): string | null;
+  declared(el: Element, prop: 'color' | 'font-size' | 'line-height' | 'text-decoration-line', theme: 'light' | 'dark'): string | null;
   /** 요소에 이긴 선언의 선택자(표의 «이기는 규칙» 칸). */
   winner(el: Element, prop: string): string | null;
   /** jsdom이 못 읽은 선택자(0이어야 판정을 믿을 수 있다). */
@@ -173,14 +173,14 @@ export async function loadTailwindCascade(container: Element): Promise<Cascade> 
       return v != null ? resolveVars(el, v, depth + 1) : (fallback != null ? resolveVars(el, fallback.trim(), depth + 1) : `var(${name})`);
     });
   };
-  const INHERITED = new Set(['color', 'font-size']);
+  const INHERITED = new Set(['color', 'font-size', 'line-height']);
   const computedRaw = (el: Element, prop: string): string => {
     for (let cur: Element | null = el; cur; cur = cur.parentElement) {
       const w = cascadeWinner(cur, prop);
       if (w && w.value !== 'inherit' && w.value !== 'currentcolor' && w.value !== 'currentColor') return resolveVars(cur, w.value);
       if (!INHERITED.has(prop)) return 'none';
     }
-    return prop === 'font-size' ? 'medium' : 'canvastext';
+    return prop === 'font-size' ? 'medium' : prop === 'line-height' ? 'normal' : 'canvastext';
   };
 
   return {

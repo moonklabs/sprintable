@@ -327,6 +327,7 @@ export function DocContentRenderer({
           wrapper.innerHTML = highlighted;
           // story #2165: 코드블럭은 전역 스크롤바 숨김 예외 — 가로로 잘린 줄을 알려야 한다.
           wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto scrollbar-visible';
+          wrapper.setAttribute('data-doc-part', 'code'); // story #4316 — 렌더러 부품(뿌리 본문 문단 · 링크 규칙 밖)
           if (pre.parentElement) pre.replaceWith(wrapper);
         }).catch(() => { /* fallback: keep original pre */ });
       });
@@ -409,6 +410,7 @@ export function DocContentRenderer({
     // 문서에 박힌 정적 메타라 노출 자체는 meta-leak 아님·클릭 네비게이션만 authed 전용으로 제한).
     const pageEmbeds = Array.from(root.querySelectorAll<HTMLElement>('[data-page-embed]'));
     const pageEmbedCleanup = pageEmbeds.map((block) => {
+      block.setAttribute('data-doc-part', 'page-embed'); // story #4316 — 렌더러 부품(뿌리 본문 문단 · 링크 규칙 밖)
       const title = block.getAttribute('data-title') || '';
       const icon = block.getAttribute('data-icon') || '';
       const slug = block.getAttribute('data-slug') || '';
@@ -461,6 +463,7 @@ export function DocContentRenderer({
     // Math block rendering (viewer)
     const mathBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathBlock"]'));
     mathBlocks.forEach((block) => {
+      block.setAttribute('data-doc-part', 'math'); // story #4316
       const latex = block.getAttribute('data-latex') ?? block.textContent ?? '';
       if (!latex.trim()) return;
       void renderKatex(latex, true, mathRenderFailedLabel).then(({ html: katexHtml, error }) => {
@@ -489,6 +492,7 @@ export function DocContentRenderer({
     // Embed block handlers (viewer)
     const embedBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="embedBlock"]'));
     embedBlocks.forEach((block) => {
+      block.setAttribute('data-doc-part', 'embed'); // story #4316 — 일반 링크 카드(`no-underline`)가 뿌리 밑줄에 지던 자리
       const url = block.getAttribute('data-url') ?? '';
       if (!url) return;
       const { type, embedUrl } = detectEmbedService(url);
@@ -529,6 +533,7 @@ export function DocContentRenderer({
     // File attachment download handlers (viewer)
     const fileBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="fileAttachment"]'));
     const fileCleanup = fileBlocks.map((block) => {
+      block.setAttribute('data-doc-part', 'file'); // story #4316
       const filename = block.getAttribute('data-filename') ?? 'file';
       const data = block.getAttribute('data-file-data') ?? '';
       const refAssetId = block.getAttribute('data-asset-id') ?? '';
@@ -594,6 +599,7 @@ export function DocContentRenderer({
       Array.from(root.querySelectorAll<HTMLImageElement>('img')).forEach((img) => {
         const alt = img.getAttribute('alt')?.trim();
         const placeholder = document.createElement('div');
+        placeholder.setAttribute('data-doc-part', 'image-placeholder'); // story #4316
         placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
         placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(alt || publicImageLabel)}</span>`;
         img.replaceWith(placeholder);
@@ -617,6 +623,7 @@ export function DocContentRenderer({
 
         const showError = () => {
           const placeholder = document.createElement('div');
+          placeholder.setAttribute('data-doc-part', 'image-placeholder'); // story #4316
           placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
           placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(altText || assetImageErrorLabel)}</span>`;
           img.replaceWith(placeholder);
@@ -809,11 +816,16 @@ export function DocContentRenderer({
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     // story #2967 — 다크 체감 눌림(/92=14.88 vs full=17.66, 둘 다 WCAG 통과지만 체감 차).
     // 리더만 bodyEmphasis='full' 옵트인 — 기본은 기존 /92 그대로(다른 소비처 무접촉).
-    bodyEmphasis === 'full' ? '[&_p]:leading-7 [&_p]:text-foreground' : '[&_p]:leading-7 [&_p]:text-foreground/92',
+    // story #4316 — 본문 문단 · 링크 규칙(`.root p` / `.root a` = 0,1,1)은 렌더러가 끼워 넣는 부품(`data-doc-part` · 임베드 카드 · 없는 문서 카드 ·
+    // 첨부 카드 · 자리 표시 · 수식 · 코드 감싸개) 안에는 걸지 않는다. 걸면 부품이 선언한 클래스(0,1,0)를 이겨 «흐림» · «밑줄 없음»이 안 닿았다
+    // (유나 4673 판 · 계산값 표). `:where()`로 감싸 특이도는 그대로(본문 문단 · 링크 모양 무변).
+    bodyEmphasis === 'full'
+      ? '[&_p:not(:where([data-doc-part],[data-doc-part]_*))]:leading-7 [&_p:not(:where([data-doc-part],[data-doc-part]_*))]:text-foreground'
+      : '[&_p:not(:where([data-doc-part],[data-doc-part]_*))]:leading-7 [&_p:not(:where([data-doc-part],[data-doc-part]_*))]:text-foreground/92',
     // story #2023 ⓒ(§5-2): 유틸 부재로 인한 var() 우회 참조를 정식 토큰으로 되돌림 — 문서 본문
     // 링크색, L1~L5 재분류 아님(콘텐츠 하이퍼링크는 서명·시스템상태 어느 축도 아님).
     // story #4315 — 글자는 brand-text(밝은 = brand-strong 7.05 · 어두운 = brand-soft 10.48). brand-soft는 옅은 틴트라 밝은 테마 1.25:1이었다.
-    '[&_a]:text-brand-text [&_a]:underline [&_a]:underline-offset-4',
+    '[&_a:not(:where([data-doc-part],[data-doc-part]_*))]:text-brand-text [&_a:not(:where([data-doc-part],[data-doc-part]_*))]:underline [&_a:not(:where([data-doc-part],[data-doc-part]_*))]:underline-offset-4',
     '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:bg-muted/30 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-muted-foreground',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
