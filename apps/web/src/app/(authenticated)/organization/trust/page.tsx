@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { HeartHandshake } from 'lucide-react';
+import { Bot, HeartHandshake, UserRound } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -49,13 +49,17 @@ function initial(name: string): string {
 // 어두운 사각+흰 글자가 아니다. `ListRowMark`는 채널 색 구분(의미 있는 색상 코딩)이
 // 용도라 그 자체를 바꾸면 채널 목록이 깨진다 — 이 화면 전용 표식을 따로 둔다(색
 // 코딩 없음, 이 화면엔 애초에 "역할"이 색으로 갈릴 이유가 없다는 원 판단은 무변).
-function PersonMark({ label }: { label: string }) {
+// story #4285(유나 재검 03:02Z · 4646 Avatar 계약과 같은 규칙) — 진짜 이름이 없는 행(«이름 없는 구성원» · «알 수 없는 구성원»)은
+// 대체 낱말의 첫 글자(«이» · «알»)가 누구의 머리글자처럼 읽힌다 — 글자 대신 같은 원에 아이콘(에이전트 Bot · 그 외 UserRound).
+function PersonMark({ label, icon }: { label?: string; icon?: 'agent' | 'person' }) {
   return (
     <span
       aria-hidden="true"
       className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
     >
-      {label}
+      {icon === 'agent' ? <Bot className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-agent" />
+        : icon === 'person' ? <UserRound className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-person" />
+        : label}
     </span>
   );
 }
@@ -145,6 +149,7 @@ export default function OrganizationTrustPage() {
         row={row}
         index={index}
         name={displayNames.get(row.member_id) ?? rosterDisplayName(row, rosterMembers, rosterNameLabels)}
+        hasRealName={![rosterNameLabels.unknown, rosterNameLabels.unnamed].includes(rosterDisplayName(row, rosterMembers, rosterNameLabels))}
         t={t}
         displayTimezone={displayTimezone}
       />
@@ -248,15 +253,15 @@ export default function OrganizationTrustPage() {
 // 펼침 상태를 공유해야 한다 — 그 상태(useHistoryDrilldown)를 쥐는 자리가 이제 행
 // 컴포넌트 자체다(훅은 컴포넌트 안에서만 부를 수 있다, .map() 콜백 안 직접 호출 불가).
 function AdminRow({
-  row, index, name, t, displayTimezone,
-}: { row: OrgSummaryRow; index: number; name: string; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
+  row, index, name, hasRealName, t, displayTimezone,
+}: { row: OrgSummaryRow; index: number; name: string; hasRealName: boolean; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
   const roleLabel = resolveRoleLabel(row.role_key, row.role_label, t);
   const coldStart = isColdStart(row.hit_rate, row.resolved);
   const drilldown = useHistoryDrilldown({ memberId: row.member_id, roleKey: row.role_key });
   return (
     <ListRow
       data-testid="trust-roster-row"
-      mark={<PersonMark label={initial(name)} />}
+      mark={hasRealName ? <PersonMark label={initial(name)} /> : <PersonMark icon={row.member_type === 'agent' ? 'agent' : 'person'} />}
       title={name}
       subtitle={coldStart ? (
         <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />
