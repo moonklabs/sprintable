@@ -1230,3 +1230,35 @@ describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 구�
   });
 });
 
+describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 행 가르기(story #4284 유나 판정)', () => {
+  async function openPicker(members: Array<{ id: string; name: string | null; type: string }>) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} members={members} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const edit = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith('✎'));
+    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    return [...container.querySelectorAll('button')].filter((b) => b.textContent?.includes(koMessages.common.memberUnnamed)).map((b) => b.textContent?.trim() ?? '');
+  }
+
+  it('⭐이름 없는 구성원 둘 → 행 라벨이 id 꼬리로 서로 다르다', async () => {
+    const rows = await openPicker([
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'agent' },
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('a1000000');
+    expect(rows[1]).toContain('b2000000');
+  });
+
+  it('이름 없는 구성원이 하나면 꼬리 없음', async () => {
+    const rows = await openPicker([
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'm-named', name: 'Pedro', type: 'human' },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toContain('a1000000');
+  });
+});
+

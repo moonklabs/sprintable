@@ -1730,6 +1730,37 @@ describe('KanbanBoard — 이름 없는 구성원(story #4284)', () => {
     expect(container.textContent).not.toContain('실명 스토리');
   });
 
+  it('⭐이름 없는 사람 둘 → 필터 행이 id 꼬리로 갈리고, 고른 뒤 트리거도 같은 라벨 · 묶음에 하나뿐인 이름 없는 에이전트는 꼬리 없음(유나 판정)', async () => {
+    const TWO = [
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'human' },
+      { id: 'c3000000-0000-4000-8000-000000000003', name: null, type: 'agent' },
+    ];
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], TWO);
+    await mount();
+    const menu = await openAssigneeFilter();
+    const rowTexts = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim() ?? '');
+    const unnamed = koMessages.common.memberUnnamed;
+    expect(rowTexts).toContain(`${unnamed} · a1000000`);
+    expect(rowTexts).toContain(`${unnamed} · b2000000`);
+    expect(rowTexts, '에이전트 묶음엔 이름 없는 행이 하나 — 꼬리 없음').toContain(unnamed);
+  });
+
+  it('⭐이름 없는 사람 둘 중 하나를 고른 상태 → 필터 트리거도 그 행 라벨(id 꼬리)', async () => {
+    searchRef.current = 'assignee_id=b2000000-0000-4000-8000-000000000002';
+    try {
+      stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], [
+        { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+        { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'human' },
+      ]);
+      await mount();
+      const trigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(`${koMessages.common.memberUnnamed} · b2000000`));
+      expect(trigger, '필터 트리거가 고른 행과 같은 라벨').toBeTruthy();
+    } finally {
+      searchRef.current = '';
+    }
+  });
+
   it('담당자 검색 — 보이는 라벨로 찾는다(«이름 없는»으로 이름 없는 구성원이 걸리고, 실명 검색에서 오류 없음)', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], MEMBERS);
     await mount();

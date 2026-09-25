@@ -34,7 +34,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
-import { memberDisplayLabel, memberNameById } from '@/lib/member-display';
+import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -1578,7 +1578,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       토글 후보에서 「시스템 발행」 제외(연결 대상이 아닌 내부 멤버).
                       memberMap 기반 기존 배정 표시는 안 건드린다(위 참고). */}
                   {/* story #4284 — 이름 없는 구성원은 «이름 없는 구성원»(common.memberUnnamed). 라벨을 행 데이터에 실어 `{m.label}`로 그린다. */}
-                  {members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type)).map((m) => ({ ...m, label: memberDisplayLabel(m.name, tc) })).map((m) => {
+                  {/* 유나 판정 — 이름 없는 구성원이 둘 이상이면 id 꼬리로 가른다(memberRowLabels · 역할이 안 보이는 목록이라 늘 id 꼬리). */}
+                  {(() => {
+                    const pickable = members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type));
+                    const rowLabels = memberRowLabels(pickable, tc, () => '');
+                    return pickable.map((m) => ({ ...m, label: rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc) }));
+                  })().map((m) => {
                     const selected = localAssigneeIds.includes(m.id);
                     return (
                       <Button
