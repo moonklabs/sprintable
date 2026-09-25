@@ -47,8 +47,10 @@ async def test_create_retro_session_calls_real_path():
 async def test_vote_retro_item_calls_real_path():
     client = _client(request={"id": "v1"})
     with patch.object(r, "client", client):
-        await r.vote_retro_item(r.VoteRetroItemInput(session_id="s1", item_id="i1", voter_id="u1"))
+        await r.vote_retro_item(r.VoteRetroItemInput(session_id="s1", item_id="i1"))
     assert client.request.call_args.args[1] == "/api/v2/retros/s1/items/i1/vote"
+    # story #4329 — 투표자는 서버가 인증에서 정한다: 본문(voter_id) · 쿼리(project_id)를 싣지 않는다.
+    assert "json" not in client.request.call_args.kwargs and "params" not in client.request.call_args.kwargs
 
 
 async def test_add_retro_action_calls_real_path():
