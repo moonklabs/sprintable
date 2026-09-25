@@ -31,6 +31,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import OrganizationChannelsPage from './page';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1309,7 +1310,8 @@ describe('OrganizationChannelsPage — 연결 시각 상대시각 정본(story #
 
     // 폴백도 formatScheduledAt(§11-2 정본)이지 브라우저 toLocaleString이 아니다 —
     // "MM-DD HH:mm TZ" 꼴(마침표 구분자 없음).
-    expect(container.textContent).toMatch(/09-01 \d{2}:\d{2}/);
+    // story #4280 — 화면은 표시 시간대(조직 tz 없으면 실행 기계 TZ)로 날짜를 그린다. 날짜를 박아 두면 음의 오프셋 기계(LA)에서 하루 앞으로 밀려 깨졌다 — 같은 포맷터로 기대값.
+    expect(container.textContent).toContain(formatScheduledAt('2026-09-01T00:00:00Z', resolveDisplayTimezone().tz).display);
     expect(container.textContent).not.toMatch(/\d{4}\. \d{1,2}\. \d{1,2}\./);
   });
 });
