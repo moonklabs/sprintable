@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_read_db
 from app.models.activity_log import ActivityLog
@@ -27,6 +28,10 @@ except Exception:
     pass
 
 router = APIRouter(prefix="/api/v2/activity-logs", tags=["activity-logs", "Trust"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_FROM_QUERY = Depends(aware_datetime_query("from", description="created_at >= from"))
+_TO_QUERY = Depends(aware_datetime_query("to", description="created_at <= to"))
 
 _ENTITY_TITLE_MODELS: dict[str, type] = {}
 
@@ -77,8 +82,9 @@ async def list_activity_logs(
     action: str | None = Query(default=None),
     entity_type: str | None = Query(default=None),
     entity_id: uuid.UUID | None = Query(default=None),
-    from_: datetime | None = Query(default=None, alias="from"),
-    to: datetime | None = Query(default=None),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`).
+    from_: datetime | None = _FROM_QUERY,
+    to: datetime | None = _TO_QUERY,
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     # story #2451(§6 Phase3 A1): append-only 로그·create→self-read 흐름 없음 → read replica.

@@ -1012,6 +1012,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "payload.kind={kind}는 등재되지 않은 kind예요 — 허용: {allowed}.",
         "en": "payload.kind={kind} is not a registered kind — allowed: {allowed}.",
     },
+    # story #4294(PO 05:01Z) — 기간 질의의 오프셋 없는 일시는 해석을 지어내지 않고 거절한다(`app/core/datetime_query.py`).
+    "common.datetime_offset_required": {
+        "ko": "{param}에 시간대를 붙여 주세요 — 예: 2020-01-01T00:00:00Z 또는 2020-01-01T09:00:00+09:00.",
+        "en": "Add a timezone offset to {param} — e.g. 2020-01-01T00:00:00Z or 2020-01-01T09:00:00+09:00.",
+    },
     "evidence.kind_type_mismatch": {
         "ko": "payload.kind={kind}는 type={expected_type}로 실려야 해요 (받은 type={received_type}).",
         "en": "payload.kind={kind} must be sent with type={expected_type} (received type={received_type}).",
