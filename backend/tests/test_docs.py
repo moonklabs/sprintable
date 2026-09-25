@@ -23,6 +23,7 @@ def _mock_doc() -> MagicMock:
     d.superseded_by = None  # E-DG S28: 신규 superseded_by(동일 패턴·MagicMock None 명시)
     d.assignee = None  # doc-payload enrich: 신규 응답필드(MagicMock→DocResponse 검증 실패 방지·동일 패턴)
     d.revisions = None  # doc-payload enrich: 신규 응답필드(동일 패턴)
+    d.wiki_link_targets = None  # story #4313: 신규 응답필드(slug 단건 경로만 채움 · MagicMock→dict 검증 실패 방지 · 동일 패턴)
     d.title = "Getting Started"
     d.slug = "getting-started"
     d.canonical_slug = "getting-started"  # 4dd399c6: property on real Doc; mock 명시 필수
