@@ -584,17 +584,23 @@ export function NotificationBell() {
   const handleMarkAllRead = useCallback(async () => {
     const readAt = new Date().toISOString();
     const countBefore = unreadCount;
-    // 낙관적 업데이트
-    setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
+    // 낙관적 업데이트 — 이번 시도가 «읽음»으로 바꾼 행 id를 적어 둔다(되돌림 · 다시 읽음이 이 행들만 만지게 · 복구 도중 SSE로 온
+    // 새 알림은 이 집합에 없어 서버 그대로 안 읽음으로 남는다). updater가 두 번 불려도(StrictMode) 같은 id라 집합은 같다.
+    const changedIds = new Set<string>();
+    setNotifications((prev) => prev ? prev.map((n) => {
+      if (n.read_at) return n;
+      changedIds.add(n.id);
+      return { ...n, read_at: readAt };
+    }) : prev);
     setUnreadCount(0);
     const readAllParams = projectId ? `?project_id=${projectId}` : '';
     // story #4295(까디르 · 유나) — 서버가 답한 실패(!ok)와 답을 못 받은 망 오류는 다르다: 망 오류는 서버가 커밋했을 수도 있다.
     const outcome: 'ok' | 'serverError' | 'networkError' = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' })
       .then((res) => (res.ok ? 'ok' : 'serverError'), () => 'networkError');
     if (outcome === 'ok') return;
-    // 열린 목록 · 개수를 바꾸기 전으로(개별 읽음 롤백과 같은 문법) — 이번에 «읽음»으로 바꾼 항목은 read_at이 정확히 이 readAt이라 그것만
-    // 되돌린다(원래 읽음이던 항목은 제 시각 그대로). 아래 재조회가 실패해도 이 상태가 안전판이다.
-    setNotifications((prev) => prev ? prev.map((n) => (n.read_at === readAt ? { ...n, read_at: null } : n)) : prev);
+    // 열린 목록 · 개수를 바꾸기 전으로(개별 읽음 롤백과 같은 문법) — 이번에 «읽음»으로 바꾼 행(changedIds)만 되돌린다(원래 읽음이던
+    // 항목은 제 시각 그대로). 아래 재조회가 실패해도 이 상태가 안전판이다.
+    setNotifications((prev) => prev ? prev.map((n) => (changedIds.has(n.id) ? { ...n, read_at: null } : n)) : prev);
     setUnreadCount(countBefore);
     // 개수 · 목록 첫 쪽을 패널 열 때와 같은 길로 다시 받아 서버 값으로 맞춘다(둘 다 던지지 않음 · 실패면 null).
     const [count, page] = await Promise.all([
@@ -620,8 +626,9 @@ export function NotificationBell() {
     }
     if (count === 0 && !page) {
       // 개수만 받음 — «안 읽음 0»은 서버가 말한 값이다(PO · 까디르 판정). 목록 재조회가 실패해 되돌린 행이 «안 읽음»으로 남으면
-      // 배지 0과 어긋나므로 이번에 되돌린 행을 서버 값대로 읽음으로 둔다. 사용자 입장에선 성공 — 토스트 없음.
-      setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
+      // 배지 0과 어긋나므로 이번에 되돌린 행(changedIds)만 서버 값대로 읽음으로 둔다 — 복구 도중 SSE로 온 새 알림은 그 집합에 없어
+      // 안 읽음 그대로(PO 정정 · 까디르 P2: 예전엔 안 읽은 행 전부를 읽음으로 숨겼다). 사용자 입장에선 성공 — 토스트 없음.
+      setNotifications((prev) => prev ? prev.map((n) => (changedIds.has(n.id) && !n.read_at ? { ...n, read_at: readAt } : n)) : prev);
       return;
     }
     if (count === null && page && !page.items.some((n) => !n.read_at)) {
