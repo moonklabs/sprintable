@@ -20,7 +20,7 @@ import { contentPostStatusLabelKey } from '@/components/content/post-status';
 import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
-import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { blockedByConnection, deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
@@ -2405,6 +2405,7 @@ export default function ChannelPostEditPage() {
             onRetryClick={draft.command_retryable
               ? () => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }
               : undefined}
+            connectionHref={blockedByConnection(draft.command_status, draft.failure_kind) ? connectRulesHref : undefined}
           />
         ) : null}
         {/* story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 부분

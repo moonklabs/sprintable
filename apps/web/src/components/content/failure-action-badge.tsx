@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,6 +40,10 @@ export interface FailureActionBadgeProps {
   /** story #4264 ④(PO 18:07Z) — 승인 필요로 멈춘 글의 뒷문장(무엇을 하면 되는지)을 고르는 사실. 화면이 게이트 상태 · 승인된
    * 예약 시각을 **실제로 받는** 곳만 넘긴다(모르면 안 넘김 → 앞문장만 · 약속 0). `undefined` = 모름, `null` = 없음이 확실함. */
   approvalContext?: BlockedApprovalContext;
+  /** story #4304(유나 4654 기록 · PO 08:18Z) — 연결 사유로 멈춘(blocked) 배지에 «연결 확인» 링크를 둔다(댓글 답변과 같은 목적지 ·
+   * 같은 낱말). 고칠 길(연결 화면)이 «다시 시도» 앞에 있어야 끊긴 채 다시 눌러 또 막히지 않는다. 호출부가 `useConnectRulesHref`로
+   * 구한 주소를 넘긴다(모르면 안 넘김 → 링크 없음). compact(카드 안 · 목록)에선 그리지 않는다(카드 자체가 링크). */
+  connectionHref?: string;
 }
 
 export interface BlockedApprovalContext {
@@ -72,7 +77,7 @@ function blockedApprovalNextKey(ctx: BlockedApprovalContext | undefined): string
   return undefined;
 }
 
-export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate, approvalContext }: FailureActionBadgeProps) {
+export function FailureActionBadge({ action, onRetryClick, displayTimezone, compact, recheckGate, approvalContext, connectionHref }: FailureActionBadgeProps) {
   const t = useTranslations('content');
   // story #3815 — dead_letter가 아닌 다른 kind에선 항상 null(훅은 조건 없이 매
   // 렌더 호출돼야 하므로 이 자리에 둔다 — early return보다 위).
@@ -84,16 +89,25 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   const canOffer = !!onRetryClick && retryable !== false;
 
   if (action.kind === 'blocked') {
-    if (compact || !canOffer) {
-      return (
-        <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
-          {t('channelPostsFailureBlocked')}
-        </p>
-      );
-    }
+    // story #4304(유나 확정) — 머리 «연결 문제로 멈춤» ` — ` «연결 확인»(링크) 한 줄 → 아래 «다시 시도»(고치기 → 다시 시도). 링크는 재시도를
+    // 못 내밀어도(서버 판정 false) 늘 둔다(댓글 답변과 같음). compact(목록 · 캘린더 · 보드)는 글만(행이 이미 상세 링크).
+    const headline = (
+      <p className="text-xs text-destructive" data-testid={canOffer && !compact ? undefined : 'channel-post-failure-badge'}>
+        {t('channelPostsFailureBlocked')}
+        {!compact && connectionHref ? (
+          <>
+            {' — '}
+            <Link href={connectionHref} className="underline" data-testid="channel-post-failure-connection-link">
+              {t('channelPostsFailureConnectionCheckLink')}
+            </Link>
+          </>
+        ) : null}
+      </p>
+    );
+    if (compact || !canOffer) return headline;
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
-        <p className="text-xs text-destructive">{t('channelPostsFailureBlocked')}</p>
+        {headline}
         <Button variant="outline" size="sm" onClick={onRetryClick} data-testid="channel-post-failure-retry-button">
           {t('channelPostsFailureRetryCta')}
         </Button>

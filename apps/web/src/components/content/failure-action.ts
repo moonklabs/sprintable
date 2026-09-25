@@ -156,3 +156,10 @@ function deriveFailureKind(input: FailureActionInput): FailureAction | undefined
   // 'needs_check' 명시값 + 그 외 모르는 값(§17-2 fail-closed) 전부 이 갈래.
   return { kind: 'needs_check' };
 }
+
+/** story #4304 — 멈춘(blocked) 명령이 **연결 사유**인가. BE가 blocked로 세우는 길은 지금 둘이다: 연결 실패(`failure_kind=connection`)와 조직
+ * 일시정지(`paused` — 연결과 무관, 정지를 풀면 서버가 다시 올림). «연결 확인» 링크는 앞의 것에만 단다(일시정지에 연결 화면을 가리키면 거짓 길).
+ * 까디르 QA(PO 08:55Z) — **닫힌 판정**: `connection`일 때만 참. 없는 kind · 모르는 kind(앞으로 blocked 사유가 늘 때)는 링크를 받지 않는다. */
+export function blockedByConnection(commandStatus: string | null | undefined, failureKind: string | null | undefined): boolean {
+  return commandStatus === 'blocked' && failureKind === 'connection';
+}

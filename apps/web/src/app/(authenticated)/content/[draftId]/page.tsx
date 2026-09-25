@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,7 @@ import { postPublicationRetry, PublicationRetryResultLine, withReload, type Publ
 import {
   ContentRuleViolationList, ContentRuleSubmitBlockedReason, type ContentRuleViolation,
 } from '@/components/content/content-rule-violation';
-import { deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
+import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureKind } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
@@ -217,6 +217,8 @@ export default function ContentPostEditPage() {
   const { draftId } = useParams<{ draftId: string }>();
   const { orgId, role } = useDashboardContext();
   const t = useTranslations('content');
+  // story #4304 — 연결 사유로 멈춘 배지의 «연결 확인» 목적지(댓글 답변 · 채널 글 상세와 같은 훅).
+  const connectRulesHref = useConnectRulesHref('/organization/channels');
   const tc = useTranslations('common');
   const channelLabel = useChannelLabel();
 
@@ -1341,6 +1343,7 @@ export default function ContentPostEditPage() {
               onRetryClick={publication.command.command_retryable
                 ? () => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }
                 : undefined}
+              connectionHref={blockedByConnection(publication.command.command_status, publication.command.failure_kind) ? connectRulesHref : undefined}
             />
           ) : null}
           <ConfirmDialog

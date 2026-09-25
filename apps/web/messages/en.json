@@ -2976,6 +2976,7 @@
     "channelPostsCalendarRangePrevWeek": "Previous week",
     "channelPostsCalendarRangeNextWeek": "Next week",
     "channelPostsFailureBlocked": "Blocked by a connection problem",
+    "channelPostsFailureConnectionCheckLink": "check connection",
     "channelPostsFailureNeedsCheck": "Check the channel — we can't tell if this went out.",
     "channelPostsFailureCheckedRetryCta": "Checked · retry",
     "channelPostsPublishLockedNeedsCheck": "This may already be on the channel — check there, then use \"{cta}\" above.",

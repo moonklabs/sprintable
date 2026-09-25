@@ -236,7 +236,7 @@ function stubFetchWithVersions(
         } as Record<string, unknown> & { command: Record<string, unknown> | null };
         // story #4290 — 서버처럼 command_retryable을 싣는다(`human_retryable`: dead_letter · blocked → 참) · 테스트가 직접 주면 그 값.
         const withExternal = merged.command && !('command_retryable' in merged.command)
-          ? { ...merged, command: { ...merged.command, command_retryable: merged.command.command_status === 'dead_letter' || merged.command.command_status === 'blocked' } }
+          ? { ...merged, command: { ...merged.command, command_retryable: merged.command.command_status === 'dead_letter' || (merged.command.command_status === 'blocked' && merged.command.failure_kind !== 'paused') } }
           : merged;
         return { ok: true, status: 200, json: async () => ({ data: withExternal, error: null, meta: null }) };
       }
@@ -1721,6 +1721,37 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
   // 2단계 관문을 site_post 외부발행 상세에도 이식(recheckGate=true, 새 컴포넌트·새
   // 낱말 0). ConfirmDialog는 Portal이라 document.body에 뜬다(unpublish 다이얼로그
   // 테스트와 동형).
+  // story #4304(유나 확정) — 연결 사유로 멈춘 외부 발행 배지: «연결 문제로 멈춤 — 연결 확인»(링크) → 아래 «다시 시도». 조직 일시정지는 링크 없음.
+  describe('⭐4304 — 연결 사유 blocked 배지의 «연결 확인»', () => {
+    const blockedPublication = (failureKind: string) => ({
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook',
+        channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'blocked', attempt_count: 1, failure_kind: failureKind, next_retry_at: null, dead_letter_at: null, command_reason_code: null, last_error: 'token expired' },
+      },
+    });
+
+    it('연결 실패 → 링크(연결 화면) + 그 아래 «다시 시도»', async () => {
+      stubFetchWithVersions([VERSION_1], undefined, undefined, blockedPublication('connection'));
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+      const link = container.querySelector('[data-testid="channel-post-failure-connection-link"]');
+      expect(link?.getAttribute('href')).toBe('/organization/channels');
+      expect(link?.textContent).toBe(koMessages.content.channelPostsFailureConnectionCheckLink);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).not.toBeNull();
+    });
+
+    it('조직 일시정지(paused) → 연결 화면을 가리키지 않는다(링크 0)', async () => {
+      stubFetchWithVersions([VERSION_1], undefined, undefined, blockedPublication('paused'));
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
+    });
+  });
+
   describe('⭐3369 — needs_check 2단계 관문(dead_letter ∧ failure_kind=needs_check)', () => {
     it('⭐배지·CTA부터 needs_check 것 — recheckGate=true라 「밖에 나갔는지 모르는 실패」 문면이 선다', async () => {
       stubFetchWithVersions([VERSION_1], undefined, undefined, {

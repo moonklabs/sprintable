@@ -2420,11 +2420,14 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
     it('blocked', async () => {
       // story #4290(까디르 QA ①) — 서버가 사람 재시도를 받는 blocked(연결을 고친 뒤)면 «다시 시도»도 — 예전엔 command_retryable=true인데 버튼이 없었다.
-      stubFetch({ draftDetail: { command_status: 'blocked' } });
+      stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'connection' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
       const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');
       expect(badge?.textContent).toContain(koMessages.content.channelPostsFailureBlocked);
+      // story #4304 — 연결 사유면 머리 줄에 «연결 확인»(연결 화면) — 버튼보다 앞.
+      const link = badge?.querySelector('[data-testid="channel-post-failure-connection-link"]');
+      expect(link?.getAttribute('href')).toBe('/organization/channels');
       const retry = badge?.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
       expect(retry?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
       expect(retry?.disabled).toBe(false);
@@ -2437,6 +2440,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
         .toBe(koMessages.content.channelPostsFailureBlocked);
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+      // story #4304 — 일시정지는 연결 사유가 아니라 «연결 확인»도 없다.
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
     });
 
     it('needs_check', async () => {

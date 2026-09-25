@@ -18,7 +18,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
-import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
+import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
@@ -115,9 +115,12 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
           action={view.action} displayTimezone={displayTimezone}
           // 확인 창의 needs_check 관문(체크리스트)이 이 화면에 실제로 있다 — 채널 포스트 상세와 같이 recheckGate.
           recheckGate
-          // 사람이 아니거나 재시도 대상이 아니면 버튼 없이 상태 줄만(compact).
-          compact={!canRetry}
+          // 재시도 대상이 아니면(사람이 아니거나 서버 판정 false) 버튼 없이 상태 줄만(compact) — 4262/4290 뉴스레터 디자인(비활성 버튼 없음).
+          // story #4304(유나 반려 08:56Z) — 단 연결로 멈춘 발송은 재시도를 못 해도 «연결 확인» 링크가 서야 해서 접지 않는다: blocked 배지는
+          // onRetryClick이 없으면 버튼 없이 머리 줄(+ 링크)만 그린다. (dead_letter · needs_check는 펼치면 비활성 버튼이 생겨 그대로 접는다.)
+          compact={!canRetry && !blockedByConnection(command.status, command.failure_kind)}
           onRetryClick={canRetry ? openConfirm : undefined}
+          connectionHref={blockedByConnection(command.status, command.failure_kind) ? connectRulesHref : undefined}
         />
       )}
       <ConfirmDialog
