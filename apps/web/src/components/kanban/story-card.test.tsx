@@ -275,3 +275,19 @@ describe('StoryCard — 이름 없는 검증자 씰(story #4284)', () => {
   });
 });
 
+
+// [SID:4300 · 유나 4682 PASS 비차단] 담당 아바타(h-6)가 조직 보충 뒤 늦게 붙으면 카드 아래 줄이 20 → 24px로 늘어 카드가 +4px 흔들렸다
+// (390 · 95.2 → 99.2). 줄이 처음부터 아바타 높이(min-h-6 = 24px)를 잡는지 — 아바타 없을 때(받는 중) · 있을 때 같은 줄.
+describe('StoryCard — 담당 아바타 줄 최소 높이([SID:4300])', () => {
+  const rowOf = (markup: string) => {
+    const d = document.createElement('div');
+    d.innerHTML = markup;
+    return d.querySelector('div.min-h-6.justify-between');
+  };
+  it('아바타 없을 때(받는 중) · 있을 때 모두 아래 줄이 min-h-6 · 아바타는 그 줄 안', () => {
+    expect(rowOf(render(makeStory({ story_points: 3 }))), '아바타 없는 카드의 아래 줄').not.toBeNull();
+    const withAvatar = rowOf(render(makeStory({ story_points: 3 }), [{ id: 'm1', name: '안나', type: 'human' } as KanbanMember]));
+    expect(withAvatar, '아바타 있는 카드의 아래 줄').not.toBeNull();
+    expect(withAvatar!.querySelector('div.h-6.w-6'), '아바타가 그 줄 안').not.toBeNull();
+  });
+});
