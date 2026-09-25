@@ -6,17 +6,18 @@
  *
  * 목적지: nav-config(`resolveNavGroups` · `resolveChatCenterItem` · `LEGACY_NAV_ITEMS`)와 탭 목적지(`resolveNavV3Destinations`)를 **v3 플래그
  * 전부 OFF · 전부 ON 두 판에서** 읽어 모은다(플래그를 켜면 «오늘» /today · «대화» /chat · «연결·규칙» /connect-rules · «일감» work-list로 바뀐다).
- * 모은 목록은 아래 EXPECTED와 **정확히 대조**한다 — 목적지가 늘거나 빠지면 RED(총량 하한만 보면 하나 빠져도 초록이었다 · 까디르 검수 P2).
+ * 모은 목록은 판마다 **따로** EXPECTED_OFF · EXPECTED_ON과 정확히 대조한다 — 늘거나 빠지거나 OFF/ON이 뒤바뀌면 RED(총량 하한 · 합집합 대조는
+ * 하나 빠져도 · 방향이 바뀌어도 초록이었다 · 까디르 검수 P2).
  *
  * 단언:
  * 1. 모든 목적지 경로가 app/ 아래 실제 page.tsx로 풀린다(라우트 그룹 `(…)` 통과) — 못 풀리면 RED(조용히 버리지 않는다).
  * 2. 그 page.tsx를 덮는 loading.tsx가 있고, 그 loading은 화면 읽기 프로그램에 상태를 알린다 — loading 파일 자체나 그것이 import한
- *    `@/components/…` 스켈레톤 소스에 role="status"가 있다(이름이 아니라 실제 소스를 본다).
+ *    `@/components/…` 스켈레톤 소스에 `role="status"` · `aria-busy="true"` · `sr-only` 라벨 셋 다(이름이 아니라 실제 소스를 본다).
  * 3. 일감 프레임 여섯 경로(WorkspaceFrameTabs의 탭)는 **자기** loading.tsx가 탭 줄을 품는다(`<WorkspaceFrameLoading active="그 탭">`) —
  *    부모 `[ws]/[proj]/loading.tsx`(일반 스켈레톤)가 덮으면 형제 탭 이동 때 탭 줄이 사라졌다 돌아온다(유나 스트리밍 대조: 보드 → 목록 ~290ms).
- * 4. 스켈레톤이 도착 페이지와 같은 폭 · 여백(유나 판정) — page.tsx가 `mx-auto … max-w-*` 컨테이너를 직접 선언하면 그 목적지의 **자기**
- *    loading.tsx className에 같은 배치 토큰(mx-auto · w-full · max-w-* · p-* · lg:p-*)이 다 있다. 컨테이너를 클라이언트 컴포넌트에 넘기는
- *    페이지는 page.tsx에서 폭을 읽을 수 없어 이 단언의 대상이 아니다(못 잡는 것).
+ * 4. 스켈레톤이 도착 페이지와 같은 폭 · 여백(유나 판정) — 목적지 전수를 EXPECTED_CONTAINERS(컨테이너 + 그 선언 파일) · NO_CONTAINER(이유)
+ *    두 표로 덮고(합 = 목적지 · 겹침 0), 표의 컨테이너가 선언 파일에 그대로 있는지 + 그 목적지를 덮는 loading(조상 loader 포함)에 같은
+ *    배치 토큰(mx-auto · w-full · max-w · p-* · lg:w/p-*)이 다 있는지 본다.
  * 5. 반대 방향 위험 — `next/navigation`의 redirect/permanentRedirect를 **import해서 부르는**(별칭 · 네임스페이스 import 포함) page.tsx ·
  *    layout.tsx는 어떤 loading.tsx 경계 아래에도 없다(스트리밍 경계 아래 redirect = React 오류 310 · story #3915). layout은 같은 폴더의
  *    loading.tsx보다 바깥이라 부모 폴더부터 본다.
@@ -35,10 +36,10 @@ const ALL_ON: NavV3Flags = { todayV3Enabled: true, chatV3Enabled: true, connectR
 
 type Dest = { kind: string; path: string };
 
-/** 두 판(플래그 OFF · ON)의 탭 + 메뉴 목적지. 키 = `resource:조각` 또는 정적 경로(쿼리 제외). */
-function collectDestinations(): Map<string, Dest> {
+/** 한 판(플래그 조합 하나)의 탭 + 메뉴 목적지. 키 = `resource:조각` 또는 정적 경로(쿼리 제외). */
+function collectDestinationsFor(flags: NavV3Flags): Map<string, Dest> {
   const out = new Map<string, Dest>();
-  for (const flags of [DEFAULT_NAV_V3_FLAGS, ALL_ON]) {
+  {
     const dest = resolveNavV3Destinations(flags);
     const items: Dest[] = [
       dest.work, dest.approvals, dest.chats, dest.more,
@@ -52,6 +53,11 @@ function collectDestinations(): Map<string, Dest> {
     }
   }
   return out;
+}
+
+/** 두 판(OFF · ON) 합집합 — loading · 상태 알림 · 컨테이너 단언은 어느 판이든 목적지가 되는 곳 전부에 건다. */
+function collectDestinations(): Map<string, Dest> {
+  return new Map([...collectDestinationsFor(DEFAULT_NAV_V3_FLAGS), ...collectDestinationsFor(ALL_ON)]);
 }
 
 /** 폴더 안에서 URL 조각들을 따라 page.tsx가 있는 폴더를 찾는다. 라우트 그룹 `(…)`은 URL에 안 나타나 그대로 통과. */
@@ -119,9 +125,13 @@ function codeOnly(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
-/** loading 파일 자체 또는 그것이 import한 `@/components/…` 파일 중 하나의 JSX에 role="status"가 있는지. */
+/** loading 파일 자체 또는 그것이 import한 `@/components/…` 파일 중 하나가 «불러오는 중»을 제대로 알리는지 — 같은 소스에 `role="status"` ·
+ * `aria-busy="true"` · 화면 읽기 프로그램용 라벨(`sr-only`) 셋 다(까디르 검수 P3 · role만 보면 라벨 없는 상태도 통과했다). */
 function announcesStatus(loadingFile: string): boolean {
-  const hasStatus = (f: string) => /\srole="status"/.test(codeOnly(readFileSync(f, 'utf8')));
+  const hasStatus = (f: string) => {
+    const src = codeOnly(readFileSync(f, 'utf8'));
+    return /\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src);
+  };
   if (hasStatus(loadingFile)) return true;
   const SRC_ROOT = join(APP_ROOT, '..');
   for (const m of readFileSync(loadingFile, 'utf8').matchAll(/from\s*['"]@\/(components\/[^'"]+)['"]/g)) {
@@ -133,20 +143,61 @@ function announcesStatus(loadingFile: string): boolean {
   return false;
 }
 
-// 두 판(OFF · ON)의 목적지 전수. 늘거나 빠지면 여기 고치고 loading.tsx를 같이 확인한다.
-const EXPECTED = [
-  '/activity', '/chat', '/chats', '/connect-rules', '/content', '/content/channel-posts', '/inbox', '/more',
-  '/org-briefing', '/organization/channels', '/organization/content-rules', '/organization/events',
-  '/organization/generation-connectors', '/organization/insights-board', '/organization/members', '/organization/roles',
-  '/organization/trust', '/organization/workforce', '/settings', '/today',
-  'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals', 'resource:loops', 'resource:storage', 'resource:work-list',
+// 판마다 따로 대조한다(까디르 검수 P2 — 합집합 하나로 대조하면 OFF/ON이 뒤바뀌어도 통과했다). 늘거나 빠지면 여기 고치고 loading.tsx를 같이 확인.
+const EXPECTED_OFF = [
+  '/activity', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing',
+  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
+  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
+  '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals', 'resource:loops', 'resource:storage',
 ].sort();
+const EXPECTED_ON = [
+  '/activity', '/chat', '/connect-rules', '/content', '/content/channel-posts', '/inbox', '/more',
+  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
+  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
+  '/settings', '/today', 'resource:artifacts', 'resource:docs', 'resource:goals', 'resource:loops', 'resource:storage', 'resource:work-list',
+].sort();
+
+// 목적지 전수의 «페이지 컨테이너» 표(유나 «스켈레톤 = 페이지 컨테이너» · 까디르 검수 P2 — 첫 className만 · 조상 loader 건너뜀 · 하한 8 대신 목록 대조).
+// source = 그 컨테이너 className이 실제로 선언된 파일(app/ 기준 상대 · `../`는 src/). 표에 없는 목적지는 NO_CONTAINER에 이유와 함께.
+const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }> = {
+  '/organization/members': { source: '(authenticated)/organization/members/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
+  '/organization/roles': { source: '(authenticated)/organization/roles/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
+  '/organization/trust': { source: '(authenticated)/organization/trust/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
+  '/organization/events': { source: '(authenticated)/organization/events/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
+  '/organization/channels': { source: '(authenticated)/organization/channels/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
+  '/organization/content-rules': { source: '(authenticated)/organization/content-rules/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
+  '/organization/generation-connectors': { source: '(authenticated)/organization/generation-connectors/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
+  '/organization/insights-board': { source: '(authenticated)/organization/insights-board/page.tsx', container: 'mx-auto w-full max-w-6xl space-y-6 p-6' },
+  '/content': { source: '(authenticated)/content/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
+  '/content/channel-posts': { source: '(authenticated)/content/channel-posts/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
+  '/settings': { source: '(authenticated)/settings/page.tsx', container: 'w-full max-w-3xl mx-auto p-6' },
+  '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto max-w-4xl space-y-6 p-4 lg:p-6' },
+  '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
+  '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]' },
+  '/connect-rules': { source: '../components/connect-rules-v3/connect-rules-v3-screen.tsx', container: 'mx-auto max-w-[720px] space-y-8' },
+  '/chat': { source: '../components/chat-v3/chat-v3-screen.tsx', container: 'flex flex-1 flex-col gap-3 p-5' },
+};
+// 폭 · 여백 컨테이너가 없는(전폭 · 자체 레이아웃) 목적지 — 기본 PageSkeleton(`space-y-6 p-6`) 또는 전용 스켈레톤.
+const NO_CONTAINER: Record<string, string> = {
+  '/activity': '활동 로그 뷰가 전폭 목록(컨테이너 없음)',
+  '/chats': '대화 목록 전폭 · 전용 스켈레톤(chats/loading.tsx)',
+  '/inbox': '결재함 전폭 목록',
+  '/organization/workforce': '에이전트 화면 전폭',
+  'resource:artifacts': '산출물 갤러리 전폭',
+  'resource:docs': '문서 트리 · 편집기 전폭',
+  'resource:flow': '일감 프레임 — 탭 줄 품은 WorkspaceFrameLoading(별 단언)',
+  'resource:work-list': '일감 프레임 — 탭 줄 품은 WorkspaceFrameLoading(별 단언)',
+  'resource:goals': '목표 전용 스켈레톤(EpicsSkeleton)',
+  'resource:loops': '실행 목록 전폭',
+  'resource:storage': '스토리지 2단(폰 1단) 전폭',
+};
 
 describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래그 OFF · ON)', () => {
   const destinations = collectDestinations();
 
-  it('⭐목적지 목록이 EXPECTED와 정확히 같다(늘거나 빠지면 RED)', () => {
-    expect([...destinations.keys()].sort()).toEqual(EXPECTED);
+  it('⭐목적지 목록이 판마다 정확히 같다 — 플래그 OFF · ON을 따로(뒤바뀌거나 늘거나 빠지면 RED)', () => {
+    expect([...collectDestinationsFor(DEFAULT_NAV_V3_FLAGS).keys()].sort()).toEqual(EXPECTED_OFF);
+    expect([...collectDestinationsFor(ALL_ON).keys()].sort()).toEqual(EXPECTED_ON);
   });
 
   it('⭐모든 목적지가 app/ 아래 실제 page.tsx로 풀린다(못 풀리면 RED · 조용히 버리지 않는다)', () => {
@@ -179,23 +230,25 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(problems).toEqual([]);
   });
 
-  it('⭐page.tsx가 폭 컨테이너를 선언한 목적지는 loading이 같은 폭 · 여백 안에 스켈레톤을 그린다', () => {
-    const LAYOUT_TOKEN = /^(mx-auto|w-full|max-w-\S+|p-\S+|px-\S+|py-\S+|(sm|md|lg):p-\S+)$/;
+  it('⭐컨테이너 표가 목적지 전수를 덮는다(표 ∪ 없음 목록 = 목적지 · 겹침 0)', () => {
+    const covered = [...Object.keys(EXPECTED_CONTAINERS), ...Object.keys(NO_CONTAINER)].sort();
+    expect(covered).toEqual([...destinations.keys()].sort());
+    expect(Object.keys(EXPECTED_CONTAINERS).filter((k) => k in NO_CONTAINER)).toEqual([]);
+  });
+
+  it('⭐표의 컨테이너가 실제 소스에 있고, 그 목적지를 덮는 loading이 같은 폭 · 여백 토큰을 쓴다', () => {
+    const LAYOUT_TOKEN = /^(mx-auto|w-full|max-w-\S+|p-\S+|px-\S+|py-\S+|(sm|md|lg):(p|w|max-w)-\S+)$/;
     const problems: string[] = [];
-    let checked = 0;
-    for (const [k, d] of destinations) {
-      const dir = routeDirOf(d);
-      if (!dir || !existsSync(join(dir, 'loading.tsx'))) continue;
-      const container = codeOnly(readFileSync(join(dir, 'page.tsx'), 'utf8')).match(/className="([^"]*\bmx-auto\b[^"]*\bmax-w-[^"]*|[^"]*\bmax-w-[^"]*\bmx-auto\b[^"]*)"/);
-      if (!container) continue;
-      checked++;
-      const want = container[1]!.split(/\s+/).filter((t) => LAYOUT_TOKEN.test(t));
-      const loading = codeOnly(readFileSync(join(dir, 'loading.tsx'), 'utf8'));
-      const have = new Set((loading.match(/className="([^"]*)"/g) ?? []).flatMap((m) => m.slice(11, -1).split(/\s+/)));
-      const missing = want.filter((t) => !have.has(t));
-      if (missing.length) problems.push(`${k}: loading에 없는 배치 토큰 ${missing.join(' ')}`);
+    for (const [k, { source, container }] of Object.entries(EXPECTED_CONTAINERS)) {
+      const src = codeOnly(readFileSync(join(APP_ROOT, source), 'utf8'));
+      if (!src.includes(`className="${container}"`)) { problems.push(`${k}: ${source}에 컨테이너 "${container}" 없음(화면이 바뀌면 표 갱신)`); continue; }
+      const dir = routeDirOf(destinations.get(k)!);
+      const loading = dir ? coveringLoading(dir) : null;
+      if (!loading) { problems.push(`${k}: loading 없음`); continue; }
+      const have = new Set((codeOnly(readFileSync(loading, 'utf8')).match(/className="([^"]*)"/g) ?? []).flatMap((m) => m.slice(11, -1).split(/\s+/)));
+      const missing = container.split(/\s+/).filter((t) => LAYOUT_TOKEN.test(t) && !have.has(t));
+      if (missing.length) problems.push(`${k}: ${relative(APP_ROOT, loading)}에 없는 배치 토큰 ${missing.join(' ')}`);
     }
-    expect(checked, '폭 컨테이너를 선언한 목적지를 실제로 쟀다').toBeGreaterThanOrEqual(8);
     expect(problems).toEqual([]);
   });
 
