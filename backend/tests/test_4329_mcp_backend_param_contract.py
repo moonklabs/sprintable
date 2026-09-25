@@ -265,3 +265,50 @@ async def test_controls_catch_unread_query_unread_body_and_unmapped_manual_parse
 
     probe2 = await probe_tools(monkeypatch, [("silent", "", _ProbeIn, silent)])
     assert probe2.no_call == ["silent"], "요청 없는 도구는 대조 공백으로 드러난다"
+
+
+# ── 뺀 인자 거절 문구(PO 요청: 이유 + 대안을 말해 에이전트가 스스로 고친다) ─────────────────────────────────
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_name", "args", "hint"),
+    [
+        ("sprintable_vote_retro_item", {"session_id": U, "item_id": U, "voter_id": U}, "대리 투표 없음"),
+        ("sprintable_send_chat_message", {"conversation_id": U, "content": "x", "message_type": "report"}, "`message_kind`"),
+        ("sprintable_send_chat_message", {"conversation_id": U, "content": "x", "review_type": "design"}, "`message_kind`"),
+        ("sprintable_send_chat_message", {"conversation_id": U, "content": "x", "metadata": {"k": "v"}}, "`message_kind`"),
+    ],
+)
+async def test_a_removed_argument_is_refused_with_the_reason_and_what_to_do_instead(tool_name, args, hint):
+    from mcp.server.mcpserver import Context
+    from sprintable_mcp import server as srv
+
+    tool = srv.mcp._tool_manager.get_tool(tool_name)
+    with pytest.raises(Exception) as ei:
+        await tool.run(args, Context())
+    msg = str(ei.value)
+    removed = next(k for k in args if k in {"voter_id", "message_type", "review_type", "metadata"})
+    assert f"`{removed}`" in msg and hint in msg and "accepted arguments" in msg, msg
+    assert "다시 부르세요" in msg, msg
+
+
+def test_removed_arg_table_names_only_arguments_the_tool_no_longer_accepts():
+    """표의 인자가 도구에 다시 생기면(살아 있는 인자에 «빼세요» 안내가 붙으면) RED · 없는 도구 이름도 RED."""
+    from sprintable_mcp import server as srv
+    from sprintable_mcp.removed_args import REMOVED_ARGS
+
+    for tool_name, hints in REMOVED_ARGS.items():
+        tool = srv.mcp._tool_manager.get_tool(tool_name)
+        assert tool is not None, tool_name
+        assert set(hints) & set(tool.fn_metadata.arg_model.model_fields) == set(), tool_name
+
+
+@pytest.mark.anyio
+async def test_an_unrelated_unknown_argument_gets_no_removed_arg_hint():
+    from mcp.server.mcpserver import Context
+    from sprintable_mcp import server as srv
+
+    tool = srv.mcp._tool_manager.get_tool("sprintable_vote_retro_item")
+    with pytest.raises(Exception) as ei:
+        await tool.run({"session_id": U, "item_id": U, "bogus": 1}, Context())
+    msg = str(ei.value)
+    assert "bogus" in msg and "accepted arguments" in msg and "다시 부르세요" not in msg, msg

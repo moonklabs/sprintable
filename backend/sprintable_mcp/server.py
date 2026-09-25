@@ -34,6 +34,7 @@ from .api_client import (
 )
 from .config import settings
 from .datetime_params import offset_required_note
+from .removed_args import removed_arg_hints
 from .response import ok
 from .schemas import SprintableInput
 from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
@@ -423,6 +424,8 @@ def _lock_down_extra_args(tool: _FastMCPTool) -> None:
             if unknown:
                 raise ValueError(
                     f"{tool_name}: unexpected argument(s) {unknown} — accepted arguments: {allowed}"
+                    # story #4329 — 뺀 인자면 이유와 대안까지(에이전트가 오류만 보고 스스로 고치게).
+                    + removed_arg_hints(tool_name, unknown)
                 )
         return data
 
