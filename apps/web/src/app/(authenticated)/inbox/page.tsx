@@ -274,12 +274,12 @@ export default function InboxPage() {
         setPagedBeyondFirst(true);
       } else {
         // story #4295 — 실패를 알린다(버튼은 그대로 남아 다시 누르면 다시 시도).
-        addToast({ title: t('loadMoreFailed'), type: 'error' });
+        addToast({ title: tCommon('loadMoreFailed'), type: 'error' });
       }
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, loadingMore, addToast, t]);
+  }, [nextCursor, loadingMore, addToast, tCommon]);
 
   // 첫 쪽 불러오기 — 마운트 때와 «다시 시도»가 같이 쓴다. `isCancelled`는 마운트 effect가 언마운트 뒤 상태를 안 쓰게.
   // story #4295(까디르) — 순번으로 늦게 온 옛 응답은 버린다(늦은 실패가 성공을 덮지 않게). 진행 중 표시(ref)는 가장 최근 호출의

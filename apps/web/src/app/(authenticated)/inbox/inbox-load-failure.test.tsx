@@ -121,7 +121,7 @@ describe('«더 보기» 실패 — 버튼이 막히지 않고 알림(story #429
     await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
     expect(buttonByText(koMessages.common.loadMore)?.hasAttribute('disabled')).toBe(false);
-    expect(addToastMock).toHaveBeenCalledWith({ title: koMessages.inbox.loadMoreFailed, type: 'error' });
+    expect(addToastMock).toHaveBeenCalledWith({ title: koMessages.common.loadMoreFailed, type: 'error' });
     expect(container.textContent).toContain('notif-1');
   });
 });

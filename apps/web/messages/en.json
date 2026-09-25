@@ -44,6 +44,7 @@
     "aiUpcomingSynthesis": "Synthesis coming up",
     "adding": "Adding…",
     "loadMore": "Load more",
+    "loadMoreFailed": "Couldn't load more. Try again.",
     "error": "An error occurred",
     "errorDescription": "An error occurred while loading the page.",
     "upgradeRequired": "Upgrade Required",
@@ -3785,8 +3786,7 @@
     "bellAriaLabelCount": "{count, plural, one {# notification} other {# notifications}}",
     "bellAriaLabelCountCapped": "99 or more notifications",
     "syncDegradedBanner": "Some older notifications may be missing — check the list below",
-    "notificationsLoadError": "Couldn't load notifications",
-    "loadMoreFailed": "Couldn't load more. Try again."
+    "notificationsLoadError": "Couldn't load notifications"
   },
   "invite": {
     "title": "Organization Invitation",
