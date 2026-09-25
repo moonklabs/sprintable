@@ -34,6 +34,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
+import { formatAtLeast } from '@/lib/format-at-least';
 import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
@@ -2232,7 +2233,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     中엔 개수를 아예 말하지 않는다. loadingComments인데도 「Comments (0)」을
                     그리면 40px 아래 본문의 「불러오는 중...」과 같은 화면 두 세계가 된다
                     (본문은 이미 loadingComments를 먼저 검사한다 — 라벨만 빠져 있었다). */}
-                <TabsTrigger value="comments" className="flex-1">{loadingComments ? t('comments') : t('commentsCountLabel', { count: comments.length })}</TabsTrigger>
+                <TabsTrigger value="comments" className="flex-1">{/* story #4302(유나 판정) — 댓글은 20건씩 받는다: 더 남았으면(다음 커서) «댓글 (20+)». */}{loadingComments ? t('comments') : t('commentsCountLabel', { count: formatAtLeast(comments.length, nextCommentsCursor !== null) })}</TabsTrigger>
                 <TabsTrigger value="activity" className="flex-1">{t('activityTab')}</TabsTrigger>
               </TabsList>
 

@@ -24,6 +24,7 @@ import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic
 import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
@@ -683,9 +684,11 @@ export default function InboxPage() {
                                       {/* story #0d1c69f3(v2 4호) — generic 그룹은 status_change와 다른 문구(반복
                                           알림 건수일 뿐 "상태 변경" 의미가 아니다)를 쓴다. */}
                                       <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                                        {/* story #4302(유나 판정) — 묶음 수는 불러온 쪽 안의 수다(전체 아님). 더 불러올 쪽이 남았으면 «48+건».
+                                            en 복수형 키는 `+`를 숫자에 못 붙여 형제 키(statusChangeCountAtLeast). */}
                                         {item.groupKind === 'status_change'
-                                          ? t('statusChangeCount', { count: item.count })
-                                          : t('notificationGroupCount', { count: item.count })}
+                                          ? (hasMore ? t('statusChangeCountAtLeast', { count: item.count }) : t('statusChangeCount', { count: item.count }))
+                                          : t('notificationGroupCount', { count: formatAtLeast(item.count, hasMore) })}
                                       </span>
                                     </div>
                                     <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
