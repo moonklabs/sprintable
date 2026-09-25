@@ -178,6 +178,8 @@ export default function DocViewPage() {
                 codeCopyFailedLabel={t('codeCopyFailed')}
                 assetImageErrorLabel={t('attachImageUnavailable')}
                 untitledEmbedLabel={t('newDocDefaultTitle')}
+                unsafeLinkLabel={t('embedLinkBlocked')}
+                unsafeFileLabel={t('attachFileBlocked')}
                 embedNotFoundLabel={t('notFound')}
                 mermaidRenderFailedLabel={t('mermaidRenderFailed')}
                 mermaidRenderingLabel={t('mermaidRendering')}

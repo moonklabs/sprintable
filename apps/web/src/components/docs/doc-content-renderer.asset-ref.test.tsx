@@ -73,7 +73,7 @@ async function mount(node: React.ReactElement) {
 
 describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
   it('authed (html): resolves the asset-ref image src + makes the asset-ref file clickable (not inert/blank)', async () => {
-    await mount(<DocContentRenderer content={ASSET_REF_HTML} contentFormat="html" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />);
+    await mount(<DocContentRenderer content={ASSET_REF_HTML} contentFormat="html" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     // image: signed route hit → img.src set to the signed URL (was blank before the fix).
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
@@ -105,7 +105,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
         publicMode
         publicAttachmentLabel="Attachment unavailable in public view"
         publicImageLabel="Image unavailable in public view"
-        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     );
 
@@ -126,7 +126,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
   });
 
   it('authed (html): legacy base64 image + file render directly and unchanged (regression 0)', async () => {
-    await mount(<DocContentRenderer content={LEGACY_HTML} contentFormat="html" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />);
+    await mount(<DocContentRenderer content={LEGACY_HTML} contentFormat="html" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     // legacy image keeps its data: src untouched (no signed resolution).
     const img = container.querySelector<HTMLImageElement>('img');
@@ -148,7 +148,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     // raw asset-ref <img> embedded in a markdown doc — guards the rehype-sanitize schema
     // extension (default schema strips img data-* → would render blank without the fix).
     const md = 'Intro\n\n<img data-asset-id="md-1" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">\n\nOutro';
-    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />);
+    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const img = container.querySelector<HTMLImageElement>('img');
@@ -162,7 +162,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     // strips div data-type/data-asset-id, so the resolver (querySelectorAll[data-type]) would miss
     // it → inert. The docMarkdownSanitizeSchema div extension keeps it resolvable.
     const md = 'Intro\n\n<div data-type="fileAttachment" data-filename="r.pdf" data-size="9" data-mime-type="application/pdf" data-asset-id="mdfile-1"></div>\n\nOutro';
-    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />);
+    await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />);
 
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock).not.toBeNull();
@@ -179,7 +179,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
   it('public (markdown): asset-ref image never triggers the signed route', async () => {
     const md = 'Intro\n\n<img data-asset-id="md-2" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">';
     await mount(
-      <DocContentRenderer content={md} contentFormat="markdown" publicMode publicImageLabel="Image unavailable in public view" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" />,
+      <DocContentRenderer content={md} contentFormat="markdown" publicMode publicImageLabel="Image unavailable in public view" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

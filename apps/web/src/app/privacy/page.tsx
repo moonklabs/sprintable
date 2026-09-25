@@ -37,6 +37,8 @@ export default async function PrivacyPage() {
                 contentFormat={doc.contentFormat}
                 publicMode
                 untitledEmbedLabel={t('newDocDefaultTitle')}
+                unsafeLinkLabel={t('embedLinkBlocked')}
+                unsafeFileLabel={t('attachFileBlocked')}
                 embedNotFoundLabel={t('notFound')}
               />
             </>
