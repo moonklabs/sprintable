@@ -180,9 +180,12 @@ def _fake_request() -> "StarletteRequest":
 async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, creator_id, owner_member_id):
     from sqlalchemy import select
 
+    from app.models.event_definition import EventDefinition
     from app.models.gate import Gate
+    from app.models.pm import Story
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.services.gate_service import transition_gate
+    from tests.recipe_stage_walk import seed_stage_publish
 
     async def _publish(stage: str, *, actor_id: uuid.UUID, extra: dict | None = None):
         payload = {"stage": stage, "work_item_type": "story", "work_item_id": str(story_id)}
@@ -192,6 +195,11 @@ async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, cr
             EventPublishRequest(definition_key=_KEY, payload=payload),
             BackgroundTasks(), _fake_request(), db=s, auth=_auth(actor_id, org_id), org_id=org_id,
         )
+
+    # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. 레시피 적용 때처럼 Creator stage는 크리에이터, Director
+    # stage는 오너에 묶는다(오너가 structure_passed를 낸다).
+    project_id = (await s.get(Story, story_id)).project_id
+    await _bind_recipe_roles(s, org_id=org_id, project_id=project_id, creator_id=creator_id, director_id=owner_member_id)
 
     await _publish("draft", actor_id=creator_id)
     await _publish("concept_confirmed", actor_id=creator_id)
@@ -215,12 +223,35 @@ async def _walk_to_pending_approval_with_abc_approved(s, *, org_id, story_id, cr
     await transition_gate(s, org_id, gate_c.id, "approved", owner_member_id, None)
     await s.commit()
 
+    # 이 파일은 게이트 ⓓ 미리보기를 잰다 — 생성 · 검수 · 편집 구간은 바로 앞 stage(editing) 발행 이력만 깐다
+    # (`recipe_stage_walk.prepare_stage_publish`와 같은 모양 · 편집 담당 = 크리에이터가 발행 승인 대기를 낸다).
+    definition = (await s.execute(select(EventDefinition).where(EventDefinition.key == _KEY))).scalar_one()
+    await seed_stage_publish(
+        s, org_id=org_id, project_id=project_id, definition=definition, work_item_type="story",
+        work_item_id=story_id, stage="editing", sender_id=creator_id,
+    )
+    await s.commit()
+
     await _publish("pending_approval", actor_id=creator_id)
     gate_d = (await s.execute(
         select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "external_publish", Gate.scope_key == "")
     )).scalar_one()
     assert gate_d.status == "pending"
     return gate_d.id
+
+
+async def _bind_recipe_roles(s, *, org_id, project_id, creator_id, director_id):
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    members = {"Creator": creator_id, "Director": director_id}
+    for stage, meta in _STAGE_METADATA.items():
+        member_id = members.get(meta.get("role"))
+        if member_id is not None:
+            s.add(RecipeRoleBinding(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_id, event_definition_key=_KEY,
+                stage=stage, agent_member_id=member_id,
+            ))
+    await s.commit()
 
 
 async def _submit_draft(s, *, org_id, story_id, connection_id, creator_id, text="AC4098 본문"):

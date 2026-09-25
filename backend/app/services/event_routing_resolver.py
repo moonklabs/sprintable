@@ -242,6 +242,32 @@ async def _bound_member_for_stage(
     )).scalar_one_or_none()
 
 
+async def recipe_crew_member_ids(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, definition_key: str,
+) -> set[uuid.UUID]:
+    """story #4110 — 같은 적용(org · [project 특이 ∪ org 전역] · 정의)의 crew: `agent_member_id`가 채워진 바인딩 행 전부.
+    연산 커넥터 stage(`live_generation`)의 수신자 폴백이자, story #4251 발행 검증에서 그 stage를 crew가 스스로 내는 허용 범위다
+    (PO 4251 Q3 — 규칙 한 원천)."""
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    # ⛔`.in_([project_id, None])`은 SQL `IN (val, NULL)`로 컴파일되는데 `col = NULL`은
+    # 항상 UNKNOWN이라 project_id가 NULL인(org 전역) 행을 못 잡는다(`?`/`!=` NULL 함정과
+    # 같은 클래스) — `or_(... == project_id, ... .is_(None))`로 명시.
+    project_filter = (
+        or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None))
+        if project_id is not None else RecipeRoleBinding.project_id.is_(None)
+    )
+    crew_ids = (await db.execute(
+        select(RecipeRoleBinding.agent_member_id).where(
+            RecipeRoleBinding.org_id == org_id,
+            RecipeRoleBinding.event_definition_key == definition_key,
+            RecipeRoleBinding.agent_member_id.is_not(None),
+            project_filter,
+        )
+    )).scalars().all()
+    return set(crew_ids)
+
+
 async def _stage_approval_is_elsewhere(
     db: AsyncSession, *, org_id: uuid.UUID, definition_key: str, stage: str,
 ) -> bool:
@@ -379,7 +405,6 @@ async def _resolve_recipe_role_binding(
     # 채워진 모든 행의 집합)로 폴백한다 — 리허설 1호에서 댄이 live_generation을 스스로
     # 발행하고 이어간 형상을 제품이 명시적으로 지지하는 것.
     from app.models.event_definition import EventDefinition
-    from app.models.recipe_role_binding import RecipeRoleBinding
 
     definition = (await db.execute(
         select(EventDefinition)
@@ -439,22 +464,7 @@ async def _resolve_recipe_role_binding(
     if capability.get("target") != "generation_connector":
         return set()
 
-    # ⛔`.in_([project_id, None])`은 SQL `IN (val, NULL)`로 컴파일되는데 `col = NULL`은
-    # 항상 UNKNOWN이라 project_id가 NULL인(org 전역) 행을 못 잡는다(`?`/`!=` NULL 함정과
-    # 같은 클래스) — `or_(... == project_id, ... .is_(None))`로 명시.
-    project_filter = (
-        or_(RecipeRoleBinding.project_id == project_id, RecipeRoleBinding.project_id.is_(None))
-        if project_id is not None else RecipeRoleBinding.project_id.is_(None)
-    )
-    crew_ids = (await db.execute(
-        select(RecipeRoleBinding.agent_member_id).where(
-            RecipeRoleBinding.org_id == org_id,
-            RecipeRoleBinding.event_definition_key == definition_key,
-            RecipeRoleBinding.agent_member_id.is_not(None),
-            project_filter,
-        )
-    )).scalars().all()
-    return set(crew_ids)
+    return await recipe_crew_member_ids(db, org_id=org_id, project_id=project_id, definition_key=definition_key)
 
 
 # SERVER_DERIVED_TARGETS(event_definition_registry.py) 전체를 커버해야 한다 — 모듈 로드

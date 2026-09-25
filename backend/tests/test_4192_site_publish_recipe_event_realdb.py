@@ -111,7 +111,27 @@ async def _world(Session):
         agent_id = await _seed_agent(s, org_id, project_id)
         human_user_id, human_id = await _seed_human(s, org_id)
         story_id = await _seed_story(s, org_id, project_id)
+        await _bind_creator_stages(s, org_id=org_id, project_id=project_id, agent_id=agent_id)
     return {"org_id": org_id, "agent_id": agent_id, "human_id": human_id, "human_user_id": human_user_id, "story_id": story_id}
+
+
+async def _bind_creator_stages(s, *, org_id, project_id, agent_id):
+    """story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. 이 회차의 에이전트를 블로그 레시피의 Creator stage
+    (planning · writing · verification)에 바인딩한다 — 레시피 적용 때 역할을 멤버에 묶는 것과 같은 상태. Director stage
+    (기획 승인 · 발행 승인 대기)는 기획 게이트 요청자(= 이 에이전트)가 잇는다."""
+    from sqlalchemy import select
+
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    stage_metadata = (await s.execute(select(EventDefinition.stage_metadata).where(EventDefinition.key == _KEY))).scalar_one()
+    for stage, meta in stage_metadata.items():
+        if meta.get("role") == "Creator":
+            s.add(RecipeRoleBinding(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_id, event_definition_key=_KEY,
+                stage=stage, agent_member_id=agent_id,
+            ))
+    await s.commit()
 
 
 async def _publish_stage(Session, w, stage, *, extra: dict | None = None):

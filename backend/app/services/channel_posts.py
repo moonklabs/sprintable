@@ -2881,6 +2881,8 @@ async def _emit_recipe_published_stage_event_locked(
     }
     await _publish_registry_event_core(
         event_db, org_id, auth, definition_key, payload, background_tasks, routing_context=routing_context or None,
+        # story #4251 — 서버가 실제 게시 · 발송을 한 뒤 내는 stage라 멤버 stage 검증을 받지 않는다(시스템 발행자).
+        stage_origin="server",
     )
     await event_db.commit()
     await background_tasks()

@@ -13,8 +13,17 @@ from __future__ import annotations
 import os
 import uuid
 
+from typing import TYPE_CHECKING
+
 import pytest
 from fastapi import BackgroundTasks
+
+if TYPE_CHECKING:
+    from starlette.requests import Request as StarletteRequest
+
+    from app.dependencies.auth import AuthContext
+
+from tests.recipe_stage_walk import prepare_stage_publish
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -108,7 +117,7 @@ async def _seed_definition(session, org_id, *, role_actor_kinds=None):
     )
     session.add(d)
     await session.commit()
-    return d.id
+    return d
 
 
 async def _seed_binding(session, org_id, project_id, *, stage, agent_id):
@@ -121,7 +130,25 @@ async def _seed_binding(session, org_id, project_id, *, stage, agent_id):
     await session.commit()
 
 
-def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
+async def _seed_human(session, org_id):
+    """story #4251 — 첫 stage를 바인딩 없이 내는 자리(«레시피 시작»)는 프로젝트에 접근할 수 있는 사람이다(org owner)."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+    session.add(user)
+    await session.commit()
+    session.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role="owner"))
+    await session.commit()
+    return user.id
+
+
+def _human_auth(user_id: uuid.UUID, org_id: uuid.UUID) -> AuthContext:
+    from app.dependencies.auth import AuthContext
+    return AuthContext(user_id=str(user_id), email=None, claims={}, org_id=str(org_id))
+
+
+def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> AuthContext:
     from app.dependencies.auth import AuthContext
     return AuthContext(
         user_id=str(agent_id), email=None,
@@ -129,12 +156,12 @@ def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
     )
 
 
-def _fake_request() -> "StarletteRequest":
+def _fake_request() -> StarletteRequest:
     from starlette.requests import Request as StarletteRequest
     return StarletteRequest(scope={"type": "http", "headers": []})
 
 
-async def _publish_stage(session, *, org_id, publisher_id, story_id, stage):
+async def _publish_stage(session, *, org_id, publisher_id, story_id, stage, human=False):
     from app.routers.events import EventPublishRequest, publish_registry_event
 
     body = EventPublishRequest(
@@ -142,7 +169,8 @@ async def _publish_stage(session, *, org_id, publisher_id, story_id, stage):
         payload={"stage": stage, "work_item_type": "story", "work_item_id": str(story_id)},
     )
     return await publish_registry_event(
-        body, BackgroundTasks(), _fake_request(), db=session, auth=_auth(publisher_id, org_id), org_id=org_id,
+        body, BackgroundTasks(), _fake_request(), db=session,
+        auth=_human_auth(publisher_id, org_id) if human else _auth(publisher_id, org_id), org_id=org_id,
     )
 
 
@@ -154,10 +182,15 @@ async def test_human_role_stage_with_declared_kinds_gets_notice_not_warning():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
-            await _seed_definition(s, org_id, role_actor_kinds=_ROLE_ACTOR_KINDS)
+            definition = await _seed_definition(s, org_id, role_actor_kinds=_ROLE_ACTOR_KINDS)
             publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
             story_id = await _seed_story(s, org_id, project_id)
             # concept_confirmed(Director) stage — 의도적으로 바인딩 0건(사람 stage라 정상).
+            # story #4251 — 앞 stage(draft)를 publisher가 낸 이력을 깐다(publisher는 draft에 바인딩 · concept_confirmed는 여전히 0건).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="concept_confirmed", publisher_id=publisher_id,
+            )
 
             resp = await _publish_stage(
                 s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="concept_confirmed",
@@ -180,12 +213,13 @@ async def test_agent_role_stage_without_binding_still_warns():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
             await _seed_definition(s, org_id, role_actor_kinds=_ROLE_ACTOR_KINDS)
-            publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
+            # story #4251 — 바인딩 없는 첫 stage는 프로젝트에 접근할 수 있는 사람만 연다(«레시피 시작»).
+            publisher_user_id = await _seed_human(s, org_id)
             story_id = await _seed_story(s, org_id, project_id)
             # draft(Creator) stage — 바인딩 0건, 이건 "진짜 갭".
 
             resp = await _publish_stage(
-                s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="draft",
+                s, org_id=org_id, publisher_id=publisher_user_id, story_id=story_id, stage="draft", human=True,
             )
 
             assert resp["broadcast_member_ids"] == []
@@ -205,13 +239,13 @@ async def test_agent_role_stage_with_binding_no_warning_no_notice():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
             await _seed_definition(s, org_id, role_actor_kinds=_ROLE_ACTOR_KINDS)
-            publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
             drafter_id = await _seed_agent(s, org_id, project_id, name="drafter")
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_binding(s, org_id, project_id, stage="draft", agent_id=drafter_id)
 
+            # story #4251 — 첫 stage를 에이전트가 내면 그 stage에 바인딩된 멤버여야 한다(drafter 자신이 연다).
             resp = await _publish_stage(
-                s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="draft",
+                s, org_id=org_id, publisher_id=drafter_id, story_id=story_id, stage="draft",
             )
 
             assert resp["broadcast_member_ids"] == [str(drafter_id)]
@@ -230,9 +264,14 @@ async def test_human_role_stage_without_role_actor_kinds_declaration_still_warns
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
-            await _seed_definition(s, org_id, role_actor_kinds=None)  # 선언 없음
+            definition = await _seed_definition(s, org_id, role_actor_kinds=None)  # 선언 없음
             publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
             story_id = await _seed_story(s, org_id, project_id)
+            # story #4251 — 앞 stage(draft) 이력을 깐다(concept_confirmed 바인딩은 0건 그대로).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="concept_confirmed", publisher_id=publisher_id,
+            )
 
             resp = await _publish_stage(
                 s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="concept_confirmed",

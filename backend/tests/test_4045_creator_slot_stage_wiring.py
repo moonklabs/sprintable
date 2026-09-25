@@ -30,6 +30,8 @@ import uuid
 import pytest
 from fastapi import BackgroundTasks
 
+from tests.recipe_stage_walk import prepare_stage_publish
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -212,6 +214,16 @@ async def _seed_binding(session, org_id, project_id, *, stage, agent_id):
     await session.commit()
 
 
+async def _definition(session, org_id):
+    from sqlalchemy import select
+
+    from app.models.event_definition import EventDefinition
+
+    return (await session.execute(
+        select(EventDefinition).where(EventDefinition.key == _KEY, EventDefinition.org_id == org_id)
+    )).scalar_one()
+
+
 def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> AuthContext:
     from app.dependencies.auth import AuthContext
     return AuthContext(
@@ -268,20 +280,35 @@ async def test_creator_binding_resolves_on_every_creator_role_stage():
             await _seed_org_owner(s, org_id)
             publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
             creator_id = await _seed_agent(s, org_id, project_id, name="creator-slot")
-            story_id = await _seed_story(s, org_id, project_id)
             for stage in _CREATOR_STAGES:
                 await _seed_binding(s, org_id, project_id, stage=stage, agent_id=creator_id)
+            definition = await _definition(s, org_id)
+
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. stage마다 새 work item에 바로 앞 상태를 깔고 그 stage를
+            # 낼 수 있는 멤버가 낸다: 게이트 승인 뒤(animatic)는 게이트 요청자 · 연산 stage 뒤(verification)는 그 앞 담당인 별도
+            # 발행자, 첫 stage · 크리에이터 stage 뒤(draft · editing · concept_confirmed)는 담당 크리에이터. 수신자는 발행자와
+            # 무관하게 바인딩으로 풀린다(별도 발행자가 낸 stage에서도 크리에이터로 풀리는지가 이 테스트의 요지).
+            publishers = {
+                "draft": creator_id, "animatic": publisher_id, "verification": publisher_id, "editing": creator_id,
+                "concept_confirmed": creator_id,
+            }
+
+            async def _publish_fresh(stage: str):
+                story_id = await _seed_story(s, org_id, project_id)
+                await prepare_stage_publish(
+                    Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                    stage=stage, publisher_id=publishers[stage],
+                )
+                return await _publish_stage(
+                    s, org_id=org_id, publisher_id=publishers[stage], story_id=story_id, stage=stage,
+                )
 
             for stage in _CREATOR_STAGES:
-                resp = await _publish_stage(
-                    s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage=stage,
-                )
+                resp = await _publish_fresh(stage)
                 assert resp["broadcast_member_ids"] == [str(creator_id)], f"stage={stage}"
 
             # 크리에이터를 안 심은 director/발행자 stage — 「모르면 안 준다」로 빈 집합.
-            resp = await _publish_stage(
-                s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="concept_confirmed",
-            )
+            resp = await _publish_fresh("concept_confirmed")
             assert resp["broadcast_member_ids"] == []
     finally:
         await engine.dispose()
@@ -305,9 +332,18 @@ async def test_creator_emits_contract_kind_per_stage_sequentially():
             story_id = await _seed_story(s, org_id, project_id)
             for stage in ("draft", "animatic", "verification"):
                 await _seed_binding(s, org_id, project_id, stage=stage, agent_id=creator_id)
+            definition = await _definition(s, org_id)
 
+            async def _prepare(stage: str, publisher: uuid.UUID) -> None:
+                await prepare_stage_publish(
+                    Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                    stage=stage, publisher_id=publisher,
+                )
+
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. 첫 stage(draft)는 바인딩된 크리에이터가 레시피를 연다.
+            # 그 뒤 stage는 바로 앞 상태(컨셉 게이트 승인 · 연산 stage 발행)를 깔고 별도 발행자가 잇는다.
             # draft: stage 알림 → concept_brief emit.
-            resp = await _publish_stage(s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="draft")
+            resp = await _publish_stage(s, org_id=org_id, publisher_id=creator_id, story_id=story_id, stage="draft")
             assert resp["broadcast_member_ids"] == [str(creator_id)]
             ev = await _emit_evidence(
                 s, org_id=org_id, agent_id=creator_id, story_id=story_id, kind="concept_brief",
@@ -317,6 +353,7 @@ async def test_creator_emits_contract_kind_per_stage_sequentially():
             assert ev.payload["kind"] == "concept_brief"
 
             # animatic: stage 알림 → storyboard + animatic(no_charge) emit.
+            await _prepare("animatic", publisher_id)
             resp = await _publish_stage(s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="animatic")
             assert resp["broadcast_member_ids"] == [str(creator_id)]
             ev_storyboard = await _emit_evidence(
@@ -335,6 +372,7 @@ async def test_creator_emits_contract_kind_per_stage_sequentially():
             assert ev_animatic.payload["cost_tier"] == "no_charge"
 
             # verification: stage 알림 → verification_sheet emit(#3561 기존 kind 재사용).
+            await _prepare("verification", publisher_id)
             resp = await _publish_stage(
                 s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="verification",
             )

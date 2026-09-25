@@ -121,6 +121,20 @@ async def test_newsletter_send_dead_letter_notifies_approver_and_send_agent_and_
         _install_notice_definition()
         ctx = await _setup_newsletter(Session)
         await _bind_agent(Session, ctx, definition_key=_SEED._KEY, stage="send_requested", agent_id=ctx["sender_id"])
+        # story #4251 — 발송 요청은 캠페인 생성(서버 stage) 뒤 발송 단계 담당이 낸다(단계 순서 검증). 그 앞 상태를 깐다(4214와 같은 방식).
+        from sqlalchemy import select as _select
+
+        from app.models.event_definition import EventDefinition
+        from tests.recipe_stage_walk import prepare_stage_publish
+
+        async with Session() as s:
+            definition = (await s.execute(
+                _select(EventDefinition).where(EventDefinition.key == _SEED._KEY, EventDefinition.org_id.is_(None))
+            )).scalar_one()
+        await prepare_stage_publish(
+            Session, org_id=ctx["org_id"], project_id=ctx["project_id"], definition=definition,
+            work_item_id=ctx["story_id"], stage="send_requested", publisher_id=ctx["sender_id"],
+        )
         scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
         async with Session() as s:
             await publish_registry_event(

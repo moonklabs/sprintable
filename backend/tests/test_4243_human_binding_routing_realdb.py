@@ -14,6 +14,7 @@ import pytest
 from tests.test_m2_recipe_role_binding_routing_realdb import (
     _DEFINITION_KEY,
     _STAGE_METADATA,
+    _prepare_stage,
     _publish_stage,
     _realdb_session,
     _seed_agent,
@@ -59,6 +60,8 @@ async def test_stage_bound_to_a_human_member_routes_to_that_person():
             await s.commit()
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_binding(s, org_id, project_id, stage="approve", agent_id=person.id)
+            # story #4251 — 앞 stage(draft)를 publisher가 낸 상태에서 출발(draft 바인딩만 더해져 approve 수신자는 그대로).
+            await _prepare_stage(Session, org_id=org_id, project_id=project_id, story_id=story_id, stage="approve", publisher_id=publisher_id)
 
             resp = await _publish_stage(s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="approve")
 
@@ -112,6 +115,8 @@ async def test_old_binding_on_an_approval_elsewhere_stage_is_not_a_recipient(kin
             await s.commit()
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_binding(s, org_id, project_id, stage="approve", agent_id=old.id)
+            # story #4251 — 앞 stage(draft)를 publisher가 낸 상태에서 출발(draft 바인딩만 더해져 approve 수신자는 그대로).
+            await _prepare_stage(Session, org_id=org_id, project_id=project_id, story_id=story_id, stage="approve", publisher_id=publisher_id)
 
             resp = await _publish_stage(s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="approve")
 

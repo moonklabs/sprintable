@@ -268,6 +268,23 @@ async def _walk_to_pending_approval_with_abc_approved(
             BackgroundTasks(), _fake_request(), db=s, auth=_auth(actor_id, org_id), org_id=org_id,
         )
 
+    # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. 각 stage를 그 담당이 순서대로 내도록 담당을 실제 바인딩으로
+    # 깐다(Creator stage = 크리에이터 · Director의 structure_passed = org owner · live_generation도 크리에이터 — 리허설 1호에서
+    # 댄이 스스로 이어간 형상). 게이트 뒤 stage는 «승인 뒤 요청자가 낸다»로 잇는다(animatic · live_generation).
+    from app.models.pm import Story
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    project_id = (await s.get(Story, story_id)).project_id
+    for bound_stage, member_id in (
+        ("draft", creator_id), ("structure_passed", owner_member_id), ("live_generation", creator_id),
+        ("verification", creator_id), ("editing", creator_id),
+    ):
+        s.add(RecipeRoleBinding(
+            id=uuid.uuid4(), org_id=org_id, project_id=project_id, event_definition_key=_KEY,
+            stage=bound_stage, agent_member_id=member_id,
+        ))
+    await s.commit()
+
     await _publish("draft", actor_id=creator_id)
     await _publish("concept_confirmed", actor_id=creator_id)
     gate_a = (await s.execute(
@@ -290,6 +307,10 @@ async def _walk_to_pending_approval_with_abc_approved(
     await transition_gate(s, org_id, gate_c.id, "approved", owner_member_id, None)
     await s.commit()
 
+    # story #4251 — ⓒ 뒤 pending_approval로 바로 건너뛸 수 없다(STAGE_NOT_NEXT). 사이 stage를 순서대로 낸다(test_4050 관통과 같은 순서).
+    await _publish("live_generation", actor_id=owner_member_id)
+    await _publish("verification", actor_id=creator_id)
+    await _publish("editing", actor_id=creator_id)
     await _publish("pending_approval", actor_id=creator_id)
     gate_d = (await s.execute(
         select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == "external_publish", Gate.scope_key == "")

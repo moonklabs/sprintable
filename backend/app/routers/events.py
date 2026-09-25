@@ -22,7 +22,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
@@ -57,6 +57,10 @@ _SSE_BATCH_SIZE = 10  # 배치 전달 청크 크기
 
 # ─── S20: SSE 연결 수 전역 제한 ───────────────────────────────────────────────
 import os as _os
+
+if TYPE_CHECKING:
+    from app.services.recipe_stage_completion import StageOrigin
+
 _MAX_SSE_CONNECTIONS: int = int(_os.getenv("MAX_SSE_CONNECTIONS", "100"))
 _sse_connection_count: int = 0
 _SSE_HEARTBEAT_TIMEOUT: float = float(_os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
@@ -2572,6 +2576,55 @@ def _stage_label(definition, stage: str | None) -> str:
     return f"{stage}({role})" if role else str(stage)
 
 
+async def _stage_publish_rejection_detail(db: AsyncSession, definition, rejection, locale: str) -> dict:
+    """story #4251 — 발행 거부 본문. 사람과 에이전트가 같은 로케일 문장을 읽고 스스로 멈추게 «무엇이 막혔나 · 지금 stage와 담당 ·
+    다음에 할 일»을 싣는다(PO 4251). 기계가 읽을 사실(code · current_stage · next_stage · allowed_member_ids)도 같이 싣는다."""
+    ids = {i for i in (rejection.current_assignee, *rejection.allowed) if i is not None}
+    names: dict[uuid.UUID, str | None] = {}
+    for member_id in ids:  # 에이전트(team_member) · 사람(org_member) 두 id 공간 모두 — 거부 경로라 몇 명뿐이다.
+        identity = await resolve_member_identity(member_id, rejection.org_id, db)
+        names[member_id] = identity.name if identity is not None else None
+    nobody = t("events.stage_publish_rejected_nobody", locale)
+
+    def who(member_ids) -> str:
+        labels = [names.get(i) or str(i) for i in member_ids if i is not None]
+        return ", ".join(labels) if labels else nobody
+
+    stage = _stage_label(definition, rejection.stage)
+    nxt = _stage_label(definition, rejection.next_stage) if rejection.next_stage else None
+    if rejection.code == "STAGE_NOT_NEXT":
+        head = (
+            t("events.stage_publish_rejected_not_next", locale, stage=stage, next=nxt) if nxt
+            else t("events.stage_publish_rejected_not_next_last", locale, stage=stage)
+        )
+    elif rejection.code == "PREVIOUS_STAGE_NOT_APPROVED":
+        head = t(
+            "events.stage_publish_rejected_not_approved", locale, current=_stage_label(definition, rejection.current), stage=stage,
+        )
+    elif rejection.code == "STAGE_ALREADY_APPROVED":
+        head = (
+            t("events.stage_publish_rejected_already_approved", locale, stage=stage, next=nxt) if nxt
+            else t("events.stage_publish_rejected_already_approved_last", locale, stage=stage)
+        )
+    elif rejection.code == "STAGE_SERVER_DRIVEN":
+        head = t("events.stage_publish_rejected_server", locale, stage=stage)
+    else:
+        head = t("events.stage_publish_rejected_not_assignee", locale, stage=stage, allowed=who(rejection.allowed))
+    context = (
+        t(
+            "events.stage_publish_rejected_now", locale,
+            current=_stage_label(definition, rejection.current), assignee=who([rejection.current_assignee]),
+        ) if rejection.current else t("events.stage_publish_rejected_not_started", locale)
+    )
+    return {
+        "code": rejection.code,
+        "message": f"{head}\n{context}",  # 첫 줄 사유 · 둘째 줄 지금 상태(유나 — 자리표시자로 끝나는 줄이 있어 줄로 가른다)
+        "current_stage": rejection.current,
+        "next_stage": rejection.next_stage,
+        "allowed_member_ids": [str(i) for i in rejection.allowed],
+    }
+
+
 async def _publish_registry_event_core(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -2598,6 +2651,10 @@ async def _publish_registry_event_core(
     # story #4255(까디르 P1) — 서버가 낸 stage 이벤트의 문맥(촉발 게이트 · 발행물 id). payload 스키마 밖이라 routing 해석과 본문
     # 렌더에만 넘기고 refs에 남긴다. 사람 · 에이전트 발행은 None.
     routing_context: dict | None = None,
+    # story #4251 — 레시피 stage 순서 · 권한 검증(`recipe_stage_completion.validate_raw_stage_publish`)을 누가 받는가. 기본
+    # `member`(HTTP 라우트 · MCP `publish_event` · «레시피 시작» · 조직 «테스트 발행» — 전부 검사). `server` · `complete_stage`는
+    # 내부 호출만 넘긴다(HTTP 입력으로 세팅되는 길이 없다 · test_4251 가드).
+    stage_origin: StageOrigin = "member",
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -2732,6 +2789,16 @@ async def _publish_registry_event_core(
                 "current_stage": current_stage,
                 "is_last_stage": current_stage is not None and current_stage == first_stage[-1],
             })
+
+    if stage_origin == "member":
+        from app.services.recipe_stage_completion import StagePublishRejection, validate_raw_stage_publish
+
+        try:
+            await validate_raw_stage_publish(db, org_id=org_id, definition=definition, payload=payload, sender=sender)
+        except StagePublishRejection as e:
+            raise HTTPException(
+                status_code=e.status, detail=await _stage_publish_rejection_detail(db, definition, e, resolved_locale),
+            ) from e
 
     from app.services.event_routing_resolver import (
         InvalidWorkItemReferenceError,
@@ -3226,6 +3293,8 @@ async def publish_preset_event(
         )
         result = await _publish_registry_event_core(
             db, org_id, auth, definition_key, payload, background_tasks, after_commit=deliveries,
+            # story #4251 — 레시피 밖 프리셋 자동 발행(판정 알림 · 상태 변경 등)이라 stage 검증 대상이 아니다(시스템 발행자).
+            stage_origin="server",
         )
     deliveries.append(background_tasks)
     schedule_after_commit(db, deliveries)
@@ -4413,6 +4482,8 @@ async def complete_recipe_stage(
         db, org_id, auth, definition.key,
         {"stage": next_stage, "work_item_type": body.work_item_type, "work_item_id": str(body.work_item_id)},
         background_tasks, request=request, resolved_locale=resolved_locale,
+        # story #4251 — 위에서 같은 규칙(`validate_stage_completion` · `validate_next_stage_start`)과 같은 락으로 이미 검증했다.
+        stage_origin="complete_stage",
     )
     completed = body.stage if body.action == "complete" else None
     return {**result, "completed_stage": completed, "next_stage": next_stage}

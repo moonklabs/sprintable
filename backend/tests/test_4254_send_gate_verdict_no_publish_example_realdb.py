@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.recipe_stage_walk import prepare_stage_publish
 from tests.test_3312_approve_stage_gate_auto_creation import _auth, _fake_request
 from tests.test_3330_gate_verdict_notification import _seed_preset_gate_verdict_definition
 from tests.test_4242_server_stage_routes_to_next_agent_realdb import _SEED, _bind_agent, _setup_newsletter
@@ -59,12 +60,21 @@ async def _approved_send_gate_verdict(Session, ctx):
     from sqlalchemy import select, text
 
     from app.models.conversation import ConversationMessage
+    from app.models.event_definition import EventDefinition
     from app.models.gate import Gate
     from app.routers.events import EventPublishRequest, publish_registry_event
     from app.services.gate_service import transition_gate
 
     async with Session() as s:
         await _seed_preset_gate_verdict_definition(s)
+        definition = (await s.execute(
+            select(EventDefinition).where(EventDefinition.key == _SEED._KEY, EventDefinition.org_id.is_(None))
+        )).scalar_one()
+    # story #4251 — 발송 요청은 캠페인 생성(서버 stage) 뒤 발송 단계 담당(sender · 이미 바인딩)이 낸다. 그 앞 상태를 깐다.
+    await prepare_stage_publish(
+        Session, org_id=ctx["org_id"], project_id=ctx["project_id"], definition=definition,
+        work_item_id=ctx["story_id"], stage="send_requested", publisher_id=ctx["sender_id"],
+    )
     scheduled_at = datetime.now(timezone.utc) + timedelta(hours=2)
     async with Session() as s:
         await publish_registry_event(

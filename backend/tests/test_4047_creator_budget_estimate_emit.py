@@ -232,16 +232,25 @@ async def test_creator_emits_generation_cost_estimate_before_live_generation_sta
     통과한다. structure_passed·live_generation 이벤트는 이 파일 어디서도 발행하지 않는다 —
     "게이트 앞"이라는 포지셔닝을 구조적으로 pin(그 stage에 진입도 안 했는데 이미 추정이
     서 있다)."""
+    from app.models.event_definition import EventDefinition
+    from tests.recipe_stage_walk import prepare_stage_publish
+
     engine, Session = await _realdb_session()
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
-            await _seed_definition(s, org_id)
+            definition_id = await _seed_definition(s, org_id)
             await _seed_generation_budget_policy(s, org_id, limit_minor=1_000_000, currency="KRW")
             publisher_id = await _seed_agent(s, org_id, project_id, name="publisher")
             creator_id = await _seed_agent(s, org_id, project_id, name="creator-slot")
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_binding(s, org_id, project_id, stage="animatic", agent_id=creator_id)
+            # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다: 컨셉 게이트가 승인된 상태에서 그 요청자(발행자)가
+            # animatic을 잇는다(structure_passed · live_generation은 여전히 발행하지 않는다).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=await s.get(EventDefinition, definition_id),
+                work_item_id=story_id, stage="animatic", publisher_id=publisher_id,
+            )
 
             resp = await _publish_stage(s, org_id=org_id, publisher_id=publisher_id, story_id=story_id, stage="animatic")
             assert resp["broadcast_member_ids"] == [str(creator_id)]

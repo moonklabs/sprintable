@@ -592,11 +592,22 @@ async def test_resolver_no_fallback_for_unbound_agent_target_stage():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
             await _seed_definition(s, org_id=org_id)
-            drafter_id = await _seed_agent(s, org_id, project_id, name="drafter")
             story_id = await _seed_story(s, org_id, project_id)
             # draft(agent-target) 바인딩을 만들지 않음 — 미배정 상태로 발행.
+            # story #4251 — 첫 stage는 프로젝트에 접근하는 사람이 바인딩 없이 연다(«레시피 시작»). 에이전트가 내려면 draft에
+            # 바인딩돼야 해서 «미배정 stage»가 성립하지 않는다.
+            from app.dependencies.auth import AuthContext
+            from app.routers.events import _publish_registry_event_core
+            from tests.test_3475_publishing_metrics import (
+                _seed_human as _seed_owner_user,
+            )
 
-            resp = await _publish_stage(s, org_id=org_id, story_id=story_id, stage="draft", requester_id=drafter_id)
+            owner_user_id = await _seed_owner_user(s, org_id, role="owner")
+            resp = await _publish_registry_event_core(
+                s, org_id, AuthContext(user_id=str(owner_user_id), email=None, claims={}, org_id=str(org_id)),
+                _DEFINITION_KEY, {"work_item_type": "story", "work_item_id": str(story_id), "stage": "draft"},
+                BackgroundTasks(),
+            )
 
             assert resp["broadcast_member_ids"] == []
     finally:

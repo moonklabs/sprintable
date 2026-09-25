@@ -363,6 +363,19 @@ async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_conte
                 return msg
 
         base = {"work_item_type": "story", "work_item_id": str(seeded["story_id"])}
+        # story #4251 — 원시 발행은 stage 순서 · 담당을 검증한다. «발행 승인 대기»는 초안을 제출한 Creator(검수 stage 담당)가
+        # 낸다 — 그 앞 상태(검수 stage 발행 이력 · 에이전트 = 검수 담당)를 깐다.
+        from app.models.pm import Story
+        from tests.recipe_stage_walk import prepare_stage_publish
+
+        async with Session() as s:
+            definition = await _definition(s)
+            project_id = (await s.get(Story, seeded["story_id"])).project_id
+        await prepare_stage_publish(
+            Session, org_id=seeded["org_id"], project_id=project_id, definition=definition,
+            work_item_id=seeded["story_id"], stage="pending_approval", publisher_id=seeded["agent_id"],
+        )
+
         # 음성 짝 먼저 — 연결 없이 발행한 회차.
         await publish({**base, "stage": "pending_approval"})
         async with Session() as s:
@@ -370,6 +383,8 @@ async def test_submit_response_draft_id_linked_by_the_run_makes_the_recipe_conte
                 s, org_id=seeded["org_id"], work_item_type="story", work_item_id=seeded["story_id"], draft_id=gate_draft_id,
             ) is None
 
+        # 같은 stage를 연결과 함께 다시 낸다 — «발행 승인 대기»는 승인 자리가 초안 게이트라 바인딩이 없지만, 그 stage를 낸
+        # 멤버는 다시 낼 수 있다(PO 12:59Z · 연결을 빠뜨린 발행을 고치는 길).
         msg = await publish({**base, "stage": "pending_approval", events.RECIPE_SITE_DRAFT_LINK_FIELD: str(draft_id)})
         assert msg.msg_metadata["event"]["payload"][events.RECIPE_SITE_DRAFT_LINK_FIELD] == str(draft_id)
         async with Session() as s:

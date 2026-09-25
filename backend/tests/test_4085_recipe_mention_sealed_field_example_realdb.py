@@ -25,6 +25,8 @@ import uuid
 import pytest
 from fastapi import BackgroundTasks
 
+from tests.recipe_stage_walk import prepare_stage_publish
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -312,8 +314,13 @@ async def test_ac1_gate_verdict_mention_includes_sealed_field_and_explanation():
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id, assignee_id=creator_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
             await _seed_preset_gate_verdict_definition(s)
+            # story #4251 — 첫 stage(draft)를 에이전트가 내려면 그 stage 담당이어야 한다(Creator = 댄).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="draft", publisher_id=creator_id,
+            )
 
             await _approve_through_structure_gate(
                 s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
@@ -350,8 +357,13 @@ async def test_ac1_next_stage_without_sealed_gate_unaffected_regression():
             await _seed_system_publisher_teammember_shim(s, org_id, project_id)
             creator_id = await _seed_agent(s, org_id, project_id, name="댄")
             story_id = await _seed_story(s, org_id, project_id, assignee_id=creator_id)
-            await _seed_definition(s)
+            definition = await _seed_definition(s)
             await _seed_preset_gate_verdict_definition(s)
+            # story #4251 — 첫 stage(draft)를 에이전트가 내려면 그 stage 담당이어야 한다(Creator = 댄).
+            await prepare_stage_publish(
+                Session, org_id=org_id, project_id=project_id, definition=definition, work_item_id=story_id,
+                stage="draft", publisher_id=creator_id,
+            )
 
             async def _publish(stage: str, *, actor_id: uuid.UUID):
                 payload = {"stage": stage, "work_item_type": "story", "work_item_id": str(story_id)}
