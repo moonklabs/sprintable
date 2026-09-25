@@ -65,5 +65,26 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
       ctx.value = { ...ctx.value, currentProjectSlug: 'proj-1' };
     }
   });
+
+  // story #4296(까디르 4639 codex · AC1 재측) — 두 탭이 서로 다른 프로젝트를 볼 때: 쿠키(다른 탭이 마지막으로 연 프로젝트)가 아니라 **이 탭의
+  // 프로젝트**(셸 컨텍스트 = `?p=` · sessionStorage)로 자원 링크가 착지한다. 예전 bare `/${item.path}`는 proxy가 쿠키로 골라 다른 탭의 프로젝트로
+  // 갔다. 뮤테이션: 자원 링크를 bare로 되돌리면 RED.
+  it('⭐두 탭 다른 프로젝트 — 쿠키가 proj-a여도 이 탭(proj-b)의 자원 링크는 `/ws-1/proj-b/{자원}` · bare · proj-a 0', async () => {
+    const before = ctx.value;
+    document.cookie = 'current_project_slug=proj-a; path=/';
+    ctx.value = { ...ctx.value, currentProjectSlug: 'proj-b' };
+    try {
+      const { NAV_GROUPS, LEGACY_NAV_ITEMS } = await import('@/lib/nav-config');
+      const resourcePaths = [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS].filter((i) => i.kind === 'resource').map((i) => i.path);
+      const hrefs = await hrefsOfMenu();
+      const resourceHrefs = hrefs.filter((h) => resourcePaths.some((p) => h.endsWith(`/${p}`) || h === `/${p}` || h.startsWith(`/${p}?`)));
+      expect(resourceHrefs.length).toBeGreaterThanOrEqual(3);
+      expect(resourceHrefs.every((h) => h.startsWith('/ws-1/proj-b/'))).toBe(true);
+      expect(hrefs.some((h) => h.includes('proj-a'))).toBe(false);
+    } finally {
+      ctx.value = before;
+      document.cookie = 'current_project_slug=; path=/; max-age=0';
+    }
+  });
 });
 
