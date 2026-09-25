@@ -28,3 +28,6 @@ class ActivityStreamResponse(BaseModel):
     items: list[ActivityStreamItem]
     # activity_seq ASC cursor: 다음 페이지는 ?after_seq=next_after_seq. None이면 더 없음.
     next_after_seq: int | None = None
+    # story #4297 — order=desc(최신부터) 커서: 다음(더 오래된) 페이지는 ?order=desc&before_seq=next_before_seq. None이면 더 없음.
+    # order=asc일 땐 늘 None(반대로 order=desc일 땐 next_after_seq가 늘 None).
+    next_before_seq: int | None = None

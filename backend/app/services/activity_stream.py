@@ -11,6 +11,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -222,14 +223,21 @@ async def query_activity_stream(
     since=None,
     until=None,
     after_seq: int | None = None,
+    before_seq: int | None = None,
+    order: Literal["asc", "desc"] = "asc",
     limit: int = 50,
 ) -> tuple[list[ActivityEvent], int | None]:
-    """L1 BE-5: activity_events를 org-scope + 필터로 조회(activity_seq ASC cursor).
+    """L1 BE-5: activity_events를 org-scope + 필터로 조회(activity_seq cursor).
 
-    반환: (rows, next_after_seq). next_after_seq는 페이지가 가득 찼을 때만 마지막 seq —
-    None이면 더 없음. org_id는 항상 강제(AC①). after_seq는 strict(> after_seq) cursor라
-    중복 없이 다음 페이지를 잇는다.
+    반환: (rows, next_cursor). next_cursor는 페이지가 가득 찼을 때만 마지막 seq — None이면 더 없음.
+    org_id는 항상 강제(AC①).
+    - order="asc"(기본 · 에이전트 team-context 읽기 공개 계약 · 무변): activity_seq ASC · after_seq(strict >)로 다음 페이지.
+    - order="desc"(story #4297 · 사람이 보는 활동 로그): 최신부터 activity_seq DESC · before_seq(strict <)로 이전 페이지.
+      예전엔 화면이 ASC LIMIT를 받아 뒤집어, 창 안 활동이 limit를 넘으면 가장 오래된 limit건만 보였다(최신 활동은 닿지 않음).
+    activity_seq는 단조 증가 Identity라 strict 커서가 경계에서 중복 · 누락 없이 잇는다(같은 occurred_at 두 건도 seq로 갈린다).
     """
+    if order not in ("asc", "desc"):
+        raise ValueError(f"order must be 'asc' or 'desc', got {order!r}")
     query = select(ActivityEvent).where(ActivityEvent.org_id == org_id)
     if project_id is not None:
         query = query.where(ActivityEvent.project_id == project_id)
@@ -247,11 +255,14 @@ async def query_activity_stream(
         query = query.where(ActivityEvent.occurred_at <= until)
     if after_seq is not None:
         query = query.where(ActivityEvent.activity_seq > after_seq)
+    if before_seq is not None:
+        query = query.where(ActivityEvent.activity_seq < before_seq)
 
-    query = query.order_by(ActivityEvent.activity_seq.asc()).limit(limit)
+    seq_order = ActivityEvent.activity_seq.desc() if order == "desc" else ActivityEvent.activity_seq.asc()
+    query = query.order_by(seq_order).limit(limit)
     rows = list((await db.execute(query)).scalars().all())
-    next_after_seq = rows[-1].activity_seq if len(rows) == limit else None
-    return rows, next_after_seq
+    next_cursor = rows[-1].activity_seq if len(rows) == limit else None
+    return rows, next_cursor
 
 
 async def poll_activities_after_seq(

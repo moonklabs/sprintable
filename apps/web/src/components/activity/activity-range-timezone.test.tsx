@@ -15,6 +15,11 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 let orgTimezone: string | null = 'Asia/Seoul';
+const { addToastMock } = vi.hoisted(() => ({ addToastMock: vi.fn() }));
+vi.mock('@/components/ui/toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/toast')>();
+  return { ...actual, useToast: () => ({ addToast: addToastMock, toasts: [], dismissToast: () => {} }) };
+});
 vi.mock('@/app/dashboard/dashboard-shell', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/app/dashboard/dashboard-shell')>();
   return { ...actual, useDashboardContext: () => ({ ...actual.useDashboardContext(), orgTimezone }) };
@@ -112,8 +117,8 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
   }
   const streamCalls = () => fetchWithAuthMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/api/activity-stream'));
 
-  it('⭐시작 날짜를 비우면 오류 없이 «끝 날짜에서 7일 전 자정»부터 최근 창 · 끝까지 비우면 «지금»에서 7일 전 · until 없음', async () => {
-    // BE 활동 스트림은 limit + 오름차순이라 since 없이 부르면 가장 오래된 N개만 온다(최근이 조용히 잘림) — 빈 시작도 최근 창부터.
+  it('⭐시작 날짜를 비우면 오류 없이 과거 경계 없음(since 없음 · 최신부터 커서가 끝까지 잇는다) · 끝까지 비우면 until도 없음', async () => {
+    // story #4297 — 4280의 «빈 시작 = 끝 날짜에서 7일 전 창» 지름길은 최신순 커서(order=desc · before_seq)로 대체됐다.
     const { TeamActivityView } = await import('./team-activity-view');
     await render(<TeamActivityView projectId="p1" />);
     const [fromInput, toInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
@@ -121,12 +126,13 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     await act(async () => { setDate(fromInput!, ''); });
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     const afterFrom = new URL(streamCalls().pop()!, 'http://x').searchParams;
-    expect(afterFrom.get('since')).toBe('2026-09-17T15:00:00.000Z'); // 9/25(끝) − 7일 = 9/18 00:00 KST
+    expect(afterFrom.get('order')).toBe('desc');
+    expect(afterFrom.get('since')).toBeNull();
     expect(afterFrom.get('until')).toBe('2026-09-25T14:59:59.999Z');
     await act(async () => { setDate(toInput!, ''); });
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     const afterTo = new URL(streamCalls().pop()!, 'http://x').searchParams;
-    expect(afterTo.get('since')).toBe('2026-09-17T15:00:00.000Z'); // 지금(9/25 02:49 KST) − 7일 = 9/18 00:00 KST
+    expect(afterTo.get('since')).toBeNull();
     expect(afterTo.get('until')).toBeNull();
   });
 
@@ -142,47 +148,179 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     expect(params.get('until')).toBeNull();
   });
 
-  it('«더 보기»는 시작 날짜 자정(KST)에서 달력 7일 전 자정까지', async () => {
+  const ITEM = (seq: number) => ({ activity_id: `a${seq}`, project_id: 'p1', occurred_at: '2026-09-20T00:00:00Z', verb: 'created', object_type: 'story', object_id: 'o1', actor_id: null, source_event_ids: [], recipient_ids: [], recipient_types: [], payload: { title: `item-${seq}` }, activity_seq: seq });
+  function stubStream(pages: Record<string, { items: ReturnType<typeof ITEM>[]; next_before_seq: number | null }>) {
     fetchWithAuthMock.mockImplementation(async (url: string) => {
       if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
       if (url.includes('/api/activity-stream')) {
-        return { ok: true, status: 200, json: async () => ({ data: { items: [{ activity_id: 'a1', project_id: 'p1', occurred_at: '2026-09-20T00:00:00Z', verb: 'created', object_type: 'story', object_id: 'o1', actor_id: null, source_event_ids: [], recipient_ids: [], recipient_types: [], payload: {}, activity_seq: 1 }] } }) };
+        const before = new URL(url, 'http://x').searchParams.get('before_seq') ?? 'first';
+        const page = pages[before] ?? { items: [], next_before_seq: null };
+        return { ok: true, status: 200, json: async () => ({ data: { items: page.items, next_after_seq: null, next_before_seq: page.next_before_seq } }) };
       }
       return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
     });
+  }
+  const moreButton = () => Array.from(container.querySelectorAll('button')).find((b) => /load more/i.test(b.textContent ?? ''));
+
+  it('⭐«더 보기»는 같은 기간 경계 안에서 before_seq=서버 커서 · 이어 붙인 목록이 최신 → 과거 순(뒤집지 않음)', async () => {
+    stubStream({ first: { items: [ITEM(30), ITEM(20)], next_before_seq: 20 }, '20': { items: [ITEM(10)], next_before_seq: null } });
     const { TeamActivityView } = await import('./team-activity-view');
     await render(<TeamActivityView projectId="p1" />);
-    const more = Array.from(container.querySelectorAll('button')).find((b) => /load more/i.test(b.textContent ?? ''));
-    expect(more, '더 보기 버튼').toBeTruthy();
+    const firstCall = new URL(streamCalls()[0]!, 'http://x').searchParams;
+    expect(firstCall.get('order')).toBe('desc');
+    expect(firstCall.get('before_seq')).toBeNull();
     fetchWithAuthMock.mockClear();
-    await act(async () => { more!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     const params = new URL(streamCalls().pop()!, 'http://x').searchParams;
-    expect(params.get('until')).toBe('2026-09-17T15:00:00.000Z');
-    expect(params.get('since')).toBe('2026-09-10T15:00:00.000Z');
+    expect(params.get('before_seq')).toBe('20');
+    expect(params.get('since')).toBe('2026-09-17T15:00:00.000Z');
+    expect(params.get('until')).toBe('2026-09-25T14:59:59.999Z');
+    const text = container.textContent ?? '';
+    expect(text.indexOf('item-30')).toBeLessThan(text.indexOf('item-20'));
+    expect(text.indexOf('item-20')).toBeLessThan(text.indexOf('item-10'));
+    expect(moreButton(), '서버 커서가 null이면 더 보기 없음').toBeUndefined();
   });
 
-  it('⭐시작 날짜를 비워도 «더 보기»가 살아 있고 경계 없이 7일씩 과거로(예전엔 꺼져 최근만 보거나 오래된 N개에 갇힘)', async () => {
-    fetchWithAuthMock.mockImplementation(async (url: string) => {
-      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
-      if (url.includes('/api/activity-stream')) {
-        return { ok: true, status: 200, json: async () => ({ data: { items: [{ activity_id: `a-${url.length}`, project_id: 'p1', occurred_at: '2026-09-20T00:00:00Z', verb: 'created', object_type: 'story', object_id: 'o1', actor_id: null, source_event_ids: [], recipient_ids: [], recipient_types: [], payload: {}, activity_seq: 1 }] } }) };
-      }
-      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
-    });
+  it('⭐시작 날짜를 비워도 서버 커서가 있으면 «더 보기»가 살아 있고 경계 없이 이전 쪽으로(빈 주에서 끝나지 않음)', async () => {
+    stubStream({ first: { items: [ITEM(5)], next_before_seq: 5 }, '5': { items: [ITEM(1)], next_before_seq: null } });
     const { TeamActivityView } = await import('./team-activity-view');
     await render(<TeamActivityView projectId="p1" />);
     const [fromInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
     await act(async () => { setDate(fromInput!, ''); });
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    const more = Array.from(container.querySelectorAll('button')).find((b) => /load more/i.test(b.textContent ?? ''));
-    expect(more, '빈 시작에서도 더 보기').toBeTruthy();
+    expect(moreButton(), '빈 시작에서도 더 보기').toBeTruthy();
     fetchWithAuthMock.mockClear();
-    await act(async () => { more!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     const params = new URL(streamCalls().pop()!, 'http://x').searchParams;
-    expect(params.get('until')).toBe('2026-09-17T15:00:00.000Z');
-    expect(params.get('since')).toBe('2026-09-10T15:00:00.000Z');
+    expect(params.get('before_seq')).toBe('5');
+    expect(params.get('since')).toBeNull();
+    expect(container.textContent).toContain('item-1');
+  });
+
+  it('⭐끝까지 오면 끝 문장 — 시작일이 있으면 «이 기간의 활동을 다 봤어요…» · 비우면 «처음 활동까지 다 봤어요.»(유나 판정)', async () => {
+    stubStream({ first: { items: [ITEM(3)], next_before_seq: null } });
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    expect(container.textContent).toContain(enMessages.teamActivity.endOfRange);
+    expect(container.textContent).not.toContain(enMessages.teamActivity.endOfAll);
+    const [fromInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    await act(async () => { setDate(fromInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(container.textContent).toContain(enMessages.teamActivity.endOfAll);
+    expect(container.textContent).not.toContain(enMessages.teamActivity.endOfRange);
+  });
+
+  it('⭐«더 보기» 실패는 끝이 아니다 — 버튼 그대로 · 끝 문장 없음 · 실패 토스트 한 번', async () => {
+    addToastMock.mockClear();
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        if (new URL(url, 'http://x').searchParams.get('before_seq')) return { ok: false, status: 502, json: async () => null };
+        return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(9)], next_after_seq: null, next_before_seq: 9 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    });
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(moreButton()).toBeTruthy();
+    expect(container.textContent).not.toContain(enMessages.teamActivity.endOfRange);
+    // story #4297(유나 후속 · PO) — 무음 실패가 아니라 토스트 한 번(결재함과 같은 공용 문구).
+    expect(addToastMock).toHaveBeenCalledTimes(1);
+    expect(addToastMock).toHaveBeenCalledWith({ title: enMessages.common.loadMoreFailed, type: 'error' });
+  });
+
+  it('⭐조건이 바뀐 뒤 늦게 온 «더 보기» 응답은 버린다 — 새 결과에 옛 행 · 옛 커서가 붙지 않음(까디르 판정)', async () => {
+    let releaseOld: (v: unknown) => void = () => {};
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        const q = new URL(url, 'http://x').searchParams;
+        if (q.get('before_seq') === '20') {
+          // 옛 조건의 «더 보기» — 조건이 바뀐 뒤에야 도착한다.
+          await new Promise((r) => { releaseOld = r; });
+          return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(10)], next_after_seq: null, next_before_seq: 10 } }) };
+        }
+        if (q.get('since') === null) {
+          return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(99)], next_after_seq: null, next_before_seq: 99 } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(30), ITEM(20)], next_after_seq: null, next_before_seq: 20 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    });
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 옛 «더 보기»가 걸린 사이 시작 날짜를 비운다 → 새 조건으로 첫 쪽을 다시 받는다.
+    const [fromInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    await act(async () => { setDate(fromInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(container.textContent).toContain('item-99');
+    await act(async () => { releaseOld(null); await vi.advanceTimersByTimeAsync(100); });
+    expect(container.textContent, '옛 조건의 행이 붙지 않음').not.toContain('item-10');
+    fetchWithAuthMock.mockClear();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    const next = new URL(streamCalls().pop()!, 'http://x').searchParams;
+    expect(next.get('before_seq'), '커서는 새 결과의 것').toBe('99');
+  });
+
+  // story #4297(까디르 델타) — 세대 확인 전에 부작용이 새지 않는지: 옛 조건의 늦은 403 · 옛 요청의 finally.
+  function stubWithHeldOld(oldResponse: () => unknown) {
+    const held: { release: () => void; releaseNew: () => void } = { release: () => {}, releaseNew: () => {} };
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        const q = new URL(url, 'http://x').searchParams;
+        if (q.get('before_seq') === '20') { await new Promise<void>((r) => { held.release = r; }); return oldResponse(); }
+        if (q.get('before_seq') === '99') { await new Promise<void>((r) => { held.releaseNew = r; }); return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(50)], next_after_seq: null, next_before_seq: null } }) }; }
+        if (q.get('since') === null) return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(99)], next_after_seq: null, next_before_seq: 99 } }) };
+        return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(30), ITEM(20)], next_after_seq: null, next_before_seq: 20 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    });
+    return held;
+  }
+  async function startOldLoadMoreThenChangeRange() {
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const [fromInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    await act(async () => { setDate(fromInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(container.textContent).toContain('item-99');
+  }
+
+  it('⭐옛 조건의 «더 보기»가 늦게 403이어도 새 조건 화면을 «접근 불가»로 덮지 않는다', async () => {
+    const held = stubWithHeldOld(() => ({ ok: false, status: 403, json: async () => null }));
+    await startOldLoadMoreThenChangeRange();
+    await act(async () => { held.release(); await vi.advanceTimersByTimeAsync(100); });
+    expect(container.textContent).not.toContain(enMessages.teamActivity.forbiddenTitle);
+    expect(container.textContent).toContain('item-99');
+  });
+
+  it('⭐옛 «더 보기»가 늦게 끝나도 새 조건에서 도는 «더 보기»의 진행 표시를 끄지 않는다', async () => {
+    const held = stubWithHeldOld(() => ({ ok: true, status: 200, json: async () => ({ data: { items: [ITEM(10)], next_after_seq: null, next_before_seq: 10 } }) }));
+    await startOldLoadMoreThenChangeRange();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const loadingButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === enMessages.common.loading);
+    expect(loadingButton(), '새 «더 보기» 진행 중').toBeTruthy();
+    await act(async () => { held.release(); await vi.advanceTimersByTimeAsync(100); });
+    expect(loadingButton(), '옛 요청이 끝나도 새 요청은 아직 진행 중').toBeTruthy();
+    expect(loadingButton()!.hasAttribute('disabled')).toBe(true);
+    await act(async () => { held.releaseNew(); await vi.advanceTimersByTimeAsync(100); });
+    expect(container.textContent).toContain('item-50');
+  });
+
+  it('첫 쪽이 비어 있고 서버 커서가 없으면 «더 보기»를 그리지 않는다', async () => {
+    stubStream({});
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    expect(moreButton()).toBeUndefined();
+    expect(container.textContent, '0건은 빈 상태가 맡는다 — 끝 문장 없음').not.toContain(enMessages.teamActivity.endOfRange);
   });
 });
 

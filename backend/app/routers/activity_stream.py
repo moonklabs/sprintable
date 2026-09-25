@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +29,9 @@ async def get_activity_stream(
     # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`).
     since: datetime | None = _SINCE_QUERY,
     until: datetime | None = _UNTIL_QUERY,
-    after_seq: int | None = Query(default=None, description="activity_seq > after_seq (cursor)"),
+    after_seq: int | None = Query(default=None, description="activity_seq > after_seq (cursor · order=asc)"),
+    before_seq: int | None = Query(default=None, description="activity_seq < before_seq (cursor · order=desc)"),
+    order: Literal["asc", "desc"] = Query(default="asc", description="asc (default, oldest first) | desc (newest first)"),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -36,7 +39,9 @@ async def get_activity_stream(
 ) -> ActivityStreamResponse:
     """GET /api/v2/activity-stream — 에이전트 team-context 읽기.
 
-    org-scope 강제(AC①). activity_seq ASC cursor 페이지네이션(AC③). 응답은 canonical
+    org-scope 강제(AC①). activity_seq cursor 페이지네이션(AC③) — 기본 ASC · after_seq(무변 · 공개 계약),
+    order=desc면 최신부터 · before_seq(story #4297 · 사람이 보는 활동 로그). 커서는 방향마다 하나만 받는다
+    (거꾸로 된 짝은 422 — 조용히 무시하면 호출자가 페이지를 건너뛰었다고 모른다). 응답은 canonical
     활동(source/recipient/payload·AC④)만 — delivery-only status/read는 미포함(AC⑤).
     """
     # ratchet round7(잔여 HIGH) — activity_logs와 동형: project_id 필터(지정 시)에
@@ -47,7 +52,12 @@ async def get_activity_stream(
         if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
             raise HTTPException(status_code=404, detail="Project not found")
 
-    rows, next_after_seq = await query_activity_stream(
+    if order == "asc" and before_seq is not None:
+        raise HTTPException(status_code=422, detail="before_seq requires order=desc")
+    if order == "desc" and after_seq is not None:
+        raise HTTPException(status_code=422, detail="after_seq requires order=asc (the default)")
+
+    rows, next_cursor = await query_activity_stream(
         db,
         org_id,
         project_id=project_id,
@@ -58,9 +68,12 @@ async def get_activity_stream(
         since=since,
         until=until,
         after_seq=after_seq,
+        before_seq=before_seq,
+        order=order,
         limit=limit,
     )
     return ActivityStreamResponse(
         items=[ActivityStreamItem.model_validate(row) for row in rows],
-        next_after_seq=next_after_seq,
+        next_after_seq=next_cursor if order == "asc" else None,
+        next_before_seq=next_cursor if order == "desc" else None,
     )

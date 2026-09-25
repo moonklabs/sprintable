@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
@@ -13,7 +14,7 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
-import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone, shiftDayStartIso } from '@/components/content/schedule-format';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
@@ -35,7 +36,18 @@ interface ActivityStreamItem {
 interface ActivityStreamResponse {
   items: ActivityStreamItem[];
   next_after_seq: number | null;
+  // story #4297 — order=desc(최신부터) 커서. 다음(더 오래된) 쪽은 before_seq=next_before_seq. null이면 더 없음.
+  next_before_seq?: number | null;
 }
+
+interface ActivityPage {
+  items: ActivityStreamItem[];
+  nextBeforeSeq: number | null;
+}
+
+// story #4297(까디르 델타) — 조회 결과만 돌려주고 상태는 안 건드린다. 부르는 쪽이 세대를 확인한 **뒤에** 반영한다(늦게 온 옛 조건의 403이
+// 새 조건 화면을 «접근 불가»로 덮지 않게).
+type ActivityFetch = { kind: 'ok'; page: ActivityPage } | { kind: 'forbidden' } | { kind: 'error' };
 
 interface TeamMember {
   id: string;
@@ -46,7 +58,6 @@ interface TeamMember {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL = '__all__';
 const PAGE_LIMIT = 200; // BE limit 상한
-const WINDOW_DAYS = 7; // 더보기 = 과거로 달력 7일 슬라이드(표시 시간대 자정 기준 · story #4280)
 const OBJECT_TYPES = ['story', 'epic', 'sprint', 'task', 'doc', 'conversation', 'meeting', 'memo'];
 
 // story #4280 — 기본 기간(최근 7일)은 표시 시간대(조직 timezone → 없으면 브라우저) 기준 «오늘»으로(예전 UTC 날짜 자르기는 KST 00~09시에 «어제»).
@@ -173,15 +184,18 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const t = useTranslations('teamActivity');
   const tInbox = useTranslations('inbox'); // verb 사람카피(event* 키)는 inbox 네임스페이스
   const tc = useTranslations('common');
+  const { addToast } = useToast();
   const locale =
     typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
 
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [forbidden, setForbidden] = useState(false);
-  // 더보기용 과거 경계(UTC ISO) — 지금까지 받은 가장 이른 창의 시작. 첫 로드 전에만 null.
-  const [oldestSince, setOldestSince] = useState<string | null>(null);
+  // story #4297 — «더 보기» 커서: 지금까지 받은 가장 오래된 활동의 activity_seq(서버가 준 next_before_seq). null이면 더 없음.
+  const [nextBeforeSeq, setNextBeforeSeq] = useState<number | null>(null);
+  // story #4297(까디르 판정) — 필터 · 날짜 · 프로젝트가 바뀌어 첫 쪽을 다시 받을 때마다 세대를 올린다. 그 전에 출발한 «더 보기» 응답이
+  // 늦게 오면 새 결과에 옛 행 · 옛 커서를 붙였다 — 출발 때 세대와 다르면 버린다.
+  const generationRef = useRef(0);
 
   // 필터 (AC③: project[암묵]·actor·object·verb·time range)
   const [actorFilter, setActorFilter] = useState(ALL);
@@ -214,27 +228,28 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     [members, t],
   );
 
-  // ASC 페치 → client reverse(newest-first). since/until로 윈도우 한정(BE ASC-only 우회).
-  const fetchSlice = useCallback(
-    // story #4280(까디르 검수 P2) — 경계는 UTC ISO 문자열 또는 null(날짜 칸을 비움 = 그 방향 경계 없음). 예전엔 빈 칸이 NaN ms가 되어
-    // `toISOString()`에서 RangeError로 화면이 깨졌다.
-    async (since: string | null, until: string | null): Promise<ActivityStreamItem[] | null> => {
-      const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_LIMIT) });
+  // story #4297 — 최신부터 한 쪽(order=desc) · 이전 쪽은 before_seq 커서. 예전엔 오름차순 LIMIT를 받아 뒤집어, 창 안 활동이 200건을 넘으면
+  // 가장 오래된 200건만 보였다(바쁜 조직은 최신 활동이 영영 안 보임). 기간(from/to)은 경계로만 쓰고, 끝까지 잇는 건 서버 커서다.
+  // story #4280(까디르 검수 P2) — 경계는 UTC ISO 문자열 또는 null(날짜 칸을 비움 = 그 방향 경계 없음).
+  const fetchPage = useCallback(
+    async (since: string | null, until: string | null, beforeSeq: number | null): Promise<ActivityFetch> => {
+      const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_LIMIT), order: 'desc' });
       if (since) p.set('since', since);
       if (until) p.set('until', until);
+      if (beforeSeq !== null) p.set('before_seq', String(beforeSeq));
       if (actorFilter !== ALL) p.set('actor_id', actorFilter);
       if (verbFilter !== ALL) p.set('verb', verbFilter);
       if (objectTypeFilter !== ALL) p.set('object_type', objectTypeFilter);
 
-      const res = await fetchWithAuth(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
-      if (res.status === 403) {
-        setForbidden(true);
-        return null;
+      try {
+        const res = await fetchWithAuth(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
+        if (res.status === 403) return { kind: 'forbidden' };
+        if (!res.ok) return { kind: 'error' };
+        const json = (await res.json()) as { data?: ActivityStreamResponse };
+        return { kind: 'ok', page: { items: json.data?.items ?? [], nextBeforeSeq: json.data?.next_before_seq ?? null } };
+      } catch {
+        return { kind: 'error' };
       }
-      if (!res.ok) return null;
-      const json = (await res.json()) as { data?: ActivityStreamResponse };
-      const asc = json.data?.items ?? [];
-      return [...asc].reverse();
     },
     [projectId, actorFilter, verbFilter, objectTypeFilter],
   );
@@ -244,47 +259,56 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const rangeFrom = useMemo(() => dateKeysToInstants(fromDate, toDate, displayTimezone).from, [fromDate, toDate, displayTimezone]);
   const rangeTo = useMemo(() => dateKeysToInstants(fromDate, toDate, displayTimezone).to, [fromDate, toDate, displayTimezone]);
 
-  // 최초 / 필터 변경 → 선택 범위 [from, to] 재로드(newest-first)
+  // 최초 / 필터 변경 → 선택 범위 [from, to]의 최신 한 쪽(시작 날짜를 비우면 과거 경계 없음 — 커서가 끝까지 잇는다).
+  // story #4297 — 4280이 둔 «빈 시작 = 최근 7일 창 + 7일씩 과거로» 지름길은 이 커서로 대체(빈 주를 만나면 «더 없음»으로 끝났다).
   useEffect(() => {
     let cancelled = false;
+    const generation = ++generationRef.current;
     async function load() {
       setItems(null);
       setForbidden(false);
-      setHasMore(true);
-      // story #4280(까디르 검수) — 시작 날짜를 비우면 «과거 경계 없음». BE 활동 스트림은 limit 상한 + **오름차순**이라 since 없이 부르면
-      // 가장 오래된 N개만 오고 그 뒤(최근)를 볼 길이 없었다(조용히 잘림). 그래서 빈 시작은 «끝 날짜(없으면 지금)에서 달력 7일 전 자정»부터
-      // 최근 쪽 한 창을 받고, «더 보기»가 경계 없이 7일씩 과거로 간다(시작 날짜가 있을 때와 같은 최신순 · 과거로 넓히는 방향).
-      const firstSince = rangeFrom ?? shiftDayStartIso(rangeTo ?? new Date().toISOString(), displayTimezone, -WINDOW_DAYS);
-      const slice = await fetchSlice(firstSince, rangeTo);
-      if (cancelled) return;
-      setItems(slice ?? []);
-      setOldestSince(firstSince);
-      setHasMore((slice?.length ?? 0) > 0);
+      setNextBeforeSeq(null);
+      setLoadingMore(false); // 옛 조건의 «더 보기»가 걸려 있어도 새 목록의 버튼은 막히지 않게(그 응답은 세대가 달라 버려진다)
+      const result = await fetchPage(rangeFrom, rangeTo, null);
+      if (cancelled || generation !== generationRef.current) return;
+      if (result.kind === 'forbidden') setForbidden(true);
+      const page = result.kind === 'ok' ? result.page : null;
+      setItems(page?.items ?? []);
+      setNextBeforeSeq(page?.nextBeforeSeq ?? null);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [fetchSlice, rangeFrom, rangeTo, displayTimezone]);
+  }, [fetchPage, rangeFrom, rangeTo]);
 
-  // 더 보기 v1 = 선택 범위보다 과거 윈도우 슬라이스 페치 후 append(dedup). 정밀 cursor는 follow-up.
+  // 더 보기 = 같은 경계 안에서 지금까지 받은 가장 오래된 활동보다 이전 쪽(before_seq). 실패하면 커서를 그대로 둬 다시 누르면 다시 시도.
   const loadMore = async () => {
-    if (oldestSince === null) return;
+    if (nextBeforeSeq === null || loadingMore) return;
+    const generation = generationRef.current;
     setLoadingMore(true);
-    const until = oldestSince;
-    // story #4280(까디르 검수 P3) — 고정 168시간이 아니라 표시 시간대의 달력 7일 전 자정(서머타임 주에도 한 시간 어긋나지 않게).
-    const since = shiftDayStartIso(oldestSince, displayTimezone, -WINDOW_DAYS);
-    const slice = await fetchSlice(since, until);
-    if (slice) {
-      setItems((prev) => {
-        const seen = new Set((prev ?? []).map((i) => i.activity_id));
-        const fresh = slice.filter((i) => !seen.has(i.activity_id));
-        return [...(prev ?? []), ...fresh];
-      });
-      setHasMore(slice.length > 0);
+    try {
+      const result = await fetchPage(rangeFrom, rangeTo, nextBeforeSeq);
+      if (generation !== generationRef.current) return; // 그 사이 첫 쪽을 다시 받았다 — 옛 조건의 응답은 버린다(토스트 · 권한 표시도 없음).
+      if (result.kind === 'forbidden') {
+        setForbidden(true);
+        return;
+      }
+      const page = result.kind === 'ok' ? result.page : null;
+      if (page) {
+        setItems((prev) => {
+          const seen = new Set((prev ?? []).map((i) => i.activity_id));
+          return [...(prev ?? []), ...page.items.filter((i) => !seen.has(i.activity_id))];
+        });
+        setNextBeforeSeq(page.nextBeforeSeq);
+      } else {
+        // story #4297(유나 후속 · PO) — 무음 실패였다. 알리고, 커서는 그대로라 버튼을 다시 누르면 다시 시도(결재함 알림과 같은 공용 문구).
+        addToast({ title: tc('loadMoreFailed'), type: 'error' });
+      }
+    } finally {
+      // 옛 조건의 요청이 늦게 끝나도 새 조건에서 도는 «더 보기»의 진행 표시를 끄지 않게 — 세대가 같을 때만 푼다(새 첫 쪽 로드가 이미 풀었다).
+      if (generation === generationRef.current) setLoadingMore(false);
     }
-    setOldestSince(since);
-    setLoadingMore(false);
   };
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
@@ -408,13 +432,19 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                   />
                 );
               })}
-              {hasMore ? (
+              {nextBeforeSeq !== null ? (
                 <li className="pt-3 text-center">
                   <Button variant="glass" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
                     {loadingMore ? tc('loading') : t('loadMore')}
                   </Button>
                 </li>
-              ) : null}
+              ) : (
+                // story #4297(유나 판정) — 버튼만 사라지면 실패인지 끝인지 못 가른다. 이 목록의 끝은 «기간 안의 끝»이라, 시작일이 있으면
+                // 더 이전으로 가는 길(시작일 앞당기기)을 말한다. 0건이면 이 목록 대신 빈 상태가 그려지고(위), 더 보기 실패는 커서가 남아 버튼이 그대로다.
+                <li className="pt-3 text-center text-xs text-muted-foreground">
+                  {rangeFrom ? t('endOfRange') : t('endOfAll')}
+                </li>
+              )}
             </ul>
           )}
         </div>

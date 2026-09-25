@@ -5253,6 +5253,8 @@
     "deliveredCount": "Delivered to {count}",
     "system": "System",
     "loadMore": "Load more",
+    "endOfRange": "That's all the activity in this range. Set an earlier From date to see older activity.",
+    "endOfAll": "You've reached the earliest activity.",
     "emptyTitle": "No activity yet",
     "emptyDesc": "Adjust the filters, or it accumulates here as the team acts.",
     "forbiddenTitle": "Access restricted",
