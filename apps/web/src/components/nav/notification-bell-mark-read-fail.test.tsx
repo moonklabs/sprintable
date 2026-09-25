@@ -154,3 +154,43 @@ describe('NotificationBell — 낙관 읽음 처리 실패 시 문장(story #363
     });
   });
 });
+
+// story #4295(까디르 P2 ①②) — «모두 읽음» 실패면 열린 목록도 바꾸기 전으로(배지만 다시 차고 목록은 전부 읽음 · 버튼 사라짐 = 한 화면 두 세계),
+// 보정용 안 읽음 수 재조회까지 망 오류여도 처리 안 된 거부가 새지 않는다.
+describe('NotificationBell — «모두 읽음» 실패 뒤 목록 · 배지가 같은 세계(story #4295)', () => {
+  const allReadButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+
+  it('⭐서버 실패 → 목록이 안 읽음으로 되돌아와 «모두 읽음» 버튼이 다시 보인다', async () => {
+    stubFetch(false);
+    await openBell();
+    expect(allReadButton(), '누르기 전').toBeTruthy();
+    await act(async () => { allReadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(allReadButton(), '실패 뒤 — 목록이 되돌아와 버튼이 남는다').toBeTruthy();
+  });
+
+  it('⭐읽음 요청 · 보정 재조회가 둘 다 망 오류여도 처리 안 된 거부 0', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/api/event-notifications?')) {
+          return new Response(JSON.stringify({ data: [unreadNotif('n1')], meta: { hasMore: false } }), {
+            status: 200, headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (init?.method === 'PATCH' || url.includes('/unread-count')) throw new TypeError('Failed to fetch');
+        return new Response('{}', { status: 200 });
+      }));
+      await openBell();
+      await act(async () => { allReadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+});

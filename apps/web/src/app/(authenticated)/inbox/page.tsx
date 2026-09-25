@@ -282,12 +282,20 @@ export default function InboxPage() {
   }, [nextCursor, loadingMore, addToast, t]);
 
   // 첫 쪽 불러오기 — 마운트 때와 «다시 시도»가 같이 쓴다. `isCancelled`는 마운트 effect가 언마운트 뒤 상태를 안 쓰게.
+  // story #4295(까디르) — 순번으로 늦게 온 옛 응답은 버린다(늦은 실패가 성공을 덮지 않게). 진행 중 표시(ref)는 가장 최근 호출의
+  // finally에서 푼다 — «다시 시도»는 그걸 보고 연타를 막는다(아래 retryFirstPage). 마운트 effect는 막지 않는다: 개발 모드 StrictMode의
+  // 이중 effect에서 첫 호출이 취소된 채 진행 중이라, 막으면 두 번째 호출이 출발하지 않아 영원히 «불러오는 중»이 된다.
+  const firstPageInFlightRef = useRef(false);
+  const firstPageSeqRef = useRef(0);
   const loadFirstPage = useCallback(async (isCancelled: () => boolean = () => false) => {
+    firstPageInFlightRef.current = true;
+    const seq = ++firstPageSeqRef.current;
+    const stale = () => isCancelled() || seq !== firstPageSeqRef.current;
     setLoading(true);
     setLoadFailed(false);
     try {
       const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
-      if (isCancelled()) return;
+      if (stale()) return;
       if (result) {
         setNotifications(result.notifications);
         setUnreadCount(result.unreadCount);
@@ -297,9 +305,14 @@ export default function InboxPage() {
         setLoadFailed(true);
       }
     } finally {
-      if (!isCancelled()) setLoading(false);
+      if (seq === firstPageSeqRef.current) firstPageInFlightRef.current = false;
+      if (!stale()) setLoading(false);
     }
   }, []);
+  const retryFirstPage = useCallback(() => {
+    if (firstPageInFlightRef.current) return;
+    void loadFirstPage();
+  }, [loadFirstPage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -616,7 +629,7 @@ export default function InboxPage() {
               // story #4295 — 못 불러온 것은 «알림 없음»과 다른 사실 — 결재 큐(gate-inbox-load-error)와 같은 모양 · 다시 시도.
               <div className="mx-3 mt-2 rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center" data-testid="inbox-notifications-load-error">
                 <p className="text-sm text-foreground">{t('notificationsLoadError')}</p>
-                <Button variant="outline" size="sm" className="mt-2" onClick={() => void loadFirstPage()}>
+                <Button variant="outline" size="sm" className="mt-2" onClick={retryFirstPage}>
                   {tCommon('retry')}
                 </Button>
               </div>

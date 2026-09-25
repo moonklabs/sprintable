@@ -2,7 +2,7 @@
 // story #4295 — 결재함 알림 목록: fetchInboxNotifications에 예외 처리가 없어 망 오류 · 깨진 JSON이면 load()가 던지고 setLoading(false)가
 // 안 불려 «불러오는 중»이 영원히 · «더 보기»도 loadingMore가 true로 막혔다. 읽음 처리도 응답을 안 봐 실패해도 화면은 «읽음».
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
@@ -179,3 +179,38 @@ describe('선출발 넘겨받은 응답이 실패여도 같은 실패 상자(sto
   });
 });
 
+// story #4295(까디르 P2 ③) — «다시 시도»가 loading 반영 전에 두 번 눌려도 요청은 하나 · 늦게 온 실패가 성공을 덮지 않는다.
+describe('«다시 시도» 연타 — 요청 하나(story #4295 까디르)', () => {
+  it('⭐실패 상자에서 두 번 연달아 눌러도 알림 요청 1건 · 목록이 선다', async () => {
+    stubFetch(['network', okPage([NOTIF('1')])]);
+    await mount();
+    const retry = buttonByText(koMessages.common.retry)!;
+    const before = vi.mocked(fetch).mock.calls.filter(([u, init]) => String(u).includes('/api/notifications') && (init as RequestInit | undefined)?.method !== 'PATCH').length;
+    await act(async () => {
+      retry.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      retry.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const after = vi.mocked(fetch).mock.calls.filter(([u, init]) => String(u).includes('/api/notifications') && (init as RequestInit | undefined)?.method !== 'PATCH').length;
+    expect(after - before).toBe(1);
+    expect(errorBox()).toBeNull();
+    expect(container.textContent).toContain('notif-1');
+  });
+
+  it('⭐StrictMode 이중 마운트 effect(개발 모드)에서도 첫 쪽이 선다 — 연타 가드가 마운트 호출을 막지 않는다', async () => {
+    stubFetch([okPage([NOTIF('1')])]);
+    const { default: InboxPage } = await import('./page');
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <TopBarProvider><InboxPage /></TopBarProvider>
+          </NextIntlClientProvider>
+        </StrictMode>,
+      );
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(skeletonCount()).toBe(0);
+    expect(container.textContent).toContain('notif-1');
+  });
+});

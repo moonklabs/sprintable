@@ -158,12 +158,19 @@ function isSyncDegraded(data: SseSyncStatus): boolean {
 // unread-count를 재fetch하면 "채팅 읽자마자 벨이 준다"가 30초 대기 없이 성립한다.
 const BELL_EXTRA_EVENT_NAMES = ['sync_status', 'conversation.read'];
 
-async function fetchUnreadCount(projectId?: string): Promise<number> {
+// story #4295(까디르) — 실패(망 오류 · 깨진 JSON · !ok)는 던지지 않고 null. 부르는 쪽은 값이 있을 때만 배지에 반영한다
+// (예전엔 !ok면 0이라 실패가 «안 읽음 0»으로 보였고, 망 오류는 `.then(setUnreadCount)` 호출처에서 처리 안 된 거부로 샜다).
+async function fetchUnreadCount(projectId?: string): Promise<number | null> {
   const params = projectId ? `?project_id=${projectId}` : '';
-  // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
-  const res = await fetchWithAuth(`/api/event-notifications/unread-count${params}`);
-  if (!res.ok) return 0;
-  const json = (await res.json()) as unknown;
+  let json: unknown;
+  try {
+    // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
+    const res = await fetchWithAuth(`/api/event-notifications/unread-count${params}`);
+    if (!res.ok) return null;
+    json = (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
     if (typeof obj['count'] === 'number') return obj['count'];
@@ -457,7 +464,7 @@ export function NotificationBell() {
       return;
     }
     if (eventName === 'conversation.read') {
-      void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
+      void fetchUnreadCount(projectId ?? undefined).then((count) => { if (count !== null) setUnreadCount(count); });
     }
   }, [projectId]);
 
@@ -473,7 +480,7 @@ export function NotificationBell() {
     let cancelled = false;
     const poll = async () => {
       const count = await fetchUnreadCount(projectId ?? undefined);
-      if (!cancelled) setUnreadCount(count);
+      if (!cancelled && count !== null) setUnreadCount(count);
     };
     void poll();
     intervalRef.current = setInterval(() => { void poll(); }, 30_000);
@@ -558,6 +565,7 @@ export function NotificationBell() {
 
   const handleMarkAllRead = useCallback(async () => {
     const readAt = new Date().toISOString();
+    const countBefore = unreadCount;
     // 낙관적 업데이트
     setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
     setUnreadCount(0);
@@ -567,9 +575,13 @@ export function NotificationBell() {
     if (!ok) {
       // story #3637(유나 silent-failure-sweep-3632) — 배지가 조용히 다시 차오르던 자리.
       addToast({ title: t('markAllReadFailed'), type: 'error' });
-      void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
+      // story #4295(까디르) — 열린 목록도 바꾸기 전으로(개별 읽음 롤백과 같은 문법). 이번에 «읽음»으로 바꾼 항목은 read_at이 정확히
+      // 이 readAt이다 — 그것만 되돌린다(원래 읽음이던 항목은 제 시각 그대로). 안 그러면 배지는 다시 차는데 목록은 전부 읽음 · 버튼도 사라졌다.
+      setNotifications((prev) => prev ? prev.map((n) => (n.read_at === readAt ? { ...n, read_at: null } : n)) : prev);
+      setUnreadCount(countBefore);
+      void fetchUnreadCount(projectId ?? undefined).then((count) => { if (count !== null) setUnreadCount(count); });
     }
-  }, [projectId, addToast, t]);
+  }, [projectId, addToast, t, unreadCount]);
 
   const handleNavigate = useCallback(
     (notification: EventNotification) => {
