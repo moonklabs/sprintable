@@ -52,8 +52,9 @@ const PATTERNS: { kind: FallbackKind; re: RegExp }[] = [
   { kind: 'question-mark', re: /(?:\?\?|\|\|)\s*['"`]\?['"`]/ },
   // 이름 표 조회 뒤 일반 폴백 — `memberMap[id]?.name ?? '—'` · `?? ''` · `|| '-'`(까디르 4651 P1)
   { kind: 'dash-fallback', re: new RegExp(String.raw`${NAME_TABLE_LOOKUP}\s*(?:\?\?|\|\|)\s*['"\x60](?:—|-|–|)['"\x60]`) },
-  // 이름 식이 이메일 통째로 — `name || full_name || user.email` · `m.name ?? m.email`
-  { kind: 'email-whole', re: /\b(?:name|full_name|display_name|displayName)\b[^;]*?(?:\?\?|\|\|)\s*(?:[A-Za-z_]+\??\.)*email\b(?!\s*[.(\[?])/ },
+  // 이름 식이 이메일 통째로 — `name || full_name || user.email` · `m.name ?? m.email`. 값을 만드는 자리(`=` · `:` · `return` 뒤)만 본다 —
+  // `if (name || m.email)` 같은 «있는지» 조건은 이름을 만들지 않는다(4638 trust-utils:138 헛잡힘으로 좁힘).
+  { kind: 'email-whole', re: /(?:[:=]|\breturn\b)\s*[^;]*?\b(?:name|full_name|display_name|displayName)\b[^;]*?(?:\?\?|\|\|)\s*(?:[A-Za-z_]+\??\.)*email\b(?!\s*[.(\[?])/ },
 ];
 
 export interface FallbackHit {

@@ -33,6 +33,12 @@ describe('findMemberNameFallbacks (story #4286 regression guard)', () => {
     expect(kinds("description={`${t('runId')}: ${run.id.slice(0, 8)}…`}")).toEqual([]);
   });
 
+  it('«있는지» 조건의 이메일은 잡지 않는다 — 이름을 만드는 값 자리만(4638 trust-utils 모양)', () => {
+    expect(kinds("if (name || m.email) lookup.set(m.id, { id: m.id, name, email: m.email ?? undefined, role: m.role ?? undefined });")).toEqual([]);
+    expect(kinds('const label = m.name || m.email;')).toEqual(['email-whole']);
+    expect(kinds('return m.display_name ?? m.email;')).toEqual(['email-whole']);
+  });
+
   it('주석 줄은 보지 않는다', () => {
     expect(kinds("// 예전엔 m.email?.split('@')[0] ?? '?'로 지어냈다")).toEqual([]);
   });
