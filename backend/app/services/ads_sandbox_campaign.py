@@ -37,8 +37,10 @@ _PAUSE_DELAYED_MARKER = "[sandbox:pause-delayed]"
 async def create_boost_campaign(
     client: httpx.AsyncClient, *, ad_account_id: str, access_token: str, object_story_id: str,
     budget_minor: int, currency: str, starts_at_iso: str, ends_at_iso: str, objective: str,
+    existing: dict | None = None,
 ) -> dict:
-    if _BUDGET_EXCEEDED_MARKER in objective:
+    """real과 같은 시그니처(story #4268 `existing` 포함). sandbox는 id가 결정적이라 이어 만들기와 새로 만들기의 결과가 같다."""
+    if _BUDGET_EXCEEDED_MARKER in objective and not (existing or {}).get("campaign_id"):
         raise MetaAdsCampaignError(
             "META_ADS_CAMPAIGN_CREATE_FAILED",
             "sandbox: [sandbox:budget-exceeded] marker simulation — ad account spend cap reached",
