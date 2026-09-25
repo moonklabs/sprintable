@@ -1962,3 +1962,58 @@ describe('KanbanBoard — 이름 없는 구성원(story #4284)', () => {
     expect(menu.textContent).not.toContain(koMessages.common.memberUnnamed);
   });
 });
+
+// story #4310 AC3 — 보드 요청이 응답 없이 걸려도 fetchWithAuth 시간 제한(30s) 뒤 화면이 풀린다. 예전엔 제한이 없어 스켈레톤이 CF 524(~100초)까지 그대로였다.
+// 실제 fetch처럼 신호가 끊겨야만 reject하는 가짜 fetch.
+describe('KanbanBoard — 걸린 요청은 30s 뒤 풀림(story #4310)', () => {
+  function stubHanging(hang: (pathname: string) => boolean) {
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      const u = new URL(url, 'http://localhost');
+      if (hang(u.pathname)) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+        });
+      }
+      if (u.pathname === '/api/stories') return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) });
+      if (u.pathname === '/api/sprints') return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      if (u.pathname === '/api/goals') return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) });
+      if (u.pathname === '/api/members') return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+  const skeleton = () => container.querySelector('[data-testid="kanban-columns-skeleton"]');
+  const loadError = () => container.querySelector('[data-testid="kanban-load-error"]');
+
+  it('⭐스토리 요청이 걸리면 30s 뒤 컬럼 자리에 오류 + 다시 시도(4663과 같은 모양) — 그 전엔 스켈레톤', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      stubHanging((p) => p === '/api/stories');
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(skeleton(), '30s 전엔 불러오는 중').not.toBeNull();
+      expect(loadError()).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(skeleton()).toBeNull();
+      expect(loadError()?.getAttribute('role')).toBe('alert');
+      expect(loadError()?.textContent).toContain((koMessages.board as unknown as Record<string, string>).boardLoadFailed);
+      expect(container.querySelector('[data-testid="kanban-load-retry"]')?.textContent).toBe(koMessages.common.retry);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐곁 요청(목표)만 걸려도 30s 뒤 보드가 그려짐 — 스켈레톤이 남지 않음(곁 요청은 null로 격리)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      stubHanging((p) => p === '/api/goals');
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(skeleton(), '30s 전엔 곁 요청을 기다리는 중').not.toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(skeleton()).toBeNull();
+      expect(loadError(), '스토리는 성공 — 오류 칸 아님').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
