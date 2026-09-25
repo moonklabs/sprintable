@@ -121,14 +121,20 @@ export function AgentsTopBarTitle() {
 export function StorageTopBarTitle({ summaryText }: { summaryText?: string }) {
   const tStorage = useTranslations('storage');
   return (
-    <div className="flex min-w-0 items-center gap-2.5">
-      <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{tStorage('breadcrumb')}</span>
-      <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">/</span>
+    // grow — 남는 폭을 알약 칸까지 내려보낸다(기준 폭은 안 바뀌어 칩 · 제목 자리 그대로). 없으면 칸이 받을 폭이 0이라 1440에서도 알약이 «…»(실측 18px).
+    <div className="flex min-w-0 grow items-center">
+      <span className="mr-2.5 hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{tStorage('breadcrumb')}</span>
+      <span className="mr-2.5 hidden shrink-0 text-[12px] text-muted-foreground sm:inline">/</span>
       <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{tStorage('title')}</h1>
+      {/* 유나 4688 — 알약이 붙으며 제목 묶음의 기준 폭이 커져 칩이 자리를 내주고 제목이 62px 왼쪽으로 튀었다(390 · 폴백이 먼저 서며 보이게 됨).
+          알약 칸은 너비 0에서 남는 폭만 채운다(`w-0 grow` — 묶음의 기준 폭에 안 섞임) · 알약 자체는 글자 폭 그대로 · 모자라면 말줄임(4672 의도).
+          제목과의 간격도 칸 **안**(알약의 왼쪽 여백)에 둔다 — 묶음의 gap · 칸의 margin은 너비 0 칸이어도 기준 폭에 14px를 더해 제목이 그만큼 튀었다(실측). */}
       {summaryText !== undefined ? (
-        <Badge variant="info" className="ml-1 min-w-0 shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
-          <span className="min-w-0 truncate">{summaryText}</span>
-        </Badge>
+        <span className="flex w-0 min-w-0 grow" data-testid="storage-summary-slot">
+          <Badge variant="info" className="ml-3.5 min-w-0 max-w-[calc(100%-0.875rem)] shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
+            <span className="min-w-0 truncate">{summaryText}</span>
+          </Badge>
+        </span>
       ) : null}
     </div>
   );
