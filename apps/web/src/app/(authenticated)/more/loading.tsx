@@ -4,5 +4,5 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton cards={0} rows={8} />;
+  return <PageSkeleton className="space-y-6 p-4" />;
 }

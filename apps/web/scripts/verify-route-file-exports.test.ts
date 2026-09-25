@@ -201,10 +201,12 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #3989(「일감」 흡수 3/N, rebase 시점 재정정 2026-09-22) — [ws]/[proj]/hypotheses/
   // page.tsx 신규(일감 「가설」 보기)로 106→107(이 브랜치 자체 기준 +1).
   // story #4221 — 죽은 app/dashboard/settings/error.tsx 삭제(그 경로는 redirect뿐이라 오류 경계가 뜰 일이 없음)로 107→106.
-  // story #4274 — 탭 · 메뉴 목적지 loading.tsx 12개 신설([ws]/[proj] · more · org-briefing · content · organization/ 여덟)로 106→118(위반 0건 그대로 — default export만).
-  it('실 트리(apps/web/src/app) — 라우트 파일 118개·위반 0건', () => {
+  // story #4274 — 탭 · 메뉴 목적지 loading.tsx 12개 신설([ws]/[proj] · more · org-briefing · content · organization/ 여덟)로 106→118,
+  // 까디르 검수 P2(v3 플래그 ON 목적지 today · connect-rules · (v3)/chat loading.tsx 셋)로 118→121, 일감 프레임 탭 줄을 품는 loading.tsx
+  // 넷(work-list · flow · epics · hypotheses — sprints · retro는 기존 파일 교체)으로 121→125(위반 0건 그대로 — default export만).
+  it('실 트리(apps/web/src/app) — 라우트 파일 125개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(118);
+    expect(fileCount).toBe(125);
     expect(violations).toEqual([]);
   }, 1000);
 });

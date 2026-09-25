@@ -4,5 +4,5 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton />;
+  return <PageSkeleton className="mx-auto w-full max-w-5xl space-y-6 p-6" />;
 }

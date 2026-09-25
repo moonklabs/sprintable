@@ -1,8 +1,12 @@
+import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
+  // story #4274(까디르 검수 P3) — PageSkeleton과 같게 화면 읽기 프로그램에 «불러오는 중» 상태를 알린다.
+  const t = useTranslations('common');
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col" role="status" aria-busy="true">
+      <span className="sr-only">{t('loading')}</span>
       <div className="border-b border-border px-4 py-3">
         <Skeleton className="h-5 w-24" />
       </div>
