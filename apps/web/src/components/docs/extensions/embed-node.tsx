@@ -5,6 +5,9 @@ import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { ExternalLink, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { safeHttpUrl } from '../lib/safe-content-url';
+import { cardVariants } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 // ─── URL Helpers ──────────────────────────────────────────────────────────────
 
@@ -59,7 +62,7 @@ export function detectEmbedService(url: string): EmbedInfo {
 
 // ─── Embed View ───────────────────────────────────────────────────────────────
 
-function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
+export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
   const t = useTranslations('docs');
   const url = (node.attrs.url as string) ?? '';
   const [editUrl, setEditUrl] = useState(url);
@@ -123,15 +126,24 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             </div>
           )}
           {type === 'fallback' && (
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40"
-            >
-              <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-foreground/80">{url}</span>
-            </a>
+            // story #4324 — 렌더러와 같은 거름(`safeHttpUrl`): http/https만 링크로. 그 밖(javascript: 등)은 링크 없이 글자만(작성자가
+            // 고칠 수 있게 주소는 보인다 — 편집기 자기 글). React 19가 javascript: href를 막아도 같은 싱크 부류라 한 원천으로 거른다.
+            safeHttpUrl(url) ? (
+              <a
+                href={safeHttpUrl(url) ?? undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40"
+              >
+                <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-foreground/80">{url}</span>
+              </a>
+            ) : (
+              <div className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm opacity-70')}>
+                <Link2 className="size-4 flex-shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{t('embedLinkBlocked')}</span>
+              </div>
+            )
           )}
         </>
       ) : (

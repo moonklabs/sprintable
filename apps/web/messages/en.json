@@ -3527,6 +3527,8 @@
     "copyMarkdown": "Copy Markdown",
     "deleteDoc": "Delete",
     "createFailed": "Failed to create document",
+    "embedLinkBlocked": "This link can't be opened",
+    "attachFileBlocked": "This file can't be opened",
     "newDocDefaultTitle": "Untitled",
     "mermaidRenderFailed": "Render failed",
     "mermaidRendering": "Rendering…",

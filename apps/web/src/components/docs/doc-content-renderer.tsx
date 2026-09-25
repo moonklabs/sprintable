@@ -26,6 +26,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { useParams, useRouter } from 'next/navigation';
 import { docUrl } from './lib/doc-project-url';
 import { remarkWikiLinks } from './lib/remark-wiki-links';
+import { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
 
 interface DocContentRendererProps {
   content: string;
@@ -55,6 +56,10 @@ interface DocContentRendererProps {
   /** story #4313(유나 4673 판) — 페이지 임베드가 열리는 문서로 안 풀릴 때(없는 · 지운 문서) 카드 문구(에디터 임베드 오류 상태와 같은 «문서를 찾을 수 없어요»).
    * 필수 — 옵셔널 + 영문 기본값이면 새 호출부가 빼먹어도 조용히 통과한다(untitledEmbedLabel과 같은 이유 · #3935). */
   embedNotFoundLabel: string;
+  /** story #4324 — 일반 링크 임베드 주소가 http/https가 아니라 열지 않을 때 카드 문구(«이 링크는 열 수 없어요»). 필수(#3935와 같은 이유). */
+  unsafeLinkLabel: string;
+  /** story #4324 — 옛 첨부 본문 주소가 위험해 열지 않을 때 둘째 줄(«이 파일은 열 수 없어요»). 필수. */
+  unsafeFileLabel: string;
   /** label shown when a mermaid diagram fails to render. */
   mermaidRenderFailedLabel?: string;
   /** label shown while a mermaid diagram is rendering. */
@@ -257,6 +262,8 @@ export function DocContentRenderer({
   assetImageErrorLabel = 'This image could not be loaded',
   untitledEmbedLabel,
   embedNotFoundLabel,
+  unsafeLinkLabel,
+  unsafeFileLabel,
   mermaidRenderFailedLabel = 'Render failed',
   mermaidRenderingLabel = 'Rendering...',
   mathRenderFailedLabel = 'KaTeX render failed',
@@ -493,10 +500,17 @@ export function DocContentRenderer({
     const embedBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="embedBlock"]'));
     embedBlocks.forEach((block) => {
       block.setAttribute('data-doc-part', 'embed'); // story #4316 — 일반 링크 카드(`no-underline`)가 뿌리 밑줄에 지던 자리
-      const url = block.getAttribute('data-url') ?? '';
-      if (!url) return;
-      const { type, embedUrl } = detectEmbedService(url);
+      const rawUrl = block.getAttribute('data-url') ?? '';
+      if (!rawUrl.trim()) return;
+      // story #4324 — http/https만 링크 · 틀로. 그 밖(javascript: · data: · 상대 경로 등)은 주소를 글자로만 보인다(누를 수 있는 것 0).
+      const url = safeHttpUrl(rawUrl);
       block.innerHTML = '';
+      if (!url) {
+        // 유나 스티어 — 날 주소는 화면에 싣지 않는다(공격 글자 노출 · 복사 유도 0) · 한 줄 «이 링크는 열 수 없어요».
+        block.innerHTML = inertCardHtml('link', null, unsafeLinkLabel);
+        return;
+      }
+      const { type, embedUrl } = detectEmbedService(url);
       if (type === 'youtube') {
         const wrapper = document.createElement('div');
         wrapper.className = 'aspect-video w-full overflow-hidden rounded-xl border border-border';
@@ -536,7 +550,8 @@ export function DocContentRenderer({
     const fileCleanup = fileBlocks.map((block) => {
       block.setAttribute('data-doc-part', 'file'); // story #4316
       const filename = block.getAttribute('data-filename') ?? 'file';
-      const data = block.getAttribute('data-file-data') ?? '';
+      // story #4324 — 옛 첨부 본문은 data: URL이면서 문서로 실행되지 않는 MIME일 때만 내려받기 링크로(javascript: 값을 a.href → a.click()으로 실행하지 않게).
+      const data = safeAttachmentDataUrl(block.getAttribute('data-file-data') ?? '') ?? '';
       const refAssetId = block.getAttribute('data-asset-id') ?? '';
       const size = Number(block.getAttribute('data-size') ?? 0);
       const sizeLabel = size < 1024 * 1024
@@ -546,19 +561,18 @@ export function DocContentRenderer({
       // Public share viewer: attachments are auth-gated (private bucket + signed URL),
       // so they'd 401 here — render an inert placeholder (no leak, no broken render).
       if (publicMode) {
-        block.innerHTML = `
-          <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 opacity-70">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
-              <p class="text-xs opacity-60">${escapeHtmlText(publicAttachmentLabel)}</p>
-            </div>
-          </div>`;
+        block.innerHTML = inertCardHtml('file', filename, publicAttachmentLabel);
+        return () => {};
+      }
+      // story #4324 — 옛 첨부 본문이 위험한 주소(javascript: · data:text/html 등)이고 자산 참조도 없으면 열 수 없는 파일 — 이름 + «이 파일은 열 수 없어요» ·
+      // 누름 · 링크 0(유나 스티어 · 기존 «삭제됐거나 권한 없음» 안내는 이 경우 사실이 아니라 쓰지 않음).
+      if (!data && !refAssetId && (block.getAttribute('data-file-data') ?? '').trim()) {
+        block.innerHTML = inertCardHtml('file', filename, unsafeFileLabel);
         return () => {};
       }
 
       block.innerHTML = `
-        <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/40 transition-colors">
+        <div class="${cn(ATTACHMENT_CARD_SURFACE, 'cursor-pointer hover:bg-muted/40 transition-colors')}">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
@@ -677,7 +691,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, unsafeLinkLabel, unsafeFileLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
 
   // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
   useEffect(() => {
@@ -1019,6 +1033,27 @@ export const RENDERER_INTERNAL_MARKERS = [
   'data-embed-state',
   'data-doc-asset-loading',
 ] as const;
+
+// 첨부 카드 면(정상 · 공개 보기 · 열 수 없음 공통) — 공용 cardVariants(손코딩 카드 가드 · 링크 카드와 같은 subtle 면). 예전 `hsl(var(--border))`는
+// 토큰이 hex라 무효 색이었다(테두리가 글자색 · 배경 투명 — 유나 짚음 · 4324).
+const ATTACHMENT_CARD_SURFACE = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+
+// story #4324(유나 스티어) — 열 수 없는 콘텐츠의 비활성 카드: 공개 보기 첨부 자리와 같은 틀(같은 카드 면 + 아이콘 + 흐린 글자 · 링크 · 호버 · 초점 0).
+const INERT_FILE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const INERT_LINK_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7"/><path d="M15 7h2a5 5 0 0 1 4 8"/><line x1="8" x2="12" y1="12" y2="12"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+function inertCardHtml(icon: 'file' | 'link', title: string | null, note: string): string {
+  return `
+          <div class="${cn(ATTACHMENT_CARD_SURFACE, 'opacity-70')}">
+            ${icon === 'file' ? INERT_FILE_ICON : INERT_LINK_ICON}
+            <div class="min-w-0 flex-1">
+              ${title != null ? `<p class="truncate text-sm font-medium">${escapeHtmlText(title)}</p>` : ''}
+              <p class="${title != null ? 'text-xs opacity-60' : 'text-sm'}">${escapeHtmlText(note)}</p>
+            </div>
+          </div>`;
+}
+
+// story #4324 — URL 거름 도우미는 편집기 노드와 한 곳(`lib/safe-content-url.ts`)에서 — 여기선 기존 import 호환으로 다시 내보낸다.
+export { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
 
 export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {
