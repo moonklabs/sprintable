@@ -58,7 +58,7 @@ function tc(key: string): string {
 describe('auditActorProps (story #2923 AQ4 — actor_type을 human/agent prop으로 정확히 갈라 넘긴다)', () => {
   it('routes actor_type=agent through the agent prop, not human', () => {
     const props = auditActorProps(item({ actor_id: 'm-1', actor_name: '미르코', actor_type: 'agent' }), tc);
-    expect(props.agent).toEqual({ name: '미르코', initial: '미' });
+    expect(props.agent).toEqual({ name: '미르코' });
     expect(props.human).toBeUndefined();
   });
 
@@ -91,7 +91,7 @@ describe('auditActorProps (story #2923 AQ4 — actor_type을 human/agent prop으
 
   it('⭐같은 상황(actor_id 있음·actor_name null)이 agent면 agent 슬롯에 같은 폴백이 뜬다', () => {
     const props = auditActorProps(item({ actor_id: 'm-5', actor_name: null, actor_type: 'agent' }), tc);
-    expect(props.agent).toEqual({ name: '이름 없는 구성원', initial: '이' });
+    expect(props.agent).toEqual({ name: '이름 없는 구성원' });
     expect(props.human).toBeUndefined();
   });
 });

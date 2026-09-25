@@ -39,8 +39,9 @@ export function HypothesisVerdictCard({
     | null;
   // story #2036 AC3 — 사람이 닫았으면 closed_by='human'이 outcome_result에 실린다(BE 컬럼
   // 없음·JSONB 자체 적재). 없으면 cron 자동 채점(hypothesis_scorer.py)이 닫은 것.
+  // [SID:4286] resolveName이 없을 때 id 전체를 이름으로 쓰지 않는다(빈 칸).
   const closedByLabel = result?.closed_by === 'human'
-    ? t('closedByHuman', { name: result.closed_by_member_id ? (resolveName?.(result.closed_by_member_id) ?? result.closed_by_member_id) : t('owner') })
+    ? t('closedByHuman', { name: result.closed_by_member_id ? (resolveName?.(result.closed_by_member_id) ?? '') : t('owner') })
     : result?.scored_at ? t('closedByAuto') : null;
 
   return (

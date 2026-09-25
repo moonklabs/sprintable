@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { memberOrAgentLabel } from '@/lib/member-display';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { RECIPE_STAGE_LABEL_SLUGS, recipeStageLabel } from '@/lib/recipe-stage-label';
 import { membersForKind, stageApprovalSurface, stageMemberKind, type RoleActorKinds } from '@/lib/recipe-role-slots';
@@ -75,6 +76,7 @@ export function RecipeRoleMappingFields({
   approvalNote: (surface: string) => string;
 }) {
   const t = useTranslations('organization');
+  const tc = useTranslations('common');
   // sandbox 포함 — status로 걸러 disconnected 등은 아예 안 보인다(잘못 고를 표면 자체를
   // 없앤다, "고른 뒤 실패"보다 "애초에 못 고름"이 싸다).
   const activeChannelConnections = channelConnections.filter((c) => c.status === 'active');
@@ -139,7 +141,7 @@ export function RecipeRoleMappingFields({
                     {memberKind === 'human' ? personPlaceholder : memberKind === 'either' ? memberPlaceholder : agentPlaceholder}
                   </option>
                   {membersForKind(members, memberKind).map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
+                    <option key={a.id} value={a.id}>{memberOrAgentLabel({ name: a.name, type: 'agent' }, tc)}</option>
                   ))}
                 </select>
                 {surfaceUnderPicker ? (

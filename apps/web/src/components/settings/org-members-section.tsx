@@ -17,6 +17,7 @@ import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
+import { memberDisplayLabel } from '@/lib/member-display';
 import { copyTextSafely } from '@/lib/clipboard';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -24,7 +25,7 @@ import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/
 interface OrgMember {
   id: string;
   user_id: string | null;
-  name: string;
+  name: string | null;
   email?: string;
   role: 'owner' | 'admin' | 'member';
   joined_at?: string;
@@ -111,7 +112,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setMembers((raw.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
-        name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? '?',
+        // [SID:4286] 이름 칸 폴백 — 이메일 앞부분 · user_id 조각 · 날것 «?»를 이름으로 지어내지 않는다(선생님 상수
+        // «이메일은 이름 칸에 안 싣는다» · 3755번 AC1). 이름이 없으면 null 그대로 두고 그릴 때 memberDisplayLabel로.
+        name: m.name?.trim() || null,
         email: m.email ?? undefined,
         role: m.role,
         joined_at: m.created_at,
@@ -402,7 +405,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
             return (
               <MemberRow
                 key={member.id}
-                name={member.name}
+                name={memberDisplayLabel(member.name, tc)}
                 email={member.email}
                 className="border-0 rounded-none bg-transparent"
                 meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
@@ -466,7 +469,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         return (
           <RemoveOrgMemberDialog
             open
-            member={{ id: target.id, name: target.name, email: target.email }}
+            member={{ id: target.id, name: memberDisplayLabel(target.name, tc), email: target.email }}
             onCancel={() => setRemoveDialogMemberId(null)}
             onConfirm={async () => {
               await handleRemove(target.id);

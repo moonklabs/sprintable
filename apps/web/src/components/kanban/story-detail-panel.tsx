@@ -958,10 +958,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const ciResult = mergeGate?.neutral_facts?.['ci_result'];
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
-  // story #4284 — 실존인데 이름 없는 구성원은 «이름 없는 구성원», 목록에 없는 id만 예전처럼 id 앞 6자(memberNameById).
-  // story #4284 — 신원 이름(머리글자)은 name 그대로 · 읽는 글자는 label(실존인데 이름 없음 → «이름 없는 구성원» · 목록에 없는 id → 예전처럼 id 앞 6자).
-  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, story.human_verified_by.slice(0, 6)) : null;
-  const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by] ? memberMap[story.human_verified_by]!.name : story.human_verified_by.slice(0, 6)) : null;
+  // [SID:4286] 검증자 id 조각(앞 6자)을 이름 칸 · 머리글자에 싣지 않는다 — 읽는 글자: 표에 있는데 이름 빔 → «이름 없는 구성원», 표에 없음 →
+  // «알 수 없는 구성원». 신원(머리글자)은 이름 그대로 · 없거나 표에 없으면 null → 사람 아이콘(#4284 name/label 계약).
+  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, tc('memberUnknown')) : null;
+  const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? null) : null;
   const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
     story.human_verified && humanVerifiedByName && story.human_verified_at
       ? { variant: 'verified', humanName: humanVerifiedByIdentity, humanLabel: humanVerifiedByIdentity ? undefined : humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
@@ -979,7 +979,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       ? {
           density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
           human: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : undefined,
-          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc), initial: initials(proofAgent.name) } : undefined,
+          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : tc('agentUnnamed') } : undefined,
           evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
         }
       : null;
@@ -1538,7 +1538,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 // 그 옛 board 키는 폐기).
                 dod: story.acceptance_criteria?.trim() || null,
                 owner: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : null,
-                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc), initial: initials(proofAgent.name) } : undefined,
+                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : tc('agentUnnamed') } : undefined,
                 onGoalMore: scrollToDescriptionSection,
                 onDodMore: scrollToAcceptanceCriteriaSection,
               }}

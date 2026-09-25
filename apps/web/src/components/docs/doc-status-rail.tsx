@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { memberLookup } from '@/lib/member-display';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CheckCircle, ExternalLink, RotateCcw, Shield, ShieldCheck, ShieldX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -87,7 +88,10 @@ export function useDocGateData(docId: string, status: string | undefined) {
   }, [load]);
 
   const t = useTranslations('docs');
-  const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
+  const tc = useTranslations('common');
+  // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». 이름 표는 게이트 · 개정 목록과
+  // 같은 load(Promise.all)에서 함께 채워져, 이름을 찾는 시점엔 늘 다 불러온 상태(불러오는 중 갈래 없음 → loaded: true).
+  const resolveName = (id: string | null | undefined) => (id ? (memberLookup(memberNames, id, tc, { loaded: true })?.label ?? '') : '—');
   const state = toState(status);
   const isApprover = state === 'pending' && gate?.can_approve === true;
   // ⚠️PR#3384 QA CRITICAL — doc_approval은 org posture가 permissive가 아닌 한 항상 high

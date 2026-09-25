@@ -1,16 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { memberDisplayLabel, memberNameById, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
+import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberNameById, memberOrAgentLabel, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
-  const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원' };
-  return table[key] ?? key;
-}
-
-// chats 네임스페이스(unknownMember는 t('common')이 아니라 t('chats') 쪽 키 — 실 호출부와
-// 동형으로 별도 함수).
-function tChats(key: string): string {
-  const table: Record<string, string> = { unknownMember: '알 수 없는 구성원' };
+  const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원', memberUnknown: '알 수 없는 구성원', agentUnnamed: '이름 없는 에이전트' };
   return table[key] ?? key;
 }
 
@@ -66,18 +59,18 @@ describe('publishHistorySenderLabel — story #3755', () => {
 // 구성원」(orphan)과 「이름 없는 구성원」(실존·표시명 없음)을 가른다.
 describe('participantDisplayLabel — story #3758', () => {
   it('name이 있으면 resolved 무관 그대로 돌린다', () => {
-    expect(participantDisplayLabel({ name: '피오', resolved: true }, tChats, t)).toBe('피오');
+    expect(participantDisplayLabel({ name: '피오', resolved: true }, t)).toBe('피오');
   });
 
   // ⭐되돌리면 RED — resolved=false(진짜 orphan)면 name 값과 무관하게 「알 수 없는 구성원」.
   it('⭐resolved=false면 「알 수 없는 구성원」(orphan — email/uuid 지어내기 금지)', () => {
-    expect(participantDisplayLabel({ name: null, resolved: false }, tChats, t)).toBe('알 수 없는 구성원');
+    expect(participantDisplayLabel({ name: null, resolved: false }, t)).toBe('알 수 없는 구성원');
   });
 
   // ⭐되돌리면 RED — resolved=true인데 name이 null(실존 구성원, 표시명만 없음)이면
   // 「이름 없는 구성원」이어야 한다(orphan과 다른 문구 — 같은 사실이 아니므로).
   it('⭐resolved=true인데 name이 null이면 「이름 없는 구성원」(orphan과 다른 문구)', () => {
-    expect(participantDisplayLabel({ name: null, resolved: true }, tChats, t)).toBe('이름 없는 구성원');
+    expect(participantDisplayLabel({ name: null, resolved: true }, t)).toBe('이름 없는 구성원');
   });
 
   // ⭐되돌리면 RED — `resolved` 필드 자체가 없는(레거시/아직 안 지나간) 호출부는 BE
@@ -85,7 +78,86 @@ describe('participantDisplayLabel — story #3758', () => {
   // falsy로 처리해 무조건 「알 수 없는 구성원」으로 떨어지면 이름 있는 기존 참여자들이
   // 전부 이 문구로 잘못 뜬다(실제로 최초 구현에서 이 회귀가 났었다).
   it('⭐resolved 필드 자체가 없으면(undefined) "실존"으로 읽어 name을 그대로 쓴다', () => {
-    expect(participantDisplayLabel({ name: '피오' }, tChats, t)).toBe('피오');
+    expect(participantDisplayLabel({ name: '피오' }, t)).toBe('피오');
+  });
+});
+
+// [SID:4286] id→이름 표로 찾는 자리 — 갈래 넷 · id 조각 0.
+describe('memberLookup 글자 갈래 — story #4286', () => {
+  const ID = '05f52181-aaaa-bbbb-cccc-000000000001';
+  const L = { loaded: true };
+  const label = (tbl: Record<string, string | null>, id: string, loaded = true) => memberLookup(tbl, id, t, { loaded })?.label ?? null;
+  it('표에 이름이 있으면 그 이름(불러오는 중이어도 먼저 온 값은 쓴다)', () => {
+    expect(label({ [ID]: '페드루' }, ID)).toBe('페드루');
+    expect(label({ [ID]: '페드루' }, ID, false)).toBe('페드루');
+  });
+  it('⭐표에 있는데 이름이 null · 빈 문자열이면 «이름 없는 구성원»', () => {
+    expect(label({ [ID]: null }, ID)).toBe('이름 없는 구성원');
+    expect(label({ [ID]: '' }, ID)).toBe('이름 없는 구성원');
+  });
+  it('⭐표를 아직 불러오는 중이면 null — «알 수 없음»을 먼저 띄우지 않는다', () => {
+    expect(memberLookup({}, ID, t, { loaded: false })).toBeNull();
+  });
+  it('⭐표를 다 불러왔는데 없는 id면 «알 수 없는 구성원» — id 앞 조각을 싣지 않는다', () => {
+    const out = label({}, ID);
+    expect(out).toBe('알 수 없는 구성원');
+    expect(out).not.toContain(ID.slice(0, 6));
+  });
+  it('프로토타입 이름(constructor · toString)이 id여도 표에 없는 것으로 읽는다', () => {
+    expect(memberLookup({}, 'constructor', t, L)?.label).toBe('알 수 없는 구성원');
+    expect(memberLookup({}, 'toString', t, L)?.label).toBe('알 수 없는 구성원');
+  });
+  it('{ name } 객체 표(memberMap 류)도 같은 갈래', () => {
+    expect(memberLookup({ a: { name: '담롱' } }, 'a', t)?.label).toBe('담롱');
+    expect(memberLookup({ a: { name: null } }, 'a', t)).toEqual({ label: '이름 없는 구성원', fallback: true });
+    expect(memberLookup({ a: { name: '담롱' } }, 'b', t)).toEqual({ label: '알 수 없는 구성원', fallback: true });
+  });
+});
+// [SID:4286 · 유나 결정 4] 폴백 여부를 돌려 «님» 없는 문장 키를 고르게 · 겹친 폴백에만 id 꼬리.
+describe('memberLookup · disambiguateFallbackLabels · memberNameById — story #4286', () => {
+  const L = { loaded: true };
+  it('memberLookup: 실명은 fallback false · 이름 빔/표에 없음은 fallback true · 불러오는 중 null', () => {
+    expect(memberLookup({ a: '페드루' }, 'a', t, L)).toEqual({ label: '페드루', fallback: false });
+    expect(memberLookup({ a: null }, 'a', t, L)).toEqual({ label: '이름 없는 구성원', fallback: true });
+    expect(memberLookup({}, 'a', t, L)).toEqual({ label: '알 수 없는 구성원', fallback: true });
+    expect(memberLookup({}, 'a', t, { loaded: false })).toBeNull();
+  });
+  it('⭐같은 폴백이 서로 다른 id 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리', () => {
+    const m = disambiguateFallbackLabels([
+      { id: '05f52181-aaaa', label: '알 수 없는 구성원', fallback: true },
+      { id: '9c3e7d10-bbbb', label: '알 수 없는 구성원', fallback: true },
+      { id: 'x1', label: '페드루', fallback: false },
+      { id: 'x2', label: '이름 없는 구성원', fallback: true },
+    ]);
+    expect(m.get('05f52181-aaaa')).toBe('알 수 없는 구성원 · 05f52181');
+    expect(m.get('9c3e7d10-bbbb')).toBe('알 수 없는 구성원 · 9c3e7d10');
+    expect(m.get('x1')).toBe('페드루');
+    expect(m.get('x2')).toBe('이름 없는 구성원');
+  });
+  it('폴백이 하나뿐이거나 같은 id가 두 번이면 꼬리 없음', () => {
+    const m = disambiguateFallbackLabels([
+      { id: 'a', label: '알 수 없는 구성원', fallback: true },
+      { id: 'a', label: '알 수 없는 구성원', fallback: true },
+    ]);
+    expect(m.get('a')).toBe('알 수 없는 구성원');
+  });
+  it('memberNameById(4646 모양 · fallback 필수): 목록에 있고 이름 빔 → «이름 없는 구성원» · 목록에 없음 → 호출부가 넘긴 fallback', () => {
+    const map = { a: { name: '담롱' }, b: { name: null } };
+    const unknown = t('memberUnknown');
+    expect(memberNameById(map, 'a', t, unknown)).toBe('담롱');
+    expect(memberNameById(map, 'b', t, unknown)).toBe('이름 없는 구성원');
+    expect(memberNameById(map, 'zz', t, unknown)).toBe('알 수 없는 구성원');
+    expect(memberNameById(map, 'zz', t, '—')).toBe('—');
+    expect(memberNameById(undefined, 'zz', t, unknown)).toBe('알 수 없는 구성원');
+  });
+});
+
+describe('memberOrAgentLabel — story #4286(유나 결정 1 · 2)', () => {
+  it('이름이 있으면 그대로 · 비면 에이전트 «이름 없는 에이전트» / 사람 «이름 없는 구성원»', () => {
+    expect(memberOrAgentLabel({ name: '담롱', type: 'agent' }, t)).toBe('담롱');
+    expect(memberOrAgentLabel({ name: null, type: 'agent' }, t)).toBe('이름 없는 에이전트');
+    expect(memberOrAgentLabel({ name: '', type: 'human' }, t)).toBe('이름 없는 구성원');
+    expect(memberOrAgentLabel({ name: null }, t)).toBe('이름 없는 구성원');
   });
 });
 

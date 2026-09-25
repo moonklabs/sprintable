@@ -2,11 +2,18 @@
 // reading-panel-stack.test.tsx와 동형 관례) 추출된 순수함수만 직접 잰다.
 import { describe, expect, it } from 'vitest';
 import { createTranslator } from 'next-intl';
-import { filterUnconnectedAgentParticipants } from './chat-view';
+import { agentNotConnectedBannerText, filterUnconnectedAgentParticipants } from './chat-view';
+import enMessages from '../../../messages/en.json';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import koMessages from '../../../messages/ko.json';
 
 const tChats = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'chats' });
+const tCommon = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'common' });
+const tChatsEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'chats' });
+const tCommonEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'common' });
+// [SID:4286] createTranslator는 키가 엄격한 타입이라, 앱의 useTranslations t처럼 (key: string) 모양으로 넘긴다.
+type LooseT = (key: string, values?: Record<string, string>) => string;
+const asT = (fn: unknown): LooseT => fn as LooseT;
 
 const ME = 'me-1';
 
@@ -90,6 +97,29 @@ describe('agentNotConnectedBanner — 조사(story #4120)', () => {
   it('받침 있는 이름 → «이»', () => {
     const name = '담롱';
     expect(tChats('agentNotConnectedBanner', { name, josa: pickIGaJosa(name) }))
+      .toBe('담롱이 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.');
+  });
+});
+
+// [SID:4286 · 유나 결정 1] 이름 없는 에이전트 — 날것 «?» · id 조각 없이 «이름 없는 에이전트» + 조사(폴백 글자에서) · en은 관사 붙은 문장.
+describe('agentNotConnectedBannerText — 이름 없는 에이전트(story #4286)', () => {
+  it('ko: name null → «이름 없는 에이전트가 아직 연결되지 않았어요 — …»(조사 «가»)', () => {
+    expect(agentNotConnectedBannerText({ name: null }, asT(tChats), asT(tCommon)))
+      .toBe('이름 없는 에이전트가 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.');
+  });
+  it('ko: 빈 문자열도 같은 폴백 · 날것 «?» 0', () => {
+    const out = agentNotConnectedBannerText({ name: '' }, asT(tChats), asT(tCommon));
+    expect(out.startsWith('이름 없는 에이전트가 ')).toBe(true);
+    expect(out).not.toContain('?');
+  });
+  it('en: name null → «An unnamed agent isn\'t connected yet — …»', () => {
+    expect(agentNotConnectedBannerText({ name: null }, asT(tChatsEn), asT(tCommonEn)))
+      .toBe("An unnamed agent isn't connected yet — your message may not go through.");
+  });
+  it('이름이 있으면 종전 그대로(조사 포함)', () => {
+    expect(agentNotConnectedBannerText({ name: '올리베이라' }, asT(tChats), asT(tCommon)))
+      .toBe('올리베이라가 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.');
+    expect(agentNotConnectedBannerText({ name: '담롱' }, asT(tChats), asT(tCommon)))
       .toBe('담롱이 아직 연결되지 않았어요 — 메시지가 전달되지 않을 수 있어요.');
   });
 });

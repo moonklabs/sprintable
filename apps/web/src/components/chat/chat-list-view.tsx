@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { MessageSquare, Users } from 'lucide-react';
+import { Bot, MessageSquare, UserRound, Users } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -112,10 +112,10 @@ function formatParticipantNames(
   // 식별자를 아예 안 실어 보내게 고쳤으니 FE 폴백도 그 계약과 짝을 맞춘다). story #3758
   // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
   // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
-  if (type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc);
+  if (type === 'dm') return participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc);
   const MAX = 3;
-  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
-  const visible = others.slice(0, MAX).map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  if (others.length <= MAX) return others.map((p) => participantDisplayLabel(p, tc)).join(', ');
+  const visible = others.slice(0, MAX).map((p) => participantDisplayLabel(p, tc)).join(', ');
   return `${visible} ${t('participantsOthers', { count: others.length - MAX })}`;
 }
 
@@ -199,7 +199,7 @@ function ConversationRow({
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
           {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
               동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
-          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, t, tc)}
+          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc)}
         </span>
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
@@ -217,7 +217,8 @@ function ConversationRow({
               key={p.member_id}
               className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
             >
-              {p.name?.slice(0, 1) ?? '?'}
+              {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘(에이전트면 Bot · muted). */}
+              {p.name ? p.name.slice(0, 1) : (p.type === 'agent' ? <Bot className="h-3 w-3" aria-hidden /> : <UserRound className="h-3 w-3" aria-hidden />)}
               {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
               {p.type === 'agent' && (
                 <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
@@ -233,7 +234,7 @@ function ConversationRow({
         <span className="truncate">
           {isAgentInConv && agentCount > 0
             ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, t, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
+            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
           }
         </span>
       </div>

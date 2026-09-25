@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { memberOrAgentLabel } from '@/lib/member-display';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -331,7 +332,7 @@ export function MarketingRecipeApplyDialog({
             data-testid="creator-agent-select"
           >
             <option value="">{memberPlaceholder(slot.memberType)}</option>
-            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {members.map((m) => <option key={m.id} value={m.id}>{memberOrAgentLabel(m, tc)}</option>)}
           </select>
         </div>
       );

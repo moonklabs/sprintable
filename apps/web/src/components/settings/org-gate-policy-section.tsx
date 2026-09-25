@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 
@@ -113,7 +114,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
         if (cancelled) return;
         if (res.ok) {
           const json = (await res.json().catch(() => null)) as { data?: EligibleApprover[] } | null;
-          const { options } = buildApproverPickerOptions(json?.data ?? []);
+          const { options } = buildApproverPickerOptions(json?.data ?? [], undefined, { unnamed: tc('memberUnnamed') });
           setApproverOptions(options);
         }
       } finally {
@@ -124,7 +125,8 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // [SID:4286] tc(이름 없는 후보 라벨)는 로케일이 같으면 같은 함수 — 조회는 사실상 한 번 그대로.
+  }, [tc]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -157,11 +159,14 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   };
 
   const approverSelectOptions: SelectOption[] = [{ value: '', label: t('approverUnset') }, ...approverOptions];
+  // [SID:4286] 지정 승인자가 후보(owner/admin)에 없을 때 UUID 통째를 이름 칸에 싣던 것 — 후보 목록을 다 불러왔으면
+  // «알 수 없는 구성원», 불러오는 중이면 빈 칸(자리 칸이 «불러오는 중» placeholder를 이미 보인다).
+  const approverLabelTable = Object.fromEntries(approverOptions.map((o) => [o.value, o.label])) as Record<string, string>;
   const currentApproverLabel = approverId
-    ? (approverOptions.find((o) => o.value === approverId)?.label ?? approverId)
+    ? (memberLookup(approverLabelTable, approverId, tc, { loaded: !loadingApprovers })?.label ?? '')
     : t('approverUnset');
   const currentRecipeApproverLabel = recipeApproverId
-    ? (approverOptions.find((o) => o.value === recipeApproverId)?.label ?? recipeApproverId)
+    ? (memberLookup(approverLabelTable, recipeApproverId, tc, { loaded: !loadingApprovers })?.label ?? '')
     : t('approverUnset');
 
   return (

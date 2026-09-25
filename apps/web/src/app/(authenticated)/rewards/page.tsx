@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import { memberOrAgentLabel } from '@/lib/member-display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,7 @@ type Period = 'all' | 'daily' | 'weekly' | 'monthly';
 
 export default function RewardsPage() {
   const t = useTranslations('rewards');
+  const tc = useTranslations('common');
   const shellT = useTranslations('shell');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
@@ -184,7 +186,7 @@ export default function RewardsPage() {
                     onValueChange={setMemberId}
                     options={[
                       { value: '', label: t('selectMember') },
-                      ...members.map((m) => ({ value: m.id, label: m.name })),
+                      ...members.map((m) => ({ value: m.id, label: memberOrAgentLabel(m, tc) })),
                     ]}
                   />
                 </div>

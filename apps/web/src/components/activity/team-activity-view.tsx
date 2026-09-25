@@ -12,6 +12,7 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notification-display';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
+import { memberLookup, memberOrAgentLabel } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -208,6 +209,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [toDate, setToDate] = useState(initTo);
 
   const [members, setMembers] = useState<TeamMember[]>([]);
+  // [SID:4286] 팀원 목록을 다 불러왔는지(성공 · 실패 모두 끝) — 활동 목록이 먼저 오면 불러오는 중엔 이름 칸을 비워 둔다.
+  const [membersLoaded, setMembersLoaded] = useState(false);
 
   useEffect(() => {
     fetchWithAuth(`/api/members?project_id=${projectId}`)
@@ -217,15 +220,21 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       })
       .catch((err) => {
         console.error('팀 활동용 팀원 목록 로드 실패', err);
-      });
+      })
+      .finally(() => setMembersLoaded(true));
   }, [projectId]);
+  const nameById = useMemo(
+    () => Object.fromEntries(members.map((m) => [m.id, m.name])) as Record<string, string | null>,
+    [members],
+  );
 
   const memberName = useCallback(
     (id: string | null): string => {
       if (!id) return t('system'); // actor.id=null → "시스템" graceful
-      return members.find((m) => m.id === id)?.name ?? `#${id.slice(0, 8)}`;
+      // [SID:4286] 구성원 id 조각(#앞 8자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸.
+      return memberLookup(nameById, id, tc, { loaded: membersLoaded })?.label ?? '';
     },
-    [members, t],
+    [nameById, membersLoaded, t, tc],
   );
 
   // story #4297 — 최신부터 한 쪽(order=desc) · 이전 쪽은 before_seq 커서. 예전엔 오름차순 LIMIT를 받아 뒤집어, 창 안 활동이 200건을 넘으면
@@ -314,7 +323,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   // ─── Dropdown options ──────────────────────────────────────────────────────
   const actorOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
-    ...members.map((m) => ({ value: m.id, label: m.name ?? tc('unknown') })),
+    ...members.map((m) => ({ value: m.id, label: memberOrAgentLabel(m, tc) })),
   ];
 
   const objectTypeOptions: SelectOption[] = [

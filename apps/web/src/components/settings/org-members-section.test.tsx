@@ -436,3 +436,29 @@ describe('OrgMembersSection — 초대 링크 복사 실패 시 원문 노출(st
     expect(container.querySelector('[data-testid="org-members-copy-failed-raw-invite-url"]')).toBeNull();
   });
 });
+
+// [SID:4286] 이름 없는 구성원의 이름 칸 — 이메일 앞부분 · user_id 조각 · 날것 «?»를 지어내지 않고 «이름 없는 구성원».
+describe('OrgMembersSection — 이름 칸 폴백(story #4286)', () => {
+  it('⭐name null — 이름 칸은 «이름 없는 구성원» · 이메일 앞부분/user_id 조각/«?» 0(이메일은 제 줄에만)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/org-members') {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: 'm3', user_id: 'u-abcdef123456', name: null, email: 'noname@example.com', role: 'member', created_at: '2026-09-01T00:00:00Z' }] }),
+        };
+      }
+      if (url === '/api/organizations/org-1/invites') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u-admin-self' } }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrgMembersSection orgId="org-1" currentRole="admin" />)); });
+    await flush();
+    const nameCells = Array.from(container.querySelectorAll('div.font-medium')).map((el) => el.textContent ?? '');
+    expect(nameCells).toContain(koMessages.common.memberUnnamed);
+    expect(nameCells).not.toContain('noname');
+    expect(nameCells).not.toContain('?');
+    expect(container.textContent).not.toContain('u-abcdef');
+    expect(container.textContent).toContain('noname@example.com');
+  });
+});

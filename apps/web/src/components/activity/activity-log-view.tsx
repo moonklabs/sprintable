@@ -11,7 +11,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { memberDisplayLabel } from '@/lib/member-display';
+import { memberDisplayLabel, memberOrAgentLabel } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
@@ -211,7 +211,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   const actorOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
-    ...members.map((m) => ({ value: m.id, label: m.name ?? tc('unknown') })),
+    ...members.map((m) => ({ value: m.id, label: memberOrAgentLabel(m, tc) })),
   ];
 
   const entityTypeOptions: SelectOption[] = [
@@ -355,11 +355,11 @@ export function auditContextTooltip(item: ActivityLogItem): string | undefined {
 // 구분한다.
 export function auditActorProps(item: ActivityLogItem, t: (key: string) => string): {
   human?: { name: string; role: string };
-  agent?: { name: string; initial: string };
+  agent?: { name: string };
 } {
   if (!item.actor_id) return {}; // 진짜 액터 없음(시스템 액션) — 빈 슬롯 유지.
   const name = memberDisplayLabel(item.actor_name, t);
-  if (item.actor_type === 'agent') return { agent: { name, initial: name.slice(0, 1) } };
+  if (item.actor_type === 'agent') return { agent: { name } };
   return { human: { name, role: item.actor_type ?? 'human' } };
 }
 

@@ -869,7 +869,8 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     expect(container.textContent).not.toContain('human-1');
   });
 
-  it('발행자 이름 해소 실패(team-members 목록에 없음) — UUID 앞 8자로 graceful 폴백한다', async () => {
+  // [SID:4286] 발행자가 목록에 없으면 id 조각 대신 «알 수 없는 구성원»(3755번 AC1 «id 문자열 0»).
+  it('발행자 이름 해소 실패(team-members 목록에 없음) — «알 수 없는 구성원» · UUID 조각 0', async () => {
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       gates: APPROVED_GATE,
       publication: {
@@ -884,7 +885,8 @@ describe('ContentPostEditPage — story #3386(S8 발행됨·URL·행위자)', ()
     await flush();
     await flush();
 
-    expect(container.textContent).toContain('human-un');
+    expect(container.textContent).toContain(koMessages.common.memberUnknown);
+    expect(container.textContent).not.toContain('human-un');
   });
 
   it('⭐발행됨 + 재승인된 새 버전(라이브 해시≠승인 해시) — 「재발행」 라벨로 버튼이 다시 열린다(AC2)', async () => {

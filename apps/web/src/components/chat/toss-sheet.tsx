@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFo
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
+import { pickIGaJosa } from '@/lib/korean-particle';
 
 interface TossParticipant {
   member_id: string;
@@ -33,7 +34,6 @@ interface TossConversation {
 function conversationDisplayName(
   conv: TossConversation,
   currentTeamMemberId: string,
-  t: (key: string) => string,
   tc: (key: string) => string,
 ): string {
   if (conv.title) return conv.title;
@@ -43,8 +43,8 @@ function conversationDisplayName(
   // 참가자 이름 해석 실패(BE participant.name=null)도 '?' 대신 같은 문구. story #3758
   // (9번째) — resolved 비트로 「알 수 없는 구성원」(orphan)과 「이름 없는 구성원」(실존·
   // 표시명 없음)을 갈라 그린다(participantDisplayLabel).
-  if (others.length === 0) return conv.type === 'dm' ? 'DM' : t('unknownMember');
-  return others.map((p) => participantDisplayLabel(p, t, tc)).join(', ');
+  if (others.length === 0) return conv.type === 'dm' ? 'DM' : tc('memberUnknown');
+  return others.map((p) => participantDisplayLabel(p, tc)).join(', ');
 }
 
 export interface TossSheetProps {
@@ -55,6 +55,8 @@ export interface TossSheetProps {
   currentTeamMemberId: string;
   designatedApproverId: string;
   designatedApproverName: string | null;
+  // [SID:4286 · 유나 결정 4] 결재자 이름이 폴백(«이름 없는 구성원» · «알 수 없는 구성원»)이면 «님» 없는 설명 문장으로.
+  designatedApproverFallback?: boolean;
   /** 200 성공 — inserted=신규 삽입 여부(story #3094, GateTossResponse.inserted). false=멱등
    * no-op(대상에 이미 카드 사본이 있었음). 호출부가 문구 분기+게이트 재조회를 담당. */
   onTossed: (targetConversationTitle: string, inserted: boolean) => void;
@@ -79,7 +81,7 @@ export interface TossSheetProps {
  * 다시 골라도(멱등 자체는 무해) 사전에 "이미 있음"이 보인다.
  */
 export function TossSheet({
-  open, onOpenChange, gateId, projectId, currentTeamMemberId, designatedApproverId, designatedApproverName,
+  open, onOpenChange, gateId, projectId, currentTeamMemberId, designatedApproverId, designatedApproverName, designatedApproverFallback = false,
   onTossed, onAlreadyResolved,
 }: TossSheetProps) {
   const t = useTranslations('chats');
@@ -201,8 +203,8 @@ export function TossSheet({
     );
     const q = query.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((c) => conversationDisplayName(c, currentTeamMemberId, t, tc).toLowerCase().includes(q));
-  }, [conversations, designatedApproverId, query, currentTeamMemberId, t]);
+    return list.filter((c) => conversationDisplayName(c, currentTeamMemberId, tc).toLowerCase().includes(q));
+  }, [conversations, designatedApproverId, query, currentTeamMemberId, tc]);
 
   const submit = async () => {
     if (!selectedId) return;
@@ -220,7 +222,7 @@ export function TossSheet({
         const inserted = body?.inserted ?? true;
         setAlreadyThereIds((prev) => new Set(prev).add(selectedId));
         onOpenChange(false);
-        onTossed(target ? conversationDisplayName(target, currentTeamMemberId, t, tc) : '', inserted);
+        onTossed(target ? conversationDisplayName(target, currentTeamMemberId, tc) : '', inserted);
         return;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
@@ -238,14 +240,15 @@ export function TossSheet({
   };
 
   // story #3203 — 결재자 이름 미해석 폴백도 같은 사람언어 문구로(예전엔 id 앞 8자 노출).
-  const approverLabel = designatedApproverName ?? t('unknownMember');
+  const approverLabel = designatedApproverName ?? tc('memberUnknown');
+  const approverIsFallback = designatedApproverName == null || designatedApproverFallback;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="mx-auto max-w-md">
         <SheetHeader>
           <SheetTitle>{t('approvalRequestTossSheetTitle')}</SheetTitle>
-          <SheetDescription>{t('approvalRequestTossSheetDescription', { name: approverLabel })}</SheetDescription>
+          <SheetDescription>{t(approverIsFallback ? 'approvalRequestTossSheetDescriptionFallback' : 'approvalRequestTossSheetDescription', { name: approverLabel, josa: pickIGaJosa(approverLabel) })}</SheetDescription>
         </SheetHeader>
         <div className="px-4">
           <Input
@@ -295,7 +298,7 @@ export function TossSheet({
             )
           ) : (
             candidates.map((c) => {
-              const name = conversationDisplayName(c, currentTeamMemberId, t, tc);
+              const name = conversationDisplayName(c, currentTeamMemberId, tc);
               const selected = selectedId === c.id;
               // story #3094(유나 규격 §2 .pick.done) — 이 세션에서 이미 토스 시도한 대상.
               const alreadyThere = alreadyThereIds.has(c.id);

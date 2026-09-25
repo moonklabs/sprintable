@@ -101,7 +101,7 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
 
   it('renders the agent avatar distinctly from the human avatar when an agent is present', () => {
     const markup = renderWithIntl(
-      <ProofCapsule {...BASE} agent={{ name: '미르코', initial: '미' }} density="full" />,
+      <ProofCapsule {...BASE} agent={{ name: '미르코' }} density="full" />,
     );
     expect(markup).toContain('실행 미르코');
     expect(markup).toContain('책임 윤재');
@@ -152,7 +152,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
       <ProofCapsule
         {...BASE}
         density="row"
-        agent={{ name: '미르코', initial: '미' }}
+        agent={{ name: '미르코' }}
         gate={{ action: '병합', tone: 'ready' }}
       />,
     );
@@ -270,7 +270,7 @@ describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)',
   it('renders a rounded-full avatar (agent shape) for an agent actor', () => {
     const { human: _human, ...withoutHuman } = BASE;
     const markup = renderWithIntl(
-      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코', initial: '미' }} />,
+      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코' }} />,
     );
     expect(markup).toContain('rounded-full');
     expect(markup).toContain('미르코');
@@ -375,7 +375,7 @@ describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어�
     const markup = renderWithIntlEn(
       <ProofCapsule
         {...BASE}
-        agent={{ name: 'Alex', initial: 'A' }}
+        agent={{ name: 'Alex' }}
         now="2h ago"
         evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', proofCount: 3 }}
         gate={{ risk: 'low', action: 'Open merge gate' }}

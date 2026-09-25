@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { memberLookup } from '@/lib/member-display';
+import { pickIGaJosa } from '@/lib/korean-particle';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
   Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown,
@@ -52,6 +54,8 @@ interface AuditEvent {
   key: string;
   kind: AuditKind;
   name: string;
+  // [SID:4286] 이름이 폴백(«이름 없는 구성원» · «알 수 없는 구성원»)이면 «님» 없는 문장 키로(유나 결정 4).
+  nameFallback?: boolean;
   at: string;
   version?: number;
   note?: string | null;
@@ -79,6 +83,7 @@ export function DocGateSection({
   onTransitioned: () => void;
 }) {
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const { currentTeamMemberId } = useDashboardContext();
@@ -137,7 +142,10 @@ export function DocGateSection({
   const isDraft = status === 'draft';
   // 자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author). FE=가시성·실 authz=BE 403.
   const isApprover = status === 'pending' && gate?.can_approve === true;
-  const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
+  // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». 이름 표는 게이트 · 개정 목록과
+  // 같은 load(Promise.all)에서 함께 채워져, 이름을 찾는 시점엔 늘 다 불러온 상태(불러오는 중 갈래 없음 → loaded: true).
+  const resolveNameInfo = (id: string | null | undefined) => (id ? memberLookup(memberNames, id, tc, { loaded: true }) : null);
+  const resolveName = (id: string | null | undefined) => (id ? (resolveNameInfo(id)?.label ?? '') : '—');
   // story #3493 — gate.resolved_at·ev.at은 "기록"(정본 formatRelativeTime).
   const fmtDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
@@ -181,7 +189,7 @@ export function DocGateSection({
       const json = await res.json().catch(() => null) as {
         data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
       } | null;
-      const { options, hasDuplicateNames } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      const { options, hasDuplicateNames } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId, { unnamed: tc('memberUnnamed') });
       setApproverOptions(options);
       setApproverHasDuplicateNames(hasDuplicateNames);
     } catch {
@@ -256,15 +264,16 @@ export function DocGateSection({
       key: `rev-${rev.id}`,
       kind: i === 0 ? 'request' : 'resubmit',
       name: resolveName(rev.created_by),
+      nameFallback: resolveNameInfo(rev.created_by)?.fallback ?? false,
       at: rev.created_at ?? '',
       version: i + 1,
     });
   });
   if (gate && gate.resolved_at) {
     if (gate.status === 'approved' || gate.status === 'confirmed') {
-      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', name: resolveName(gate.resolver_id), at: gate.resolved_at });
+      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', name: resolveName(gate.resolver_id), nameFallback: resolveNameInfo(gate.resolver_id)?.fallback ?? false, at: gate.resolved_at });
     } else if (gate.status === 'rejected' || gate.status === 'denied') {
-      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', name: resolveName(gate.resolver_id), at: gate.resolved_at, note: gate.resolution_note });
+      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', name: resolveName(gate.resolver_id), nameFallback: resolveNameInfo(gate.resolver_id)?.fallback ?? false, at: gate.resolved_at, note: gate.resolution_note });
     }
   }
   auditEvents.sort((a, b) => b.at.localeCompare(a.at)); // 최신 우선
@@ -431,7 +440,7 @@ export function DocGateSection({
                     </span>
                     <div className="min-w-0">
                       <p className="text-xs text-foreground">
-                        {t('docGateAuditBy', { name: ev.name, action: t(am.labelKey) })}
+                        {t(ev.nameFallback ? 'docGateAuditByFallback' : 'docGateAuditBy', { name: ev.name, josa: pickIGaJosa(ev.name), action: t(am.labelKey) })}
                         {ev.version ? <span className="text-muted-foreground"> (v{ev.version})</span> : null}
                       </p>
                       <p className="mt-px text-[10.5px] text-muted-foreground">{fmtDate(ev.at)}</p>

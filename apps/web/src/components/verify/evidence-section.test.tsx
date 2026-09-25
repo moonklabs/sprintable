@@ -87,7 +87,8 @@ describe('EvidenceSection (SSR snapshot — §7 상태 매트릭스 + P0-04 Clai
     expect(markup).not.toContain('에이전트 주장');
   });
 
-  it('falls back to a short id + generic label when the verifier is not in memberMap (no-fiction — never invents a name)', () => {
+  // [SID:4286] id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없으면 «알 수 없는 구성원»(3755번 AC1 «id 문자열 0»).
+  it('verifier not in memberMap → «Unknown member»-class label, never an id fragment (no-fiction — never invents a name)', () => {
     const markup = renderToStaticMarkup(
       wrap(
         <EvidenceSection
@@ -101,7 +102,8 @@ describe('EvidenceSection (SSR snapshot — §7 상태 매트릭스 + P0-04 Clai
         />,
       ),
     );
-    expect(markup).toContain('deadbe');
+    expect(markup).toContain(koMessages.common.memberUnknown);
+    expect(markup).not.toContain('deadbe');
     expect(markup).not.toContain('undefined');
   });
 });

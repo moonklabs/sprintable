@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { memberOrAgentLabel } from '@/lib/member-display';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -906,7 +907,7 @@ export default function RetroSessionPage() {
                         <OperatorSelect value={newActionAssigneeId} onChange={(e) => setNewActionAssigneeId(e.target.value)} className="w-auto">
                           <option value="">{t('actionUnassigned')}</option>
                           {members.filter((member) => !isSystemPublisher(member.runtime_type)).map((member) => (
-                            <option key={member.id} value={member.id}>{member.name}</option>
+                            <option key={member.id} value={member.id}>{memberOrAgentLabel(member, tc)}</option>
                           ))}
                         </OperatorSelect>
                         <Button

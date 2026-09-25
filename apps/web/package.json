@@ -62,6 +62,7 @@
     "verify:no-handrolled-card": "tsx scripts/verify-no-handrolled-card.ts",
     "verify:no-hardcoded-aria-label": "tsx scripts/verify-no-hardcoded-aria-label.ts",
     "verify:no-hardcoded-app-domain": "tsx scripts/verify-no-hardcoded-app-domain.ts",
+    "verify:no-member-name-fallback": "tsx scripts/verify-no-member-name-fallback.ts",
     "verify:nav-v3-single-source": "tsx scripts/verify-nav-v3-single-source.ts",
     "verify:no-new-repeated-row-action-names": "tsx scripts/verify-repeated-row-action-names.ts",
     "verify:no-fetch-response-without-ok-check": "tsx scripts/verify-no-fetch-response-without-ok-check.ts",

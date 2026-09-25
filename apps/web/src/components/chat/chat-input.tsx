@@ -740,7 +740,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
                 // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
                 // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
-                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, t, tc)}</option>
+                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
               ))}
             </select>
             <div className="relative min-w-0 flex-1">

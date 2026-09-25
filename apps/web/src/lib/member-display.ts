@@ -65,19 +65,19 @@ export function memberNameById(
 }
 
 // story #3758(9번째, PO 決 2026-09-09) — 대화 참여자 전용. `resolved === false`(진짜
-// orphan — member/alias 해소 자체가 실패)는 t('unknownMember')(「알 수 없는 구성원」,
-// 낱말 정 적용 — chats.unknownMember 값 자체는 이 스토리가 갱신) · 그 외(실존 구성원,
+// orphan — member/alias 해소 자체가 실패)는 tc('memberUnknown')(「알 수 없는 구성원」 · story #4286에서
+// chats.unknownMember를 common.memberUnknown으로 모음) · 그 외(실존 구성원,
 // 표시명만 없을 수 있음)는 memberDisplayLabel로 「이름 없는 구성원」/실명. activity-log-view.tsx
 // auditActorProps(actor_id 유무로 가름)·publishHistorySenderLabel(sender_id 유무)과 같은
 // 모양 — 여기는 신호가 BE가 직접 실어 보내는 `resolved` 비트라는 점만 다르다.
 export function participantDisplayLabel(
   p: { name: string | null; resolved?: boolean },
-  t: (key: string) => string,
   tc: (key: string) => string,
 ): string {
   // BE ResolvedMember.resolved 기본값(True)과 짝 — 필드 자체가 없는 호출부(레거시 캐시·
   // 아직 안 지나간 필드)는 "모른다"가 아니라 "실존"으로 읽는다. orphan만 명시 false.
-  if (p.resolved === false) return t('unknownMember');
+  // [SID:4286] «알 수 없는 구성원»은 common.memberUnknown 하나로 모았다(chats.unknownMember 폐기 · PO 決).
+  if (p.resolved === false) return tc('memberUnknown');
   return memberDisplayLabel(p.name, tc);
 }
 
@@ -98,4 +98,63 @@ export function publishHistorySenderLabel(
 ): string {
   if (!item.sender_id) return t('eventPublishHistoryUnknownSender');
   return memberDisplayLabel(item.sender_name, tc);
+}
+
+// story #4284 — id로 구성원 이름을 찾을 때 «목록에 있는데 이름이 없음»(→ memberDisplayLabel의 «이름 없는 구성원»)과
+// «목록에 없음»(→ 호출부가 정한 unknownFallback · 예: «—»)을 가른다. 예전 `memberMap[id]?.name ?? fallback`은 이름이 null인 실존
+// 구성원까지 fallback(id 조각 등)으로 떨어뜨려, 식별자를 이름처럼 보이던 #3755 클래스와 같은 모양이 됐다. `t`는 common 네임스페이스.
+// [SID:4286] unknownFallback 기본값 = «알 수 없는 구성원»(common.memberUnknown) — id 조각을 fallback으로 넘기지 않는다(3755번 AC1 «id 문자열 0»).
+export function memberNameById(
+  memberMap: Record<string, { name: string | null }> | undefined,
+  id: string,
+  t: (key: string) => string,
+  unknownFallback: string = t('memberUnknown'),
+): string {
+  const member = memberMap?.[id];
+  return member ? memberDisplayLabel(member.name, t) : unknownFallback;
+}
+
+// [SID:4286] memberNameById 위에 두 갈래를 더한 조회(PO 決 2026-09-24 · 헬퍼 하나로 · 4646 뼈대):
+//   표를 아직 불러오는 중 → null(호출부는 글자 없음 · 자리표시 — «알 수 없음»을 띄웠다가 곧 이름으로 바뀌면 거짓)
+//   fallback 여부 → «님» 없는 문장 키를 고르게(유나 결정 4 · «알 수 없는 구성원의 결재…»)
+// 표 값은 이름 문자열(memberNames 류)이든 { name } 객체(memberMap 류)든 받는다. 다른 프로젝트 구성원처럼 «표가 좁아서» 없는 것도
+// 후속 카드 전까지는 «알 수 없는 구성원»으로 선다(누군지 모름은 거짓이 아니고 id 조각보다 정직 — PR 본문 지름길 표시).
+// Object.hasOwn — 표가 평범한 객체라 'constructor' 같은 id가 프로토타입 값으로 새지 않게. 표 불러오기가 실패로 끝나도 loaded=true.
+export function memberLookup(
+  table: Readonly<Record<string, string | null | undefined | { name?: string | null }>> | undefined,
+  id: string,
+  t: (key: string) => string,
+  opts: { loaded: boolean } = { loaded: true },
+): { label: string; fallback: boolean } | null {
+  if (table && Object.hasOwn(table, id)) {
+    const v = table[id];
+    const name = v && typeof v === 'object' ? v.name : v;
+    return name ? { label: name, fallback: false } : { label: t('memberUnnamed'), fallback: true };
+  }
+  if (!opts.loaded) return null;
+  return { label: t('memberUnknown'), fallback: true };
+}
+
+// [SID:4286 · 유나 결정 4] 한 목록 안에서 같은 폴백 글자(«알 수 없는 구성원» 등)가 서로 다른 id 둘 이상에 서면 그 폴백에만
+// id 앞 8자 꼬리를 붙여 가른다(4282 신뢰 센터 같은 이름 꼬리와 같은 규칙). 실명 · 겹치지 않는 폴백은 그대로.
+export function disambiguateFallbackLabels(
+  items: ReadonlyArray<{ id: string; label: string; fallback: boolean }>,
+): Map<string, string> {
+  const idsByFallback = new Map<string, Set<string>>();
+  for (const it of items) if (it.fallback) (idsByFallback.get(it.label) ?? idsByFallback.set(it.label, new Set()).get(it.label)!).add(it.id);
+  const out = new Map<string, string>();
+  for (const it of items) {
+    const shared = it.fallback && (idsByFallback.get(it.label)?.size ?? 0) > 1;
+    out.set(it.id, shared ? `${it.label} · ${it.id.slice(0, 8)}` : it.label);
+  }
+  return out;
+}
+
+// [SID:4286 · 유나 결정 1 · 2] 사람 · 에이전트가 섞인 목록의 이름 칸 — 이름이 비면 에이전트는 «이름 없는 에이전트», 사람은 «이름 없는 구성원».
+export function memberOrAgentLabel(
+  m: { name?: string | null; type?: string | null },
+  tc: (key: string) => string,
+): string {
+  if (m.name) return m.name;
+  return m.type === 'agent' ? tc('agentUnnamed') : tc('memberUnnamed');
 }

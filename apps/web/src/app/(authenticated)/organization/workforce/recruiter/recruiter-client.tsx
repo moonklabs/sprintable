@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { memberOrAgentLabel } from '@/lib/member-display';
 import {
   Check, CheckCircle2, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
   Palette, Cog, Search, ClipboardList, Briefcase, IdCard, RotateCw, Loader2,
@@ -1178,7 +1179,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">{t('agentSelectPlaceholder')}</option>
-                      {(existingAgents ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      {(existingAgents ?? []).map((a) => <option key={a.id} value={a.id}>{memberOrAgentLabel({ name: a.name, type: 'agent' }, tc)}</option>)}
                     </select>
                   )}
                   <p className="flex items-start gap-1.5 text-xs text-info">
