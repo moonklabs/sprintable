@@ -378,18 +378,21 @@ export function StorageView({ projectId }: { projectId: string }) {
   // 요약 칩: 로드된 집합 기준(전체 카운트 전용 엔드포인트 부재 — 가정/NOTE).
   const totalBytes = useMemo(() => items.reduce((sum, a) => sum + (a.size_bytes || 0), 0), [items]);
 
+  const summaryText = storageSummaryText(t, items.length, totalBytes, nextCursor !== null);
   const topBarTitle = useMemo(
     () => (
+      // story #4277(PO 402 라이브) — 전부 shrink-0이라 폰에서 «N개 자산 · 용량» 알약이 상단바 밖으로 말줄임 없이 잘렸다.
+      // 문서 상단바와 같은 관례: 폰(sm 미만)은 브레드크럼(«작업 공간 /»)을 숨기고 · 화면 이름(h1)은 온전히 · 알약이 먼저 양보해 말줄임(전체 글자는 title).
       <div className="flex min-w-0 items-center gap-2.5">
-        <span className="shrink-0 text-[12px] text-muted-foreground">{t('breadcrumb')}</span>
-        <span className="shrink-0 text-[12px] text-muted-foreground">/</span>
+        <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{t('breadcrumb')}</span>
+        <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">/</span>
         <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{t('title')}</h1>
-        <Badge variant="info" className="ml-1 shrink-0 font-bold">
-          {storageSummaryText(t, items.length, totalBytes, nextCursor !== null)}
+        <Badge variant="info" className="ml-1 min-w-0 shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
+          <span className="min-w-0 truncate">{summaryText}</span>
         </Badge>
       </div>
     ),
-    [t, items.length, totalBytes, nextCursor],
+    [t, summaryText],
   );
 
   const supportsInlinePanel = detailPanel.supportsInlinePanel;
