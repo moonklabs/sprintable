@@ -2114,6 +2114,12 @@ jobs:
       - name: "Verify accent-color contrast (story #4128 regression guard)"
         run: pnpm --filter web verify:accent-color-contrast
 
+      # story #4315(PO · high) — 밝은 테마 문서 본문 링크 1.25:1(옅은 틴트 토큰 brand-soft를 글자로 씀). 브랜드 글자 토큰
+      # --brand-text(밝은 = brand-strong · 어두운 = brand-soft)가 양 테마 배경 · 카드 · 칩 틴트에서 4.5:1 이상인지 +
+      # brand-soft를 글자색으로 쓰는 자리 0(dark: 전용 제외)인지.
+      - name: "Verify brand text contrast (story #4315 regression guard)"
+        run: pnpm --filter web verify:brand-text-contrast
+
       # story #4125(라이브 실측, 페드루 PO 2026-09-21) — globals.css 최상위(레이어 밖) 단일-
       # 클래스 선택자 규칙 재유입 가드. Cascade Layers 스펙상 레이어 밖 규칙은 명시도·순서
       # 무관하게 모든 @layer를 항상 이긴다 — `.proof-surface`가 최상위에 있어 같은 요소의
