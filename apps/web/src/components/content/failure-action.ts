@@ -16,9 +16,11 @@ export type CommandStatus =
 // «자동 재시도를 멈췄어요»가 된다(아래 deriveFailureAction 무변).
 export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent';
 
+// story #4290(까디르 QA ④ · PO 06:40Z) — `retryable`은 서버 한 판정(`command_retryable` = 보는 사람이 지금 다시 시도할 수 있는가)을
+// 그대로 옮긴 값이다. 호출부가 넘길 때만 실린다(모르면 없음) — 배지는 이 값이 false면 버튼을 켜지 않는다(화면이 상태로 따로 가르지 않음).
 export type FailureAction =
-  | { kind: 'blocked' }
-  | { kind: 'needs_check' }
+  | { kind: 'blocked'; retryable?: boolean }
+  | { kind: 'needs_check'; retryable?: boolean }
   | { kind: 'auto_retry'; nextRetryAt: string | null }
   // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
   // dead_letter로 접어(publication_command.py:695-698) 위 kind:'needs_check' 갈래는
@@ -33,7 +35,7 @@ export type FailureAction =
   // check→dead_letter, 재시도 대상 아님) 그동안 이 갈래는 reasonCode를 아예 안 봐
   // BE가 아는 사유(사용량 소진·리셋 시각)를 화면이 못 읽고 일반 dead_letter/
   // needs_check 문구만 보여줬다 — 원인은 아는데 모른다고 말하는 결함.
-  | { kind: 'dead_letter'; needsRecheck: boolean; reasonCode: string | null; reasonResetAt: string | null }
+  | { kind: 'dead_letter'; needsRecheck: boolean; reasonCode: string | null; reasonResetAt: string | null; retryable?: boolean }
   | { kind: 'voided'; reasonCode: string | null }
   // story #4264 ④ — 사유 문장만 · 버튼 0(재시도 개념이 없다).
   | { kind: 'blocked_unapproved'; reasonCode: string | null }
@@ -107,6 +109,8 @@ export interface FailureActionInput {
   reasonResetAt?: string | null;
   /** BE #3425(PR#3776) 서버 파생 — 'awaiting_container'면 이미지 컨테이너 처리 중(§17-15). */
   processingKind?: 'awaiting_container' | string | null;
+  /** story #4290(까디르 QA ④) — 서버 `command_retryable`. 넘기면 멈춤 갈래(blocked · needs_check · dead_letter)에 그대로 실린다. */
+  retryable?: boolean | null;
 }
 
 /**
@@ -119,6 +123,15 @@ export interface FailureActionInput {
  * 있는 것을 막는다 — 판단을 사람에게 넘기는 쪽이 어느 사고도 안 낸다").
  */
 export function deriveFailureAction(input: FailureActionInput): FailureAction | undefined {
+  const action = deriveFailureKind(input);
+  if (!action || input.retryable == null) return action;
+  if (action.kind === 'blocked' || action.kind === 'needs_check' || action.kind === 'dead_letter') {
+    return { ...action, retryable: input.retryable };
+  }
+  return action;
+}
+
+function deriveFailureKind(input: FailureActionInput): FailureAction | undefined {
   if (input.commandStatus === 'voided') return { kind: 'voided', reasonCode: input.reasonCode ?? null };
   if (input.commandStatus === 'blocked_unapproved') return { kind: 'blocked_unapproved', reasonCode: input.reasonCode ?? null };
   // story #3402 갭(2026-09-10) — needsRecheck는 dead_letter로 접히기 直前의 failure_kind가

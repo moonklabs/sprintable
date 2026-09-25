@@ -57,11 +57,18 @@ from app.services.insight_snapshots import (
 )
 
 
-def _command_failure_fields(command: PublicationCommand | None) -> dict:
-    """story #4264 — 채널 포스트 목록 응답(routers/channel_posts.py)과 같은 네 필드 · 같은 형식."""
+def _command_failure_fields(command: PublicationCommand | None, *, viewer_is_human: bool = False) -> dict:
+    """story #4264 — 채널 포스트 목록 응답(routers/channel_posts.py)과 같은 네 필드 · 같은 형식.
+    story #4290(까디르 QA ④) — 목록과 같은 한 판정 `command_retryable`도(보는 사람 기준 · `viewer_can_retry`)."""
     if command is None:
-        return {"failure_kind": None, "next_retry_at": None, "command_reason_code": None, "command_reason_reset_at": None}
+        return {
+            "failure_kind": None, "next_retry_at": None, "command_reason_code": None, "command_reason_reset_at": None,
+            "command_retryable": False,
+        }
+    from app.services.publication_command import viewer_can_retry
+
     return {
+        "command_retryable": viewer_can_retry(command, viewer_is_human=viewer_is_human),
         "failure_kind": command.failure_kind,
         "next_retry_at": command.next_attempt_at.isoformat() if command.next_attempt_at else None,
         "command_reason_code": command.reason_code,
@@ -263,7 +270,7 @@ async def list_insights_board(
     db: AsyncSession, *, org_id: uuid.UUID, window: str = "30d", channel: str | None = None,
     status: str | None = None, sort: str = "published_at", sort_dir: str = "desc",
     cursor: str | None = None, limit: int = 50, now: datetime | None = None,
-    work_item_id: uuid.UUID | None = None, include_deleted: bool = False,
+    work_item_id: uuid.UUID | None = None, include_deleted: bool = False, viewer_is_human: bool = False,
 ) -> dict[str, Any]:
     if window not in _WINDOW_DAYS:
         raise InsightsBoardInvalidWindowError(window)
@@ -597,7 +604,7 @@ async def list_insights_board(
                 latest_command_by_gate[r.gate_id].status if r.gate_id in latest_command_by_gate else None
             ),
             # story #4264 — 목록과 같은 실패 필드(같은 명령 행 · 같은 형식).
-            **_command_failure_fields(latest_command_by_gate.get(r.gate_id)),
+            **_command_failure_fields(latest_command_by_gate.get(r.gate_id), viewer_is_human=viewer_is_human),
             # story #3806(Phase3·3-2 PR5 조각⑥) — ads_boost 요약. 이 publication에
             # 홍보 요청 자체가 없으면 None(유나 §절 §3 「해당 없음」의 데이터 원천 —
             # FE가 None을 「해당 없음」으로 렌더, 값을 지어내지 않는다).

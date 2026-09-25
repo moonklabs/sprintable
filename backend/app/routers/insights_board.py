@@ -89,6 +89,8 @@ class InsightsBoardRow(BaseModel):
     next_retry_at: str | None = None
     command_reason_code: str | None = None
     command_reason_reset_at: str | None = None
+    # story #4290(까디르 QA ④) — 목록 · 상세와 같은 한 판정(보는 사람이 지금 «다시 시도»할 수 있는가 · `viewer_can_retry`).
+    command_retryable: bool = False
     # story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
     # 이 publication에 홍보 요청이 없으면 None(FE가 「해당 없음」으로 렌더 — 값을
     # 지어내지 않는다). paid_snapshots_only()로 organic 지표(d1/d7)와 원천부터
@@ -272,12 +274,14 @@ async def get_insights_board_endpoint(
 ) -> InsightsBoardResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+    # story #4290(까디르 QA ④) — 행의 command_retryable은 보는 쪽 기준(재시도는 사람만).
+    viewer_is_human = (await resolve_member(_auth, org_id, db)).type == "human"
 
     try:
         result = await list_insights_board(
             db, org_id=org_id, window=window, channel=channel, status=status,
             sort=sort, sort_dir=sort_dir, cursor=cursor, limit=limit,
-            work_item_id=work_item_id, include_deleted=include_deleted,
+            work_item_id=work_item_id, include_deleted=include_deleted, viewer_is_human=viewer_is_human,
         )
     except InsightsBoardInvalidWindowError as exc:
         raise HTTPException(

@@ -2,6 +2,9 @@
 짜면(예전 화면 `deriveFailureAction`처럼) 버튼과 서버가 다시 갈라진다.
 
 뮤테이션: 아래 자리 중 하나가 `human_retryable` 대신 status 비교를 직접 쓰면 RED.
+
+까디르 QA ③ · ④(PO 06:40Z) — 응답에 싣는 자리는 **보는 사람 기준** 판정(`viewer_can_retry` = 사람 · `human_retryable`)을 부른다
+(재시도 엔드포인트가 사람만 받으므로). 성과 보드 행(`insights_board._command_failure_fields`)도 같은 판정.
 """
 from __future__ import annotations
 
@@ -12,11 +15,18 @@ _APP = pathlib.Path(__file__).resolve().parents[1] / "app"
 
 READERS = {
     ("services/publication_command.py", "retry_dead_letter_command"),  # 재시도 엔드포인트가 받는지
+    ("services/publication_command.py", "viewer_can_retry"),  # 응답에 싣는 보는 사람 기준 판정
+}
+
+# 응답에 command_retryable을 싣는 자리 — 모두 보는 사람 기준 판정(`viewer_can_retry`)을 부른다.
+VIEW_READERS = {
     ("routers/channel_posts.py", "_to_draft_list_item"),  # 글 상세 · 목록 command_retryable
+    ("routers/channel_posts.py", "publish_channel_post_draft_endpoint"),  # 발행 409(needs_check)의 command_retryable
     ("routers/channel_post_comments.py", "_comment_reply_summary"),  # 댓글 목록의 답변 요약
     ("routers/channel_post_comment_replies.py", "_reply_view"),  # 답변 단건
     ("routers/site_posts.py", "_publication_command_view"),  # 블로그 글 상세(PO 05:01Z · 유나)
     ("routers/gates.py", "get_gate_endpoint"),  # 뉴스레터 발송 게이트의 발송 명령 요약
+    ("services/insights_board.py", "_command_failure_fields"),  # 성과 보드 행(까디르 QA ④)
 }
 
 
@@ -37,6 +47,24 @@ def test_every_reader_uses_the_one_server_judgement():
     assert not missing, f"«다시 시도 가능» 판정을 human_retryable 없이 읽는 자리: {missing}"
 
 
+def test_every_response_carries_the_viewer_judgement():
+    """까디르 QA ③ · ④ — 응답의 command_retryable은 보는 사람 기준(에이전트면 false) · 성과 보드 포함."""
+    missing = [key for key in VIEW_READERS if "viewer_can_retry" not in _calls_in(*key)]
+    assert not missing, f"command_retryable을 보는 사람 기준 판정 없이 싣는 자리: {missing}"
+
+
+def test_the_viewer_judgement_is_person_and_command():
+    from types import SimpleNamespace
+
+    from app.services.publication_command import viewer_can_retry
+
+    dead = SimpleNamespace(status="dead_letter", content_kind="channel_post", reason_code=None, failure_kind=None)
+    pending = SimpleNamespace(status="pending", content_kind="channel_post", reason_code=None, failure_kind=None)
+    assert viewer_can_retry(dead, viewer_is_human=True)
+    assert not viewer_can_retry(dead, viewer_is_human=False)
+    assert not viewer_can_retry(pending, viewer_is_human=True)
+
+
 def test_the_judgement_table():
     from types import SimpleNamespace
 
@@ -45,10 +73,13 @@ def test_the_judgement_table():
         human_retryable,
     )
 
-    def cmd(status, content_kind="channel_post", reason_code=None):
-        return SimpleNamespace(status=status, content_kind=content_kind, reason_code=reason_code)
+    def cmd(status, content_kind="channel_post", reason_code=None, failure_kind=None):
+        return SimpleNamespace(status=status, content_kind=content_kind, reason_code=reason_code, failure_kind=failure_kind)
 
     assert human_retryable(cmd("dead_letter")) and human_retryable(cmd("blocked"))
+    # 까디르 QA ① — 조직 일시정지로 멈춘 blocked는 사람 재시도 대상이 아니다(정지를 풀면 서버가 다시 올린다 · 화면도 숨김).
+    assert not human_retryable(cmd("blocked", failure_kind="paused"))
+    assert human_retryable(cmd("blocked", failure_kind="connection"))
     for status in ("pending", "in_progress", "completed", "voided", "cancelled", "blocked_unapproved"):
         assert not human_retryable(cmd(status)), status
     code = next(iter(NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES))

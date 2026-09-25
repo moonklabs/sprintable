@@ -86,7 +86,7 @@ export default function GateDetailPage() {
   const tOrg = useTranslations('organization');
   // 조직/프로젝트 식별(AC) — 현재 탭이 이미 로드해둔 멤버십 목록에서 이름 조회(신규 fetch 0).
   // 크로스 프로젝트 게이트(현재 탭 프로젝트가 아닌 경우)는 매칭 실패 → ID 스니펫 폴백(정직한 값).
-  const { orgMemberships, projectMemberships, currentTeamMemberId, currentMemberType, orgTimezone } = useDashboardContext();
+  const { orgMemberships, projectMemberships, currentTeamMemberId, orgTimezone } = useDashboardContext();
   // story #1959(P2-S3): 딥링크 매니페스트(gate_detail→parentTab=approvals) — 콜드 진입 시 "결재함"
   // 탭 루트를 BACK 대상으로 선주입. 결재함 목록에서 클릭해 온 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/inbox');
@@ -509,7 +509,7 @@ export default function GateDetailPage() {
                 <GateEvidence gate={gate} />
                 {/* story #4262(유나 표) — 발송 게이트면 뉴스레터 사실 칸 바로 아래 «발송 상태» 한 줄 + 사람 재시도. */}
                 <NewsletterSendStatus
-                  gate={gate} orgId={gate.org_id ?? null} isHuman={currentMemberType !== 'agent'}
+                  gate={gate} orgId={gate.org_id ?? null}
                   displayTimezone={resolveDisplayTimezone(orgTimezone).tz}
                   // story #4290 — 다시 읽은 발송 명령의 서버 판정을 돌려줘 404 뒤 결과 줄을 고른다.
                   onRetried={async () => {

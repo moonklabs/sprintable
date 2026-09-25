@@ -1885,12 +1885,15 @@ export default function ChannelPostEditPage() {
         // 같은 «다시 보내지 않았어요». 외부 영향 줄은 없다 — 이번 요청은 어댑터를 안 불렀으니 «나갔는지 모름 · 다시 시도»(unknown
         // 폴백)는 사실과 다르다.
         if (info.kind === 'publish_needs_check') {
-          // story #4290 — 409가 싣는 사실(dead_letter · 그 명령 id)로 배지를 맞춘다. dead_letter는 사람 재시도 대상이라 command_retryable=true
-          // (서버 `human_retryable`과 같은 뜻) — 낡은 화면에서도 배지 «확인했어요 · 다시 시도»가 그 명령을 가리킨다.
-          const refused = ((body as { error?: { command_id?: string }; detail?: { command_id?: string } } | null)?.error
-            ?? (body as { detail?: { command_id?: string } } | null)?.detail) ?? null;
+          // story #4290(까디르 QA ②) — 409가 싣는 사실(거절된 명령 id · 실제 상태 · 서버 한 판정 `command_retryable`)을 그대로 쓴다 —
+          // 화면이 dead_letter · 재시도 가능을 지어내지 않는다(pending/in_progress + needs_check면 서버는 false · 재시도 404).
+          type RefusedCommand = { command_id?: string; command_status?: string; command_retryable?: boolean };
+          const refused = ((body as { error?: RefusedCommand; detail?: RefusedCommand } | null)?.error
+            ?? (body as { detail?: RefusedCommand } | null)?.detail) ?? null;
           setDraft((prev) => prev && {
-            ...prev, failure_kind: 'needs_check', command_status: 'dead_letter', command_retryable: true,
+            ...prev, failure_kind: 'needs_check',
+            command_status: refused?.command_status ?? prev.command_status,
+            command_retryable: refused?.command_retryable === true,
             command_id: refused?.command_id ?? prev.command_id,
           });
           setPublishResult({
@@ -2241,6 +2244,7 @@ export default function ChannelPostEditPage() {
     reasonCode: draft.command_reason_code,
     reasonResetAt: draft.command_reason_reset_at,
     processingKind: draft.processing_kind,
+    retryable: draft.command_retryable ?? null,
   });
   // story #3402 갭(PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시 dead_letter로
   // 접어(publication_command.py:695-698) kind==='needs_check' 갈래가 라이브에서

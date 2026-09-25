@@ -171,6 +171,7 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
       failureKind: c.reply?.failure_kind ?? null,
       nextRetryAt: c.reply?.next_attempt_at ?? null,
       reasonCode: c.reply?.reason_code ?? null,
+      retryable: c.reply?.command_retryable ?? null,
     }),
     replyCommandId: c.reply?.command_id ?? null,
     replyRetryable: c.reply?.command_retryable === true,

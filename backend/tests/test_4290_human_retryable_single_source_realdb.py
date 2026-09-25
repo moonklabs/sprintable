@@ -5,6 +5,8 @@
   빼기) 그 줄이 RED.
 - AC3: 낡은 화면 — 다른 재시도가 먼저 받아 pending이 된 뒤의 내 재시도는 404, 그 사이 워커가 또 멈춰 새 dead_letter가 되면 다시 읽은
   상세는 retryable=true(화면은 그 값으로 결과 줄을 고른다).
+- 까디르 QA(PO 06:40Z): ① 일시정지 blocked는 사람 재시도 대상 아님(상세 false ⇔ 404) · ② 발행 409가 실제 명령 상태와 같은 판정을
+  싣는다 · ③ 에이전트가 보면 command_retryable=false(재시도 엔드포인트는 사람만 · 403) · ④ 성과 보드 행도 같은 판정.
 """
 from __future__ import annotations
 
@@ -106,7 +108,7 @@ async def _world(Session):
             r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r_pub.status_code == 200, r_pub.text
             command_id = (r_pub.json().get("data") or r_pub.json())["command_id"]
-    return app, org_id, draft_id, command_id
+    return app, org_id, draft_id, command_id, human_id, agent_id
 
 
 async def _set(Session, command_id, *, status, failure_kind, reason_code):
@@ -127,7 +129,7 @@ async def test_the_detail_says_retryable_exactly_when_the_retry_endpoint_accepts
     서버 판정으로 false · 재시도 404로 같은 사실."""
     engine, Session = await _session_factory()
     try:
-        app, org_id, draft_id, command_id = await _world(Session)
+        app, org_id, draft_id, command_id, _human_id, _agent_id = await _world(Session)
         base = f"/api/v2/organizations/{org_id}/channel-posts"
         seen = {}
         async with _client_for(app) as client:
@@ -144,6 +146,8 @@ async def test_the_detail_says_retryable_exactly_when_the_retry_endpoint_accepts
         assert seen[("blocked", "connection")] == (True, True)
         assert seen[("pending", "needs_check")] == (False, False)
         assert seen[("in_progress", "needs_check")] == (False, False)
+        # 까디르 QA ① — 조직 일시정지로 멈춘 blocked: 화면이 숨기는 줄 = 서버도 사람 재시도 대상 아님(정지를 풀면 서버가 다시 올린다).
+        assert seen[("blocked", "paused")] == (False, False)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -155,7 +159,7 @@ async def test_a_stale_retry_is_404_and_the_reloaded_new_stop_is_retryable():
     dead_letter → A가 다시 읽은 상세는 retryable=true(버튼 켜짐이 맞다 — 화면은 결과 줄을 이 값으로 고른다)."""
     engine, Session = await _session_factory()
     try:
-        app, org_id, draft_id, command_id = await _world(Session)
+        app, org_id, draft_id, command_id, _human_id, _agent_id = await _world(Session)
         base = f"/api/v2/organizations/{org_id}/channel-posts"
         await _set(Session, command_id, status="dead_letter", failure_kind="needs_check", reason_code="X_POST_TWEET_MISSING_ID")
         async with _client_for(app) as client:
@@ -167,6 +171,61 @@ async def test_a_stale_retry_is_404_and_the_reloaded_new_stop_is_retryable():
         assert (reloaded["command_status"], reloaded["failure_kind"], reloaded["command_retryable"]) == (
             "dead_letter", "needs_check", True,
         )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_agent_viewer_never_gets_a_retryable_command():
+    """까디르 QA ③ — 같은 dead_letter를 사람은 retryable=true로, 에이전트는 false로 받는다(재시도 엔드포인트가 사람만 · 에이전트 403).
+    성과 보드 행(④)도 같은 판정. 뮤테이션: 읽는 자리가 보는 쪽을 안 보면(사람 판정만) 에이전트 줄이 RED."""
+    from tests.test_0e960006_command_id_exposure import _setup_org_scoped_app as setup
+
+    engine, Session = await _session_factory()
+    try:
+        app, org_id, draft_id, command_id, human_id, agent_id = await _world(Session)
+        base = f"/api/v2/organizations/{org_id}/channel-posts"
+        await _set(Session, command_id, status="dead_letter", failure_kind="needs_check", reason_code="X_POST_TWEET_MISSING_ID")
+        seen = {}
+        for who, user_id, agent in (("human", human_id, False), ("agent", agent_id, True)):
+            setup(app, Session, org_id, user_id=user_id, agent=agent)
+            async with _client_for(app) as client:
+                detail = (await client.get(f"{base}/drafts/{draft_id}")).json()
+                listed = next(i for i in (await client.get(f"{base}/drafts")).json() if i["draft_id"] == draft_id)
+                board = (await client.get(f"/api/v2/organizations/{org_id}/insights-board")).json()
+                rows = [r for r in (board.get("items") or board.get("rows") or []) if r.get("channel_post_draft_id") == str(draft_id)]
+                retry = await client.post(f"{base}/publication-commands/{command_id}/retry") if agent else None
+            seen[who] = (detail["command_retryable"], listed["command_retryable"], [r["command_retryable"] for r in rows])
+            if retry is not None:
+                assert retry.status_code == 403, retry.text
+        assert seen["human"][:2] == (True, True) and seen["human"][2] in ([True], []), seen
+        assert seen["agent"][:2] == (False, False) and seen["agent"][2] in ([False], []), seen
+        assert seen["human"][2] == [True], f"성과 보드에 이 발행 행이 있어야 한다(공허 통과 방지): {seen}"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_publish_409_carries_the_real_status_and_judgement():
+    """까디르 QA ② — 발행 409(needs_check)는 거절된 명령의 실제 상태와 같은 한 판정을 싣는다: pending + needs_check면
+    command_retryable=false(재시도 404) · dead_letter + needs_check면 true. 화면은 지어내지 않고 이 값을 그대로 쓴다."""
+    engine, Session = await _session_factory()
+    try:
+        app, org_id, draft_id, command_id, _human_id, _agent_id = await _world(Session)
+        base = f"/api/v2/organizations/{org_id}/channel-posts"
+        got = {}
+        async with _client_for(app) as client:
+            for status in ("pending", "dead_letter"):
+                await _set(Session, command_id, status=status, failure_kind="needs_check", reason_code="X_POST_TWEET_MISSING_ID")
+                r = await client.post(f"{base}/drafts/{draft_id}/publish")
+                assert r.status_code == 409, r.text
+                body = r.json()
+                err = body.get("error") or body.get("detail") or {}
+                got[status] = (err.get("command_status"), err.get("command_retryable"), err.get("command_id"))
+        assert got["pending"] == ("pending", False, str(command_id)), got
+        assert got["dead_letter"] == ("dead_letter", True, str(command_id)), got
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

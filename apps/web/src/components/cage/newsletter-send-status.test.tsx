@@ -37,11 +37,11 @@ afterEach(async () => {
 
 type Command = NonNullable<GateItem['newsletter_send_command']>;
 
-// story #4290 — 서버처럼 command_retryable을 싣는다(`human_retryable`: dead_letter · blocked · 사람 재시도 사유의 blocked_unapproved →
-// 참). 테스트가 직접 주면 그 값.
+// story #4290 — 서버처럼 command_retryable을 싣는다(보는 사람 기준 `viewer_can_retry` · 사람이 볼 때: dead_letter · blocked(일시정지
+// 제외) · 사람 재시도 사유의 blocked_unapproved → 참). 테스트가 직접 주면 그 값(에이전트 화면 = 서버가 false).
 function withServerRetryable(c: Command): Command {
   if ('command_retryable' in c) return c;
-  const retryable = c.status === 'dead_letter' || c.status === 'blocked'
+  const retryable = c.status === 'dead_letter' || (c.status === 'blocked' && c.failure_kind !== 'paused')
     || (c.status === 'blocked_unapproved' && c.reason_code === 'NEWSLETTER_SEND_CONNECTION_UNAVAILABLE');
   return { ...c, command_retryable: retryable };
 }
@@ -58,11 +58,11 @@ function gate(command: Partial<Command> | null, gateType = 'newsletter_send'): G
   } as GateItem;
 }
 
-async function mount(g: GateItem, { isHuman = true, onRetried }: { isHuman?: boolean; onRetried?: () => Promise<ReloadOutcome> } = {}) {
+async function mount(g: GateItem, { onRetried }: { onRetried?: () => Promise<ReloadOutcome> } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <NewsletterSendStatus gate={g} orgId="org-1" isHuman={isHuman} displayTimezone="Asia/Seoul" onRetried={onRetried} />
+        <NewsletterSendStatus gate={g} orgId="org-1" displayTimezone="Asia/Seoul" onRetried={onRetried} />
       </NextIntlClientProvider>,
     );
   });
@@ -127,8 +127,8 @@ describe('NewsletterSendStatus — 상태별 표시(유나 표)', () => {
 });
 
 describe('NewsletterSendStatus — 재시도', () => {
-  it('에이전트 화면엔 상태 줄만(버튼 0) — 재시도 API가 사람 전용', async () => {
-    await mount(gate({ status: 'dead_letter', failure_kind: 'not_sent' }), { isHuman: false });
+  it('에이전트 화면엔 상태 줄만(버튼 0) — 재시도 API가 사람 전용이라 서버가 command_retryable=false로 싣는다(까디르 QA ③)', async () => {
+    await mount(gate({ status: 'dead_letter', failure_kind: 'not_sent', command_retryable: false }));
     expect(q('channel-post-failure-badge')?.textContent).toContain(K.channelPostsFailureDeadLetter);
     expect(q('channel-post-failure-retry-button')).toBeNull();
   });

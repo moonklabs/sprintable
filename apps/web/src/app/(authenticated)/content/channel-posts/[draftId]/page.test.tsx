@@ -133,7 +133,7 @@ function stubFetch(opts: {
   // story #3808(Phase3·3-3 PR5a) — genBudgetOk와 동형(별도 지갑, x/x_sandbox
   // 채널 draft에서만 실제로 호출됨).
   apiUsageBudgetOk?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } | false;
-  draftDetail?: Partial<typeof DRAFT_DETAIL>;
+  draftDetail?: Partial<typeof DRAFT_DETAIL> & { command_retryable?: boolean };
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
   onPublish?: () => { status: number; body: unknown };
@@ -280,9 +280,14 @@ function stubFetch(opts: {
         // 「다음」 이 URL 호출(=재조회)만 네트워크단 reject한다(최초 페이지 로드
         // 호출은 그대로 성공).
         if (rejectNextDraftRefetch) { rejectNextDraftRefetch = false; throw new Error('network down'); }
-        // story #4290 — 서버처럼 command_retryable을 싣는다(`human_retryable`: dead_letter · blocked → 참). 테스트가 값을 직접 주면 그 값.
+        // story #4290 — 서버처럼 command_retryable을 싣는다(사람이 볼 때 `viewer_can_retry`: dead_letter · blocked(일시정지 제외) → 참).
+        // 테스트가 값을 직접 주면 그 값.
         const served = 'command_retryable' in currentDraftDetail ? currentDraftDetail
-          : { ...currentDraftDetail, command_retryable: currentDraftDetail.command_status === 'dead_letter' || currentDraftDetail.command_status === 'blocked' };
+          : {
+            ...currentDraftDetail,
+            command_retryable: currentDraftDetail.command_status === 'dead_letter'
+              || (currentDraftDetail.command_status === 'blocked' && currentDraftDetail.failure_kind !== 'paused'),
+          };
         return { ok: true, status: 200, json: async () => ({ data: served, error: null, meta: null }) };
       }
       // story #3402·PR#3767 — GATE_ALREADY_HELD best-effort 상대 초안 단건 조회. 테스트의
@@ -2414,11 +2419,24 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   // mount 안 돼 있던 갭(#3422 AC3). 표본 5종이 상세에서 실제로 「보인다」를 pin한다.
   describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
     it('blocked', async () => {
+      // story #4290(까디르 QA ①) — 서버가 사람 재시도를 받는 blocked(연결을 고친 뒤)면 «다시 시도»도 — 예전엔 command_retryable=true인데 버튼이 없었다.
       stubFetch({ draftDetail: { command_status: 'blocked' } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');
+      expect(badge?.textContent).toContain(koMessages.content.channelPostsFailureBlocked);
+      const retry = badge?.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+      expect(retry?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
+      expect(retry?.disabled).toBe(false);
+    });
+
+    it('blocked — 서버가 재시도 불가(일시정지 · 에이전트 화면 등)면 문장만 · 버튼 0', async () => {
+      stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'paused', command_retryable: false } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
         .toBe(koMessages.content.channelPostsFailureBlocked);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
     });
 
     it('needs_check', async () => {
@@ -6424,6 +6442,7 @@ describe('발행 버튼 — needs_check면 잠금(story #4264 · 유나)', () =>
       draftDetail: PUBLISHABLE,
       onPublish: () => ({ status: 409, body: { detail: {
         code: 'CHANNEL_POST_NEEDS_CHECK', message: 'server', command_id: 'cmd-nc', failure_kind: 'needs_check', command_status: 'dead_letter',
+        command_retryable: true,
       } } }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -6442,5 +6461,23 @@ describe('발행 버튼 — needs_check면 잠금(story #4264 · 유나)', () =>
     expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent).toBe(locked);
     expect(container.textContent?.split(locked).length).toBe(2);
     expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('⭐409가 pending + needs_check(서버 재시도 불가)면 그 사실 그대로 — 재시도 가능을 지어내지 않는다(까디르 QA ②)', async () => {
+    stubFetch({
+      draftDetail: PUBLISHABLE,
+      onPublish: () => ({ status: 409, body: { detail: {
+        code: 'CHANNEL_POST_NEEDS_CHECK', message: 'server', command_id: 'cmd-nc', failure_kind: 'needs_check', command_status: 'pending',
+        command_retryable: false,
+      } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const retry = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+    expect(retry?.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent)
+      .toBe(koMessages.content.channelPostsPublishLockedNeedsCheckNoRetry);
   });
 });

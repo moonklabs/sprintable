@@ -47,6 +47,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
     reasonCode: item.command_reason_code,
     reasonResetAt: item.command_reason_reset_at,
     processingKind: item.processing_kind,
+    retryable: item.command_retryable ?? null,
   });
 
   return (

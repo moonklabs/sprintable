@@ -8,7 +8,7 @@ import { formatScheduledAt } from '@/components/content/schedule-format';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 
 // story #3422 ②-c 2/N(doc §17-13) — 실패 5종 렌더 매핑. 버튼 유무표 그대로:
-//   blocked=버튼 없음(연결 고치기로) · needs_check=2단계(확認→재시도) ·
+//   blocked=연결 고치기로(story #4290 까디르 QA ① — 서버가 사람 재시도를 받으면(command_retryable) «다시 시도»도) · needs_check=2단계(확認→재시도) ·
 //   auto_retry=버튼 없음(next_retry_at 표시) · dead_letter=수동 재시도 버튼(휴먼) ·
 //   voided=사유만(행동 없음).
 // B3(페드루 PO, 2026-09-04 13:14Z) — 재시도 «클릭» 배선(재시도 API 호출·확認 다이얼로그)
@@ -78,12 +78,26 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   // 렌더 호출돼야 하므로 이 자리에 둔다 — early return보다 위).
   const reasonResetAt = action.kind === 'dead_letter' ? action.reasonResetAt : null;
   const resetPassed = useResetPassed(reasonResetAt);
+  // story #4290(까디르 QA ① · ④) — 재시도를 내미는지는 서버 한 판정 하나: 호출부가 재시도를 넘겼고(onRetryClick) 서버가 false라고
+  // 하지 않았을 때(`action.retryable`). 화면이 kind(상태)로 버튼 유무를 따로 가르지 않는다 — blocked(연결을 고친 뒤)도 서버가 받으면 버튼.
+  const retryable = 'retryable' in action ? action.retryable : undefined;
+  const canOffer = !!onRetryClick && retryable !== false;
 
   if (action.kind === 'blocked') {
+    if (compact || !canOffer) {
+      return (
+        <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
+          {t('channelPostsFailureBlocked')}
+        </p>
+      );
+    }
     return (
-      <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
-        {t('channelPostsFailureBlocked')}
-      </p>
+      <div className="space-y-1" data-testid="channel-post-failure-badge">
+        <p className="text-xs text-destructive">{t('channelPostsFailureBlocked')}</p>
+        <Button variant="outline" size="sm" onClick={onRetryClick} data-testid="channel-post-failure-retry-button">
+          {t('channelPostsFailureRetryCta')}
+        </Button>
+      </div>
     );
   }
   if (action.kind === 'needs_check') {
@@ -93,12 +107,12 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
         {compact ? null : (
           <>
             <Button
-              variant="outline" size="sm" onClick={onRetryClick} disabled={!onRetryClick}
+              variant="outline" size="sm" onClick={canOffer ? onRetryClick : undefined} disabled={!canOffer}
               data-testid="channel-post-failure-retry-button"
             >
               {t('channelPostsFailureCheckedRetryCta')}
             </Button>
-            {onRetryClick ? null : (
+            {canOffer ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryUnavailable')}
               </p>
@@ -141,7 +155,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     // 문장으로 — 이 부류(200 뒤 id 없음 등)를 사람이 처음 보는 자리가 목록이다. compact는 버튼을 안 그리므로(아래) 없는
     // 관문을 약속하지 않는다(문장만).
     const showRecheckWording = !deadLetterReasonKey && action.needsRecheck && (recheckGate || compact);
-    const canRetryNow = resetPassed && !!onRetryClick;
+    const canRetryNow = resetPassed && canOffer;
     const bodyText = deadLetterReasonKey
       ? t(deadLetterReasonKey)
       : (showRecheckWording ? t('channelPostsFailureNeedsCheck') : t('channelPostsFailureDeadLetter'));
@@ -159,7 +173,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
         {compact ? null : (
           <>
             <Button
-              variant="outline" size="sm" onClick={onRetryClick} disabled={!canRetryNow}
+              variant="outline" size="sm" onClick={canRetryNow ? onRetryClick : undefined} disabled={!canRetryNow}
               data-testid="channel-post-failure-retry-button"
             >
               {ctaText}
@@ -168,7 +182,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryAfterReset')}
               </p>
-            ) : onRetryClick ? null : (
+            ) : canOffer ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryUnavailable')}
               </p>

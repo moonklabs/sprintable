@@ -1108,6 +1108,7 @@ export default function ContentPostEditPage() {
         failureKind: publication.command.failure_kind,
         nextRetryAt: publication.command.next_retry_at,
         reasonCode: publication.command.command_reason_code,
+        retryable: publication.command.command_retryable ?? null,
       })
     : undefined;
   // story #3369(channel_posts 상세 isNeedsCheckGate와 동형) — dead_letter 안에서도
