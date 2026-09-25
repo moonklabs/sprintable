@@ -232,7 +232,7 @@
     "components/loops/loop-create-dialog.tsx::w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary",
     "components/loops/variant-gallery.tsx::overflow-hidden rounded-xl border border-border bg-card",
     "components/meetings/audio-recorder.tsx::rounded-lg border bg-background p-4",
-    "components/nav/context-switcher-chip.tsx::h-11 min-h-0 min-w-11 max-w-[190px] shrink-[10000] justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden",
+    "components/nav/context-switcher-chip.tsx::h-11 min-h-0 min-w-11 @[40rem]:min-w-[7.5rem] max-w-[190px] shrink-[10000] justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden",
     "components/nav/notification-bell.tsx::absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col",
     "components/organization/event-definer-form.tsx::flex items-center gap-1 rounded-xl border border-border bg-background pl-3",
     "components/organization/event-definer-form.tsx::flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5",

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -51,6 +52,12 @@ export const WORKSPACE_FRAME_TAB_PATHS: readonly string[] = TABS.map((tab) => ta
  * (epic-swimlane-board.tsx, /epics)으로 실체가 생겨 3번째 탭으로 합류한다.
  */
 export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey }) {
+  // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이 되면서 켜진 탭이 화면 밖일 수 있다(«가설»로 들어온 경우 등) — 그릴 때 · 탭이 바뀔 때
+  // 켜진 탭을 줄 안으로(block/inline 'nearest' — 이미 보이면 안 움직인다 · 페이지 세로 스크롤은 건드리지 않는다).
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
   const t = useTranslations('nav');
   const router = useRouter();
   const params = useParams<{ ws: string; proj: string }>();
@@ -69,13 +76,14 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
     // 넘쳤다(423/402). 줄 자체를 가로 스크롤(스크롤바 숨김)로 — 탭은 줄바꿈 · 축소 없이 제 폭. overflow-y-hidden은 버튼의 -mb-px(아래 선과 겹침)가
     // 1px 세로 스크롤을 만들지 않게.
     <div
-      className="focus-inset flex items-center gap-4 overflow-x-auto overflow-y-hidden border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="focus-inset flex items-center gap-4 overflow-x-auto overflow-y-hidden border-b border-border pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label={t('workspace')}
     >
       {TABS.map((tab) => (
         <button
           key={tab.key}
+          ref={active === tab.key ? activeRef : undefined}
           type="button"
           role="tab"
           aria-selected={active === tab.key}

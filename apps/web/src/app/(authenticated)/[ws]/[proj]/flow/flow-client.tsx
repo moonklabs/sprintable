@@ -273,7 +273,13 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 중(단순 표라면 드래그로 상태를 바꾸는 길이 사라지는지라 다르다). 답 오기 前엔
           // 되돌리기 쉬운 쪽(칸반 그대로 임베드)으로 가정한다 — kanban-board.tsx를 새로 그리지
           // 않고 그대로 마운트, `?view=kanban`(레거시)도 이 칸으로 들어온다.
-          <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
+          // story #4277(PO 4639 변경 요청) — KanbanBoard 뿌리는 h-full(부모 높이의 100%)이라 여기(일감 뿌리 안)서는 뿌리의 안쪽 높이를 통째로
+          // 먹고, 위 탭 줄 · 아래 «승인 흐름에서 멈춘 것» 상자가 뿌리 밖으로 넘쳤다(402 실측: 뿌리 804 · 보드 772 = 804−p-4×2). 이 화면에서 보드에
+          // 명시 높이(보이는 영역 = 100svh − 셸 크롬 · 문서 · 스프린트 화면과 같은 앵커)를 주면 보드는 제 높이만 쓰고 뿌리가 내용만큼 자란다(넘침 0 ·
+          // 뿌리 p-4 아래 여백이 그대로 틈). 보드 칸 안 세로 스크롤(칸마다 overflow-y-auto)은 무변.
+          <div className="h-[calc(100svh-var(--shell-chrome-h))]" data-testid="flow-board-frame">
+            <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
+          </div>
         ) : (
           // 「갈래」보기 — story #2224 AC1(2026-07-31) 멀티레인 본체. 30일 안 변화 있는 목표
           // «전부»를 레인으로 동시에 그린다(목표 하나를 고르던 이전 판을 대체 — 그 판이
@@ -334,12 +340,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             <ExceptionStream items={exceptionItems} loadFailed={data?.partialErrors?.attention ?? false} />
           </div>
         </details>
-        {/* story #4277(민 기기 20번) — 맨 아래 «승인 흐름에서 멈춘 것» 상자가 탭바에 여백 0으로 붙었다. 이 뿌리의 p-4 아래 여백이 안 먹는 이유:
-            위 KanbanBoard 뿌리(h-full)가 이 뿌리 상자보다 길어 내용이 상자 밖으로 넘치고, 셸 스크롤러의 스크롤 영역은 넘친 내용의 끝까지만 잡는다
-            (뿌리 padding · 마지막 자식의 margin · 높이 0인 빈 상자는 안 들어감 — 402폭 실측: margin-bottom 16 → 틈 0 · 높이 0 빈 줄 → 틈 1 ·
-            높이 16 빈 줄 → 33). KanbanBoard는 보드 화면에서 h-full이 맞아 그대로 두고, 이 화면 끝에 1px 빈 줄을 둔다 — 그러면 위 상자가
-            «마지막 자식»이 아니게 돼 space-y-4(Tailwind v4 = 마지막 아닌 자식의 margin-bottom)의 16px가 빈 줄 앞에 깔리고 스크롤 영역이 빈 줄 끝까지 잡힌다. */}
-        <div aria-hidden="true" className="h-px" data-testid="flow-bottom-spacer" />
       </div>
     </>
   );

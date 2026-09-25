@@ -163,18 +163,38 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   const listWidth = await page.locator('[data-testid="storage-asset-list"]').evaluate((e) => e.getBoundingClientRect().width);
   expect.soft(listWidth, '스토리지 목록 폭(402폭)').toBeGreaterThan(300);
 
-  // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0).
+  // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639): 일감 뿌리가 넘치지 않고(scrollHeight − clientHeight = 0)
+  // 여백 16 · 보드 안 세로 스크롤은 그대로(보드에 이 화면 명시 높이 · KanbanBoard h-full이 뿌리를 통째로 먹던 넘침 제거).
   await page.goto('/flow', { waitUntil: 'domcontentloaded' });
+  await page.locator('[data-testid="flow-board-frame"]').waitFor({ state: 'attached', timeout: 90_000 });
   await page.locator('details').last().waitFor({ state: 'attached', timeout: 90_000 });
-  await page.waitForTimeout(2000);
-  const gap = await page.evaluate(() => {
+  await page.waitForTimeout(3000);
+  const flow = await page.evaluate(() => {
     const det = [...document.querySelectorAll('details')].pop()!;
-    let sc: HTMLElement | null = det.parentElement;
+    const root = det.parentElement!;
+    let sc: HTMLElement | null = root;
     while (sc && !/overflow-y-auto/.test(sc.className)) sc = sc.parentElement;
-    if (!sc) return -1;
+    if (!sc) return null;
     sc.scrollTop = sc.scrollHeight;
-    return sc.getBoundingClientRect().bottom - det.getBoundingClientRect().bottom;
+    return {
+      rootOverflow: root.scrollHeight - root.clientHeight,
+      gap: sc.getBoundingClientRect().bottom - det.getBoundingClientRect().bottom,
+    };
   });
-  expect.soft(gap, '일감 바닥 상자 ↔ 탭바 여백(px)').toBeGreaterThanOrEqual(8);
+  // 보드 안 세로 스크롤 유지 — 시드(스토리 셋)로는 칸이 안 넘칠 수 있어 «넘친다»가 아니라 구조를 잰다: 틀 안에 overflow-y auto/scroll 스크롤러가
+  // 있고 그 높이가 틀 높이 안으로 묶여 있다(묶여 있어야 내용이 늘면 그 안에서 스크롤된다 · 틀이 없어 뿌리를 따라 늘어나면 묶임이 풀린다).
+  const boardInnerScroll = await page.waitForFunction(() => {
+    const frame = document.querySelector<HTMLElement>('[data-testid="flow-board-frame"]');
+    if (!frame) return false;
+    const frameH = frame.getBoundingClientRect().height;
+    return [...frame.querySelectorAll<HTMLElement>('*')].some((e) => {
+      if (!['auto', 'scroll'].includes(getComputedStyle(e).overflowY) || e.getClientRects().length === 0) return false;
+      const h = e.getBoundingClientRect().height;
+      return h > 200 && h <= frameH + 1;
+    });
+  }, undefined, { timeout: 30_000 }).then(() => true).catch(() => false);
+  expect.soft(flow?.rootOverflow, '일감 뿌리 넘침(scrollHeight − clientHeight)').toBe(0);
+  expect.soft(flow?.gap ?? 0, '일감 바닥 상자 ↔ 탭바 여백(px)').toBeGreaterThanOrEqual(12);
+  expect.soft(boardInnerScroll, '보드 안 세로 스크롤러(틀 높이 안에 묶임)').toBe(true);
 });
 

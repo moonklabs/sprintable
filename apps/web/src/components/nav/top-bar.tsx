@@ -34,7 +34,8 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
     <div
       data-testid="top-bar"
       className={cn(
-        'flex h-12 shrink-0 items-center gap-2 border-b px-4',
+        // story #4277(유나 판단 ②) — 컨테이너 쿼리 기준(칩의 태블릿 바닥 @[40rem]:min-w-[7.5rem]가 이 막대 폭을 본다).
+        '@container flex h-12 shrink-0 items-center gap-2 border-b px-4',
         'sticky top-0 z-30 bg-background transition-transform',
         '[transition-duration:var(--gnb-hide-duration)]',
         '[transition-timing-function:var(--gnb-hide-easing)]',
