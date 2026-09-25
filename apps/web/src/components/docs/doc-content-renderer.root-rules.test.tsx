@@ -141,18 +141,33 @@ describe('부품 표지 전수(data-doc-part)', () => {
   });
 });
 
-// PO 15:00Z — 글쓴이가 raw HTML에 `data-doc-part`를 적어도 본문 규칙을 못 벗어난다: HTML 경로는 DOMPurify가 걷고(FORBID_ATTR) · 마크다운 경로는
-// sanitize 스키마에 없어 걷힌다. 그 문단은 본문 문단처럼 뿌리 규칙을 탄다.
-describe.each([['html', '<p data-doc-part="x">글쓴이 문단 <a data-doc-part="y" href="https://example.com">링크</a></p>'], ['markdown', '<p data-doc-part="x">글쓴이 문단 <a data-doc-part="y" href="https://example.com">링크</a></p>\n']] as const)('글쓴이가 적은 data-doc-part — %s', (format, content) => {
-  it('⭐표지는 걷히고 그 문단 · 링크는 본문 모양(뿌리 규칙)', async () => {
+// PO 15:00Z · 15:03Z — 렌더러가 스스로 붙이고 스스로 믿는 내부 표지는 글쓴이 입력에서 전부 걷힌다: HTML은 DOMPurify FORBID_ATTR(RENDERER_INTERNAL_MARKERS) ·
+// 마크다운은 sanitize 스키마에 없음(`data-doc-internal-link`만 스키마를 지나지만 렌더러 nonce 없는 표지는 `a`가 안 믿고 속성도 안 남김).
+import { RENDERER_INTERNAL_MARKERS } from './doc-content-renderer';
+
+describe('글쓴이가 적은 렌더러 내부 표지는 걷힌다', () => {
+  const cases = RENDERER_INTERNAL_MARKERS.flatMap((m) => (['html', 'markdown'] as const).map((f) => [m, f] as const));
+  it.each(cases)('⭐%s — %s: 글쓴이 문단 · 링크에서 속성 0 · 그 글은 본문 모양', async (marker, format) => {
+    const content = `<p ${marker}="design-doc">작성 문단 <a ${marker}="design-doc" href="https://example.com/w">작성 링크</a></p>${format === 'markdown' ? '\n' : ''}`;
     const c = await render(content, format);
-    const p = q('.doc-renderer p');
-    const a = q('.doc-renderer p a');
-    expect(p.hasAttribute('data-doc-part')).toBe(false);
-    expect(a.hasAttribute('data-doc-part')).toBe(false);
-    for (const t of THEMES) {
-      expect(c.computed(p, 'color', t), t).toBe(ref(c, 'fg92', t));
-      expect(c.computed(a, 'text-decoration-line', t), t).toBe('underline');
-    }
+    const p = [...container.querySelectorAll('.doc-renderer p')].find((el) => el.textContent?.includes('작성 문단'))!;
+    const a = [...container.querySelectorAll('.doc-renderer a')].find((el) => el.textContent === '작성 링크')!;
+    expect(p, '글쓴이 문단').toBeDefined();
+    expect(a, '글쓴이 링크').toBeDefined();
+    expect(p.hasAttribute(marker), `문단 ${marker}`).toBe(false);
+    expect(a.hasAttribute(marker), `링크 ${marker}`).toBe(false);
+    expect(c.computed(p, 'color', 'light')).toBe(ref(c, 'fg92', 'light'));
+    expect(c.computed(a, 'text-decoration-line', 'light')).toBe('underline');
+  });
+
+  it('표지 목록 = 렌더러가 붙이는 data-doc-*/data-embed-state 전부(새 표지가 목록 밖으로 새지 않게)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    // 주석은 뺀다(주석엔 에디터 콘텐츠 속성 설명 · 예: data-doc-id가 나온다 — 렌더러가 붙이는 표지가 아님).
+    const src = readFileSync(path.resolve(process.cwd(), 'src/components/docs/doc-content-renderer.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    const set = new Set<string>();
+    for (const m of src.matchAll(/(?:setAttribute\('|\s)(data-doc-[a-z-]+|data-embed-state)(?=['=\s"])/g)) set.add(m[1]!);
+    expect([...set].sort()).toEqual([...RENDERER_INTERNAL_MARKERS].sort());
   });
 });

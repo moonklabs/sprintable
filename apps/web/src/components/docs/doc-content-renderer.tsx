@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ComponentProps, MouseEvent as ReactMouseEvent, MutableRefObject, ReactNode, RefObject } from 'react';
 import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
 import { detectEmbedService } from './extensions/embed-node';
@@ -718,9 +718,18 @@ export function DocContentRenderer({
     routerRef.current.push(href);
   }, []);
   // 마크다운 «[[slug]]» · «[[slug|글]]» → 실재 문서만 링크(집합 · 주소가 바뀔 때만 새 플러그인 설정).
+  // story #4316(PO 15:03Z) — `data-doc-internal-link`는 렌더러가 스스로 붙이고 스스로 믿는 표지다. 마크다운 경로는 플러그인이 sanitize **전에** 만든
+  // 링크라 스키마가 이 속성을 통과시켜야 하는데, 그러면 글쓴이가 raw HTML로 같은 표지를 적을 수 있다. 그래서 플러그인 표지에 이 렌더러 인스턴스만
+  // 아는 nonce(useId · SSR/CSR 같은 값)를 붙이고, `a` 컴포넌트는 nonce가 맞는 표지만 문서 링크로 믿는다 — 흉내 낸 표지는 보통 링크로 그리고
+  // 속성은 DOM에 안 남는다.
+  const linkNonce = useId();
   const remarkPlugins = useMemo(
-    () => [remarkGfm, [remarkWikiLinks, { resolve: (slug: string) => wikiLinkTargetMap.get(slug) ?? null, href: docHref }]] as NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']>,
-    [wikiLinkTargetMap, docHref],
+    () => [remarkGfm, [remarkWikiLinks, {
+      resolve: (slug: string) => wikiLinkTargetMap.get(slug) ?? null,
+      href: docHref,
+      marker: (target: string) => `${linkNonce}|${target}`,
+    }]] as NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']>,
+    [wikiLinkTargetMap, docHref, linkNonce],
   );
 
   const stableMarkdownComponents = useMemo<Components>(() => ({
@@ -732,8 +741,10 @@ export function DocContentRenderer({
       const { href, children } = props as { href?: string; children?: ReactNode };
       // story #4313 — «[[slug]]» 플러그인이 만든 문서 링크: 표지 slug가 실재 집합에 있고 주소가 그 문서 주소와 같을 때만(본문이 raw HTML로
       // 같은 표지를 흉내 내도 다른 곳으로 가는 클라이언트 이동은 안 생긴다). publicMode는 평문.
-      const internalSlug = (props as Record<string, unknown>)['data-doc-internal-link'];
-      if (typeof internalSlug === 'string') {
+      const marker = (props as Record<string, unknown>)['data-doc-internal-link'];
+      // 플러그인이 만든 표지(`{nonce}|{지금 slug}`)만 믿는다 — 글쓴이가 적은 표지(nonce 없음)는 아래 보통 링크로 떨어지고 속성은 안 남는다.
+      if (typeof marker === 'string' && marker.startsWith(`${linkNonce}|`)) {
+        const internalSlug = marker.slice(linkNonce.length + 1);
         if (publicMode || !wikiLinkCurrentSlugs.has(internalSlug) || href !== docHref(internalSlug)) return <span>{children}</span>;
         return <a href={href} data-doc-internal-link={internalSlug} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
       }
@@ -807,7 +818,7 @@ export function DocContentRenderer({
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref, wikiLinkTargetMap, wikiLinkCurrentSlugs, docHref, onDocLinkClick]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref, wikiLinkTargetMap, wikiLinkCurrentSlugs, docHref, onDocLinkClick, linkNonce]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
@@ -991,6 +1002,23 @@ function ShikiCodeBlock({
 // content_format='html' doc을 마크다운 전용 렌더러(MdBody)에 먹여 태그가 텍스트로 그대로
 // 찍히던 결함을 고치며 이 sanitize 정본을 재사용한다(사본 분화 금지 — decorateHtmlContent의
 // TOC/코드카피 장식은 그 소비처 전용이라 안 가져감, 순수 sanitize만).
+/**
+ * story #4316 — 렌더러 내부 표지(렌더러가 붙이고 · 렌더러가 읽는 것). 글쓴이 입력에서 걷는다(HTML: sanitizeDocHtml FORBID_ATTR · 마크다운: sanitize
+ * 스키마에 없음 / `data-doc-internal-link`는 플러그인 표지에 nonce).
+ * - data-doc-part: 부품 뿌리(효과) → 뿌리 본문 규칙이 제외 · data-doc-internal-link: 문서 링크 → `a` 검증 · href 새로 쓰기 · 색 선택자
+ * - data-doc-copy-button · data-doc-code-shell · data-doc-code-actions: 코드 블록(decorateHtmlContent는 sanitize **뒤**에 붙임 · ShikiCodeBlock) → 복사 처리기 · CSS
+ * - data-embed-state: 없는 문서 임베드 카드 · data-doc-asset-loading: 자산 이미지 로딩 자리.
+ */
+export const RENDERER_INTERNAL_MARKERS = [
+  'data-doc-part',
+  'data-doc-internal-link',
+  'data-doc-copy-button',
+  'data-doc-code-shell',
+  'data-doc-code-actions',
+  'data-embed-state',
+  'data-doc-asset-loading',
+] as const;
+
 export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {
     sanitize?: (value: string, config?: { FORBID_ATTR?: string[] }) => string;
@@ -998,9 +1026,9 @@ export function sanitizeDocHtml(content: string): string {
   };
 
   const sanitize = maybePurifier.sanitize ?? maybePurifier.default?.sanitize;
-  // story #4316 — `data-doc-part`는 렌더러가 스스로 끼워 넣는 부품의 표지(뿌리 본문 문단 · 링크 규칙 밖)다. 문서 글쓴이가 적은 것은 걷는다 —
-  // 남기면 본문 글이 본문 모양을 벗어날 수 있다(DOMPurify 기본은 data-*를 통과시킨다 · 마크다운 경로는 스키마에 없어 원래 걷힘).
-  return sanitize ? sanitize(content, { FORBID_ATTR: ['data-doc-part'] }) : '';
+  // story #4316(PO 15:03Z) — 렌더러가 스스로 붙이고 스스로 믿는 내부 표지는 글쓴이 입력에서 전부 걷는다(DOMPurify 기본은 data-*를 통과시킨다).
+  // 에디터가 정당하게 만드는 콘텐츠 속성(data-type · data-slug · data-title · data-open …)은 대상 아님. 마크다운 경로는 스키마가 막는다.
+  return sanitize ? sanitize(content, { FORBID_ATTR: [...RENDERER_INTERNAL_MARKERS] }) : '';
 }
 
 function decorateHtmlContent(content: string, headings: ReturnType<typeof extractDocHeadings>, codeCopyLabel: string): string {

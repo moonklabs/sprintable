@@ -217,7 +217,11 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     expect(html).not.toContain('onmouseover');
     expect(html).not.toContain('color:red');
     expect(html).not.toContain('javascript:');
-    expect(html).not.toContain('evil.test');
+    // story #4316 — 흉내 낸 표지(렌더러 nonce 없음)는 믿지 않는다: 글쓴이가 적은 보통 외부 링크로 그려지고(마크다운 `[x](https://…)`와 같음)
+    // 표지 속성 · 문서 링크 모양 · 클라이언트 이동은 없다. 문서 링크는 진짜 위키 span 하나뿐.
+    const forged = container.querySelector('a[href="https://evil.test/x"]');
+    expect(forged, '보통 링크로 그려짐').not.toBeNull();
+    expect(forged!.hasAttribute('data-doc-internal-link')).toBe(false);
     expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc']);
   });
 });
