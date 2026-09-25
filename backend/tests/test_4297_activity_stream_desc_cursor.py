@@ -216,3 +216,31 @@ async def test_endpoint_rejects_mismatched_cursor_or_unknown_order(query):
         assert resp.status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+@_db
+@pytest.mark.anyio
+async def test_desc_cursor_query_is_served_by_seq_index_without_sort():
+    """까디르 판정(0409) — 최신순 커서 질의가 정렬 없이 activity_seq 인덱스 역순 훑기로 풀린다. 통계에 따라 작은 표는 seq scan을 고를 수
+    있어 이 트랜잭션에서만 seq scan · bitmap · sort를 끄고 «쓸 수 있는 인덱스가 있는가 · 정렬 단계가 없는가»를 잰다(인덱스가 없으면 Sort가 나온다)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(_ASYNC_URL)
+    org, proj = uuid.uuid4(), uuid.uuid4()
+    try:
+        async with engine.begin() as conn:
+            # 작은 표에선 다른 인덱스 bitmap + 싼 Sort가 이긴다 — 셋 다 꺼 «이 순서를 주는 인덱스가 있는가»만 남긴다(없으면 Sort를 피할 길이 없다).
+            for setting in ("enable_seqscan", "enable_bitmapscan", "enable_sort"):
+                await conn.execute(text(f"SET LOCAL {setting} = off"))
+            plan_project = "\n".join(r[0] for r in (await conn.execute(text(
+                "EXPLAIN SELECT * FROM activity_events WHERE org_id = :o AND project_id = :p AND activity_seq < 1000000 "
+                "ORDER BY activity_seq DESC LIMIT 200"
+            ), {"o": org, "p": proj})).all())
+            plan_org = "\n".join(r[0] for r in (await conn.execute(text(
+                "EXPLAIN SELECT * FROM activity_events WHERE org_id = :o ORDER BY activity_seq DESC LIMIT 200"
+            ), {"o": org})).all())
+        assert "ix_activity_events_project_seq" in plan_project and "Sort" not in plan_project, plan_project
+        assert "ix_activity_events_org_seq" in plan_org and "Sort" not in plan_org, plan_org
+    finally:
+        await engine.dispose()

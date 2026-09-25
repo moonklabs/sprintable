@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
@@ -189,6 +189,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [forbidden, setForbidden] = useState(false);
   // story #4297 — «더 보기» 커서: 지금까지 받은 가장 오래된 활동의 activity_seq(서버가 준 next_before_seq). null이면 더 없음.
   const [nextBeforeSeq, setNextBeforeSeq] = useState<number | null>(null);
+  // story #4297(까디르 판정) — 필터 · 날짜 · 프로젝트가 바뀌어 첫 쪽을 다시 받을 때마다 세대를 올린다. 그 전에 출발한 «더 보기» 응답이
+  // 늦게 오면 새 결과에 옛 행 · 옛 커서를 붙였다 — 출발 때 세대와 다르면 버린다.
+  const generationRef = useRef(0);
 
   // 필터 (AC③: project[암묵]·actor·object·verb·time range)
   const [actorFilter, setActorFilter] = useState(ALL);
@@ -259,12 +262,14 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   // story #4297 — 4280이 둔 «빈 시작 = 최근 7일 창 + 7일씩 과거로» 지름길은 이 커서로 대체(빈 주를 만나면 «더 없음»으로 끝났다).
   useEffect(() => {
     let cancelled = false;
+    const generation = ++generationRef.current;
     async function load() {
       setItems(null);
       setForbidden(false);
       setNextBeforeSeq(null);
+      setLoadingMore(false); // 옛 조건의 «더 보기»가 걸려 있어도 새 목록의 버튼은 막히지 않게(그 응답은 세대가 달라 버려진다)
       const page = await fetchPage(rangeFrom, rangeTo, null);
-      if (cancelled) return;
+      if (cancelled || generation !== generationRef.current) return;
       setItems(page?.items ?? []);
       setNextBeforeSeq(page?.nextBeforeSeq ?? null);
     }
@@ -277,9 +282,11 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   // 더 보기 = 같은 경계 안에서 지금까지 받은 가장 오래된 활동보다 이전 쪽(before_seq). 실패하면 커서를 그대로 둬 다시 누르면 다시 시도.
   const loadMore = async () => {
     if (nextBeforeSeq === null || loadingMore) return;
+    const generation = generationRef.current;
     setLoadingMore(true);
     try {
       const page = await fetchPage(rangeFrom, rangeTo, nextBeforeSeq);
+      if (generation !== generationRef.current) return; // 그 사이 첫 쪽을 다시 받았다 — 옛 조건의 응답은 버린다(토스트도 없음).
       if (page) {
         setItems((prev) => {
           const seen = new Set((prev ?? []).map((i) => i.activity_id));
