@@ -27,7 +27,9 @@ export async function POST(request: Request) {
     body: JSON.stringify({
       email: body.email,
       password: body.password,
-      display_name: body.display_name ?? body.email.split('@')[0],
+      // story #4293 — 이메일 앞부분을 이름 칸에 지어내지 않는다(#3755 · #3758 «이메일은 이름 칸에 안 싣는다»). 받은 그대로 넘기고, 없거나
+      // 비었으면 BE가 422로 거절한다(auth.py `display_name: str` 필수 + 공백 거부) — 가입 화면은 이름을 필수로 보낸다.
+      ...(body.display_name !== undefined ? { display_name: body.display_name } : {}),
       tos_accepted: body.tos_accepted ?? false,
       ...(body.invite_token ? { invite_token: body.invite_token } : {}),
       ...(utmSource ? { signup_utm_source: utmSource } : {}),

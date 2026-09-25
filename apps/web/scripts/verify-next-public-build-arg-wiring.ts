@@ -81,13 +81,9 @@ export const EXCLUDED_KEYS: Record<string, string> = {
   NEXT_PUBLIC_COOKIE_DOMAIN:
     '서버 전용 도달 확認 — 유일한 참조처 apps/web/src/lib/auth/cookies.ts는 ' +
     'proxy.ts(Middleware)·app/api/**/route.ts(Route Handler)에서만 import됨(grep 전수, ' +
-    'page/component importer 0). ee/apps/web/src/proxy.ts도 동형(Middleware).',
-  NEXT_PUBLIC_POLAR_PRODUCT_PRO_MONTHLY:
-    '서버 전용 도달 확認 — 유일한 참조처 ee/apps/web/src/lib/polar-products.ts의 유일한 ' +
-    'importer는 ee/apps/web/src/app/api/webhooks/polar/route.ts(Route Handler) 하나뿐(grep 전수).',
-  NEXT_PUBLIC_POLAR_PRODUCT_PRO_YEARLY: '위와 동일 파일·동일 근거(polar-products.ts).',
-  NEXT_PUBLIC_POLAR_PRODUCT_TEAM_MONTHLY: '위와 동일 파일·동일 근거(polar-products.ts).',
-  NEXT_PUBLIC_POLAR_PRODUCT_TEAM_YEARLY: '위와 동일 파일·동일 근거(polar-products.ts).',
+    'page/component importer 0).',
+  // story #4293 — NEXT_PUBLIC_POLAR_PRODUCT_* 넷은 유일한 참조처(ee/apps/web/src/lib/polar-products.ts · Supabase/polar 시절 사본)가
+  // 서빙되지 않는 옛 overlay째 지워져 참조 0 — 제외 목록에서도 내린다.
   NEXT_PUBLIC_SUPABASE_URL:
     '데드코드 확認 — 유일한 참조처 packages/db/src/client.ts(supabaseClient 스텁, ' +
     '"실제 구현은 @supabase/supabase-js 연동 시 교체" 주석)를 index.ts가 re-export하지만, ' +
