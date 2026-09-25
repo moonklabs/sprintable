@@ -9,6 +9,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { OrgGatePolicySection } from './org-gate-policy-section';
+import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+
+// [SID:4300] 기본 org 없음(조직 보충 안 함 — 기존 테스트 그대로). 보충 테스트만 orgId를 채운다.
+const dashCtx = vi.hoisted(() => ({ value: {} as { orgId?: string } }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -36,6 +41,8 @@ afterEach(async () => {
   });
   container.remove();
   vi.unstubAllGlobals();
+  dashCtx.value = {};
+  resetOrgMembersCacheForTests();
 });
 
 async function flush() {
@@ -315,5 +322,37 @@ describe('OrgGatePolicySection — 저장(story e0c1b24c)', () => {
     expect(container.textContent).toContain(rawDetail);
     expect(container.textContent).not.toContain('recipe_gate_default_approver_member_id');
     expect(container.textContent).not.toContain('requires_human');
+  });
+});
+
+// [SID:4300] 지정 승인자가 후보(owner/admin · 고르는 목록)에 없을 때 — 역할이 바뀐 사람 등 — 조직 범위로 이름. 조직에도 없으면 «알 수 없는 구성원».
+describe('OrgGatePolicySection — 후보 밖 지정 승인자 이름([SID:4300])', () => {
+  function stubWithOrg(orgRows: Array<{ id: string; name: string | null; type: string }>) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/gate-config/policy') {
+        return { ok: true, status: 200, json: async () => ({ data: { id: 'p1', org_id: 'o1', posture: 'balanced', merge_gate_default_approver_member_id: 'member-9', created_at: '2026-09-02T00:00:00Z', updated_at: '2026-09-02T00:00:00Z' }, error: null, meta: null }) };
+      }
+      if (url === '/api/org-members/eligible-approvers') return { ok: true, status: 200, json: async () => ELIGIBLE_APPROVERS };
+      if (url === ORG_NAMES_URL) return { ok: true, status: 200, json: async () => ({ data: orgRows }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+  }
+
+  it('후보 밖 지정 승인자 → 조직 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    stubWithOrg([{ id: 'member-9', name: '전 관리자', type: 'human' }]);
+    await act(async () => { root.render(wrap(<OrgGatePolicySection canEdit={false} />)); });
+    await flush(); await flush();
+    expect(container.textContent).toContain('전 관리자');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+  });
+
+  it('조직에도 없으면 «알 수 없는 구성원»', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    stubWithOrg([]);
+    await act(async () => { root.render(wrap(<OrgGatePolicySection canEdit={false} />)); });
+    await flush(); await flush();
+    expect(container.textContent).toContain('알 수 없는 구성원');
   });
 });

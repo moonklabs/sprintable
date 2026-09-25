@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { memberLookup } from '@/lib/member-display';
 import { useChannelLabel } from '@/lib/channel-label';
 import {
@@ -725,7 +726,8 @@ export default function ContentPostEditPage() {
     const id = publication?.published_by_member_id;
     if (!id || fetchedPublisherIdRef.current === id) return;
     fetchedPublisherIdRef.current = id;
-    void fetchWithAuth('/api/team-members')
+    // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+    void fetchWithAuth(ORG_NAMES_URL)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;

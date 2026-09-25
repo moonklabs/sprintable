@@ -8,6 +8,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { StandupHistorySection } from './standup-history-section';
+import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+
+// [SID:4300] 기본 org 없음(조직 보충 안 함 — 기존 테스트 그대로). 보충 테스트만 orgId를 채운다.
+const dashCtx = vi.hoisted(() => ({ value: {} as { orgId?: string } }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -37,6 +42,8 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  dashCtx.value = {};
+  resetOrgMembersCacheForTests();
 });
 
 function stubFetchByCursor(pages: Record<string, { data: ReturnType<typeof entry>[]; meta: { has_more: boolean; next_cursor: string | null } }>) {
@@ -102,5 +109,29 @@ describe('StandupHistorySection — 더 보기(story #2248)', () => {
     expect(Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기')).toBeUndefined();
     // story #4302 — 다 불러왔으면 맨 수(`+` 없음).
     expect(container.querySelectorAll('[data-slot="badge"]')[0]?.textContent).toBe('2');
+  });
+});
+
+// [SID:4300] 지난 기록 작성자 — 부모 표(활성만)에 없는 작성자(비활성 에이전트의 옛 기록)를 비활성까지 싣는 조직 원천으로 보충.
+describe('StandupHistorySection — 작성자 이름 조직 보충([SID:4300])', () => {
+  it('부모 표에 없는 작성자 → 조직 원천 이름 · 표에 있는 작성자는 그대로 · 조직에도 없으면 «알 수 없는 구성원»', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url === ORG_NAMES_URL) {
+        return new Response(JSON.stringify({ data: [{ id: 'member-2', name: '쉬는봇', type: 'agent' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [entry('1', '2026-09-24'), entry('2', '2026-09-23'), entry('3', '2026-09-22')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{ 'member-1': '안나' }} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = container.textContent ?? '';
+    expect(text).toContain('안나');
+    expect(text).toContain('쉬는봇');
+    expect(text).toContain('알 수 없는 구성원');
+    expect(calls.filter((u) => u === ORG_NAMES_URL)).toHaveLength(1);
   });
 });

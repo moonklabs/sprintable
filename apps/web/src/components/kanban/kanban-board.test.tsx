@@ -2017,3 +2017,47 @@ describe('KanbanBoard — 걸린 요청은 30s 뒤 풀림(story #4310)', () => {
     }
   });
 });
+
+// [SID:4300] 보드 카드 담당 — 프로젝트 구성원 목록(담당자 고르는 목록 · 권한 있는 사람)에 없는 담당자(다른 프로젝트 에이전트 · 권한 회수)가
+// 카드에서 조용히 빠지던 것을 조직 범위(비활성 포함)로 채운다. 첫 화면 뒤 · 없을 때만 — 다 풀리면 조직 요청 0.
+describe('KanbanBoard — 카드 담당 이름 조직 범위 보충([SID:4300])', () => {
+  function stubWithOrg(members: Array<Record<string, unknown>>, orgRows: Array<Record<string, unknown>>) {
+    const calls: string[] = [];
+    const stories = [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: 'ag-other', assignee_ids: ['ag-other'], trust_stage: deriveDefaultTrustStage('backlog') }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = stories.filter((st) => st.status === status);
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: members }) };
+      if (url === '/api/team-members?include_inactive=true') return { ok: true, json: async () => ({ data: orgRows }) };
+      return { ok: false, json: async () => null };
+    }));
+    return calls;
+  }
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+
+  it('프로젝트 목록 밖 담당자 → 조직 목록 한 번으로 카드에 이름', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', bottomDockBannerSlot: bannerSlot, orgId: 'org-1',
+    });
+    const calls = stubWithOrg([], [{ id: 'ag-other', name: '다른봇', type: 'agent' }]);
+    await mount();
+    await settle();
+    expect(container.querySelector('[title="다른봇"]')).not.toBeNull();
+    expect(calls.filter((u) => u === '/api/team-members?include_inactive=true')).toHaveLength(1);
+  });
+
+  it('담당자가 전부 프로젝트 목록에 있으면 조직 요청 0', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', bottomDockBannerSlot: bannerSlot, orgId: 'org-1',
+    });
+    const calls = stubWithOrg([{ id: 'ag-other', name: '우리봇', type: 'agent' }], []);
+    await mount();
+    await settle();
+    expect(container.querySelector('[title="우리봇"]')).not.toBeNull();
+    expect(calls.filter((u) => u.startsWith('/api/team-members'))).toHaveLength(0);
+  });
+});

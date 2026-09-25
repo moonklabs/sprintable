@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { memberOptionLabels } from '@/lib/member-display';
+import { memberLookup, memberOptionLabels } from '@/lib/member-display';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -16,6 +16,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useRetroRoute } from '../retro-context';
 import {
   RETRO_PHASE_TO_STAGE,
@@ -47,7 +48,7 @@ interface RetroMemberOption {
   id: string;
   name: string;
   // story #3997 CHANGES(카디르 「고르는 자리」 전수, 페드루 확定 2026-09-17) — 회고 액션
-  // 배정 select에서 「시스템 발행」을 걸러내는 데 쓴다. memberNameById(기존 배정 표시
+  // 배정 select에서 「시스템 발행」을 걸러내는 데 쓴다. 이름 칸(기존 배정 표시 · [SID:4300] actionNames
   // 해소)는 이 필드로 안 거른다 — 여기서 걸러지는 건 아래 select 후보뿐.
   type?: string;
   runtime_type?: string | null;
@@ -191,7 +192,7 @@ export default function RetroSessionPage() {
   const t = useTranslations('retro');
   const tc = useTranslations('common');
   const { projectId, wsSlug, projSlug } = useRetroRoute();
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, orgId } = useDashboardContext();
   const params = useParams<{ id: string }>();
   const sessionId = params.id;
 
@@ -326,20 +327,24 @@ export default function RetroSessionPage() {
 
   // B3(9f27af8f): 액션 담당자 선택용 멤버 목록 — org-level, 신규 fetch 1회.
   const [members, setMembers] = useState<RetroMemberOption[]>([]);
+  // [SID:4300] 담당자 목록을 받아 봤는지(성공 · 실패 모두) — 이름 칸 보충의 «없음» 판단 시점.
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [togglingActionId, setTogglingActionId] = useState<string | null>(null);
-  const memberNameById = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const member of members) map[member.id] = member.name;
-    return map;
-  }, [members]);
+  const memberTable = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members]);
+  const actionAssigneeIds = useMemo(() => actions.map((action) => action.assignee_id), [actions]);
+  const actionNames = useMemberNameFallback(orgId, memberTable, actionAssigneeIds, membersLoaded);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetchWithAuth('/api/team-members');
-      if (!res.ok || cancelled) return;
-      const json = await res.json().catch(() => null) as { data?: RetroMemberOption[] } | null;
-      if (json?.data && !cancelled) setMembers(json.data);
+      try {
+        const res = await fetchWithAuth('/api/team-members');
+        if (!res.ok || cancelled) return;
+        const json = await res.json().catch(() => null) as { data?: RetroMemberOption[] } | null;
+        if (json?.data && !cancelled) setMembers(json.data);
+      } finally {
+        if (!cancelled) setMembersLoaded(true);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -885,7 +890,11 @@ export default function RetroSessionPage() {
                               {action.title}
                             </p>
                             <Badge variant="chip">
-                              {action.assignee_id ? (memberNameById[action.assignee_id] ?? t('actionUnassigned')) : t('actionUnassigned')}
+                              {/* [SID:4300] 배정됐는데 목록(활성만 · 배정 선택지)에 없던 담당자가 «미배정»으로 보이던 거짓 — 표에 있으면 이름(빔 =
+                                  «이름 없는 구성원»), 없으면 조직 범위(비활성 포함)로 보충, 그래도 없으면 «알 수 없는 구성원». 받는 동안 빈 칩. */}
+                              {action.assignee_id
+                                ? (memberLookup(actionNames.memberMap, action.assignee_id, tc, { loaded: actionNames.loaded })?.label ?? '')
+                                : t('actionUnassigned')}
                             </Badge>
                           </div>
                         );

@@ -3,6 +3,7 @@
 // story #3368(Phase0·마케팅운영 S4) — 글 편집(S3). AC2 pin: 저장하면 새 버전 번호와
 // "미상신"(초안) 상태가 표시되고, slug·lang은 잠겨(표시만, 입력란 없음) 재전송된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -250,7 +251,7 @@ function stubFetchWithVersions(
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
-      if (url === '/api/team-members') {
+      if (url === ORG_NAMES_URL) {
         return { ok: true, status: 200, json: async () => ({ data: opts?.teamMembers ?? [], error: null, meta: null }) };
       }
       if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {

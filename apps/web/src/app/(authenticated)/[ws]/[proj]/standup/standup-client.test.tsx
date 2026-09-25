@@ -125,4 +125,23 @@ describe('StandupClient — 막힘 모음 작성자 이름([SID:4300])', () => {
     expect(text).toContain('안나');
     expect(text).not.toContain(koMessages.standup.unknown);
   });
+
+  it('오늘 명단(활성만)에 없는 작성자(비활성 에이전트) → 비활성까지 싣는 조직 원천으로 이름', async () => {
+    const { ORG_NAMES_URL } = await import('@/hooks/use-member-name-fallback');
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgId: 'org-1' });
+    stubFetch({
+      members: [{ id: 'm-anna', name: '안나', type: 'human' }],
+      entries: [{ id: 'e1', author_id: 'a-inactive', date: '2026-09-25', done: '', plan: '', blockers: '배포 막힘', plan_story_ids: [] }],
+    });
+    const base = globalThis.fetch as unknown as (url: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      url === ORG_NAMES_URL ? { ok: true, json: async () => ({ data: [{ id: 'a-inactive', name: '쉬는봇', type: 'agent' }] }) } : base(url)
+    )));
+    await mount();
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = container.textContent ?? '';
+    expect(text).toContain('배포 막힘');
+    expect(text).toContain('쉬는봇');
+    expect(text).not.toContain(koMessages.common.memberUnknown);
+  });
 });

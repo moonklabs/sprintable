@@ -113,3 +113,35 @@ describe('RetroSessionPage — 액션 담당자 select 시스템 발행 제외(s
     expect(options.some((t) => t?.includes('점검봇'))).toBe(true);
   });
 });
+
+// [SID:4300] 액션 담당 칩 — 배정됐는데 배정 선택지 목록(활성만)에 없는 담당자가 «미배정»으로 보이던 거짓. 조직 범위(비활성 포함)로
+// 보충해 이름으로, 담당 없음만 «미배정». 배정 선택지는 활성 목록 그대로(보충 이름이 고르는 목록에 안 섞인다).
+describe('RetroSessionPage — 액션 담당 칩 이름([SID:4300])', () => {
+  it('목록 밖 담당자(비활성 에이전트) → 조직 이름 · 담당 없음만 «미배정» · 선택지엔 안 섞임', async () => {
+    const { resetOrgMembersCacheForTests, ORG_NAMES_URL } = await import('@/hooks/use-member-name-fallback');
+    resetOrgMembersCacheForTests();
+    const session = {
+      ...SESSION,
+      actions: [
+        { id: 'act1', session_id: SESSION.id, title: '배포 점검', assignee_id: 'a-inactive', status: 'open', created_at: '2026-09-25T00:00:00Z' },
+        { id: 'act2', session_id: SESSION.id, title: '문서 정리', assignee_id: null, status: 'open', created_at: '2026-09-25T00:00:00Z' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/api/retro-sessions/${SESSION.id}?project_id=`)) return { ok: true, json: async () => ({ data: session }) };
+      if (url === ORG_NAMES_URL) return { ok: true, json: async () => ({ data: [{ id: 'm1', name: '유나', type: 'human' }, { id: 'a-inactive', name: '쉬는봇', type: 'agent' }] }) };
+      if (url === '/api/team-members') return { ok: true, json: async () => ({ data: [{ id: 'm1', name: '유나', type: 'human' }] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const rowText = (title: string) => [...container.querySelectorAll('p')].find((p) => p.textContent === title)?.parentElement?.textContent ?? '';
+    expect(rowText('배포 점검')).toContain('쉬는봇');
+    expect(rowText('배포 점검')).not.toContain(koMessages.retro.actionUnassigned);
+    expect(rowText('문서 정리')).toContain(koMessages.retro.actionUnassigned);
+    const select = [...container.querySelectorAll('select')].find((sel) =>
+      [...sel.querySelectorAll('option')].some((o) => o.textContent === koMessages.retro.actionUnassigned),
+    );
+    expect([...select!.querySelectorAll('option')].map((o) => o.textContent)).not.toContain('쉬는봇');
+  });
+});
