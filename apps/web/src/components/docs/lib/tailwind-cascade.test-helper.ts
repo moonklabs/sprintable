@@ -80,7 +80,8 @@ export function toMatchable(selector: string, alias: ReadonlyMap<string, string>
 
 /** container 안(과 뿌리 클래스)에 나온 클래스로 CSS를 컴파일해 문서에 싣고 해석기를 돌려준다. */
 export async function loadTailwindCascade(container: Element): Promise<Cascade> {
-  const base = path.resolve(process.cwd(), 'src/app');
+  // 파일 기준 경로 — CI vitest는 레포 뿌리에서 돌아 cwd에 `apps/web`이 빠진다(4681 CI RED).
+  const base = path.resolve(__dirname, '../../../app');
   const compiler = await compile(readFileSync(path.join(base, 'globals.css'), 'utf8'), { base, onDependency: () => {} });
   const candidates = new Set<string>();
   for (const el of [container, ...container.querySelectorAll('*')]) for (const cls of (el.getAttribute('class') ?? '').split(/\s+/)) if (cls) candidates.add(cls);

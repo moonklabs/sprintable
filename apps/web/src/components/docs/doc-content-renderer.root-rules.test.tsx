@@ -166,7 +166,7 @@ describe('글쓴이가 적은 렌더러 내부 표지는 걷힌다', () => {
     const { readFileSync } = await import('node:fs');
     const path = await import('node:path');
     // 주석은 뺀다(주석엔 에디터 콘텐츠 속성 설명 · 예: data-doc-id가 나온다 — 렌더러가 붙이는 표지가 아님).
-    const src = readFileSync(path.resolve(process.cwd(), 'src/components/docs/doc-content-renderer.tsx'), 'utf8')
+    const src = readFileSync(path.resolve(__dirname, 'doc-content-renderer.tsx'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
     const set = new Set<string>();
     for (const m of src.matchAll(/(?:setAttribute\('|\s)(data-doc-[a-z-]+|data-embed-state)(?=['=\s"])/g)) set.add(m[1]!);
