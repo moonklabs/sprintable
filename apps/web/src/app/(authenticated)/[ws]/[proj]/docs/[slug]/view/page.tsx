@@ -33,6 +33,8 @@ interface DocDetail {
   updated_at?: string;
   assignee?: { id: string; name: string } | null;
   revisions?: { count: number; latest_at: string | null } | null;
+  // story #4313 — 본문 위키 링크 중 같은 프로젝트에 실재하는 문서 slug(BE slug 단건 경로 · BFF getBySlug가 실어 옴). 여기 든 것만 링크.
+  wiki_link_slugs?: string[] | null;
 }
 
 // null = 로딩 중, false = not found, DocDetail = 로드 완료
@@ -181,6 +183,7 @@ export default function DocViewPage() {
                 mathRenderFailedLabel={t('mathRenderFailed')}
                 suppressLeadingTitle={doc.title}
                 bodyEmphasis="full"
+                wikiLinkSlugs={doc.wiki_link_slugs}
               />
             </div>
             {/* 두 번째 backlinks 자리(첫 자리: story-detail-panel, story #2299) — 컴포넌트

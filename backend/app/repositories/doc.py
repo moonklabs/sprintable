@@ -63,6 +63,20 @@ class DocRepository(BaseRepository[Doc]):
         )
         return result.scalar_one_or_none()
 
+    async def existing_slugs(self, project_id: uuid.UUID, slugs: list[str]) -> list[str]:
+        """story #4313: 주어진 slug 중 이 프로젝트에 실재하는(삭제 안 된) 것만 — 한 쿼리. 순서는 slug 오름차순."""
+        if not slugs:
+            return []
+        result = await self.session.execute(
+            select(Doc.slug).where(
+                self._org_filter(),
+                Doc.project_id == project_id,
+                Doc.slug.in_(slugs),
+                Doc.deleted_at.is_(None),
+            )
+        )
+        return sorted({row[0] for row in result.all()})
+
     async def get_by_alias(self, project_id: uuid.UUID, old_slug: str) -> Doc | None:
         """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback.
 

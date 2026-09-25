@@ -36,11 +36,14 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
-async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean } = {}) {
+// story #4313 — 링크는 실재 문서 slug 집합(문서 상세 응답 `wiki_link_slugs`)에 든 것만. 4309 테스트의 문서는 다 실재로 둔다.
+const EXISTING = ['design-doc', 'meeting-notes', 'untitled-1'];
+
+async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean; wikiLinkSlugs?: string[] | null } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" />
+        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" wikiLinkSlugs={opts.wikiLinkSlugs === undefined ? EXISTING : opts.wikiLinkSlugs} />
       </NextIntlClientProvider>,
     );
   });

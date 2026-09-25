@@ -76,6 +76,9 @@ class DocSummaryResponse(BaseModel):
     # 담당자/수정이력 요약 동봉(이중 fetch 제거). additive·nullable(다건 list/tree/search 엔 None). forward-ref.
     assignee: "DocMemberSummary | None" = None
     revisions: "DocRevisionsSummary | None" = None
+    # story #4313 — slug-query 단건 경로에서만: 본문의 위키 링크 후보(«[[slug]]» · «[[slug|글]]» · `data-slug="…"`) 중 같은 프로젝트에
+    # 실재하는(삭제 안 된) 문서 slug. FE는 이 집합에 든 것만 진짜 링크로 · 나머지는 글자 그대로. 다건 경로엔 None(additive).
+    wiki_link_slugs: list[str] | None = None
 
 
 class DocMemberSummary(BaseModel):

@@ -67,6 +67,27 @@ describe('ApiDocRepository.getBySlug — 단건 조회도 {data,meta} 봉투를 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('⭐slug 단건 응답의 wiki_link_slugs(실재 위키 링크 slug)를 상세 응답에 실어 돌려준다 — 요청 추가 0(story #4313)', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: async () => ({ data: [{ id: 'doc-1', slug: 'my-doc', wiki_link_slugs: ['onboarding'] }], meta: { has_more: false, next_cursor: null } }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 'doc-1', slug: 'my-doc', content: '[[onboarding]]' }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const doc = await new ApiDocRepository('token').getBySlug('proj-1', 'my-doc');
+    expect(doc.wiki_link_slugs).toEqual(['onboarding']);
+    expect(doc.content).toBe('[[onboarding]]');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('slug 응답에 wiki_link_slugs가 없으면(옛 BE) null — 렌더러는 전부 글자 그대로', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [{ id: 'doc-1', slug: 'my-doc' }], meta: { has_more: false, next_cursor: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 'doc-1', slug: 'my-doc' }) }));
+    expect((await new ApiDocRepository('token').getBySlug('proj-1', 'my-doc')).wiki_link_slugs).toBeNull();
+  });
+
   it('data가 빈 배열이면 Doc not found를 던진다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true, status: 200,

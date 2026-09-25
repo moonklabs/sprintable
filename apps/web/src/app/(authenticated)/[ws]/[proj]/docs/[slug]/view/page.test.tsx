@@ -23,7 +23,9 @@ vi.mock('@/components/docs/doc-status-rail', () => ({
   DocEvidenceRail: ({ status }: { status?: string }) => <div data-testid="evidence-rail">{status}</div>,
 }));
 vi.mock('@/components/docs/doc-content-renderer', () => ({
-  DocContentRenderer: ({ content }: { content: string }) => <div data-testid="content">{content}</div>,
+  DocContentRenderer: ({ content, wikiLinkSlugs }: { content: string; wikiLinkSlugs?: string[] | null }) => (
+    <div data-testid="content" data-wiki-link-slugs={JSON.stringify(wikiLinkSlugs ?? null)}>{content}</div>
+  ),
 }));
 vi.mock('@/components/shared/entity-backlinks-section', () => ({
   EntityBacklinksSection: () => <div data-testid="backlinks" />,
@@ -61,9 +63,9 @@ const DOC = {
   updated_at: '2026-08-21T00:00:00Z', assignee: { id: 'm1', name: '윤도선' }, revisions: { count: 3, latest_at: null },
 };
 
-async function mount() {
+async function mount(doc: typeof DOC & { wiki_link_slugs?: string[] } = DOC) {
   useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
-  fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ data: DOC }), { status: 200 }));
+  fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ data: doc }), { status: 200 }));
   const { default: DocViewPage } = await import('./page');
   await act(async () => { root.render(wrap(<DocViewPage />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -107,6 +109,12 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
     await mount();
     expect(container.querySelector('[data-testid="content"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="backlinks"]')).toBeTruthy();
+  });
+
+  // story #4313 — 문서 응답의 실재 위키 링크 slug를 렌더러로 넘긴다(렌더러는 이 집합에 든 것만 링크 · 없으면 전부 글자 그대로).
+  it('⭐문서 응답의 wiki_link_slugs를 렌더러 wikiLinkSlugs로 넘긴다', async () => {
+    await mount({ ...DOC, wiki_link_slugs: ['onboarding', 'design-doc'] });
+    expect(container.querySelector('[data-testid="content"]')?.getAttribute('data-wiki-link-slugs')).toBe('["onboarding","design-doc"]');
   });
 
   it('문서를 못 찾으면(404) notFound 문구를 보여준다', async () => {
