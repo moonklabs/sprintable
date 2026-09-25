@@ -13,6 +13,7 @@ describe('story #4315 — 브랜드 글자 토큰 대비', () => {
     for (const c of [light!, dark!]) {
       expect(c.onBackground).toBeGreaterThanOrEqual(4.5);
       expect(c.onCard).toBeGreaterThanOrEqual(4.5);
+      expect(c.onMuted).toBeGreaterThanOrEqual(4.5);
       expect(c.onChipTint).toBeGreaterThanOrEqual(4.5);
     }
   });

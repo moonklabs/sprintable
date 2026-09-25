@@ -177,3 +177,17 @@ describe('LoginPage — 회원가입 링크 next 전파(story #3220, 초대수�
     expect(signUpLink?.getAttribute('href')).toBe('/register');
   });
 });
+
+describe('story #4318 — 로그인 화면 링크 글자는 brand-text(밝은 7.05 · muted 6.63) · text-brand(4.35 · 4.09) 아님', () => {
+  it('⭐비밀번호 찾기 · 가입 링크 — text-brand-text · hover /85 · 로고만 text-brand', async () => {
+    await mount();
+    const links = [...container.querySelectorAll('a')].filter((a) => ['/forgot-password', '/register'].some((h) => (a.getAttribute('href') ?? '').startsWith(h)));
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    for (const a of links) {
+      const cls = a.className.split(/\s+/);
+      expect(cls).toContain('text-brand-text');
+      expect(cls).toContain('hover:text-brand-text/85');
+      expect(cls).not.toContain('text-brand');
+    }
+  });
+});

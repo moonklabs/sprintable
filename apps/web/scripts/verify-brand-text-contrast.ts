@@ -5,7 +5,7 @@
  * (밝은 = brand-strong · 어두운 = brand-soft)로 모았다.
  *
  * 두 축을 잰다:
- *   (a) 토큰 대비 — `--brand-text` vs 페이지 배경 · 카드 · 카드 위 brand/14 틴트(활성 칩) ≥ 4.5:1(본문 글자 AA) · 양 테마.
+ *   (a) 토큰 대비 — `--brand-text` vs 페이지 배경 · 카드 · muted(story #4318) · 카드 위 brand/14 틴트(활성 칩) ≥ 4.5:1(본문 글자 AA) · 양 테마.
  *   (b) 사용처 — `brand-soft`를 **글자색**으로 쓰는 자리 0(`text-brand-soft` · `text-[color:var(--brand-soft)]` · CSS `color: var(--brand-soft)`).
  *       `dark:` 변형 안에서만 쓰는 것은 허용(어두운 테마에선 읽힌다). 틴트(`bg-` · `border-` …)는 대상 아님.
  *
@@ -53,6 +53,8 @@ export interface BrandTextContrast {
   theme: 'light' | 'dark';
   onBackground: number;
   onCard: number;
+  /** story #4318 — 인증 · 약관 화면 바깥 틀(bg-muted) 위 링크. */
+  onMuted: number;
   onChipTint: number;
 }
 
@@ -63,11 +65,13 @@ export function computeBrandTextContrasts(css: string): BrandTextContrast[] {
     const text = resolveRgb(vars, 'brand-text');
     const background = resolveRgb(vars, 'background');
     const card = resolveRgb(vars, 'card');
+    const muted = resolveRgb(vars, 'muted');
     const brand = resolveRgb(vars, 'brand');
     out.push({
       theme,
       onBackground: contrastRatio(text, background),
       onCard: contrastRatio(text, card),
+      onMuted: contrastRatio(text, muted),
       onChipTint: contrastRatio(text, over(brand, card, CHIP_TINT_ALPHA)),
     });
   }
@@ -235,8 +239,8 @@ function main(): number {
   const contrasts = computeBrandTextContrasts(readFileSync(GLOBALS_CSS_PATH, 'utf8'));
   console.log('[story #4315] 브랜드 글자(--brand-text) 대비 —');
   for (const c of contrasts) {
-    console.log(`  ${c.theme}: 배경 ${c.onBackground.toFixed(2)} · 카드 ${c.onCard.toFixed(2)} · 카드 위 brand/${Math.round(CHIP_TINT_ALPHA * 100)} 틴트 ${c.onChipTint.toFixed(2)}`);
-    for (const [label, v] of [['배경', c.onBackground], ['카드', c.onCard], ['칩 틴트', c.onChipTint]] as const) {
+    console.log(`  ${c.theme}: 배경 ${c.onBackground.toFixed(2)} · 카드 ${c.onCard.toFixed(2)} · muted ${c.onMuted.toFixed(2)} · 카드 위 brand/${Math.round(CHIP_TINT_ALPHA * 100)} 틴트 ${c.onChipTint.toFixed(2)}`);
+    for (const [label, v] of [['배경', c.onBackground], ['카드', c.onCard], ['muted', c.onMuted], ['칩 틴트', c.onChipTint]] as const) {
       if (v < AA_TEXT) { console.error(`FAIL: ${c.theme} --brand-text vs ${label} ${v.toFixed(2)} < ${AA_TEXT}:1`); failed = true; }
     }
   }
