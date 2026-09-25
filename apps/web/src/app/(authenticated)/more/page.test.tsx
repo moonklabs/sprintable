@@ -80,8 +80,23 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // 전담(별도 축, 이 파일 관심사 아님).
   it('섹션(h2) 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/그 밖의 화면[legacy 단일 카드] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
     await mount();
+    // story #4292(유나 1안) — 한 항목 구역(오늘 · 결과)은 머리 없이 항목 줄 하나. 카드(구역)는 넷 그대로 · 순서도 그대로.
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
-    expect(sectionLabels).toEqual(['오늘', '결과', '연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    expect(sectionLabels).toEqual(['연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
+    expect(cards).toHaveLength(4);
+    expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
+      ['오늘', '결과', expect.any(String), expect.any(String)],
+    );
+    // 머리 없는 카드도 구역으로 읽힌다 — role=group + 번역된 구역 이름(까디르 QA ②). 머리 있는 카드엔 붙이지 않는다(h2가 이름).
+    expect(cards.slice(0, 2).map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual([['group', '오늘'], ['group', '결과']]);
+    expect(cards.slice(2).every((c) => c.getAttribute('role') === null)).toBe(true);
+    // 같은 낱말이 한 카드에 두 번(머리 · 항목) 보이지 않는다.
+    for (const card of cards) {
+      const header = card.querySelector('[data-testid="more-section-header"]')?.textContent;
+      const rows = card.querySelectorAll('[data-testid="more-menu-link"]');
+      if (header && rows.length === 1) expect(rows[0]!.querySelector('span span')?.textContent).not.toBe(header);
+    }
     // h2 안 캡션은 "그 밖의 화면" 라벨과 별도 span(§⑤ 해요체 인라인 캡션, moreLegacyMovingCaptionInline)
     // — 위 concat 문자열이 그 둘의 합임을 명시로도 확認(텍스트 원문이 바뀌면 이 assert가 RED).
     const legacyH2 = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith('그 밖의 화면'));

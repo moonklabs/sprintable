@@ -8,7 +8,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { groupVisibleLegacyByTarget, LEGACY_NAV_ITEMS, MOBILE_HUB_GROUP_ORDER, resolveNavGroups } from '@/lib/nav-config';
-import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID } from '@/lib/mobile-hub-groups';
+import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeader } from '@/lib/mobile-hub-groups';
 import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -154,29 +154,36 @@ export default function MorePage() {
                 </Link>
               );
             };
+            // story #4292 — 머리 규칙은 구역 조립 한 곳(sectionHeader): 한 항목 이름과 같은 글자의 머리는 그리지 않는다(사이드바와 같은 모양).
+            // 머리를 안 그린 카드도 구역으로 읽히게 role=group + 번역된 구역 이름(까디르 QA ②).
+            const { headerKey, name: sectionName } = sectionHeader(group, (key) => t(key));
             return (
-              <Card key={group.id} className="overflow-hidden">
-                <CardHeader>
-                  {/* story #3824(UX-v3·FE 1) — 헤더리스 1항목 그룹(now·dev·results, app-
-                      sidebar.tsx와 동형 관례)은 카드에서도 제목이 있어야 하니 그 유일한
-                      항목 자신의 라벨을 쓴다(그 그룹의 정체성이 곧 그 항목이라 desktop과
-                      같은 낱말이 뜬다).
-                  */}
-                  <h2 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
-                    <span>{group.labelKey ? t(group.labelKey) : t(group.items[0]!.labelKey)}</span>
-                    {/* story #3855(픽셀 커밋, 페드루 PO 판정 2026-09-14 07:34Z ⑥) — 카드
-                        헤더 옆 작은 캡션(§⑤ 해요체) — 데스크톱 「더보기」 캡션과 같은
-                        낱말, 여기선 카드 헤더에 붙는다(별도 페이지 줄이 아님). */}
-                    {isLegacy ? (
-                      <span
-                        className="text-[10.5px] font-medium text-muted-foreground"
-                        data-testid="legacy-moving-caption"
-                      >
-                        {t('moreLegacyMovingCaptionInline')}
-                      </span>
-                    ) : null}
-                  </h2>
-                </CardHeader>
+              <Card
+                key={group.id}
+                className="overflow-hidden"
+                data-testid="more-section-card"
+                {...(headerKey ? {} : { role: 'group', 'aria-label': sectionName })}
+              >
+                {headerKey ? (
+                  <CardHeader>
+                    {/* story #3824 → #4292 — 머리 없는 구역이 여러 항목이면 첫 항목 이름을 머리로 쓴다. 한 항목 구역은 머리 자체가
+                        없다(sectionHeader — 예전엔 그 항목 이름을 끌어와 «결과 › 결과»로 두 번 보였다). */}
+                    <h2 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
+                      <span data-testid="more-section-header">{t(headerKey)}</span>
+                      {/* story #3855(픽셀 커밋, 페드루 PO 판정 2026-09-14 07:34Z ⑥) — 카드
+                          헤더 옆 작은 캡션(§⑤ 해요체) — 데스크톱 「더보기」 캡션과 같은
+                          낱말, 여기선 카드 헤더에 붙는다(별도 페이지 줄이 아님). */}
+                      {isLegacy ? (
+                        <span
+                          className="text-[10.5px] font-medium text-muted-foreground"
+                          data-testid="legacy-moving-caption"
+                        >
+                          {t('moreLegacyMovingCaptionInline')}
+                        </span>
+                      ) : null}
+                    </h2>
+                  </CardHeader>
+                ) : null}
                 {isLegacy && group.subgroups ? (
                   <div>
                     {group.subgroups.map((sg, i) => (
