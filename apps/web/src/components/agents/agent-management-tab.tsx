@@ -122,7 +122,8 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const displayTimezone = resolveDisplayTimezone().tz;
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
-  const rowLabels = useMemo(() => memberRowLabels(agents, tc, () => ''), [agents, tc]);
+  // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => orgRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
 
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
