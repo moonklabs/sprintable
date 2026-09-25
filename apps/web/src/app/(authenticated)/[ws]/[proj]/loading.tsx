@@ -11,7 +11,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { EpicsSkeleton } from '@/components/epics/epics-skeleton';
 import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
 import { WORKSPACE_FRAME_TABS } from '@/components/workspace/workspace-frame-tabs';
-import { RouteTopBarFallback } from '@/components/nav/flat-tab-top-bar';
+import { RouteTopBarFallback, projectRouteOf } from '@/components/nav/flat-tab-top-bar';
 
 export default function Loading() {
   // /{ws}/{proj}/{자원}/… — 셋째 조각이 자원 경로.
@@ -19,9 +19,12 @@ export default function Loading() {
   const tab = WORKSPACE_FRAME_TABS.find((t) => t.path === segment);
   // story #4291 — 탭 줄은 레이아웃이 쥐므로 여기선 도착 여섯 탭에 맞는 몸 스켈레톤만(탭 모양 갈래 없음).
   if (tab) return <WorkspaceFrameLoading />;
+  // story #4326(PO 4688) — 동적 layout 자원(목표 · 문서 · 실행)은 그 layout이 풀리는 동안 이 부모 경계가 먼저 보인다 — 상단바 폴백도 자기 loading과
+  // 같은 것을 쥔다(경로 → 제목 표에 있는 자원 · 목록으로 올 때만 · 그리는 마크업은 없어 아래 모양 대조와 무관).
+  const route = projectRouteOf(segment);
+  const hold = route ? <RouteTopBarFallback route={route} /> : null;
   // 자기 loading.tsx가 일반 PageSkeleton이 아닌 자원 — 부모 경계도 같은 모양(안 그러면 «일반 → 자기» 두 번 바뀐다 · 목표는 동적 layout이라 부모가 보임).
   // 자기 loading과 같은 모양인지는 loading.parity.test.tsx가 폴더 전수로 대조한다.
-  // story #4326(PO 4688) — 목표는 동적 layout이 풀리는 동안 이 부모 경계가 먼저 보인다 — 상단바 폴백도 자기 loading과 같은 것을 쥔다(목록으로 올 때만).
-  if (segment === 'goals') return (<><RouteTopBarFallback route="[ws]/[proj]/goals" /><EpicsSkeleton /></>);
-  return <PageSkeleton />;
+  if (segment === 'goals') return <>{hold}<EpicsSkeleton /></>;
+  return <>{hold}<PageSkeleton /></>;
 }

@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
 
 const { fetchWithAuthMock, useDashboardContextMock, searchParamsMock } = vi.hoisted(() => ({
   fetchWithAuthMock: vi.fn(),
@@ -21,6 +22,8 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => searchParamsMock.value,
+  // story #4326 — 결재 loading의 상단바 폴백은 목록 주소일 때만 쥔다(usePathname).
+  usePathname: () => '/inbox',
 }));
 vi.mock('@/components/realtime-provider', () => ({
   useSseMultiplexerContext: () => ({ subscribe: () => () => {}, subscribeMessage: () => () => {}, subscribeReconnect: () => () => {} }),
@@ -132,7 +135,7 @@ describe('⭐실제 화면이 넘겨받는다 — loading의 선출발 + 결재 
 
   it('⭐inbox/loading.tsx(실제 로딩 경계)를 그리면 결재 탭 요청 넷이 출발한다', async () => {
     const { default: Loading } = await import('@/app/(authenticated)/inbox/loading');
-    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><Loading /></NextIntlClientProvider>); });
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><TopBarProvider><Loading /></TopBarProvider></NextIntlClientProvider>); });
     expect(calledUrls().sort()).toEqual([
       INBOX_GATES_HELD_URL,
       INBOX_GATES_PENDING_URL,

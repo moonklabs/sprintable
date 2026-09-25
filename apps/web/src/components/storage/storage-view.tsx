@@ -5,7 +5,6 @@ import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
@@ -29,6 +28,7 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { StorageTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // story #2302 AC1 — `?asset=` 딥링크가 무엇을 해야 하는지의 판정만 순수 함수로 뽑아 둔다
 // (StorageView 전체를 렌더하지 않고도 이 결정 로직 자체를 단위테스트하기 위함 — 이 컴포넌트는
@@ -379,21 +379,8 @@ export function StorageView({ projectId }: { projectId: string }) {
   const totalBytes = useMemo(() => items.reduce((sum, a) => sum + (a.size_bytes || 0), 0), [items]);
 
   const summaryText = storageSummaryText(t, items.length, totalBytes, nextCursor !== null);
-  const topBarTitle = useMemo(
-    () => (
-      // story #4277(PO 402 라이브) — 전부 shrink-0이라 폰에서 «N개 자산 · 용량» 알약이 상단바 밖으로 말줄임 없이 잘렸다.
-      // 문서 상단바와 같은 관례: 폰(sm 미만)은 브레드크럼(«작업 공간 /»)을 숨기고 · 화면 이름(h1)은 온전히 · 알약이 먼저 양보해 말줄임(전체 글자는 title).
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{t('breadcrumb')}</span>
-        <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">/</span>
-        <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{t('title')}</h1>
-        <Badge variant="info" className="ml-1 min-w-0 shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
-          <span className="min-w-0 truncate">{summaryText}</span>
-        </Badge>
-      </div>
-    ),
-    [t, summaryText],
-  );
+  // story #4277 폭 관례 · #4326 폴백과 같은 모양은 StorageTopBarTitle 한 곳(알약만 화면이 넘긴다).
+  const topBarTitle = useMemo(() => <StorageTopBarTitle summaryText={summaryText} />, [summaryText]);
 
   const supportsInlinePanel = detailPanel.supportsInlinePanel;
   // story #4277(민 기기 #2) — 402폭에서도 데스크톱 2단(폴더 칸 248px 고정)이라 목록이 약 150px로 찌그러져 «정렬: 최근 수정»이 한 자씩

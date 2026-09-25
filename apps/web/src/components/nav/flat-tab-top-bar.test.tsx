@@ -105,6 +105,46 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     expect(probe().dataset.chip).toBe('true');
   });
 
+  const FIVE: ReadonlyArray<{ name: string; load: () => Promise<{ default: React.ComponentType }>; path: string; title: string }> = [
+    { name: '실행', load: () => import('@/app/(authenticated)/[ws]/[proj]/loops/loading'), path: '/my-ws/my-proj/loops', title: koMessages.loops.title },
+    { name: '문서', load: () => import('@/app/(authenticated)/[ws]/[proj]/docs/loading'), path: '/my-ws/my-proj/docs', title: koMessages.docs.title },
+    { name: '스토리지', load: () => import('@/app/(authenticated)/[ws]/[proj]/storage/loading'), path: '/my-ws/my-proj/storage', title: `${koMessages.storage.breadcrumb}/${koMessages.storage.title}` },
+    { name: '활동 로그', load: () => import('@/app/(authenticated)/activity/loading'), path: '/activity', title: koMessages.activityLog.title },
+    { name: '에이전트', load: () => import('@/app/(authenticated)/organization/workforce/loading'), path: '/organization/workforce', title: koMessages.agents.title },
+  ];
+  for (const r of FIVE) {
+    it(`⭐«${r.name}» 로딩 — 고정 이름 + 칩(PO 4688 · 첫 방문 36프레임 빔)`, async () => {
+      const { default: Loading } = await r.load();
+      nav.pathname = r.path;
+      await render(<Loading />);
+      expect(probe().textContent).toBe(r.title);
+      expect(probe().dataset.chip).toBe('true');
+    });
+  }
+
+  it('⭐«스토리지» 폴백엔 데이터 알약(N개 자산 · 용량)이 없다 — 화면만 붙인다(PO 규칙: 도착 화면과 글자가 똑같은 부분만)', async () => {
+    const { default: Loading } = await import('@/app/(authenticated)/[ws]/[proj]/storage/loading');
+    nav.pathname = '/my-ws/my-proj/storage';
+    await render(<Loading />);
+    expect(probe().querySelector('[data-testid="storage-summary-badge"]')).toBeNull();
+    const { StorageTopBarTitle } = await import('./flat-tab-top-bar');
+    await render(<TopBarSlot title={<StorageTopBarTitle summaryText="3개 자산 · 1 KB" />} showContextChip />);
+    expect(probe().querySelector('[data-testid="storage-summary-badge"]')?.textContent).toBe('3개 자산 · 1 KB');
+  });
+
+  it('⭐동적 layout 자원(실행 · 문서)도 부모 경계가 같은 폴백을 쥔다', async () => {
+    const { default: ParentLoading } = await import('@/app/(authenticated)/[ws]/[proj]/loading');
+    nav.pathname = '/my-ws/my-proj/loops';
+    await render(<ParentLoading />);
+    expect(probe().textContent).toBe(koMessages.loops.title);
+    nav.pathname = '/my-ws/my-proj/docs';
+    await render(<ParentLoading />);
+    expect(probe().textContent).toBe(koMessages.docs.title);
+    nav.pathname = '/my-ws/my-proj/loops/loop-1';
+    await render(<ParentLoading />);
+    expect(probe().textContent, '상세(실행 하나)는 안 쥔다').toBe('');
+  });
+
   it('⭐목록 전용 — 같은 loading이 덮는 상세(대화 하나 · 목표 하나)로 올 땐 목록 제목 · 칩을 세우지 않는다(상세는 제목이 다르고 칩이 없다)', async () => {
     const { default: ChatsLoading } = await import('@/app/(authenticated)/chats/loading');
     nav.pathname = '/chats/conv-1';

@@ -14,6 +14,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      <TopBarSlot title={<ActivityTopBarTitle />} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}

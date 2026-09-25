@@ -13,6 +13,7 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { LoopsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // story 1eb18bd8(doc resource-view-firsttouch-identity-pattern §2/§4 — 실험실 파일럿): 빈
 // first-touch 정체성 visual = "4노드(가설→실행→검증→학습+↻다음 Loop) 가로 플로우(과설명 금지·
@@ -132,7 +133,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        <TopBarSlot title={<LoopsTopBarTitle />} showContextChip />
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -143,7 +144,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   return (
     <>
       <TopBarSlot
-        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        title={<LoopsTopBarTitle />}
         actions={
           // story #4277(민 기기 #6) — 402폭에서 «새 실행 시작하기» 글자 버튼이 상단 제목을 «실.»로 밀었다. 스프린트 상단바 관례: 폰은 아이콘만 ·
           // 글자는 sm 이상 · 접근 이름은 aria-label로 유지.

@@ -4,6 +4,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useTopBar } from '@/components/nav/top-bar-context';
+import { Badge } from '@/components/ui/badge';
 
 /**
  * story #4326 — «전체» · «결재» · «대화»로 옮기는 사이(옛 화면 언마운트 → 도착 화면 마운트 전 · loading.tsx가 뜬 동안) 상단바 제목 · 칩이
@@ -13,25 +14,25 @@ import { useTopBar } from '@/components/nav/top-bar-context';
 
 /** «전체»(/more) 상단바 제목 — 화면(more/page)과 폴백(more/loading)이 같이 쓴다. */
 export function MoreTopBarTitle() {
-  const t = useTranslations('nav');
-  return <h1 className="text-sm font-medium">{t('moreMenuTitle')}</h1>;
+  const tNav = useTranslations('nav');
+  return <h1 className="text-sm font-medium">{tNav('moreMenuTitle')}</h1>;
 }
 
 /** «대화»(/chats) 상단바 제목 — 화면(chats/page)과 폴백(chats/loading)이 같이 쓴다. */
 export function ChatsTopBarTitle() {
-  const t = useTranslations('chats');
-  return <p className="text-sm font-medium">{t('title')}</p>;
+  const tChats = useTranslations('chats');
+  return <p className="text-sm font-medium">{tChats('title')}</p>;
 }
 
 export type InboxTabKey = 'attention' | 'notifications' | 'gates';
 
 /** 결재 탭 이름 표 — 화면의 탭 줄 · 상단바 제목 · 폴백이 한 곳에서 읽는다(story #2164: 헤더는 늘 지금 탭의 진짜 이름). */
 export function useInboxTabLabels(): ReadonlyArray<{ key: InboxTabKey; label: string }> {
-  const t = useTranslations('inbox');
+  const tInbox = useTranslations('inbox');
   const tCage = useTranslations('cage');
   return [
-    { key: 'attention', label: t('attentionTabLabel') },
-    { key: 'notifications', label: t('notificationsTabLabel') },
+    { key: 'attention', label: tInbox('attentionTabLabel') },
+    { key: 'notifications', label: tInbox('notificationsTabLabel') },
     { key: 'gates', label: tCage('gateTabLabel') },
   ];
 }
@@ -68,10 +69,10 @@ export function TopBarFallbackHolder({ title, showContextChip }: { title: ReactN
 
 /** «채널»(/channel) 상단바 제목 — 연결 상태 점은 화면만 안다(폴백은 점 없이). 화면과 폴백이 같이 쓴다. */
 export function ChannelTopBarTitle({ statusDot }: { statusDot?: { className: string; label: string } }) {
-  const t = useTranslations('channel');
+  const tChannel = useTranslations('channel');
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-foreground">{t('title')}</span>
+      <span className="text-sm font-medium text-foreground">{tChannel('title')}</span>
       {statusDot ? <span className={`h-2 w-2 rounded-full ${statusDot.className}`} title={statusDot.label} /> : null}
     </div>
   );
@@ -79,14 +80,58 @@ export function ChannelTopBarTitle({ statusDot }: { statusDot?: { className: str
 
 /** «보상»(/rewards) 상단바 제목 — 화면과 폴백이 같이 쓴다. */
 export function RewardsTopBarTitle() {
-  const t = useTranslations('rewards');
-  return <h1 className="text-sm font-medium">{t('title')}</h1>;
+  const tRewards = useTranslations('rewards');
+  return <h1 className="text-sm font-medium">{tRewards('title')}</h1>;
 }
 
 /** «목표»(`[ws]/[proj]/goals` 목록) 상단바 제목 — 화면(목록 · 로딩 분기)과 폴백이 같이 쓴다. 본문 마스트헤드가 진짜 h1이라 비-헤딩(story #3945). */
 export function GoalsTopBarTitle() {
-  const t = useTranslations('goals');
-  return <p className="text-sm font-medium">{t('title')}</p>;
+  const tGoals = useTranslations('goals');
+  return <p className="text-sm font-medium">{tGoals('title')}</p>;
+}
+
+/** «실행»(`[ws]/[proj]/loops` 목록) 상단바 제목 — 화면(목록 · 로딩 분기)과 폴백이 같이 쓴다. */
+export function LoopsTopBarTitle() {
+  const tLoops = useTranslations('loops');
+  return <h1 className="text-sm font-medium">{tLoops('title')}</h1>;
+}
+
+/** «문서»(`[ws]/[proj]/docs` 목록) 상단바 제목 — 상단바 크롬이라 비-헤딩(story #3945 · 본문 h1과 겹치지 않게). */
+export function DocsTopBarTitle() {
+  const tDocs = useTranslations('docs');
+  return <p className="text-sm font-medium">{tDocs('title')}</p>;
+}
+
+/** «활동 로그»(/activity 첫 탭 = 감사 로그) 상단바 제목. */
+export function ActivityTopBarTitle() {
+  const tActivityLog = useTranslations('activityLog');
+  return <h1 className="text-sm font-medium">{tActivityLog('title')}</h1>;
+}
+
+/** «에이전트»(/organization/workforce) 상단바 제목 — 탭과 무관하게 고정(agents-page-tabs). */
+export function AgentsTopBarTitle() {
+  const tAgents = useTranslations('agents');
+  return <h1 className="text-sm font-medium">{tAgents('title')}</h1>;
+}
+
+/**
+ * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름은 고정, «N개 자산 · 용량» 알약은 데이터라 화면만 넘긴다(폴백은 알약 없이 ·
+ * PO 규칙: 폴백은 도착 화면과 글자가 똑같은 부분만). 폰은 브레드크럼을 숨기고 알약이 먼저 양보해 말줄임(story #4277).
+ */
+export function StorageTopBarTitle({ summaryText }: { summaryText?: string }) {
+  const tStorage = useTranslations('storage');
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{tStorage('breadcrumb')}</span>
+      <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:inline">/</span>
+      <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{tStorage('title')}</h1>
+      {summaryText !== undefined ? (
+        <Badge variant="info" className="ml-1 min-w-0 shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
+          <span className="min-w-0 truncate">{summaryText}</span>
+        </Badge>
+      ) : null}
+    </div>
+  );
 }
 
 /** 결재 폴백 제목 — 도착 탭(?tab=)의 이름(수는 아직 모름 → 안 붙임). */
@@ -109,9 +154,20 @@ export const FLAT_ROUTE_TOP_BAR = {
   channel: { Title: () => <ChannelTopBarTitle />, showContextChip: true },
   rewards: { Title: RewardsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/goals': { Title: GoalsTopBarTitle, showContextChip: true },
+  '[ws]/[proj]/loops': { Title: LoopsTopBarTitle, showContextChip: true },
+  '[ws]/[proj]/docs': { Title: DocsTopBarTitle, showContextChip: true },
+  '[ws]/[proj]/storage': { Title: () => <StorageTopBarTitle />, showContextChip: true },
+  activity: { Title: ActivityTopBarTitle, showContextChip: true },
+  'organization/workforce': { Title: AgentsTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
 
 export type FlatRoute = keyof typeof FLAT_ROUTE_TOP_BAR;
+
+/** 프로젝트 자원 부모 경계(`[ws]/[proj]/loading`)용 — 도착 자원 조각이 표에 있으면 그 경로. */
+export function projectRouteOf(segment: string | undefined): FlatRoute | null {
+  const key = `[ws]/[proj]/${segment ?? ''}`;
+  return key in FLAT_ROUTE_TOP_BAR ? (key as FlatRoute) : null;
+}
 
 /** 도착 주소가 그 폴더의 목록 자체인가(마지막 조각 = 폴더 이름). 상세(`…/chats/<id>`)면 아니다. */
 export function isRouteListPath(route: FlatRoute, pathname: string | null): boolean {
