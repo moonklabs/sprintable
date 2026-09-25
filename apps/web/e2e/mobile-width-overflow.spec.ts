@@ -199,6 +199,19 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
     test.info().annotations.push({ type: 'skipped-check', description: `스토리지 이름 칸 폭: 자산 행 0(목록 상태 ${listState} · 로컬 업로드 불가 · story dc3d62f4) — 칸 예산 단위 테스트가 가드` });
     console.log(`[mobile-width-overflow] SKIPPED storage name-width check: no asset rows (list state ${listState} · seed upload unsupported · story dc3d62f4)`);
   }
+  // 4277(PO 402 라이브) — 상단 «N개 자산 · 용량» 알약이 상단바 밖으로 말줄임 없이 잘리던 것: 화면 이름(h1)은 온전 · 알약은 화면 안에서
+  // 끝나거나(다 보임) 말줄임으로 줄어든다(잘린 채 숨지 않음).
+  expect.soft(await topBarInsideViewport(true), '/storage 상단바 — 화면 밖으로 밀린 버튼 · 제목 잘림').toBe('ok');
+  const pill = await page.locator('[data-testid="storage-summary-badge"]').evaluate((b) => {
+    const inner = b.querySelector('span') as HTMLElement;
+    return {
+      inside: b.getBoundingClientRect().right <= window.innerWidth + 1,
+      fits: inner.scrollWidth <= inner.clientWidth + 1,
+      ellipsis: getComputedStyle(inner).textOverflow === 'ellipsis',
+    };
+  });
+  expect.soft(pill.inside, '스토리지 요약 알약이 화면 안에서 끝난다').toBe(true);
+  expect.soft(pill.fits || pill.ellipsis, '스토리지 요약 알약 — 다 보이거나 말줄임').toBe(true);
 
   // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639 · 까디르 검수 P2):
   // - 명시 높이 틀(flow-board-frame) 안에서 보드가 넘치지 않는다(틀 scrollHeight − clientHeight ≤ 1 — 자동 높이 부모 기준이면 0이 당연해 뜻이 없다).
