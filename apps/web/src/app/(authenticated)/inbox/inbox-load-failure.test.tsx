@@ -164,3 +164,18 @@ describe('묶음 열기 — 읽음 실패 토스트는 한 번(story #4295 PO �
   });
 });
 
+// story #4295 × #4276(까디르 렌즈) — loading에서 먼저 출발시킨 1쪽 요청이 실패해도, 넘겨받는 화면은 같은 실패 상자(영원히 로딩 아님).
+describe('선출발 넘겨받은 응답이 실패여도 같은 실패 상자(story #4295 × #4276)', () => {
+  it('⭐선출발 요청이 망 오류 → 화면이 그 실패를 넘겨받아 실패 상자 · 새 요청 없이(1회용 넘겨받기)', async () => {
+    stubFetch(['network', okPage([NOTIF('1')])]);
+    const { prefetchInbox, __resetInboxPrefetchForTest } = await import('@/components/inbox/inbox-prefetch');
+    __resetInboxPrefetchForTest();
+    prefetchInbox({ memberId: 'me-1', projectId: 'proj-1' }, 'notifications');
+    await mount();
+    expect(skeletonCount()).toBe(0);
+    expect(errorBox()?.textContent).toContain(koMessages.inbox.notificationsLoadError);
+    const notifCalls = vi.mocked(fetch).mock.calls.filter(([u, init]) => String(u).includes('/api/notifications') && (init as RequestInit | undefined)?.method !== 'PATCH');
+    expect(notifCalls).toHaveLength(1);
+  });
+});
+
