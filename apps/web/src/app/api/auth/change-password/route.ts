@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -13,6 +14,7 @@ export async function PATCH(request: Request) {
   const spAt = request.headers.get('cookie')?.match(/sp_at=([^;]+)/)?.[1] ?? '';
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/change-password`, {
+    signal: backendSignal(request),
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spAt}` },
     body: JSON.stringify({ current_password: body.current_password, new_password: body.new_password }),

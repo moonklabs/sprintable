@@ -1,6 +1,7 @@
 import { getServerSession } from '@/lib/db/server';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
+import { backendSignal, BFF_BACKEND_CONVERT_TIMEOUT_MS } from '@/lib/backend-signal';
 
 // story #2803 — pptx 인앱 미리보기: BE 변환 파이프(office_conversion.py, story #2771)로
 // 넘기는 얇은 프록시. 인가·캐시·변환 로직은 전부 BE 권위(그라운딩 doc 84ef0cb7 §7-3) —
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
 
     const beUrl = new URL(`/api/v2/attachments/${assetId}/convert`, FASTAPI_URL());
     const beRes = await fetch(beUrl.toString(), {
+      signal: backendSignal(request, BFF_BACKEND_CONVERT_TIMEOUT_MS),
       method: 'POST',
       headers: { Authorization: `Bearer ${session.access_token}` },
       cache: 'no-store',

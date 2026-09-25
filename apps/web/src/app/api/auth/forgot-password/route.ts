@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
 
   const body = await request.json() as { email: string };
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/forgot-password`, {
+    signal: backendSignal(request),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: body.email }),

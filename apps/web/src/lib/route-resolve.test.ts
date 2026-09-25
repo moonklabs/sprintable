@@ -145,7 +145,8 @@ describe('fetchResolve', () => {
     });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://localhost:8000/api/v2/resolve?workspace=moonklabs&project=sprintable',
-      { headers: { Authorization: 'Bearer access-token' } },
+      // story #4320 — 서버 헬퍼라 요청 신호 없이 시간 제한만(backendSignal(null)).
+      { headers: { Authorization: 'Bearer access-token' }, signal: expect.any(AbortSignal) },
     );
   });
 

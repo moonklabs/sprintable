@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { SP_AT_COOKIE } from '@/lib/db/server';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
   const spAt = cookieStore.get(SP_AT_COOKIE)?.value ?? '';
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/${provider}/unlink`, {
+    signal: backendSignal(request),
     method: 'POST',
     headers: { Authorization: `Bearer ${spAt}` },
   });

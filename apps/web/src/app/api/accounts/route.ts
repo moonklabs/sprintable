@@ -9,6 +9,7 @@ import {
   discardCookies,
   getVerifiedActiveAccountId,
 } from '@/lib/auth/account-vault';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -26,7 +27,7 @@ interface AccountMeta {
  * RC1 enforcement: corrupt active(sp_at.sub != sp_rt.sub) = 폐기+401 거부 / stale vault = 폐기.
  * RC3: resolve는 metadata만(rotate/revoke 부작용 0). BE 404 = RT decode 최소 리스트(graceful).
  */
-export async function GET(_request: Request) {
+export async function GET(request: Request) {
   try {
     const store = await cookies();
     const at = store.get(SP_AT_COOKIE)?.value ?? null;
@@ -53,6 +54,7 @@ export async function GET(_request: Request) {
     try {
       const session = await getServerSession();
       const r = await fetch(`${FASTAPI_URL()}/api/v2/accounts/resolve`, {
+        signal: backendSignal(request),
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

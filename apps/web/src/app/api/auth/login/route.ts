@@ -3,6 +3,7 @@ import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
   const body = await request.json() as { email: string; password: string; totp_code?: string | null };
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/token`, {
+    signal: backendSignal(request),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: body.email, password: body.password, totp_code: body.totp_code ?? null }),

@@ -6,6 +6,7 @@
 import { getServerSession } from '@/lib/db/server';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getLocale } from '@/i18n/request';
+import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/lib/backend-signal';
 import { formatRouteTiming, isServerTimingEnabled, logRouteTiming, routeKindForPath, startRouteTimer, withServerTiming, type RouteTimer } from '@/lib/server-timing';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
@@ -50,6 +51,8 @@ interface ProxyOptions {
   // 보여주는 언어를 항상 Accept-Language로 실어 보낸다 — 이 옵션은 그 값을 라우트별로
   // override하고 싶을 때만 쓴다(대부분 안 써도 된다).
   extraHeaders?: Record<string, string>;
+  /** story #4320 — 백엔드 응답 머리까지 기다릴 최대 시간(기본 30초 · 4310과 같은 수). 변환 계열처럼 오래 걸리는 라우트만 길게. */
+  timeoutMs?: number;
 }
 
 /**
@@ -126,8 +129,19 @@ async function proxyToFastapiImpl(
       method: request.method,
       headers,
       body,
+      // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
+      signal: backendSignal(request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
     });
-  } catch {
+  } catch (err) {
+    // story #4320 — 시간 초과는 «연결 못 함»과 다른 코드(같은 503 계열 · 사용자 문장은 «응답이 늦다»).
+    const kind = classifyBackendAbort(err);
+    if (kind === 'timeout') {
+      return apiError('UPSTREAM_TIMEOUT', '서버 응답이 늦어지고 있습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    }
+    if (kind === 'client-abort') {
+      // 브라우저가 이미 떠났다 — 이 응답을 받을 쪽이 없다(로그 · 계측에서만 구분되게 499).
+      return apiError('CLIENT_CLOSED_REQUEST', '요청이 취소되었습니다.', 499);
+    }
     // story #3644(3632 후속, «봉투가 사라지는» 자리 전수) — DNS 실패·connection refused·
     // abort 등 fetch() 자체가 던지면 이 아래 코드가 전혀 안 돈다 — 어떤 라우트도 자기
     // 몫의 오류 처리를 못 받는다. grep 실측: `if (!_r.ok) return _r` 형이 244개 라우트

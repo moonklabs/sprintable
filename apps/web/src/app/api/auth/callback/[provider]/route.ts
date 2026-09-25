@@ -7,6 +7,7 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
+import { backendSignal, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 // e-mobile-oauth-native-handoff-contract §2: returnUrl = 검증된 App Link. dev/prod 도메인·서명
@@ -122,6 +123,8 @@ async function handleCallback(request: Request, provider: string, code: string |
       return NextResponse.redirect(`${origin}/settings?link_error=SESSION_EXPIRED`);
     }
     const linkRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/${provider}/link/callback`, {
+      // story #4320 — OAuth 코드 교환 · 연결 · 인계 발급(한 번 쓰는 값) — 브라우저가 끊어도 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+      signal: backendSignal(null, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS),
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${spAt}` },
       body: JSON.stringify({ provider, code, state }),
@@ -144,6 +147,8 @@ async function handleCallback(request: Request, provider: string, code: string |
 
   // FastAPI OAuth callback
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {
+    // story #4320 — OAuth 코드 교환 · 연결 · 인계 발급(한 번 쓰는 값) — 브라우저가 끊어도 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+    signal: backendSignal(null, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -181,6 +186,8 @@ async function handleCallback(request: Request, provider: string, code: string |
     // story #3121 AC1 — return_uri는 고정 매핑으로 계산(클라 입력 아님). APP_LINK_ORIGIN()은
     // 기존 App Link 리다이렉트 목적지 계산과 동일 출처(아래 returnUrl 참조) — 새 소스 안 만든다.
     const issueRes = await fetch(`${FASTAPI_URL()}/api/v2/internal/auth/oauth-handoff/issue`, {
+      // story #4320 — OAuth 코드 교환 · 연결 · 인계 발급(한 번 쓰는 값) — 브라우저가 끊어도 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+      signal: backendSignal(null, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

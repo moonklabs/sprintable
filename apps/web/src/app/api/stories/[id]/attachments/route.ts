@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
+import { backendSignal } from '@/lib/backend-signal';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (schemas/story.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
@@ -32,6 +33,7 @@ export async function POST(
   // 03fe1663: project_id를 story에서 server-side 도출(클라이언트/쿠키 의존·'unknown' 폴백 제거).
   // GET /api/v2/stories/{id} → story.project_id. 인가도 BE가 강제(403/404).
   const storyRes = await fetch(new URL(`/api/v2/stories/${id}`, FASTAPI_URL()).toString(), {
+    signal: backendSignal(request),
     headers: { Authorization: `Bearer ${session.access_token}` },
     cache: 'no-store',
   });

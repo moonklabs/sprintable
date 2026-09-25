@@ -4,6 +4,7 @@ import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -37,6 +38,8 @@ export async function POST(request: Request) {
   }
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/refresh`, {
+    // story #4320 — 리프레시 토큰 회전(한 번 쓰는 토큰) — 브라우저가 끊어도 끝까지(끊으면 새 토큰을 잃어 로그아웃된다). 시간 제한만.
+    signal: backendSignal(null),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: refreshToken }),

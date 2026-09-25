@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { SP_AT_COOKIE } from '@/lib/db/server';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -33,6 +34,7 @@ export async function GET(request: Request) {
   const res = await fetch(
     `${FASTAPI_BASE}/api/v2/organizations/${orgId}/channel-connections/${channel}/authorize`,
     {
+      signal: backendSignal(request),
       method: 'POST',
       headers: { Authorization: `Bearer ${spAt}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ target_connection_id: connectionId ?? undefined }),

@@ -16,6 +16,7 @@ import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { setFirebaseSessionCookie } from '@/lib/auth/firebase-session';
 import { cookieBase } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -67,6 +68,8 @@ export async function POST(request: Request) {
 
   const internalSecret = process.env['FIREBASE_BFF_INTERNAL_SECRET'];
   const mintRes = await fetch(`${FASTAPI_URL()}/api/v2/internal/auth/firebase-session`, {
+    // story #4320 — 세션 발급 — 브라우저가 끊어도 끝까지(끊으면 발급 결과를 잃는다). 시간 제한만.
+    signal: backendSignal(null),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

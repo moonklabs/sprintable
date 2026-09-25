@@ -3,6 +3,7 @@ import { SP_AT_COOKIE, SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -18,6 +19,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/switch-org`, {
+    // story #4320 — 조직 전환 = 토큰 재발급 — 끊으면 새 토큰을 잃는다. 시간 제한만.
+    signal: backendSignal(null),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

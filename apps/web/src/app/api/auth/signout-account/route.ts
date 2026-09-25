@@ -14,6 +14,7 @@ import {
   removeVaultEntry,
 } from '@/lib/auth/account-vault';
 import { clearSuperseded, markSuperseded } from '@/lib/auth/switch-epoch';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 const RT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
@@ -30,6 +31,8 @@ const RT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 async function beRevoke(refreshToken: string): Promise<void> {
   try {
     const res = await fetch(`${FASTAPI_URL()}/api/v2/auth/logout`, {
+      // story #4320 — 계정 로그아웃 무효화(도우미 함수 · 요청 없음) — 끝까지. 시간 제한만.
+      signal: backendSignal(null),
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),

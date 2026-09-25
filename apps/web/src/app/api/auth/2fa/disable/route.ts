@@ -3,6 +3,7 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getServerSession } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { NextResponse } from 'next/server';
+import { backendSignal } from '@/lib/backend-signal';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     if (!code && !password) return apiError('BAD_REQUEST', 'code or password is required', 400);
 
     const res = await fetch(`${FASTAPI_URL()}/api/v2/auth/totp/disable`, {
+      signal: backendSignal(request),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
