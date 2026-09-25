@@ -2420,7 +2420,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
   describe('⭐B3 — 실패 배지 5종이 상세에서 보인다', () => {
     it('blocked', async () => {
       // story #4290(까디르 QA ①) — 서버가 사람 재시도를 받는 blocked(연결을 고친 뒤)면 «다시 시도»도 — 예전엔 command_retryable=true인데 버튼이 없었다.
-      stubFetch({ draftDetail: { command_status: 'blocked' } });
+      stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'connection' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
       const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');

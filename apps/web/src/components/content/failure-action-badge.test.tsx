@@ -451,9 +451,12 @@ describe('FailureActionBadge — 연결 사유 blocked의 «연결 확인»(stor
     expect(container.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
   });
 
-  it('연결 사유 판정 — blocked 중 조직 일시정지(paused)만 아니다', () => {
+  it('연결 사유 판정(닫힌 판정) — blocked ∧ failure_kind=connection일 때만', () => {
     expect(blockedByConnection('blocked', 'connection')).toBe(true);
-    expect(blockedByConnection('blocked', null)).toBe(true);
+    // 까디르 QA — 없는 kind · 모르는 kind는 연결로 보지 않는다(앞으로 blocked 사유가 늘어도 조용히 연결 링크를 받지 않게).
+    expect(blockedByConnection('blocked', null)).toBe(false);
+    expect(blockedByConnection('blocked', undefined)).toBe(false);
+    expect(blockedByConnection('blocked', 'some_future_kind')).toBe(false);
     expect(blockedByConnection('blocked', 'paused')).toBe(false);
     expect(blockedByConnection('dead_letter', 'connection')).toBe(false);
   });

@@ -131,6 +131,17 @@ describe('NewsletterSendStatus — 연결 사유 blocked의 «연결 확인»(st
     await mount(gate({ status: 'blocked', failure_kind: 'connection' }));
     expect(q('channel-post-failure-connection-link')?.getAttribute('href')).toBe('/organization/channels');
   });
+
+  it('⭐재시도를 못 하는 사람(서버 false)에게도 링크는 선다 — 버튼만 없다(유나 반려 08:56Z)', async () => {
+    await mount(gate({ status: 'blocked', failure_kind: 'connection', command_retryable: false }));
+    expect(q('channel-post-failure-connection-link')?.getAttribute('href')).toBe('/organization/channels');
+    expect(q('channel-post-failure-retry-button')).toBeNull();
+  });
+
+  it('없는 · 모르는 failure_kind의 blocked는 연결 링크를 받지 않는다(닫힌 판정)', async () => {
+    await mount(gate({ status: 'blocked', failure_kind: null }));
+    expect(q('channel-post-failure-connection-link')).toBeNull();
+  });
 });
 
 describe('NewsletterSendStatus — 재시도', () => {
