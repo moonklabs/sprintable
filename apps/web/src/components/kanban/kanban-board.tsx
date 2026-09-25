@@ -10,6 +10,7 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOve
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { MenuSearchInput } from '@/components/ui/menu-search-input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
@@ -1323,11 +1324,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             />
             <DropdownMenuContent align="start" className="w-56">
               <div className="p-1">
-                <Input
-                  autoFocus
+                <MenuSearchInput
                   value={sprintSearch}
                   onChange={(e) => setSprintSearch(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={t('searchSprints')}
                   className="h-7 text-xs"
                 />
@@ -1384,11 +1383,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             />
             <DropdownMenuContent align="start" className="w-56">
               <div className="p-1">
-                <Input
-                  autoFocus
+                <MenuSearchInput
                   value={epicSearch}
                   onChange={(e) => setEpicSearch(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={t('searchEpics')}
                   className="h-7 text-xs"
                 />
@@ -1445,11 +1442,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             />
             <DropdownMenuContent align="start" className="w-56">
               <div className="p-1">
-                <Input
-                  autoFocus
+                <MenuSearchInput
                   value={assigneeSearch}
                   onChange={(e) => setAssigneeSearch(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={t('searchAssignees')}
                   className="h-7 text-xs"
                 />
@@ -1526,11 +1521,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               />
               <DropdownMenuContent align="start" className="w-56">
                 <div className="p-1">
-                  <Input
-                    autoFocus
+                  <MenuSearchInput
                     value={labelSearch}
                     onChange={(e) => setLabelSearch(e.target.value)}
-                    onKeyDown={(e) => e.stopPropagation()}
                     placeholder={t('searchLabels')}
                     className="h-7 text-xs"
                   />
