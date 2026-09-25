@@ -315,7 +315,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     });
 
     it('⭐command_status=blocked — 사유만(버튼 0, §17-13 규율 그대로)', async () => {
-      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'blocked' }]);
+      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'blocked', failure_kind: 'connection' }]);
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 

@@ -42,8 +42,12 @@ describe('deriveFailureAction', () => {
   });
 
 
-  it('⭐blocked — failureKind와 무관하게 blocked(연결 문제, §17-13 버튼 없음)', () => {
-    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'needs_check' })).toEqual({ kind: 'blocked' });
+  it('⭐blocked — 사유 세 갈래(story #4305 · blockedReason 닫힌 판정): 연결 · 일시 중지 · 그 밖(모름)', () => {
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'connection' })).toEqual({ kind: 'blocked' });
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'paused' })).toEqual({ kind: 'blocked', paused: true });
+    // 없는 · 모르는 kind는 연결이라 말하지 않는다(예전엔 failureKind와 무관하게 «연결 문제»).
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'needs_check' })).toEqual({ kind: 'blocked', unknownReason: true });
+    expect(deriveFailureAction({ commandStatus: 'blocked' })).toEqual({ kind: 'blocked', unknownReason: true });
   });
 
   it('⭐pending+processing_kind=awaiting_container — processing이 failure_kind보다 먼저(§17-15, BE #3425/PR#3776)', () => {

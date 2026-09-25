@@ -2854,8 +2854,17 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     // 유나 재판정(2026-09-04 13:37Z) — pending·blocked를 한 문장에 묶으면 절반은 틀린
     // 지시가 된다. blocked 전용 문구("연결 문제")가 예약 전용 문구("예약이 서버에...")와
     // 다른 것을 pin한다.
+    it('blocked + 사유 모름 — 발행 영역 줄은 빼지 않고 중립 문장(연결 · 일시 중지 문장 0 · 링크 0 · story #4305)', async () => {
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked', failure_kind: null } });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason?.textContent).toBe(koMessages.content.channelPostsCommandInFlightReasonBlockedUnknown);
+      expect(reason?.querySelector('a')).toBeNull();
+    });
+
     it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 예약 전용과 다르다', async () => {
-      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked' } });
+      stubFetch({ draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1', command_status: 'blocked', failure_kind: 'connection' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -2880,7 +2889,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         draftDetail: {
           gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
           publication_status: 'published', permalink: 'https://x', published_at: '2026-09-04T00:00:00Z',
-          command_status: 'blocked',
+          command_status: 'blocked', failure_kind: 'connection',
         },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });

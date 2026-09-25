@@ -20,7 +20,8 @@ export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent
 // 그대로 옮긴 값이다. 호출부가 넘길 때만 실린다(모르면 없음) — 배지는 이 값이 false면 버튼을 켜지 않는다(화면이 상태로 따로 가르지 않음).
 export type FailureAction =
   // story #4305 — `paused`: 조직 «외부 발행 일시 중지»로 멈춘 blocked(연결 문제 아님). 그때만 실린다(연결 blocked는 예전 모양 그대로).
-  | { kind: 'blocked'; retryable?: boolean; paused?: true }
+  // story #4305(유나 4660 판정 끝) — `unknownReason`: failure_kind가 없거나 모르는 blocked(연결인지 일시 중지인지 모름 · 연결이라 말하지 않는다).
+  | { kind: 'blocked'; retryable?: boolean; paused?: true; unknownReason?: true }
   | { kind: 'needs_check'; retryable?: boolean }
   | { kind: 'auto_retry'; nextRetryAt: string | null }
   // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
@@ -144,7 +145,11 @@ function deriveFailureKind(input: FailureActionInput): FailureAction | undefined
       reasonCode: input.reasonCode ?? null, reasonResetAt: input.reasonResetAt ?? null,
     };
   }
-  if (input.commandStatus === 'blocked') return input.failureKind === 'paused' ? { kind: 'blocked', paused: true } : { kind: 'blocked' };
+  if (input.commandStatus === 'blocked') {
+    const reason = blockedReason(input.commandStatus, input.failureKind);
+    if (reason === 'paused') return { kind: 'blocked', paused: true };
+    return reason === 'connection' ? { kind: 'blocked' } : { kind: 'blocked', unknownReason: true };
+  }
   if (input.commandStatus === 'completed' || input.commandStatus === 'cancelled' || !input.commandStatus) return undefined;
   // 페드루 PO 정정(2026-09-04 09:49Z) — pending ∧ processing_kind==='awaiting_container'
   // 는 failure_kind보다 먼저 잡는다. 실패가 아니라 "진행 중"이라 §17-2의 실패 갈래
@@ -162,5 +167,17 @@ function deriveFailureKind(input: FailureActionInput): FailureAction | undefined
  * 일시정지(`paused` — 연결과 무관, 정지를 풀면 서버가 다시 올림). «연결 확인» 링크는 앞의 것에만 단다(일시정지에 연결 화면을 가리키면 거짓 길).
  * 까디르 QA(PO 08:55Z) — **닫힌 판정**: `connection`일 때만 참. 없는 kind · 모르는 kind(앞으로 blocked 사유가 늘 때)는 링크를 받지 않는다. */
 export function blockedByConnection(commandStatus: string | null | undefined, failureKind: string | null | undefined): boolean {
-  return commandStatus === 'blocked' && failureKind === 'connection';
+  return blockedReason(commandStatus, failureKind) === 'connection';
 }
+
+/** story #4305(유나 확정) — 멈춘(blocked) 명령의 사유 한 판정(닫힌 판정). `connection` · `paused`만 이름을 붙이고, 없는 kind · 모르는 kind는
+ * `unknown`(연결이라고도 일시 중지라고도 말하지 않는다). 배지 · 댓글 답변 줄 · 채널 상세 발행 영역 줄이 이 값 하나로 갈린다. blocked가 아니면 null. */
+export function blockedReason(
+  commandStatus: string | null | undefined, failureKind: string | null | undefined,
+): 'connection' | 'paused' | 'unknown' | null {
+  if (commandStatus !== 'blocked') return null;
+  if (failureKind === 'connection') return 'connection';
+  if (failureKind === 'paused') return 'paused';
+  return 'unknown';
+}
+

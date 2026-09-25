@@ -89,7 +89,7 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
   describe('⭐B3 — 실패 배지 5종이 카드에서 보인다', () => {
     it('blocked', async () => {
       await act(async () => {
-        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked' }} displayTimezone="Asia/Seoul" />));
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked', failure_kind: 'connection' }} displayTimezone="Asia/Seoul" />));
       });
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
         .toBe(koMessages.content.channelPostsFailureBlocked);

@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { FailureActionBadge } from './failure-action-badge';
-import { blockedByConnection, deriveFailureAction, type FailureAction } from './failure-action';
+import { blockedByConnection, blockedReason, deriveFailureAction, type FailureAction } from './failure-action';
 import { formatScheduledAt } from './schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -413,12 +413,13 @@ describe('FailureActionBadge — 재시도는 서버 한 판정(story #4290 까�
   });
 
   it('deriveFailureAction은 넘긴 서버 판정을 멈춤 갈래에 그대로 싣는다(목록 · 캘린더 · 보드 · 상세가 같은 값)', () => {
-    expect(deriveFailureAction({ commandStatus: 'blocked', retryable: true })).toEqual({ kind: 'blocked', retryable: true });
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'connection', retryable: true })).toEqual({ kind: 'blocked', retryable: true });
     expect(deriveFailureAction({ commandStatus: 'pending', failureKind: 'needs_check', retryable: false }))
       .toEqual({ kind: 'needs_check', retryable: false });
     expect(deriveFailureAction({ commandStatus: 'pending', failureKind: 'transient', retryable: false }))
       .toEqual({ kind: 'auto_retry', nextRetryAt: null });
-    expect(deriveFailureAction({ commandStatus: 'blocked' })).toEqual({ kind: 'blocked' });
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'connection' })).toEqual({ kind: 'blocked' });
+    expect(deriveFailureAction({ commandStatus: 'blocked' })).toEqual({ kind: 'blocked', unknownReason: true }); // story #4305 — 사유 모름
   });
 });
 
@@ -487,6 +488,38 @@ describe('FailureActionBadge — 조직 «외부 발행 일시 중지»로 멈�
     expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'connection' })).toEqual({ kind: 'blocked' });
     expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'paused', retryable: false }))
       .toEqual({ kind: 'blocked', paused: true, retryable: false });
+  });
+});
+
+describe('FailureActionBadge — 사유를 모르는 blocked(story #4305 · 유나)', () => {
+  async function renderWith(props: { action: FailureAction; onRetryClick?: () => void; connectionHref?: string; compact?: boolean }) {
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge displayTimezone="UTC" {...props} />));
+    });
+  }
+  const C = koMessages.content;
+
+  it('중립 머리 · 연결 문구 0 · 링크 0(넘겨도) · 재시도는 서버 판정대로 아래', async () => {
+    await renderWith({ action: { kind: 'blocked', unknownReason: true, retryable: true }, onRetryClick: vi.fn(), connectionHref: '/organization/channels' });
+    expect(container.textContent).toContain(C.channelPostsFailureBlockedUnknown);
+    expect(container.textContent).not.toContain(C.channelPostsFailureBlocked);
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).not.toBeNull();
+  });
+
+  it('compact · 서버 false면 머리만', async () => {
+    await renderWith({ action: { kind: 'blocked', unknownReason: true }, compact: true });
+    expect(container.textContent).toBe(C.channelPostsFailureBlockedUnknown);
+    await renderWith({ action: { kind: 'blocked', unknownReason: true, retryable: false }, onRetryClick: vi.fn() });
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('blockedReason — 닫힌 판정(연결 · 일시 중지만 이름, 그 밖은 unknown, blocked 아니면 null)', () => {
+    expect(blockedReason('blocked', 'connection')).toBe('connection');
+    expect(blockedReason('blocked', 'paused')).toBe('paused');
+    expect(blockedReason('blocked', null)).toBe('unknown');
+    expect(blockedReason('blocked', 'some_future_kind')).toBe('unknown');
+    expect(blockedReason('dead_letter', 'connection')).toBeNull();
   });
 });
 

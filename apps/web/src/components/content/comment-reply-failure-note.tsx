@@ -106,6 +106,19 @@ export function CommentReplyFailureNote({
     );
   }
 
+  if (action.kind === 'blocked' && action.unknownReason) {
+    // story #4305 — 사유를 모르는 blocked: 연결 문장 · 링크 없이 중립 문장(재시도는 서버 판정대로).
+    return (
+      <div className="space-y-1" data-testid="comments-item-reply-failure-note">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">{t('commentsReplyFailureBlockedUnknown')}</p>
+          {onRetry && action.retryable !== false ? retryControls : null}
+        </div>
+        {retryOutcomeLines}
+      </div>
+    );
+  }
+
   if (action.kind === 'blocked') {
     const blockedText = t.rich('commentsReplyFailureConnectionBlocked', {
       link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,

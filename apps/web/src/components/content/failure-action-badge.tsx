@@ -98,6 +98,19 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
       </p>
     );
   }
+  if (action.kind === 'blocked' && action.unknownReason) {
+    // story #4305 — 사유를 모르는 blocked: 연결이라 말하지 않는 중립 머리 · 링크 없음 · 재시도는 서버 판정대로(버튼은 아래).
+    const head = <p className="text-xs text-destructive">{t('channelPostsFailureBlockedUnknown')}</p>;
+    if (compact || !canOffer) return <div data-testid="channel-post-failure-badge">{head}</div>;
+    return (
+      <div className="space-y-1" data-testid="channel-post-failure-badge">
+        {head}
+        <Button variant="outline" size="sm" onClick={onRetryClick} data-testid="channel-post-failure-retry-button">
+          {t('channelPostsFailureRetryCta')}
+        </Button>
+      </div>
+    );
+  }
   if (action.kind === 'blocked') {
     // story #4304(유나 확정) — 머리 «연결 문제로 멈춤» ` — ` «연결 확인»(링크) 한 줄 → 아래 «다시 시도»(고치기 → 다시 시도). 링크는 재시도를
     // 못 내밀어도(서버 판정 false) 늘 둔다(댓글 답변과 같음). compact(목록 · 캘린더 · 보드)는 글만(행이 이미 상세 링크).
