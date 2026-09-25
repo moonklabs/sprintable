@@ -150,6 +150,82 @@ else
 fi
 
 echo
+echo "── story #4319 — 증거 수집(STALL_EVIDENCE_DIR): 죽이기 전에 DB · 스택 증거, 정상 판엔 아무 일도 안 함 ──"
+EV_TMP="$(mktemp -d)"
+mkdir -p "$EV_TMP/bin" "$EV_TMP/evidence"
+# 가짜 psql — 실 DB 없이 «수집기가 DB 조회를 부른다»만 확인(인자 기록).
+cat > "$EV_TMP/bin/psql" <<'STUB'
+#!/usr/bin/env bash
+echo "FAKE_PSQL $*" >> "${FAKE_PSQL_LOG:?}"
+echo "fake psql row"
+STUB
+chmod +x "$EV_TMP/bin/psql"
+# 가짜 pytest — 명령줄에 pytest가 있는 python 프로세스(실 CI의 `.venv/bin/python …/pytest`와 같은 모양). conftest처럼
+# SIGUSR1 · SIGUSR2를 받으면 증거 폴더에 덤프 파일을 쓴다.
+cat > "$EV_TMP/fake_pytest.py" <<'PY'
+import os, signal, sys, time
+d = os.environ["STALL_EVIDENCE_DIR"]
+def dump(kind):
+    def h(_s, _f):
+        with open(os.path.join(d, f"pytest-{os.getpid()}-{kind}.txt"), "a") as out:
+            out.write(f"FAKE {kind} dump\n")
+    return h
+signal.signal(signal.SIGUSR1, dump("threads"))
+signal.signal(signal.SIGUSR2, dump("asyncio"))
+time.sleep(float(sys.argv[1]))
+PY
+PYTHON_BIN="$(command -v python3)"
+
+set +e
+OUT="$(PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDENCE_DIR="$EV_TMP/evidence" \
+  STALL_EVIDENCE_LEAD_SEC=2 STALL_EVIDENCE_DUMP_WAIT_SEC=1 STALL_KILL_AFTER=1s \
+  "$SCRIPT" 0.1 -- "$PYTHON_BIN" "$EV_TMP/fake_pytest.py" 60 pytest-marker 2>&1)"
+CODE=$?
+set -e
+if [ "$CODE" -eq 124 ]; then echo "  ok   정지 판정 그대로(124)"; else echo "  FAIL exit code=${CODE}(기대 124) — 출력: $OUT"; FAIL=1; fi
+if [[ "$OUT" == *"STALL evidence(story #4319)"* ]] && [[ "$OUT" == *"fake psql row"* ]]; then
+  echo "  ok   죽이기 전에 증거 묶음 · DB 조회"
+else
+  echo "  FAIL 증거 묶음 · DB 조회가 안 보임 — 출력: $OUT"; FAIL=1
+fi
+if [[ "$OUT" == *"FAKE threads dump"* ]] && [[ "$OUT" == *"FAKE asyncio dump"* ]]; then
+  echo "  ok   pytest 프로세스에 SIGUSR1 · SIGUSR2 → 두 덤프가 로그에"
+else
+  echo "  FAIL 스택 덤프가 로그에 없음 — 출력: $OUT"; FAIL=1
+fi
+_ev_line=$(printf '%s\n' "$OUT" | grep -n "STALL evidence" | head -1 | cut -d: -f1)
+_stall_line=$(printf '%s\n' "$OUT" | grep -n "^STALL:" | head -1 | cut -d: -f1)
+if [ -n "$_ev_line" ] && [ -n "$_stall_line" ] && [ "$_ev_line" -lt "$_stall_line" ]; then
+  echo "  ok   증거가 STALL 판정(강제 종료)보다 먼저"
+else
+  echo "  FAIL 증거가 STALL 뒤이거나 없음(ev=${_ev_line:-없음} stall=${_stall_line:-없음})"; FAIL=1
+fi
+
+rm -f "$EV_TMP/psql.log"
+set +e
+_t0=$(date +%s)
+OUT="$(PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDENCE_DIR="$EV_TMP/evidence" \
+  STALL_EVIDENCE_LEAD_SEC=2 "$SCRIPT" 0.5 -- bash -c 'exit 3' 2>&1)"
+CODE=$?
+_took=$(( $(date +%s) - _t0 ))
+OUT_OK="$(PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDENCE_DIR="$EV_TMP/evidence" \
+  STALL_EVIDENCE_LEAD_SEC=2 "$SCRIPT" 0.5 -- true 2>&1)"
+CODE_OK=$?
+set -e
+if [ "$CODE" -eq 3 ] && [ "$CODE_OK" -eq 0 ]; then echo "  ok   정상 판 종료 코드 그대로(3 · 0)"; else echo "  FAIL exit code=${CODE}/${CODE_OK}(기대 3/0)"; FAIL=1; fi
+if [ ! -e "$EV_TMP/psql.log" ] && [[ "$OUT$OUT_OK" != *"STALL evidence"* ]]; then
+  echo "  ok   정상 판엔 수집 0(DB 조회 · 증거 묶음 없음)"
+else
+  echo "  FAIL 정상 판인데 수집이 돌았다 — 출력: $OUT $OUT_OK"; FAIL=1
+fi
+if [ "$_took" -le 2 ]; then
+  echo "  ok   정상 판에 기다림이 안 붙는다(${_took}s · 수집기 sleep은 거둔다 · AC7)"
+else
+  echo "  FAIL 정상 판이 ${_took}s 걸림 — 수집기를 기다린다"; FAIL=1
+fi
+rm -rf "$EV_TMP"
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0

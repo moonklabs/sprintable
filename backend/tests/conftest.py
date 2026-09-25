@@ -55,6 +55,49 @@ from unittest.mock import AsyncMock, MagicMock
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
+
+# story #4319(AC5) — CI 정지 감지기(scripts/run-with-stall-detection.sh)가 죽이기 전에 보내는 신호로 스택을 남긴다.
+# STALL_EVIDENCE_DIR이 있을 때만(CI destructive 샤드). 모듈 최상위에서 등록해 수집(collection) 중 멈춤도 잡힌다.
+# 파일로 쓴다 — pytest의 출력 가로채기(fd 수준)가 stderr를 삼키고, 정지 판은 곧 죽어 그 버퍼가 사라진다.
+#   SIGUSR1 → faulthandler: 모든 스레드 스택(C 수준이라 파이썬이 한 호출에 묶여 있어도 찍힌다)
+#   SIGUSR2 → 지금 테스트 · 단계(PYTEST_CURRENT_TEST)와 실행 중인 asyncio 루프의 모든 태스크 스택
+_STALL_EVIDENCE_FILES: list = []
+
+
+def _register_stall_evidence_dumps() -> None:
+    evidence_dir = os.environ.get("STALL_EVIDENCE_DIR")
+    if not evidence_dir:
+        return
+    import asyncio
+    import faulthandler
+    import signal
+    import time
+
+    os.makedirs(evidence_dir, exist_ok=True)
+    threads_file = open(os.path.join(evidence_dir, f"pytest-{os.getpid()}-threads.txt"), "a", buffering=1)  # noqa: SIM115 — 프로세스 끝까지 연다
+    _STALL_EVIDENCE_FILES.append(threads_file)
+    faulthandler.register(signal.SIGUSR1, file=threads_file, all_threads=True)
+    tasks_path = os.path.join(evidence_dir, f"pytest-{os.getpid()}-asyncio.txt")
+
+    def _dump_asyncio_tasks(_signum, _frame) -> None:
+        with open(tasks_path, "a") as out:
+            out.write(f"== {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} · PYTEST_CURRENT_TEST={os.environ.get('PYTEST_CURRENT_TEST')!r}\n")
+            # 신호 처리기는 주 스레드에서 돈다 — 루프가 주 스레드에서 돌고 있으면 그 루프가 보인다(공개 API는 코루틴 안에서만 쓸 수 있다).
+            loop = asyncio.events._get_running_loop()
+            if loop is None:
+                out.write("(주 스레드에 실행 중인 asyncio 루프 없음)\n")
+                return
+            tasks = asyncio.all_tasks(loop)
+            out.write(f"({len(tasks)} tasks)\n")
+            for task in tasks:
+                out.write(f"-- {task!r}\n")
+                task.print_stack(file=out)
+
+    signal.signal(signal.SIGUSR2, _dump_asyncio_tasks)
+
+
+_register_stall_evidence_dumps()
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 

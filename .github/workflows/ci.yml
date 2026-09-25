@@ -1397,6 +1397,9 @@ jobs:
           # 넘는 날이 오면 STALL_TIMEOUT_MIN을 8이 아니라 그 실측값×2로 다시 잡는다(같은
           # 8을 무한정 우려먹지 않는다).
           STALL_TIMEOUT_MIN=8
+          # story #4319(AC5) — 정지 감지기가 죽이기 전에 DB 연결 · 잠금과 pytest 스레드 · asyncio 태스크 스택을 이 잡 로그에 남긴다
+          # (scripts/stall-evidence.sh · tests/conftest.py). 정상 판엔 아무 일도 안 한다(수집기는 제한 60초 전에만 깨어난다).
+          stall_evidence_dir=$(mktemp -d) || exit 1
           failed_out=$(must_mktemp) || exit 1
           overage_out=$(must_mktemp) || exit 1
           unweighted_file=$(must_mktemp) || exit 1
@@ -1410,6 +1413,8 @@ jobs:
           loop_exit=0
           WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
           STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
+          STALL_EVIDENCE_DIR="$stall_evidence_dir" \
+          STALL_EVIDENCE_PGDATABASE=sprintable_test_iso \
           FILES_LIST_FILE=/tmp/shard_files.txt \
           ELAPSED_OUT_FILE="$elapsed_file" \
           FAILED_OUT_FILE="$failed_out" \
@@ -1497,6 +1502,8 @@ jobs:
             rerun_loop_exit=0
             WRAPPER_SCRIPT="${{ github.workspace }}/scripts/run-with-stall-detection.sh" \
             STALL_TIMEOUT_MIN="$STALL_TIMEOUT_MIN" \
+            STALL_EVIDENCE_DIR="$stall_evidence_dir" \
+            STALL_EVIDENCE_PGDATABASE=sprintable_test_iso \
             FILES_LIST_FILE="$suspects_file" \
             ELAPSED_OUT_FILE="$rerun_elapsed" \
             FAILED_OUT_FILE="$rerun_failed" \
