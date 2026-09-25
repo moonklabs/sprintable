@@ -45,6 +45,10 @@ interface ActivityPage {
   nextBeforeSeq: number | null;
 }
 
+// story #4297(까디르 델타) — 조회 결과만 돌려주고 상태는 안 건드린다. 부르는 쪽이 세대를 확인한 **뒤에** 반영한다(늦게 온 옛 조건의 403이
+// 새 조건 화면을 «접근 불가»로 덮지 않게).
+type ActivityFetch = { kind: 'ok'; page: ActivityPage } | { kind: 'forbidden' } | { kind: 'error' };
+
 interface TeamMember {
   id: string;
   name: string | null;
@@ -228,7 +232,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   // 가장 오래된 200건만 보였다(바쁜 조직은 최신 활동이 영영 안 보임). 기간(from/to)은 경계로만 쓰고, 끝까지 잇는 건 서버 커서다.
   // story #4280(까디르 검수 P2) — 경계는 UTC ISO 문자열 또는 null(날짜 칸을 비움 = 그 방향 경계 없음).
   const fetchPage = useCallback(
-    async (since: string | null, until: string | null, beforeSeq: number | null): Promise<ActivityPage | null> => {
+    async (since: string | null, until: string | null, beforeSeq: number | null): Promise<ActivityFetch> => {
       const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_LIMIT), order: 'desc' });
       if (since) p.set('since', since);
       if (until) p.set('until', until);
@@ -239,15 +243,12 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
       try {
         const res = await fetchWithAuth(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
-        if (res.status === 403) {
-          setForbidden(true);
-          return null;
-        }
-        if (!res.ok) return null;
+        if (res.status === 403) return { kind: 'forbidden' };
+        if (!res.ok) return { kind: 'error' };
         const json = (await res.json()) as { data?: ActivityStreamResponse };
-        return { items: json.data?.items ?? [], nextBeforeSeq: json.data?.next_before_seq ?? null };
+        return { kind: 'ok', page: { items: json.data?.items ?? [], nextBeforeSeq: json.data?.next_before_seq ?? null } };
       } catch {
-        return null;
+        return { kind: 'error' };
       }
     },
     [projectId, actorFilter, verbFilter, objectTypeFilter],
@@ -268,8 +269,10 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       setForbidden(false);
       setNextBeforeSeq(null);
       setLoadingMore(false); // 옛 조건의 «더 보기»가 걸려 있어도 새 목록의 버튼은 막히지 않게(그 응답은 세대가 달라 버려진다)
-      const page = await fetchPage(rangeFrom, rangeTo, null);
+      const result = await fetchPage(rangeFrom, rangeTo, null);
       if (cancelled || generation !== generationRef.current) return;
+      if (result.kind === 'forbidden') setForbidden(true);
+      const page = result.kind === 'ok' ? result.page : null;
       setItems(page?.items ?? []);
       setNextBeforeSeq(page?.nextBeforeSeq ?? null);
     }
@@ -285,8 +288,13 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     const generation = generationRef.current;
     setLoadingMore(true);
     try {
-      const page = await fetchPage(rangeFrom, rangeTo, nextBeforeSeq);
-      if (generation !== generationRef.current) return; // 그 사이 첫 쪽을 다시 받았다 — 옛 조건의 응답은 버린다(토스트도 없음).
+      const result = await fetchPage(rangeFrom, rangeTo, nextBeforeSeq);
+      if (generation !== generationRef.current) return; // 그 사이 첫 쪽을 다시 받았다 — 옛 조건의 응답은 버린다(토스트 · 권한 표시도 없음).
+      if (result.kind === 'forbidden') {
+        setForbidden(true);
+        return;
+      }
+      const page = result.kind === 'ok' ? result.page : null;
       if (page) {
         setItems((prev) => {
           const seen = new Set((prev ?? []).map((i) => i.activity_id));
@@ -298,7 +306,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
         addToast({ title: tc('loadMoreFailed'), type: 'error' });
       }
     } finally {
-      setLoadingMore(false);
+      // 옛 조건의 요청이 늦게 끝나도 새 조건에서 도는 «더 보기»의 진행 표시를 끄지 않게 — 세대가 같을 때만 푼다(새 첫 쪽 로드가 이미 풀었다).
+      if (generation === generationRef.current) setLoadingMore(false);
     }
   };
 

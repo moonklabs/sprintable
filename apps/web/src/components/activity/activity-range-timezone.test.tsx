@@ -268,6 +268,53 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     expect(next.get('before_seq'), '커서는 새 결과의 것').toBe('99');
   });
 
+  // story #4297(까디르 델타) — 세대 확인 전에 부작용이 새지 않는지: 옛 조건의 늦은 403 · 옛 요청의 finally.
+  function stubWithHeldOld(oldResponse: () => unknown) {
+    const held: { release: () => void; releaseNew: () => void } = { release: () => {}, releaseNew: () => {} };
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        const q = new URL(url, 'http://x').searchParams;
+        if (q.get('before_seq') === '20') { await new Promise<void>((r) => { held.release = r; }); return oldResponse(); }
+        if (q.get('before_seq') === '99') { await new Promise<void>((r) => { held.releaseNew = r; }); return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(50)], next_after_seq: null, next_before_seq: null } }) }; }
+        if (q.get('since') === null) return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(99)], next_after_seq: null, next_before_seq: 99 } }) };
+        return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(30), ITEM(20)], next_after_seq: null, next_before_seq: 20 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    });
+    return held;
+  }
+  async function startOldLoadMoreThenChangeRange() {
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const [fromInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    await act(async () => { setDate(fromInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(container.textContent).toContain('item-99');
+  }
+
+  it('⭐옛 조건의 «더 보기»가 늦게 403이어도 새 조건 화면을 «접근 불가»로 덮지 않는다', async () => {
+    const held = stubWithHeldOld(() => ({ ok: false, status: 403, json: async () => null }));
+    await startOldLoadMoreThenChangeRange();
+    await act(async () => { held.release(); await vi.advanceTimersByTimeAsync(100); });
+    expect(container.textContent).not.toContain(enMessages.teamActivity.forbiddenTitle);
+    expect(container.textContent).toContain('item-99');
+  });
+
+  it('⭐옛 «더 보기»가 늦게 끝나도 새 조건에서 도는 «더 보기»의 진행 표시를 끄지 않는다', async () => {
+    const held = stubWithHeldOld(() => ({ ok: true, status: 200, json: async () => ({ data: { items: [ITEM(10)], next_after_seq: null, next_before_seq: 10 } }) }));
+    await startOldLoadMoreThenChangeRange();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const loadingButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === enMessages.common.loading);
+    expect(loadingButton(), '새 «더 보기» 진행 중').toBeTruthy();
+    await act(async () => { held.release(); await vi.advanceTimersByTimeAsync(100); });
+    expect(loadingButton(), '옛 요청이 끝나도 새 요청은 아직 진행 중').toBeTruthy();
+    expect(loadingButton()!.hasAttribute('disabled')).toBe(true);
+    await act(async () => { held.releaseNew(); await vi.advanceTimersByTimeAsync(100); });
+    expect(container.textContent).toContain('item-50');
+  });
+
   it('첫 쪽이 비어 있고 서버 커서가 없으면 «더 보기»를 그리지 않는다', async () => {
     stubStream({});
     const { TeamActivityView } = await import('./team-activity-view');
