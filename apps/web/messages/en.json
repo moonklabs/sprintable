@@ -1212,7 +1212,7 @@
     "epicSwimlaneUnassigned": "Unassigned",
     "epicSwimlaneOverflowToggle": "{count} more epics",
     "epicSwimlaneLoadError": "Couldn't load. Please try again in a moment.",
-    "boardLoadFailed": "Couldn't load the board — try again.",
+    "boardLoadFailed": "Couldn't load the board",
     "epicSwimlaneLoadTimeout": "Loading took too long, so we stopped. Please try again.",
     "epicSwimlaneLoadingElapsed": "Loading… ({seconds}s)",
     "epicSwimlaneRetry": "Retry",
