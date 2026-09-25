@@ -77,9 +77,11 @@ interface DocContentRendererProps {
 }
 
 // story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것). 유나 4673 판: 본문 속 글자 링크라 **글자 크기 ·
-// 줄바꿈을 본문에서 물려받는다**(예전 `inline-flex text-sm px-1`은 16px 본문 속 14px 끊기지 않는 상자 — 1440에서 들쭉날쭉 빈틈 · 390 줄 간격 흔들림).
-// 색은 이 선언이 이긴다 — 루트의 `[&_a]` 링크 규칙은 문서 링크(`data-doc-internal-link`)를 빼고 건다(아래 rootClassName · 예전엔 brand-soft가 덮어 라이트 대비 1.25:1).
-const WIKI_LINK_CLASS = 'rounded-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+// 줄바꿈을 본문에서 물려받는다**(예전 `inline-flex text-sm px-1`은 16px 본문 속 14px 끊기지 않는 상자 — 06-23 문서 리디자인부터 · 1440에서 들쭉날쭉 빈틈 ·
+// 390 줄 간격 흔들림). 색은 링크 자신의 쪽에서 더 구체적인 선택자로 이긴다(유나 조정 14:00Z): `[&[data-doc-internal-link]]:…` =
+// `.cls[data-doc-internal-link]`(0,2,0) > 루트 `.root a`(0,1,1). 루트 `[&_a]:text-brand-soft`(본문 링크 전체 대비 · 디디 4315 몫)가 선언 색을 덮어
+// 라이트 대비 1.25:1이던 것 — 루트 규칙은 여기서 안 건드리고, 4315가 루트 색을 바꿔도 위키 링크는 foreground로 남는다.
+const WIKI_LINK_CLASS = 'rounded-sm underline decoration-muted-foreground/40 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-doc-internal-link]]:text-foreground [&[data-doc-internal-link]]:underline-offset-2';
 
 function normalizeHeadingForTitleCompare(s: string): string {
   return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
@@ -373,6 +375,9 @@ export function DocContentRenderer({
     // React가 노드를 쥐므로 DOM을 갈아끼우지 않고 렌더러 `span` 컴포넌트가 그린다(story #4313).
     const wikiLinks = contentFormat === 'html' ? Array.from(root.querySelectorAll<HTMLElement>('[data-type="wikiLink"]')) : [];
     const wikiCleanup = wikiLinks.map((span) => {
+      // story #4313(까디르 P3) — 효과가 다시 돌 때(대응이 비거나 바뀜 · publicMode 전환) 이전에 만든 링크가 남지 않게 먼저 글자로 되돌린다.
+      const previousLink = span.querySelector(':scope > a[data-doc-internal-link]');
+      if (previousLink) span.replaceChildren(document.createTextNode(previousLink.textContent ?? ''));
       const slug = span.getAttribute('data-slug') ?? '';
       const title = span.getAttribute('data-title') ?? span.textContent ?? '';
       // Public share viewer: internal doc links are inert plain text — no navigation,

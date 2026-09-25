@@ -154,13 +154,39 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     expect(container.querySelector('[data-page-embed]')!.getAttribute('data-embed-state')).toBeNull();
   });
 
-  it('⭐마크다운 문서 링크도 본문 글자 크기 · 줄바꿈 상속(상자 아님) · 선언 색', async () => {
-    await renderDoc('[[onboarding]] <span data-type="wikiLink" data-slug="design-doc">설계</span>');
-    for (const link of docLinks()) {
-      for (const cls of ['inline-flex', 'text-sm', 'px-1']) expect(link.classList.contains(cls), cls).toBe(false);
-      expect(link.classList.contains('text-foreground')).toBe(true);
+  it('⭐마크다운 문서 링크도 본문 글자 크기 · 줄바꿈 상속(상자 아님) · 링크 쪽 더 구체적인 선택자 색(마크다운 · HTML 두 경로)', async () => {
+    for (const [md, format] of [
+      ['[[onboarding]] <span data-type="wikiLink" data-slug="design-doc">설계</span>', 'markdown'],
+      ['<p><span data-type="wikiLink" data-title="설계" data-slug="design-doc">설계</span></p>', 'html'],
+    ] as const) {
+      await renderDoc(md, { format });
+      expect(docLinks().length, format).toBeGreaterThan(0);
+      for (const link of docLinks()) {
+        for (const cls of ['inline-flex', 'text-sm', 'px-1']) expect(link.classList.contains(cls), `${format} ${cls}`).toBe(false);
+        expect(link.classList.contains('[&[data-doc-internal-link]]:text-foreground'), format).toBe(true);
+        expect(link.hasAttribute('data-doc-internal-link'), format).toBe(true);
+      }
     }
-    expect(docLinks()).toHaveLength(2);
+  });
+
+  // PO 14:00Z — XSS 표: data: URL · 따옴표 든 속성 · 태그 든 제목. 어느 경로에서도 스크립트 실행 경로 0 · 문서 링크 0(대응 밖).
+  it.each([
+    ['마크다운 링크 data: URL', '[x](data:text/html,<script>alert(1)</script>)'],
+    ['raw a 표지 + data: href', '<a data-doc-internal-link="design-doc" href="data:text/html,x">가짜</a>'],
+    ['«[[…]]» 안 따옴표로 속성 탈출 시도', '[[design-doc" onmouseover="alert(1)]]'],
+    ['span data-slug 안 따옴표', '<span data-type="wikiLink" data-slug=\'design-doc" onclick="alert(1)\'>설계</span>'],
+    ['span data-title에 태그', '<span data-type="wikiLink" data-slug="design-doc" data-title="<img src=x onerror=alert(1)>">설계</span>'],
+  ] as const)('⭐XSS — %s', async (_name, md) => {
+    await renderDoc(md);
+    // 글자(텍스트 노드 · 속성 값)로 남는 건 무해 — 실행 경로(요소 · 이벤트 속성 · 스킴)만 0이어야 한다.
+    expect(container.querySelectorAll('[onmouseover],[onclick],[onerror],script,img,iframe').length).toBe(0);
+    for (const a of container.querySelectorAll('a')) expect(a.getAttribute('href') ?? '').not.toMatch(/^\s*(javascript|data):/i);
+  });
+
+  it('⭐XSS — HTML 포맷 임베드 · 없음 카드 제목의 태그는 글자로(escape)', async () => {
+    await renderDoc('<div data-page-embed data-title="<img src=x onerror=alert(1)>" data-slug="gone-doc"></div><div data-page-embed data-title="<b>굵게</b>" data-slug="design-doc"></div>', { format: 'html' });
+    expect(container.querySelectorAll('img,b,[onerror]').length).toBe(0);
+    expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
   it('⭐publicMode — «[[…]]» · 에디터 span 모두 평문 · 이동 0', async () => {

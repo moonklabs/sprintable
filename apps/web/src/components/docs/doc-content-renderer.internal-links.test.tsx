@@ -83,18 +83,32 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
     }
   });
 
-  // story #4313(유나 4673 판 · PO) — 4309가 span을 `<a>`로 바꾸며 들어온 퇴행 둘: (1) 루트의 `[&_a]:text-brand-soft`가 선언 색을 덮어 라이트 대비 1.25:1 ·
-  // (2) `inline-flex text-sm px-1` = 16px 본문 속 14px 끊기지 않는 상자. 문서 링크는 루트 링크 규칙에서 빠지고, 글자 크기 · 줄바꿈을 본문에서 물려받는다.
-  it('⭐문서 링크는 루트 링크 색 규칙에서 빠지고(선언 색이 이김) 본문 글자 크기 · 줄바꿈을 물려받는다(상자 아님)', async () => {
+  // story #4313(유나 4673 판 · PO 14:00Z) — 위키 링크: (1) 16px 본문 속 14px 끊기지 않는 상자(`inline-flex text-sm px-1` · 06-23 리디자인부터) →
+  // 본문 글자 크기 · 줄바꿈 상속. (2) 루트 `[&_a]:text-brand-soft`(본문 링크 전체 · 디디 4315 몫 · 여기선 안 건드림)가 선언 색을 덮던 것 →
+  // 링크 자신의 쪽에서 더 구체적인 선택자(`[&[data-doc-internal-link]]:text-foreground` = (0,2,0) > 루트 `.root a` (0,1,1) · 유나 조정).
+  it('⭐위키 링크는 본문 글자 크기 · 줄바꿈을 물려받고(상자 아님) 색은 링크 쪽 더 구체적인 선택자가 이긴다', async () => {
     await renderDoc(WIKI + EMBED);
-    const rootClass = (container.firstElementChild as HTMLElement).className;
-    expect(rootClass).toContain('[&_a:not([data-doc-internal-link])]:text-brand-soft');
-    expect(rootClass).not.toMatch(/(^|\s)\[&_a\]:text-brand-soft/);
     const wiki = container.querySelector('[data-type="wikiLink"] a')!;
-    expect(wiki.hasAttribute('data-doc-internal-link')).toBe(true);
     for (const cls of ['inline-flex', 'text-sm', 'px-1', 'py-0.5']) expect(wiki.classList.contains(cls), cls).toBe(false);
-    expect(wiki.classList.contains('text-foreground')).toBe(true);
-    expect(container.querySelector('[data-page-embed] a')!.hasAttribute('data-doc-internal-link')).toBe(true);
+    expect(wiki.classList.contains('[&[data-doc-internal-link]]:text-foreground')).toBe(true);
+    expect(wiki.hasAttribute('data-doc-internal-link'), '선택자가 걸리는 속성').toBe(true);
+    expect(wiki.classList.contains('text-foreground'), '루트 (0,1,1)에 밀리는 보통 선언 아님').toBe(false);
+    // 루트 링크 규칙은 이 PR이 안 건드린다(4315 몫).
+    expect((container.firstElementChild as HTMLElement).className).toContain('[&_a]:text-brand-soft');
+  });
+
+  // 까디르 4673 P3 — 효과가 다시 돌 때(대응이 비거나 publicMode 전환) 이미 만든 링크가 글자로 돌아가야 한다.
+  it('⭐대응이 비면 · publicMode로 바뀌면 이미 만든 HTML 위키 링크가 글자로 돌아감', async () => {
+    await renderDoc(WIKI);
+    expect(container.querySelector('[data-type="wikiLink"] a')).not.toBeNull();
+    await renderDoc(WIKI, { wikiLinkTargets: null });
+    expect(container.querySelector('[data-type="wikiLink"] a'), '대응 없음').toBeNull();
+    expect(container.querySelector('[data-type="wikiLink"]')!.textContent).toBe('설계 문서');
+    await renderDoc(WIKI);
+    expect(container.querySelector('[data-type="wikiLink"] a')).not.toBeNull();
+    await renderDoc(WIKI, { publicMode: true });
+    expect(container.querySelector('[data-type="wikiLink"] a'), 'publicMode').toBeNull();
+    expect(container.querySelector('[data-type="wikiLink"]')!.textContent).toBe('설계 문서');
   });
 
   it('제목 없는 임베드의 이름 = 빈 제목 표기', async () => {
