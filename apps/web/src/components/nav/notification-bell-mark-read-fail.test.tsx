@@ -254,6 +254,31 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
   });
 
+  it('⭐개수만 받음 · 0(목록 재조회 실패) → 서버 값대로 목록 전부 읽음 · 버튼 없음 · 토스트 없음', async () => {
+    stubAfterNetworkLoss({ list: 'network', count: 0 });
+    await openBell();
+    await clickAllRead();
+    expect(allReadButton()).toBeUndefined();
+    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
+  });
+
+  it('개수만 받음 · 여전히 안 읽음(목록 재조회 실패) → 되돌린 목록 · «전체 읽음 처리에 실패했어요»', async () => {
+    stubAfterNetworkLoss({ list: 'network', count: 1 });
+    await openBell();
+    await clickAllRead();
+    expect(allReadButton()).toBeTruthy();
+    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+  });
+
+  it('목록만 받음 · 전부 읽음(개수 재조회 실패) → 배지를 확인 못 했으니 «확인하지 못했어요»', async () => {
+    stubAfterNetworkLoss({ list: 'allRead', count: 'network' });
+    await openBell();
+    await clickAllRead();
+    expect(allReadButton()).toBeUndefined();
+    expect(container.textContent).toContain(koMessages.inbox.markAllReadUnconfirmed);
+  });
+
   it('서버가 답한 실패(500) → 재조회와 무관하게 «전체 읽음 처리에 실패했어요»', async () => {
     stubFetch(false);
     await openBell();

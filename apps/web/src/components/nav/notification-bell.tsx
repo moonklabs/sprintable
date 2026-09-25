@@ -614,11 +614,22 @@ export function NotificationBell() {
       return;
     }
     if (count === null && !page) {
-      // 확정 실패가 아니라 확인이 필요한 상태(유나 판정) — 목록은 되돌린 그대로.
+      // 둘 다 못 받음 — 확정 실패가 아니라 확인이 필요한 상태(유나 판정) · 목록은 되돌린 그대로.
       addToast({ title: t('markAllReadUnconfirmed'), type: 'warning' });
       return;
     }
-    const stillUnread = count !== null ? count > 0 : page!.items.some((n) => !n.read_at);
+    if (count === 0 && !page) {
+      // 개수만 받음 — «안 읽음 0»은 서버가 말한 값이다(PO · 까디르 판정). 목록 재조회가 실패해 되돌린 행이 «안 읽음»으로 남으면
+      // 배지 0과 어긋나므로 이번에 되돌린 행을 서버 값대로 읽음으로 둔다. 사용자 입장에선 성공 — 토스트 없음.
+      setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
+      return;
+    }
+    if (count === null && page && !page.items.some((n) => !n.read_at)) {
+      // 목록만 받았고 그 쪽은 전부 읽음인데 배지는 서버 값을 못 받았다 — 성공처럼 조용히 두지 않고 «확인 필요».
+      addToast({ title: t('markAllReadUnconfirmed'), type: 'warning' });
+      return;
+    }
+    const stillUnread = (count ?? 0) > 0 || (page?.items.some((n) => !n.read_at) ?? false);
     // 서버가 전부 읽음으로 처리했다면 사용자 입장에선 성공 — 실패 문장을 띄우지 않는다.
     if (stillUnread) addToast({ title: t('markAllReadFailed'), type: 'error' });
   }, [projectId, addToast, t, unreadCount]);
