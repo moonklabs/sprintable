@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { memberOrAgentLabel } from '@/lib/member-display';
+import { memberOptionLabels } from '@/lib/member-display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -186,7 +186,7 @@ export default function RewardsPage() {
                     onValueChange={setMemberId}
                     options={[
                       { value: '', label: t('selectMember') },
-                      ...members.map((m) => ({ value: m.id, label: memberOrAgentLabel(m, tc) })),
+                      ...((labels) => members.map((m) => ({ value: m.id, label: labels.get(m.id) ?? '' })))(memberOptionLabels(members, tc)),
                     ]}
                   />
                 </div>

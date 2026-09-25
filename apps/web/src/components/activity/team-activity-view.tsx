@@ -12,7 +12,7 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notification-display';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
-import { memberLookup, memberOrAgentLabel } from '@/lib/member-display';
+import { memberLookup, memberOptionLabels } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -321,9 +321,11 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   };
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
+  // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
+  const actorLabelById = memberOptionLabels(members, tc);
   const actorOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
-    ...members.map((m) => ({ value: m.id, label: memberOrAgentLabel(m, tc) })),
+    ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
 
   const objectTypeOptions: SelectOption[] = [

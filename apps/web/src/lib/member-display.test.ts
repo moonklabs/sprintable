@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberNameById, memberOrAgentLabel, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
+import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberNameById, memberOptionLabels, memberOrAgentLabel, memberRowLabels, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
   const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원', memberUnknown: '알 수 없는 구성원', agentUnnamed: '이름 없는 에이전트' };
@@ -176,6 +176,47 @@ describe('memberNameById', () => {
   it('⭐목록에 없는 id만 호출부 fallback', () => {
     expect(memberNameById(map, 'missing-id', tc, 'missin')).toBe('missin');
     expect(memberNameById(undefined, 'x', tc, '—')).toBe('—');
+  });
+});
+
+// [SID:4286 · 유나 06:48Z · 06:49Z] 꼬리 규칙은 한 곳(tailSharedFallbacks) — memberRowLabels · disambiguateFallbackLabels · memberOptionLabels가
+// 같은 규칙으로 갈린다. 선택 목록(표식 없음)은 이름 빔이면 타입대로 라벨.
+describe('행 꼬리 규칙 한 곳 · 선택 목록 라벨([SID:4286])', () => {
+  const A = 'agent-aaaa1111'; const B = 'agent-bbbb2222'; const H = 'human-cccc3333'; const N = 'named-dddd4444';
+
+  it('memberRowLabels 기본(«이름 없는 구성원»): 이름 없는 행 둘 이상이면 꼬리 · 역할이 그 사이 유일하면 꼬리 없음', () => {
+    const rows = [{ id: A, name: null }, { id: H, name: null }, { id: N, name: '안나' }];
+    const plain = memberRowLabels(rows, t, () => '');
+    expect(plain.get(A)).toBe('이름 없는 구성원 · agent-aa');
+    expect(plain.get(H)).toBe('이름 없는 구성원 · human-cc');
+    expect(plain.get(N)).toBe('안나');
+    const byRole = memberRowLabels(rows, t, (r) => (r.id === A ? '관리자' : '구성원'));
+    expect(byRole.get(A)).toBe('이름 없는 구성원');
+    expect(byRole.get(H)).toBe('이름 없는 구성원');
+  });
+
+  it('memberOptionLabels(선택 목록): 이름 빔이면 타입대로 · 라벨이 달라 겹치지 않으면 꼬리 없음', () => {
+    const labels = memberOptionLabels([{ id: A, name: null, type: 'agent' }, { id: H, name: null, type: 'human' }, { id: N, name: '안나', type: 'human' }], t);
+    expect(labels.get(A)).toBe('이름 없는 에이전트');
+    expect(labels.get(H)).toBe('이름 없는 구성원');
+    expect(labels.get(N)).toBe('안나');
+  });
+
+  it('memberOptionLabels: 같은 타입 라벨이 서로 다른 둘 이상이면 그 행에만 꼬리', () => {
+    const labels = memberOptionLabels([{ id: A, name: null, type: 'agent' }, { id: B, name: null, type: 'agent' }, { id: H, name: null, type: 'human' }], t);
+    expect(labels.get(A)).toBe('이름 없는 에이전트 · agent-aa');
+    expect(labels.get(B)).toBe('이름 없는 에이전트 · agent-bb');
+    expect(labels.get(H)).toBe('이름 없는 구성원');
+  });
+
+  it('disambiguateFallbackLabels도 같은 규칙(같은 id 반복은 한 사람)', () => {
+    const m = disambiguateFallbackLabels([
+      { id: A, label: '알 수 없는 구성원', fallback: true },
+      { id: A, label: '알 수 없는 구성원', fallback: true },
+      { id: B, label: '알 수 없는 구성원', fallback: true },
+    ]);
+    expect(m.get(A)).toBe('알 수 없는 구성원 · agent-aa');
+    expect(m.get(B)).toBe('알 수 없는 구성원 · agent-bb');
   });
 });
 

@@ -244,3 +244,36 @@ describe('RecipeRoleMappingFields — 행 이름 축은 창 단위(story #4243 �
     expect(labels).toEqual(['Agent', 'Writer', '검토 담당자', 'my_step_2']);
   });
 });
+
+// [SID:4286] 사람 역할 stage의 선택지 — 예전엔 행을 type 'agent'로 고정해 이름 없는 사람이 «이름 없는 에이전트»였다. 행의 실제 타입대로.
+describe('RecipeRoleMappingFields — 사람 역할 선택지 이름 빔([SID:4286])', () => {
+  it('사람 역할 · 이름 없는 사람 → «이름 없는 구성원»(«이름 없는 에이전트» 0) · 둘이면 행 꼬리', async () => {
+    await act(async () => {
+      root.render(withIntl(
+        <RecipeRoleMappingFields
+          stages={['review']}
+          stageMetadata={{ review: { role: 'Reviewer', action: '검토한다', capability: { kind: 'review', target: 'member' as never } } } as never}
+          roleActorKinds={{ Reviewer: 'human' }}
+          members={[{ id: 'human-aaaa1111', name: null as unknown as string, type: 'human' }, { id: 'human-bbbb2222', name: null as unknown as string, type: 'human' }, { id: 'agent-cccc3333', name: '봇', type: 'agent' }]}
+          channelConnections={[]}
+          generationConnectors={[]}
+          roleMapping={{}}
+          onChange={() => {}}
+          agentPlaceholder="에이전트 선택..."
+          personPlaceholder="사람 선택..."
+          memberPlaceholder="담당 선택..."
+          approvalNote={(s) => `approval:${s}`}
+          channelPlaceholder="채널 선택..."
+          generationConnectorPlaceholder="연산 커넥터 선택..."
+        />
+      ));
+    });
+    const select = container.querySelector('select');
+    expect(select).toBeTruthy();
+    const optionTexts = Array.from(select!.querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionTexts).toContain('이름 없는 구성원 · human-aa');
+    expect(optionTexts).toContain('이름 없는 구성원 · human-bb');
+    expect(optionTexts.some((x) => x?.includes('이름 없는 에이전트'))).toBe(false);
+  });
+});
+

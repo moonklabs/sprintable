@@ -1,27 +1,7 @@
 [
   {
-    "key": "app/(authenticated)/organization/trust/page.tsx::question-mark::return (name.trim()[0] ?? '?').toUpperCase();",
-    "reason": "신뢰 센터 아바타 머리글자 «?» — 유나 결정 2(사람 아이콘)대로 바꿀 자리지만 PR 4637(4282) · PR 4638(4285)이 같은 파일을 고치는 중 → 두 PR 착지 뒤 후속"
-  },
-  {
-    "key": "app/(authenticated)/organization/trust/trust-utils.tsx::email-prefix::lookup.set(m.id, { id: m.id, name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? '?', email: m.email ?? undefined, role: m.role ?? undefined });",
-    "reason": "PR 4638(4285번 · 신뢰 센터 이름 출처 org-summary)이 걷는 중 — 그 PR이 이 줄을 지운다"
-  },
-  {
-    "key": "app/(authenticated)/organization/trust/trust-utils.tsx::question-mark::lookup.set(m.id, { id: m.id, name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? '?', email: m.email ?? undefined, role: m.role ?? undefined });",
-    "reason": "PR 4638(4285번 · 신뢰 센터 이름 출처 org-summary)이 걷는 중 — 그 PR이 이 줄을 지운다"
-  },
-  {
-    "key": "app/(authenticated)/organization/trust/trust-utils.tsx::question-mark::if (!lookup.has(m.id)) lookup.set(m.id, { id: m.id, name: m.name?.trim() || '?' });",
-    "reason": "PR 4638(4285번 · 신뢰 센터 이름 출처 org-summary)이 걷는 중 — 그 PR이 이 줄을 지운다"
-  },
-  {
-    "key": "app/api/auth/register/route.ts::email-prefix::display_name: body.display_name ?? body.email.split('@')[0],",
-    "reason": "가입 BFF가 display_name 기본값을 이메일 앞부분으로 저장(데이터 층) — PO 별도 카드(3758 確定과 부딪히는지 PO가 먼저 잰다)"
-  },
-  {
     "key": "services/memo.ts::id-fragment::name: (memberById.get(row.team_member_id) as any)?.name ?? row.team_member_id,",
-    "reason": "메모 «읽은 사람» 응답을 만드는 데이터 층(id 통째 폴백 뒤 filter(Boolean(name))) — 4286 PR 본문으로 PO 보고 · 별도 판단"
+    "reason": "퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) — 메모 «읽은 사람» 응답을 만드는 데이터 층(PO 決 2026-09-25)"
   },
   {
     "key": "lib/auth-helpers.ts::email-whole::const name = user.user_metadata?.name || user.user_metadata?.full_name || user.email || tc('unknown');",
@@ -29,6 +9,6 @@
   },
   {
     "key": "services/memo.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;",
-    "reason": "메모 답글 작성자 이름을 만드는 데이터 층(id 통째 폴백) — 메모 서비스는 퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) · 같은 파일 243줄과 같은 사유"
+    "reason": "퇴역 · 저장소 미구성(memo.ts:29 예외 · 사용자 도달 0) — 메모 답글 작성자 이름을 만드는 데이터 층(같은 파일 243줄과 같은 사유)"
   }
 ]

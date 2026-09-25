@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { Check, Plus, TriangleAlert, UserRound, X } from 'lucide-react';
+import { Check, Plus, TriangleAlert, X } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -280,8 +281,8 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted disabled:opacity-50"
                         >
                           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                            {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘(에이전트면 Bot · muted). */}
-                            {m.name ? m.name.slice(0, 2).toUpperCase() : <UserRound className="h-3 w-3" aria-hidden />}
+                            {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 이 목록은 사람만). */}
+                            {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
                           </div>
                           <span className="flex-1 truncate">{memberDisplayLabel(m.name, tc)}</span>
                           {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-brand" />}

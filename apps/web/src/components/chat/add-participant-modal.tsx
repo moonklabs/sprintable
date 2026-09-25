@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bot, Check, UserRound, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
-import { memberOrAgentLabel } from '@/lib/member-display';
+import { memberDisplayLabel } from '@/lib/member-display';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -132,10 +133,11 @@ export function AddParticipantModal({
                     }`}
                   >
                     <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                      {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘(에이전트면 Bot · muted). */}
-                      {m.name ? m.name.slice(0, 2).toUpperCase() : (m.type === 'agent' ? <Bot className="h-3 w-3" aria-hidden /> : <UserRound className="h-3 w-3" aria-hidden />)}
+                      {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘(에이전트 Bot · 사람 User — 4646 공용 표식). */}
+                      {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} className="h-3 w-3" aria-hidden />}
                     </div>
-                    <span className="flex-1 truncate">{memberOrAgentLabel(m, tc)}</span>
+                    {/* [SID:4286 · 유나 규칙 06:48Z] 같은 행에 타입 표식(원 아이콘 · AgentIdentity)이 있어 라벨은 «이름 없는 구성원» 하나. */}
+                    <span className="flex-1 truncate">{memberDisplayLabel(m.name, tc)}</span>
                     {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
                         신호 dot) 채택, soft-fill 폐지. */}
                     {m.type === 'agent' && <AgentIdentity />}

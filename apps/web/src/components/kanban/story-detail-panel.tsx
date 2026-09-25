@@ -365,7 +365,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const t = useTranslations('board');
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
   const tc = useTranslations('common');
-  const tChats = useTranslations('chats'); // chats.unknownMember — «알 수 없는 구성원»(대화 · 토스 시트와 같은 낱말)
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
@@ -979,7 +978,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       ? {
           density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
           human: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : undefined,
-          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : tc('agentUnnamed') } : undefined,
+          agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc) } : undefined,
           evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
         }
       : null;
@@ -1539,7 +1538,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 // 그 옛 board 키는 폐기).
                 dod: story.acceptance_criteria?.trim() || null,
                 owner: proofHuman ? { name: proofHuman.name, label: proofHuman.name ? undefined : memberDisplayLabel(null, tc), role: 'human' } : null,
-                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : tc('agentUnnamed') } : undefined,
+                agent: proofAgent ? { name: proofAgent.name, label: proofAgent.name ? undefined : memberDisplayLabel(null, tc) } : undefined,
                 onGoalMore: scrollToDescriptionSection,
                 onDodMore: scrollToAcceptanceCriteriaSection,
               }}

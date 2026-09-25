@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { memberOrAgentLabel } from '@/lib/member-display';
+import { memberOptionLabels } from '@/lib/member-display';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -306,6 +306,7 @@ export function MarketingRecipeApplyDialog({
     }
     if (slot.kind === 'member') {
       const members = membersFor(slot);
+      const optionLabels = memberOptionLabels(members, tc);
       // story #4243 D4 — 멤버 자리 stage에 걸린 사람 승인 게이트(뉴스레터 «발송 요청» · 영상 «애니매틱» 등)는 동작엔 문제가
       // 없지만 적용 창에 안 보였다. 그 stage와 승인 주체를 한 줄로 알린다(게이트 승인 주체 낱말 = gate-approver-label SSOT).
       const gatedStages = slot.stages.filter((s) => recipe.stage_metadata[s]?.gate);
@@ -332,7 +333,7 @@ export function MarketingRecipeApplyDialog({
             data-testid="creator-agent-select"
           >
             <option value="">{memberPlaceholder(slot.memberType)}</option>
-            {members.map((m) => <option key={m.id} value={m.id}>{memberOrAgentLabel(m, tc)}</option>)}
+            {members.map((m) => <option key={m.id} value={m.id}>{optionLabels.get(m.id)}</option>)}
           </select>
         </div>
       );
