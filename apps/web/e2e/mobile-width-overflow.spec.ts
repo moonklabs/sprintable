@@ -32,7 +32,9 @@ const PROJECT_NAME = '넘침 가드 프로젝트 · 이름이 긴 편';
 // beforeAll이 만든(또는 찾은) 프로젝트 — 모든 이동에 `?p=`로 싣는다(4231 규칙). 안 실으면 소유자의 다른 프로젝트 · 선택기로 떨어져
 // 시드한 긴 데이터를 안 보고도 초록이 될 수 있었다(까디르 검수 P1).
 let seededProjectId = '';
-const withProject = (path: string) => `${path}${path.includes('?') ? '&' : '?'}p=${seededProjectId}`;
+// 이미 `p=`가 있으면 그대로(메뉴 링크 대부분은 `/more`가 싣는다) · 없으면 붙인다 — `/more`의 자원 항목(`/docs` · `/loops` · `/storage`)은
+// `p` 없이 나와 프록시가 쿠키 프로젝트로 고르므로 순회가 다른 프로젝트를 잴 수 있었다(까디르 검수 · 그 링크 자체의 결함은 별 카드).
+const withProject = (path: string) => (/[?&]p=/.test(path) ? path : `${path}${path.includes('?') ? '&' : '?'}p=${seededProjectId}`);
 const LONG_DOC_TITLE = '[FE·prod 승격 준비] 명령 팔레트 «작업 목록»이 /work-list(직접 경로)로 보내는데 옛 주소 변환 표에 work-list가 없어 404가 난다';
 
 /** 응답 봉투({data} · 날것 · 목록)에서 조건에 맞는 첫 객체를 찾는다. */
@@ -113,7 +115,7 @@ test('⭐402폭 — 전체 메뉴 · 탭바 모든 목적지에서 가로 넘침
   expect(destinations.length, `모은 목적지: ${JSON.stringify(destinations)}`).toBeGreaterThanOrEqual(10);
 
   for (const href of destinations) {
-    await page.goto(href, { waitUntil: 'domcontentloaded' });
+    await page.goto(withProject(href), { waitUntil: 'domcontentloaded' });
     await page.locator('body').waitFor({ state: 'visible' });
     // 데이터가 그려질 시간(SSE · 폴링으로 networkidle이 안 오는 화면이 있어 고정 대기).
     await page.waitForTimeout(2500);
@@ -160,7 +162,7 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   for (const part of ['/docs', '/loops', '/inbox']) {
     const href = part === '/inbox' ? withProject('/inbox?tab=notifications') : pick(part);
     expect(href, `${part} 메뉴 링크`).toBeTruthy();
-    await page.goto(href!, { waitUntil: 'domcontentloaded' });
+    await page.goto(withProject(href!), { waitUntil: 'domcontentloaded' });
     await page.locator('[data-testid="top-bar"]').waitFor({ timeout: 60_000 });
     // 로딩 중 상단바엔 화면 액션이 아직 없다(실행 화면은 로딩 때 액션 없는 TopBarSlot) — 액션 버튼이 붙은 뒤에 잰다.
     await page.locator('[data-testid="top-bar"] [aria-label]').nth(4).waitFor({ state: 'attached', timeout: 60_000 }).catch(() => {});
@@ -171,7 +173,7 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   // 2번 — 스토리지: 폰은 한 단(폴더 트리는 서랍) · 목록이 화면 폭을 거의 다 쓴다(예전: 폴더 칸 248px 고정 → 목록 약 150px).
   const storage = pick('/storage');
   expect(storage, '스토리지 메뉴 링크').toBeTruthy();
-  await page.goto(storage!, { waitUntil: 'domcontentloaded' });
+  await page.goto(withProject(storage!), { waitUntil: 'domcontentloaded' });
   await page.locator('[data-testid="storage-asset-list"]').waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1500);
   await expect.soft(page.locator('[data-testid="storage-folder-drawer-trigger"]')).toBeVisible();
