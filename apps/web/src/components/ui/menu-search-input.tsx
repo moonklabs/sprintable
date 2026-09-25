@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 //
 // 키(유나 확정 · 4306 본문 끝 절):
 // - 검색칸은 글자만 삼킨다(글자 · 스페이스 · Backspace · ←/→ · Home/End) — 메뉴 타이프어헤드로 새지 않게.
-// - ↓ = 목록 첫 항목으로 초점(보이는 순서 그대로 · 보통 «전체 …»가 첫째).
+// - ↓ = 목록 첫 항목으로 초점(보이는 순서 그대로 · 보통 «전체 …»가 첫째 · 일반/체크/라디오 항목 모두). IME 조합 중이면 무시.
 // - Esc = 메뉴로 통과(닫힘 + 트리거로 초점) · Tab = 메뉴로 통과(닫힘 · 다음으로).
 // - Enter(검색칸) = 아무것도 안 함.
 // - 항목 위에선 메뉴 기본(↑↓ · Enter · Esc). 단 첫 항목에서 ↑ = 검색칸으로 돌아온다(맨 끝으로 감지 않는다 — 다시 거를 자리).
@@ -22,8 +22,17 @@ function accessibleName(placeholder: string | undefined): string | undefined {
   return placeholder?.replace(/(\.{3}|…)\s*$/, '').trim() || undefined;
 }
 
+// 메뉴 항목 세 종류 모두(일반 · 체크 · 라디오) — 체크/라디오 항목만 있는 메뉴에서도 ↓가 첫 항목으로 간다(PO 10:23Z).
+const MENU_ITEM_SELECTOR = ['menuitem', 'menuitemcheckbox', 'menuitemradio']
+  .map((role) => `[role="${role}"]:not([aria-disabled="true"])`).join(', ');
+
 function firstMenuItem(input: HTMLElement | null): HTMLElement | null {
-  return input?.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? null;
+  return input?.closest('[role="menu"]')?.querySelector<HTMLElement>(MENU_ITEM_SELECTOR) ?? null;
+}
+
+/** 한글 등 IME 조합 중인 키(조합 확정 전 ↓ · ↑는 조합 후보 이동이라 메뉴 초점을 옮기지 않는다). */
+function isComposing(e: React.KeyboardEvent<HTMLInputElement>): boolean {
+  return e.nativeEvent.isComposing || e.keyCode === 229;
 }
 
 export function MenuSearchInput({ onKeyDown, placeholder, ...props }: Omit<React.ComponentProps<typeof Input>, 'autoFocus' | 'ref'>) {
@@ -55,7 +64,8 @@ export function MenuSearchInput({ onKeyDown, placeholder, ...props }: Omit<React
         if (PASS_THROUGH_KEYS.has(e.key)) return;
         e.stopPropagation();
         // Enter는 여기서 멈춘다(메뉴로 안 올라가 항목을 고르지 않음 = 아무것도 안 함).
-        if (e.key === 'ArrowDown') {
+        // IME 조합 중(한국어 제품 · PO 10:23Z)의 ↓는 조합 후보 이동이라 무시한다(초점 검색칸 그대로).
+        if (e.key === 'ArrowDown' && !isComposing(e)) {
           e.preventDefault();
           firstMenuItem(ref.current)?.focus();
         }
