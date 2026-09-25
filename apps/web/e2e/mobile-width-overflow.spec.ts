@@ -268,12 +268,15 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
 // 그 소유자를 «이름 없는 구성원»으로 보여 · 보이는 글자로 찾히고 · 고르면 트리거도 그 글자다(예전: `m.name.toLowerCase()`가 null에서
 // throw → 보드 전체 오류 화면).
 test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정상(story #4284 AC3)', async ({ page }) => {
+  // 까디르 QA(4685) — 기본 30초 테스트 제한이 아래 첫 화면 대기(90초)보다 먼저 끊었다. 같은 파일의 다른 테스트처럼 넉넉히.
+  test.setTimeout(5 * 60_000);
   expect(ownerIsUnnamed, '이름 없는 소유자 시드').toBe(true);
   await page.goto(withProject('/flow?view=list'), { waitUntil: 'domcontentloaded' });
   const trigger = page.getByRole('button', { name: '전체 담당자' });
   await trigger.waitFor({ timeout: 90_000 });
   await trigger.click();
-  const unnamed = page.getByRole('menuitem', { name: '이름 없는 구성원' });
+  // 까디르 QA(4685) — 부분 일치면 «이름 없는 구성원 · 1a2b3c4d»(같은 묶음에 둘 이상일 때)도 맞는다 → 정확히 그 글자 한 행.
+  const unnamed = page.getByRole('menuitem', { name: '이름 없는 구성원', exact: true });
   await expect(unnamed, '이름 없는 소유자가 «이름 없는 구성원» 행으로').toBeVisible();
   const search = page.getByPlaceholder('담당자 검색...');
   await search.fill('이름 없는');
@@ -281,6 +284,12 @@ test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정�
   await search.fill('zzz-없는-사람');
   await expect(page.getByText('결과 없음', { exact: true })).toBeVisible();
   await search.fill('');
+  await expect(unnamed.locator('svg'), '고르기 전엔 그 행에 선택 표시 없음').toHaveCount(0);
   await unnamed.click();
-  await expect(page.getByRole('button', { name: '이름 없는 구성원' }), '고른 뒤 트리거도 그 글자').toBeVisible();
+  const selectedTrigger = page.getByRole('button', { name: '이름 없는 구성원', exact: true });
+  await expect(selectedTrigger, '고른 뒤 트리거도 그 글자').toBeVisible();
+  // 선택 표시(체크 아이콘)가 그 행으로 옮겨 갔다 — «전체 담당자» 행엔 없고 · 이름 없는 구성원 행에만 하나.
+  await selectedTrigger.click();
+  await expect(unnamed.locator('svg'), '고른 행에 선택 표시').toHaveCount(1);
+  await expect(page.getByRole('menuitem', { name: '전체 담당자', exact: true }).locator('svg'), '«전체 담당자»에서 선택 표시가 빠짐').toHaveCount(0);
 });
