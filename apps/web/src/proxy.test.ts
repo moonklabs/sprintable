@@ -1433,6 +1433,14 @@ describe('proxy — story #2595 connect-guide locale rewrite', () => {
     expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.ko.txt');
   });
 
+  // story #4289 — Korean first, English second (a common Chrome value) → Korean. The old copy (supported-list order, en first · includes) gave English.
+  it('⭐rewrites to Korean for "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7" (header order + q, not substring)', async () => {
+    const req = makeRequest('/connect-guide.txt');
+    req.headers.set('accept-language', 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7');
+    const response = await middleware(req);
+    expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.ko.txt');
+  });
+
   it('a locale cookie value outside the supported set falls back to English, not a crash', async () => {
     const response = await middleware(makeRequest('/connect-guide.txt', { locale: 'fr' }));
     expect(response.status).toBe(200);
