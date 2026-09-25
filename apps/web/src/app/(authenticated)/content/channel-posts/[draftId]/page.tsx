@@ -489,6 +489,14 @@ function describeChannelImageError(info: SitePostApiErrorInfo, t: (key: string, 
   }
 }
 
+// story #4305(유나 확정) — 멈춘(blocked) 사유별 발행 영역 줄 문장(blockedReason 한 판정의 세 갈래). 문장 키는 표 값으로 둔다(죽은 키 가드가
+// 표 값을 소비로 읽는다 — 배지 사유 표와 같은 관례).
+const BLOCKED_REASON_LINE_KEYS: Record<string, string> = {
+  connection: 'channelPostsCommandInFlightReasonBlocked',
+  paused: 'errorExternalPublishPaused',
+  unknown: 'channelPostsCommandInFlightReasonBlockedUnknown',
+};
+
 export default function ChannelPostEditPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, role } = useDashboardContext();
@@ -2236,10 +2244,8 @@ export default function ChannelPostEditPage() {
   // story #4305(유나 확정) — 발행 영역 줄 세 갈래(blockedReason 한 판정): 연결 = 연결 문장(링크) · 일시 중지 = errorExternalPublishPaused ·
   // 사유 모름 = 중립 문장(«발행 · 예약 상신»이 왜 비활성인지는 늘 버튼 밖에 보인다 — 줄을 빼지 않는다).
   const blockedReasonNow = blockedReason(draft.command_status, draft.failure_kind);
-  const commandInFlightReasonKey = blockedReasonNow === 'connection' ? 'channelPostsCommandInFlightReasonBlocked'
-    : blockedReasonNow === 'paused' ? 'errorExternalPublishPaused'
-      : blockedReasonNow === 'unknown' ? 'channelPostsCommandInFlightReasonBlockedUnknown'
-        : 'channelPostsCommandInFlightReasonScheduled';
+  const commandInFlightReasonKey = blockedReasonNow
+    ? BLOCKED_REASON_LINE_KEYS[blockedReasonNow] : 'channelPostsCommandInFlightReasonScheduled';
 
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
   // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와
