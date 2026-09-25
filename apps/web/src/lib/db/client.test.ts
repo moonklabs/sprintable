@@ -278,6 +278,21 @@ describe('fetchWithAuth — 응답 헤더까지 시간 제한(story #4310)', () 
     expect(vi.getTimerCount(), '시간 제한 타이머도 풀림').toBe(0);
   });
 
+  it('⭐호출자 signal 리스너를 끝나면 걷는다 — 헤더가 온 뒤 호출자가 끊어도 이미 끝난 요청에 닿지 않음(오래 사는 signal에 리스너가 쌓이지 않게)', async () => {
+    const { fetchMock, calls } = hangingFetch({ afterMs: 100 });
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const p = fetchWithAuth('/api/stories', { signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await p).status).toBe(200);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]![1]);
+    controller.abort();
+    expect(calls[0]!.init?.signal?.aborted, '끝난 요청의 신호는 그대로').toBe(false);
+  });
+
   it('이미 끊긴 호출자 signal이면 바로 그 이유로 reject', async () => {
     const { fetchMock } = hangingFetch();
     vi.stubGlobal('fetch', fetchMock);
