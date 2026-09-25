@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
+import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
 
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, MOBILE_BREAKPOINT: 1024 }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (h: string) => `${h}${h.includes('?') ? '&' : '?'}p=P` }));
@@ -68,12 +69,21 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
 
   // story #4296(까디르 4639 codex · AC1 재측) — 두 탭이 서로 다른 프로젝트를 볼 때: 쿠키(다른 탭이 마지막으로 연 프로젝트)가 아니라 **이 탭의
   // 프로젝트**(셸 컨텍스트 = `?p=` · sessionStorage)로 자원 링크가 착지한다. 예전 bare `/${item.path}`는 proxy가 쿠키로 골라 다른 탭의 프로젝트로
-  // 갔다. 뮤테이션: 자원 링크를 bare로 되돌리면 RED.
+  // 갔다. 쿠키는 운영과 같은 이름(`CURRENT_PROJECT_COOKIE` · 값 = 프로젝트 **id**)으로 심는다(까디르 4664 P2 — 예전엔 운영이 안 읽는 이름이라
+  // «쿠키는 proj-a» 조건이 안 섰다). 뮤테이션: 자원 링크를 bare로 · 쿠키 프로젝트를 읽게 되돌리면 RED.
   it('⭐두 탭 다른 프로젝트 — 쿠키가 proj-a여도 이 탭(proj-b)의 자원 링크는 `/ws-1/proj-b/{자원}` · bare · proj-a 0', async () => {
     const before = ctx.value;
-    document.cookie = 'current_project_slug=proj-a; path=/';
-    ctx.value = { ...ctx.value, currentProjectSlug: 'proj-b' };
+    document.cookie = `${CURRENT_PROJECT_COOKIE}=proj-a-id; path=/`;
+    ctx.value = {
+      ...ctx.value,
+      currentProjectSlug: 'proj-b',
+      projectMemberships: [
+        { projectId: 'proj-a-id', projectName: 'A', projectSlug: 'proj-a', orgId: 'org-1' },
+        { projectId: 'proj-b-id', projectName: 'B', projectSlug: 'proj-b', orgId: 'org-1' },
+      ] as never[],
+    };
     try {
+      expect(document.cookie, '조건: 운영이 읽는 쿠키가 다른 탭 프로젝트(proj-a)').toContain(`${CURRENT_PROJECT_COOKIE}=proj-a-id`);
       const { NAV_GROUPS, LEGACY_NAV_ITEMS } = await import('@/lib/nav-config');
       const resourcePaths = [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS].filter((i) => i.kind === 'resource').map((i) => i.path);
       const hrefs = await hrefsOfMenu();
@@ -83,7 +93,7 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
       expect(hrefs.some((h) => h.includes('proj-a'))).toBe(false);
     } finally {
       ctx.value = before;
-      document.cookie = 'current_project_slug=; path=/; max-age=0';
+      document.cookie = `${CURRENT_PROJECT_COOKIE}=; path=/; max-age=0`;
     }
   });
 });
