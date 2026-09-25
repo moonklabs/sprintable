@@ -15,7 +15,7 @@ import {
   SP_RESOLVE_CACHE_COOKIE,
   verifyResolveCache,
 } from '@/lib/route-resolve';
-import { formatServerTiming, isServerTimingEnabled, logServerTiming, withServerTiming } from '@/lib/server-timing';
+import { formatServerTiming, isServerTimingEnabled, logServerTiming, MW_T0_HEADER, withServerTiming } from '@/lib/server-timing';
 
 // story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고,
 // apps/web/src/i18n/request.ts의 getLocale()(next-intl RSC config, `cookies()`/`headers()`
@@ -748,7 +748,9 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
  */
 export async function proxy(request: NextRequest) {
   if (!isServerTimingEnabled()) return proxyImpl(request);
-  const { value: response, spans, totalMs } = await withServerTiming(() => proxyImpl(request));
+  // story #4299 — 미들웨어 시작 시각을 요청 헤더로(route handler가 «미들웨어 + 라우터 대기»를 잰다). 클라이언트가 보낸 같은 이름은 덮어씀.
+  const stamped = withMiddlewareStart(request);
+  const { value: response, spans, totalMs } = await withServerTiming(() => proxyImpl(stamped));
   if (spans.length > 0) {
     response.headers.set('Server-Timing', formatServerTiming('proxy', totalMs, spans));
     const pathname = request.nextUrl.pathname;
@@ -919,6 +921,14 @@ export function stripClientResolvedHeaders(fwdHeaders: Headers): void {
   for (const key of [...fwdHeaders.keys()]) {
     if (key.toLowerCase().startsWith('x-resolved-')) fwdHeaders.delete(key);
   }
+}
+
+// story #4299 — dev 전용(SERVER_TIMING_MARKERS · proxy()의 켜진 갈래에서만 부름). 미들웨어 시작 시각(같은 프로세스 시계의
+// epoch ms)을 실은 요청 — proxyImpl의 모든 갈래가 이 요청의 헤더를 넘기므로(#4219 D1) route handler까지 닿는다.
+export function withMiddlewareStart(request: NextRequest, wall: () => number = Date.now): NextRequest {
+  const headers = new Headers(request.headers);
+  headers.set(MW_T0_HEADER, String(wall()));
+  return new NextRequest(request, { headers });
 }
 
 /** 클라이언트가 보낸 x-resolved-*를 지운 요청. 없으면 원본 그대로(새 객체 0 · 동작 변화 0). */

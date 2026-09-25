@@ -581,6 +581,49 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
     expectNoSpoof(response);
   });
 
+  // story #4299 — dev 전용 미들웨어 시작 시각(route handler의 bff_pre). 켜져 있을 때만 모든 갈래가 새 값을 넘기고(클라이언트가
+  // 같은 이름으로 보낸 값은 덮음), 꺼져 있으면 붙이지 않는다.
+  describe('미들웨어 시작 시각(story #4299 · SERVER_TIMING_MARKERS)', () => {
+    afterEach(() => { delete process.env['SERVER_TIMING_MARKERS']; });
+
+    function clientStamped(path: string, cookies: Record<string, string>, extra: Record<string, string> = {}): NextRequest {
+      const base = makeRequest(path, cookies);
+      return new NextRequest(base.url, {
+        headers: new Headers({ cookie: base.headers.get('cookie') ?? '', 'x-sp-mw-t0': '1', ...extra }),
+      });
+    }
+
+    it.each([
+      ['기본 resolve 갈래(flat 페이지)', '/inbox', 'token'],
+      ['공개 경로 통과', '/refund-policy', 'none'],
+      ['API 통과(토큰 없음)', '/api/whatever', 'none'],
+      ['API 키(Bearer)', '/api/labels', 'key'],
+      ['토큰 갱신 뒤 API', '/api/whatever', 'refresh'],
+      ['토큰 갱신 뒤 페이지', '/inbox', 'refresh'],
+      ['connect-guide rewrite', '/connect-guide.txt', 'none'],
+    ] as const)('켜면 %s 갈래에 새 시각이 실리고 클라이언트 값은 덮인다', async (_n, path, auth) => {
+      process.env['SERVER_TIMING_MARKERS'] = 'true';
+      const cookies: Record<string, string> = {};
+      if (auth === 'token') cookies['sp_at'] = await makeAccessToken();
+      if (auth === 'refresh') {
+        cookies['sp_rt'] = 'valid-rt';
+        const newAt = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) + 900 });
+        mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }) });
+      }
+      const before = Date.now();
+      const response = await middleware(clientStamped(path, cookies, auth === 'key' ? { Authorization: 'Bearer sk_agent_key' } : {}));
+      const stamp = Number(response.headers.get('x-middleware-request-x-sp-mw-t0'));
+      expect(stamp).toBeGreaterThanOrEqual(before);
+      expect(stamp).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('꺼져 있으면(기본) 새 시각을 붙이지 않는다', async () => {
+      const response = await middleware(makeRequest('/api/whatever'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-request-x-sp-mw-t0')).toBeNull();
+    });
+  });
+
   it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
     const token = await makeAccessToken();
     const cacheToken = await new SignJWT({

@@ -115,17 +115,80 @@ export async function withServerTiming<T>(fn: () => Promise<T>): Promise<TimingR
 
 /** `Server-Timing` 헤더 값 — 이름·시간만(desc는 시작 오프셋·연결 대기·새 연결 여부). */
 export function formatServerTiming(surface: string, totalMs: number, spans: TimingSpan[]): string {
-  const parts = [`${surface};dur=${totalMs}`];
-  spans.forEach((s, i) => {
-    const conn = s.newConnection === null ? '?' : s.newConnection ? 'new' : 'reuse';
-    parts.push(`be${i}-${s.name};dur=${s.durMs ?? -1};desc="t+${s.startMs} wait=${s.waitMs ?? -1} conn=${conn}"`);
-  });
-  return parts.join(', ');
+  return [`${surface};dur=${totalMs}`, ...spans.map(formatSpan)].join(', ');
+}
+
+function formatSpan(s: TimingSpan, i: number): string {
+  const conn = s.newConnection === null ? '?' : s.newConnection ? 'new' : 'reuse';
+  return `be${i}-${s.name};dur=${s.durMs ?? -1};desc="t+${s.startMs} wait=${s.waitMs ?? -1} conn=${conn}"`;
 }
 
 /** Cloud Logging 한 줄(레이아웃처럼 응답 헤더를 못 다는 자리). 요청 경로·id는 안 싣는다 — 종류 라벨만. */
 export function logServerTiming(surface: string, kind: string, totalMs: number, spans: TimingSpan[]): void {
   console.log(JSON.stringify({ message: 'server_timing', surface, kind, totalMs, spans }));
+}
+
+/**
+ * story #4299 — BFF route handler 구간(dev 전용 · 켜져 있을 때만 타이머를 만든다). 동시 요청이 몰리면 BFF 층만 +230~465ms
+ * 느는데(백엔드 무변) 그게 어느 구간인지 가르려고, `/api/*` 공용 프록시(proxyToFastapi)가 인증 헤더 · 로케일 · 요청 본문 ·
+ * 백엔드 첫 바이트 · 백엔드 본문 구간과 백엔드 호출의 연결 대기 · 새 연결 여부를 낸다. 미들웨어가 들어올 때 찍은
+ * 시각(MW_T0_HEADER · 같은 프로세스 벽시계)으로 «미들웨어 + 라우트까지 대기»(bff_pre)도 낸다. 이름 · 시간만(경로 · id 0).
+ */
+export const MW_T0_HEADER = 'x-sp-mw-t0';
+
+export interface RouteTimingSummary {
+  totalMs: number;
+  /** 미들웨어 시작 → 이 타이머 시작. 표시 헤더가 없거나 이상하면(음수 · 1분 초과) null. */
+  preMs: number | null;
+  marks: Array<[string, number]>;
+}
+
+export interface RouteTimer {
+  /** 직전 표시(또는 시작)부터 지금까지를 name 구간으로 적는다. */
+  mark(name: string): void;
+  summary(): RouteTimingSummary;
+}
+
+export function startRouteTimer(request: Request, now: () => number = () => performance.now(), wall: () => number = Date.now): RouteTimer {
+  const t0 = now();
+  const mwT0 = Number(request.headers.get(MW_T0_HEADER) ?? NaN);
+  const pre = wall() - mwT0;
+  const preMs = Number.isFinite(pre) && pre >= 0 && pre <= 60_000 ? Math.round(pre) : null;
+  const marks: Array<[string, number]> = [];
+  let last = t0;
+  return {
+    mark(name) {
+      const t = now();
+      marks.push([name, Math.round(t - last)]);
+      last = t;
+    },
+    summary: () => ({ totalMs: Math.round(now() - t0), preMs, marks: [...marks] }),
+  };
+}
+
+/** `bff;dur=합계, bff_pre;dur=…, bff_<구간>;dur=…, be0-<이름>;dur=…;desc="… wait=… conn=…"` */
+export function formatRouteTiming(s: RouteTimingSummary, spans: TimingSpan[]): string {
+  return [
+    `bff;dur=${s.totalMs}`,
+    ...(s.preMs === null ? [] : [`bff_pre;dur=${s.preMs};desc="mw+queue"`]),
+    ...s.marks.map(([name, dur]) => `bff_${name};dur=${dur}`),
+    ...spans.map(formatSpan),
+  ].join(', ');
+}
+
+/** 백엔드 경로 → 리소스 이름(`v2/labels` · 더 깊은 칸은 개수만 `v2/stories/+2`). id · slug · 쿼리는 안 남긴다. */
+export function routeKindForPath(fastapiPath: string): string {
+  const segs = (fastapiPath.split('?')[0] ?? '').split('/').filter(Boolean);
+  const resource = segs[2] ?? '';
+  // 리소스 칸은 코드에 박힌 이름뿐이지만, 혹시 id가 오면(hex/uuid 꼴) 이름 대신 other.
+  if (segs[0] !== 'api' || !segs[1] || !/^[a-z][a-z0-9_-]*$/.test(resource) || /^[0-9a-f-]{16,}$/.test(resource)) return 'other';
+  const rest = segs.length - 3;
+  return `${segs[1]}/${resource}${rest > 0 ? `/+${rest}` : ''}`;
+}
+
+/** 응답을 새로 감싸는 라우트(sprints 등)는 헤더가 안 남는다 — 서버 로그 한 줄로도 남겨 PO가 요청 로그와 맞춘다. */
+export function logRouteTiming(kind: string, status: number, s: RouteTimingSummary, spans: TimingSpan[]): void {
+  console.log(JSON.stringify({ message: 'server_timing', surface: 'bff', kind, status, ...s, spans }));
 }
 
 // 켜져 있으면 모듈 로드 시점에 구독 — 첫 계측 전에 열린 연결의 시각도 잡는다(꺼져 있으면 구독 0).
