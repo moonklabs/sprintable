@@ -131,6 +131,15 @@ export function findRepeatedRowActionHits(content: string): { line: number; snip
           if (bareFieldInterpolation?.test(childrenText)) {
             continue;
           }
+          // [SID:4286 · PO 12:42Z] 루프 변수 필드로 «행 라벨 표»를 조회한 값을 그대로 그리는 것(`{rowLabels.get(m.id)}` ·
+          // `{labels[m.id] ?? …}`)도 행마다 갈린다 — `{m.name}`을 memberRowLabels 표 조회로 바꾸자(이름 없는 행 둘 가르기)
+          // 정적 라벨로 오인했다. 조회 값이 그대로 보일 때만(`}` · `??` · `||`가 바로 뒤) — 조건식 안 조회(`{labels.get(m.id) ? A : B}`)는 여전히 히트.
+          const lookupByLoopField = loopVar
+            ? new RegExp(`\\{\\s*[\\w$]+(?:\\.get\\(\\s*${loopVar}\\.[\\w$]+\\s*\\)|\\[\\s*${loopVar}\\.[\\w$]+\\s*\\])\\s*(?:\\}|\\?\\?|\\|\\|)`)
+            : null;
+          if (lookupByLoopField?.test(childrenText)) {
+            continue;
+          }
         }
       }
       // 정적 라벨(또는 판정 불가 destructuring) + aria-label 없음 → 히트.

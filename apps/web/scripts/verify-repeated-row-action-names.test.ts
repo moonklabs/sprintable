@@ -36,6 +36,33 @@ describe('findRepeatedRowActionHits (story #3592 §22-18)', () => {
     expect(findRepeatedRowActionHits(content).length).toBe(0);
   });
 
+  // [SID:4286 · PO 12:42Z] 루프 변수 필드로 조회한 행 라벨 표 값(memberRowLabels) — 행마다 갈린다.
+  it('does not flag a button whose label is a row-label lookup keyed by the loop var field(.get · [] · ?? 폴백)', () => {
+    for (const label of ['{rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}', '{rowLabels.get(m.id)}', '{labels[m.id] || fallback}', '{labels[ m.id ]}']) {
+      const content = `
+        {members.map((m) => (
+          <button type="button" onClick={() => add(m.id)}>
+            <span className="flex-1 truncate">${label}</span>
+          </button>
+        ))}
+      `;
+      expect(findRepeatedRowActionHits(content).length, label).toBe(0);
+    }
+  });
+
+  it('양성 대조 — 조회가 조건식 안이거나(같은 두 글자 중 하나) 루프 변수가 아닌 키로 조회하면 여전히 히트', () => {
+    for (const label of ["{rowLabels.get(m.id) ? t('remove') : t('add')}", '{rowLabels.get(selectedId)}', "{labels[other.id]}", "{t('addCta')}"]) {
+      const content = `
+        {members.map((m) => (
+          <button type="button" onClick={() => add(m.id)}>
+            <span>${label}</span>
+          </button>
+        ))}
+      `;
+      expect(findRepeatedRowActionHits(content).length, label).toBe(1);
+    }
+  });
+
   it('flags lowercase <button> too, not just <Button>', () => {
     const content = `
       {items.map((item) => (
