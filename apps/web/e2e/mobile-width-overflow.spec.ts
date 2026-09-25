@@ -26,6 +26,13 @@ const LONG_STORY_TITLES = [
   '[prod 승격 차단·BE/infra] main push 배포의 migrate 잡이 prod DB에 develop 파일셋으로 upgrade heads를 돌려 스키마가 앞서간다',
   'AReallyLongUnbrokenTokenWithoutAnySpacesThatCannotWrapAnywhereInTheLayoutAtAll_0123456789_abcdefghijklmnopqrstuvwxyz',
 ];
+// 보드 칸이 실제로 넘치게(안쪽 세로 스크롤이 «있다»가 아니라 «움직인다»를 재려고 · 까디르 검수 P2) 짧은 스토리 여럿.
+const FILLER_STORY_COUNT = 16;
+const PROJECT_NAME = '넘침 가드 프로젝트 · 이름이 긴 편';
+// beforeAll이 만든(또는 찾은) 프로젝트 — 모든 이동에 `?p=`로 싣는다(4231 규칙). 안 실으면 소유자의 다른 프로젝트 · 선택기로 떨어져
+// 시드한 긴 데이터를 안 보고도 초록이 될 수 있었다(까디르 검수 P1).
+let seededProjectId = '';
+const withProject = (path: string) => `${path}${path.includes('?') ? '&' : '?'}p=${seededProjectId}`;
 const LONG_DOC_TITLE = '[FE·prod 승격 준비] 명령 팔레트 «작업 목록»이 /work-list(직접 경로)로 보내는데 옛 주소 변환 표에 work-list가 없어 404가 난다';
 
 /** 응답 봉투({data} · 날것 · 목록)에서 조건에 맞는 첫 객체를 찾는다. */
@@ -66,11 +73,15 @@ test.beforeAll(async () => {
     project = findDeep(await json(await api.post('/api/v2/projects', { headers: H, data: { org_id: orgId, name: 'Overflow Guard', slug: 'overflow-guard' } }), 'project'), (o) => typeof o['id'] === 'string');
   }
   const projectId = project!['id'] as string;
+  seededProjectId = projectId;
   // 실사용 프로젝트 이름 길이(민 기기의 «뭉클랩 / 제로고»처럼 상단바 컨텍스트 칩이 최대 폭까지 차는 쪽) — 짧은 이름이면 칩이 좁아 상단바 경합이 안 드러난다.
-  await json(await api.patch(`/api/v2/projects/${projectId}`, { headers: H, data: { name: '넘침 가드 프로젝트 · 이름이 긴 편' } }), 'project name');
+  await json(await api.patch(`/api/v2/projects/${projectId}`, { headers: H, data: { name: PROJECT_NAME } }), 'project name');
 
   for (const title of LONG_STORY_TITLES) {
     await json(await api.post('/api/v2/stories', { headers: H, data: { org_id: orgId, project_id: projectId, title } }), 'story');
+  }
+  for (let i = 1; i <= FILLER_STORY_COUNT; i++) {
+    await json(await api.post('/api/v2/stories', { headers: H, data: { org_id: orgId, project_id: projectId, title: `넘침 가드 채움 스토리 ${i}` } }), 'filler story');
   }
 
   // 에이전트가 소유자에게 긴 제목 문서 결재를 요청 → 소유자 «오늘»에 «서명 대기» 줄(doc_approval · 고위험). 본인 결재 지정은 서버가 막는다.
@@ -91,8 +102,10 @@ test.beforeAll(async () => {
 test('⭐402폭 — 전체 메뉴 · 탭바 모든 목적지에서 가로 넘침 0(데이터 있는 상태 · 셸 스크롤러까지)', async ({ page }) => {
   test.setTimeout(15 * 60_000);
 
-  await page.goto('/more', { waitUntil: 'domcontentloaded' });
+  await page.goto(withProject('/more'), { waitUntil: 'domcontentloaded' });
   await page.locator('[data-testid="more-menu-link"]').first().waitFor({ timeout: 60_000 });
+  // 양성 대조(까디르 검수 P1) — 시드한 프로젝트에 실제로 들어왔다: 상단바 컨텍스트 칩에 긴 프로젝트 이름이 실린다.
+  await expect(page.locator('[data-testid="top-bar"]')).toContainText(PROJECT_NAME.slice(0, 8), { timeout: 30_000 });
   const menu = await page.locator('[data-testid="more-menu-link"]').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
   const tabs = await page.locator('[data-testid="mobile-tab-bar"] a').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
   const destinations = [...new Set([...tabs, ...menu].filter((h) => h.startsWith('/')))];
@@ -131,19 +144,21 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
     const out = [...bar.querySelectorAll('button, a')].filter((e) => e.getBoundingClientRect().right > W).map((e) => (e.getAttribute('aria-label') ?? e.textContent ?? '').slice(0, 30));
     // 6번 — 글자 버튼이 제목 칸을 먹어 짧은 제목(«실행»)이 «실.»로 잘리던 것: 제목(h1 · p)이 말줄임 없이 다 보여야 한다.
     // 칩이 먼저 양보하므로(shrink-[10000] · 최소 44px) 짧은 제목은 문서 · 실행 · 결재 모두 온전해야 한다.
+    // 말줄임 요소를 빼지 않는다(까디르 검수 P3 판단): 6번 결함 자체가 말줄임(«실…»)이었다. 이 검사는 세 화면의 고정된 짧은 화면 이름
+    // («문서» · «실행» · «알림 N»)에만 걸린다 — 사람이 쓴 긴 제목(말줄임이 기대 동작)은 이 검사의 대상이 아니다.
     const title = bar.querySelector('h1, p');
     if (checkTitleArg && title && title.scrollWidth > title.clientWidth + 1) out.push(`제목 잘림: ${title.textContent ?? ''}`);
     return out.length ? out : 'ok';
   }, checkTitle);
 
-  await page.goto('/more', { waitUntil: 'domcontentloaded' });
+  await page.goto(withProject('/more'), { waitUntil: 'domcontentloaded' });
   await page.locator('[data-testid="more-menu-link"]').first().waitFor({ timeout: 60_000 });
   const hrefs = await page.locator('[data-testid="more-menu-link"]').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
   const pick = (part: string) => hrefs.find((h) => h.split('?')[0]!.endsWith(part));
 
   // 결재(/inbox) — 유나 4636 측정 때 본 «알림 120» 제목이 오른쪽 칩 · 버튼에 눌려 잘리던 자리(같은 상단바 부류 · PO 20:26Z).
   for (const part of ['/docs', '/loops', '/inbox']) {
-    const href = part === '/inbox' ? '/inbox?tab=notifications' : pick(part);
+    const href = part === '/inbox' ? withProject('/inbox?tab=notifications') : pick(part);
     expect(href, `${part} 메뉴 링크`).toBeTruthy();
     await page.goto(href!, { waitUntil: 'domcontentloaded' });
     await page.locator('[data-testid="top-bar"]').waitFor({ timeout: 60_000 });
@@ -163,38 +178,41 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   const listWidth = await page.locator('[data-testid="storage-asset-list"]').evaluate((e) => e.getBoundingClientRect().width);
   expect.soft(listWidth, '스토리지 목록 폭(402폭)').toBeGreaterThan(300);
 
-  // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639): 일감 뿌리가 넘치지 않고(scrollHeight − clientHeight = 0)
-  // 여백 16 · 보드 안 세로 스크롤은 그대로(보드에 이 화면 명시 높이 · KanbanBoard h-full이 뿌리를 통째로 먹던 넘침 제거).
-  await page.goto('/flow', { waitUntil: 'domcontentloaded' });
+  // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639 · 까디르 검수 P2):
+  // - 명시 높이 틀(flow-board-frame) 안에서 보드가 넘치지 않는다(틀 scrollHeight − clientHeight ≤ 1 — 자동 높이 부모 기준이면 0이 당연해 뜻이 없다).
+  // - 맨 아래 상자와 탭바 사이 틈 16(뿌리 p-4).
+  // - 보드 칸이 긴 내용(시드 스토리 19)으로 실제로 넘치고 **스크롤이 움직인다**(scrollTop 이동).
+  await page.goto(withProject('/flow'), { waitUntil: 'domcontentloaded' });
   await page.locator('[data-testid="flow-board-frame"]').waitFor({ state: 'attached', timeout: 90_000 });
   await page.locator('details').last().waitFor({ state: 'attached', timeout: 90_000 });
-  await page.waitForTimeout(3000);
+  // 양성 대조 — 이 실행이 시드한 스토리가 이 보드에 실제로 그려졌다(다른 프로젝트 · 빈 보드면 여기서 RED). 칸은 최신 20장만 그려
+  // 먼저 만든 긴 제목 스토리는 채움 스토리에 밀려 첫 장에 없다(로컬 실측) — 마지막에 만든 채움 스토리로 확인한다. 부하 걸린 dev 서버에서
+  // 보드가 채워지기까지 15~30초(실측)라 넉넉히.
+  await expect(page.locator('[data-testid="flow-board-frame"]').getByText(`넘침 가드 채움 스토리 ${FILLER_STORY_COUNT}`, { exact: true }).first()).toBeAttached({ timeout: 120_000 });
+  await page.waitForTimeout(2000);
   const flow = await page.evaluate(() => {
+    const frame = document.querySelector<HTMLElement>('[data-testid="flow-board-frame"]')!;
     const det = [...document.querySelectorAll('details')].pop()!;
-    const root = det.parentElement!;
-    let sc: HTMLElement | null = root;
+    let sc: HTMLElement | null = det.parentElement;
     while (sc && !/overflow-y-auto/.test(sc.className)) sc = sc.parentElement;
     if (!sc) return null;
     sc.scrollTop = sc.scrollHeight;
+    // 틀 안 세로 스크롤러 중 내용이 가장 긴 것(보드 칸).
+    const scrollers = [...frame.querySelectorAll<HTMLElement>('*')].filter((e) => ['auto', 'scroll'].includes(getComputedStyle(e).overflowY) && e.getClientRects().length > 0);
+    const inner = scrollers.sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] ?? null;
+    let moved = 0;
+    if (inner) { inner.scrollTop = 120; moved = inner.scrollTop; inner.scrollTop = 0; }
     return {
-      rootOverflow: root.scrollHeight - root.clientHeight,
+      frameOverflow: frame.scrollHeight - frame.clientHeight,
       gap: sc.getBoundingClientRect().bottom - det.getBoundingClientRect().bottom,
+      innerOverflows: inner ? inner.scrollHeight > inner.clientHeight : false,
+      innerMoved: moved,
     };
   });
-  // 보드 안 세로 스크롤 유지 — 시드(스토리 셋)로는 칸이 안 넘칠 수 있어 «넘친다»가 아니라 구조를 잰다: 틀 안에 overflow-y auto/scroll 스크롤러가
-  // 있고 그 높이가 틀 높이 안으로 묶여 있다(묶여 있어야 내용이 늘면 그 안에서 스크롤된다 · 틀이 없어 뿌리를 따라 늘어나면 묶임이 풀린다).
-  const boardInnerScroll = await page.waitForFunction(() => {
-    const frame = document.querySelector<HTMLElement>('[data-testid="flow-board-frame"]');
-    if (!frame) return false;
-    const frameH = frame.getBoundingClientRect().height;
-    return [...frame.querySelectorAll<HTMLElement>('*')].some((e) => {
-      if (!['auto', 'scroll'].includes(getComputedStyle(e).overflowY) || e.getClientRects().length === 0) return false;
-      const h = e.getBoundingClientRect().height;
-      return h > 200 && h <= frameH + 1;
-    });
-  }, undefined, { timeout: 30_000 }).then(() => true).catch(() => false);
-  expect.soft(flow?.rootOverflow, '일감 뿌리 넘침(scrollHeight − clientHeight)').toBe(0);
-  expect.soft(flow?.gap ?? 0, '일감 바닥 상자 ↔ 탭바 여백(px)').toBeGreaterThanOrEqual(12);
-  expect.soft(boardInnerScroll, '보드 안 세로 스크롤러(틀 높이 안에 묶임)').toBe(true);
+  expect(flow, '일감 화면 셸 스크롤러').not.toBeNull();
+  expect.soft(flow!.frameOverflow, '보드 틀 넘침(scrollHeight − clientHeight · 명시 높이 부모)').toBeLessThanOrEqual(1);
+  expect.soft(flow!.gap, '일감 바닥 상자 ↔ 탭바 여백(px)').toBeGreaterThanOrEqual(15.5);
+  expect.soft(flow!.innerOverflows, '보드 칸이 긴 내용으로 넘침(시드 스토리 19)').toBe(true);
+  expect.soft(flow!.innerMoved, '보드 칸 안 세로 스크롤이 실제로 움직임(scrollTop)').toBeGreaterThan(0);
 });
 
