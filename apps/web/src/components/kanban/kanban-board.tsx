@@ -30,7 +30,7 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
 import { KanbanTrustColumn } from './kanban-trust-column';
 import { KanbanListView } from './kanban-list-view';
-import { KanbanSkeleton } from './kanban-skeleton';
+import { KanbanColumnsSkeleton, KanbanListRowsSkeleton, KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
 import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
@@ -166,6 +166,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   ]);
   const assigneeRowLabel = (m: KanbanMember) => assigneeRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc);
   const [loading, setLoading] = useState(true);
+  // story #4307(유나 · PO 10:42Z) — 첫 불러오기가 끝났는지. 전면 스켈레톤(툴바까지 갈아끼움)은 첫 불러오기에만 — 그 뒤 스프린트 · 담당자 필터로
+  // 다시 불러올 때는 툴바를 그대로 둔다(예전엔 툴바째 사라져 필터 버튼으로 돌아갈 초점이 body로 빠지고 보드 전체가 깜빡였다).
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   // CB-S4: status별 total count + cursor
   const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
   const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
@@ -544,7 +547,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         setMembers(json.data);
       }
     } finally {
-      if (!stale()) setLoading(false);
+      if (!stale()) {
+        setLoading(false);
+        setHasLoadedOnce(true);
+      }
     }
     if (stale()) return;
 
@@ -1265,7 +1271,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const activeStory = activeId ? stories.find((s) => s.id === activeId) : null;
   const dragStatus = activeStory?.status ?? null;
 
-  if (loading) return <KanbanSkeleton />;
+  // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
+  // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).
+  if (loading && !hasLoadedOnce) return <KanbanSkeleton />;
+  const refetching = loading && hasLoadedOnce;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -1343,7 +1352,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="focus-inset max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
                     <span className="flex-1">{t('allSprints')}</span>
@@ -1402,7 +1411,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="focus-inset max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
                     <span className="flex-1">{t('allEpics')}</span>
@@ -1465,7 +1474,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="focus-inset max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
                     <span className="flex-1">{t('allAssignees')}</span>
@@ -1547,7 +1556,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   />
                 </div>
                 <DropdownMenuSeparator />
-                <div className="focus-inset max-h-[50vh] overflow-y-auto">
+                <div className="focus-inset max-h-[50vh] overflow-y-auto" tabIndex={-1}>
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
                       <span className="flex-1">{t('allLabels')}</span>
@@ -1684,8 +1693,13 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         </div>
       </div>
 
-      {/* Content area */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Content area — story #4307: 다시 불러오는 동안 컬럼(목록) 자리만 스켈레톤 · aria-busy. */}
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        aria-busy={refetching || undefined}
+        data-testid="kanban-content-area"
+      >
+        {refetching ? (viewMode === 'list' ? <KanbanListRowsSkeleton /> : <KanbanColumnsSkeleton />) : (<>
         {stories.length === 0 ? (
           // story bb78f14b(doc resource-view-firsttouch-identity-pattern §4 "보드" 행 — ⚠️과함
           // 주의 명시): 다른 4뷰(5요소)와 달리 여기는 3요소로 축소(아이콘+headline+CTA, explainer
@@ -1871,10 +1885,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           </DndContext>
         )}
         </div>
+        </>)}
       </div>
 
-      {/* Load more */}
-      {nextCursor || epicsNextCursor ? (
+      {/* Load more — story #4307: 다시 불러오는 동안엔 옛 커서라 숨긴다. */}
+      {!refetching && (nextCursor || epicsNextCursor) ? (
         <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border/80 p-2">
           {nextCursor ? (
             <Button
