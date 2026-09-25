@@ -52,6 +52,18 @@ export function buildMobileHubGroups(input: {
   return hub.filter((g) => g.items.length > 0);
 }
 
+/**
+ * story #4292(유나 관찰 · 선택지 1) — 구역 카드 머리의 한 규칙. 머리 낱말이 그 구역의 **유일한 항목 이름과 같으면 머리를 그리지 않는다**
+ * (null) — 사이드바의 «머리 없는 한 항목 구역»(오늘 · 개발 · 결과)과 같은 모양으로, 카드는 항목 줄(이름 + 설명) 하나가 된다.
+ * 예전엔 머리 없는 구역이 첫 항목 이름을 머리로 끌어와 «결과 › 결과», «오늘»은 머리 `zoneNow` + 항목 `zoneNow`라 «오늘 › 오늘»이었다.
+ * 검색으로 걸러진 뒤의 구역에도 같은 함수를 부른다(걸러져 한 항목만 남아도 겹치지 않게).
+ */
+export function sectionHeaderKey(group: Pick<MobileHubGroup, 'labelKey' | 'items'>): string | null {
+  const only = group.items.length === 1 ? group.items[0] : undefined;
+  if (only && (!group.labelKey || group.labelKey === only.labelKey)) return null;
+  return group.labelKey ?? group.items[0]?.labelKey ?? null;
+}
+
 function rank(id: string): number {
   const i = CONNECT_TAIL_ORDER.indexOf(id);
   return i === -1 ? CONNECT_TAIL_ORDER.length : i;
