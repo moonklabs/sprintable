@@ -40,11 +40,13 @@ const okPage = (items: unknown[], hasMore = false, nextCursor: string | null = n
 });
 
 /** 알림 GET은 순서대로 behaviors를 쓰고(마지막 것을 반복), PATCH(읽음)은 patchOk, 나머지는 빈 성공. */
-function stubFetch(behaviors: Array<'network' | 'badJson' | 'notOk' | ReturnType<typeof okPage>>, patchOk = true) {
+function stubFetch(behaviors: Array<'network' | 'badJson' | 'notOk' | ReturnType<typeof okPage>>, patchOk = true, patchFailIds: string[] = []) {
   let call = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/api/notifications') && init?.method === 'PATCH') {
       if (!patchOk) throw new TypeError('Failed to fetch');
+      const id = (JSON.parse(String(init.body)) as { id?: string }).id;
+      if (id && patchFailIds.includes(id)) return { ok: false, status: 500, json: async () => null };
       return { ok: true, status: 200, json: async () => ({}) };
     }
     if (url.includes('/api/notifications')) {
@@ -142,3 +144,23 @@ describe('읽음 처리 실패 — 화면을 «읽음»으로 바꾸지 않고 �
     expect(unhandled).not.toHaveBeenCalled();
   });
 });
+
+// story #4295(PO 검토) — 묶음을 열면 안 읽은 알림마다 읽음 처리를 부르는데, 건마다 토스트면 묶음 크기만큼(generic은 121건까지) 쏟아졌다.
+describe('묶음 열기 — 읽음 실패 토스트는 한 번(story #4295 PO 검토)', () => {
+  it('⭐묶음 3건 중 2건 실패 → 토스트 1번 · 요청 3건', async () => {
+    const statusNotif = (id: string) => ({
+      id, org_id: 'o1', user_id: 'u1', type: 'story_status_changed', title: '묶음 알림', body: null,
+      is_read: false, reference_type: 'story', reference_id: 'st-1', href: null, created_at: '2026-01-01T00:00:00+00:00',
+    });
+    stubFetch([okPage([statusNotif('s1'), statusNotif('s2'), statusNotif('s3')])], true, ['s1', 's2']);
+    await mount();
+    const header = [...container.querySelectorAll('button, [role="button"]')].find((b) => b.textContent?.includes('묶음 알림') && !b.getAttribute('aria-label')?.includes('펼치기'));
+    expect(header, '묶음 머리').toBeTruthy();
+    await act(async () => { header!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    const patches = vi.mocked(fetch).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH');
+    expect(patches).toHaveLength(3);
+    expect(addToastMock.mock.calls.filter(([arg]) => (arg as { title: string }).title === koMessages.inbox.markReadFailed)).toHaveLength(1);
+  });
+});
+

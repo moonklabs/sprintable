@@ -333,7 +333,8 @@ export default function InboxPage() {
 
   // story #4295 — 응답을 안 보고 읽음으로 바꾸던 자리(서버가 실패해도 화면은 읽음 · 망 오류면 처리 안 된 거부). 벨(handleMarkRead ·
   // story #3637)과 같은 문구로 실패를 알리고 화면은 그대로 둔다. 망 오류도 실패로 친다.
-  const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean): Promise<boolean> => {
+  // `silent`: 묶음처럼 여러 건을 한 번에 처리하는 호출부가 결과를 모아 토스트를 한 번만 띄우도록(4648 PO 검토).
+  const setNotificationReadState = async (id: string, currentIsRead: boolean, nextIsRead: boolean, opts: { silent?: boolean } = {}): Promise<boolean> => {
     if (currentIsRead === nextIsRead) return true;
 
     const ok = await fetch('/api/notifications', {
@@ -342,7 +343,7 @@ export default function InboxPage() {
       body: JSON.stringify({ id, is_read: nextIsRead }),
     }).then((res) => res.ok, () => false);
     if (!ok) {
-      addToast({ title: t('markReadFailed'), type: 'error' });
+      if (!opts.silent) addToast({ title: t('markReadFailed'), type: 'error' });
       return false;
     }
 
@@ -497,7 +498,10 @@ export default function InboxPage() {
   // 항목별 구체 참조 칩+CTA(아래 렌더)로 실제 대상을 고르게 한다.
   const openGroup = async (group: Extract<InboxItem, { kind: 'group' }>) => {
     const unread = group.notifications.filter((n) => !n.is_read);
-    await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true)));
+    // story #4295(PO 검토) — 건마다 토스트를 띄우면 묶음 크기만큼(generic 묶음은 121건까지) 같은 토스트가 쏟아졌다. 조용히 처리해 결과를
+    // 모으고, 하나라도 실패면 한 번만. 실패한 건은 setNotificationReadState가 화면을 안 바꿔 안 읽음 그대로 남는다.
+    const results = await Promise.all(unread.map((n) => setNotificationReadState(n.id, n.is_read, true, { silent: true })));
+    if (results.includes(false)) addToast({ title: t('markReadFailed'), type: 'error' });
     if (group.groupKind === 'status_change' && group.latest.href) {
       router.push(group.latest.href);
     } else if (group.groupKind === 'generic') {
