@@ -65,7 +65,7 @@ export function avatarColor(isAgent: boolean): string {
 }
 
 export function initials(name: string | null | undefined): string {
-  // story #4284 — 구성원 이름은 nullable(표시 이름 없는 휴먼) — 빈 이름과 같게 «?».
+  // story #4284 — 구성원 이름은 nullable(표시 이름 없는 휴먼) — 빈 이름과 같게 «?»(문자열만 받는 자리용 · 화면 아바타는 사람 아이콘을 쓴다).
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
   const first = parts[0] ?? '';

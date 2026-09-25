@@ -233,3 +233,21 @@ describe('StoryCard — deleteStoryDialogBody 조사(story #4120)', () => {
     expect(document.body.textContent).not.toContain('을(를)');
   });
 });
+
+// story #4284 — 이름 없는 구성원(BE name null)은 머리글자 대신 사람 아이콘(유나 4286 판정) · title은 «이름 없는 구성원». 예전 타입이 거짓이라
+// null이면 `name.slice` throw 또는 빈 동그라미였다.
+describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
+  it('⭐담당자 동그라미가 «?» · «이름» 머리글자가 아니라 사람 아이콘이고, title은 «이름 없는 구성원»', () => {
+    const markup = render(makeStory({ assignee_id: 'm-unnamed', assignee_ids: ['m-unnamed'] }), [{ id: 'm-unnamed', name: null, type: 'human' }]);
+    expect(markup).toContain(`title="${koMessages.common.memberUnnamed}"`);
+    expect(markup).toContain('lucide-user-round');
+    expect(markup).not.toMatch(/>\?</);
+    expect(markup).not.toContain('>이름<');
+  });
+
+  it('실명 담당자는 그대로 머리글자', () => {
+    const markup = render(makeStory({ assignee_id: 'm-1', assignee_ids: ['m-1'] }), [{ id: 'm-1', name: 'Pedro', type: 'human' }]);
+    expect(markup).toContain('title="Pedro"');
+    expect(markup).toContain('>PE<');
+  });
+});

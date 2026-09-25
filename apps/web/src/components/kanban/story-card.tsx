@@ -10,7 +10,7 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, UserRound, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
 import { MaterialChip } from '@/components/ui/material-chip';
@@ -49,10 +49,10 @@ function getEpicDotClass(epicId: string): string {
   return EPIC_DOT_CLASSES[hash % EPIC_DOT_CLASSES.length]!;
 }
 
-// story #4284 — 구성원 이름은 nullable. 이름 없는 구성원의 머리글자는 «?»(대화 · 활동 타임라인 · 메시징 정책의 기존 관례) — 라벨
-// «이름 없는 구성원»의 앞 두 자(«이름»)를 머리글자로 쓰면 실명처럼 읽힌다. 전체 라벨은 title로.
-function getInitials(name: string | null): string {
-  return name ? name.slice(0, 2).toUpperCase() : '?';
+// story #4284 — 구성원 이름은 nullable. 이름 없는 구성원은 머리글자 대신 사람 아이콘(유나 4286 판정 — «?» 머리글자 → 사람 아이콘),
+// 전체 라벨(«이름 없는 구성원»)은 title로. 라벨 앞 두 자(«이름»)를 머리글자로 쓰면 실명처럼 읽힌다.
+function getInitials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
 }
 
 // E-DG S11 ①: workflow-line badge 5상태(LineStatusSummary + 기존 pending gate 두 소스 merge).
@@ -547,7 +547,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         )}
                         title={memberDisplayLabel(m.name, tc)}
                       >
-                        {getInitials(m.name)}
+                        {m.name ? getInitials(m.name) : <UserRound className="size-3" aria-hidden="true" />}
                         {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
                         {m.type === 'agent' && (
                           <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
@@ -583,7 +583,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                     when={story.human_verified_at ? formatRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
                   />
                 ) : story.status === 'done' && trustStage === 'claimed' ? (
-                  <TrustSeal variant="claimed" agentInitial={trustAgent ? getInitials(trustAgent.name) : undefined} />
+                  <TrustSeal variant="claimed" agentInitial={trustAgent?.name ? getInitials(trustAgent.name) : undefined} />
                 ) : null}
                 {story.story_points != null ? (
                   <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
