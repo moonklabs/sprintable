@@ -6,6 +6,8 @@ import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from 
 import { ExternalLink, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { safeHttpUrl } from '../lib/safe-content-url';
+import { cardVariants } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 // ─── URL Helpers ──────────────────────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ export function detectEmbedService(url: string): EmbedInfo {
 
 // ─── Embed View ───────────────────────────────────────────────────────────────
 
-function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
+export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
   const t = useTranslations('docs');
   const url = (node.attrs.url as string) ?? '';
   const [editUrl, setEditUrl] = useState(url);
@@ -137,9 +139,9 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
                 <span className="min-w-0 flex-1 truncate text-foreground/80">{url}</span>
               </a>
             ) : (
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm opacity-70" data-embed-blocked="">
+              <div className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm opacity-70')}>
                 <Link2 className="size-4 flex-shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-foreground/80">{t('embedLinkBlocked')}</span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{t('embedLinkBlocked')}</span>
               </div>
             )
           )}

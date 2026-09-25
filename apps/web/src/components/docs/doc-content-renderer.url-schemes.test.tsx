@@ -148,7 +148,25 @@ describe('스킴 판정 단위', () => {
     for (const bad of [...HOSTILE, 'ftp://a', '', 'mailto:a@b']) expect(safeHttpUrl(bad), JSON.stringify(bad)).toBeNull();
   });
   it('safeAttachmentDataUrl: data: + 실행 안 되는 MIME만', () => {
-    for (const ok of ['data:application/pdf;base64,AA', 'data:image/png;base64,AA', 'data:text/plain,hi', 'data:;base64,AA']) expect(safeAttachmentDataUrl(ok), ok).toBe(ok);
+    for (const ok of ['data:application/pdf;base64,AA', 'data:image/png;base64,AA', 'data:text/plain,hi']) expect(safeAttachmentDataUrl(ok), ok).toBe(ok);
+    // 허용 목록(PO 22:14Z) — 빈 MIME(`data:;base64,…`)은 첨부 종류가 아니라 거절.
+    expect(safeAttachmentDataUrl('data:;base64,AA')).toBeNull();
     for (const bad of [...HOSTILE, 'https://a', 'data:TEXT/HTML;base64,AA', 'data:application/xhtml+xml,x', 'data:text/javascript,x']) expect(safeAttachmentDataUrl(bad), JSON.stringify(bad)).toBeNull();
+  });
+});
+
+// story #4316 × #4324 — 비활성 카드도 끼워 넣는 부품 표지(`data-doc-part`) 아래라 뿌리 본문 규칙([&_p] · [&_a])에서 빠진다.
+describe('비활성 카드 · 부품 표지', () => {
+  it.each(FORMATS)('링크 · 첨부 비활성 카드는 data-doc-part 부품 안 · %s', async (format) => {
+    await render('<div data-type="embedBlock" data-url="javascript:alert(1)"></div><div data-type="fileAttachment" data-filename="a.pdf" data-size="1" data-file-data="javascript:alert(1)"></div>', format);
+    for (const p of container.querySelectorAll('p')) {
+      if (p.textContent === LINK_BLOCKED || p.textContent === FILE_BLOCKED) expect(p.closest('[data-doc-part]'), p.textContent ?? '').not.toBeNull();
+    }
+    const fileNote = [...container.querySelectorAll('p')].find((p) => p.textContent === FILE_BLOCKED);
+    expect(fileNote?.closest('[data-doc-part="file"]')).not.toBeNull();
+    if (format === 'html') {
+      const linkNote = [...container.querySelectorAll('p')].find((p) => p.textContent === LINK_BLOCKED);
+      expect(linkNote?.closest('[data-doc-part="embed"]')).not.toBeNull();
+    }
   });
 });

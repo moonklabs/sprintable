@@ -27,7 +27,7 @@ function fileGlyph(mimeType: string, className: string) {
 
 // ─── File Attachment View ─────────────────────────────────────────────────────
 
-function FileAttachmentView({ node }: ReactNodeViewProps) {
+export function FileAttachmentView({ node }: ReactNodeViewProps) {
   const t = useTranslations('docs');
   const { addToast } = useToast();
   const [downloading, setDownloading] = useState(false);
