@@ -15,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import _resolve_api_key, bearer_scheme
 from app.dependencies.database import get_db
 from app.services.onboarding_funnel import (
@@ -38,7 +39,7 @@ class OnboardingEventBody(BaseModel):
     transport: str | None = None
     key_prefix: str | None = None
     failure_reason: str | None = None
-    client_ts: datetime | None = None
+    client_ts: OffsetDatetime | None = None
     meta: dict = Field(default_factory=dict)
 
 

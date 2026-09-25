@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.core.error_envelope import human_error
 from app.services.gate_service import RecipeReviewedDraftChangedError
 from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
@@ -2669,7 +2670,7 @@ async def _void_gate_endpoint(
 
 class GateHoldRequest(BaseModel):
     reason: str | None = None       # S31: 보류 사유(선택·가역적 일시정지라 마찰↓)
-    held_until: datetime | None = None  # 시한부 만료(무기한이면 None)
+    held_until: OffsetDatetime | None = None  # 시한부 만료(무기한이면 None)
 
 
 async def _require_gate_admin(session, auth, org_id, resolved_locale: str):

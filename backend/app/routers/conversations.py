@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -1394,7 +1395,7 @@ class MarkReadRequest(BaseModel):
     """story #1976: up_to 지정 시 그 시각으로 SET(FE 실 렌더 마지막 메시지 timestamp — 권장 경로).
     up_to 생략 시 서버 now() 사용 — 이는 "전체 읽음"(mark-all-read) 명시 액션 전용 의도(§3-2)."""
 
-    up_to: datetime | None = None
+    up_to: OffsetDatetime | None = None
 
 
 class CircuitBreakerReleaseRequest(BaseModel):

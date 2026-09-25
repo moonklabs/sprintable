@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+from app.core.datetime_query import OffsetDatetime
 
 # 계층 리네이밍 B1(story 1925): 구 epic.py — 클래스/필드명만 rename, DB 컬럼(stories.epic_id 등)은
 # B4 후속(스코프 밖). 구 이름(GoalXxx의 별칭)은 REST/MCP 레이어(routers/goals.py·sprintable_mcp)에서
@@ -38,7 +39,7 @@ class GoalCreate(BaseModel):
     target_date: date | None = None
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
 
 
 class GoalUpdate(BaseModel):
@@ -53,7 +54,7 @@ class GoalUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
     # ⚠️RC#2(D1'): status 는 잔류하되 update_goal 엔드포인트가 **미변경이면 무시·변경 시 422**(전용
     # /transition 강제). FE always-send(미변경 동봉) 호환·실제 status 변경만 차단(RC#1 resolver_id 동형).
 

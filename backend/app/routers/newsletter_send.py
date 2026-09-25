@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -42,7 +43,7 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID,
 
 class CreateNewsletterSendRequest(BaseModel):
     segment_name: str
-    scheduled_at: datetime
+    scheduled_at: OffsetDatetime
 
 
 class NewsletterSendResponse(BaseModel):

@@ -4,6 +4,8 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from limits.errors import StorageError
@@ -292,6 +294,21 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         content={"data": None, "error": error, "meta": None},
         headers=exc.headers,
     )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """story #4330 — 본문 일시가 오프셋 없어 `OffsetDatetime`에 걸린 오류만 쿼리(4294)와 같은 422 `DATETIME_OFFSET_REQUIRED`
+    봉투(`param` = 본문 경로 · `hint` 예시)로 바꾼다. 그 밖의 검증 오류는 FastAPI 기본 처리 그대로(형태 회귀 0)."""
+    from app.core.datetime_query import OFFSET_REQUIRED_ERROR_TYPE, offset_required_detail
+
+    for err in exc.errors():
+        if err.get("type") == OFFSET_REQUIRED_ERROR_TYPE:
+            loc = [str(part) for part in err.get("loc", ()) if part != "body"]
+            return await http_exception_handler(
+                request, HTTPException(status_code=422, detail=offset_required_detail(".".join(loc), request)),
+            )
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(RateLimitExceeded)

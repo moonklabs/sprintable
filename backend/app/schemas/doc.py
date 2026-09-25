@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, computed_field
+from app.core.datetime_query import OffsetDatetime
 
 
 class DocCreate(BaseModel):
@@ -41,7 +42,7 @@ class DocUpdate(BaseModel):
     # 151e05f1: 낙관적 동시성(문서 동시편집 충돌 보호). expected_updated_at 제공 시 BE가 현재
     # updated_at 과 exact match 검사 → 불일치면 409 DOC_CONFLICT(opt-in·미제공=무체크 하위호환).
     # force_overwrite=True 면 검사 우회(last-write-wins 의도적). ⚠️ 이 2필드는 strip 금지(BE 수용).
-    expected_updated_at: datetime | None = None
+    expected_updated_at: OffsetDatetime | None = None
     force_overwrite: bool | None = None
     # story #2346 AC7 — stories.py와 동형(50% 이상 급감+절대손실 100자 이상이면 기본 거부).
     # 정당한 대규모 축약(예: 낡은 섹션 통째로 제거)은 이 플래그로 명시 승인한다.

@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
+from app.core.datetime_query import OffsetDatetime
 from app.schemas.story import _validate_metric_definition
 from app.schemas.validators import is_blank
 
@@ -73,6 +74,8 @@ class SprintBase(BaseModel):
 class SprintCreate(SprintBase):
     project_id: uuid.UUID
     org_id: uuid.UUID
+    # story #4330 — SprintBase는 응답(SprintResponse)과 공유라 요청 쪽만 오프셋 필수 타입으로 덮는다.
+    measure_after: OffsetDatetime | None = None
 
 
 class SprintUpdate(BaseModel):
@@ -90,7 +93,7 @@ class SprintUpdate(BaseModel):
     # E-OUTCOME-LOOP: 의도 필드 (Update 허용)
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
 
     @field_validator("metric_definition")
