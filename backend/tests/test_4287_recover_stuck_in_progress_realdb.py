@@ -243,3 +243,55 @@ def test_the_stamp_precedes_every_adapter_branch():
     ):
         assert _lines(adapter), adapter
         assert stamp[0] < min(_lines(adapter)), f"{adapter}가 영속 표식보다 앞에서 불린다"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("died_with", ["all_ids", "campaign_only"])
+async def test_an_ads_boost_start_recovered_after_the_mark_resumes_without_a_second_campaign(monkeypatch, died_with):
+    """AC4 — 광고 부스트 시작 명령이 표식 뒤에 죽었다(all_ids: ACTIVE 전환 중 · 4268이 id를 ACTIVE 전에 커밋 / campaign_only: 부분 생성).
+    회수 → needs_check(자동 재시도 0) → 사람 재시도 → 4268 이어 만들기: 캠페인 생성 호출은 처음 한 번뿐(중복 PAUSED 0)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.publication_command import WORKER_INTERRUPTED_ERROR_CODE
+    from tests.test_3806_ads_boost_execution import _setup_approved_gate
+    from tests.test_4268_ads_boost_idempotent_start_realdb import (
+        _retry,
+        _run,
+        _spy_sandbox_create,
+        _start_command,
+    )
+    from tests.test_e4fc29fa_site_post_orchestration import (
+        _session_factory as _ads_session_factory,
+    )
+
+    calls = _spy_sandbox_create(monkeypatch)
+    engine, Session, org_id, _project_id, owner_id, gate_id = await _setup_approved_gate(await _ads_session_factory())
+    try:
+        command_id = await _start_command(Session, org_id, gate_id, owner_id)
+        # 첫 틱은 정상으로 끝까지 만든다(생성 1) — 그 뒤 «ACTIVE 중 죽음»의 흔적을 행에 되돌려 놓는다.
+        await _tick(Session, datetime.now(UTC))
+        assert len(calls) == 1
+        first = await _run(Session, gate_id)
+        long_ago = datetime.now(UTC) - timedelta(hours=2)
+        await _set(Session, command_id, status="in_progress", claimed_at=long_ago, provider_call_started_at=long_ago)
+        async with Session() as s:
+            run = await s.get(AdsBoostRun, first.id)
+            run.status = "pending"
+            if died_with == "campaign_only":
+                run.adset_id, run.ad_id = None, None
+            await s.commit()
+
+        await _tick(Session, datetime.now(UTC))
+        row = await _row(Session, command_id)
+        assert (row.status, row.failure_kind, row.reason_code) == ("dead_letter", "needs_check", WORKER_INTERRUPTED_ERROR_CODE)
+        assert len(calls) == 1, "회수가 광고를 자동으로 다시 만들었다"
+
+        await _retry(Session, org_id, command_id)
+        await _tick(Session, datetime.now(UTC))
+        after = await _run(Session, gate_id)
+        assert after.campaign_id == first.campaign_id, "이어 만들기가 아니라 새 캠페인이 생겼다"
+        if died_with == "all_ids":
+            assert len(calls) == 1, f"id가 다 있는데 생성을 다시 불렀다: {calls}"
+        else:
+            assert calls[1] == {"campaign_id": first.campaign_id, "adset_id": None, "ad_id": None}
+    finally:
+        await engine.dispose()
