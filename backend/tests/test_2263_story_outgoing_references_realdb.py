@@ -362,6 +362,66 @@ async def test_create_proof_reference_readable_conversation_201_then_read_back()
 
 
 @pytest.mark.anyio
+async def test_outgoing_proof_reference_carries_conversations_own_project():
+    """story #4231 — 증거 대화는 스토리와 다른 프로젝트일 수 있다(생성 때 프로젝트 일치를 안 본다 · 참여자 기반). GET 목록이
+    그 대화의 project_id를 같이 내야 FE 딥링크가 현재 p(스토리 프로젝트)가 아니라 대화 쪽 프로젝트로 간다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            other_project = await _make_project(s, org.id, "Q")
+            member_id, caller_id = await _make_human_member(s, org.id, project.id)
+            source_story = await _make_story(s, org.id, project.id, title="Source")
+            conv = await _make_conversation(s, org.id, other_project.id, participant_ids=[member_id])
+
+            from app.models.conversation import ConversationMessage
+            msg = ConversationMessage(
+                id=uuid.uuid4(), conversation_id=conv.id, sender_id=member_id, content="quoted text",
+            )
+            s.add(msg)
+            await s.commit()
+            message_id = msg.id
+
+        await _setup_app_human(app, Session, caller_id, org.id)
+        client = _client_for(app)
+        try:
+            payload = {
+                "conversation_id": str(conv.id),
+                "start_message_id": str(message_id), "end_message_id": str(message_id),
+                "snapshot": [{
+                    "message_id": str(message_id), "author_id": str(caller_id),
+                    "content": "quoted text", "created_at": "2026-07-29T00:00:00Z",
+                }],
+            }
+            resp = await client.post(
+                f"/api/v2/stories/{source_story.id}/references",
+                json={
+                    "target_type": "chat_message", "target_id": str(message_id), "form": "proof",
+                    "proof_payload": payload,
+                },
+            )
+            assert resp.status_code == 201, resp.text
+
+            read_resp = await client.get(
+                f"/api/v2/stories/{source_story.id}/references", params={"direction": "outgoing"},
+            )
+            assert read_resp.status_code == 200, read_resp.text
+            items = read_resp.json()["data"]
+            assert len(items) == 1
+            assert items[0]["conversation_project_id"] == str(other_project.id), (
+                "증거 대화 자기 프로젝트여야 한다(스토리 프로젝트 아님)"
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_create_proof_reference_unreadable_conversation_404():
     """권한② — 그 대화를 못 읽는 caller가 조각을 박으려 하면 거부(존재 비노출 — 404)."""
     from app.main import app

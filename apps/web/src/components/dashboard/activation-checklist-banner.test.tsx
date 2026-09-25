@@ -100,6 +100,7 @@ function stubChecklist(data: {
   total: number;
   all_complete: boolean;
   first_instruction_conversation_id?: string | null;
+  first_instruction_conversation_project_id?: string | null;
   scope_is_requested_org?: boolean;
 }) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data }) })));
@@ -322,7 +323,21 @@ describe('ActivationChecklistBanner — "첫 지시…" 항목 클릭(story #320
     await flush();
 
     expect(createFirstInstructionConversationMock).not.toHaveBeenCalled();
-    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-abc?p=proj-1') /* story #4231 — 현재 프로젝트를 싣는다 */;
+    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-abc?p=proj-1') /* story #4231 — 옛 응답(대화 프로젝트 없음)은 현재 프로젝트 폴백 */;
+  });
+
+  it('⭐story #4231 — 첫 지시 대화가 다른 프로젝트에 있으면 그 대화의 프로젝트로 간다(BE가 조직 전체에서 고른다)', async () => {
+    stubChecklist({ ...PARTIAL, first_instruction_conversation_id: 'conv-abc', first_instruction_conversation_project_id: 'proj-9' });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+
+    const target = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('첫 지시 보내고 회신 받기'),
+    ) as HTMLButtonElement;
+    await act(async () => { target.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(routerPushMock).toHaveBeenCalledWith('/chats/conv-abc?p=proj-9');
   });
 
   it('first_instruction_conversation_id가 null이면 신규 DM 생성 경로(connect-step과 동일)를 타 그 대화로 이동한다', async () => {

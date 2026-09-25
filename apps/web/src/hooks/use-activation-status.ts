@@ -25,6 +25,8 @@ export interface ActivationState {
   all_complete: boolean;
   // story #3201 — 왕복 성사된 대화(또는 org 최초 agent DM) id, 없으면 null.
   first_instruction_conversation_id: string | null;
+  // story #4231 — 그 대화의 프로젝트(조직 전체에서 고른 대화라 현재 프로젝트와 다를 수 있다). 옛 응답이면 undefined.
+  first_instruction_conversation_project_id?: string | null;
   // story #3610(3607 잔여) CHANGES-2(유나 확認·PO 채택 2026-09-07) — 최초판 scope_org_id
   // (판정에 쓰인 org 값)를 폐기하고 불리언으로 대체했다. FE가 그 값을 orgId(실제로는
   // me.org_id=계정 기본 org)와 비교했는데, X-Org-Id(탭 effective org)와 다른 프레임이라

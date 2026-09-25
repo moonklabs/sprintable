@@ -31,7 +31,7 @@ function item(over: Partial<TodayNeedsMeItem>): TodayNeedsMeItem {
   return {
     id: 'g1', source: 'gate', state: 'approval', risk: 'low', workItemType: 'story', workItemId: 's1',
     workItemTitle: '제목', requestedByName: null, reason: null, createdAt: '2026-09-24T00:00:00Z',
-    conversationId: null, recipePublish: false, projectId: null, ...over,
+    conversationId: null, recipePublish: false, projectId: null, conversationProjectId: null, ...over,
   };
 }
 
@@ -53,6 +53,15 @@ describe('「오늘」 결정 행 링크(story #4241)', () => {
     ['같은 프로젝트 결재 → 지금과 같음', item({ id: 'g-a', projectId: 'proj-A' }), '/gates/g-a?p=proj-A'],
     ['프로젝트 모르는 결재 → 현재 프로젝트', item({ id: 'g-x', projectId: null }), '/gates/g-x?p=proj-A'],
     ['결재함 큐(hitl) → 현재 프로젝트', item({ id: 'h1', source: 'hitl', state: 'answer', projectId: 'proj-C' }), '/inbox?tab=gates&p=proj-A'],
+  ])('%s', async (_label, it1, expected) => {
+    expect(await hrefsFor([it1])).toContain(expected);
+  });
+});
+
+describe('「오늘」 대화 열기 링크(story #4231)', () => {
+  it.each([
+    ['다른 프로젝트 대화 → 그 대화의 프로젝트', item({ id: 'g-1', conversationId: 'c-1', conversationProjectId: 'proj-C' }), '/chats/c-1?p=proj-C'],
+    ['옛 응답(대화 프로젝트 없음) → 현재 프로젝트 폴백', item({ id: 'g-2', conversationId: 'c-2', conversationProjectId: null }), '/chats/c-2?p=proj-A'],
   ])('%s', async (_label, it1, expected) => {
     expect(await hrefsFor([it1])).toContain(expected);
   });

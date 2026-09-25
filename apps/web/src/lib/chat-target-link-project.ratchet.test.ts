@@ -21,15 +21,52 @@ const DIRS = [
   'components/today-v3', 'components/org-briefing', 'components/verify', 'components/dashboard', 'components/inbox',
 ];
 const CURRENT_P = 'flatHref';
-/** 이 파일에서 «현재 p» 함수로 쓰이는 이름 — `flatHref` + `const X = useFlatHref()`로 받은 별칭(맹점: 이름만 바꿔 넘기면 못 셌다). */
+/** 이 파일에서 «현재 p» 함수로 쓰이는 이름 — 이름만 바꿔 넘기면 못 셌다(맹점). 셈하는 모양(모든 모양을 쫓진 않는다 · PO 4669):
+ *  `const X = useFlatHref()` · `const/let X = <현재 p>` · `const X = useCallback(<현재 p>…)` · `useCallback((h) => <현재 p>(h), …)` ·
+ *  구조 분해 `const { flatHref: X } = …` / `const { X } = { X: <현재 p> }`. 별칭의 별칭도(고정점까지). */
 function currentProjectNames(sf: ts.SourceFile): Set<string> {
   const names = new Set([CURRENT_P]);
-  const visit = (node: ts.Node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isCallExpression(node.initializer)
-      && ts.isIdentifier(node.initializer.expression) && node.initializer.expression.text === 'useFlatHref') names.add(node.name.text);
-    ts.forEachChild(node, visit);
+  const isCur = (e: ts.Node | undefined): boolean => !!e && ts.isIdentifier(e) && names.has(e.text);
+  const wrapsCurrent = (e: ts.Expression): boolean => {
+    if (isCur(e)) return true;
+    if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) {
+      if (e.expression.text === 'useFlatHref') return true;
+      if (e.expression.text === 'useCallback' || e.expression.text === 'useMemo') {
+        const fn = e.arguments[0];
+        if (!fn) return false;
+        if (isCur(fn)) return true;
+        // useCallback((h) => flatHref(h), …) · useMemo(() => flatHref, …)
+        if (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) {
+          const body = fn.body;
+          if (ts.isArrowFunction(fn) && !ts.isBlock(body)) return isCur(body) || (ts.isCallExpression(body) && isCur(body.expression));
+        }
+      }
+    }
+    return false;
   };
-  visit(sf);
+  let grew = true;
+  while (grew) {
+    const before = names.size;
+    const visit = (node: ts.Node) => {
+      if (ts.isVariableDeclaration(node) && node.initializer) {
+        if (ts.isIdentifier(node.name) && wrapsCurrent(node.initializer)) names.add(node.name.text);
+        if (ts.isObjectBindingPattern(node.name)) {
+          for (const el of node.name.elements) {
+            if (!ts.isIdentifier(el.name)) continue;
+            const key = el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : el.name.text;
+            // `const { flatHref: X } = …`(현재 p를 이름으로 꺼냄) · `const { X } = { X: flatHref }`(객체 리터럴에서 현재 p를 꺼냄).
+            const fromLiteral = ts.isObjectLiteralExpression(node.initializer) && node.initializer.properties.some((pr) =>
+              (ts.isPropertyAssignment(pr) && ts.isIdentifier(pr.name) && pr.name.text === key && isCur(pr.initializer))
+              || (ts.isShorthandPropertyAssignment(pr) && pr.name.text === key && names.has(key)));
+            if (names.has(key) || fromLiteral) names.add(el.name.text);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    grew = names.size > before;
+  }
   return names;
 }
 const REASON_MARK = '대상-프로젝트:';
@@ -64,7 +101,19 @@ function hasReason(sf: ts.SourceFile, node: ts.Node, text: string): boolean {
   const prevLineStart = text.lastIndexOf('\n', lineStart - 1);
   const prevLine = lineStart < 0 ? '' : text.slice(prevLineStart + 1, lineStart);
   const ownLineHead = text.slice(lineStart + 1, node.getStart(sf));
-  return leading.includes(REASON_MARK) || sameLine.includes(REASON_MARK) || prevLine.includes(REASON_MARK) || ownLineHead.includes(REASON_MARK);
+  return [leading, sameLine, prevLine, ownLineHead].some(hasFilledReason);
+}
+
+// 표지 뒤에 이유 글자가 있어야 허용(PO 4669 반려) — 줄 주석이든 JSX 블록 주석이든 표지 뒤가 비면(주석 닫는 글자만 있어도) 셈에 남는다.
+export function hasFilledReason(chunk: string): boolean {
+  let at = chunk.indexOf(REASON_MARK);
+  while (at >= 0) {
+    // 이유는 표지 뒤 그 주석 안의 글자만 — 줄 끝 또는 블록 주석 닫힘(`*` `/`)까지.
+    const rest = chunk.slice(at + REASON_MARK.length).split('\n')[0].split('*/')[0].trim();
+    if (rest.length > 0) return true;
+    at = chunk.indexOf(REASON_MARK, at + REASON_MARK.length);
+  }
+  return false;
 }
 
 export function countCurrentProjectTargetLinks(fileName: string, text: string): number {
@@ -120,6 +169,27 @@ describe('대상 링크의 현재 p 래칫(#4231 다음 조각 · 맹점 ② · 
     expect(count('const a = <EmbedCard withProject={flatHref} />;')).toBe(1);
     expect(count('// 대상-프로젝트: 메시지 참조엔 대상 프로젝트가 없다\nconst a = <EmbedCard withProject={flatHref} />;')).toBe(0);
     expect(count('const f = useCallback(() => 1, [flatHref]);'), '의존성 배열은 전달 아님').toBe(0);
+  });
+
+  it('⭐별칭 모양 넓힘(PO 4669) — const/let 대입 · 별칭의 별칭 · useCallback 감쌈 · 구조 분해', () => {
+    expect(count('const x = flatHref;\nconst h = getEntityHref(t, id, x);')).toBe(1);
+    expect(count('let x = flatHref;\nconst a = <Link href={x(`/gates/${g}`)} />;')).toBe(1);
+    expect(count('const x = flatHref;\nconst y = x;\nconst h = getEntityHref(t, id, y);'), '별칭의 별칭').toBe(1);
+    expect(count('const w = useCallback(flatHref, []);\nconst h = getEntityHref(t, id, w);')).toBe(1);
+    expect(count('const w = useCallback((h) => flatHref(h), [flatHref]);\nconst a = <Link href={w(`/chats/${c}`)} />;')).toBe(1);
+    expect(count('const { flatHref: go } = ctx;\nconst h = getEntityHref(t, id, go);')).toBe(1);
+    expect(count('const { go } = { go: flatHref };\nconst h = getEntityHref(t, id, go);')).toBe(1);
+    // 음성 — 현재 p와 무관한 이름은 세지 않는다.
+    expect(count('const x = other;\nconst h = getEntityHref(t, id, x);')).toBe(0);
+  });
+
+  it('⭐이유 표지 뒤가 비면 허용 안 함(PO 4669) — 표지만 달고 이유를 안 쓰면 셈에 남는다', () => {
+    expect(count('// 대상-프로젝트:\nconst h = getEntityHref(t, id, flatHref);')).toBe(1);
+    expect(count('// 대상-프로젝트:   \nconst h = getEntityHref(t, id, flatHref);')).toBe(1);
+    expect(count('const a = <div>{/* 대상-프로젝트: */}<Link href={flatHref(`/gates/${g}`)} /></div>;')).toBe(1);
+    expect(count('const a = <div>{/* 대상-프로젝트: 게이트 id만 안다 */}<Link href={flatHref(`/gates/${g}`)} /></div>;')).toBe(0);
+    expect(hasFilledReason('// 대상-프로젝트: 모름')).toBe(true);
+    expect(hasFilledReason('// 대상-프로젝트:')).toBe(false);
     expect(count('const r = useRef(flatHref);'), '훅 인자는 대상 링크 조립 아님').toBe(0);
   });
 

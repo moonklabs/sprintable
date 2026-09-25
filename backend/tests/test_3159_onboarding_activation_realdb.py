@@ -198,6 +198,65 @@ async def test_get_activation_state_scope_is_requested_org_reveals_mismatch_for_
 
 
 @pytest.mark.anyio
+async def test_get_activation_state_first_instruction_carries_conversation_project():
+    """story #4231 — 첫 지시 대화는 조직 전체에서 고르므로(①②) 요청자가 보는 프로젝트와 다를 수 있다. 응답이 그
+    대화의 project_id를 같이 내야 FE 딥링크가 대상 프로젝트(`?p=`)로 간다. 대화가 없으면 둘 다 None."""
+    eng, Session = await _engine()
+    async with Session() as s:
+        await _wipe(s, ORG)
+        try:
+            proj_a, proj_b = _uuid(), _uuid()
+            human_member, agent_member, user_id = _uuid(), _uuid(), _uuid()
+            await s.execute(text(
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','O','story3159-o','free')"
+            ))
+            await s.execute(text(
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{user_id}','story3159-proj@t.test','x','U',true,false,0,false,0)"
+            ))
+            await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{_uuid()}','{ORG}','{user_id}','owner')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO projects (id,org_id,name,violation_level) VALUES "
+                f"('{proj_a}','{ORG}','A','none'),('{proj_b}','{ORG}','B','none')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name,user_id) VALUES "
+                f"('{human_member}','{ORG}','human','H','{user_id}')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO members (id,org_id,type,name) VALUES ('{agent_member}','{ORG}','agent','A')"
+            ))
+            await s.commit()
+            user = (await s.execute(select(User).where(User.id == uuid.UUID(user_id)))).scalar_one()
+
+            empty = await svc.get_activation_state(s, user, requested_org_id=uuid.UUID(ORG))
+            assert empty["first_instruction_conversation_id"] is None
+            assert empty["first_instruction_conversation_project_id"] is None
+
+            # 대화는 프로젝트 B에 있다(요청자가 A를 보고 있어도 딥링크는 B로).
+            dm = _uuid()
+            await s.execute(text(
+                f"INSERT INTO conversations (id,org_id,project_id,type) VALUES ('{dm}','{ORG}','{proj_b}','dm')"
+            ))
+            await s.execute(text(
+                f"INSERT INTO conversation_participants (id,conversation_id,member_id) VALUES "
+                f"('{_uuid()}','{dm}','{human_member}'),('{_uuid()}','{dm}','{agent_member}')"
+            ))
+            await s.commit()
+            state = await svc.get_activation_state(s, user, requested_org_id=uuid.UUID(ORG))
+            assert state["first_instruction_conversation_id"] == dm
+            assert state["first_instruction_conversation_project_id"] == proj_b
+        finally:
+            await _wipe(s, ORG)
+            await s.execute(text("DELETE FROM users WHERE email LIKE 'story3159-%'"))
+            await s.commit()
+    await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_is_org_agent_connected_requires_real_verify_not_just_member_record():
     """story #3193 근본수정 — 예전엔 agent 멤버 레코드 **존재**만으로 True였다("생성"을
     "연결"로 오판정: 연결 스텝을 건너뛰어도 레코드는 남아 체크리스트가 거짓 완료를 표시

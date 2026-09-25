@@ -43,6 +43,11 @@ describe('parseStoryProofReferences — story #2265(C-7) PR1b 파싱', () => {
     expect(skippedIds).toEqual([]);
   });
 
+  it('story #4231 — conversation_project_id를 읽고, 없거나 문자열이 아니면 null(옛 응답)', () => {
+    expect(parseStoryProofReferences({ data: [{ ...VALID_ROW, conversation_project_id: 'proj-Q' }] }).items[0].conversationProjectId).toBe('proj-Q');
+    expect(parseStoryProofReferences({ data: [VALID_ROW] }).items[0].conversationProjectId).toBeNull();
+  });
+
   it('{data:[...]}·bare 배열 둘 다 받는다', () => {
     expect(parseStoryProofReferences({ data: [VALID_ROW] }).items).toHaveLength(1);
     expect(parseStoryProofReferences([VALID_ROW]).items).toHaveLength(1);
@@ -99,6 +104,17 @@ describe('ChatProofSection — story #2265(C-7) PR1b 섹션 렌더', () => {
     await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
     await act(async () => { await Promise.resolve(); });
     expect(container.innerHTML).toBe('');
+  });
+
+  it('⭐story #4231 — 증거 대화 링크는 대화 자기 프로젝트(conversation_project_id)를 싣는다(스토리 · 현재 p 아님)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [{ ...VALID_ROW, conversation_project_id: 'proj-Q' }] }) })));
+    await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
+    await act(async () => { await Promise.resolve(); });
+    const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
+    const convHref = hrefs.find((h) => h.startsWith('/chats/conv-1'));
+    expect(convHref, hrefs.join(' | ')).toBeDefined();
+    expect(new URL(convHref!, 'http://x').searchParams.get('p')).toBe('proj-Q');
+    expect(new URL(convHref!, 'http://x').searchParams.get('messageId')).toBe('msg-1');
   });
 
   it('참조가 있으면 인용 카드를 그리고 개수를 보인다', async () => {

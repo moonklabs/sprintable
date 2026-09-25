@@ -14,6 +14,7 @@ import { useActivationStatus, type ActivationState } from '@/hooks/use-activatio
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { cn } from '@/lib/utils';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 // story #4032(실측 — Lighthouse CI 인증화면 6곳 전부 CLS>0.1, layout-shift-elements 감사
 // 상위 기여요소가 6곳 모두 이 배너 바로 아래 그리드였다) — 진짜 원인은 `useActivationStatus`
@@ -171,8 +172,11 @@ export function ActivationChecklistBanner() {
   const handleFirstInstructionClick = async () => {
     if (navigatingToInstruction) return;
     if (state?.first_instruction_conversation_id) {
-      // 대상-프로젝트: 첫 지시 대화는 온보딩이 만든 현재 프로젝트의 대화라 현재 p가 곧 대상 프로젝트.
-      router.push(flatHref(`/chats/${state.first_instruction_conversation_id}`));
+      // story #4231 — 그 대화는 BE가 조직 전체에서 고른다 → 대화 자기 프로젝트(`first_instruction_conversation_project_id`).
+      router.push(state.first_instruction_conversation_project_id
+        ? withProjectParam(`/chats/${state.first_instruction_conversation_id}`, state.first_instruction_conversation_project_id)
+        // 대상-프로젝트: 옛 응답(필드 없음)일 때만 현재 p로 폴백.
+        : flatHref(`/chats/${state.first_instruction_conversation_id}`));
       return;
     }
     if (!projectId) return;
@@ -184,8 +188,8 @@ export function ActivationChecklistBanner() {
       // 아무 일도 없었던 것처럼 보임). connect-step.tsx의 같은 호출은 null을 «건너뛰고
       // 진행»으로 의도적으로 쓰지만(범위 밖, 그쪽은 그대로 둠), 이 배너는 그 클릭 자체가
       // 유일한 목적이라 실패를 알려야 한다.
-      // 대상-프로젝트: 첫 지시 대화는 온보딩이 만든 현재 프로젝트의 대화라 현재 p가 곧 대상 프로젝트.
-      if (convId) router.push(flatHref(`/chats/${convId}`));
+      // story #4231 — 방금 이 프로젝트(projectId)에 만든 대화라 그 프로젝트를 싣는다.
+      if (convId) router.push(withProjectParam(`/chats/${convId}`, projectId));
       else setInstructionStartError(true);
     } finally {
       setNavigatingToInstruction(false);
