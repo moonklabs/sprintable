@@ -17,6 +17,12 @@ function wrap(node: React.ReactNode) {
 // DOMPurify runs only in browser environments. Mock it as an identity function so
 // the server-side heading sanitisation logic (attrs removal + sanitizeHeadingInner)
 // is exercised without needing a real DOM.
+// story #4309 — 렌더러가 본문 문서 링크의 클라이언트 이동에 useRouter를 쓴다(앱 라우터 밖 테스트라 목).
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  useParams: () => ({}),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() }),
+}));
 vi.mock('dompurify', () => ({
   default: { sanitize: (html: string) => html },
 }));

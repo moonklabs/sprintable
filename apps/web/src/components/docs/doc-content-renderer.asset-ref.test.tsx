@@ -13,6 +13,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { DocContentRenderer } from './doc-content-renderer';
 
 // next/image → plain <img> (keeps the markdown legacy-image assertion DOM-simple).
+// story #4309 — 렌더러가 본문 문서 링크의 클라이언트 이동에 useRouter를 쓴다(앱 라우터 밖 테스트라 목).
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  useParams: () => ({}),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() }),
+}));
 vi.mock('next/image', () => ({
   default: ({ src, alt }: { src?: string; alt?: string }) =>
     // eslint-disable-next-line @next/next/no-img-element
