@@ -1,0 +1,1 @@
+{"file": "tests/test_4290_human_retryable_single_source_realdb.py", "sec": 60.0, "provisional": true, "source": "story #4290(미르코, 2026-09-25) — 조합 12 × 상세 · 목록 · 재시도 + 낡은 화면 1건 잠정값(로컬 실측 뒤 CI 배율 ~6x 관례) · CI 첫 run 샤드 실측으로 교체 예정 — provisional:true(story #4152/#4159 관례)"}

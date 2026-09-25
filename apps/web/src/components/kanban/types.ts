@@ -226,6 +226,8 @@ export interface GateItem {
     reason_code: string | null;
     next_attempt_at: string | null;
     reason_reset_at: string | null;
+    /** story #4290 — 사람이 지금 이 발송 명령을 «다시 시도»할 수 있는가(서버 한 판정 `human_retryable` · 재시도 엔드포인트와 같은 값). */
+    command_retryable?: boolean;
   } | null;
   // story #4044(0333)/#4072(BE 응답스키마 누락 fix, 페드루 PO 確定 2026-09-19) —
   // generation_budget 전용 sealing(sealed_ads_*/sealed_newsletter_*와 동일 선례).

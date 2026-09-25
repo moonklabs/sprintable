@@ -524,6 +524,8 @@ export default function InsightsBoardPage() {
           reasonCode: row.command_reason_code ?? null,
           reasonResetAt: row.command_reason_reset_at ?? null,
           nextRetryAt: row.next_retry_at ?? null,
+          // story #4290(까디르 QA ④) — 보드 행도 목록 · 상세와 같은 서버 한 판정.
+          retryable: row.command_retryable ?? null,
         });
         const showFailureBadge = rowFailureAction?.kind === 'dead_letter' || rowFailureAction?.kind === 'blocked'
           || rowFailureAction?.kind === 'blocked_unapproved';

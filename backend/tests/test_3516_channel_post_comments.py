@@ -837,7 +837,7 @@ async def test_insights_board_row_carries_comments_count_for_channel_publication
             s.add(site_post)
             await s.commit()
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", channel=None, status=None, sort="published_at", sort_dir="desc", cursor=None, limit=50)
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", channel=None, status=None, sort="published_at", sort_dir="desc", cursor=None, limit=50)
             by_pub = {r["publication_id"]: r for r in result["rows"]}
             assert by_pub[pub.id]["comments_count"] == 1
             assert by_pub[site_post.id]["comments_count"] is None, "site_post는 댓글 개념이 없어 null이어야 한다"

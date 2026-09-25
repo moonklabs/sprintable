@@ -655,7 +655,7 @@ async def test_the_insights_board_row_carries_the_same_failure_fields_as_the_cha
                 failure_kind="needs_check", reason_code="X_POST_TWEET_MISSING_ID", reason_reset_at=reset, next_attempt_at=None,
             ))
             await s.commit()
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == cp.id)
         assert (row["command_status"], row["failure_kind"], row["command_reason_code"], row["next_retry_at"]) == (
             "dead_letter", "needs_check", "X_POST_TWEET_MISSING_ID", None,

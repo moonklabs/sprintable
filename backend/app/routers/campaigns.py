@@ -139,6 +139,8 @@ async def get_campaign_detail_endpoint(
         raise HTTPException(status_code=404, detail=f"campaign을 찾을 수 없습니다: {campaign_id}")
 
     content_item_rows = await list_content_items_for_campaign(db, org_id=org_id, campaign_id=campaign_id)
+    # story #4290(까디르 델타 ①) — 변형들의 command_retryable도 보는 사람 기준(재시도는 사람만).
+    viewer_is_human = (await resolve_member(auth, org_id, db)).type == "human"
 
     content_items: list[CampaignContentItemItem] = []
     for draft, latest_version in content_item_rows:
@@ -152,7 +154,7 @@ async def get_campaign_detail_endpoint(
             content_item_id=draft.id, slug=draft.slug, lang=latest_version.lang,
             title=latest_version.title, current_version=latest_version.version,
             updated_at=latest_version.created_at.isoformat(),
-            variants=[_to_draft_list_item(row, source_titles) for row in variant_rows],
+            variants=[_to_draft_list_item(row, source_titles, viewer_is_human=viewer_is_human) for row in variant_rows],
         ))
 
     return CampaignDetailResponse(

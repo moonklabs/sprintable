@@ -162,7 +162,7 @@ async def test_insights_board_response_includes_published_in_window():
             conn_id = await _seed_connection(s, org_id)
             await _seed_completed_command(s, org_id, conn_id, updated_at=datetime.now(timezone.utc))
 
-            result = await list_insights_board(s, org_id=org_id, window="7d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="7d")
             assert result["published_in_window"] is not None
             assert result["published_in_window"]["count"] == 1
             assert result["published_in_window"]["by_channel"] == [{"channel_kind": "threads", "count": 1}]
@@ -209,8 +209,8 @@ async def test_views_in_window_sums_captured_d7_views_page_independent():
             await _seed_site_post_with_d7_view(s, org_id=org_id, published_at=now - timedelta(days=1), views=100)
             await _seed_site_post_with_d7_view(s, org_id=org_id, published_at=now - timedelta(days=2), views=50)
 
-            full_page = await list_insights_board(s, org_id=org_id, window="7d", limit=50)
-            one_page = await list_insights_board(s, org_id=org_id, window="7d", limit=1)
+            full_page = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="7d", limit=50)
+            one_page = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="7d", limit=1)
 
         assert full_page["views_in_window"] == {"sum": 150, "captured_rows": 2, "total_rows": 2}
         assert one_page["views_in_window"] == full_page["views_in_window"]  # 페이지 크기 무관
@@ -239,7 +239,7 @@ async def test_views_in_window_null_when_nothing_captured():
             s.add(post)
             await s.commit()
 
-            result = await list_insights_board(s, org_id=org_id, window="7d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="7d")
 
         assert result["views_in_window"] is None
     finally:

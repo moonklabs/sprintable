@@ -21,6 +21,7 @@ from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.content_rules import get_org_content_rules
+from app.services.publication_command import viewer_can_retry
 from app.services.site_posts import (
     CampaignNotFoundError,
     ConceptApprovalNotApprovedError,
@@ -783,6 +784,8 @@ class PublicationCommandView(BaseModel):
     dead_letter_at: str | None = None
     command_reason_code: str | None = None
     last_error: str | None = None
+    # story #4290 — **보는 사람이** 지금 이 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `viewer_can_retry` = 사람 · `human_retryable`).
+    command_retryable: bool = False
 
 
 def _channel_publication_view(pub) -> ChannelPublicationView | None:
@@ -796,7 +799,7 @@ def _channel_publication_view(pub) -> ChannelPublicationView | None:
     )
 
 
-def _publication_command_view(cmd) -> PublicationCommandView | None:
+def _publication_command_view(cmd, *, viewer_is_human: bool) -> PublicationCommandView | None:
     if cmd is None:
         return None
     return PublicationCommandView(
@@ -806,6 +809,7 @@ def _publication_command_view(cmd) -> PublicationCommandView | None:
         dead_letter_at=cmd.dead_letter_at.isoformat() if cmd.dead_letter_at else None,
         command_reason_code=cmd.reason_code,
         last_error=cmd.last_error,
+        command_retryable=viewer_can_retry(cmd, viewer_is_human=viewer_is_human),
     )
 
 
@@ -888,7 +892,7 @@ async def publish_site_post_from_draft_endpoint(
         return PublishSitePostFromDraftResponse(
             version_id=command.approved_version, command_id=command.id, status=command.status,
             channel_publication=_channel_publication_view(publication),
-            command=_publication_command_view(command),
+            command=_publication_command_view(command, viewer_is_human=resolved.type == "human"),
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -995,13 +999,15 @@ async def get_site_post_publication_endpoint(
                 normalized=snapshot.normalized, source=snapshot.source, error_code=snapshot.error_code,
             )
 
+    # story #4290(까디르 QA ③) — 재시도는 사람만 — 명령 요약의 command_retryable도 보는 쪽 기준.
+    viewer_is_human = (await resolve_member(auth, org_id, db)).type == "human"
     return SitePostPublicationResponse(
         published_at=info.published_at.isoformat() if info.published_at else None,
         url=info.url, published_by_member_id=info.published_by_member_id,
         published_body_sha256=info.published_body_sha256,
         destination=destination,
         channel_publication=_channel_publication_view(publication),
-        command=_publication_command_view(command),
+        command=_publication_command_view(command, viewer_is_human=viewer_is_human),
         publication_id=insight_publication_id,
         latest_insight=latest_insight,
     )
@@ -1064,7 +1070,7 @@ async def unpublish_site_post_endpoint(
         return UnpublishSitePostResponse(
             command_id=command.id, status=command.status,
             channel_publication=_channel_publication_view(publication),
-            command=_publication_command_view(command),
+            command=_publication_command_view(command, viewer_is_human=resolved.type == "human"),
         )
     except SitePostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

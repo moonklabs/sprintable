@@ -84,6 +84,8 @@ interface ChannelPostDraftListItem {
   // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
   // EXCEEDED'일 때만 채워진다.
   command_reason_reset_at?: string | null;
+  /** story #4290(까디르 QA ④) — 서버 한 판정: 보는 사람이 지금 이 명령을 «다시 시도»할 수 있는가(`viewer_can_retry`). */
+  command_retryable?: boolean;
   failure_kind?: string | null;
   next_retry_at?: string | null;
   processing_kind?: string | null;
@@ -257,6 +259,8 @@ export default function ChannelPostListPage() {
         reasonCode: draft.command_reason_code,
         reasonResetAt: draft.command_reason_reset_at,
         processingKind: draft.processing_kind,
+        // story #4290(까디르 QA ④) — 목록도 서버 한 판정을 싣는다(카드는 버튼이 없지만 같은 값으로 가른다).
+        retryable: draft.command_retryable ?? null,
       });
       return { draft, view, failureAction, tab: toStatusTab(view.status) };
     }),

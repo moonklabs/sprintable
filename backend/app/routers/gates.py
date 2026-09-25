@@ -224,6 +224,8 @@ class NewsletterSendCommandSummary(BaseModel):
     # 유나 4262 표 — «{time}에 자동으로 다시 시도해요»(재시도 대기) · 제공자 한도 풀리는 시각.
     next_attempt_at: datetime | None = None
     reason_reset_at: datetime | None = None
+    # story #4290 — **보는 사람이** 지금 이 발송 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `viewer_can_retry`).
+    command_retryable: bool = False
 
 
 class GateResponse(BaseModel):
@@ -1938,9 +1940,14 @@ async def get_gate_endpoint(
             .limit(1)
         )).scalar_one_or_none()
         if command is not None:
+            from app.services.publication_command import viewer_can_retry
+
+            # story #4290(까디르 QA ③) — 재시도는 사람만 — 발송 명령 요약의 command_retryable도 보는 쪽 기준.
+            viewer_is_human = (await resolve_member(auth, org_id, session)).type == "human"
             resp.newsletter_send_command = NewsletterSendCommandSummary(
                 id=command.id, status=command.status, failure_kind=command.failure_kind, reason_code=command.reason_code,
                 next_attempt_at=command.next_attempt_at, reason_reset_at=command.reason_reset_at,
+                command_retryable=viewer_can_retry(command, viewer_is_human=viewer_is_human),
             )
     # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
     if gate.gate_type == MERGE_GATE_TYPE:

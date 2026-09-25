@@ -404,6 +404,34 @@ def compute_next_attempt_at(
     return now + timedelta(seconds=delay)
 
 
+def human_retryable(command: PublicationCommand) -> bool:
+    """story #4290 — 사람이 지금 «다시 시도»할 수 있는 명령인가 — 재시도(`retry_dead_letter_command`)와 상세 응답
+    (`command_retryable` · 화면 배지 버튼)이 같이 읽는 한 판정. 예전엔 화면(`deriveFailureAction`)이 따로 갈라 pending/in_progress
+    + (transient 아닌) failure_kind에서 버튼은 켜지는데 서버는 404인 틈이 있었다.
+    - dead_letter · blocked: 사람 재시도(연결을 고친 뒤 · 확인한 뒤).
+    - 단 조직 일시정지로 멈춘 blocked(`failure_kind=paused`)는 아니다(까디르 QA ①) — 정지 중엔 다시 올려도 워커가 또 막고, 정지를
+      풀면 서버가 스스로 다시 올린다(`external_publish_pause` · `only_paused`). 화면도 이 줄을 숨긴다 — 판정과 화면이 같은 뜻.
+    - 뉴스레터 `blocked_unapproved` 중 사람 재시도 사유(`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`) — 멈춤 통지 · 게이트 버튼과 같은 모음."""
+    if command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED:
+        return False
+    if command.status in ("dead_letter", "blocked"):
+        return True
+    return (
+        command.status == STATUS_BLOCKED_UNAPPROVED and command.content_kind == "newsletter_send"
+        and command.reason_code in NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
+    )
+
+
+
+def viewer_can_retry(command: PublicationCommand, *, viewer_is_human: bool) -> bool:
+    """story #4290(까디르 QA ③ · PO 06:40Z) — **이 화면을 보는 사람이** 지금 «다시 시도»할 수 있는가. 재시도 엔드포인트
+    (`channel_posts._retry_publication_command`)는 사람만 받으므로(`_require_human` · 에이전트 403) 응답의 `command_retryable`도
+    보는 쪽이 사람일 때만 참 — 화면은 이 값 하나로 버튼을 가른다(멤버 종류를 따로 보지 않는다)."""
+    # 조립 함수들(`_to_draft_list_item` · `_reply_view` · `_publication_command_view` · 보드 행 등)은 `viewer_is_human`을 기본값 없는
+    # 키워드로 받는다(까디르 델타 ②) — 새 호출처가 보는 쪽을 빠뜨리면 TypeError로 바로 드러난다(예전 캠페인 상세처럼 조용히 false가 아니라).
+    return viewer_is_human and human_retryable(command)
+
+
 async def retry_dead_letter_command(
     db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, only_paused: bool = False,
 ) -> PublicationCommand | None:
@@ -431,17 +459,15 @@ async def retry_dead_letter_command(
     # 다시 확인하므로 여전히 막혀 있으면 다시 blocked_unapproved로 설 뿐이다(무한 재시도 0). 다른 종류는 예전대로 404.
     # story #4262 AC2(PO 14:13Z 조건 1) — 받는 사유는 멈춤 통지 · 게이트 화면 버튼과 같은 한 모음
     # (`NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES`)으로 좁힌다 — 버튼 · 통지 · 재시도 수용이 어긋나지 않게.
-    newsletter_retryable_block = (
-        command.status == STATUS_BLOCKED_UNAPPROVED and command.content_kind == "newsletter_send"
-        and command.reason_code in NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES
-    )
-    if command.status not in ("dead_letter", "blocked") and not newsletter_retryable_block:
-        return None
-    # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩
-    # 잠근다. 그 사이 다른 tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면
-    # 사람의 «재시도 필요» 판단을 우회해 되살리면 안 된다 — 잠근 뒤 pause 차단이 맞는지 다시 본다.
-    # 사람이 누르는 재시도(기본값 False)는 예전 그대로.
-    if only_paused and not (command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED):
+    # story #4290 — 사람이 누르는 재시도가 받는지는 상세 응답 · 화면 버튼과 같은 한 판정(`human_retryable`). 일시정지 해제의 자동 재큐
+    # (`only_paused`)는 사람 판정이 아니라 «정지로 멈춘 blocked»만 따로 받는다(사람 판정은 그 행을 받지 않으므로 — 까디르 QA ①).
+    # story #4195 AC2b(까디르 QA) — 자동 복구(pause 해제 재큐·크론 자가복구)는 id를 먼저 모은 뒤 여기서 하나씩 잠근다. 그 사이 다른
+    # tick이 이 명령을 처리해 `blocked/connection`·`dead_letter/needs_check`가 됐으면 사람의 «재시도 필요» 판단을 우회해 되살리면 안
+    # 된다 — 잠근 뒤 pause 차단이 맞는지 다시 본다.
+    if only_paused:
+        if not (command.status == "blocked" and command.failure_kind == FAILURE_KIND_PAUSED):
+            return None
+    elif not human_retryable(command):
         return None
     command.status = "pending"
     command.next_attempt_at = None

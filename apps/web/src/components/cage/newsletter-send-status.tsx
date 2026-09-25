@@ -12,7 +12,7 @@
 // - blocked_unapproved + 연결 비활성(`NEWSLETTER_SEND_CONNECTION_UNAVAILABLE`) → «연결 문제로 멈춤» + 연결 화면 링크 + «다시 시도».
 // - 그 밖의 blocked_unapproved(게이트 · 캠페인 없음) → «자동 재시도를 멈췄어요.»(버튼 없음 · 따로 다룬다).
 // - 조직 일시정지로 멈춘 blocked → 줄 없음(해제하면 서버가 스스로 다시 큐에 올린다).
-// 버튼은 사람에게만(재시도 API가 사람 전용). 뉴스레터는 다시 보내면 구독자 전원에게 두 번 가서 확인 창 한 번은 빼지 않는다.
+// 버튼은 사람에게만(재시도 API가 사람 전용 — 서버가 command_retryable에 이미 넣어 싣는다, story #4290). 뉴스레터는 다시 보내면 구독자 전원에게 두 번 가서 확인 창 한 번은 빼지 않는다.
 
 import { useState } from 'react';
 import Link from 'next/link';
@@ -20,7 +20,7 @@ import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
-import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -28,13 +28,13 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 const CONNECTION_UNAVAILABLE = 'NEWSLETTER_SEND_CONNECTION_UNAVAILABLE';
 
 type View =
-  | { kind: 'badge'; action: FailureAction; retryable: boolean }
+  | { kind: 'badge'; action: FailureAction }
   | { kind: 'connection_blocked' };
 
 function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View | null {
   if (command.status === 'blocked_unapproved') {
     if (command.reason_code === CONNECTION_UNAVAILABLE) return { kind: 'connection_blocked' };
-    return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null }, retryable: false };
+    return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null } };
   }
   if (command.status === 'blocked' && command.failure_kind === 'paused') return null;
   const action = deriveFailureAction({
@@ -45,20 +45,19 @@ function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View
     reasonResetAt: command.reason_reset_at,
   });
   if (!action) return null;
-  return { kind: 'badge', action, retryable: action.kind === 'dead_letter' || action.kind === 'needs_check' };
+  return { kind: 'badge', action };
 }
 
 export interface NewsletterSendStatusProps {
   gate: GateItem;
   orgId: string | null;
-  /** 지금 화면의 사람이 사람 멤버인가 — 에이전트 화면엔 상태 줄만 둔다(재시도 API가 사람 전용). */
-  isHuman: boolean;
   displayTimezone: string;
   /** 재시도가 받아들여진 뒤(또는 404 · 재시도 대상 아님) 게이트를 다시 읽는다. true = 새 상태를 반영함 · false/예외 = 다시 읽기 실패(이전 상태 유지). */
-  onRetried?: () => Promise<boolean>;
+  /** 게이트를 다시 읽는다 — `{ retryable }`(다시 읽은 발송 명령의 서버 판정)를 돌려주면 404 뒤 결과 줄이 그 값으로 골라진다(story #4290). */
+  onRetried?: () => Promise<ReloadOutcome>;
 }
 
-export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, onRetried }: NewsletterSendStatusProps) {
+export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }: NewsletterSendStatusProps) {
   const t = useTranslations('content');
   const tc = useTranslations('common');
   const connectRulesHref = useConnectRulesHref('/organization/channels');
@@ -71,7 +70,9 @@ export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, on
   const view = command ? viewOf(command) : null;
   if (!command || !view) return <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />;
 
-  const canRetry = isHuman && !!orgId && (view.kind === 'connection_blocked' || view.retryable);
+  // story #4290 — 버튼은 서버 판정(`command_retryable`)만 본다 — 화면이 상태로 따로 가르면 서버 404와 갈라진다. 사람인지도 서버가 이미
+  // 판정에 넣어 싣는다(까디르 QA ③ · `viewer_can_retry`) — 화면이 멤버 종류를 따로 보지 않는다.
+  const canRetry = !!orgId && command.command_retryable === true;
   const isNeedsCheckGate = view.kind === 'badge' && (
     view.action.kind === 'needs_check' || (view.action.kind === 'dead_letter' && view.action.needsRecheck)
   );

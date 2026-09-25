@@ -42,6 +42,8 @@ export interface CommentItem {
   /** dead_letter 재시도 호출에 필요 — command_id가 없으면(레이스) 재시도 버튼을
    * 활성화하지 않는다. */
   replyCommandId: string | null;
+  /** story #4290 — 답변 명령을 지금 다시 시도할 수 있는가(서버 `command_retryable`). */
+  replyRetryable?: boolean;
   /** story #3544 조각⑧(유나 §22-15 ⑧, PO 確定 2026-09-06) — voided(봉인 불일치)
    * 「다시 상신」이 여는 다이얼로그에 «지금 답변»을 prefill하는 데 쓴다(단건 GET
    * .../replies/{replyId}로 원문을 가져온다). null=이 댓글에 답변 자체가 없다. */
@@ -97,6 +99,8 @@ export interface RawCommentsResponse {
     reply?: {
       id: string; status: string; external_reply_url: string | null; command_id: string | null;
       command_status: string | null; failure_kind: string | null;
+      /** story #4290 — 서버 한 판정(`human_retryable`) · 재시도 엔드포인트와 같은 값. 없으면(옛 응답) false. */
+      command_retryable?: boolean;
       next_attempt_at: string | null; reason_code: string | null;
       /** story #3593(BE #3945 additive) — 옵셔널로 둔다(기존 픽스처·구버전 소비처가
        * 이 키 없이 reply 객체를 만들어도 안 죽는다, §17 "신호 없으면 지어내지
@@ -167,8 +171,10 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
       failureKind: c.reply?.failure_kind ?? null,
       nextRetryAt: c.reply?.next_attempt_at ?? null,
       reasonCode: c.reply?.reason_code ?? null,
+      retryable: c.reply?.command_retryable ?? null,
     }),
     replyCommandId: c.reply?.command_id ?? null,
+    replyRetryable: c.reply?.command_retryable === true,
     replyId: c.reply?.id ?? null,
     latestReplyText: c.reply?.text ?? null,
     repliesCount: c.replies_count ?? 0,
@@ -360,7 +366,8 @@ function CommentsList({
               <CommentReplyFailureNote
                 action={comment.replyFailureAction}
                 displayTimezone={displayTimezone}
-                onRetry={comment.replyCommandId ? () => onRetryReply(comment) : undefined}
+                // story #4290 — 다시 시도 버튼은 서버 판정이 참일 때만(화면이 상태로 따로 가르면 서버 404와 갈라진다).
+                onRetry={comment.replyCommandId && comment.replyRetryable ? () => onRetryReply(comment) : undefined}
                 onResubmit={() => onResubmitReply(comment)}
                 retryAriaLabel={t('commentsRetryAriaLabel', { n: ordinal, label: t('commentsReplyRetryCta') })}
                 resubmitAriaLabel={t('commentsResubmitAriaLabel', { n: ordinal, label: t('commentsReplyResubmitCta') })}

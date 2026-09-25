@@ -25,6 +25,7 @@ from app.services.channel_post_comment_replies import (
     submit_comment_reply,
 )
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
+from app.services.publication_command import viewer_can_retry
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comment-replies"])
 
@@ -135,6 +136,8 @@ class ReplyView(BaseModel):
     next_attempt_at: str | None = Field(
         default=None, description="transient 백오프 다음 시도 시각(ISO) — 없으면 null.",
     )
+    # story #4290 — 사람이 지금 이 답변 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `human_retryable`).
+    command_retryable: bool = False
     reason_code: str | None = Field(
         default=None,
         description=(
@@ -153,6 +156,7 @@ class ReplyView(BaseModel):
 
 async def _reply_view(
     db: AsyncSession, reply, target_comment_state: str | None, target_text: str | None = None,
+    *, viewer_is_human: bool,
 ) -> ReplyView:
     command = None
     if reply.command_id is not None:
@@ -168,6 +172,7 @@ async def _reply_view(
         failure_kind=command.failure_kind if command is not None else None,
         next_attempt_at=command.next_attempt_at.isoformat() if command is not None and command.next_attempt_at else None,
         reason_code=command.reason_code if command is not None else None,
+        command_retryable=viewer_can_retry(command, viewer_is_human=viewer_is_human) if command is not None else False,
     )
 
 
@@ -220,7 +225,7 @@ async def create_comment_reply_draft_endpoint(
                 existing_reply_id=str(exc.existing_reply_id),
             ),
         ) from exc
-    return await _reply_view(db, reply, None)
+    return await _reply_view(db, reply, None, viewer_is_human=created_by_kind == "human")
 
 
 @router.post(
@@ -279,7 +284,9 @@ async def submit_comment_reply_endpoint(
         # reply_view 둘 다)는 안 잡아 500이 새던 갭. create와 같은 문장.
         raise HTTPException(status_code=404, detail=f"댓글을 찾을 수 없습니다: {comment_id}") from exc
 
-    return await _reply_view(db, view["reply"], view["target_comment_state"], view["target_text"])
+    return await _reply_view(
+        db, view["reply"], view["target_comment_state"], view["target_text"], viewer_is_human=resolved.type == "human",
+    )
 
 
 @router.get(
@@ -312,4 +319,8 @@ async def get_comment_reply_endpoint(
         # _get_owned_comment가 던지는데(대상 댓글 행 하드 삭제) 이 라우터가 이 예외를
         # 못 잡아 500이 새던 갭. create 엔드포인트와 같은 문장으로 맞춘다.
         raise HTTPException(status_code=404, detail=f"댓글을 찾을 수 없습니다: {comment_id}") from exc
-    return await _reply_view(db, view["reply"], view["target_comment_state"], view["target_text"])
+    # story #4290(까디르 QA ③) — 답변 «다시 보내기»는 사람만 — command_retryable도 보는 쪽 기준.
+    viewer_is_human = (await resolve_member(auth, org_id, db)).type == "human"
+    return await _reply_view(
+        db, view["reply"], view["target_comment_state"], view["target_text"], viewer_is_human=viewer_is_human,
+    )

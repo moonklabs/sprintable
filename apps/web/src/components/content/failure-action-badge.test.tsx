@@ -59,7 +59,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe('');
     expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
-      .toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+      .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
   });
 
   // N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard(`<Link>`)가 쓰는 모드. 버튼 자체를
@@ -101,7 +101,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe('');
     expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
-      .toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+      .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
   });
 
   it('⭐N3 — compact=true면 dead_letter 재시도 버튼을 아예 안 그린다(라벨만)', async () => {
@@ -371,5 +371,53 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
       btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(clicked).toBe(true);
+  });
+});
+
+describe('FailureActionBadge — 재시도는 서버 한 판정(story #4290 까디르 QA ① · ④)', () => {
+  async function renderWith(action: FailureAction, onRetryClick?: () => void) {
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge action={action} displayTimezone="UTC" onRetryClick={onRetryClick} />));
+    });
+  }
+  const btn = () => container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+
+  it('blocked + 서버가 받음(retryable) + 재시도 배선 → «다시 시도» 눌림 · 한 번 누르면 한 번', async () => {
+    const onRetryClick = vi.fn();
+    await renderWith({ kind: 'blocked', retryable: true }, onRetryClick);
+    expect(container.textContent).toContain(koMessages.content.channelPostsFailureBlocked);
+    expect(btn()?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
+    await act(async () => { btn()?.click(); });
+    expect(onRetryClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocked + 서버가 안 받음(retryable=false)이면 배선이 있어도 문장만', async () => {
+    await renderWith({ kind: 'blocked', retryable: false }, vi.fn());
+    expect(btn()).toBeNull();
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
+  });
+
+  it('dead_letter · needs_check도 retryable=false면 배선이 있어도 버튼이 꺼지고 사유가 보인다', async () => {
+    const onRetryClick = vi.fn();
+    for (const action of [
+      { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null, retryable: false },
+      { kind: 'needs_check', retryable: false },
+    ] as FailureAction[]) {
+      await renderWith(action, onRetryClick);
+      expect(btn()?.disabled).toBe(true);
+      expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
+      await act(async () => { btn()?.click(); });
+    }
+    expect(onRetryClick).not.toHaveBeenCalled();
+  });
+
+  it('deriveFailureAction은 넘긴 서버 판정을 멈춤 갈래에 그대로 싣는다(목록 · 캘린더 · 보드 · 상세가 같은 값)', () => {
+    expect(deriveFailureAction({ commandStatus: 'blocked', retryable: true })).toEqual({ kind: 'blocked', retryable: true });
+    expect(deriveFailureAction({ commandStatus: 'pending', failureKind: 'needs_check', retryable: false }))
+      .toEqual({ kind: 'needs_check', retryable: false });
+    expect(deriveFailureAction({ commandStatus: 'pending', failureKind: 'transient', retryable: false }))
+      .toEqual({ kind: 'auto_retry', nextRetryAt: null });
+    expect(deriveFailureAction({ commandStatus: 'blocked' })).toEqual({ kind: 'blocked' });
   });
 });

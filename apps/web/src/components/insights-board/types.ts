@@ -103,6 +103,8 @@ export interface InsightsBoardRow {
   next_retry_at?: string | null;
   command_reason_code?: string | null;
   command_reason_reset_at?: string | null;
+  /** story #4290(까디르 QA ④) — 서버 한 판정: 보는 사람이 지금 이 명령을 «다시 시도»할 수 있는가(`viewer_can_retry`). */
+  command_retryable?: boolean;
   // story #3806(Phase3·3-2 PR5 조각⑥, 유나 §절 §3 「성과 보드 «광고비» 분리 칸」) —
   // 이 publication에 홍보 요청이 없으면 null(「해당 없음」 원천 — 지어내지 않는다).
   ads_boost: AdsBoostSummaryView | null;

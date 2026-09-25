@@ -86,7 +86,7 @@ export default function GateDetailPage() {
   const tOrg = useTranslations('organization');
   // 조직/프로젝트 식별(AC) — 현재 탭이 이미 로드해둔 멤버십 목록에서 이름 조회(신규 fetch 0).
   // 크로스 프로젝트 게이트(현재 탭 프로젝트가 아닌 경우)는 매칭 실패 → ID 스니펫 폴백(정직한 값).
-  const { orgMemberships, projectMemberships, currentTeamMemberId, currentMemberType, orgTimezone } = useDashboardContext();
+  const { orgMemberships, projectMemberships, currentTeamMemberId, orgTimezone } = useDashboardContext();
   // story #1959(P2-S3): 딥링크 매니페스트(gate_detail→parentTab=approvals) — 콜드 진입 시 "결재함"
   // 탭 루트를 BACK 대상으로 선주입. 결재함 목록에서 클릭해 온 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/inbox');
@@ -116,6 +116,8 @@ export default function GateDetailPage() {
   // 로드·id 변경 때만(호출부가 silent 생략) «불러오는 중».
   // story #4266(까디르 codex 4634 P2) — 새 상태를 화면에 반영했는지 돌려준다(뉴스레터 발송 재시도 뒤 «다시 불러왔어요»를 말해도 되는지).
   // 실패하면 이전 게이트를 그대로 둔다(예전과 같음). 404는 «없어짐»을 반영한 것이라 true.
+  // story #4290 — 방금 다시 읽은 게이트(상태 반영 전 값을 onRetried가 읽는다).
+  const latestGateRef = useRef<GateItem | null>(null);
   const fetchGate = useCallback(async (opts?: { silent?: boolean }): Promise<boolean> => {
     if (!opts?.silent) setLoading(true);
     try {
@@ -124,6 +126,7 @@ export default function GateDetailPage() {
       if (result.kind === 'not-found') { setNotFound(true); return true; }
       if (result.kind !== 'ok') return false;
       setGate(result.gate);
+      latestGateRef.current = result.gate;
       setNotFound(false);
       return true;
     } finally {
@@ -506,9 +509,14 @@ export default function GateDetailPage() {
                 <GateEvidence gate={gate} />
                 {/* story #4262(유나 표) — 발송 게이트면 뉴스레터 사실 칸 바로 아래 «발송 상태» 한 줄 + 사람 재시도. */}
                 <NewsletterSendStatus
-                  gate={gate} orgId={gate.org_id ?? null} isHuman={currentMemberType !== 'agent'}
+                  gate={gate} orgId={gate.org_id ?? null}
                   displayTimezone={resolveDisplayTimezone(orgTimezone).tz}
-                  onRetried={() => fetchGate({ silent: true })}
+                  // story #4290 — 다시 읽은 발송 명령의 서버 판정을 돌려줘 404 뒤 결과 줄을 고른다.
+                  onRetried={async () => {
+                    const ok = await fetchGate({ silent: true });
+                    if (!ok) return false;
+                    return { retryable: latestGateRef.current?.newsletter_send_command?.command_retryable === true };
+                  }}
                 />
                 {/* story #4136 — canAct/needsAction과 무관하게 항상 렌더(모든 열람자, AC1).
                     GateProductionWorkbenchEvidence(아래, #4057)는 work-item 범위 훅이 0건이면

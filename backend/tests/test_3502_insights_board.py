@@ -204,7 +204,7 @@ async def test_pivot_matches_real_scheduler_offsets_not_a_hand_rolled_assumption
             )
             await s.commit()
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
         assert row["d1"] is not None, "스케줄러가 심은 +1일 행을 피벗이 못 찾았다(오프셋 드리프트)"
         assert row["d7"] is not None, "스케줄러가 심은 +7일 행을 피벗이 못 찾았다(오프셋 드리프트)"
@@ -281,7 +281,7 @@ async def test_five_row_sample_unified_across_hosted_site_and_channels():
                             "clicks": None, "spend": None, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         rows = result["rows"]
         assert len(rows) == 5, [r["publication_id"] for r in rows]
@@ -329,7 +329,7 @@ async def test_channel_filter_hosted_site_excludes_channel_publications():
                 s, org_id=org_id, gate_id=gate.id, channel="threads", published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", channel="hosted_site")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", channel="hosted_site")
         assert [r["publication_id"] for r in result["rows"]] == [sp.id]
     finally:
         await engine.dispose()
@@ -358,7 +358,7 @@ async def test_channel_filter_threads_excludes_hosted_site_and_other_channels():
                 s, org_id=org_id, gate_id=gate2.id, channel="webhook", published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", channel="threads")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", channel="threads")
         assert [r["publication_id"] for r in result["rows"]] == [cp_threads.id]
     finally:
         await engine.dispose()
@@ -390,7 +390,7 @@ async def test_status_filter_only_returns_rows_with_matching_snapshot_status():
                 published_at=now - timedelta(days=2),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", status="captured")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", status="captured")
         assert [r["publication_id"] for r in result["rows"]] == [sp_captured.id]
         assert sp_no_snapshot.id not in [r["publication_id"] for r in result["rows"]]
     finally:
@@ -416,7 +416,7 @@ async def test_window_filter_excludes_publications_outside_window():
                 published_at=now - timedelta(days=40),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="7d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="7d")
         assert [r["publication_id"] for r in result["rows"]] == [recent.id]
     finally:
         await engine.dispose()
@@ -437,7 +437,7 @@ async def test_unpublished_site_post_excluded():
                 published_at=now - timedelta(days=1), unpublished_at=now,
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         assert result["rows"] == []
     finally:
         await engine.dispose()
@@ -466,8 +466,8 @@ async def test_site_post_excluded_when_source_draft_archived():
                 published_at=now - timedelta(days=1),
             )
 
-            result_default = await list_insights_board(s, org_id=org_id, window="30d")
-            result_included = await list_insights_board(s, org_id=org_id, window="30d", include_deleted=True)
+            result_default = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
+            result_included = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", include_deleted=True)
 
         assert result_default["rows"] == []
         assert [r["publication_id"] for r in result_included["rows"]] == [sp.id]
@@ -493,7 +493,7 @@ async def test_site_post_not_excluded_when_no_matching_draft_exists():
                 published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert [r["publication_id"] for r in result["rows"]] == [sp.id]
     finally:
@@ -520,8 +520,8 @@ async def test_channel_publication_excluded_when_source_draft_archived():
                 published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
             )
 
-            result_default = await list_insights_board(s, org_id=org_id, window="30d")
-            result_included = await list_insights_board(s, org_id=org_id, window="30d", include_deleted=True)
+            result_default = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
+            result_included = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", include_deleted=True)
 
         assert result_default["rows"] == []
         assert [r["publication_id"] for r in result_included["rows"]] == [pub.id]
@@ -550,7 +550,7 @@ async def test_channel_publication_not_excluded_when_draft_not_archived():
                 published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert [r["publication_id"] for r in result["rows"]] == [pub.id]
     finally:
@@ -597,7 +597,7 @@ async def test_sort_by_metric_puts_null_last():
                             "clicks": None, "spend": None, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", sort="views_d7")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", sort="views_d7")
         ids = [r["publication_id"] for r in result["rows"]]
         assert ids == [sp_high.id, sp_low.id, sp_null.id], "높은 값 먼저·null은 맨 뒤여야 한다"
     finally:
@@ -643,7 +643,7 @@ async def test_sort_by_metric_asc_orders_low_to_high():
             )
 
             result = await list_insights_board(
-                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc",
+                s, viewer_is_human=True, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc",
             )
         ids = [r["publication_id"] for r in result["rows"]]
         assert ids == [sp_low.id, sp_high.id], "asc면 낮은 값(10)이 먼저, 높은 값(500)이 뒤여야 한다"
@@ -680,11 +680,11 @@ async def test_sort_by_metric_asc_cursor_pagination_no_duplicates_no_gaps():
             expected_order = [pid for _v, pid in sorted(ids, key=lambda t: t[0])]
 
             page1 = await list_insights_board(
-                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
+                s, viewer_is_human=True, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
             )
             assert len(page1["rows"]) == 2 and page1["has_more"] is True
             page2 = await list_insights_board(
-                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
+                s, viewer_is_human=True, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
                 cursor=page1["next_cursor"],
             )
             assert len(page2["rows"]) == 2 and page2["has_more"] is False
@@ -731,13 +731,13 @@ async def test_sort_by_metric_asc_null_group_still_last_with_cursor_continuity()
             )
 
             page1 = await list_insights_board(
-                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=1,
+                s, viewer_is_human=True, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=1,
             )
             assert [r["publication_id"] for r in page1["rows"]] == [sp_value.id], (
                 "값 있는 행이 null 그룹보다 먼저(asc에서도 null은 맨 뒤)"
             )
             page2 = await list_insights_board(
-                s, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
+                s, viewer_is_human=True, org_id=org_id, window="30d", sort="views_d7", sort_dir="asc", limit=2,
                 cursor=page1["next_cursor"],
             )
         ids2 = [r["publication_id"] for r in page2["rows"]]
@@ -766,14 +766,14 @@ async def test_cursor_pagination_published_at_no_duplicates_no_gaps():
                 )
                 ids.append(sp.id)
 
-            page1 = await list_insights_board(s, org_id=org_id, window="30d", limit=2)
+            page1 = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", limit=2)
             assert len(page1["rows"]) == 2 and page1["has_more"] is True
             page2 = await list_insights_board(
-                s, org_id=org_id, window="30d", limit=2, cursor=page1["next_cursor"],
+                s, viewer_is_human=True, org_id=org_id, window="30d", limit=2, cursor=page1["next_cursor"],
             )
             assert len(page2["rows"]) == 2 and page2["has_more"] is True
             page3 = await list_insights_board(
-                s, org_id=org_id, window="30d", limit=2, cursor=page2["next_cursor"],
+                s, viewer_is_human=True, org_id=org_id, window="30d", limit=2, cursor=page2["next_cursor"],
             )
             assert len(page3["rows"]) == 1 and page3["has_more"] is False
 
@@ -806,10 +806,10 @@ async def test_cursor_pagination_tied_published_at_no_duplicates_no_gaps():
                 ids.append(sp.id)
             ids.sort(reverse=True)  # id DESC가 2차 정렬키(구현 관례).
 
-            page1 = await list_insights_board(s, org_id=org_id, window="30d", limit=2)
+            page1 = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", limit=2)
             assert len(page1["rows"]) == 2 and page1["has_more"] is True
             page2 = await list_insights_board(
-                s, org_id=org_id, window="30d", limit=2, cursor=page1["next_cursor"],
+                s, viewer_is_human=True, org_id=org_id, window="30d", limit=2, cursor=page1["next_cursor"],
             )
             assert len(page2["rows"]) == 1 and page2["has_more"] is False
 
@@ -829,7 +829,7 @@ async def test_invalid_window_raises():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             with pytest.raises(InsightsBoardInvalidWindowError):
-                await list_insights_board(s, org_id=org_id, window="14d")
+                await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="14d")
     finally:
         await engine.dispose()
 
@@ -869,7 +869,7 @@ async def test_channel_publication_row_carries_asset_sha256s_and_hook_key():
                 published_at=datetime.now(timezone.utc) - timedelta(days=1), version_id=version_id,
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
         assert row["asset_sha256s"] == ["sha-first", "sha-second"]
         assert row["hook_key"] == "hook-A"
@@ -894,7 +894,7 @@ async def test_site_post_row_asset_and_hook_always_null():
                 published_at=datetime.now(timezone.utc) - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
         assert row["asset_sha256s"] is None
         assert row["hook_key"] is None
@@ -939,7 +939,7 @@ async def test_asset_hook_evidence_query_count_not_proportional_to_row_count():
         event.listen(engine.sync_engine, "before_cursor_execute", listener_1)
         try:
             async with Session() as s:
-                result_1 = await list_insights_board(s, org_id=org_id, window="30d")
+                result_1 = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
                 assert len(result_1["rows"]) == 1
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", listener_1)
@@ -954,7 +954,7 @@ async def test_asset_hook_evidence_query_count_not_proportional_to_row_count():
         event.listen(engine.sync_engine, "before_cursor_execute", listener_4)
         try:
             async with Session() as s:
-                result_4 = await list_insights_board(s, org_id=org_id, window="30d")
+                result_4 = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
                 assert len(result_4["rows"]) == 4
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", listener_4)
@@ -1011,7 +1011,7 @@ async def test_status_filter_pending_matches_both_pending_and_in_progress():
                             "clicks": None, "spend": None, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", status="pending")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", status="pending")
 
         publication_ids = {r["publication_id"] for r in result["rows"]}
         assert publication_ids == {sp_pending.id, sp_in_progress.id}
@@ -1047,7 +1047,7 @@ async def test_superseded_snapshot_never_surfaces_as_bucket_data():
                 due_at=sp.published_at + timedelta(days=1), status="superseded",
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
         # 배제가 서 있으면 후보 자체가 없어 "미스케줄"(None)로 떨어진다 — superseded
@@ -1100,7 +1100,7 @@ async def test_narrow_window_republish_collision_prefers_fresh_over_superseded()
                             "clicks": None, "spend": None, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         row = next(r for r in result["rows"] if r["publication_id"] == sp.id)
         assert row["d1"] is not None
@@ -1138,7 +1138,7 @@ async def test_hidden_count_counts_all_lang_rows_hidden_by_one_archived_draft():
                 title="Multi-lang post", published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert result["rows"] == []  # 기본 뷰 — 보관돼 둘 다 안 보인다.
         assert result["hidden_count"] == 2, f"ko·en 두 행이 한 초안 보관으로 숨었다 — {sp_ko.id}, {sp_en.id}"
@@ -1166,7 +1166,7 @@ async def test_hidden_count_null_when_include_deleted_true():
                 published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", include_deleted=True)
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", include_deleted=True)
 
         assert result["hidden_count"] is None
     finally:
@@ -1188,7 +1188,7 @@ async def test_hidden_count_zero_when_nothing_archived():
                 published_at=now - timedelta(days=1),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert result["hidden_count"] == 0
     finally:
@@ -1226,7 +1226,7 @@ async def test_ga4_connection_status_not_connected_when_no_row():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert result["ga4_connection_status"] == "not_connected"
     finally:
@@ -1244,7 +1244,7 @@ async def test_ga4_connection_status_not_connected_when_property_pending():
             org_id, project_id = await _seed_org(s)
             await _seed_ga4_connection(s, org_id=org_id, status="property_pending")
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert result["ga4_connection_status"] == "not_connected"
     finally:
@@ -1262,7 +1262,7 @@ async def test_ga4_connection_status_needs_reauth():
             org_id, project_id = await _seed_org(s)
             await _seed_ga4_connection(s, org_id=org_id, status="needs_reauth")
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert result["ga4_connection_status"] == "needs_reauth"
     finally:
@@ -1280,7 +1280,7 @@ async def test_ga4_connection_status_connected():
             org_id, project_id = await _seed_org(s)
             await _seed_ga4_connection(s, org_id=org_id, status="connected")
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
 
         assert result["ga4_connection_status"] == "connected"
     finally:
@@ -1318,7 +1318,7 @@ async def test_paid_channel_snapshot_does_not_leak_into_d1_bucket():
                             "clicks": None, "spend": 12_345, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
         assert row["d1"] is None, "paid(meta_ads) 스냅샷이 organic d1 버킷에 섞여 나왔다"
     finally:
@@ -1349,7 +1349,7 @@ async def test_paid_channel_snapshot_does_not_satisfy_organic_status_filter():
                             "clicks": None, "spend": 12_345, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d", status="captured")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d", status="captured")
         assert pub.id not in [r["publication_id"] for r in result["rows"]], (
             "organic 캡처가 없는데 paid 캡처만으로 status=captured 필터에 걸렸다"
         )
@@ -1400,7 +1400,7 @@ async def test_ads_boost_summary_attached_when_boost_requested():
                             "clicks": None, "spend": 12_345, "conversions": None},
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
         assert row["ads_boost"] is not None
         assert row["ads_boost"]["gate_id"] == ads_gate.id
@@ -1430,7 +1430,7 @@ async def test_ads_boost_summary_null_when_no_boost_requested():
                 published_at=datetime.now(timezone.utc) - timedelta(days=2),
             )
 
-            result = await list_insights_board(s, org_id=org_id, window="30d")
+            result = await list_insights_board(s, viewer_is_human=True, org_id=org_id, window="30d")
         row = next(r for r in result["rows"] if r["publication_id"] == pub.id)
         assert row["ads_boost"] is None
     finally:

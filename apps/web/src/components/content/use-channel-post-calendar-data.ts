@@ -28,6 +28,8 @@ export interface ChannelPostCalendarItem {
   // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
   // EXCEEDED'일 때만 채워진다.
   command_reason_reset_at?: string | null;
+  /** story #4290(까디르 QA ④) — 서버 한 판정: 보는 사람이 지금 이 명령을 «다시 시도»할 수 있는가(`viewer_can_retry`). */
+  command_retryable?: boolean;
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — ChannelPostCard의 실패 배지 mount에
   // 필요한 나머지 필드. BE 목록 응답(ChannelPostDraftListItem)이 이미 낸다.
   failure_kind?: string | null;

@@ -435,7 +435,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyRetryable: false, replyId: null, latestReplyText: null, repliesCount: 0,
         openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
@@ -540,7 +540,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyRetryable: false, replyId: null, latestReplyText: null, repliesCount: 0,
         openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
@@ -646,6 +646,25 @@ describe('CommentsSection — 답변 실패 얼굴(story #3544, 유나 §22-15)'
     });
     const link = container.querySelector('[data-testid="comments-item-reply-failure-note"] a');
     expect(link?.getAttribute('href')).toBe('/organization/channels');
+  });
+
+  it('② blocked + 서버가 사람 재시도를 받음(command_retryable) — 연결 문장 옆에 «다시 보내기»가 눌린다(story #4290 까디르 QA ①)', async () => {
+    const container = await mountWithReply({
+      ...FAILED_BASE, command_id: 'cmd-1', command_status: 'blocked', failure_kind: 'connection', next_attempt_at: null, reason_code: null,
+      command_retryable: true,
+    });
+    const note = container.querySelector('[data-testid="comments-item-reply-failure-note"]');
+    expect(note?.querySelector('a')?.getAttribute('href')).toBe('/organization/channels');
+    const retry = note?.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement | null;
+    expect(retry?.disabled).toBe(false);
+  });
+
+  it('② blocked + 서버가 안 받음(에이전트 화면 · 일시정지 등 command_retryable=false) — 문장만 · 버튼 0', async () => {
+    const container = await mountWithReply({
+      ...FAILED_BASE, command_id: 'cmd-1', command_status: 'blocked', failure_kind: 'connection', next_attempt_at: null, reason_code: null,
+      command_retryable: false,
+    });
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-button"]')).toBeNull();
   });
 
   it('모르는 command_status(미래 값) — 실패 얼굴 자체를 안 그린다(칩은 여전히 "실패", 지어내지 않는다)', async () => {

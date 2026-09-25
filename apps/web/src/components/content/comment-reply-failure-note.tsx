@@ -79,13 +79,43 @@ export function CommentReplyFailureNote({
     );
   }
 
+  // story #4290(까디르 QA ①) — 서버가 사람 재시도를 받는 멈춤이면(호출부가 command_retryable일 때만 onRetry를 넘김) 연결을 고친 뒤
+  // 누를 «다시 보내기»를 같이 둔다(dead_letter와 같은 버튼 · 같은 결과 줄). 없으면 예전처럼 문장만.
+  const retryControls = (
+    <Button
+      type="button" variant="outline" size="sm" onClick={() => void handleRetryClick()}
+      disabled={!onRetry || retrying} data-testid="comments-item-reply-retry-button"
+      aria-label={retryAriaLabel}
+    >
+      {t('commentsReplyRetryCta')}
+    </Button>
+  );
+  const retryOutcomeLines = retryOutcome === 'ok' ? (
+    <>
+      <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-success">{t('commentsReplyRetrySuccess')}</p>
+      {retryNotice ? <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-notice">{retryNotice}</p> : null}
+    </>
+  ) : retryOutcome && retryOutcome !== 'ok' ? (
+    <p className="text-xs text-destructive" data-testid="comments-item-reply-retry-error">{retryOutcome}</p>
+  ) : null;
+
   if (action.kind === 'blocked') {
+    const blockedText = t.rich('commentsReplyFailureConnectionBlocked', {
+      link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
+    });
+    if (!onRetry || action.retryable === false) {
+      return (
+        <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-failure-note">{blockedText}</p>
+      );
+    }
     return (
-      <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-failure-note">
-        {t.rich('commentsReplyFailureConnectionBlocked', {
-          link: (chunks) => <Link href={connectRulesHref} className="underline">{chunks}</Link>,
-        })}
-      </p>
+      <div className="space-y-1" data-testid="comments-item-reply-failure-note">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">{blockedText}</p>
+          {retryControls}
+        </div>
+        {retryOutcomeLines}
+      </div>
     );
   }
 
@@ -100,22 +130,9 @@ export function CommentReplyFailureNote({
               같은 낱말로 묶으면 두 다른 메커니즘이 한 낱말이 된다 — 전용 키로
               가른다. "다시 시도"도 금지(자동 재시도 문장 「다시 시도합니다」와
               사람이 누르는 이 버튼이 같은 낱말이 되면 헷갈린다). */}
-          <Button
-            type="button" variant="outline" size="sm" onClick={() => void handleRetryClick()}
-            disabled={!onRetry || retrying} data-testid="comments-item-reply-retry-button"
-            aria-label={retryAriaLabel}
-          >
-            {t('commentsReplyRetryCta')}
-          </Button>
+          {retryControls}
         </div>
-        {retryOutcome === 'ok' ? (
-          <>
-            <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-success">{t('commentsReplyRetrySuccess')}</p>
-            {retryNotice ? <p className="text-xs text-muted-foreground" data-testid="comments-item-reply-retry-notice">{retryNotice}</p> : null}
-          </>
-        ) : retryOutcome && retryOutcome !== 'ok' ? (
-          <p className="text-xs text-destructive" data-testid="comments-item-reply-retry-error">{retryOutcome}</p>
-        ) : null}
+        {retryOutcomeLines}
       </div>
     );
   }

@@ -36,7 +36,7 @@ import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-bud
 import { ApiUsageBudgetIndicator, type ApiUsageBudgetState } from '@/components/content/api-usage-budget-indicator';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
-import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { notRetryableMessageKey, postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import { ImageAttachmentList } from '@/components/content/image-attachment-list';
 import { formatImageConvertedBadge } from '@/components/content/image-converted-badge';
 // story #3483 — 3472 2부에서 이 페이지에 있던 위반 표시 로직을 공용으로 뺐다
@@ -100,6 +100,9 @@ interface ChannelPostDraftDetail {
   // story f061c1a3(BE 0e960006) — 재시도 BFF가 붙일 대상 command. 목록/단건 응답
   // (ChannelPostDraftListItem)이 이미 낸다 — command 자체가 없으면 null.
   command_id?: string | null;
+  // story #4290 — 사람이 지금 «다시 시도»할 수 있는가(서버 한 판정 `human_retryable` · 재시도 엔드포인트와 같은 값). 배지 버튼 · 404 뒤 결과
+  // 줄이 이 값만 본다.
+  command_retryable?: boolean;
   // story #3499(PO 確定 2026-09-05) — 최신 ChannelPublication.id(BE #3844 조각4 의존,
   // 이 PR 작성 시점 미착지 — additive, 없으면 undefined). command_id(PublicationCommand
   // 축)와 다른 테이블이라 혼동 금지.
@@ -554,7 +557,8 @@ export default function ChannelPostEditPage() {
   useEffect(() => loadComments(), [loadComments]);
   // 까디르 codex 4634 P2 — 댓글 답변 «다시 보내기» 뒤 다시 읽기 전용: 실패하면 지금 목록을 **그대로 두고** false(loadComments는 실패면
   // 목록 자리를 오류 면으로 바꾼다 — 첫 로드 동작 그대로 · 여기서만 이전 상태 유지).
-  const refreshCommentsAfterRetry = useCallback(async (): Promise<boolean> => {
+  // story #4290 — 재시도한 답변 명령(replyCommandId)을 주면 다시 읽은 목록에서 그 명령의 서버 판정(`command_retryable`)도 돌려준다.
+  const refreshCommentsAfterRetry = useCallback(async (replyCommandId?: string): Promise<ReloadOutcome> => {
     if (!orgId || !draft?.publication_id) return false;
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/publications/${draft.publication_id}/comments`);
@@ -563,7 +567,9 @@ export default function ChannelPostEditPage() {
       const data = (body?.data ?? null) as RawCommentsResponse | null;
       if (!data) return false;
       setCommentsFace(deriveCommentsFace(data));
-      return true;
+      if (!replyCommandId) return true;
+      const reloaded = data.comments.find((c) => c.reply?.command_id === replyCommandId)?.reply;
+      return { retryable: reloaded?.command_retryable === true };
     } catch {
       return false;
     }
@@ -718,9 +724,10 @@ export default function ChannelPostEditPage() {
     if (!orgId || !comment.replyCommandId) return { ok: false, errorMessage: t('commentsActionErrorGeneric') };
     // story #4266 — 발행 재시도 확인 창들과 같은 공용 규칙(같은 엔드포인트): 404(재시도 대상 아님)는 서버 원문 대신 목록을 다시 읽고
     // 유나 문장 · 그 밖의 실패도 서버 원문 대신 로케일 문장. 이 자리는 확인 창 없이 줄 안에 보여 «창 뒤 오류»는 해당 없음.
+    const replyCommandId = comment.replyCommandId;
     const result = await withReload(
-      await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${comment.replyCommandId}/retry`),
-      refreshCommentsAfterRetry,
+      await postPublicationRetry(`/api/organizations/${orgId}/publication-commands/${replyCommandId}/retry`),
+      () => refreshCommentsAfterRetry(replyCommandId),
     );
     // 다시 읽기 실패면 목록은 이전 그대로 · «다시 불러왔어요»라고 말하지 않고 «최신 상태는 불러오지 못했어요» 한 줄(유나 확정 조합).
     if (result.type === 'success') {
@@ -729,9 +736,10 @@ export default function ChannelPostEditPage() {
     if (result.type === 'not_retryable') {
       return {
         ok: false,
+        // story #4290 — 다시 읽은 답변 명령이 다시 시도 가능한 새 멈춤이면 유나 문장(«그 사이 다시 시도됐고…») · 글 상세와 같은 키.
         errorMessage: result.reloadFailed
           ? `${t('publicationRetryNotRetryable')} ${t('publicationRetryReloadFailed')}`
-          : t('publicationRetryNotRetryableReloaded'),
+          : t(notRetryableMessageKey(result)),
       };
     }
     return { ok: false, errorMessage: result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed') };
@@ -1877,7 +1885,17 @@ export default function ChannelPostEditPage() {
         // 같은 «다시 보내지 않았어요». 외부 영향 줄은 없다 — 이번 요청은 어댑터를 안 불렀으니 «나갔는지 모름 · 다시 시도»(unknown
         // 폴백)는 사실과 다르다.
         if (info.kind === 'publish_needs_check') {
-          setDraft((prev) => prev && { ...prev, failure_kind: 'needs_check', command_status: 'dead_letter' });
+          // story #4290(까디르 QA ②) — 409가 싣는 사실(거절된 명령 id · 실제 상태 · 서버 한 판정 `command_retryable`)을 그대로 쓴다 —
+          // 화면이 dead_letter · 재시도 가능을 지어내지 않는다(pending/in_progress + needs_check면 서버는 false · 재시도 404).
+          type RefusedCommand = { command_id?: string; command_status?: string; command_retryable?: boolean };
+          const refused = ((body as { error?: RefusedCommand; detail?: RefusedCommand } | null)?.error
+            ?? (body as { detail?: RefusedCommand } | null)?.detail) ?? null;
+          setDraft((prev) => prev && {
+            ...prev, failure_kind: 'needs_check',
+            command_status: refused?.command_status ?? prev.command_status,
+            command_retryable: refused?.command_retryable === true,
+            command_id: refused?.command_id ?? prev.command_id,
+          });
           setPublishResult({
             type: 'error',
             text: t('channelPostsPublishRefusedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') }),
@@ -2038,13 +2056,14 @@ export default function ChannelPostEditPage() {
   // story #4266 — 결과가 무엇이든 확인 창을 닫고 결과 줄로 보인다(예전엔 실패면 창이 열린 채 · 오류 줄이 오버레이 뒤). 404(재시도 대상 아님)는
   // 서버 원문 대신 상태를 다시 읽고 로케일 문장 · 그 밖의 실패도 로케일 문장(공용 postPublicationRetry).
   // 까디르 codex 4634 P2① — 다시 읽기 성공 여부를 돌려준다(실패면 이전 초안 그대로 · 결과 줄이 «다시 불러오지 못했어요»를 말한다).
-  const reloadDraft = async (): Promise<boolean> => {
+  // story #4290 — 다시 읽은 서버 판정(`command_retryable`)도 돌려줘 404 뒤 결과 줄을 그 값으로 고른다(withReload).
+  const reloadDraft = async (): Promise<ReloadOutcome> => {
     const draftRes = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}`);
     if (!draftRes.ok) return false;
     const draftJson = (await draftRes.json().catch(() => null)) as { data?: ChannelPostDraftDetail } | null;
     if (!draftJson?.data) return false;
     setDraft(draftJson.data);
-    return true;
+    return { retryable: draftJson.data.command_retryable === true };
   };
   const handleRetry = async () => {
     if (!orgId || !draft?.command_id) return;
@@ -2225,6 +2244,7 @@ export default function ChannelPostEditPage() {
     reasonCode: draft.command_reason_code,
     reasonResetAt: draft.command_reason_reset_at,
     processingKind: draft.processing_kind,
+    retryable: draft.command_retryable ?? null,
   });
   // story #3402 갭(PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시 dead_letter로
   // 접어(publication_command.py:695-698) kind==='needs_check' 갈래가 라이브에서
@@ -2381,7 +2401,10 @@ export default function ChannelPostEditPage() {
             // story #4264 ④ — 승인 필요 멈춤의 뒷문장은 이 화면이 실제로 받은 게이트 상태 · 승인된 예약 시각으로만 고른다.
             approvalContext={(('gate_status' in draft && 'scheduled_at' in draft)
               ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
-            onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
+            // story #4290 — 버튼은 서버 판정(`command_retryable`)이 참일 때만 — 화면이 상태로 따로 가르지 않는다(가르면 서버 404와 갈라진다).
+            onRetryClick={draft.command_retryable
+              ? () => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }
+              : undefined}
           />
         ) : null}
         {/* story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 부분
@@ -2784,7 +2807,10 @@ export default function ChannelPostEditPage() {
         </div>
         {canPublish && isNeedsCheckGate ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-locked-needs-check">
-            {t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') })}
+            {/* story #4290(유나 05:16Z) — 배지 재시도를 지금 못 누르면(서버 command_retryable=false) 그 버튼을 가리키지 않는다. */}
+            {draft.command_retryable
+              ? t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') })
+              : t('channelPostsPublishLockedNeedsCheckNoRetry')}
           </p>
         ) : null}
         {!canPublish ? (
