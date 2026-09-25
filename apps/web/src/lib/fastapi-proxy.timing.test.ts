@@ -62,6 +62,40 @@ const keyRequest = (path: string, extra: Record<string, string> = {}) =>
 
 const timingLogs = () => logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('"server_timing"'));
 
+// 까디르 4652 — «타이밍 로그만 걸러 없음»이 아니라 호출 자체가 0인지를 직접 잰다: console.log 호출 0 · Server-Timing 없음 ·
+// undici 채널 구독 0. 새 모듈로(구독 여부는 모듈 상태라 앞 테스트가 이미 구독했으면 안 보인다) 같은 측정을 켜짐에도 돌려 셋 다
+// 잡히는 것을 옆에 둔다(양성 대조 — 측정이 틀릴 수 있어야 한다).
+describe('꺼짐 호출 0 직접 단언 + 켜짐 양성 대조(새 모듈)', () => {
+  async function freshRun(enabled: boolean) {
+    vi.resetModules();
+    if (enabled) process.env['SERVER_TIMING_MARKERS'] = 'true';
+    else delete process.env['SERVER_TIMING_MARKERS'];
+    const dc = (await import('node:diagnostics_channel')).default;
+    const subSpy = vi.spyOn(dc, 'subscribe');
+    try {
+      const fresh = await import('./fastapi-proxy');
+      logSpy.mockClear();
+      const res = await fresh.proxyToFastapi(keyRequest('/api/labels'), '/api/v2/labels');
+      const body = await res.text();
+      return { logs: logSpy.mock.calls.length, header: res.headers.get('Server-Timing'), subs: subSpy.mock.calls.length, body };
+    } finally {
+      subSpy.mockRestore();
+    }
+  }
+
+  it('꺼짐: console.log 0 · Server-Timing 없음 · undici 구독 0 · 본문 그대로', async () => {
+    expect(await freshRun(false)).toEqual({ logs: 0, header: null, subs: 0, body: '[]' });
+  });
+
+  it('양성 대조 — 켜짐: 같은 측정이 로그 · 헤더 · 구독을 모두 잡는다', async () => {
+    const r = await freshRun(true);
+    expect(r.logs).toBeGreaterThan(0);
+    expect(r.header).toMatch(/^bff;dur=\d+/);
+    expect(r.subs).toBeGreaterThan(0);
+    expect(r.body).toBe('[]');
+  });
+});
+
 describe('꺼져 있으면(기본 · prod) 오버헤드 0', () => {
   it('타이머 · 계측 범위 · 로그 · 헤더 전부 0 — 응답은 그대로', async () => {
     const res = await proxyToFastapi(keyRequest('/api/labels'), '/api/v2/labels');
@@ -184,6 +218,17 @@ describe('routeKindForPath — 리소스 이름 · 깊이만', () => {
     ['/api/v2/dependencies/graph', 'v2/dependencies/+1'],
     [`/api/v2/${ID}/x`, 'other'],
     ['/api/v2/abcdef12-3456-4789-abcd-ef0123456789', 'other'],
+    // 음성 사례(까디르 4652) — 개인정보 · id가 버전 칸이나 리소스 칸에 와도 이름으로 안 실린다.
+    ['/api/v2/someone@example.com/profile', 'other'],
+    ['/api/someone@example.com/labels', 'other'],
+    ['/api/v2/12345', 'other'],
+    ['/api/v2/label.json', 'other'],
+    ['/api/v2/oauth2', 'other'],
+    [`/api/${ID}/labels`, 'other'],
+    ['/api/latest/labels', 'other'],
+    ['/api/V2/labels', 'other'],
+    ['/api/v2/Labels', 'other'],
+    ['/api/v10/labels', 'v10/labels'],
     ['/weird', 'other'],
     ['', 'other'],
   ])('%s → %s', (path, kind) => {

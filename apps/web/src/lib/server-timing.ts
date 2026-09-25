@@ -176,14 +176,20 @@ export function formatRouteTiming(s: RouteTimingSummary, spans: TimingSpan[]): s
   ].join(', ');
 }
 
-/** 백엔드 경로 → 리소스 이름(`v2/labels` · 더 깊은 칸은 개수만 `v2/stories/+2`). id · slug · 쿼리는 안 남긴다. */
+/**
+ * 백엔드 경로 → 리소스 이름(`v2/labels` · 더 깊은 칸은 개수만 `v2/stories/+2`). id · slug · 쿼리는 안 남긴다.
+ * 로그로 새는 «종류»를 모양으로 막는다(까디르 4652): 버전 칸은 `v숫자`만, 리소스 칸은 소문자 · `_` · `-`만(숫자 · `@` · `.` 없음)
+ * 통과하고 나머지는 전부 `other` — 이메일 · uuid · 숫자 id가 어느 칸에 와도 이름으로 안 실린다.
+ */
+const VERSION_SEG = /^v\d+$/;
+const RESOURCE_SEG = /^[a-z][a-z_-]*$/;
 export function routeKindForPath(fastapiPath: string): string {
   const segs = (fastapiPath.split('?')[0] ?? '').split('/').filter(Boolean);
+  const version = segs[1] ?? '';
   const resource = segs[2] ?? '';
-  // 리소스 칸은 코드에 박힌 이름뿐이지만, 혹시 id가 오면(hex/uuid 꼴) 이름 대신 other.
-  if (segs[0] !== 'api' || !segs[1] || !/^[a-z][a-z0-9_-]*$/.test(resource) || /^[0-9a-f-]{16,}$/.test(resource)) return 'other';
+  if (segs[0] !== 'api' || !VERSION_SEG.test(version) || !RESOURCE_SEG.test(resource)) return 'other';
   const rest = segs.length - 3;
-  return `${segs[1]}/${resource}${rest > 0 ? `/+${rest}` : ''}`;
+  return `${version}/${resource}${rest > 0 ? `/+${rest}` : ''}`;
 }
 
 /** 응답을 새로 감싸는 라우트(sprints 등)는 헤더가 안 남는다 — 서버 로그 한 줄로도 남겨 PO가 요청 로그와 맞춘다. */
