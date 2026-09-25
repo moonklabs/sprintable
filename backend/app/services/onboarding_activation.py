@@ -218,6 +218,12 @@ async def get_activation_state(
     first_instruction_conv_id = (
         await get_first_instruction_conversation_id(db, org_id, user.id) if org_id else None
     )
+    # story #4231 — 그 대화는 조직 전체에서 고르므로(위 ①②) FE 현재 프로젝트와 다를 수 있다. 딥링크가
+    # 대상 대화의 프로젝트(`?p=`)를 싣도록 그 대화의 project_id를 같이 낸다(nullable=False 컬럼).
+    first_instruction_conv_project_id = (
+        await db.scalar(select(Conversation.project_id).where(Conversation.id == first_instruction_conv_id))
+        if first_instruction_conv_id else None
+    )
     steps = {
         "signed_up": True,
         "email_verified": user.email_verified,
@@ -233,6 +239,9 @@ async def get_activation_state(
         "all_complete": completed == len(steps),
         "first_instruction_conversation_id": (
             str(first_instruction_conv_id) if first_instruction_conv_id else None
+        ),
+        "first_instruction_conversation_project_id": (
+            str(first_instruction_conv_project_id) if first_instruction_conv_project_id else None
         ),
         # story #3610(3607 잔여) 최초판은 scope_org_id(판정에 쓰인 org 값 자체)를
         # 냈는데, 유나 CHANGES-2(2026-09-07, PR#3966 리뷰·PO 채택) — FE가 그 값을

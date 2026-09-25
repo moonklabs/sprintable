@@ -243,10 +243,17 @@ async def _resolve_needs_me(
     # story #3860 — 이 배치 파생은 이제 work_item_conversation.py의 SSOT 함수다
     # (gates.py/hitl.py의 conversation_id enrich도 같은 함수를 쓴다 — 로직 복제 0).
     work_item_pairs = {(it["work_item_type"], it["work_item_id"]) for it in items}
-    from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
+    from app.services.work_item_conversation import (
+        conversation_project_ids,
+        derive_conversation_ids_for_tagged_work_items,
+    )
 
     conversation_by_work_item = await derive_conversation_ids_for_tagged_work_items(
         session, org_id=org_id, member_id=member.id, work_item_pairs=work_item_pairs,
+    )
+    # story #4231 — 태그된 대화는 work_item과 다른 프로젝트에 있을 수 있다 → 대화 자기 프로젝트를 같이(FE `?p=`).
+    project_by_conversation = await conversation_project_ids(
+        session, conversation_ids=set(conversation_by_work_item.values()),
     )
 
     for it in items:
@@ -259,6 +266,7 @@ async def _resolve_needs_me(
         else:
             it.setdefault("requested_by", None)
         it["conversation_id"] = conversation_by_work_item.get((it["work_item_type"], it["work_item_id"]))
+        it["conversation_project_id"] = project_by_conversation.get(it["conversation_id"]) if it["conversation_id"] else None
         # TodayResponse 계약(story #3823 카드) — work_item은 중첩 객체다. 내부적으로는
         # 평평한 키(work_item_type/id/gate_type/title)로 dedupe·enrich하는 편이
         # 간단해 여기서만 마지막에 조립한다.

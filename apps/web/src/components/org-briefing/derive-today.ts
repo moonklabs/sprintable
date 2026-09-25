@@ -28,6 +28,9 @@ export interface TodayNeedsMeItem {
   reason: string | null;
   createdAt: string;
   conversationId: string | null;
+  // story #4231 — 그 대화의 프로젝트(BE needs_me `conversation_project_id`). 대화는 항목과 다른 프로젝트에 있을 수 있어
+  // «대화 열기» 링크는 현재 p가 아니라 이 값을 `?p=`로 싣는다. 옛 응답(필드 없음)이면 null.
+  conversationProjectId: string | null;
   // story #4190(유나 «본 버전 대조» 2) — BE `recipe_publish`(레시피 발행 게이트 — 초안을 보고 승인해야 함). true면 저위험
   // 일괄 승인에서 빼고 개별 카드(«초안 보고 승인» → 게이트 상세)로 둔다.
   recipePublish: boolean;
@@ -186,6 +189,7 @@ function parseNeedsMeItem(raw: unknown): TodayNeedsMeItem | null {
     createdAt,
     // story #3828(PR #4253) develop 착지 — 응답 값 그대로(비참여 실행은 BE가 이미 null).
     conversationId: str(raw['conversation_id']),
+    conversationProjectId: str(raw['conversation_project_id']),
     recipePublish: raw['recipe_publish'] === true,
     projectId: str(raw['project_id']),
   };

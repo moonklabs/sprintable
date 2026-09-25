@@ -3674,6 +3674,7 @@ export default function ChannelPostEditPage() {
           <Alert role="status">
             <AlertDescription>
               {t('submitSuccess')}{' '}
+              {/* 대상-프로젝트: 제출 응답은 게이트 id만 준다(채널 게시물 초안은 조직 단위 · 게이트 상세가 자기 프로젝트로 연다). */}
               <Link href={flatHref(`/gates/${submitResult.gateId}`)} className="underline">{t('submitGateLink')}</Link>
             </AlertDescription>
           </Alert>

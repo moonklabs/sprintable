@@ -84,6 +84,7 @@ function GateSignatureCard({ item, isAdminOrOwner, onDone }: {
   const tOrg = useTranslations('orgBriefing');
   const tc = useTranslations('common');
   const flatHref = useFlatHref(); // story #4231 4차 — 결재함 큐(조직 단위 화면)는 현재 p · 게이트 상세는 결재 자기 p
+  // 대상-프로젝트: hrefForNeedsMeItem은 결재 자기 프로젝트(item.projectId)를 싣고, 현재 p(flatHref)는 결재함 큐 · 프로젝트 모를 때의 폴백에만 쓴다.
   const href = hrefForNeedsMeItem(item, flatHref);
   const [dialogKind, setDialogKind] = useState<DialogKind | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,6 +195,9 @@ function RecipeDraftReviewCard({ item }: { item: TodayNeedsMeItem }) {
   const tOrg = useTranslations('orgBriefing');
   const tCage = useTranslations('cage');
   const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
+  // story #4231 — 레시피 초안 결재도 결재 자기 프로젝트(item.projectId)를 싣는다(hrefForNeedsMeItem과 같은 규칙) — 현재 p가 아니다.
+  // 대상-프로젝트: 현재 p(flatHref)는 결재의 프로젝트를 모를 때의 폴백에만.
+  const reviewHref = hrefForNeedsMeItem(item, flatHref);
   return (
     <Card className="p-3.5" data-testid="today-v3-decision-card">
       <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
@@ -202,7 +206,7 @@ function RecipeDraftReviewCard({ item }: { item: TodayNeedsMeItem }) {
       ) : null}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         <Button asChild size="sm">
-          <Link href={flatHref(`/gates/${item.id}`)} data-testid="today-v3-recipe-review-draft-action">{tCage('gateReviewDraftToApprove')}</Link>
+          <Link href={reviewHref} data-testid="today-v3-recipe-review-draft-action">{tCage('gateReviewDraftToApprove')}</Link>
         </Button>
       </div>
     </Card>

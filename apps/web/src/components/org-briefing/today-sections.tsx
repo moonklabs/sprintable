@@ -17,6 +17,7 @@ import {
   type TodayUsage,
 } from './derive-today';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
 
 // story #3831(UX-v3·FE 3·오늘) — 낱말 표 §① 상태 3어(PO 確定 2026-09-13 09:43Z) 매핑.
 // 돈·외부 발송 구분은 pill로 안 가른다(API가 그 축을 모른다, gap3 판정 그대로) — 필요하면
@@ -40,7 +41,13 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
   const t = useTranslations('orgBriefing');
   const meta = STATE_META[item.state];
   const Icon = meta.icon;
+  // 대상-프로젝트: hrefForNeedsMeItem은 결재 자기 프로젝트(item.projectId)를 싣고, 현재 p(flatHref)는 결재함 큐 · 프로젝트 모를 때의 폴백에만 쓴다.
   const href = hrefForNeedsMeItem(item, flatHref);
+  // story #4231 — 대화는 항목과 다른 프로젝트에 있을 수 있다(BE가 태그된 대화를 조직 안에서 고른다) → 대화 자기 프로젝트.
+  const conversationHref = (conversationId: string, conversationProjectId: string | null) => (conversationProjectId
+    ? withProjectParam(`/chats/${conversationId}`, conversationProjectId)
+    // 대상-프로젝트: 옛 응답(conversation_project_id 없음)일 때만 현재 p로 폴백.
+    : flatHref(`/chats/${conversationId}`));
   return (
     <div className="flex items-start gap-3 border-t border-border px-3 py-3 first:border-t-0">
       <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -74,7 +81,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 develop 착지,
             라이브 dev-app은 배포 86 뒤 반영). 있으면 짓지 않고 실 id로만 연다. */}
         {item.conversationId ? (
-          <Link href={flatHref(`/chats/${item.conversationId}`)} className="text-[11px] text-primary hover:underline">
+          <Link href={conversationHref(item.conversationId, item.conversationProjectId)} className="text-[11px] text-primary hover:underline">
             {t('conversationOpenLink')}
           </Link>
         ) : null}

@@ -47,6 +47,8 @@ class NeedsMeItem(BaseModel):
     # story #3828(UX-v3·대화·BE 1) — 이 work_item을 태그한 가장 최근 대화(있으면).
     # 없으면 null(그 일을 얘기한 대화가 아직 없다는 정직한 사실 — 지어내지 않는다).
     conversation_id: uuid.UUID | None = None
+    # story #4231 — 그 대화의 프로젝트(대화는 work_item과 다른 프로젝트에 있을 수 있다 · FE 딥링크 `?p=`). conversation_id가 null이면 null.
+    conversation_project_id: uuid.UUID | None = None
     # story #3965(페드루 PO CHANGES 소형, 2026-09-17) — source="workflow_step" 항목만
     # 채워진다(gate_id는 WorkflowLineStepApproval.gate_id 그대로, S9 parallel gate
     # 대표 Gate). FE가 이 값 없이는 POST /gates/{id}/approvers/{approval_id}/decision을

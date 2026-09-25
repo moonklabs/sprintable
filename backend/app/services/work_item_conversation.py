@@ -91,3 +91,24 @@ async def filter_participant_conversation_ids(
             ConversationParticipant.member_id == member_id,
         )
     )).scalars().all())
+
+
+async def conversation_project_ids(
+    session: AsyncSession,
+    *,
+    conversation_ids: set[uuid.UUID],
+) -> dict[uuid.UUID, uuid.UUID]:
+    """story #4231 — 대화 id별 그 대화의 프로젝트(`conversations.project_id` · nullable=False). 위 두 경로가 고른 대화는
+    work_item · 요청자 프로젝트와 다를 수 있어(대화는 조직 안 어느 프로젝트에나 있다), FE 딥링크가 현재 p가 아니라 대화
+    자기 프로젝트(`?p=`)를 싣게 같이 낸다. 배치 · 빈 입력이면 쿼리 0."""
+    if not conversation_ids:
+        return {}
+
+    from app.models.conversation import Conversation
+
+    return {
+        cid: pid
+        for cid, pid in (await session.execute(
+            select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conversation_ids))
+        )).all()
+    }

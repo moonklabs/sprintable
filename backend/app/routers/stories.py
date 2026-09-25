@@ -1548,6 +1548,16 @@ async def get_story_outgoing_references(
         repo.session, org_id=repo.org_id, entity_type="story", entity_id=id,
         direction="outgoing", visible_ids_by_type=visible,
     )
+    # story #4231 — 증거 대화는 생성 때 스토리와 같은 프로젝트인지 안 본다(참여자 기반) → FE 딥링크가 현재 p가 아니라
+    # 그 대화 자기 프로젝트(`?p=`)를 싣게 대화의 project_id를 같이 낸다(보이는 참조만 · 배치).
+    from app.services.work_item_conversation import conversation_project_ids
+
+    project_by_conversation = await conversation_project_ids(
+        repo.session,
+        conversation_ids={
+            conversation_id_by_target_id[r.target_id] for r in refs if r.target_id in conversation_id_by_target_id
+        },
+    )
 
     # story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적): 「#<번호> 관찰 수집(축A, #2643)」만
     # 해서는 화면에 아무것도 안 뜬다 — render-time 치환에 필요한 번호→story_id 매핑을 이
@@ -1583,6 +1593,10 @@ async def get_story_outgoing_references(
                 "referenced_at": r.created_at.isoformat(),
                 "still_exists": r.still_exists,
                 "proof_payload": r.proof_payload,
+                "conversation_project_id": (
+                    str(project_by_conversation[conversation_id_by_target_id[r.target_id]])
+                    if conversation_id_by_target_id.get(r.target_id) in project_by_conversation else None
+                ),
             }
             for r in refs
         ],

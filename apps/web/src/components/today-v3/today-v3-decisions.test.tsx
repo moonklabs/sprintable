@@ -44,7 +44,7 @@ afterEach(async () => {
 const base: TodayNeedsMeItem = {
   id: 'g1', source: 'gate', state: 'signature', risk: 'high',
   workItemType: 'channel_post', workItemId: 'w1', workItemTitle: '블로그 글 발행',
-  requestedByName: null, reason: null, createdAt: '2026-09-17T00:00:00Z', conversationId: null, recipePublish: false, projectId: null,
+  requestedByName: null, reason: null, createdAt: '2026-09-17T00:00:00Z', conversationId: null, recipePublish: false, projectId: null, conversationProjectId: null,
 };
 
 async function mount(items: TodayNeedsMeItem[], opts?: { isAdminOrOwner?: boolean; onActionSuccess?: () => void }) {
@@ -264,6 +264,12 @@ describe('TodayV3Decisions — 레시피 발행 게이트 일괄 제외 (story #
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const transitioned = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith('/transition'));
     expect(transitioned.sort()).toEqual(['/api/gates/g-a/transition', '/api/gates/g-b/transition']);
+  });
+
+  it('⭐story #4231 — 레시피 초안 결재 링크는 결재 자기 프로젝트(item.projectId)를 싣는다(현재 p 아님)', async () => {
+    await mount([{ ...low('g-recipe', true), projectId: 'proj-of-gate' }]);
+    const link = container.querySelector('[data-testid="today-v3-recipe-review-draft-action"]');
+    expect(link?.getAttribute('href')).toBe('/gates/g-recipe?p=proj-of-gate');
   });
 
   it('레시피 게이트만 있으면 일괄 줄 자체가 없다', async () => {

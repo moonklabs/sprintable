@@ -76,7 +76,7 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
     expect(snapshot.needsMe[0]).toEqual({
       id: 'g1', source: 'gate', state: 'signature', risk: 'high', workItemType: 'story', workItemId: 's1',
       workItemTitle: 'Threads에 글 발행', requestedByName: null, reason: null,
-      createdAt: '2026-09-13T05:00:00Z', conversationId: null, recipePublish: false, projectId: 'proj-C',
+      createdAt: '2026-09-13T05:00:00Z', conversationId: null, conversationProjectId: null, recipePublish: false, projectId: 'proj-C',
     });
     expect(snapshot.needsMe[1]!.state).toBe('answer');
     expect(snapshot.needsMe[1]!.reason).toBe('YouTube 챕터를 3개로 나눌까요?');
@@ -107,11 +107,13 @@ describe('parseToday — story #3823 실 응답 모양 파싱(no-fiction)', () =
         kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',
         work_item: { type: 'story', id: 's1', title: '블로그 글 발행' },
         requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
-        conversation_id: 'conv-1',
+        conversation_id: 'conv-1', conversation_project_id: 'proj-Q',
       }],
       needs_me_count: 1, agent_progress: [], published_today: { count: 0, by_channel: [] }, usage: { platform: [], ad_spend: { measured: false } },
     };
     expect(parseToday({ data: raw }).needsMe[0]!.conversationId).toBe('conv-1');
+    // story #4231 — 대화 자기 프로젝트도 그대로(링크 `?p=`).
+    expect(parseToday({ data: raw }).needsMe[0]!.conversationProjectId).toBe('proj-Q');
   });
 
   it('핵심 식별자(work_item.id·created_at) 없는 needs_me 항목은 생략한다(지어내지 않음)', () => {

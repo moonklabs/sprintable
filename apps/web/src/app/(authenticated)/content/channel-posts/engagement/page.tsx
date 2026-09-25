@@ -470,6 +470,7 @@ export default function ChannelPostsEngagementPage() {
                       <p className="line-clamp-2 whitespace-pre-wrap text-foreground">{item.text}</p>
                       {item.linked_story_id ? (
                         <a
+                          // 대상-프로젝트: 댓글 항목은 연결된 스토리 id만 싣는다(스토리 프로젝트 필드 없음 · 보드가 착지 뒤 정한다).
                           href={getEntityHref('story', item.linked_story_id, flatHref) ?? '#'}
                           className="mt-1 inline-block text-xs text-primary underline underline-offset-4"
                           data-testid="engagement-view-task-link"
