@@ -268,7 +268,8 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # MultiFernet 암호화 키, channel_credential_encryption_key와 동형 패턴·독립 시크릿)로
     # 125→126. 가드가 신규 필드를 설계대로 잡은 것(파서 결함 아님, 이 assert만 stale).
     assert "GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY" in keys
-    assert len(keys) == 126
+    # story #4332 — DB_TIMING_LOG_ENABLED(요청 DB 몫 로그 한 줄 · dev만 켬) 신설로 126→127(가드가 신규 필드를 설계대로 잡음).
+    assert len(keys) == 127
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():

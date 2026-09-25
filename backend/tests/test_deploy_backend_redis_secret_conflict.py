@@ -180,6 +180,12 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   (`app/main.py` 조건부 `include_router`) ③c/④/⑤ 라이브 QA가 통째로 못 돈다.
   `WEBHOOK_TEST_STUB_SECRET`은 여기 안 실음(yaml 평문 secret 금지 관례 — 스텁 파일
   기본값으로 동작, 런북 2bbafa37에 그 경로 명시).
+- **Apple OAuth 식별자(story #4332 압축 때 cloudbuild.yaml에서 옮김)**: `ENV_VARS`에 싣는 Apple OAuth 값은 식별자(비밀
+  아님)뿐이고, 개인키는 `SECRETS_FLAG`(--update-secrets)로만 싣는다.
+- **story #4332(PO 판정 2026-09-25)**: `DB_TIMING_LOG_ENABLED=true`는 **dev에서만**(리터럴) — 요청마다 «풀 체크아웃
+  대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(`app/core/request_db_timing.py`). 폴링 경로(designated-pending-count 등)
+  때문에 양이 커 다른 환경은 미설정 = 기본 끔. 응답 헤더 `Server-Timing`은 이 값과 무관하게 늘 실린다. 배포 설정도
+  코드라 PR로(PO) — 수동 env 주입 아님.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
@@ -797,6 +803,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story 5b27b32f — GCS_CHANNEL_MEDIA_BUCKET 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "SANDBOX_CHANNEL_ENABLED=true,"
+        # story #4332 — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml 삽입 순서 그대로 · dev만).
+        "DB_TIMING_LOG_ENABLED=true,"
         # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
