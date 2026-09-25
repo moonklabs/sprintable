@@ -82,7 +82,8 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
             {/* story #4004 — OFF 폴백(/gates/{id})은 이 카드 고유 맥락(v3 걷기 前
                 서명 자리)이라 목적지 모듈이 정할 대상이 아니다 — 그대로 유지. */}
             <Link
-              // 대상-프로젝트: 결재 요청 카드 대상은 gate_id뿐이라 게이트 프로젝트를 모른다(게이트 상세가 조직 수준 화면 · 착지 뒤 자기 프로젝트로 연다).
+              // 대상-프로젝트: 결재 요청 카드의 approval_target(work_item_type · work_item_id · gate_id · gate_type — approval_delivery.py)엔 프로젝트가 없어
+              // 게이트 프로젝트를 모른다(게이트 상세 /gates/{id}는 조직 수준 화면 · 착지 뒤 GET /gates/{id}의 project_id로 자기 프로젝트를 쓴다).
               href={todayV3Enabled ? todayHref : flatHref(`/gates/${approvalTarget.gate_id}`)}
               data-testid="chat-v3-event-card-sign"
             >
