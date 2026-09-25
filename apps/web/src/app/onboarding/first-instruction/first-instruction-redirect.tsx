@@ -101,12 +101,16 @@ async function fetchAllProjectConversations(projectId: string): Promise<Conversa
   return all;
 }
 
-async function fetchChecklistConversationId(): Promise<string | null> {
+// story #4231 — 체크리스트의 첫 지시 대화는 BE가 조직 전체에서 고른다 → 그 대화의 프로젝트(`first_instruction_conversation_project_id`)도 같이.
+async function fetchChecklistConversation(): Promise<{ id: string; projectId: string | null } | null> {
   try {
     const res = await fetchWithAuth('/api/activation/checklist');
     if (!res.ok) return null;
-    const json = (await res.json()) as { data?: { first_instruction_conversation_id: string | null } };
-    return json.data?.first_instruction_conversation_id ?? null;
+    const json = (await res.json()) as {
+      data?: { first_instruction_conversation_id: string | null; first_instruction_conversation_project_id?: string | null };
+    };
+    const id = json.data?.first_instruction_conversation_id ?? null;
+    return id ? { id, projectId: json.data?.first_instruction_conversation_project_id ?? null } : null;
   } catch {
     return null;
   }
@@ -180,13 +184,17 @@ export function FirstInstructionRedirect({
         // ① 체크리스트 first_instruction_conversation_id — 그 대화 참가자에 이 에이전트가 있을 때만
         // (조회는 GET /{id}로·PO CHANGES3). 체크리스트/상세 실패는 ① 건너뛰기(soft).
         let conversationId: string | null = null;
-        const checklistId = await fetchChecklistConversationId();
+        // story #4231 — 착지 `?p=`는 그 대화의 프로젝트. ②(이 프로젝트 목록) · ③(이 프로젝트에 생성)은 곧 projectId.
+        let conversationProjectId: string = projectId;
+        const checklist = await fetchChecklistConversation();
         if (cancelled) return;
-        if (checklistId) {
-          const parts = await fetchConversationParticipants(checklistId);
+        if (checklist) {
+          const parts = await fetchConversationParticipants(checklist.id);
           if (cancelled) return;
           if (parts && participantsIncludeAgent(parts, agentId)) {
-            conversationId = checklistId;
+            conversationId = checklist.id;
+            // 옛 응답(대화 프로젝트 필드 없음)일 때만 이 온보딩의 프로젝트로 폴백.
+            conversationProjectId = checklist.projectId ?? projectId;
           }
         }
 
@@ -215,13 +223,13 @@ export function FirstInstructionRedirect({
         const { path, tooLong } = buildFirstInstructionTarget(conversationId, compose, flags);
         if (tooLong) {
           // compose 없이 재구성 — 새 리터럴 0(같은 함수 재사용, 위 base와 동형).
-          setConversationHref(withProjectParam(buildFirstInstructionTarget(conversationId, '', flags).path, projectId));
+          setConversationHref(withProjectParam(buildFirstInstructionTarget(conversationId, '', flags).path, conversationProjectId));
           setPhase('too_long');
           return;
         }
         // AC2 — 교체 이동(뒤로가기로 이 중간 주소에 안 돌아옴). 전송은 사람이 대화 화면에서 누른다.
-        // story #4231 3차 · 까디르 QA(ccef5258a) — 첫 착지(대화 · flat)는 이 온보딩의 프로젝트를 싣는다(착지 뒤 셸 ?p= 정규화 왕복 없음).
-        router.replace(withProjectParam(path, projectId));
+        // story #4231 3차 · 까디르 QA(ccef5258a) — 첫 착지(대화 · flat)는 프로젝트를 싣는다(착지 뒤 셸 ?p= 정규화 왕복 없음) — 그 대화의 프로젝트.
+        router.replace(withProjectParam(path, conversationProjectId));
       } catch {
         fail();
       }

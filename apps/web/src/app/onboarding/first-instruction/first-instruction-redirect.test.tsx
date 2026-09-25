@@ -41,6 +41,7 @@ interface StubOpts {
   conversations?: ConversationLite[]; // 전체 목록(스텁이 페이지네이션)
   conversationsOk?: boolean; // 목록 조회 성공 여부(기본 true)
   checklistId?: string | null;
+  checklistProjectId?: string | null; // story #4231 — 체크리스트 대화의 프로젝트(없으면 옛 응답)
   byId?: Record<string, { participants?: { member_id: string }[] } | null>; // GET /{id} (null=조회 실패)
 }
 
@@ -61,7 +62,7 @@ function stubFetch(opts: StubOpts) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: slice, total: all.length }) });
     }
     if (url.startsWith('/api/activation/checklist')) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { first_instruction_conversation_id: opts.checklistId ?? null } }) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { first_instruction_conversation_id: opts.checklistId ?? null, first_instruction_conversation_project_id: opts.checklistProjectId } }) });
     }
     if (url.startsWith('/api/conversations/')) {
       const id = url.slice('/api/conversations/'.length);
@@ -183,6 +184,17 @@ describe('FirstInstructionRedirect (동작)', () => {
     await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
     expect(createConversationMock).not.toHaveBeenCalled();
     expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-check?p=proj-1');
+  });
+
+  it('⭐story #4231 — 체크리스트 대화가 다른 프로젝트면 착지 `?p=`는 그 대화의 프로젝트(온보딩 프로젝트 아님)', async () => {
+    stubFetch({
+      checklistId: 'c-check',
+      checklistProjectId: 'proj-9',
+      conversations: [agentDm('c-list', '2026-09-17T02:00:00Z')],
+      byId: { 'c-check': { participants: [{ member_id: agentId }, { member_id: 'me' }] } },
+    });
+    await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-check?p=proj-9');
   });
 
   it('생성 뒤 재마운트(새로고침 동형)면 ②에서 찾아 생성 0', async () => {
