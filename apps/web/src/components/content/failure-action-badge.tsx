@@ -100,7 +100,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
             </Button>
             {onRetryClick ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
-                {t('channelPostsFailureRetryComingSoon')}
+                {t('channelPostsFailureRetryUnavailable')}
               </p>
             )}
           </>
@@ -170,7 +170,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
               </p>
             ) : onRetryClick ? null : (
               <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
-                {t('channelPostsFailureRetryComingSoon')}
+                {t('channelPostsFailureRetryUnavailable')}
               </p>
             )}
           </>

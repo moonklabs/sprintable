@@ -21,6 +21,7 @@ from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.insight_snapshots import get_latest_insight_snapshot
 from app.services.content_rules import get_org_content_rules
+from app.services.publication_command import human_retryable
 from app.services.site_posts import (
     CampaignNotFoundError,
     ConceptApprovalNotApprovedError,
@@ -783,6 +784,8 @@ class PublicationCommandView(BaseModel):
     dead_letter_at: str | None = None
     command_reason_code: str | None = None
     last_error: str | None = None
+    # story #4290 — 사람이 지금 이 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `human_retryable`).
+    command_retryable: bool = False
 
 
 def _channel_publication_view(pub) -> ChannelPublicationView | None:
@@ -806,6 +809,7 @@ def _publication_command_view(cmd) -> PublicationCommandView | None:
         dead_letter_at=cmd.dead_letter_at.isoformat() if cmd.dead_letter_at else None,
         command_reason_code=cmd.reason_code,
         last_error=cmd.last_error,
+        command_retryable=human_retryable(cmd),
     )
 
 

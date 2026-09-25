@@ -59,7 +59,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe('');
     expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
-      .toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+      .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
   });
 
   // N3(페드루 PO, 2026-09-04 13:26Z) — ChannelPostCard(`<Link>`)가 쓰는 모드. 버튼 자체를
@@ -101,7 +101,7 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe('');
     expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
-      .toBe(koMessages.content.channelPostsFailureRetryComingSoon);
+      .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
   });
 
   it('⭐N3 — compact=true면 dead_letter 재시도 버튼을 아예 안 그린다(라벨만)', async () => {

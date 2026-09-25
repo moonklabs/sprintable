@@ -20,7 +20,7 @@ import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
-import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -28,13 +28,13 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 const CONNECTION_UNAVAILABLE = 'NEWSLETTER_SEND_CONNECTION_UNAVAILABLE';
 
 type View =
-  | { kind: 'badge'; action: FailureAction; retryable: boolean }
+  | { kind: 'badge'; action: FailureAction }
   | { kind: 'connection_blocked' };
 
 function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View | null {
   if (command.status === 'blocked_unapproved') {
     if (command.reason_code === CONNECTION_UNAVAILABLE) return { kind: 'connection_blocked' };
-    return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null }, retryable: false };
+    return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null } };
   }
   if (command.status === 'blocked' && command.failure_kind === 'paused') return null;
   const action = deriveFailureAction({
@@ -45,7 +45,7 @@ function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View
     reasonResetAt: command.reason_reset_at,
   });
   if (!action) return null;
-  return { kind: 'badge', action, retryable: action.kind === 'dead_letter' || action.kind === 'needs_check' };
+  return { kind: 'badge', action };
 }
 
 export interface NewsletterSendStatusProps {
@@ -55,7 +55,8 @@ export interface NewsletterSendStatusProps {
   isHuman: boolean;
   displayTimezone: string;
   /** 재시도가 받아들여진 뒤(또는 404 · 재시도 대상 아님) 게이트를 다시 읽는다. true = 새 상태를 반영함 · false/예외 = 다시 읽기 실패(이전 상태 유지). */
-  onRetried?: () => Promise<boolean>;
+  /** 게이트를 다시 읽는다 — `{ retryable }`(다시 읽은 발송 명령의 서버 판정)를 돌려주면 404 뒤 결과 줄이 그 값으로 골라진다(story #4290). */
+  onRetried?: () => Promise<ReloadOutcome>;
 }
 
 export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, onRetried }: NewsletterSendStatusProps) {
@@ -71,7 +72,8 @@ export function NewsletterSendStatus({ gate, orgId, isHuman, displayTimezone, on
   const view = command ? viewOf(command) : null;
   if (!command || !view) return <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />;
 
-  const canRetry = isHuman && !!orgId && (view.kind === 'connection_blocked' || view.retryable);
+  // story #4290 — 버튼은 서버 판정(`command_retryable`)만 본다 — 화면이 상태로 따로 가르면 서버 404와 갈라진다.
+  const canRetry = isHuman && !!orgId && command.command_retryable === true;
   const isNeedsCheckGate = view.kind === 'badge' && (
     view.action.kind === 'needs_check' || (view.action.kind === 'dead_letter' && view.action.needsRecheck)
   );

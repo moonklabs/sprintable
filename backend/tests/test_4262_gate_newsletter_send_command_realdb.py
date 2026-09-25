@@ -114,6 +114,8 @@ async def test_the_newsletter_gate_carries_its_latest_send_command_from_its_own_
         assert r.json()["newsletter_send_command"] == {
             "id": str(latest.id), "status": "dead_letter", "failure_kind": "needs_check", "reason_code": "STIBEE_SEND_FAILED",
             "next_attempt_at": None, "reason_reset_at": None,
+            # story #4290 — 재시도 엔드포인트와 같은 한 판정(`human_retryable`) · dead_letter라 참.
+            "command_retryable": True,
         }
     finally:
         app.dependency_overrides.clear()

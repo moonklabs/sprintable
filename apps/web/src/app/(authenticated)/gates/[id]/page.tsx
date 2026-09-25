@@ -116,6 +116,8 @@ export default function GateDetailPage() {
   // 로드·id 변경 때만(호출부가 silent 생략) «불러오는 중».
   // story #4266(까디르 codex 4634 P2) — 새 상태를 화면에 반영했는지 돌려준다(뉴스레터 발송 재시도 뒤 «다시 불러왔어요»를 말해도 되는지).
   // 실패하면 이전 게이트를 그대로 둔다(예전과 같음). 404는 «없어짐»을 반영한 것이라 true.
+  // story #4290 — 방금 다시 읽은 게이트(상태 반영 전 값을 onRetried가 읽는다).
+  const latestGateRef = useRef<GateItem | null>(null);
   const fetchGate = useCallback(async (opts?: { silent?: boolean }): Promise<boolean> => {
     if (!opts?.silent) setLoading(true);
     try {
@@ -124,6 +126,7 @@ export default function GateDetailPage() {
       if (result.kind === 'not-found') { setNotFound(true); return true; }
       if (result.kind !== 'ok') return false;
       setGate(result.gate);
+      latestGateRef.current = result.gate;
       setNotFound(false);
       return true;
     } finally {
@@ -508,7 +511,12 @@ export default function GateDetailPage() {
                 <NewsletterSendStatus
                   gate={gate} orgId={gate.org_id ?? null} isHuman={currentMemberType !== 'agent'}
                   displayTimezone={resolveDisplayTimezone(orgTimezone).tz}
-                  onRetried={() => fetchGate({ silent: true })}
+                  // story #4290 — 다시 읽은 발송 명령의 서버 판정을 돌려줘 404 뒤 결과 줄을 고른다.
+                  onRetried={async () => {
+                    const ok = await fetchGate({ silent: true });
+                    if (!ok) return false;
+                    return { retryable: latestGateRef.current?.newsletter_send_command?.command_retryable === true };
+                  }}
                 />
                 {/* story #4136 — canAct/needsAction과 무관하게 항상 렌더(모든 열람자, AC1).
                     GateProductionWorkbenchEvidence(아래, #4057)는 work-item 범위 훅이 0건이면

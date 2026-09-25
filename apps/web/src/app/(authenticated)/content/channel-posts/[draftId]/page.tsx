@@ -1885,7 +1885,14 @@ export default function ChannelPostEditPage() {
         // 같은 «다시 보내지 않았어요». 외부 영향 줄은 없다 — 이번 요청은 어댑터를 안 불렀으니 «나갔는지 모름 · 다시 시도»(unknown
         // 폴백)는 사실과 다르다.
         if (info.kind === 'publish_needs_check') {
-          setDraft((prev) => prev && { ...prev, failure_kind: 'needs_check', command_status: 'dead_letter' });
+          // story #4290 — 409가 싣는 사실(dead_letter · 그 명령 id)로 배지를 맞춘다. dead_letter는 사람 재시도 대상이라 command_retryable=true
+          // (서버 `human_retryable`과 같은 뜻) — 낡은 화면에서도 배지 «확인했어요 · 다시 시도»가 그 명령을 가리킨다.
+          const refused = ((body as { error?: { command_id?: string }; detail?: { command_id?: string } } | null)?.error
+            ?? (body as { detail?: { command_id?: string } } | null)?.detail) ?? null;
+          setDraft((prev) => prev && {
+            ...prev, failure_kind: 'needs_check', command_status: 'dead_letter', command_retryable: true,
+            command_id: refused?.command_id ?? prev.command_id,
+          });
           setPublishResult({
             type: 'error',
             text: t('channelPostsPublishRefusedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') }),
@@ -2796,7 +2803,10 @@ export default function ChannelPostEditPage() {
         </div>
         {canPublish && isNeedsCheckGate ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-locked-needs-check">
-            {t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') })}
+            {/* story #4290(유나 05:16Z) — 배지 재시도를 지금 못 누르면(서버 command_retryable=false) 그 버튼을 가리키지 않는다. */}
+            {draft.command_retryable
+              ? t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') })
+              : t('channelPostsPublishLockedNeedsCheckNoRetry')}
           </p>
         ) : null}
         {!canPublish ? (

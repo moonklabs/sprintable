@@ -21,7 +21,7 @@ import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
-import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult } from '@/components/content/publication-retry';
+import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 // story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙
 // 위반. field는 title|summary|body_md(channel_post의 text|link_url과 다른 축이라
 // 컴포넌트는 field를 모른다 — 호출부가 이미 걸러 넘긴다).
@@ -143,6 +143,8 @@ interface PublicationCommandView {
   dead_letter_at: string | null;
   command_reason_code: string | null;
   last_error: string | null;
+  /** story #4290 — 사람이 지금 이 명령을 «다시 시도»할 수 있는가(서버 한 판정 · 재시도 엔드포인트와 같은 값). */
+  command_retryable?: boolean;
 }
 
 interface SitePostPublicationInfo {
@@ -689,7 +691,8 @@ export default function ContentPostEditPage() {
 
   // 까디르 codex 4634 P2② — 재시도 뒤 다시 읽기 전용: 실패하면 이전 발행 정보를 **지우지 않고** false(첫 로드 loadPublication은 그대로 —
   // 실패면 null로 두는 첫 로드 동작 회귀 0). 지우면 외부 발행 카드와 결과 줄이 통째로 사라졌다.
-  const refreshPublicationAfterRetry = useCallback(async (): Promise<boolean> => {
+  // story #4290 — 다시 읽은 발행 명령의 서버 판정도 돌려줘 404 뒤 결과 줄을 그 값으로 고른다(withReload).
+  const refreshPublicationAfterRetry = useCallback(async (): Promise<ReloadOutcome> => {
     if (!orgId) return false;
     try {
       const res = await fetchWithAuth(`/api/organizations/${orgId}/site-posts/drafts/${draftId}/publication`);
@@ -697,7 +700,7 @@ export default function ContentPostEditPage() {
       const json = (await res.json().catch(() => null)) as { data?: SitePostPublicationInfo } | null;
       if (!json?.data) return false;
       setPublication(json.data);
-      return true;
+      return { retryable: json.data.command?.command_retryable === true };
     } catch {
       return false;
     }
@@ -1333,7 +1336,10 @@ export default function ContentPostEditPage() {
               // 확認버튼 disabled)을 제공한다 — recheckGate=true라 needsRecheck
               // 문면이 「약속을 지키는」 곳(channel_posts 상세와 동형).
               recheckGate
-              onRetryClick={() => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }}
+              // story #4290 — 버튼은 서버 판정(`command_retryable`)이 참일 때만.
+              onRetryClick={publication.command.command_retryable
+                ? () => { setRetryChecklistConfirmed(false); setRetryConfirmOpen(true); }
+                : undefined}
             />
           ) : null}
           <ConfirmDialog

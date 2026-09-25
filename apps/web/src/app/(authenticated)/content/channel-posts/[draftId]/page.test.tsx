@@ -6383,17 +6383,31 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
 describe('발행 버튼 — needs_check면 잠금(story #4264 · 유나)', () => {
   // 승인 · 봉인 일치(발행 가능) 초안 — 잠금 사유가 needs_check 하나뿐이게.
   const PUBLISHABLE = { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' };
+  // story #4290 — 잠금 줄은 배지 재시도를 지금 누를 수 있을 때(서버 command_retryable)만 그 버튼을 가리킨다. pending ∧ needs_check는
+  // 서버가 재시도 불가라 버튼을 가리키지 않는 문장.
+  const lockedWithButton = koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', koMessages.content.channelPostsFailureCheckedRetryCta);
   it.each([
-    ['dead_letter ∧ needs_check', { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-nc' }],
-    ['pending ∧ needs_check', { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-nc' }],
-  ])('⭐%s — 발행 버튼 비활성 · 사유 문장이 배지의 재시도 이름을 가리킴', async (_label, detail) => {
+    ['dead_letter ∧ needs_check', { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-nc' }, lockedWithButton],
+    ['pending ∧ needs_check', { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-nc' }, koMessages.content.channelPostsPublishLockedNeedsCheckNoRetry],
+  ])('⭐%s — 발행 버튼 비활성 · 사유 문장(재시도 가능하면 배지 버튼을 가리킴)', async (_label, detail, expected) => {
     stubFetch({ draftDetail: { ...PUBLISHABLE, ...detail } as Record<string, unknown> });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
     await flush();
     const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
     expect(publish.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent).toBe(expected);
+  });
+
+  // story #4290(유나 05:16Z) — 서버가 지금 재시도 불가(command_retryable=false)라고 하면 배지는 끝난 «곧 열려요» 대신 «지금은 다시 시도할
+  // 수 없어요 — 새로고침…», 잠금 줄은 못 누르는 버튼을 가리키지 않는 문장. 뮤테이션: 잠금 줄이 command_retryable을 안 보면 RED.
+  it('⭐#4290 — needs_check인데 서버가 재시도 불가 → 배지 사유 «지금은 다시 시도할 수 없어요…» · 잠금 줄은 버튼을 가리키지 않음', async () => {
+    stubFetch({ draftDetail: { ...PUBLISHABLE, command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-nc', command_retryable: false } as Record<string, unknown> });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-post-failure-retry-disabled-reason"]')?.textContent)
+      .toBe(koMessages.content.channelPostsFailureRetryUnavailable);
     expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent)
-      .toBe(koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', koMessages.content.channelPostsFailureCheckedRetryCta));
+      .toBe(koMessages.content.channelPostsPublishLockedNeedsCheckNoRetry);
   });
 
   it('not_sent(«안 나감»)는 잠그지 않는다 · 사유 문장 없음', async () => {

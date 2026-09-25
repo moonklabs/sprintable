@@ -15,6 +15,8 @@ READERS = {
     ("routers/channel_posts.py", "_to_draft_list_item"),  # 글 상세 · 목록 command_retryable
     ("routers/channel_post_comments.py", "_comment_reply_summary"),  # 댓글 목록의 답변 요약
     ("routers/channel_post_comment_replies.py", "_reply_view"),  # 답변 단건
+    ("routers/site_posts.py", "_publication_command_view"),  # 블로그 글 상세(PO 05:01Z · 유나)
+    ("routers/gates.py", "get_gate_endpoint"),  # 뉴스레터 발송 게이트의 발송 명령 요약
 }
 
 

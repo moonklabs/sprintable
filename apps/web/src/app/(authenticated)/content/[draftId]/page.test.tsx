@@ -99,7 +99,7 @@ function stubFetchWithVersions(
       } | null;
       command?: {
         id: string; command_status: string; attempt_count: number; failure_kind: string | null;
-        next_retry_at: string | null; dead_letter_at: string | null; command_reason_code: string | null; last_error: string | null;
+        next_retry_at: string | null; dead_letter_at: string | null; command_reason_code: string | null; last_error: string | null; command_retryable?: boolean;
       } | null;
     };
     // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
@@ -230,10 +230,14 @@ function stubFetchWithVersions(
         const body = opts?.publication ?? {
           published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
         };
-        const withExternal = {
+        const merged = {
           destination: 'hosted_site', channel_publication: null, command: null,
           ...body,
-        };
+        } as Record<string, unknown> & { command: Record<string, unknown> | null };
+        // story #4290 — 서버처럼 command_retryable을 싣는다(`human_retryable`: dead_letter · blocked → 참) · 테스트가 직접 주면 그 값.
+        const withExternal = merged.command && !('command_retryable' in merged.command)
+          ? { ...merged, command: { ...merged.command, command_retryable: merged.command.command_status === 'dead_letter' || merged.command.command_status === 'blocked' } }
+          : merged;
         return { ok: true, status: 200, json: async () => ({ data: withExternal, error: null, meta: null }) };
       }
       if (url === `/api/organizations/${ORG_ID}/publication-commands/cmd-1/retry` && init?.method === 'POST') {
@@ -1840,16 +1844,33 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
   });
 
   // story #4266 — 예전엔 재시도 실패가 조용했다(결과 줄 없음 · 확인 창만 열린 채). 이제 창을 닫고 결과 줄 · 404는 다시 읽고 유나 문장.
-  async function retryWith(onRetry: () => { status: number; body: unknown }) {
+  // story #4290 — commandAfterRetry: 재시도 뒤 다시 읽는 발행 상태의 명령(그 사이 다른 시도가 명령을 움직였다). 없으면 재시도 전 그대로.
+  async function retryWith(onRetry: () => { status: number; body: unknown }, commandAfterRetry?: Record<string, unknown>) {
+    const command = { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: null, next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' };
     stubFetchWithVersions([VERSION_1], undefined, undefined, {
       publication: {
         published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
         destination: 'webhook',
         channel_publication: null,
-        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: null, next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout' },
+        command,
       },
       onRetryPublicationCommand: onRetry,
     });
+    if (commandAfterRetry) {
+      const base = globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>;
+      let retried = false;
+      vi.stubGlobal('fetch', vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+        if (String(u).endsWith('/retry') && i?.method === 'POST') { retried = true; return base(u, i); }
+        if (retried && String(u) === `/api/organizations/${ORG_ID}/site-posts/drafts/${DRAFT_ID}/publication`) {
+          const data = {
+            published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+            destination: 'webhook', channel_publication: null, command: { ...command, ...commandAfterRetry },
+          };
+          return { ok: true, status: 200, json: async () => ({ data, error: null, meta: null }) };
+        }
+        return base(u, i);
+      }));
+    }
     await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
     await flush();
     await flush();
@@ -1877,12 +1898,41 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
   });
 
   it('⭐#4266 AC2 — 재시도 404 → 창 닫힘 · 발행 상태를 다시 읽고 유나 문장 · 서버 원문 0', async () => {
-    const { reloads } = await retryWith(() => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }));
+    // 그 사이 다른 시도가 명령을 pending으로 돌렸다(서버: 지금 재시도 불가).
+    const { reloads } = await retryWith(
+      () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+      { command_status: 'pending', dead_letter_at: null, command_retryable: false },
+    );
     expect(document.body.querySelector('[data-testid="content-retry-confirm-what"]')).toBeNull();
     expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent)
       .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
     expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
     expect(reloads).toBe(1);
+  });
+
+  // story #4290(유나 03:29Z) — 404 뒤 다시 읽은 명령이 다시 시도 가능한 새 멈춤이면 «그 사이 다시 시도됐고…» · 버튼 켜짐(채널 포스트와
+  // 같은 키). 뮤테이션: withReload가 다시 읽은 판정을 무시하면 RED.
+  it('⭐#4290 — 재시도 404 + 다시 읽은 명령이 새 멈춤 → «그 사이 다시 시도됐고…» · 버튼 켜짐', async () => {
+    await retryWith(() => ({ status: 404, body: { detail: 'x' } }));
+    expect(container.querySelector('[data-testid="content-retry-result"] p')?.textContent)
+      .toBe(koMessages.content.publicationRetryStoppedAgainReloaded);
+    expect((container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // story #4290 AC2 — 버튼은 서버 판정(command_retryable)만 본다. 뮤테이션: onRetryClick을 늘 넘기면 RED.
+  it('⭐#4290 AC2 — 서버가 다시 시도 불가라고 한 명령엔 다시 시도 버튼이 눌리지 않는다', async () => {
+    stubFetchWithVersions([VERSION_1], undefined, undefined, {
+      publication: {
+        published_at: null, url: null, published_by_member_id: null, published_body_sha256: null,
+        destination: 'webhook', channel_publication: null,
+        command: { id: 'cmd-1', command_status: 'dead_letter', attempt_count: 5, failure_kind: 'needs_check', next_retry_at: null, dead_letter_at: '2026-09-05T00:00:00Z', command_reason_code: null, last_error: 'timeout', command_retryable: false },
+      },
+    });
+    await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+    await flush();
+    await flush();
+    const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+    expect(btn === null || btn.disabled).toBe(true);
   });
 
   // 까디르 codex 4634 P2② — 재시도 뒤 다시 읽기가 실패해도 외부 발행 카드와 결과 줄이 사라지지 않는다(예전: setPublication(null)).
