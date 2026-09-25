@@ -30,7 +30,7 @@ export default async function TermsPage() {
           {doc ? (
             <>
               <p className="mb-6 text-xs text-muted-foreground">
-                시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz).display}
+                시행일: {formatScheduledAt(doc.effectiveFrom, resolveDisplayTimezone().tz, null).display}
               </p>
               <DocContentRenderer
                 content={doc.content}

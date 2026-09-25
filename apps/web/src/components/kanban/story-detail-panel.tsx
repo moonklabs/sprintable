@@ -957,7 +957,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const humanVerifiedByName = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? story.human_verified_by.slice(0, 6)) : null;
   const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
     story.human_verified && humanVerifiedByName && story.human_verified_at
-      ? { variant: 'verified', humanName: humanVerifiedByName, when: formatDate(story.human_verified_at) }
+      ? { variant: 'verified', humanName: humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
       : story.self_reported
         ? (proofAgent ? { variant: 'claimed', agentInitial: initials(proofAgent.name) } : { variant: 'claimed' })
         : undefined;

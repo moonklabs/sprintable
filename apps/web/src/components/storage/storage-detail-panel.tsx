@@ -135,7 +135,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
                 )
               }
             />
-            <MetaRow label={t('metaCreated')} value={formatDate(asset.created_at)} />
+            <MetaRow label={t('metaCreated')} value={formatDate(asset.created_at, displayTimezone)} />
             <MetaRow label={t('metaUpdated')} value={formatRelativeTime(asset.updated_at, locale, displayTimezone)} last />
 
             {usageCount > 0 ? (

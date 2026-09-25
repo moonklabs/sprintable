@@ -16,6 +16,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 }));
 
 import ContentRulesPage from './page';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -144,7 +145,9 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
     // story #3747 CHANGES(§11-2 정본 formatScheduledAt) — "MM-DD HH:mm TZ" 꼴(브라우저
     // toLocaleString 아님). TZ는 테스트 실행 환경에 따라 달라 정규식으로만 pin.
-    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} .+ · 송윤재/);
+    // story #4280 — 화면은 표시 시간대(resolveDisplayTimezone · 조직 tz 없으면 실행 기계 TZ)로 그리고 표기도 보는 사람에 따라 붙거나 생략된다.
+    // 날짜(09-07)를 박아 두면 LA처럼 음의 오프셋 기계에서 09-06이 되어 깨졌다(develop부터) — 기대값을 화면과 같은 포맷터로 만든다.
+    expect(header.textContent).toBe(`마지막 변경 ${formatScheduledAt('2026-09-07T00:00:00Z', resolveDisplayTimezone().tz).display} · 송윤재`);
   });
 
   it('⭐아직 한 번도 규칙을 안 정한 조직(row 자체가 없음) — 「아직 정한 적 없습니다」(빈 줄 아님)', async () => {
@@ -159,7 +162,7 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     stubFetch({ updatedByName: null });
     await mount('owner');
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
-    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} /);
+    expect(header.textContent).toBe(`마지막 변경 ${formatScheduledAt('2026-09-07T00:00:00Z', resolveDisplayTimezone().tz).display}`);
   });
 
   it('⭐member는 행 액션(고치기/정하기) 버튼이 없고 값은 그대로 본다(secret 아님)', async () => {

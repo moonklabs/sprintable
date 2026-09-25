@@ -262,7 +262,8 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
 
     const rows = [...container.querySelectorAll('table [data-testid="insights-board-row"]')];
     const publishedCell = rows[0]!.querySelector('[data-testid="insights-board-published-at"]');
-    expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2} /);
+    // story #4280 — 시간대 표기는 보는 사람(실행 기계 TZ)과 같은 오프셋이면 생략 · 다르면 «GMT±N»이라 기계 TZ에 따라 붙거나 안 붙는다 — 표기는 선택으로 둔다(표기 규칙 자체는 schedule-format.test.ts 진리표가 고정).
+    expect(publishedCell?.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}(?: GMT\S*)?$/);
     expect(publishedCell?.textContent).not.toMatch(/전|그저께|어제|오늘/);
   });
 });
