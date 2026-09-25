@@ -25,6 +25,7 @@ import {
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberLookup } from '@/lib/member-display';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
 
@@ -198,10 +199,12 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
       .filter((entry) => Boolean(entry.blockers?.trim()))
       .map((entry) => ({
         authorId: entry.author_id,
-        name: memberNameById[entry.author_id] ?? t('unknown'),
+        // [SID:4300] 이름이 빈 구성원을 «알 수 없음»으로 쓰던 자리 — #4284 계약대로 표에 있는데 이름 빔 = «이름 없는 구성원»,
+        // 표에 없음 = «알 수 없는 구성원». 막힘 모음은 불러오기가 끝난 뒤(!loading)에만 그려져 loaded=true.
+        name: memberLookup(memberNameById, entry.author_id, tc)!.label,
         blockers: entry.blockers as string,
       }))
-  ), [entries, memberNameById, t]);
+  ), [entries, memberNameById, tc]);
 
   const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
   const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);

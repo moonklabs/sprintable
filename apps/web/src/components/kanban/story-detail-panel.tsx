@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -106,6 +108,8 @@ interface StoryDetailPanelProps {
   onStoryUpdate?: (updated: KanbanStory) => void;
   onDeleteSuccess?: (storyId: string) => void;
   memberMap?: Record<string, KanbanMember>;
+  /** [SID:4300] memberMap(프로젝트 범위)을 다 받았는지. 받기 전엔 «표에 없음»을 판단하지 않는다(기본 true — 보드는 표를 받은 뒤 패널을 연다). */
+  memberMapLoaded?: boolean;
   members?: KanbanMember[];
   storyMap?: Record<string, { title: string; status: string }>;
   epicMap?: Record<string, string>;
@@ -360,7 +364,7 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap: projectMemberMap = {}, memberMapLoaded = true, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
@@ -379,6 +383,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const [deleting, setDeleting] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  // [SID:4300] 이름표 = 넘겨받은 프로젝트 범위 + 이 패널에 보이는 id가 거기 없을 때만 조직 범위(권한 회수 · 다른 프로젝트 에이전트).
+  // 보드로 열든 흐름 그래프로 열든 같은 이름이 서게 패널 안에서 채운다. 담당자 «고르는» 목록(members)은 프로젝트 범위 그대로.
+  // OrgMember는 KanbanMember와 같은 모양({id, name, type, runtime_type} · #4284 뒤 name nullable)이라 그대로 넘긴다.
+  const { orgId } = useDashboardContext();
+  const nameFallback = useMemberNameFallback(orgId, projectMemberMap, [
+    story.assignee_id, ...(story.assignee_ids ?? []), story.human_verified_by, story.human_owner_member_id,
+    ...comments.map((c) => c.created_by), ...activities.map((a) => a.created_by),
+  ], memberMapLoaded);
+  const memberMap = nameFallback.memberMap as Record<string, KanbanMember>;
+  const memberNamesLoaded = nameFallback.loaded;
   const [nextCommentsCursor, setNextCommentsCursor] = useState<string | null>(null);
   const [nextActivitiesCursor, setNextActivitiesCursor] = useState<string | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -959,9 +973,15 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
   // [SID:4286] 검증자 id 조각(앞 6자)을 이름 칸 · 머리글자에 싣지 않는다 — 읽는 글자: 표에 있는데 이름 빔 → «이름 없는 구성원», 표에 없음 →
   // «알 수 없는 구성원». 신원(머리글자)은 이름 그대로 · 없거나 표에 없으면 null → 사람 아이콘(#4284 name/label 계약).
-  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, tc('memberUnknown')) : null;
+  // [SID:4300] 표는 프로젝트 범위 + 없을 때 조직 범위(위 nameFallback). 조직 표를 받는 동안(null)은 봉인 자체를 미룬다 — «알 수
+  // 없음»이나 «주장만» 봉인이 먼저 섰다가 «검증됨 · 이름»으로 바뀌는 거짓을 안 만든다.
+  const verifiedByLookup = story.human_verified_by
+    ? memberLookup(memberMap, story.human_verified_by, tc, { loaded: memberNamesLoaded })
+    : null;
+  const verifiedByPending = !!story.human_verified_by && verifiedByLookup === null;
+  const humanVerifiedByName = verifiedByLookup?.label ?? null;
   const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? null) : null;
-  const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
+  const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined = verifiedByPending ? undefined :
     story.human_verified && humanVerifiedByName && story.human_verified_at
       ? { variant: 'verified', humanName: humanVerifiedByIdentity, humanLabel: humanVerifiedByIdentity ? undefined : humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
       : story.self_reported
@@ -990,7 +1010,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   };
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
     // [SID:4286 · 까디르 P1] 작성자 id 통째를 이름 칸에 싣던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
-    author: memberLookup(memberMap, c.created_by, tc)!.label,
+    // [SID:4300] 조직 표를 받는 동안은 빈 글자.
+    author: memberLookup(memberMap, c.created_by, tc, { loaded: memberNamesLoaded })?.label ?? '',
     body: c.content,
   }));
 
@@ -1490,6 +1511,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               humanVerifiedBy={story.human_verified_by}
               humanVerifiedAt={story.human_verified_at}
               memberMap={memberMap}
+              memberNamesLoaded={memberNamesLoaded}
             />
             {/* story #2265(C-7) PR1b — "대화 근거"(proof). EvidenceSection 바로 아래,
                 "근거" 계열 이름으로(구조 이름 "참조"·"임베드" 미노출, PO 확定). 0건이면

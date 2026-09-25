@@ -41,11 +41,11 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-function stubFetch(opts: { missingReject?: boolean; entries?: unknown[] } = {}) {
+function stubFetch(opts: { missingReject?: boolean; entries?: unknown[]; members?: unknown[] } = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => null };
     if (url.includes('/api/standup?date=')) return { ok: true, json: async () => ({ data: opts.entries ?? [] }) };
-    if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+    if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: opts.members ?? [] }) };
     if (url.includes('/api/sprints?project_id=')) {
       return { ok: true, json: async () => ({ data: [{ id: 'sp1', title: '진행중 스프린트', status: 'active', start_date: null, end_date: null }] }) };
     }
@@ -102,5 +102,27 @@ describe('StandupClient — embedded prop(story #3845 §①, TopBarSlot 싱글�
     stubFetch({ entries: [{ id: 'e1', author_id: 'me-1', date: '2026-09-14', done: '', plan: '', blockers: null, plan_story_ids: [] }] });
     await mount({ embedded: true });
     expect(container.textContent).not.toContain(koMessages.standup.noCheckinsToday);
+  });
+});
+
+// [SID:4300] 막힘 모음의 작성자 이름 — 예전엔 이름이 빈 구성원도 «알 수 없음»이었다. #4284 계약: 표에 있는데 이름 빔 = «이름 없는
+// 구성원», 표에 없음 = «알 수 없는 구성원». 두 갈래를 한 화면에서 가른다.
+describe('StandupClient — 막힘 모음 작성자 이름([SID:4300])', () => {
+  it('이름 빔 → «이름 없는 구성원» · 표에 없음 → «알 수 없는 구성원» · «알 수 없음» 0', async () => {
+    stubFetch({
+      members: [{ id: 'm-noname', name: null, type: 'human' }, { id: 'm-anna', name: '안나', type: 'human' }],
+      entries: [
+        { id: 'e1', author_id: 'm-noname', date: '2026-09-25', done: '', plan: '', blockers: '빌드 막힘', plan_story_ids: [] },
+        { id: 'e2', author_id: 'm-gone', date: '2026-09-25', done: '', plan: '', blockers: '권한 막힘', plan_story_ids: [] },
+        { id: 'e3', author_id: 'm-anna', date: '2026-09-25', done: '', plan: '', blockers: '리뷰 대기', plan_story_ids: [] },
+      ],
+    });
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('빌드 막힘');
+    expect(text).toContain(koMessages.common.memberUnnamed);
+    expect(text).toContain(koMessages.common.memberUnknown);
+    expect(text).toContain('안나');
+    expect(text).not.toContain(koMessages.standup.unknown);
   });
 });

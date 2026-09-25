@@ -18,6 +18,11 @@ vi.mock('@/lib/db/client', () => ({
   fetchWithAuth: (...args: Parameters<typeof fetchWithAuthMock>) => fetchWithAuthMock(...args),
 }));
 
+// [SID:4300] 기본은 org 없음(조직 범위 보충 안 함 — 기존 테스트 그대로). 보충 테스트만 orgId를 채운다.
+const dashCtx = vi.hoisted(() => ({ value: {} as { orgId?: string } }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
+import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -57,6 +62,8 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  dashCtx.value = {};
+  resetOrgMembersCacheForTests();
 });
 
 describe('TeamActivityView — 페이지 h1 1개(story #3946)', () => {
@@ -86,5 +93,48 @@ describe('TeamActivityView — 활동 항목 링크는 자기 프로젝트(story
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('/docs?id=d1&p=proj-X');
+  });
+});
+
+// [SID:4300] 행위자 이름표 = 프로젝트 범위 + 없을 때 조직 범위. 다른 프로젝트 에이전트 · 권한이 회수된 사람이 «알 수 없는 구성원»이
+// 아니라 이름으로 선다(유나 판정: 꼬리 없이 이름만). 행위자 필터 선택지(members)는 코드상 프로젝트 범위 그대로(이 카드가 안 바꿈).
+describe('TeamActivityView — 행위자 이름 조직 범위 보충([SID:4300])', () => {
+  function stub(orgRows: Array<{ id: string; name: string | null; type: string }>) {
+    const calls: string[] = [];
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      calls.push(url);
+      if (url === ORG_NAMES_URL) return { ok: true, status: 200, json: async () => ({ data: orgRows }) };
+      if (url.startsWith('/api/members?project_id=')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'om-a', name: '안나', type: 'human' }] }) };
+      if (url.includes('/api/activity-stream')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: { items: [{
+            activity_id: 'a1', project_id: 'p1', actor_id: 'ag-other', verb: 'updated', object_type: 'doc', object_id: 'd1',
+            occurred_at: new Date().toISOString(), source_event_ids: [], recipient_ids: [], recipient_types: [], payload: {}, activity_seq: 1,
+          }], next_after_seq: null } }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    return calls;
+  }
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+
+  it('프로젝트 밖 행위자(다른 프로젝트 에이전트) → 조직 목록 한 번으로 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    const calls = stub([{ id: 'ag-other', name: '다른프로젝트봇', type: 'agent' }]);
+    await mount();
+    await settle();
+    expect(container.textContent).toContain('다른프로젝트봇');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(calls.filter((u) => u === ORG_NAMES_URL)).toHaveLength(1);
+  });
+
+  it('조직 목록에도 없으면(BE 원천 대기) «알 수 없는 구성원»', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    stub([]);
+    await mount();
+    await settle();
+    expect(container.textContent).toContain('알 수 없는 구성원');
   });
 });
