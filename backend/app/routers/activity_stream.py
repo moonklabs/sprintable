@@ -31,7 +31,7 @@ async def get_activity_stream(
     until: datetime | None = _UNTIL_QUERY,
     after_seq: int | None = Query(default=None, description="activity_seq > after_seq (cursor · order=asc)"),
     before_seq: int | None = Query(default=None, description="activity_seq < before_seq (cursor · order=desc)"),
-    order: Literal["asc", "desc"] = Query(default="asc", description="asc(기본 · 오래된 것부터) | desc(최신부터)"),
+    order: Literal["asc", "desc"] = Query(default="asc", description="asc (default, oldest first) | desc (newest first)"),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),

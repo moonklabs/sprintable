@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-T0 = datetime(2026, 9, 1, 0, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 9, 1, 0, 0, 0, tzinfo=UTC)
 
 _RAW = os.environ.get("PARITY_TEST_DATABASE_URL") or os.environ.get("ALEMBIC_DATABASE_URL") or ""
 _ASYNC_URL = (
@@ -90,7 +90,7 @@ async def test_desc_cursor_crosses_empty_weeks():
 
     old = [T0 + timedelta(minutes=i) for i in range(3)]
     recent = [T0 + timedelta(days=30, minutes=i) for i in range(3)]  # 사이에 네 주가 빈다
-    engine, Session, org, seqs = await _seed(old + recent)
+    engine, Session, org, _ = await _seed(old + recent)
     try:
         async with Session() as s:
             page1, cur1 = await query_activity_stream(s, org, order="desc", limit=3)
@@ -146,8 +146,8 @@ async def test_asc_default_is_unchanged_public_contract():
 
 async def _client(activity_rows):
     from app.dependencies.auth import get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
     from app.main import app
+    from tests.conftest import override_db_and_read
 
     mock_session = AsyncMock()
     result = MagicMock()
@@ -160,7 +160,7 @@ async def _client(activity_rows):
     async def override_auth():
         return MagicMock(user_id=str(uuid.uuid4()))
 
-    app.dependency_overrides[get_db] = override_db
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_verified_org_id] = lambda: uuid.uuid4()
     app.dependency_overrides[get_current_user] = override_auth
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app, mock_session
