@@ -1262,3 +1262,23 @@ describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 행 �
   });
 });
 
+// story #4284(까디르 CHANGES) — 워크셀 메시지 작성자: 목록에 없는 작성자는 id 통째가 아니라 «알 수 없는 구성원».
+describe('StoryDetailPanel — 워크셀 메시지의 모르는 작성자(story #4284)', () => {
+  it('⭐목록에 없는 작성자 → «알 수 없는 구성원» · 작성자 id는 화면에 없음', async () => {
+    const UNKNOWN = 'f00dcafe-0000-4000-8000-00000000abcd';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'c1', story_id: 's1', content: '모르는 작성자 댓글', created_by: UNKNOWN, created_at: '2026-09-25T00:00:00Z' }], meta: {} }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ status: 'in-progress' })} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('모르는 작성자 댓글');
+    expect(container.textContent).toContain(koMessages.chats.unknownMember);
+    expect(container.textContent).not.toContain(UNKNOWN);
+  });
+});
+

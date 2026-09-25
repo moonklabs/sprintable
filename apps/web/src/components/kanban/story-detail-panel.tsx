@@ -364,6 +364,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const t = useTranslations('board');
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
   const tc = useTranslations('common');
+  const tChats = useTranslations('chats'); // chats.unknownMember — «알 수 없는 구성원»(대화 · 토스 시트와 같은 낱말)
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
@@ -988,7 +989,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     done: t('workcellNextNeedDone'),
   };
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
-    author: memberNameById(memberMap, c.created_by, tc, c.created_by),
+    // story #4284(까디르 CHANGES) — 목록에 없는 작성자 폴백이 id 통째라 워크셀 메시지 작성자로 긴 id가 그려졌다 → «알 수 없는 구성원».
+    author: memberNameById(memberMap, c.created_by, tc, tChats('unknownMember')),
     body: c.content,
   }));
 
