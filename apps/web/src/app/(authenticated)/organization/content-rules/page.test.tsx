@@ -144,7 +144,8 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
     // story #3747 CHANGES(§11-2 정본 formatScheduledAt) — "MM-DD HH:mm TZ" 꼴(브라우저
     // toLocaleString 아님). TZ는 테스트 실행 환경에 따라 달라 정규식으로만 pin.
-    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} .+ · 송윤재/);
+    // story #4280 — 시간대 표기는 보는 사람(실행 기계 TZ)과 같은 오프셋이면 생략 · 다르면 «GMT±N»이라 기계 TZ에 따라 붙거나 안 붙는다 — 표기는 선택으로 둔다(표기 규칙 자체는 schedule-format.test.ts 진리표가 고정).
+    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2}(?: GMT\S*)? · 송윤재/);
   });
 
   it('⭐아직 한 번도 규칙을 안 정한 조직(row 자체가 없음) — 「아직 정한 적 없습니다」(빈 줄 아님)', async () => {
@@ -159,7 +160,7 @@ describe('ContentRulesPage — 조회·표시(story #3747)', () => {
     stubFetch({ updatedByName: null });
     await mount('owner');
     const header = container.querySelector('[data-testid="content-rules-last-changed"]')!;
-    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2} /);
+    expect(header.textContent).toMatch(/마지막 변경 09-07 \d{2}:\d{2}(?: GMT\S*)?$/);
   });
 
   it('⭐member는 행 액션(고치기/정하기) 버튼이 없고 값은 그대로 본다(secret 아님)', async () => {
