@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 MODEL_VERSION = "gemini-embedding-001"
 
 
+# story #4322 — 임베딩 호출 명시 시간 제한(밀리초). 짧은 한 문장 임베딩이라 생성보다 짧게 — 멈추면 None(검색은 벡터 없이 폴백).
+EMBED_TIMEOUT_MS = 10_000
+
+
 def _has_adc() -> bool:
     """Application Default Credentials 사용 가능 여부 간단 체크(ga4_client.py와 동형)."""
     try:
@@ -55,7 +59,7 @@ def embed_text(text: str) -> list[float] | None:
             vertexai=True,
             project=settings.gcp_project_id,
             location=settings.vertex_ai_location,
-            http_options=types.HttpOptions(api_version="v1"),
+            http_options=types.HttpOptions(api_version="v1", timeout=EMBED_TIMEOUT_MS),
         )
         response = client.models.embed_content(
             model=MODEL_VERSION,

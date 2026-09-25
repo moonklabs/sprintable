@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -692,7 +694,8 @@ async def draft_hypothesis(
     S15: gen-LLM(S25)으로 statement 초안 시도 → 미가용/실패 시 기존 deterministic 템플릿으로
     graceful fallback. metric_definition/measure_after는 여전히 고정값(사람이 다듬는 전제).
     """
-    statement, llm_generated = _draft_statement(payload.context)
+    # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+    statement, llm_generated = await asyncio.to_thread(_draft_statement, payload.context)
     metric_definition = {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"}
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     snapshot = _build_source_snapshot(payload.context)

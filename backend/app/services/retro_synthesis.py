@@ -17,6 +17,8 @@ Gemini 피벗(2026-07-03, 선생님/PO 지시): moonklabs org GCP credit이 Vert
 전부 무변경(llm_client.py 참고)."""
 from __future__ import annotations
 
+import asyncio
+
 import json
 import logging
 import math
@@ -198,7 +200,8 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
 
     raw = None
     try:
-        raw = generate_text(prompt, response_schema=_SYNTHESIS_SCHEMA)
+        # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+        raw = await asyncio.to_thread(generate_text, prompt, response_schema=_SYNTHESIS_SCHEMA)
     except Exception as exc:  # noqa: BLE001 — 예외도 "실패"로 수렴(None), 여기서 삼키지 않음.
         logger.warning("retro synthesize: LLM 호출 실패: %s", exc)
 
@@ -266,7 +269,8 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
 
     raw = None
     try:
-        raw = generate_text(prompt, response_schema=_NEXT_HYPOTHESES_SCHEMA)
+        # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+        raw = await asyncio.to_thread(generate_text, prompt, response_schema=_NEXT_HYPOTHESES_SCHEMA)
     except Exception as exc:  # noqa: BLE001
         logger.warning("retro recommend_next: LLM 호출 실패: %s", exc)
     if not raw:
