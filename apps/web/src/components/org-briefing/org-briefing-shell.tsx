@@ -92,7 +92,10 @@ export function OrgBriefingShell() {
   const dateLabel = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric', weekday: 'long' }).format(today);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 lg:p-6">
+    // story #4277(민 기기 #1) — 셸 본문 열(flex-col) 안에서 mx-auto(자동 여백)가 stretch를 꺼 이 뿌리가 «내용 폭»으로 줄었다 → 긴 제목(한 줄
+    // 말줄임 · nowrap)의 폭이 그대로 뿌리 폭(최대 max-w-4xl = 896px)이 돼 402폭에서 가로로 밀어야 «승인하고 서명» · «보내기»가 보였다.
+    // w-full로 열 폭을 채우고(말줄임이 제 폭 안에서 동작) mx-auto는 넓은 화면 가운데 정렬만 맡는다.
+    <div className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6">
       {nextTarget ? (
         <Alert role="status">
           <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>

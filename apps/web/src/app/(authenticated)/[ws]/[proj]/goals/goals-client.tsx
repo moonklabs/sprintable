@@ -1281,9 +1281,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       <TopBarSlot
         title={<p className="text-sm font-medium">{t('title')}</p>}
         actions={
-          <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newGoal')}
+          // story #4277 — 402폭에서 글자 버튼이 상단바를 가로로 넘쳤다(410/402 · 가드가 잡음). 스프린트 상단바 관례: 폰은 아이콘만 · 접근 이름 aria-label.
+          <Button size="sm" variant="outline" onClick={() => setShowCreate(true)} aria-label={t('newGoal')}>
+            <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">{t('newGoal')}</span>
           </Button>
         }
         showContextChip

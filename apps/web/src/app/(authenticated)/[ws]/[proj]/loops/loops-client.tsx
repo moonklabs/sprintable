@@ -145,9 +145,11 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          // story #4277(민 기기 #6) — 402폭에서 «새 실행 시작하기» 글자 버튼이 상단 제목을 «실.»로 밀었다. 스프린트 상단바 관례: 폰은 아이콘만 ·
+          // 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
+          <Button size="sm" onClick={() => setCreateOpen(true)} aria-label={t('createLoopCta')}>
             <Plus className="size-3.5" />
-            {t('createLoopCta')}
+            <span className="hidden sm:inline">{t('createLoopCta')}</span>
           </Button>
         }
         showContextChip

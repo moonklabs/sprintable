@@ -76,7 +76,7 @@ export function StorageAssetList({
   };
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-col">
+    <section className="flex min-h-0 min-w-0 flex-col" data-testid="storage-asset-list">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <Button size="sm" onClick={() => fileInputRef.current?.click()}>

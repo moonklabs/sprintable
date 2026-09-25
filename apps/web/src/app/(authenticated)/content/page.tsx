@@ -343,7 +343,8 @@ export default function ContentPostListPage() {
         actions={chatAction}
       />
 
-      <div className="flex items-center justify-between gap-4">
+      {/* story #4277 — 402폭에서 상태 탭 다섯 + «보관됨 보기»가 한 줄에 안 들어가 셸 스크롤러가 가로로 넘쳤다(493/402). 좁으면 토글이 다음 줄로. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
           <TabsList>
             <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>

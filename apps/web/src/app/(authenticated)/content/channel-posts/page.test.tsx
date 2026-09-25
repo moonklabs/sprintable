@@ -374,6 +374,25 @@ describe('ChannelPostListPage (story #3402)', () => {
     expect(container.textContent).toContain('마케팅 자동화가 실제로 아끼는 시간은…');
   });
 
+  // story #4277(민 기기 15번) — 402폭 카드에서 제목이 말줄임 없이 잘렸다: 인라인 <a>에 걸린 `truncate`는 말줄임표를 못 그리고 카드 제목 칸의
+  // 두 줄 말줄임(line-clamp-2)도 한 줄로 막았다. 카드(lg 미만)엔 한 줄 강제 0 · 표(lg 이상)에서만 block+truncate.
+  it('⭐4277 15번 — 목록 제목 링크는 lg 이상에서만 한 줄 말줄임(카드에선 칸의 두 줄 말줄임에 맡김)', async () => {
+    stubFetch([{ ...DRAFT_A, text_preview: '리허설 ⑤-2 · 계보 앵커 확認 (재발행 경로 : 아주 긴 제목이 카드 폭을 넘는다)', text_length: 363 }]);
+    await act(async () => {
+      root.render(wrap(<ChannelPostListPage />));
+    });
+    await flush();
+
+    const links = [...container.querySelectorAll('a')].filter((a) => a.textContent?.startsWith('리허설 ⑤-2'));
+    expect(links.length).toBeGreaterThan(0);
+    for (const a of links) {
+      const tokens = a.className.split(/\s+/);
+      expect(tokens).not.toContain('truncate');
+      expect(tokens).toContain('lg:truncate');
+      expect(tokens).toContain('lg:block');
+    }
+  });
+
   it('로드 실패 — 오류 알림을 보인다', async () => {
     stubFetch({ status: 500 });
     await act(async () => {

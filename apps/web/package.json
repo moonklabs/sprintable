@@ -77,6 +77,7 @@
     "e2e:contrast": "playwright test contrast-guard.spec.ts",
     "e2e:card-surface": "playwright test card-surface-guard.spec.ts",
     "e2e:v3-narrow-width": "playwright test v3-narrow-width-overflow.spec.ts",
+    "e2e:mobile-width": "playwright test mobile-width-overflow.spec.ts",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
   },

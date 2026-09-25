@@ -326,6 +326,7 @@ export function MobileTabBar({
   return (
     <nav
       aria-label={t('navLabel')}
+      data-testid="mobile-tab-bar"
       // story #3756 — 탭 바 높이는 이제 globals.css `.dashboard-shell-root`가 소유한
       // `--mobile-tab-bar-h`(4rem, 기존 h-16과 동일값) 토큰을 참조한다(두 벌 상수 금지 —
       // 이 값을 바꾸려면 globals.css 그 한 줄만 고치면 우하단 fixed 요소들의 인셋도 함께 맞다).

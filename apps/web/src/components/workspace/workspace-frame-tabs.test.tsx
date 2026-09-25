@@ -162,4 +162,25 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
       expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/flow');
     });
   });
+
+  // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이라 켜진 탭이 화면 밖일 수 있다 → 그릴 때 · 탭이 바뀔 때 켜진 탭을 줄 안으로(nearest).
+  it('⭐켜진 탭을 그릴 때 · 바뀔 때 scrollIntoView(nearest) — 다른 탭은 부르지 않는다', async () => {
+    const calls: Array<{ text: string | null; opts: unknown }> = [];
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, opts?: unknown) { calls.push({ text: this.textContent, opts }); } as typeof orig;
+    try {
+      const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="hypothesis" />)); });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.opts).toEqual({ block: 'nearest', inline: 'nearest' });
+      const selected = container.querySelector('[aria-selected="true"]');
+      expect(calls[0]!.text).toBe(selected?.textContent);
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.text).toBe(container.querySelector('[aria-selected="true"]')?.textContent);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
+  });
 });
+

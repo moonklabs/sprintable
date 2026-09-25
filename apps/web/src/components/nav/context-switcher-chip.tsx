@@ -103,7 +103,13 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           variant="ghost"
           onClick={() => s.setOpen(true)}
           disabled={s.pending}
-          className="h-11 min-h-0 min-w-0 max-w-[190px] shrink-0 justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden"
+          // story #4277(민 기기 5번) — 402폭에서 칩이 최대 폭(190px · shrink-0)을 끝까지 쥐면 칩 + 화면 액션 + 전역 아이콘 셋(프레즌스 · 새 소식 · 알림)이
+          // 한 줄에 안 들어가 알림 벨이 화면 밖으로 밀렸다(버튼을 아이콘으로 접어도 긴 조직 · 프로젝트 이름이면 재현). 칩이 먼저 양보한다(shrink) —
+          // 안의 조직 · 프로젝트 이름은 이미 truncate라 말줄임으로 줄고, 최소 폭은 조직 첫 글자 칸(44px = 28 + 좌우 8).
+          // shrink-[10000]: 제목(기준 폭 = 글자 폭 · shrink 1)과 비례로 줄면 제목도 소수점 픽셀만큼 줄어 고밀도 화면(DPR 2 · 3)에서 «실…»이 된다(캡처 실측).
+          // 비율을 1만 배로 두면 제목 몫이 레이아웃 단위(1/64px) 아래라 사실상 0 — 칩이 최소 폭에 닿은 뒤에야 제목이 남은 부족분을 떠안는다.
+          // 유나 판단 ②: 태블릿 폭(상단바 막대 640px 이상)에선 칩이 머리글자까지 접히지 않게 120px 바닥 — 그 뒤 모자란 폭은 제목이 말줄임. 폰은 44px 그대로.
+          className="h-11 min-h-0 min-w-11 @[40rem]:min-w-[7.5rem] max-w-[190px] shrink-[10000] justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden"
           aria-label={t('switcherMobileTriggerAria')}
         >
           <OrgInitial name={s.displayOrg} className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-brand text-xs font-semibold text-brand-foreground" />

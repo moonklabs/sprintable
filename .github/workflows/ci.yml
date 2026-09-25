@@ -2597,6 +2597,36 @@ jobs:
       - name: Run card-surface e2e (background-adjacent surfaceless box)
         run: pnpm --filter web e2e:card-surface
 
+      # story #4277(high · 민 기기 탐색 점검 배포 27) — 402폭 전 경로 가로 넘침 가드. 목적지는 /more 메뉴 링크 + 하단 탭바 링크를 실행 때 읽어
+      # 모으고(새 화면 자동 포함), documentElement뿐 아니라 셸의 세로 스크롤러(가로도 암묵 스크롤)까지 잰다 — 옛 자(documentElement만)는
+      # 셸 스크롤러 안의 넘침을 0으로 쟀다. 데이터 있는 상태(빈 화면 = 거짓 PASS)를 spec의 beforeAll이 API로만 심는다(NEXT_PUBLIC_FASTAPI_URL).
+      # 플래그 OFF 기본 탭바 기준이라 위 두 e2e와 같은 env.
+      # 이 가드는 전 경로(탭 4 + 전체 메뉴 ~19)를 돈다 — `pnpm dev`(webpack dev) 위에서는 경로마다 첫 컴파일(CI 러너 1~2분) · 메모리 재시작
+      # («Server is approaching the used memory threshold») · 재시작 중 이동(«Router action dispatched before initialization»)이 겹쳐
+      # 18분 넘게 돌다 잡 제한(25분)에 걸렸다(PR 4639 run 36087407788 · 두 번 같은 자리). 프로덕션 빌드 한 번(~3.5분 · ci-work Build 실측) +
+      # `next start` 위에서 돈다 — 컴파일이 없어 경로당 몇 초. 포트는 잡 env의 3108 그대로(로그인 CSRF가 NEXT_PUBLIC_APP_URL 오리진을 본다).
+      # 다음 스텝(v3 narrow-width)의 `pnpm dev`는 kill-port.sh로 3108을 비우고 뜬다(아래 정리 스텝은 안전망).
+      - name: Build web for mobile-width overflow e2e (production)
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          LICENSE_CONSENT: agreed
+
+      - name: Run mobile-width overflow e2e (story #4277)
+        working-directory: apps/web
+        run: |
+          nohup pnpm exec next start --port 3108 > /tmp/next-start-mobile-width.log 2>&1 &
+          echo $! > /tmp/next-start-mobile-width.pid
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3108/login && break; sleep 2; done
+          PLAYWRIGHT_BASE_URL=http://localhost:3108 pnpm exec playwright test mobile-width-overflow.spec.ts
+
+      - name: Stop production server (mobile-width)
+        if: always()
+        run: |
+          kill "$(cat /tmp/next-start-mobile-width.pid 2>/dev/null)" 2>/dev/null || true
+          cat /tmp/next-start-mobile-width.log 2>/dev/null | tail -20 || true
+
       # story #4006(critical, 5pt) AC3 — v3 화면(오늘·대화·연결·규칙·일감·결과, 「가설」은
       # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 별도 env로 v3 플래그
       # 3개를 켠다(job 레벨 env엔 안 실음 — 위 contrast/card-surface e2e는 플래그 OFF 기준을
