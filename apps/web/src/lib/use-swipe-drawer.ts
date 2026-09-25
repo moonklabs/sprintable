@@ -95,3 +95,14 @@ export function useSwipeDrawer(
 
   return { progress, dragging };
 }
+
+/**
+ * [SID:4288] 닫힌 서랍의 속성 — 보조기술에서 숨김(aria-hidden)과 함께 초점 · 클릭에서도 뺀다(inert). 예전엔 aria-hidden +
+ * 화면 밖 이동(translateX)뿐이라 Tab이 보이지 않는 서랍 속 버튼으로 들어갔다(aria-hidden 속 초점 = 접근성 위반). 손으로 끄는
+ * 중(0 < progress < 1)은 여는 중이라 둘 다 풀어 둔다 — 열림 · 닫힘은 progress 1 · 0으로 정착한다. 연 뒤 초점 가두기 · 닫은 뒤
+ * 여는 버튼으로 초점 복귀는 각 서랍의 useFocusTrap 그대로.
+ */
+export function closedDrawerProps(progress: number): { 'aria-hidden': boolean; inert: boolean } {
+  const closed = progress === 0;
+  return { 'aria-hidden': closed, inert: closed };
+}

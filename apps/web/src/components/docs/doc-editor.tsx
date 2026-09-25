@@ -697,7 +697,8 @@ export function DocEditor({
           role="toolbar"
           aria-label={labels.toolbar}
           className={`fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm transition-transform duration-200 md:hidden ${
-            isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+            // [SID:4288] 편집기 초점이 빠진 뒤 Tab이 이 도구막대로 들어오면 숨은 채 초점을 받던 것 — 안에 초점이 있으면 보인다.
+            isFocused ? 'translate-y-0' : 'translate-y-full pointer-events-none focus-within:translate-y-0 focus-within:pointer-events-auto'
           }`}
         >
           <div className="flex overflow-x-auto items-center gap-1 px-2 py-2" onMouseDown={(e) => e.preventDefault()}>

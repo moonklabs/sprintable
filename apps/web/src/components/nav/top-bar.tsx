@@ -39,7 +39,8 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
         'sticky top-0 z-30 bg-background transition-transform',
         '[transition-duration:var(--gnb-hide-duration)]',
         '[transition-timing-function:var(--gnb-hide-easing)]',
-        hidden && '-translate-y-full',
+        // [SID:4288] 스크롤로 숨은 채 Tab 초점이 들어오면 다시 보인다(보이지 않는 초점 0 · 내용은 늘 닿아야 해서 inert가 아님).
+        hidden && '-translate-y-full focus-within:translate-y-0',
         className,
       )}
     >
