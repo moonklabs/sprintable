@@ -2978,6 +2978,7 @@
     "channelPostsFailureNeedsCheck": "Check the channel — we can't tell if this went out.",
     "channelPostsFailureCheckedRetryCta": "Checked · retry",
     "channelPostsPublishLockedNeedsCheck": "This may already be on the channel — check there, then use \"{cta}\" above.",
+    "channelPostsPublishRefusedNeedsCheck": "Not sent again — this may already be on the channel. Check there, then use \"{cta}\".",
     "channelPostsFailureAutoRetryAt": "This will retry automatically at {time}.",
     "channelPostsFailureAutoRetryUnknown": "This will retry automatically shortly.",
     "channelPostsFailureDeadLetter": "Automatic retries have stopped.",

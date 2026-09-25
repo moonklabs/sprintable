@@ -6296,8 +6296,15 @@ describe('발행 버튼 — needs_check면 잠금(story #4264 · 유나)', () =>
     expect(publish.disabled).toBe(false);
     await act(async () => { publish.click(); });
     await flush();
-    const sentence = koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', koMessages.content.channelPostsFailureCheckedRetryCta);
-    expect(container.querySelector('[data-testid="channel-post-publish-error-reason"]')?.textContent).toBe(sentence);
+    // 유나 재검(02:05Z) — 빨간 알림 = 일어난 일(«다시 보내지 않았어요» · BE 409 문장) · 외부 영향 줄 0(어댑터를 안 불렀다) · 회색 잠금
+    // 줄은 상태로 그대로. 한 화면에 같은 잠금 문장이 두 번 쌓이지 않는다.
+    const cta = koMessages.content.channelPostsFailureCheckedRetryCta;
+    const refused = koMessages.content.channelPostsPublishRefusedNeedsCheck.replace('{cta}', cta);
+    const locked = koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', cta);
+    expect(container.querySelector('[data-testid="channel-post-publish-error-reason"]')?.textContent).toBe(refused);
+    expect(container.querySelector('[data-testid="channel-post-publish-external-impact"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent).toBe(locked);
+    expect(container.textContent?.split(locked).length).toBe(2);
     expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -1872,15 +1872,16 @@ export default function ChannelPostEditPage() {
         // 「내일 09:00 이후 가능합니다」는 값을 실제로 보간해야 하는 문장이라 정적
         // 번역키 하나로 못 담는다). 나머지 코드는 기존 humanMessageKey/fallback 체인
         // 그대로.
-        // story #4264(유나 4632 · PO 처방) — 서버가 needs_check로 거절했으면(어댑터 0) 버튼 잠금 사유와 같은 문장 · 이 화면도
-        // 곧바로 잠금 상태로(목록을 다시 불러오기 전에 또 누르지 않게).
+        // story #4264(유나 4632 · PO 처방) — 서버가 needs_check로 거절했으면(어댑터 0) 이 화면도 곧바로 잠금 상태로(목록을 다시
+        // 불러오기 전에 또 누르지 않게 — 회색 잠금 줄이 상태를 말한다). 빨간 알림은 **일어난 일**만(유나 재검 02:05Z): BE 409 문장과
+        // 같은 «다시 보내지 않았어요». 외부 영향 줄은 없다 — 이번 요청은 어댑터를 안 불렀으니 «나갔는지 모름 · 다시 시도»(unknown
+        // 폴백)는 사실과 다르다.
         if (info.kind === 'publish_needs_check') {
           setDraft((prev) => prev && { ...prev, failure_kind: 'needs_check', command_status: 'dead_letter' });
           setPublishResult({
             type: 'error',
-            text: t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') }),
+            text: t('channelPostsPublishRefusedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') }),
             raw: info.raw,
-            externalImpact: describeExternalImpact(info.kind),
           });
           return;
         }
