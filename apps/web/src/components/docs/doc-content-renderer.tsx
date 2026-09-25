@@ -26,6 +26,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { useParams, useRouter } from 'next/navigation';
 import { docUrl } from './lib/doc-project-url';
 import { remarkWikiLinks } from './lib/remark-wiki-links';
+import { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
 
 interface DocContentRendererProps {
   content: string;
@@ -1051,32 +1052,8 @@ function inertCardHtml(icon: 'file' | 'link', title: string | null, note: string
           </div>`;
 }
 
-/**
- * story #4324(critical · 저장형 XSS) — 문서 콘텐츠 속성에서 온 주소를 href · src로 쓰기 전의 스킴 거름. HTML 형식은 DOMPurify가 data-* 값을
- * 그대로 통과시키고 CSP가 'unsafe-inline'이라, 거르지 않으면 `javascript:` 값이 누른 사람 브라우저에서 실행된다.
- * - 링크 · 틀 주소(`data-url`): http/https 절대 주소만. 브라우저처럼 앞 공백 · 제어 문자를 무시하고 해석한 뒤 정규화한 주소를 돌려준다.
- */
-export function safeHttpUrl(raw: string): string | null {
-  const value = raw.trim();
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
-// 브라우저가 문서로 그려 스크립트를 돌릴 수 있는 MIME — 옛 첨부 본문이 이 종류면 내려받기 링크도 만들지 않는다.
-const ACTIVE_DATA_MIME = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|text\/javascript|application\/javascript|application\/ecmascript|text\/ecmascript)\b/i;
-
-/** story #4324 — 옛 첨부 본문(`data-file-data`)은 `data:` URL이면서 문서로 실행되지 않는 MIME일 때만(javascript: · data:text/html 등은 null). */
-export function safeAttachmentDataUrl(raw: string): string | null {
-  const value = raw.trim();
-  const m = /^data:([^,;]*)[;,]/i.exec(value);
-  if (!m) return null;
-  return ACTIVE_DATA_MIME.test(m[1]!.trim()) ? null : value;
-}
+// story #4324 — URL 거름 도우미는 편집기 노드와 한 곳(`lib/safe-content-url.ts`)에서 — 여기선 기존 import 호환으로 다시 내보낸다.
+export { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
 
 export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {

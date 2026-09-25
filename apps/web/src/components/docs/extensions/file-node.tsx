@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 import { getFileIcon } from '@/lib/file-icon';
 import { FILE_TINT_CLASS, fileExtLabel, fileTypeTint } from '@/lib/storage/format';
 import { useToast } from '@/components/ui/toast';
+import { safeAttachmentDataUrl } from '../lib/safe-content-url';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -45,8 +46,14 @@ function FileAttachmentView({ node }: ReactNodeViewProps) {
   const handleDownload = useCallback(async () => {
     // legacy(base64 data-url) — blob href 직접 다운로드(현 동작).
     if (isLegacy) {
+      // story #4324 — 렌더러와 같은 도우미로 거른 값만 href로(허용 MIME의 data:만). 그 밖은 내려받기 링크를 만들지 않는다.
+      const safe = safeAttachmentDataUrl(data);
+      if (!safe) {
+        addToast({ type: 'info', title: t('attachFileBlocked') });
+        return;
+      }
       const a = document.createElement('a');
-      a.href = data;
+      a.href = safe;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
