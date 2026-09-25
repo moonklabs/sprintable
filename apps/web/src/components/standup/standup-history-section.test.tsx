@@ -177,6 +177,33 @@ describe('StandupHistorySection — 겹치는 폴백에만 꼬리([SID:4300])', 
   });
 });
 
+// [SID:4300 · PO 16:27Z · story #4311 뒤] 꼬리 규칙이 «보이는 글자가 같으면»으로 바뀌었다(4678) — 받는 동안 빈 글자 행은 규칙에 안 들어가
+// (memberLookup null → 목록에서 뺌) « · id»만 보이는 줄이 없어야 하고, 받은 뒤 동명이인 둘은 id 앞 8자로 갈린다.
+describe('StandupHistorySection — 4311 꼬리 규칙 × 받는 동안 빈 글자([SID:4300])', () => {
+  it('조직 원천 받는 동안 작성자 둘 = 빈 글자 · « · » 꼬리 0 → 받은 뒤 동명이인 «송윤재» 둘 = 두 줄에 id 앞 8자', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) {
+        await gate;
+        return new Response(JSON.stringify({ data: [{ id: 'member-5', name: '송윤재', type: 'human' }, { id: 'member-6', name: '송윤재', type: 'human' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [entry('5', '2026-09-24'), entry('6', '2026-09-23')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{}} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const names = () => [...container.querySelectorAll('div.min-h-4 > span.font-medium')].map((el) => el.textContent ?? '');
+    expect(names()).toEqual(['', '']);
+    expect(container.textContent).not.toMatch(/ · member-/);
+    await act(async () => { release(); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(names().sort()).toEqual(['송윤재 · member-5', '송윤재 · member-6']);
+  });
+});
+
 // [SID:4300 · 4303 AC1 · PR 4658] 조직을 떠난 사람도 조직 원천(ORG_NAMES_URL)에 이름만 실린다(user_id null · is_active false) — 떠난 사람이
 // 작성한 지난 기록에 «알 수 없는 구성원» 대신 그 이름이 선다.
 describe('StandupHistorySection — 떠난 사람이 작성자([SID:4300] · 4303)', () => {

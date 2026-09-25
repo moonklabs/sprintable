@@ -93,3 +93,26 @@ describe('StandupFeedbackDialog — 피드백 작성자 이름([SID:4300])', () 
     expect(bodyText()).not.toContain(koMessages.common.memberUnknown);
   });
 });
+
+// [SID:4300 · PO 16:27Z · story #4311 뒤] 꼬리 규칙 «보이는 글자가 같으면»(4678) × 받는 동안 빈 글자 — 빈 글자 행은 규칙 밖(« · id»만 보이는 줄 0),
+// 받은 뒤 동명이인 두 작성자는 id 앞 8자로 갈린다.
+describe('StandupFeedbackDialog — 4311 꼬리 규칙 × 받는 동안 빈 글자([SID:4300])', () => {
+  it('조직 원천 받는 동안 « · » 꼬리 0 · «알 수 없음» 0 → 받은 뒤 동명이인 «송윤재» 둘 = id 앞 8자', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { await gate; return { ok: true, json: async () => ({ data: [{ id: 'dup-aaaa1', name: '송윤재', type: 'human' }, { id: 'dup-bbbb2', name: '송윤재', type: 'human' }] }) }; }
+      return { ok: false, json: async () => null };
+    }));
+    await render([fb('f1', 'dup-aaaa1'), fb('f2', 'dup-bbbb2')], { 'm-anna': '안나' });
+    const text0 = document.body.textContent ?? '';
+    expect(text0).not.toMatch(/ · dup-/);
+    expect(text0).not.toContain(koMessages.common.memberUnknown);
+    await act(async () => { release(); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('송윤재 · dup-aaaa');
+    expect(text).toContain('송윤재 · dup-bbbb');
+  });
+});

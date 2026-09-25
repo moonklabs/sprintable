@@ -37,7 +37,8 @@ export function StandupHistorySection({ projectId, memberNameById = {}, memberNa
   const { orgId } = useDashboardContext();
   const authorIds = useMemo(() => entries.map((e) => e.author_id), [entries]);
   const authorNames = useMemberNameFallback(orgId, memberNameById, authorIds, memberNamesLoaded);
-  // [SID:4300 · PO 06:37Z] 같은 폴백 글자(«알 수 없는 구성원» 등)가 서로 다른 작성자 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(#4284 · 겹칠 때만).
+  // [SID:4300 · PO 06:37Z · story #4311] 보이는 글자가 같은 서로 다른 작성자(폴백 · 동명이인)가 둘 이상이면 그 행에만 id 앞 8자 꼬리(규칙은 member-display 한 곳).
+  // 받는 동안(memberLookup null) 행은 규칙에 넣지 않는다 — 빈 글자끼리 묶여 « · id»만 보이는 줄이 생기지 않게.
   const authorLabelById = useMemo(() => disambiguateFallbackLabels([...new Set(authorIds)].flatMap((id) => {
     const r = memberLookup(authorNames.memberMap, id, tCommon, { loaded: authorNames.loaded });
     return r ? [{ id, ...r }] : [];

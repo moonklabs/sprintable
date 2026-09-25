@@ -78,6 +78,7 @@ export function StandupFeedbackDialog({
   const { orgId } = useDashboardContext();
   const feedbackAuthorIds = useMemo(() => [...new Set(feedback.map((item) => item.feedback_by_id))], [feedback]);
   const authorNames = useMemberNameFallback(orgId, memberNameById, feedbackAuthorIds, true);
+  // [SID:4300 · story #4311] 꼬리는 보이는 글자가 같은 작성자(폴백 · 동명이인)끼리만 · 받는 동안(null) 행은 규칙 밖(빈 글자끼리 안 묶임).
   const authorLabelById = useMemo(() => disambiguateFallbackLabels(feedbackAuthorIds.flatMap((id) => {
     const r = memberLookup(authorNames.memberMap, id, tc, { loaded: authorNames.loaded });
     return r ? [{ id, ...r }] : [];
