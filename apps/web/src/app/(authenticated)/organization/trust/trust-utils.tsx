@@ -17,6 +17,11 @@ export interface OrgSummaryRow {
   // 가설 N건" 문장을 내려면 필요. BE가 이미 metrics JSONB에 갖고 있던 값을 이
   // 스토리에서 org-summary 응답에 배선(routers/trust_scores.py 1줄).
   pending: number | null;
+  // story #4285 — 이름 · 종류를 서버가 조직 범위로 싣는다(다른 프로젝트 에이전트도). 지워진(또는 이 조직에서 못 찾는) 구성원이면
+  // name=null · member_deleted=true. 옛 서버 응답엔 없을 수 있어 선택 필드.
+  name?: string | null;
+  member_type?: 'human' | 'agent' | null;
+  member_deleted?: boolean;
 }
 
 export interface HistorySnapshot {
@@ -127,10 +132,14 @@ export function mergeMemberLookup(
 ): Map<string, RosterMember> {
   const lookup = new Map<string, RosterMember>();
   for (const m of orgMembers) {
-    lookup.set(m.id, { id: m.id, name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? '?', email: m.email ?? undefined, role: m.role ?? undefined });
+    // story #4285(까디르 P2 ×2) — 리터럴 '?'도 이메일 앞부분도 이름으로 만들지 않는다(#3755 «이메일 폴백 0» — BE는 같은 행에 name null).
+    // 이메일은 같은 이름 구분 꼬리 재료라 항목은 남기되 이름은 빈 채로. 표시 이름은 rosterDisplayName이 정한다.
+    const name = m.name?.trim() || '';
+    if (name || m.email) lookup.set(m.id, { id: m.id, name, email: m.email ?? undefined, role: m.role ?? undefined });
   }
   for (const m of teamMembers) {
-    if (!lookup.has(m.id)) lookup.set(m.id, { id: m.id, name: m.name?.trim() || '?' });
+    const name = m.name?.trim();
+    if (name && !lookup.has(m.id)) lookup.set(m.id, { id: m.id, name });
   }
   return lookup;
 }
@@ -146,6 +155,9 @@ export function disambiguatedNames(
   nameOf: (memberId: string) => string,
   lookup: Map<string, RosterMember>,
   roleLabel: (role: string) => string | null,
+  // story #4285(유나 4286 판정 · PO 00:32Z) — 대체 낱말(«이름 없는 구성원» · «알 수 없는 구성원»)이 겹치면 꼬리는 ID 앞 8자만 — 이메일 0
+  // (#3755 «이메일 폴백 0»: 이름을 모르는 사람의 이메일을 그 자리에 띄우지 않는다) · 역할도 안 쓴다(같은 대체 낱말 여럿을 한 규칙으로).
+  fallbackNames: ReadonlySet<string> = new Set(),
 ): Map<string, string> {
   const byName = new Map<string, string[]>();
   for (const id of new Set(memberIds)) {
@@ -156,6 +168,10 @@ export function disambiguatedNames(
   const out = new Map<string, string>();
   for (const [name, ids] of byName) {
     if (ids.length < 2) { out.set(ids[0], name); continue; }
+    if (fallbackNames.has(name)) {
+      for (const id of ids) out.set(id, `${name} · ${id.slice(0, 8)}`);
+      continue;
+    }
     const roles = ids.map((id) => lookup.get(id)?.role ?? null);
     ids.forEach((id, i) => {
       const role = roles[i];
@@ -312,4 +328,47 @@ export function HistoryDrilldownPanel({
       )}
     </div>
   );
+}
+
+// story #4285 — 이름은 org-summary 응답이 정본이다(조직 범위 조인). 예전엔 조직 구성원(사람) + 지금 프로젝트 팀원 두 부분 목록으로만
+// 짜 맞춰 같은 조직 다른 프로젝트의 에이전트가 «알 수 없는 구성원»이었다. 응답 이름이 있으면 그 이름으로 덮고(이메일 · 역할은 그대로 —
+// 같은 이름 구분 꼬리 재료), 없으면(옛 서버 · 지워진 구성원) 기존 조회값 그대로. 지워진 구성원은 조회에 없으니 화면 폴백
+// «알 수 없는 구성원»은 그 경우에만 남는다.
+export function withSummaryNames(lookup: Map<string, RosterMember>, rows: OrgSummaryRow[]): Map<string, RosterMember> {
+  const out = new Map(lookup);
+  for (const row of rows) {
+    const name = row.name?.trim();
+    if (!name) continue;
+    const prev = out.get(row.member_id);
+    out.set(row.member_id, { ...(prev ?? { id: row.member_id }), name });
+  }
+  return out;
+}
+
+// story #4285(까디르 P2 · PO 처방 ×2) — 신뢰 센터 행 이름을 한 곳에서 정한다. 제목 · 이니셜 · 정렬이 모두 이 판정을 읽는다.
+// 새 서버(요약 행에 member_deleted가 있음)면 **요약 이름만** — 조회 이름(조직 구성원 · 팀원 목록)은 보지 않는다(BE가 이메일 폴백 없이
+// null을 준 행에 화면이 이메일 앞부분을 내던 부딪힘 · #3755). 옛 서버(플래그 없음)만 조회 이름으로 폴백.
+export function rosterRealName(row: OrgSummaryRow, lookup: Map<string, RosterMember>): string | null {
+  if (row.member_deleted !== undefined) return row.member_deleted ? null : (row.name?.trim() || null);
+  return lookup.get(row.member_id)?.name?.trim() || null;
+}
+
+// 이름이 없을 때의 낱말: 지워진 구성원 → «알 수 없는 구성원» · 살아 있는데 이름이 빈 구성원(에이전트 PATCH가 name null을 받는다 ·
+// 사람의 이름 · display_name이 둘 다 빔) → «이름 없는 구성원» · 옛 서버에서 못 찾음 → «알 수 없는 구성원». 날것 `?` · 이메일 0.
+export function rosterDisplayName(
+  row: OrgSummaryRow,
+  lookup: Map<string, RosterMember>,
+  labels: { unknown: string; unnamed: string },
+): string {
+  return rosterRealName(row, lookup) ?? (row.member_deleted === false ? labels.unnamed : labels.unknown);
+}
+
+/** 정렬용 조회 — 진짜 이름만 싣는다(«이름 없는 구성원» 같은 대체 낱말은 이름이 아니라 이름 있는 행 뒤로 간다). */
+export function rosterSortLookup(rows: OrgSummaryRow[], lookup: Map<string, RosterMember>): Map<string, RosterMember> {
+  const out = new Map<string, RosterMember>();
+  for (const row of rows) {
+    const name = rosterRealName(row, lookup);
+    if (name) out.set(row.member_id, { id: row.member_id, name });
+  }
+  return out;
 }

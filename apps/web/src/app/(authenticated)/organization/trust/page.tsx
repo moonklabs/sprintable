@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { HeartHandshake } from 'lucide-react';
+import { Bot, HeartHandshake, UserRound } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,6 +18,9 @@ import {
   mergeMemberLookup,
   resolveRoleLabel,
   sortGroupMembersByName,
+  withSummaryNames,
+  rosterDisplayName,
+  rosterSortLookup,
   useHistoryDrilldown,
   HistoryDrilldownPanel,
   HistoryDrilldownTrigger,
@@ -46,13 +49,17 @@ function initial(name: string): string {
 // 어두운 사각+흰 글자가 아니다. `ListRowMark`는 채널 색 구분(의미 있는 색상 코딩)이
 // 용도라 그 자체를 바꾸면 채널 목록이 깨진다 — 이 화면 전용 표식을 따로 둔다(색
 // 코딩 없음, 이 화면엔 애초에 "역할"이 색으로 갈릴 이유가 없다는 원 판단은 무변).
-function PersonMark({ label }: { label: string }) {
+// story #4285(유나 재검 03:02Z · 4646 Avatar 계약과 같은 규칙) — 진짜 이름이 없는 행(«이름 없는 구성원» · «알 수 없는 구성원»)은
+// 대체 낱말의 첫 글자(«이» · «알»)가 누구의 머리글자처럼 읽힌다 — 글자 대신 같은 원에 아이콘(에이전트 Bot · 그 외 UserRound).
+function PersonMark({ label, icon }: { label?: string; icon?: 'agent' | 'person' }) {
   return (
     <span
       aria-hidden="true"
       className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
     >
-      {label}
+      {icon === 'agent' ? <Bot className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-agent" />
+        : icon === 'person' ? <UserRound className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-person" />
+        : label}
     </span>
   );
 }
@@ -62,6 +69,7 @@ export default function OrganizationTrustPage() {
   const currentRole = orgMemberships.find((o) => o.orgId === orgId)?.role ?? 'member';
   const isAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('organization');
+  const tCommon = useTranslations('common');
   const displayTimezone = resolveDisplayTimezone().tz;
 
   const [loading, setLoading] = useState(true);
@@ -87,7 +95,7 @@ export default function OrganizationTrustPage() {
       const teamMembersJson = teamMembersRes?.ok ? await teamMembersRes.json() as { data?: Array<{ id: string; name?: string | null }> } : { data: [] };
       if (cancelled) return;
       setRosterRows(summaryJson.members ?? []);
-      setRosterMembers(mergeMemberLookup(orgMembersJson.data ?? [], teamMembersJson.data ?? []));
+      setRosterMembers(withSummaryNames(mergeMemberLookup(orgMembersJson.data ?? [], teamMembersJson.data ?? []), summaryJson.members ?? []));
       setLoading(false);
     }
     async function loadSelf() {
@@ -116,17 +124,22 @@ export default function OrganizationTrustPage() {
   // 그룹은 groupRosterByRole을 그대로 재사용(SectionCard로 안 그리고 칩 라벨+수만
   // 뽑는다) — 새 그룹 함수를 또 만들지 않는다.
   const groupedByRole = groupRosterByRole(rosterRows, t);
-  const sortedRows = sortGroupMembersByName(rosterRows, rosterMembers);
+  // story #4285 — 정렬도 제목과 같은 판정(rosterRealName)으로 — 조회의 다른 이름으로 앞에 서지 않게.
+  const sortedRows = sortGroupMembersByName(rosterRows, rosterSortLookup(rosterRows, rosterMembers));
   const visibleRows = roleFilter === ALL_ROLES
     ? sortedRows
     : sortedRows.filter((row) => resolveRoleLabel(row.role_key, row.role_label, t) === roleFilter);
 
   // [SID:4282] 같은 이름 · 다른 구성원 행에만 구분 꼬리(역할 → 이메일 → ID 앞 8자 · trust-utils.disambiguatedNames).
+  // story #4285 — 구분 꼬리의 이름도 행 이름과 같은 한 해석기(rosterDisplayName)에서 — «이름 없는 구성원» · «알 수 없는 구성원»이 겹쳐도 갈린다.
+  const rosterNameLabels = { unknown: t('trustUnknownMember'), unnamed: tCommon('memberUnnamed') };
+  const rosterRowById = new Map(rosterRows.map((row) => [row.member_id, row]));
   const displayNames = disambiguatedNames(
     rosterRows.map((row) => row.member_id),
-    (id) => rosterMembers.get(id)?.name ?? t('trustUnknownMember'),
+    (id) => rosterDisplayName(rosterRowById.get(id)!, rosterMembers, rosterNameLabels),
     rosterMembers,
     (role) => orgRoleLabel(role, t),
+    new Set([rosterNameLabels.unknown, rosterNameLabels.unnamed]),
   );
 
   function renderAdminRow(row: OrgSummaryRow, index: number) {
@@ -135,7 +148,8 @@ export default function OrganizationTrustPage() {
         key={`${row.member_id}-${row.role_key}`}
         row={row}
         index={index}
-        name={displayNames.get(row.member_id) ?? rosterMembers.get(row.member_id)?.name ?? t('trustUnknownMember')}
+        name={displayNames.get(row.member_id) ?? rosterDisplayName(row, rosterMembers, rosterNameLabels)}
+        hasRealName={![rosterNameLabels.unknown, rosterNameLabels.unnamed].includes(rosterDisplayName(row, rosterMembers, rosterNameLabels))}
         t={t}
         displayTimezone={displayTimezone}
       />
@@ -239,15 +253,15 @@ export default function OrganizationTrustPage() {
 // 펼침 상태를 공유해야 한다 — 그 상태(useHistoryDrilldown)를 쥐는 자리가 이제 행
 // 컴포넌트 자체다(훅은 컴포넌트 안에서만 부를 수 있다, .map() 콜백 안 직접 호출 불가).
 function AdminRow({
-  row, index, name, t, displayTimezone,
-}: { row: OrgSummaryRow; index: number; name: string; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
+  row, index, name, hasRealName, t, displayTimezone,
+}: { row: OrgSummaryRow; index: number; name: string; hasRealName: boolean; t: ReturnType<typeof useTranslations>; displayTimezone: string }) {
   const roleLabel = resolveRoleLabel(row.role_key, row.role_label, t);
   const coldStart = isColdStart(row.hit_rate, row.resolved);
   const drilldown = useHistoryDrilldown({ memberId: row.member_id, roleKey: row.role_key });
   return (
     <ListRow
       data-testid="trust-roster-row"
-      mark={<PersonMark label={initial(name)} />}
+      mark={hasRealName ? <PersonMark label={initial(name)} /> : <PersonMark icon={row.member_type === 'agent' ? 'agent' : 'person'} />}
       title={name}
       subtitle={coldStart ? (
         <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />

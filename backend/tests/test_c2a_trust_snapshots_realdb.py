@@ -323,3 +323,82 @@ async def test_history_self_or_admin_ordered_desc_realdb():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_summary_carries_org_scoped_name_type_and_deleted_flag_realdb():
+    """story #4285 — org-summary 행이 이름 · 종류를 조직 범위로 싣는다. 예전엔 화면이 조직 구성원(사람) + 지금 프로젝트 팀원으로만
+    짜 맞춰, 같은 조직 **다른 프로젝트**의 에이전트(실측: 페드루)가 «알 수 없는 구성원»이었다.
+    행 여섯: 사람(이름) · 다른 프로젝트 에이전트(이 조직 어느 프로젝트에도 접근 없음) · 이름 없는 사람(users.display_name) ·
+    레거시 alias id(→ canonical 사람) · 지워진 구성원(deleted_at) · 다른 조직 구성원(이 조직에선 «없음»).
+    뮤테이션: 조직 조건(`Member.org_id == org_id`)을 빼면 다른 조직 행이 이름을 얻어 RED · deleted_at 검사를 빼면 지워진 행이 RED."""
+    from datetime import UTC
+
+    from app.main import app
+    from app.models.member import Member, MemberIdentityAlias
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+    from app.models.trust_snapshot import OrgMemberTrustSnapshot
+    from app.models.user import User
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_and_members(s)
+            org_id = seeded["org_id"]
+            other_org = Organization(id=uuid.uuid4(), name="Other", slug=f"other-{uuid.uuid4().hex[:8]}")
+            s.add(other_org)
+            await s.commit()
+
+            agent_id = uuid.uuid4()
+            deleted_id = uuid.uuid4()
+            foreign_id = uuid.uuid4()
+            s.add_all([
+                Member(id=agent_id, org_id=org_id, type="agent", name="페드루 올리베이라"),
+                Member(id=deleted_id, org_id=org_id, type="agent", name="떠난 에이전트", deleted_at=datetime.now(UTC)),
+                Member(id=foreign_id, org_id=other_org.id, type="agent", name="남의 조직 에이전트"),
+            ])
+            nameless_user = uuid.uuid4()
+            s.add(User(id=nameless_user, email=f"n-{nameless_user.hex[:8]}@test.com", hashed_password="x", display_name="표시 이름"))
+            await s.commit()
+            nameless_om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=nameless_user, role="member")
+            s.add(nameless_om)
+            await s.commit()
+            s.add(Member(id=nameless_om.id, org_id=org_id, type="human", user_id=nameless_user, name=""))
+            await s.commit()
+            legacy_id = uuid.uuid4()
+            s.add(MemberIdentityAlias(alias_id=legacy_id, member_id=seeded["target_member_id"], org_id=org_id, alias_source="human_team_member"))
+            await s.commit()
+
+            for mid in (seeded["target_member_id"], agent_id, nameless_om.id, legacy_id, deleted_id, foreign_id):
+                s.add(OrgMemberTrustSnapshot(
+                    id=uuid.uuid4(), org_id=org_id, member_id=mid, role_key="dev", window_days=90,
+                    metrics={"role_label": "개발", "hit_rate": 0.5, "resolved": 2, "pending": 0},
+                    computed_at=datetime.now(UTC),
+                ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["admin_user_id"], org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/trust-scores/org-summary")
+            assert resp.status_code == 200, resp.text
+            by_id = {m["member_id"]: m for m in resp.json()["members"]}
+        finally:
+            await client.aclose()
+
+        def pick(mid):
+            m = by_id[str(mid)]
+            return (m["name"], m["member_type"], m["member_deleted"])
+
+        assert pick(seeded["target_member_id"]) == ("Target", "human", False)
+        assert pick(agent_id) == ("페드루 올리베이라", "agent", False)
+        assert pick(nameless_om.id) == ("표시 이름", "human", False)
+        assert pick(legacy_id) == ("Target", "human", False)
+        assert pick(deleted_id) == (None, None, True)
+        assert pick(foreign_id) == (None, None, True)
+        # 기존 필드는 그대로(응답 계약은 더하기만).
+        assert by_id[str(agent_id)]["hit_rate"] == 0.5 and by_id[str(agent_id)]["pending"] == 0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

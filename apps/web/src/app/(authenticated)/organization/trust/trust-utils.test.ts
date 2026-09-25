@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames, withSummaryNames, rosterDisplayName, rosterRealName, rosterSortLookup } from './trust-utils';
 import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 // story #3735(D1) — groupRosterByRole이 이제 t(Translator)를 받아 기본 5키(role_key)면
@@ -152,12 +152,14 @@ describe('mergeMemberLookup (org-members 우선, team-members는 보강만 — i
     expect(lookup.get('x2')).toEqual({ id: 'x2', name: 'Team-only Name' });
   });
 
-  it('falls back to email local-part when org-member has no name (nullish/빈문자열 폴백)', () => {
+  // story #4285(까디르 P2 둘째) — 예전엔 이메일 앞부분을 이름으로 채웠다(«nobody»). BE는 같은 행에 이메일 폴백 없이 name null(#3755)이라
+  // 화면만 이메일을 냈다 — 이제 이름은 빈 채로 두고(표시는 rosterDisplayName이 «이름 없는 구성원») 이메일은 구분 꼬리 재료로만 남는다.
+  it('does not turn the email local-part into a name when org-member has no name (이메일 폴백 0)', () => {
     const lookup = mergeMemberLookup(
       [{ id: 'x1', name: '  ', email: 'nobody@example.com' }],
       [],
     );
-    expect(lookup.get('x1')?.name).toBe('nobody');
+    expect(lookup.get('x1')).toEqual({ id: 'x1', name: '', email: 'nobody@example.com' });
   });
 
   it('returns an empty map for two empty sources', () => {
@@ -268,6 +270,16 @@ describe('disambiguatedNames (SID:4282 — 같은 이름 두 줄 구분)', () =>
     expect(out.get('11111111-x')).toBe('알 수 없는 구성원 · 11111111');
     expect(out.get('22222222-y')).toBe('알 수 없는 구성원 · 22222222');
   });
+  it('대체 낱말이 겹치면(이름 없는 구성원 여럿) 이메일 · 역할 대신 ID 앞 8자(story #4285 · 유나 4286 판정)', () => {
+    const lookup = L([
+      { id: 'aaaaaaaa-1111', name: '', email: 'a@x.com', role: 'owner' },
+      { id: 'bbbbbbbb-2222', name: '', email: 'b@x.com', role: 'member' },
+    ]);
+    const out = disambiguatedNames(['aaaaaaaa-1111', 'bbbbbbbb-2222'], () => '이름 없는 구성원', lookup, role, new Set(['이름 없는 구성원']));
+    expect(out.get('aaaaaaaa-1111')).toBe('이름 없는 구성원 · aaaaaaaa');
+    expect(out.get('bbbbbbbb-2222')).toBe('이름 없는 구성원 · bbbbbbbb');
+    expect([...out.values()].join(' ')).not.toMatch(/@|소유자|구성원 · 구성원/);
+  });
   it('mergeMemberLookup이 org-members의 role을 싣는다', () => {
     const lookup = mergeMemberLookup([{ id: 'o', name: 'A', email: 'a@x.com', role: 'owner' }], [{ id: 't', name: 'B' }]);
     expect(lookup.get('o')?.role).toBe('owner');
@@ -295,5 +307,64 @@ describe('sortGroupMembersByName — 같은 이름은 member_id · role_key로 �
     const b = sortGroupMembersByName([row('p1', 'dev'), row('p1', 'qa')], one).map((r) => r.role_key);
     expect(a).toEqual(['dev', 'qa']);
     expect(b).toEqual(['dev', 'qa']);
+  });
+});
+
+describe('withSummaryNames(story #4285)', () => {
+  it('응답 이름이 정본 — 없던 행은 채우고 · 있던 행은 이름만 바꾸고 이메일은 둔다 · 이름 없는 행(지워진 구성원)은 건드리지 않는다', () => {
+    const lookup = new Map([['h1', { id: 'h1', name: 'song', email: 'song@x.dev' }]]);
+    const base = { role_key: 'dev', role_label: null, hit_rate: null, resolved: 0, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+    const out = withSummaryNames(lookup, [
+      { ...base, member_id: 'h1', name: '송윤재' },
+      { ...base, member_id: 'a1', name: '페드루 올리베이라' },
+      { ...base, member_id: 'gone', name: null, member_deleted: true },
+    ]);
+    expect(out.get('h1')).toEqual({ id: 'h1', name: '송윤재', email: 'song@x.dev' });
+    expect(out.get('a1')).toEqual({ id: 'a1', name: '페드루 올리베이라' });
+    expect(out.has('gone')).toBe(false);
+    expect(lookup.get('h1')!.name).toBe('song'); // 원본 맵은 그대로(새 맵을 돌려준다).
+  });
+});
+
+describe('rosterDisplayName · mergeMemberLookup — 날것 `?` 0(story #4285 · 까디르 P2)', () => {
+  const base = { role_key: 'dev', role_label: null, hit_rate: null, resolved: 0, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+  const labels = { unknown: '알 수 없는 구성원', unnamed: '이름 없는 구성원' };
+
+  it('지워짐 → unknown · 살아 있고 이름 빔 → unnamed · 이름 있음 → 이름 · 옛 서버(플래그 없음)에 이름 없음 → unknown', () => {
+    const lookup = new Map([['a', { id: 'a', name: '페드루' }]]);
+    expect(rosterDisplayName({ ...base, member_id: 'x', member_deleted: true }, lookup, labels)).toBe(labels.unknown);
+    expect(rosterDisplayName({ ...base, member_id: 'y', name: null, member_deleted: false }, lookup, labels)).toBe(labels.unnamed);
+    expect(rosterDisplayName({ ...base, member_id: 'a', name: '페드루', member_deleted: false }, lookup, labels)).toBe('페드루');
+    expect(rosterDisplayName({ ...base, member_id: 'z' }, lookup, labels)).toBe(labels.unknown);
+  });
+
+  it('mergeMemberLookup은 이름을 못 정한 항목을 만들지 않는다(리터럴 `?` 0)', () => {
+    const lookup = mergeMemberLookup([{ id: 'o1', name: null, email: null }], [{ id: 't1', name: null }, { id: 't2', name: '  ' }]);
+    expect(lookup.size).toBe(0);
+    expect([...lookup.values()].map((m) => m.name)).not.toContain('?');
+  });
+});
+
+
+describe('새 서버는 요약 이름만 · 이메일 폴백 0(story #4285 · 까디르 P2 둘째)', () => {
+  const base = { role_key: 'dev', role_label: null, hit_rate: null, resolved: 0, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
+  const lookup = new Map([['h', { id: 'h', name: 'jane.doe', email: 'jane.doe@x.dev' }]]);
+
+  it('member_deleted가 있으면 조회 이름을 안 본다 — name null → 없음 · 옛 서버(플래그 없음)만 조회 이름', () => {
+    expect(rosterRealName({ ...base, member_id: 'h', name: null, member_deleted: false }, lookup)).toBeNull();
+    expect(rosterRealName({ ...base, member_id: 'h' }, lookup)).toBe('jane.doe');
+  });
+
+  it('mergeMemberLookup은 이메일 앞부분을 이름으로 만들지 않는다(이메일은 꼬리 재료로만 남김)', () => {
+    const m = mergeMemberLookup([{ id: 'h', name: null, email: 'jane.doe@x.dev' }], []);
+    expect(m.get('h')).toEqual({ id: 'h', name: '', email: 'jane.doe@x.dev' });
+  });
+
+  it('정렬 조회엔 진짜 이름만 — 이름 없는 행은 싣지 않는다(이름 있는 행 뒤로)', () => {
+    const out = rosterSortLookup([
+      { ...base, member_id: 'h', name: null, member_deleted: false },
+      { ...base, member_id: 'n', name: '가나다', member_deleted: false },
+    ], lookup);
+    expect([...out.keys()]).toEqual(['n']);
   });
 });
