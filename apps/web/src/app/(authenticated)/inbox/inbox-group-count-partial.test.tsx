@@ -68,3 +68,28 @@ describe('알림 묶음 수 — 불러온 쪽 기준임을 드러냄(story #4302
     expect(container.textContent).not.toContain('3+');
   });
 });
+
+// story #4302(까디르 델타 · 빈자리 채움) — «더 보기»로 끝까지 불러오면 묶음 라벨이 «N+»에서 맨 수로 바뀌는 전환.
+describe('알림 묶음 수 — «더 보기»로 끝까지 오면 맨 수로 전환(story #4302)', () => {
+  it('⭐첫 쪽 «3+건»(더 남음) → «더 보기»로 마지막 쪽(1건 · 더 없음) → «4건»', async () => {
+    const pages = [
+      { data: [generic('g1'), generic('g2'), generic('g3')], meta: { unreadCount: 4, hasMore: true, nextCursor: 'c1' } },
+      { data: [generic('g4')], meta: { unreadCount: 4, hasMore: false, nextCursor: null } },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/notifications')) {
+        const page = url.includes('cursor=c1') ? pages[1]! : pages[0]!;
+        return { ok: true, status: 200, json: async () => page };
+      }
+      return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    }));
+    await mount();
+    expect(container.textContent).toContain('3+건');
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.loadMore)!;
+    await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('4건');
+    expect(container.textContent).not.toContain('+건');
+  });
+});
+

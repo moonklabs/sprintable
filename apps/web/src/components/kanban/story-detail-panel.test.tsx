@@ -1303,6 +1303,32 @@ describe('StoryDetailPanel — 댓글 탭 수 한계 표기(story #4302)', () =>
     expect(await mountWith('2026-09-24T00:00:00Z')).toContain('댓글 (20+)');
   });
 
+  it('⭐«댓글 (20+)» → 댓글 탭 «더 보기»로 마지막 쪽(5건 · 커서 없음) → «댓글 (25)»(까디르 델타 · 전환)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20&cursor=')) {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 5 }, (_, i) => comment(100 + i)), meta: { next_cursor: null, has_more: false } }) };
+      }
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 20 }, (_, i) => comment(i)), meta: { next_cursor: 'cur-1', has_more: true } }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const commentsTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('댓글'))! as HTMLElement;
+    expect(commentsTab.textContent).toBe('댓글 (20+)');
+    await act(async () => { commentsTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); commentsTab.click(); });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.board.loadMore)!;
+    expect(more, '댓글 더 보기').toBeTruthy();
+    await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const after = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('댓글'))!;
+    expect(after.textContent).toBe('댓글 (25)');
+  });
+
   it('다 불러왔으면 «댓글 (20)»', async () => {
     const tabs = await mountWith(null);
     expect(tabs).toContain('댓글 (20)');
