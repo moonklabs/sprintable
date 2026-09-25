@@ -119,6 +119,19 @@ async def _blocked_send(Session, *, break_campaign: bool = False):
 
     ctx = await _setup_newsletter(Session)
     await _bind_agent(Session, ctx, definition_key=_SEED._KEY, stage="send_requested", agent_id=ctx["sender_id"])
+    # story #4251 — 원시 단계 발행은 순서를 검증한다(앞 단계 없이 send_requested → 409 STAGE_NOT_NEXT). test_4258과 같이
+    # 앞 단계를 깔아 둔다.
+    from app.models.event_definition import EventDefinition
+    from tests.recipe_stage_walk import prepare_stage_publish
+
+    async with Session() as s:
+        definition = (await s.execute(
+            select(EventDefinition).where(EventDefinition.key == _SEED._KEY, EventDefinition.org_id.is_(None))
+        )).scalar_one()
+    await prepare_stage_publish(
+        Session, org_id=ctx["org_id"], project_id=ctx["project_id"], definition=definition,
+        work_item_id=ctx["story_id"], stage="send_requested", publisher_id=ctx["sender_id"],
+    )
     scheduled_at = datetime.now(UTC) + timedelta(hours=2)
     async with Session() as s:
         await publish_registry_event(
