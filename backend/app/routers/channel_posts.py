@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
@@ -127,6 +128,14 @@ from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-posts"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_SCHEDULED_FROM_QUERY = Depends(aware_datetime_query(
+        "scheduled_from", description="Start of the scheduled-time range (gate.sealed_scheduled_at); not with unscheduled",
+    ))
+_SCHEDULED_TO_QUERY = Depends(aware_datetime_query(
+        "scheduled_to", description="End of the scheduled-time range (gate.sealed_scheduled_at); not with unscheduled",
+    ))
 
 
 async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
@@ -1511,16 +1520,10 @@ async def list_channel_post_drafts_endpoint(
     response: Response,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    scheduled_from: datetime | None = Query(
-        default=None,
-        description="예약 시각 범위 시작(tz-aware ISO, gate.sealed_scheduled_at 기준 — "
-        "publication_command의 스냅샷 값이 아니다). unscheduled와 함께 줄 수 없다.",
-    ),
-    scheduled_to: datetime | None = Query(
-        default=None,
-        description="예약 시각 범위 끝(tz-aware ISO, gate.sealed_scheduled_at 기준). "
-        "unscheduled와 함께 줄 수 없다.",
-    ),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`). 기준은 gate.sealed_scheduled_at(publication_command의
+    # 스냅샷 값이 아니다) · unscheduled와 함께 줄 수 없다.
+    scheduled_from: datetime | None = _SCHEDULED_FROM_QUERY,
+    scheduled_to: datetime | None = _SCHEDULED_TO_QUERY,
     unscheduled: bool = Query(
         default=False,
         description="true면 gate.sealed_scheduled_at이 null인 draft만(캘린더 「날짜 미정」 "
@@ -1569,15 +1572,8 @@ async def list_channel_post_drafts_endpoint(
                 "message": "unscheduled는 scheduled_from/scheduled_to와 함께 줄 수 없습니다.",
             },
         )
-    for _label, _value in (("scheduled_from", scheduled_from), ("scheduled_to", scheduled_to)):
-        if _value is not None and _value.tzinfo is None:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "CHANNEL_POST_LIST_FILTER_NAIVE_DATETIME",
-                    "message": f"{_label}은 timezone 정보가 있어야 합니다(예: Z 또는 +09:00).",
-                },
-            )
+    # story #4294 — 오프셋 없는 scheduled_from/to 거절(#3423이 이 라우트에만 두던 검사)은 이제 공용 의존성(`_SCHEDULED_*_QUERY` ·
+    # `app/core/datetime_query.py`)이 모든 기간 파라미터에 같은 코드 `DATETIME_OFFSET_REQUIRED`로 한다.
     if scheduled_from is not None and scheduled_to is not None and scheduled_from > scheduled_to:
         raise HTTPException(
             status_code=422,

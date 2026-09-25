@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.routers.judgments import JudgmentListResponse
@@ -26,6 +27,11 @@ from app.services.dashboard_core import MemberNotFoundError
 from app.services.session_context_core import DEFAULT_RECENT_ACTIVITY_LIMIT, get_session_context
 
 router = APIRouter(prefix="/api/v2/session-context", tags=["session-context", "Work"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_SINCE_QUERY = Depends(aware_datetime_query(
+        "since", description="Only activity after this time; omitted → recent_activity is null (not an empty list)",
+    ))
 
 
 class ActivityItem(BaseModel):
@@ -57,10 +63,8 @@ class SessionContextResponse(BaseModel):
 async def get_session_context_endpoint(
     member_id: uuid.UUID = Query(...),
     project_id: uuid.UUID | None = Query(default=None),
-    since: datetime | None = Query(
-        default=None,
-        description="이 시각 이후 활동만 포함(AC4 — 생략하면 recent_activity 축 전체가 null, 빈 배열이 아니다)",
-    ),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`). 생략하면 recent_activity 축 전체가 null(빈 배열이 아니다).
+    since: datetime | None = _SINCE_QUERY,
     activity_limit: int = Query(default=DEFAULT_RECENT_ACTIVITY_LIMIT, ge=1, le=100),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),

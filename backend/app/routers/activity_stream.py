@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.schemas.activity_stream import ActivityStreamItem, ActivityStreamResponse
@@ -11,6 +12,10 @@ from app.services.activity_stream import query_activity_stream
 from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/activity-stream", tags=["activity-stream", "Trust"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_SINCE_QUERY = Depends(aware_datetime_query("since", description="occurred_at >= since"))
+_UNTIL_QUERY = Depends(aware_datetime_query("until", description="occurred_at <= until"))
 
 
 @router.get("", response_model=ActivityStreamResponse)
@@ -20,8 +25,9 @@ async def get_activity_stream(
     verb: str | None = Query(default=None),
     object_type: str | None = Query(default=None),
     object_id: uuid.UUID | None = Query(default=None),
-    since: datetime | None = Query(default=None, description="occurred_at >= since"),
-    until: datetime | None = Query(default=None, description="occurred_at <= until"),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`).
+    since: datetime | None = _SINCE_QUERY,
+    until: datetime | None = _UNTIL_QUERY,
     after_seq: int | None = Query(default=None, description="activity_seq > after_seq (cursor)"),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

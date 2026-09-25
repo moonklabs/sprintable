@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 from sqlalchemy import String, and_, cast, delete, func, literal_column, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import (
     AuthContext,
     get_current_user,
@@ -47,6 +48,9 @@ from app.services.i18n_catalog import t
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
+
+# story #4294 — 기간 파라미터는 오프셋 필수(`app/core/datetime_query.py`) · 기본값 호출을 모듈 상수로(ruff B008).
+_SINCE_TIMESTAMP_QUERY = Depends(aware_datetime_query("since_timestamp", description="Replay events since this time"))
 logger = logging.getLogger(__name__)
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -414,7 +418,8 @@ async def agent_event_stream(
     ),
     auth: AuthContext = Depends(get_current_user_streaming),  # AC1: Bearer {API_KEY} 또는 JWT — 없으면 401 (AC3). P0(#abaf6279): SSE 커넥션 비점유 변형
     org_id: uuid.UUID = Depends(get_verified_org_id_streaming),
-    since_timestamp: datetime | None = Query(default=None),
+    # story #4294 — 오프셋 없는 일시는 422(`app/core/datetime_query.py`).
+    since_timestamp: datetime | None = _SINCE_TIMESTAMP_QUERY,
     last_event_id: uuid.UUID | None = Query(default=None),
 ):
     """GET /api/v2/events/stream — SSE 스트림.

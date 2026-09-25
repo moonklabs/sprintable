@@ -3,10 +3,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OFFSET_REQUIRED_DESCRIPTION, require_aware
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.agent_run_tool_call import AgentRunToolCall
@@ -99,12 +100,14 @@ def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:
 @router.get("", response_model=list[AgentRunResponse])
 async def list_agent_runs(
     response: Response,
+    request: Request,
     project_id: uuid.UUID = Query(...),
     agent_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
     status: _AGENT_RUN_STATUS_VALUES | None = Query(default=None),
-    from_: str | None = Query(default=None, alias="from"),
-    to: str | None = Query(default=None),
+    # story #4294 — 오프셋 없는 일시는 422(예전엔 UTC로 가정). 문자열로 받아 ISO 오류(400)는 예전 그대로.
+    from_: str | None = Query(default=None, alias="from", description=OFFSET_REQUIRED_DESCRIPTION),
+    to: str | None = Query(default=None, description=OFFSET_REQUIRED_DESCRIPTION),
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
@@ -158,16 +161,14 @@ async def list_agent_runs(
             from_dt = datetime.fromisoformat(from_)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid from (expected ISO 8601 datetime)")
-        if from_dt.tzinfo is None:
-            from_dt = from_dt.replace(tzinfo=timezone.utc)
+        from_dt = require_aware(from_dt, param="from", request=request)
     to_dt: datetime | None = None
     if to:
         try:
             to_dt = datetime.fromisoformat(to)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid to (expected ISO 8601 datetime)")
-        if to_dt.tzinfo is None:
-            to_dt = to_dt.replace(tzinfo=timezone.utc)
+        to_dt = require_aware(to_dt, param="to", request=request)
     if from_dt is not None and to_dt is not None and from_dt > to_dt:
         raise HTTPException(status_code=422, detail="from must not be after to")
     runs, total = await repo.list(

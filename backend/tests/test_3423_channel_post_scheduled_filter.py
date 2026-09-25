@@ -456,7 +456,8 @@ async def test_naive_datetime_returns_422():
             )
         assert r.status_code == 422, r.text
         error = r.json().get("error") or r.json()
-        assert error["code"] == "CHANNEL_POST_LIST_FILTER_NAIVE_DATETIME"
+        # story #4294 — #3423의 이 라우트 전용 코드는 모든 기간 파라미터 공용 규칙(DATETIME_OFFSET_REQUIRED · hint · param)으로 합쳐졌다.
+        assert (error["code"], error["param"]) == ("DATETIME_OFFSET_REQUIRED", "scheduled_from")
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

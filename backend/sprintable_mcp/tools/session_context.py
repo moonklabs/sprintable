@@ -14,7 +14,7 @@ from ..schemas import SprintableInput
 class SessionContextInput(SprintableInput):
     member_id: str | None = None
     # ⭐PO 지시(2026-07-29): 이 필드 설명이 곧 관례다 — 안 적으면 아무도 안 쓴다.
-    since: str | None = None  # 마지막 세션 종료 시각(ISO 8601)을 주면 그 뒤 활동만 온다.
+    since: str | None = None  # 마지막 세션 종료 시각(ISO 8601 · **시간대 필수**, 예: …Z · …+09:00)을 주면 그 뒤 활동만 온다.
     activity_limit: int | None = None
 
 
@@ -22,7 +22,9 @@ async def get_session_context(args: SessionContextInput) -> list[TextContent]:
     """세션 시작 컨텍스트 — "여기까지 했고 · 판단/정정 · 최근 활동"을 한 호출로 받는다.
     progress.txt 같은 제품 밖 파일 대신 이 도구가 그 자리를 대신한다(story #2268).
 
-    `since`에 **직전 세션이 끝난 시각**(ISO 8601, 예: "2026-07-29T14:00:00Z")을 주면
+    `since`에 **직전 세션이 끝난 시각**(ISO 8601, 예: "2026-07-29T14:00:00Z")을 주면. **시간대(오프셋)가 꼭 있어야 한다** —
+    `2026-07-29T14:00:00`처럼 오프셋이 없으면 서버가 어느 시간대인지 지어내지 않고 422 `DATETIME_OFFSET_REQUIRED`(본문 `hint`에
+    예시 값)로 거절한다(story #4294). 끝에 `Z`(UTC)나 `+09:00`을 붙여 다시 부른다. 이렇게 주면
     `recent_activity_by_work_item`에 그 뒤로 내 stories/tasks에 일어난 일(action·actor·
     created_at)만 담겨 온다 — ⛔안 주면 이 필드는 `null`이다(빈 목록이 아니다: "안 물어봤다"와
     "물어봤는데 없었다"는 다른 사실이라 섞으면 거짓이 된다). 매 세션 시작마다 **직전 호출
