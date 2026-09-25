@@ -11,7 +11,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup } from '@/lib/member-display';
+import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 
 type MessagingMode = 'creator_only' | 'org_wide' | 'list';
 const MODES: MessagingMode[] = ['creator_only', 'list', 'org_wide'];
@@ -96,6 +96,8 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
     () => orgHumans.filter((m) => !allowlist.includes(m.id) && m.id !== creatorMemberId),
     [orgHumans, allowlist, creatorMemberId],
   );
+  // [SID:4286 · PO 12:06Z] 고르기 목록 행 라벨 — 이름 없는 사람이 둘 이상이면 겹친 행에만 꼬리(꼬리 규칙 한 곳).
+  const pickerRowLabels = memberRowLabels(pickerCandidates, tc, () => '');
 
   const handleSaveMode = async () => {
     if (stagedMode === mode || savingMode) return;
@@ -284,7 +286,8 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                             {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 이 목록은 사람만). */}
                             {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
                           </div>
-                          <span className="flex-1 truncate">{memberDisplayLabel(m.name, tc)}</span>
+                          {/* [SID:4286 · PO 12:06Z 같은 부류] 이메일 없이 이름만 그리는 고르기 목록 — 이름 없는 사람이 둘 이상이면 겹친 행에만 «· ID 앞 8자». */}
+                          <span className="flex-1 truncate">{pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}</span>
                           {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-brand" />}
                         </button>
                       </li>

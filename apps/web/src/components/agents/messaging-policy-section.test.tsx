@@ -84,3 +84,28 @@ describe('MessagingPolicySection — allowlist 후보를 agent 전용 엔드포�
     expect(container.textContent?.length ?? 0).toBeGreaterThan(0);
   });
 });
+
+// [SID:4286 · PO 12:06Z 같은 부류] 허용 목록 «구성원 추가» 고르기 목록 — 이메일 없이 이름만 그려, 이름 없는 사람이 둘이면 겹친 행에만 꼬리.
+describe('MessagingPolicySection — 고르기 목록 이름 없는 둘([SID:4286])', () => {
+  it('서로 다른 두 줄(«· ID 앞 8자»)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/agents/agent-1/message-policy') return { ok: true, json: async () => ({ data: { mode: 'list', allowlist: [] } }) };
+      if (url === '/api/agents/agent-1/message-policy/candidates') {
+        return { ok: true, json: async () => ({ data: [
+          { id: 'a2000000-1111', user_id: 'u-a', name: null },
+          { id: 'b3000000-2222', user_id: 'u-b', name: null },
+        ] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => { root.render(wrap(<MessagingPolicySection agentId="agent-1" creatorUserId="u-1" />)); });
+    await flush();
+    const addBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('구성원 추가'));
+    expect(addBtn).toBeTruthy();
+    await act(async () => { addBtn!.click(); });
+    const rows = Array.from(container.querySelectorAll('span.flex-1.truncate')).map((x) => x.textContent);
+    expect(rows).toContain('이름 없는 구성원 · a2000000');
+    expect(rows).toContain('이름 없는 구성원 · b3000000');
+  });
+});
+
