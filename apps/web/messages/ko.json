@@ -3671,6 +3671,7 @@
     "markAllRead": "전체 읽음",
     "markReadFailed": "읽음 처리에 실패했어요",
     "markAllReadFailed": "전체 읽음 처리에 실패했어요",
+    "markAllReadUnconfirmed": "전체 읽음이 반영됐는지 확인하지 못했어요. 잠시 뒤 알림을 다시 열어 확인해 주세요.",
     "markRead": "읽음",
     "markUnread": "안읽음",
     "open": "열기",

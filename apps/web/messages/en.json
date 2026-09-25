@@ -3671,6 +3671,7 @@
     "markAllRead": "Mark all read",
     "markReadFailed": "Failed to mark as read",
     "markAllReadFailed": "Failed to mark all as read",
+    "markAllReadUnconfirmed": "We couldn't confirm that \"Mark all read\" went through. Open notifications again in a moment to check.",
     "markRead": "Mark read",
     "markUnread": "Mark unread",
     "open": "Open",

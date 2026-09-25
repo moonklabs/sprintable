@@ -119,13 +119,31 @@ interface NotificationsPage {
   hasMore: boolean;
 }
 
-async function fetchNotifications(projectId?: string, offset = 0): Promise<NotificationsPage> {
+function notificationsUrl(projectId: string | undefined, offset: number): string {
   const params = new URLSearchParams({ limit: String(NOTIFICATIONS_PAGE_SIZE), offset: String(offset) });
   if (projectId) params.set('project_id', projectId);
+  return `/api/event-notifications?${params.toString()}`;
+}
+
+async function fetchNotifications(projectId?: string, offset = 0): Promise<NotificationsPage> {
   // story #2160 — 401을 조용히 삼키던 폴링을 fetchWithAuth로 전환(세션만료 인지+재로그인 유도).
-  const res = await fetchWithAuth(`/api/event-notifications?${params.toString()}`);
+  const res = await fetchWithAuth(notificationsUrl(projectId, offset));
   if (!res.ok) return { items: [], hasMore: false };
-  const json = (await res.json()) as unknown;
+  return parseNotificationsPage((await res.json()) as unknown);
+}
+
+// story #4295(까디르) — 목록을 서버 값으로 맞출 때 쓰는 조회: 실패(망 오류 · 깨진 JSON · !ok)는 null(던지지 않음 · 빈 목록으로 덮지 않게).
+async function fetchNotificationsOrNull(projectId: string | undefined, offset: number): Promise<NotificationsPage | null> {
+  try {
+    const res = await fetchWithAuth(notificationsUrl(projectId, offset));
+    if (!res.ok) return null;
+    return parseNotificationsPage((await res.json()) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function parseNotificationsPage(json: unknown): NotificationsPage {
   if (Array.isArray(json)) return { items: json as EventNotification[], hasMore: false }; // 옛 raw-array 응답 하위호환
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
@@ -570,17 +588,39 @@ export function NotificationBell() {
     setNotifications((prev) => prev ? prev.map((n) => ({ ...n, read_at: n.read_at ?? readAt })) : prev);
     setUnreadCount(0);
     const readAllParams = projectId ? `?project_id=${projectId}` : '';
-    const ok = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' }).then((res) => res.ok, () => false);
-    // 서버 실패(망 오류 포함 · story #4295) 시 unread count 재폴링으로 보정
-    if (!ok) {
+    // story #4295(까디르 · 유나) — 서버가 답한 실패(!ok)와 답을 못 받은 망 오류는 다르다: 망 오류는 서버가 커밋했을 수도 있다.
+    const outcome: 'ok' | 'serverError' | 'networkError' = await fetch(`/api/event-notifications/read-all${readAllParams}`, { method: 'PATCH' })
+      .then((res) => (res.ok ? 'ok' : 'serverError'), () => 'networkError');
+    if (outcome === 'ok') return;
+    // 열린 목록 · 개수를 바꾸기 전으로(개별 읽음 롤백과 같은 문법) — 이번에 «읽음»으로 바꾼 항목은 read_at이 정확히 이 readAt이라 그것만
+    // 되돌린다(원래 읽음이던 항목은 제 시각 그대로). 아래 재조회가 실패해도 이 상태가 안전판이다.
+    setNotifications((prev) => prev ? prev.map((n) => (n.read_at === readAt ? { ...n, read_at: null } : n)) : prev);
+    setUnreadCount(countBefore);
+    // 개수 · 목록 첫 쪽을 패널 열 때와 같은 길로 다시 받아 서버 값으로 맞춘다(둘 다 던지지 않음 · 실패면 null).
+    const [count, page] = await Promise.all([
+      fetchUnreadCount(projectId ?? undefined),
+      fetchNotificationsOrNull(projectId ?? undefined, 0),
+    ]);
+    if (count !== null) setUnreadCount(count);
+    if (page) {
+      setNotifications(page.items);
+      setHasMore(page.hasMore);
+      offsetRef.current = page.items.length;
+    }
+    // 토스트는 재조회 결과로 고른다(목록과 토스트가 다른 말을 하지 않게).
+    if (outcome === 'serverError') {
       // story #3637(유나 silent-failure-sweep-3632) — 배지가 조용히 다시 차오르던 자리.
       addToast({ title: t('markAllReadFailed'), type: 'error' });
-      // story #4295(까디르) — 열린 목록도 바꾸기 전으로(개별 읽음 롤백과 같은 문법). 이번에 «읽음»으로 바꾼 항목은 read_at이 정확히
-      // 이 readAt이다 — 그것만 되돌린다(원래 읽음이던 항목은 제 시각 그대로). 안 그러면 배지는 다시 차는데 목록은 전부 읽음 · 버튼도 사라졌다.
-      setNotifications((prev) => prev ? prev.map((n) => (n.read_at === readAt ? { ...n, read_at: null } : n)) : prev);
-      setUnreadCount(countBefore);
-      void fetchUnreadCount(projectId ?? undefined).then((count) => { if (count !== null) setUnreadCount(count); });
+      return;
     }
+    if (count === null && !page) {
+      // 확정 실패가 아니라 확인이 필요한 상태(유나 판정) — 목록은 되돌린 그대로.
+      addToast({ title: t('markAllReadUnconfirmed'), type: 'warning' });
+      return;
+    }
+    const stillUnread = count !== null ? count > 0 : page!.items.some((n) => !n.read_at);
+    // 서버가 전부 읽음으로 처리했다면 사용자 입장에선 성공 — 실패 문장을 띄우지 않는다.
+    if (stillUnread) addToast({ title: t('markAllReadFailed'), type: 'error' });
   }, [projectId, addToast, t, unreadCount]);
 
   const handleNavigate = useCallback(

@@ -194,3 +194,71 @@ describe('NotificationBell — «모두 읽음» 실패 뒤 목록 · 배지가 
     expect(unhandled).not.toHaveBeenCalled();
   });
 });
+
+// story #4295(까디르 · 유나) — «모두 읽음»이 망 오류면 서버가 커밋했을 수도 있다. 목록 · 개수를 다시 받아 서버 값으로 맞추고,
+// 토스트는 그 결과로 고른다(목록과 토스트가 다른 말을 하지 않게).
+describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목록 · 토스트가 한 세계(story #4295)', () => {
+  const allReadButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+  const readNotif = (id: string) => ({ ...unreadNotif(id), read_at: '2026-07-27T01:00:00Z' });
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  /** «모두 읽음» 요청 전 조회는 늘 안 읽음 1건. 그 뒤(재조회)는 after 대로 — 'allRead'(서버가 커밋함) · 'unread'(안 됨) · 'network'. */
+  function stubAfterNetworkLoss(after: { list: 'allRead' | 'unread' | 'network'; count: number | 'network' }) {
+    let patched = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') { patched = true; throw new TypeError('Failed to fetch'); }
+      if (url.includes('/api/event-notifications?')) {
+        if (!patched) return json({ data: [unreadNotif('n1')], meta: { hasMore: false } });
+        if (after.list === 'network') throw new TypeError('Failed to fetch');
+        return json({ data: [after.list === 'allRead' ? readNotif('n1') : unreadNotif('n1')], meta: { hasMore: false } });
+      }
+      if (url.includes('/unread-count')) {
+        if (!patched) return json({ count: 1 });
+        if (after.count === 'network') throw new TypeError('Failed to fetch');
+        return json({ count: after.count });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+  }
+
+  async function clickAllRead() {
+    await act(async () => { allReadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  }
+
+  it('⭐응답만 잃고 서버는 전부 읽음 → 목록 읽음 · 버튼 사라짐 · 실패 토스트 없음', async () => {
+    stubAfterNetworkLoss({ list: 'allRead', count: 0 });
+    await openBell();
+    await clickAllRead();
+    expect(allReadButton(), '목록이 서버 값(전부 읽음)').toBeUndefined();
+    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
+  });
+
+  it('⭐망 오류 뒤 여전히 안 읽음 → 목록 안 읽음 · 버튼 남음 · «전체 읽음 처리에 실패했어요»', async () => {
+    stubAfterNetworkLoss({ list: 'unread', count: 1 });
+    await openBell();
+    await clickAllRead();
+    expect(allReadButton()).toBeTruthy();
+    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
+  });
+
+  it('⭐재조회까지 실패 → 되돌린 목록(버튼 남음) · «반영됐는지 확인하지 못했어요»', async () => {
+    stubAfterNetworkLoss({ list: 'network', count: 'network' });
+    await openBell();
+    await clickAllRead();
+    expect(allReadButton()).toBeTruthy();
+    expect(container.textContent).toContain(koMessages.inbox.markAllReadUnconfirmed);
+    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+  });
+
+  it('서버가 답한 실패(500) → 재조회와 무관하게 «전체 읽음 처리에 실패했어요»', async () => {
+    stubFetch(false);
+    await openBell();
+    await clickAllRead();
+    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(allReadButton()).toBeTruthy();
+  });
+});
