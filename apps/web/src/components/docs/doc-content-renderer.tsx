@@ -52,6 +52,9 @@ interface DocContentRendererProps {
   // 현재·미래 호출부 전부를 지키게 한다(테스트가 아니라 타입이 자).
   /** label shown in a page-embed card when the embedded doc has no title. */
   untitledEmbedLabel: string;
+  /** story #4313(유나 4673 판) — 페이지 임베드가 열리는 문서로 안 풀릴 때(없는 · 지운 문서) 카드 문구(에디터 임베드 오류 상태와 같은 «문서를 찾을 수 없어요»).
+   * 필수 — 옵셔널 + 영문 기본값이면 새 호출부가 빼먹어도 조용히 통과한다(untitledEmbedLabel과 같은 이유 · #3935). */
+  embedNotFoundLabel: string;
   /** label shown when a mermaid diagram fails to render. */
   mermaidRenderFailedLabel?: string;
   /** label shown while a mermaid diagram is rendering. */
@@ -73,8 +76,10 @@ interface DocContentRendererProps {
   wikiLinkTargets?: Readonly<Record<string, string>> | null;
 }
 
-// story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것).
-const WIKI_LINK_CLASS = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+// story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것). 유나 4673 판: 본문 속 글자 링크라 **글자 크기 ·
+// 줄바꿈을 본문에서 물려받는다**(예전 `inline-flex text-sm px-1`은 16px 본문 속 14px 끊기지 않는 상자 — 1440에서 들쭉날쭉 빈틈 · 390 줄 간격 흔들림).
+// 색은 이 선언이 이긴다 — 루트의 `[&_a]` 링크 규칙은 문서 링크(`data-doc-internal-link`)를 빼고 건다(아래 rootClassName · 예전엔 brand-soft가 덮어 라이트 대비 1.25:1).
+const WIKI_LINK_CLASS = 'rounded-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 function normalizeHeadingForTitleCompare(s: string): string {
   return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
@@ -249,6 +254,7 @@ export function DocContentRenderer({
   publicImageLabel = 'Image unavailable in public view',
   assetImageErrorLabel = 'This image could not be loaded',
   untitledEmbedLabel,
+  embedNotFoundLabel,
   mermaidRenderFailedLabel = 'Render failed',
   mermaidRenderingLabel = 'Rendering...',
   mathRenderFailedLabel = 'KaTeX render failed',
@@ -415,8 +421,20 @@ export function DocContentRenderer({
       // 유지하되 링크(이동)만 뺀다.
       // 카드 표면은 공용 cardVariants(손코딩 카드 가드 · story #3164) — 링크 카드와 공개 보기의 비활성 카드가 같은 표면.
       const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
-      // story #4313 — 열리는 문서로 안 풀리면(대응 밖) 공개 보기와 같은 비활성 카드(깨진 링크 0) · 풀리면 주소는 지금 slug.
+      // story #4313 — 열리는 문서로 안 풀리면(대응 밖 · 없는 · 지운 문서) 작동하는 링크 카드와 같은 모양 · `/slug`를 보이지 않는다(유나 4673 판):
+      // 에디터 임베드 오류 상태처럼 경고 아이콘 + «문서를 찾을 수 없어요» + 흐린 제목. 풀리면 주소는 지금 slug.
       const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!publicMode && slug && !target) {
+        block.className = cn('not-prose my-2', cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+        block.setAttribute('data-embed-state', 'not-found');
+        block.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm text-muted-foreground">${escapeHtmlText(embedNotFoundLabel)}</p>
+          ${title ? `<p class="truncate text-xs text-muted-foreground/70">${escapeHtmlText(title)}</p>` : ''}
+        </div>`;
+        return () => { /* no destination — not found */ };
+      }
       if (publicMode || !target) {
         block.className = cn('not-prose my-2', embedCardClassName);
         block.innerHTML = cardInner;
@@ -642,7 +660,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
 
   // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
   useEffect(() => {

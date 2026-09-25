@@ -41,7 +41,7 @@ async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; 
           content={content}
           contentFormat={opts.format ?? 'markdown'}
           publicMode={opts.publicMode}
-          untitledEmbedLabel="제목 없음"
+          untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요"
           wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets}
         />
       </NextIntlClientProvider>,
@@ -136,6 +136,31 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc', '/ws-1/proj-b/docs/onboarding']);
     expect(container.textContent).toContain('없음');
     expect(container.textContent).toContain('지운 문서');
+  });
+
+  // 유나 4673 판 (2) — 열리는 문서로 안 풀린 임베드가 작동하는 링크 카드와 같은 모양 · `/slug`를 보이면 안 된다: 에디터 임베드 오류 상태처럼 «문서를 찾을 수 없어요» + 흐린 제목.
+  it('⭐안 풀린 임베드(없는 · 지운 문서) — «문서를 찾을 수 없어요» + 흐린 제목 · `/slug` 0 · 링크 0(마크다운 · HTML)', async () => {
+    for (const format of ['markdown', 'html'] as const) {
+      await renderDoc('<div data-page-embed data-title="지운 문서" data-slug="gone-doc"></div>\n', { format });
+      const card = container.querySelector('[data-page-embed]')!;
+      expect(card.getAttribute('data-embed-state'), format).toBe('not-found');
+      expect(card.textContent).toContain('문서를 찾을 수 없어요');
+      expect(card.textContent).toContain('지운 문서');
+      expect(card.textContent).not.toContain('/gone-doc');
+      expect(card.querySelector('a')).toBeNull();
+    }
+    // 공개 보기는 예전 그대로(제목 카드 · 비활성) — 없음 판정을 공개 보기에 드러내지 않는다.
+    await renderDoc('<div data-page-embed data-title="회의록" data-slug="gone-doc"></div>\n', { publicMode: true });
+    expect(container.querySelector('[data-page-embed]')!.getAttribute('data-embed-state')).toBeNull();
+  });
+
+  it('⭐마크다운 문서 링크도 본문 글자 크기 · 줄바꿈 상속(상자 아님) · 선언 색', async () => {
+    await renderDoc('[[onboarding]] <span data-type="wikiLink" data-slug="design-doc">설계</span>');
+    for (const link of docLinks()) {
+      for (const cls of ['inline-flex', 'text-sm', 'px-1']) expect(link.classList.contains(cls), cls).toBe(false);
+      expect(link.classList.contains('text-foreground')).toBe(true);
+    }
+    expect(docLinks()).toHaveLength(2);
   });
 
   it('⭐publicMode — «[[…]]» · 에디터 span 모두 평문 · 이동 0', async () => {

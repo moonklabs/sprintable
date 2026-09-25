@@ -78,6 +78,7 @@ export default function SharedDocPage() {
           codeCopiedLabel={t('codeCopied')}
           codeCopyFailedLabel={t('codeCopyFailed')}
           untitledEmbedLabel={t('newDocDefaultTitle')}
+          embedNotFoundLabel={t('notFound')}
           mermaidRenderFailedLabel={t('mermaidRenderFailed')}
           mermaidRenderingLabel={t('mermaidRendering')}
           mathRenderFailedLabel={t('mathRenderFailed')}

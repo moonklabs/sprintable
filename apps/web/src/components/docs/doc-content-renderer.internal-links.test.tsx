@@ -43,7 +43,7 @@ async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; 
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets} />
+        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets} />
       </NextIntlClientProvider>,
     );
   });
@@ -81,6 +81,20 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
       expect(accessibleName(link)).toBe('회의록');
       expect(link.textContent, '카드 모양(제목 · 경로 줄)은 그대로').toContain('/meeting-notes');
     }
+  });
+
+  // story #4313(유나 4673 판 · PO) — 4309가 span을 `<a>`로 바꾸며 들어온 퇴행 둘: (1) 루트의 `[&_a]:text-brand-soft`가 선언 색을 덮어 라이트 대비 1.25:1 ·
+  // (2) `inline-flex text-sm px-1` = 16px 본문 속 14px 끊기지 않는 상자. 문서 링크는 루트 링크 규칙에서 빠지고, 글자 크기 · 줄바꿈을 본문에서 물려받는다.
+  it('⭐문서 링크는 루트 링크 색 규칙에서 빠지고(선언 색이 이김) 본문 글자 크기 · 줄바꿈을 물려받는다(상자 아님)', async () => {
+    await renderDoc(WIKI + EMBED);
+    const rootClass = (container.firstElementChild as HTMLElement).className;
+    expect(rootClass).toContain('[&_a:not([data-doc-internal-link])]:text-brand-soft');
+    expect(rootClass).not.toMatch(/(^|\s)\[&_a\]:text-brand-soft/);
+    const wiki = container.querySelector('[data-type="wikiLink"] a')!;
+    expect(wiki.hasAttribute('data-doc-internal-link')).toBe(true);
+    for (const cls of ['inline-flex', 'text-sm', 'px-1', 'py-0.5']) expect(wiki.classList.contains(cls), cls).toBe(false);
+    expect(wiki.classList.contains('text-foreground')).toBe(true);
+    expect(container.querySelector('[data-page-embed] a')!.hasAttribute('data-doc-internal-link')).toBe(true);
   });
 
   it('제목 없는 임베드의 이름 = 빈 제목 표기', async () => {
