@@ -416,11 +416,16 @@ export function DocContentRenderer({
         ? `<span class="shrink-0 text-lg">${escapeHtmlText(icon)}</span>`
         : '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
       const displayTitle = title || `(${untitledEmbedLabel})`;
+      // story #4313 — 열리는 문서로 풀리면 지금 slug(옛 slug alias면 이름 바뀐 뒤의 것). 풀리지 않으면 undefined.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      // story #4316 — 카드의 경로 줄은 링크 주소와 같은 **지금 slug**(예전엔 문서에 적힌 slug라 alias로 옮겨 간 문서면 옛 `/old-…`를 보여
+      // href와 다른 말을 했다). 대응을 모르는 자리(공개 보기 등)만 적힌 slug.
+      const shownSlug = target ?? slug;
       const cardInner = `
         ${iconMarkup}
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium">${escapeHtmlText(displayTitle)}</p>
-          ${slug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(slug)}</p>` : ''}
+          ${shownSlug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(shownSlug)}</p>` : ''}
         </div>`;
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
       // 유지하되 링크(이동)만 뺀다.
@@ -428,7 +433,6 @@ export function DocContentRenderer({
       const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
       // story #4313 — 열리는 문서로 안 풀리면(대응 밖 · 없는 · 지운 문서) 작동하는 링크 카드와 같은 모양 · `/slug`를 보이지 않는다(유나 4673 판):
       // 에디터 임베드 오류 상태처럼 경고 아이콘 + «문서를 찾을 수 없어요» + 흐린 제목. 풀리면 주소는 지금 slug.
-      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
       if (!publicMode && slug && !target) {
         block.className = cn('not-prose my-2', cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
         block.setAttribute('data-embed-state', 'not-found');
