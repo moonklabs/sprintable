@@ -5,8 +5,9 @@ import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import { remarkWikiLinks } from './remark-wiki-links';
 
-const EXISTING = new Set(['onboarding', 'design-doc']);
-const options = { exists: (s: string) => EXISTING.has(s), href: (s: string) => `/ws/p/docs/${s}` };
+// 적힌 slug → 지금 slug(옛 이름 old-design → design-doc).
+const TARGETS: Record<string, string> = { onboarding: 'onboarding', 'design-doc': 'design-doc', 'old-design': 'design-doc' };
+const options = { resolve: (s: string) => TARGETS[s] ?? null, href: (s: string) => `/ws/p/docs/${s}` };
 
 type N = { type: string; value?: string; url?: string; children?: N[]; data?: { hProperties?: Record<string, string> } };
 function run(md: string): N {
@@ -63,8 +64,15 @@ describe('remarkWikiLinks(story #4313)', () => {
     expect(links(run('| a |\n|---|\n| [[onboarding]] |\n'))).toHaveLength(1);
   });
 
-  it('집합이 비면(응답에 wiki_link_slugs 없음) 전부 원문', () => {
-    const processor = unified().use(remarkParse).use(remarkWikiLinks, { exists: () => false, href: (s: string) => s });
+  it('⭐옛 이름(alias)으로 적힌 링크 — 주소 · 표지는 지금 slug(alias 해소 왕복 0) · 보이는 글은 적힌 그대로', () => {
+    const got = links(run('[[old-design]] · [[old-design|설계]]'));
+    expect(got.map((l) => l.url)).toEqual(['/ws/p/docs/design-doc', '/ws/p/docs/design-doc']);
+    expect(got.map((l) => l.data?.hProperties?.dataDocInternalLink)).toEqual(['design-doc', 'design-doc']);
+    expect(got.map((l) => textOf(l))).toEqual(['old-design', '설계']);
+  });
+
+  it('대응이 비면(응답에 wiki_link_targets 없음) 전부 원문', () => {
+    const processor = unified().use(remarkParse).use(remarkWikiLinks, { resolve: () => null, href: (s: string) => s });
     const tree = processor.runSync(processor.parse('[[onboarding]] [[design-doc|설계]]')) as unknown as N;
     expect(links(tree)).toHaveLength(0);
     expect(textOf(tree)).toBe('[[onboarding]] [[design-doc|설계]]');

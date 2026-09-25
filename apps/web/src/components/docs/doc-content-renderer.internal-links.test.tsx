@@ -36,14 +36,14 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
-// story #4313 — 링크는 실재 문서 slug 집합(문서 상세 응답 `wiki_link_slugs`)에 든 것만. 4309 테스트의 문서는 다 실재로 둔다.
-const EXISTING = ['design-doc', 'meeting-notes', 'untitled-1'];
+// story #4313 — 링크는 위키 링크 대응(문서 상세 응답 `wiki_link_targets` · 적힌 slug → 지금 slug)에 든 것만. 4309 테스트의 문서는 다 살아 있는 문서로 둔다.
+const EXISTING: Record<string, string> = { 'design-doc': 'design-doc', 'meeting-notes': 'meeting-notes', 'untitled-1': 'untitled-1' };
 
-async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean; wikiLinkSlugs?: string[] | null } = {}) {
+async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean; wikiLinkTargets?: Record<string, string> | null } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" wikiLinkSlugs={opts.wikiLinkSlugs === undefined ? EXISTING : opts.wikiLinkSlugs} />
+        <DocContentRenderer content={content} contentFormat={opts.format ?? 'html'} publicMode={opts.publicMode} untitledEmbedLabel="제목 없음" wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets} />
       </NextIntlClientProvider>,
     );
   });

@@ -1,7 +1,8 @@
-"""story #4313 — 문서 상세(slug 단건 경로) 응답의 `wiki_link_slugs`: 본문 위키 링크 후보 중 같은 프로젝트에 실재하는 문서 slug만.
+"""story #4313 — 문서 상세(slug 단건 경로) 응답의 `wiki_link_targets`: 본문 위키 링크 후보 → 지금 slug(같은 프로젝트의 살아 있는 문서만).
 
-FE는 이 집합에 든 것만 진짜 링크로 그리고 나머지는 글자 그대로 둔다(없는 문서로 가는 깨진 링크 0 · 요청 추가 0).
-실재 판정(삭제 제외 · 같은 프로젝트 · 같은 org)은 실DB 쿼리라 mock으로는 못 잡는다. DB env 없으면 skip(realdb 관례).
+살아 있는 slug는 자기 자신 · 옛 slug(`doc_slug_aliases`)는 그 문서의 지금 slug(PO 13:44Z — 이름 바꾼 문서도 열리는 문서 · 주소는 지금 slug라
+alias 해소 왕복 0). FE는 여기 든 것만 진짜 링크 · 나머지는 글자 그대로(깨진 링크 0 · 요청 추가 0).
+판정(삭제 제외 · 같은 프로젝트 · 같은 org · 살아 있는 slug 우선)은 실DB 쿼리라 mock으로는 못 잡는다. DB env 없으면 skip(realdb 관례).
 """
 from __future__ import annotations
 
@@ -28,7 +29,9 @@ FOREIGN_PROJ = uuid.UUID("43130000-0000-0000-0000-0000000000c3")
 
 BODY = (
     "앞 [[onboarding]] · 별칭 [[onboarding|온보딩 안내]] · 없는 [[feedback_memory_file]] · 지운 [[gone-doc]] · "
-    "다른 프로젝트 [[other-proj-doc]] · 다른 org [[foreign-doc]] · 에디터 span "
+    "다른 프로젝트 [[other-proj-doc]] · 다른 org [[foreign-doc]] · 옛 이름 [[old-onboarding|온보딩]] · 지운 문서의 옛 이름 [[old-gone]] · "
+    "다른 프로젝트 alias [[old-other]] · 다른 프로젝트에 기록된 옛 이름(문서는 지금 이 프로젝트) [[old-moved]] · "
+    "이 프로젝트 옛 이름인데 문서가 다른 프로젝트로 감 [[old-left]] · 살아 있는 slug와 같은 alias [[collide]] · 에디터 span "
     '<span data-type="wikiLink" data-doc-id="x" data-title="설계" data-slug="design-doc">설계</span>\n'
     "```\n[[in-code]]\n```\n"
 )
@@ -36,7 +39,8 @@ BODY = (
 
 def test_candidates_cover_both_syntaxes_and_span_dedup_in_order():
     assert wiki_link_slug_candidates(BODY) == [
-        "onboarding", "feedback_memory_file", "gone-doc", "other-proj-doc", "foreign-doc", "design-doc", "in-code",
+        "onboarding", "feedback_memory_file", "gone-doc", "other-proj-doc", "foreign-doc", "old-onboarding", "old-gone",
+        "old-other", "old-moved", "old-left", "collide", "design-doc", "in-code",
     ]
     # 후보의 상위집합만 뽑는다 — 코드 안 «[[in-code]]»도 후보(문맥 판정은 FE 렌더러).
     assert wiki_link_slug_candidates(None) == []
@@ -63,6 +67,7 @@ async def _dispose_global_engine_after_test():
 
 async def _seed(session) -> None:
     for sql in [
+        f"DELETE FROM doc_slug_aliases WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM docs WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM projects WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM organizations WHERE id IN ('{ORG}','{OTHER_ORG}')",
@@ -78,23 +83,43 @@ async def _seed(session) -> None:
         (ORG, PROJ, "Onboarding", "onboarding", "x", None),
         (ORG, PROJ, "Design", "design-doc", "x", None),
         (ORG, PROJ, "In code", "in-code", "x", None),
+        (ORG, PROJ, "Collide", "collide", "x", None),
         (ORG, PROJ, "Gone", "gone-doc", "x", "now()"),
         (ORG, OTHER_PROJ, "Other", "other-proj-doc", "x", None),
         (OTHER_ORG, FOREIGN_PROJ, "Foreign", "foreign-doc", "x", None),
     ]
+    ids: dict[str, uuid.UUID] = {}
     for org, proj, title, slug, content, deleted in rows:
+        ids[slug] = uuid.uuid4()
         await session.execute(
             text(
                 "INSERT INTO docs (id,org_id,project_id,title,slug,content,content_format,deleted_at) "
                 f"VALUES (:id,:org,:proj,:title,:slug,:content,'markdown',{deleted or 'NULL'})"
             ),
-            {"id": uuid.uuid4(), "org": org, "proj": proj, "title": title, "slug": slug, "content": content},
+            {"id": ids[slug], "org": org, "proj": proj, "title": title, "slug": slug, "content": content},
+        )
+    # 옛 slug(이름 바꾸기 흔적): 살아 있는 문서 · 지운 문서 · 다른 프로젝트로 기록된 alias · 살아 있는 slug와 같은 alias(살아 있는 쪽 우선).
+    aliases = [
+        (PROJ, "old-onboarding", ids["onboarding"]),
+        (PROJ, "old-gone", ids["gone-doc"]),
+        (OTHER_PROJ, "old-other", ids["other-proj-doc"]),
+        # 옛 slug가 다른 프로젝트 이름공간에 기록됨(문서는 지금 PROJ) — 이 프로젝트 본문의 «[[old-moved]]»는 그 이름공간이 아니라 풀리면 안 됨.
+        (OTHER_PROJ, "old-moved", ids["onboarding"]),
+        # 이 프로젝트의 옛 이름인데 문서는 지금 다른 프로젝트 — 이 프로젝트 주소(/{ws}/{proj}/docs/…)로 링크하면 틀린 곳이라 풀리면 안 됨.
+        (PROJ, "old-left", ids["other-proj-doc"]),
+        (PROJ, "collide", ids["design-doc"]),
+    ]
+    for proj, old, doc_id in aliases:
+        await session.execute(
+            text("INSERT INTO doc_slug_aliases (id,org_id,project_id,old_slug,doc_id) VALUES (:id,:org,:proj,:old,:doc)"),
+            {"id": uuid.uuid4(), "org": ORG, "proj": proj, "old": old, "doc": doc_id},
         )
     await session.commit()
 
 
 async def _cleanup(session) -> None:
     for sql in [
+        f"DELETE FROM doc_slug_aliases WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM docs WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM projects WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM organizations WHERE id IN ('{ORG}','{OTHER_ORG}')",
@@ -105,7 +130,7 @@ async def _cleanup(session) -> None:
 
 @realdb
 @pytest.mark.anyio
-async def test_existing_slugs_only_live_docs_in_same_project_and_org(anyio_backend):
+async def test_targets_live_docs_and_aliases_in_same_project_and_org(anyio_backend):
     from app.repositories.doc import DocRepository
 
     engine = create_async_engine(_ASYNC)
@@ -114,12 +139,18 @@ async def test_existing_slugs_only_live_docs_in_same_project_and_org(anyio_backe
         async with Session() as session:
             await _seed(session)
             repo = DocRepository(session, ORG)
-            got = await repo.existing_slugs(PROJ, wiki_link_slug_candidates(BODY))
-            # 실재 = onboarding · design-doc · in-code(코드 안이어도 BE는 실재만 판정). 없음 · 삭제 · 다른 프로젝트 · 다른 org는 빠짐.
-            assert got == ["design-doc", "in-code", "onboarding"]
-            assert await repo.existing_slugs(PROJ, []) == []
-            # org 경계 — 다른 org 저장소로는 같은 후보라도 이 프로젝트 문서가 안 보인다.
-            assert await DocRepository(session, OTHER_ORG).existing_slugs(PROJ, ["onboarding"]) == []
+            got = await repo.resolve_wiki_link_targets(PROJ, wiki_link_slug_candidates(BODY))
+            # 살아 있는 slug = 자기 자신(코드 안 in-code도 — 문맥은 FE 판정) · 옛 slug old-onboarding → 지금 onboarding ·
+            # collide는 살아 있는 문서 slug이자 design-doc의 alias → 살아 있는 쪽 우선(자기 자신).
+            # 빠짐: 없는 것 · 지운 문서(gone-doc) · 지운 문서의 alias(old-gone) · 다른 프로젝트 문서 · 다른 프로젝트 alias(old-other ·
+            # old-moved — 문서가 이 프로젝트에 있어도 옛 이름이 다른 프로젝트 이름공간) · 다른 프로젝트로 간 문서의 옛 이름(old-left) · 다른 org.
+            assert got == {
+                "collide": "collide", "design-doc": "design-doc", "in-code": "in-code",
+                "old-onboarding": "onboarding", "onboarding": "onboarding",
+            }
+            assert await repo.resolve_wiki_link_targets(PROJ, []) == {}
+            # org 경계 — 다른 org 저장소로는 같은 후보라도 이 프로젝트 문서 · alias가 안 보인다.
+            assert await DocRepository(session, OTHER_ORG).resolve_wiki_link_targets(PROJ, ["onboarding", "old-onboarding"]) == {}
             await _cleanup(session)
     finally:
         await engine.dispose()
@@ -127,7 +158,7 @@ async def test_existing_slugs_only_live_docs_in_same_project_and_org(anyio_backe
 
 @realdb
 @pytest.mark.anyio
-async def test_slug_detail_response_carries_wiki_link_slugs_and_other_paths_do_not(anyio_backend):
+async def test_slug_detail_response_carries_wiki_link_targets_and_other_paths_do_not(anyio_backend):
     from app.repositories.doc import DocRepository
     from app.routers.docs import list_docs
 
@@ -142,20 +173,23 @@ async def test_slug_detail_response_carries_wiki_link_slugs_and_other_paths_do_n
                 limit=500, cursor=None, repo=repo,
             )
             assert [d.slug for d in detail["data"]] == ["main-doc"]
-            assert detail["data"][0].wiki_link_slugs == ["design-doc", "in-code", "onboarding"]
+            assert detail["data"][0].wiki_link_targets == {
+                "collide": "collide", "design-doc": "design-doc", "in-code": "in-code",
+                "old-onboarding": "onboarding", "onboarding": "onboarding",
+            }
 
             no_links = await list_docs(
                 project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug="onboarding", q=None, ids=None,
                 limit=500, cursor=None, repo=repo,
             )
-            assert no_links["data"][0].wiki_link_slugs == []
+            assert no_links["data"][0].wiki_link_targets == {}
 
             # 다건 경로(목록)는 필드를 채우지 않는다(additive · None).
             listing = await list_docs(
                 project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug=None, q=None, ids=None,
                 limit=500, cursor=None, repo=repo,
             )
-            assert listing["data"] and all(d.wiki_link_slugs is None for d in listing["data"])
+            assert listing["data"] and all(d.wiki_link_targets is None for d in listing["data"])
             await _cleanup(session)
     finally:
         await engine.dispose()

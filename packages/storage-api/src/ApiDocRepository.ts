@@ -37,8 +37,8 @@ export class ApiDocRepository implements IDocRepository {
     const first = res.data[0];
     if (!first) throw new Error(`Doc not found: ${slug}`);
     const doc = await fastapiCall<Doc>('GET', `/api/v2/docs/${first.id}`, this.accessToken);
-    // story #4313 — 실재 위키 링크 slug는 slug 단건 경로 응답에만 있다(상세 GET엔 없음) — 이미 받은 값을 실어 보낸다(요청 추가 0).
-    return { ...doc, wiki_link_slugs: first.wiki_link_slugs ?? null };
+    // story #4313 — 위키 링크 대응(적힌 slug → 지금 slug)은 slug 단건 경로 응답에만 있다(상세 GET엔 없음) — 이미 받은 값을 실어 보낸다(요청 추가 0).
+    return { ...doc, wiki_link_targets: first.wiki_link_targets ?? null };
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Doc> {

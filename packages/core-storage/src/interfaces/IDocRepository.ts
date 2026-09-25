@@ -18,8 +18,8 @@ export interface Doc {
   created_by: string;
   created_at: string;
   updated_at: string;
-  /** story #4313 — 본문 위키 링크 중 같은 프로젝트에 실재하는 문서 slug(slug 단건 조회에서만 · 그 밖엔 없음). */
-  wiki_link_slugs?: string[] | null;
+  /** story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(같은 프로젝트의 살아 있는 문서 · 옛 slug는 지금 slug로 · slug 단건 조회에서만). */
+  wiki_link_targets?: Record<string, string> | null;
 }
 
 export interface DocSummary {
@@ -33,7 +33,7 @@ export interface DocSummary {
   is_folder: boolean;
   updated_at: string;
   /** story #4313 — BE slug 단건 경로만 채운다(다건 경로는 null). */
-  wiki_link_slugs?: string[] | null;
+  wiki_link_targets?: Record<string, string> | null;
 }
 
 export interface CreateDocInput {

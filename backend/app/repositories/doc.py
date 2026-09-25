@@ -63,11 +63,18 @@ class DocRepository(BaseRepository[Doc]):
         )
         return result.scalar_one_or_none()
 
-    async def existing_slugs(self, project_id: uuid.UUID, slugs: list[str]) -> list[str]:
-        """story #4313: 주어진 slug 중 이 프로젝트에 실재하는(삭제 안 된) 것만 — 한 쿼리. 순서는 slug 오름차순."""
+    async def resolve_wiki_link_targets(self, project_id: uuid.UUID, slugs: list[str]) -> dict[str, str]:
+        """story #4313: 적힌 slug → 지금 slug. 이 프로젝트에 살아 있는(삭제 안 된) 문서만.
+
+        살아 있는 slug는 자기 자신. 아니면 옛 slug(`doc_slug_aliases`) → 그 문서의 지금 slug(PO 13:44Z — 이름 바꾼 문서를 가리키는
+        «[[옛-slug]]»도 열리는 문서이므로 링크 · 주소는 지금 slug라 alias 해소 왕복이 없다). 살아 있는 slug가 alias보다 앞선다
+        (`?slug=` 조회 get_by_slug → get_by_alias 순서와 같다). 두 쿼리(살아 있는 것 · 남은 것의 alias).
+        """
         if not slugs:
-            return []
-        result = await self.session.execute(
+            return {}
+        from app.models.doc import DocSlugAlias
+
+        live = await self.session.execute(
             select(Doc.slug).where(
                 self._org_filter(),
                 Doc.project_id == project_id,
@@ -75,7 +82,24 @@ class DocRepository(BaseRepository[Doc]):
                 Doc.deleted_at.is_(None),
             )
         )
-        return sorted({row[0] for row in result.all()})
+        targets = {row[0]: row[0] for row in live.all()}
+        rest = [s for s in slugs if s not in targets]
+        if rest:
+            aliased = await self.session.execute(
+                select(DocSlugAlias.old_slug, Doc.slug)
+                .join(Doc, DocSlugAlias.doc_id == Doc.id)
+                .where(
+                    self._org_filter(),
+                    DocSlugAlias.project_id == project_id,
+                    Doc.project_id == project_id,
+                    DocSlugAlias.old_slug.in_(rest),
+                    Doc.deleted_at.is_(None),
+                )
+            )
+            # rest엔 살아 있는 slug가 없으니 alias가 살아 있는 slug를 덮지 않는다(살아 있는 쪽 우선은 위 rest 거르기 하나로).
+            for old_slug, current in aliased.all():
+                targets[old_slug] = current
+        return dict(sorted(targets.items()))
 
     async def get_by_alias(self, project_id: uuid.UUID, old_slug: str) -> Doc | None:
         """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback.

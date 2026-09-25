@@ -67,9 +67,10 @@ interface DocContentRendererProps {
    * 눌림(full=17.66과 대비). 리더만 'full'로 옵트인 — 기본(미지정)은 기존 /92 그대로라
    * 공유 렌더러의 다른 소비처(에디터 프리뷰 등) 무접촉. */
   bodyEmphasis?: 'default' | 'full';
-  /** story #4313 — 본문 위키 링크 중 같은 프로젝트에 **실재하는** 문서 slug(문서 상세 응답의 `wiki_link_slugs`). 위키 링크 · 페이지 임베드는
-   * 이 집합에 든 것만 문서 링크가 된다. 안 넘기면(이 값을 모르는 소비처) 늘 글자 그대로 · 비활성 카드 — 없는 문서로 가는 깨진 링크 0. */
-  wikiLinkSlugs?: readonly string[] | null;
+  /** story #4313 — 본문 위키 링크 {적힌 slug → 지금 slug}(문서 상세 응답의 `wiki_link_targets` · 같은 프로젝트의 살아 있는 문서 · 옛 slug는
+   * 지금 slug로). 위키 링크 · 페이지 임베드는 여기 든 것만 문서 링크가 되고 주소는 지금 slug(alias 해소 왕복 0). 안 넘기면(이 값을 모르는
+   * 소비처) 늘 글자 그대로 · 비활성 카드 — 없는 문서로 가는 깨진 링크 0. */
+  wikiLinkTargets?: Readonly<Record<string, string>> | null;
 }
 
 // story #4309 · #4313 — 본문 위키 링크의 모양(HTML 포맷 DOM 조립 · 마크다운 렌더 둘 다 같은 것).
@@ -253,7 +254,7 @@ export function DocContentRenderer({
   mathRenderFailedLabel = 'KaTeX render failed',
   suppressLeadingTitle,
   bodyEmphasis = 'default',
-  wikiLinkSlugs,
+  wikiLinkTargets,
 }: DocContentRendererProps) {
   // story #4309 — 본문의 문서 링크(위키 링크 · 페이지 임베드)는 진짜 `<a href>`다: 키보드 초점 · Enter · 새 탭(⌘/Ctrl · 가운데 클릭).
   // 목적지는 처음부터 이 탭 주소의 `/{ws}/{proj}/docs/{slug}`(예전 `window.location.href = /docs/{slug}?p=` = 전체 새로고침 + 서버 307),
@@ -272,8 +273,11 @@ export function DocContentRenderer({
   const routerRef = useRef(router);
   useEffect(() => { docHrefRef.current = docHref; routerRef.current = router; }, [docHref, router]);
   // story #4313 — 실재 문서 slug 집합(없으면 빈 집합 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 배열 모양이 매 렌더 새것이어도 값이 같으면 같은 집합.
-  const wikiLinkSlugKey = wikiLinkSlugs?.length ? wikiLinkSlugs.join('\n') : '';
-  const wikiLinkSet = useMemo(() => new Set(wikiLinkSlugKey ? wikiLinkSlugKey.split('\n') : []), [wikiLinkSlugKey]);
+  // story #4313 — 적힌 slug → 지금 slug 대응(없으면 빈 대응 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 객체가 매 렌더 새것이어도 값이 같으면 같은 대응.
+  const wikiLinkTargetKey = wikiLinkTargets ? JSON.stringify(Object.entries(wikiLinkTargets).sort(([a], [b]) => a.localeCompare(b))) : '[]';
+  const wikiLinkTargetMap = useMemo(() => new Map<string, string>(JSON.parse(wikiLinkTargetKey) as [string, string][]), [wikiLinkTargetKey]);
+  // `a` 컴포넌트가 표지(지금 slug)를 검증할 때 — 대응의 값(지금 slug) 집합.
+  const wikiLinkCurrentSlugs = useMemo(() => new Set(wikiLinkTargetMap.values()), [wikiLinkTargetMap]);
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
 
@@ -372,14 +376,15 @@ export function DocContentRenderer({
         span.removeAttribute('data-slug');
         return () => { /* no handler attached */ };
       }
-      // story #4313 — 실재 문서가 아니면(slug 없음 · 집합 밖) 글자 그대로(없는 문서로 가는 깨진 링크 0).
-      if (!slug || !wikiLinkSet.has(slug)) {
+      // story #4313 — 열리는 문서로 안 풀리면(slug 없음 · 대응 밖) 글자 그대로(없는 문서로 가는 깨진 링크 0). 풀리면 주소는 지금 slug.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!target) {
         span.className = '';
         return () => { /* no destination — plain text */ };
       }
       // 링크는 span 안에 둔다(span의 data-*는 다시 돌 때 찾는 표지 · 효과가 다시 돌면 링크를 새로 만든다).
       span.className = '';
-      const link = makeInternalLink(slug, WIKI_LINK_CLASS);
+      const link = makeInternalLink(target, WIKI_LINK_CLASS);
       link.title = title;
       link.textContent = span.textContent || title;
       span.replaceChildren(link);
@@ -410,15 +415,16 @@ export function DocContentRenderer({
       // 유지하되 링크(이동)만 뺀다.
       // 카드 표면은 공용 cardVariants(손코딩 카드 가드 · story #3164) — 링크 카드와 공개 보기의 비활성 카드가 같은 표면.
       const embedCardClassName = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
-      // story #4313 — 실재 문서가 아니면(집합 밖) 공개 보기와 같은 비활성 카드(깨진 링크 0).
-      if (publicMode || !slug || !wikiLinkSet.has(slug)) {
+      // story #4313 — 열리는 문서로 안 풀리면(대응 밖) 공개 보기와 같은 비활성 카드(깨진 링크 0) · 풀리면 주소는 지금 slug.
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (publicMode || !target) {
         block.className = cn('not-prose my-2', embedCardClassName);
         block.innerHTML = cardInner;
         return () => { /* no handler attached */ };
       }
       // story #4309 — 카드 전체가 링크 하나(접근 가능한 이름 = 문서 제목 · 경로 줄은 이름에 섞지 않는다).
       block.className = 'not-prose my-2';
-      const link = makeInternalLink(slug, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
+      const link = makeInternalLink(target, cn(embedCardClassName, 'no-underline transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'));
       link.setAttribute('aria-label', displayTitle);
       link.innerHTML = cardInner;
       block.replaceChildren(link);
@@ -636,7 +642,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel, wikiLinkSet]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
 
   // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
   useEffect(() => {
@@ -679,8 +685,8 @@ export function DocContentRenderer({
   }, []);
   // 마크다운 «[[slug]]» · «[[slug|글]]» → 실재 문서만 링크(집합 · 주소가 바뀔 때만 새 플러그인 설정).
   const remarkPlugins = useMemo(
-    () => [remarkGfm, [remarkWikiLinks, { exists: (slug: string) => wikiLinkSet.has(slug), href: docHref }]] as NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']>,
-    [wikiLinkSet, docHref],
+    () => [remarkGfm, [remarkWikiLinks, { resolve: (slug: string) => wikiLinkTargetMap.get(slug) ?? null, href: docHref }]] as NonNullable<Parameters<typeof ReactMarkdown>[0]['remarkPlugins']>,
+    [wikiLinkTargetMap, docHref],
   );
 
   const stableMarkdownComponents = useMemo<Components>(() => ({
@@ -694,7 +700,7 @@ export function DocContentRenderer({
       // 같은 표지를 흉내 내도 다른 곳으로 가는 클라이언트 이동은 안 생긴다). publicMode는 평문.
       const internalSlug = (props as Record<string, unknown>)['data-doc-internal-link'];
       if (typeof internalSlug === 'string') {
-        if (publicMode || !wikiLinkSet.has(internalSlug) || href !== docHref(internalSlug)) return <span>{children}</span>;
+        if (publicMode || !wikiLinkCurrentSlugs.has(internalSlug) || href !== docHref(internalSlug)) return <span>{children}</span>;
         return <a href={href} data-doc-internal-link={internalSlug} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
       }
       // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유).
@@ -722,8 +728,9 @@ export function DocContentRenderer({
       const slug = typeof rest['data-slug'] === 'string' ? rest['data-slug'] : '';
       const title = typeof rest['data-title'] === 'string' ? rest['data-title'] : undefined;
       if (publicMode) return <span className="text-sm text-muted-foreground">{children}</span>;
-      if (!slug || !wikiLinkSet.has(slug)) return <span>{children}</span>;
-      return <a href={docHref(slug)} data-doc-internal-link={slug} title={title} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
+      const target = slug ? wikiLinkTargetMap.get(slug) : undefined;
+      if (!target) return <span>{children}</span>;
+      return <a href={docHref(target)} data-doc-internal-link={target} title={title} className={WIKI_LINK_CLASS} onClick={onDocLinkClick}>{children}</a>;
     },
     blockquote: ({ children }: { children?: ReactNode }) => <blockquote>{children}</blockquote>,
     img: (props) => {
@@ -766,7 +773,7 @@ export function DocContentRenderer({
       }
       return <code>{children}</code>;
     },
-  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref, wikiLinkSet, docHref, onDocLinkClick]);
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel, codeCopyFailedLabel, mermaidRenderFailedLabel, mermaidRenderingLabel, flatHref, wikiLinkTargetMap, wikiLinkCurrentSlugs, docHref, onDocLinkClick]);
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',

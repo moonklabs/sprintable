@@ -77,8 +77,9 @@ class DocSummaryResponse(BaseModel):
     assignee: "DocMemberSummary | None" = None
     revisions: "DocRevisionsSummary | None" = None
     # story #4313 — slug-query 단건 경로에서만: 본문의 위키 링크 후보(«[[slug]]» · «[[slug|글]]» · `data-slug="…"`) 중 같은 프로젝트에
-    # 실재하는(삭제 안 된) 문서 slug. FE는 이 집합에 든 것만 진짜 링크로 · 나머지는 글자 그대로. 다건 경로엔 None(additive).
-    wiki_link_slugs: list[str] | None = None
+    # 살아 있는 문서로 풀리는 것의 {적힌 slug → 지금 slug}(살아 있는 slug는 자기 자신 · 옛 slug alias는 지금 slug). FE는 여기 든 것만
+    # 진짜 링크(주소 = 지금 slug) · 나머지는 글자 그대로. 다건 경로엔 None(additive).
+    wiki_link_targets: dict[str, str] | None = None
 
 
 class DocMemberSummary(BaseModel):

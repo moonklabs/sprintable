@@ -202,8 +202,8 @@ async def list_docs(
         # story #2191: 단건 lookup이라 페이지네이션 대상이 아님 — has_more는 구조적으로 항상 False.
         data = [await _enrich_doc_summary(doc, repo.session)] if doc else []
         if doc is not None:
-            # story #4313 — 본문 위키 링크 후보 중 실재 문서 slug(FE가 이것만 링크 · 요청 추가 0).
-            data[0].wiki_link_slugs = await repo.existing_slugs(doc.project_id, wiki_link_slug_candidates(doc.content))
+            # story #4313 — 본문 위키 링크 후보 → 지금 slug(살아 있는 문서 · alias 해소). FE가 여기 든 것만 링크 · 요청 추가 0.
+            data[0].wiki_link_targets = await repo.resolve_wiki_link_targets(doc.project_id, wiki_link_slug_candidates(doc.content))
         if response is not None:
             response.headers["X-Result-Count"] = str(len(data))
         return {"data": data, "meta": {"has_more": False, "next_cursor": None}}

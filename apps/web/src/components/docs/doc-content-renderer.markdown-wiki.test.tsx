@@ -20,7 +20,8 @@ import { DocContentRenderer } from './doc-content-renderer';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const EXISTING = ['design-doc', 'onboarding'];
+// 적힌 slug → 지금 slug(`wiki_link_targets`). 옛 이름 old-design은 이름 바뀐 design-doc(alias · PO 13:44Z).
+const EXISTING: Record<string, string> = { 'design-doc': 'design-doc', onboarding: 'onboarding', 'old-design': 'design-doc' };
 
 let container: HTMLDivElement;
 let root: Root;
@@ -32,7 +33,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
-async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean; wikiLinkSlugs?: string[] | null } = {}) {
+async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; publicMode?: boolean; wikiLinkTargets?: Record<string, string> | null } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -41,7 +42,7 @@ async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; 
           contentFormat={opts.format ?? 'markdown'}
           publicMode={opts.publicMode}
           untitledEmbedLabel="제목 없음"
-          wikiLinkSlugs={opts.wikiLinkSlugs === undefined ? EXISTING : opts.wikiLinkSlugs}
+          wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets}
         />
       </NextIntlClientProvider>,
     );
@@ -104,12 +105,26 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
 
   it('⭐실재 집합을 모르는 소비처(값 없음)는 어떤 경로에서도 링크 0 — «[[…]]» · 마크다운 span · HTML span · 임베드 둘', async () => {
     const md = '[[onboarding]] <span data-type="wikiLink" data-slug="design-doc">설계</span>\n\n<div data-page-embed data-title="회의록" data-slug="onboarding"></div>\n';
-    await renderDoc(md, { wikiLinkSlugs: null });
+    await renderDoc(md, { wikiLinkTargets: null });
     expect(container.querySelectorAll('a')).toHaveLength(0);
     expect(container.textContent).toContain('[[onboarding]]');
-    await renderDoc('<p><span data-type="wikiLink" data-title="설계" data-slug="design-doc">설계</span></p><div data-page-embed data-title="회의록" data-slug="onboarding"></div>', { format: 'html', wikiLinkSlugs: null });
+    await renderDoc('<p><span data-type="wikiLink" data-title="설계" data-slug="design-doc">설계</span></p><div data-page-embed data-title="회의록" data-slug="onboarding"></div>', { format: 'html', wikiLinkTargets: null });
     expect(container.querySelectorAll('a')).toHaveLength(0);
     expect(container.textContent).toContain('회의록');
+  });
+
+  // PO 13:44Z — 이름 바꾼 문서를 가리키는 옛 slug도 열리는 문서다: 링크 · 주소는 **지금 slug**(옛 주소 → alias 해소 → router.replace 왕복 0 ·
+  // AC4 «Doc 요청 1»). 모든 경로(«[[…]]» · 마크다운 span · HTML span · 임베드 둘)가 같다.
+  it('⭐옛 이름(alias)으로 적힌 위키 링크 · span · 임베드 — 링크이고 주소는 지금 slug', async () => {
+    await renderDoc('[[old-design]] · [[old-design|설계]] · <span data-type="wikiLink" data-slug="old-design" data-title="설계">설계</span>\n\n<div data-page-embed data-title="설계" data-slug="old-design"></div>\n');
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(Array(4).fill('/ws-1/proj-b/docs/design-doc'));
+    expect(docLinks().map((a) => a.getAttribute('data-doc-internal-link'))).toEqual(Array(4).fill('design-doc'));
+    expect(docLinks().slice(0, 2).map((a) => a.textContent)).toEqual(['old-design', '설계']);
+    await renderDoc('<p><span data-type="wikiLink" data-title="설계" data-slug="old-design">설계</span></p><div data-page-embed data-title="설계" data-slug="old-design"></div>', { format: 'html' });
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc', '/ws-1/proj-b/docs/design-doc']);
+    const link = docLinks()[0]!;
+    expect(click(link)).toBe(false);
+    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/design-doc');
   });
 
   it('HTML 포맷도 같은 규칙 — 실재 밖 위키 링크는 글자 그대로 · 실재 밖 임베드는 비활성 카드', async () => {
