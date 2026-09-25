@@ -207,6 +207,9 @@
   --color-brand-soft: var(--brand-soft);
   --color-brand-strong: var(--brand-strong);
   --color-brand-contrast: var(--brand-contrast);
+  /* story #4315 — 브랜드색 **글자**(링크 · 활성 칩 글자 · 아이콘). brand-soft는 옅은 틴트용이라 밝은 테마 글자로 1.25:1이었다
+     (문서 본문 링크 · 공개 공유 · 약관). 테마별로 읽히는 쪽을 고른다 — 밝은 = brand-strong(7.05) · 어두운 = brand-soft(10.48). */
+  --color-brand-text: var(--brand-text);
   --color-info-foreground: var(--info-foreground);
   --color-primary-tint: var(--primary-tint);
   --color-priority: var(--priority);
@@ -411,6 +414,7 @@
 
   --brand-soft: oklch(0.90 0.06 258);
   --brand-strong: oklch(0.45 0.20 258);
+  --brand-text: var(--brand-strong); /* story #4315 — 밝은 테마 브랜드 글자(배경 7.05 · 흰 패널 7.62 · brand/14 틴트 6.32) */
   --brand-contrast: oklch(0.96 0.03 258);
 
   /* DS-S13: Extended semantic tokens */
@@ -704,6 +708,7 @@
 
   --brand-soft: oklch(0.80 0.10 258);
   --brand-strong: oklch(0.55 0.22 258);
+  --brand-text: var(--brand-soft); /* story #4315 — 어두운 테마 브랜드 글자(배경 10.48 · 패널 9.42 · brand/14 틴트 7.87 · brand-strong은 3.92라 아님) */
   --brand-contrast: oklch(0.22 0.05 258);
 
   /* DS-S13: Extended semantic tokens */

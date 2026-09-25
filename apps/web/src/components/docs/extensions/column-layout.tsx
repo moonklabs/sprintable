@@ -61,7 +61,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
           onClick={() => switchTo(2)}
           className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
             cols === 2
-              ? 'border-brand/40 bg-brand/10 text-[color:var(--brand-soft)]'
+              ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
           }`}
         >
@@ -72,7 +72,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
           onClick={() => switchTo(3)}
           className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
             cols === 3
-              ? 'border-brand/40 bg-brand/10 text-[color:var(--brand-soft)]'
+              ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
           }`}
         >

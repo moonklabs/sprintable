@@ -172,7 +172,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           />
           <button
             type="submit"
-            className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-[color:var(--brand-soft)] hover:bg-brand/24"
+            className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-brand-text hover:bg-brand/24"
           >
             {tChats('embedFormEmbed')}
           </button>
@@ -203,7 +203,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           <button
             type="button"
             onClick={handleReset}
-            className="text-xs text-[color:var(--brand-soft)] hover:underline"
+            className="text-xs text-brand-text hover:underline"
           >
             {tDocs('pageEmbedChangeAction')}
           </button>
@@ -228,7 +228,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>
           ) : (
-            <FileText className="size-5 shrink-0 text-[color:var(--brand-soft)]" />
+            <FileText className="size-5 shrink-0 text-brand-text" />
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">

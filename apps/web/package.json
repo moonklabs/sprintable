@@ -35,6 +35,7 @@
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:nontext-icon-contrast": "tsx scripts/verify-nontext-icon-contrast.ts",
     "verify:accent-color-contrast": "tsx scripts/verify-accent-color-contrast.ts",
+    "verify:brand-text-contrast": "tsx scripts/verify-brand-text-contrast.ts",
     "verify:no-unlayered-css-class": "tsx scripts/verify-no-unlayered-css-class.ts",
     "verify:no-hardcoded-shell-chrome-anchor": "tsx scripts/verify-no-hardcoded-shell-chrome-anchor.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
