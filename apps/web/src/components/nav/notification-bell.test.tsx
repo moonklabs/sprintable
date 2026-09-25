@@ -345,7 +345,7 @@ describe('getEntityHref — 대상 프로젝트(story #4244)', () => {
   it('story · task · epic · sprint도 대상 프로젝트를 싣는다', () => {
     const hrefs = (['story', 'task', 'epic', 'sprint'] as const).map((t) =>
       getEntityHref(baseNotification({ source_entity_type: t, source_entity_id: 'x', target_project_id: 'P' })));
-    expect(hrefs).toEqual(['/board?story=x&p=P', '/board?task_id=x&p=P', '/goals/x?p=P', '/sprints?id=x&p=P']);
+    expect(hrefs).toEqual(['/flow?story=x&p=P', '/flow?task_id=x&p=P', '/goals/x?p=P', '/sprints?id=x&p=P']);
   });
 
   it('대상 프로젝트를 모르면(SSE로 막 들어온 항목 · 옛 응답) 주소 그대로 · 문서는 payload slug 폴백', () => {

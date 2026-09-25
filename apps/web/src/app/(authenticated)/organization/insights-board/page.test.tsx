@@ -580,7 +580,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
     expect(titleInput.value).toBe('내가 직접 쓴 제목');
   });
 
-  it('⭐성공 경로 — 만들면 story_id로 /board?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
+  it('⭐성공 경로 — 만들면 story_id로 /flow?story= 링크가 뜬다(getEntityHref 재사용)', async () => {
     stubFetch({ followUp: () => ({ status: 201, body: { story_id: 'story-99' } }) });
     await mount();
     await expandFirstRow();
@@ -594,7 +594,7 @@ describe('InsightsBoardPage — 후속 조치 다이얼로그(story #3503)', () 
 
     const link = document.querySelector('[data-testid="follow-up-success-link"]') as HTMLAnchorElement;
     expect(link).not.toBeNull();
-    expect(link.getAttribute('href')).toBe('/board?story=story-99');
+    expect(link.getAttribute('href')).toBe('/flow?story=story-99');
   });
 
   it('403 FOLLOW_UP_CREATE_HUMAN_ONLY — 알려진 코드의 사람 말 문구가 뜬다', async () => {

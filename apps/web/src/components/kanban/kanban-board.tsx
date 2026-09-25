@@ -243,7 +243,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     else params.delete(key);
     const storyId = searchParams.get('story');
     if (storyId) params.set('story', storyId);
-    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+    router.replace(`/${wsSlug}/${projSlug}/flow${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [router, searchParams, wsSlug, projSlug]);
 
   // BOARD-03: done 컬럼 collapse 상태
@@ -712,7 +712,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     setAutoComposeNonce((n) => n + 1);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('view');
-    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+    router.replace(`/${wsSlug}/${projSlug}/flow${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
   }, [searchParams, router, wsSlug, projSlug]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기

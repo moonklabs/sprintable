@@ -70,7 +70,7 @@ async function flush(times = 4) {
 describe('AC1 — epic 링크가 은퇴한 /epics/ 대신 실재 라우트로 간다', () => {
   // story #4253(유나 4612 design) — 목적지가 있는 갈래는 전부 넘긴 withProject(프로젝트를 싣는 함수)를 거친다(예전엔 doc만).
   it.each([
-    ['story', '/board?story=x&p=P'], ['doc', '/docs?id=x&p=P'], ['epic', '/goals/x?p=P'], ['sprint', '/sprints?id=x&p=P'], ['asset', '/storage?asset=x&p=P'],
+    ['story', '/flow?story=x&p=P'], ['doc', '/docs?id=x&p=P'], ['epic', '/goals/x?p=P'], ['sprint', '/sprints?id=x&p=P'], ['asset', '/storage?asset=x&p=P'],
   ])('⭐getEntityHref("%s")는 withProject로 프로젝트를 싣는다', (type, expected) => {
     const withP = (h: string) => `${h}${h.includes('?') ? '&' : '?'}p=P`;
     expect(getEntityHref(type, 'x', withP)).toBe(expected);
@@ -92,10 +92,10 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
     });
     await openCard();
     await flush();
-    const link = document.querySelector('a[href="/acme/content/board?story=s-cross"]');
+    const link = document.querySelector('a[href="/acme/content/flow?story=s-cross"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('전체 보기');
-    expect(document.querySelector('a[href="/board?story=s-cross"]')).toBeNull();
+    expect(document.querySelector('a[href="/flow?story=s-cross"]')).toBeNull();
   });
 
   it('story — fetch 실패/미도착 시 기존 bare href로 우아하게 폴백한다(회귀 아님)', async () => {
@@ -142,7 +142,7 @@ describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 �
 });
 
 describe('AC3/AC4 — task는 부모 story로("상위 스토리로 가요")', () => {
-  it('task 상세 fetch가 story_id를 주면 풋터가 파랑 링크 "상위 스토리로 가요"·/board?story=로 간다', async () => {
+  it('task 상세 fetch가 story_id를 주면 풋터가 파랑 링크 "상위 스토리로 가요"·/flow?story=로 간다', async () => {
     stubFetch(async (url) => {
       expect(url).toContain('/api/tasks/');
       return { ok: true, json: async () => ({ data: { story_id: 's-parent-1' } }) };
@@ -152,7 +152,7 @@ describe('AC3/AC4 — task는 부모 story로("상위 스토리로 가요")', ()
     });
     await openCard();
     await flush();
-    const link = document.querySelector('a[href="/board?story=s-parent-1"]');
+    const link = document.querySelector('a[href="/flow?story=s-parent-1"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('상위 스토리로 가요');
   });
@@ -169,10 +169,10 @@ describe('AC3/AC4 — task는 부모 story로("상위 스토리로 가요")', ()
     });
     await openCard();
     await flush();
-    const link = document.querySelector('a[href="/acme/content/board?story=s-parent-2"]');
+    const link = document.querySelector('a[href="/acme/content/flow?story=s-parent-2"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('상위 스토리로 가요');
-    expect(document.querySelector('a[href="/board?story=s-parent-2"]')).toBeNull();
+    expect(document.querySelector('a[href="/flow?story=s-parent-2"]')).toBeNull();
   });
 });
 
@@ -202,7 +202,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     });
     await openCard();
     await flush();
-    const link = document.querySelector('a[href="/board?story=s-1"]');
+    const link = document.querySelector('a[href="/flow?story=s-1"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('상위 스토리로 가요');
   });
@@ -256,8 +256,8 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     });
     await openCard();
     await flush();
-    expect(document.querySelector('a[href="/acme/content/board?story=s-1"]')).not.toBeNull();
-    expect(document.querySelector('a[href="/board?story=s-1"]')).toBeNull();
+    expect(document.querySelector('a[href="/acme/content/flow?story=s-1"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/flow?story=s-1"]')).toBeNull();
   });
 
   it('epic_id + org_slug/project_slug가 있는 artifact는 크로스프로젝트 부모 epic으로 직행한다', async () => {
@@ -339,7 +339,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     await openCard();
     await flush();
     // 링크가 없어야 한다 — 있으면 "갈 수 있다고 말하고 배신하는"(유나 판정) 거짓.
-    expect(document.querySelectorAll('a[href^="/goals/"], a[href^="/board?story="], a[href^="/docs?id="]').length).toBe(0);
+    expect(document.querySelectorAll('a[href^="/goals/"], a[href^="/flow?story="], a[href^="/docs?id="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없어요');
   });
 });
@@ -358,7 +358,7 @@ describe('story #2614 — hypothesis는 풋터(담긴 곳)는 여전히 없지�
     expect(document.body.textContent).toContain('이 가설은 검증되면 전환율이 오른다');
     expect(document.body.textContent).not.toContain('이 엔티티는 별도 미리보기가 없습니다');
     // AC3/AC4 — 다대다라 단일 부모를 못 고르는 사실은 안 바뀌었다: 풋터는 여전히 "갈 곳 없음".
-    expect(document.querySelectorAll('a[href^="/goals/"], a[href^="/board?story="], a[href^="/docs?id="]').length).toBe(0);
+    expect(document.querySelectorAll('a[href^="/goals/"], a[href^="/flow?story="], a[href^="/docs?id="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없어요');
   });
 
@@ -478,7 +478,7 @@ describe('AC3/AC4 — evidence는 부모 story로("상위 스토리로 가요", 
     });
     await openCard();
     await flush();
-    const link = document.querySelector('a[href="/board?story=s-parent-2"]');
+    const link = document.querySelector('a[href="/flow?story=s-parent-2"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('상위 스토리로 가요');
   });
@@ -490,7 +490,7 @@ describe('AC3/AC4 — evidence는 부모 story로("상위 스토리로 가요", 
     });
     await openCard();
     await flush();
-    expect(document.querySelectorAll('a[href^="/board?story="]').length).toBe(0);
+    expect(document.querySelectorAll('a[href^="/flow?story="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없어요');
   });
 
@@ -506,10 +506,10 @@ describe('AC3/AC4 — evidence는 부모 story로("상위 스토리로 가요", 
     });
     await openCard();
     await flush();
-    const link = document.querySelector('a[href="/acme/content/board?story=s-parent-3"]');
+    const link = document.querySelector('a[href="/acme/content/flow?story=s-parent-3"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('상위 스토리로 가요');
-    expect(document.querySelector('a[href="/board?story=s-parent-3"]')).toBeNull();
+    expect(document.querySelector('a[href="/flow?story=s-parent-3"]')).toBeNull();
   });
 });
 

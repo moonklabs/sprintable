@@ -192,14 +192,14 @@ export function buildAttentionQueueFromBe(
         id: `verify_fail-${sig.story_id}`, kind: 'verify_fail', bucket: BUCKET_BY_KIND.verify_fail, kindLabel: t('kindVerifyFail'),
         proofState: PROOF_STATE.verify_fail, claim: t('claimVerifyFail', { title: sig.title }),
         actor: null, actionLabel: t('actionRework'), actionTone: 'neutral',
-        href: withProject(`/board?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+        href: withProject(`/flow?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     } else if (sig.kind === 'merge_ready') {
       items.push({
         id: `merge_ready-${sig.story_id}`, kind: 'merge_ready', bucket: BUCKET_BY_KIND.merge_ready, kindLabel: t('kindMergeReady'),
         proofState: PROOF_STATE.merge_ready, claim: t('claimMergeReady', { title: sig.title }),
         actor: null, actionLabel: t('actionMerge'), actionTone: 'ready',
-        href: withProject(`/board?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+        href: withProject(`/flow?story=${sig.story_id}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     }
   }
@@ -209,7 +209,7 @@ export function buildAttentionQueueFromBe(
       id: `blocked-${storyId}`, kind: 'blocked', bucket: BUCKET_BY_KIND.blocked, kindLabel: t('kindBlocked'),
       proofState: PROOF_STATE.blocked, claim: t('claimBlocked', { title, count }),
       actor: null, actionLabel: t('actionCoordinate'), actionTone: 'neutral',
-      href: withProject(`/board?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+      href: withProject(`/flow?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   for (const [storyId, { title, enteredAtMs, originKind }] of decisionNeededByStory) {
@@ -220,7 +220,7 @@ export function buildAttentionQueueFromBe(
       id: `decision_needed-${storyId}`, kind: 'decision_needed', bucket: originKind === 'gate_pending' ? 'GATE' : 'STEER', kindLabel: t('kindDecisionNeeded'),
       proofState: PROOF_STATE.decision_needed, claim: t('claimDecisionNeeded', { title }),
       actor: null, actionLabel: t('actionDecide'), actionTone: 'primary',
-      href: withProject(`/board?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
+      href: withProject(`/flow?story=${storyId}`), enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   return items;

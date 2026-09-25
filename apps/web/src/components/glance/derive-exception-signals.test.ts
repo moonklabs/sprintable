@@ -100,8 +100,8 @@ describe('toExceptionQueueItems — 렌더 shape 매핑 + 정렬', () => {
     // gate_pending → 게이트 인박스(승인 표면), 개별 스토리 보드 아님.
     expect(byKind['gate_pending']!.href).toBe('/inbox?tab=gates');
 
-    expect(byKind['blocked']!.href).toBe('/board?story=s-bk');
-    expect(byKind['merge_ready']!.href).toBe('/board?story=s-mr');
+    expect(byKind['blocked']!.href).toBe('/flow?story=s-bk');
+    expect(byKind['merge_ready']!.href).toBe('/flow?story=s-mr');
     expect(byKind['merge_ready']!.proofState).toBe('green');
   });
 

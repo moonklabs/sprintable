@@ -173,7 +173,7 @@ describe('EventBlockCard — 담당에게만 «스토리 보기»(story #4249)',
     await flush();
     const link = container.querySelector('[data-testid="event-card-view-story"]');
     expect(link?.textContent).toBe(koMessages.eventCard.viewStory);
-    expect(link?.getAttribute('href')).toContain('/board?story=story-9');
+    expect(link?.getAttribute('href')).toContain('/flow?story=story-9');
 
     await act(async () => { root.render(wrap(<EventBlockCard template={TEMPLATE} payload={PAYLOAD} refs={{ stage_assignee: 'someone-else' }} />)); });
     await flush();

@@ -1092,14 +1092,14 @@ describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프�
   it('⭐게이트 project_id가 있으면 미리보기의 작업 항목 링크가 그 프로젝트(현재 B여도 C)', async () => {
     await mount(gate({ project_id: 'proj-C' }));
     const hrefs = await openChipHrefs(() => container);
-    expect(hrefs).toContain('/board?story=w-1&p=proj-C');
-    expect(hrefs).not.toContain('/board?story=w-1&p=proj-B');
+    expect(hrefs).toContain('/flow?story=w-1&p=proj-C');
+    expect(hrefs).not.toContain('/flow?story=w-1&p=proj-B');
   });
 
   it('게이트 project_id가 없으면 현재 p(B) 폴백', async () => {
     await mount(gate());
     const hrefs = await openChipHrefs(() => container);
-    expect(hrefs).toContain('/board?story=w-1&p=proj-B');
+    expect(hrefs).toContain('/flow?story=w-1&p=proj-B');
   });
 
   // 풀린(resolved) 카드의 preset.gate.verdict 템플릿 — «대상» 필드의 엔티티 칩(work_item_target = 게이트 대상 작업 항목).
@@ -1127,8 +1127,8 @@ describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프�
   it('⭐풀린 템플릿의 «대상» 칩 링크도 게이트 자기 프로젝트(현재 B여도 C)', async () => {
     await mountResolved(gate({ status: 'approved', project_id: 'proj-C', work_item_id: '11111111-2222-4333-8444-555555555555' }));
     const hrefs = await openChipHrefs(() => container.querySelector('dl')!);
-    expect(hrefs).toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-C');
-    expect(hrefs).not.toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-B');
+    expect(hrefs).toContain('/flow?story=11111111-2222-4333-8444-555555555555&p=proj-C');
+    expect(hrefs).not.toContain('/flow?story=11111111-2222-4333-8444-555555555555&p=proj-B');
   });
 
   // 까디르 codex 01a0d35f P3 — 본문(text 블록)에 엔티티 토큰이 오는 템플릿. text 블록 렌더(:689)만 현재 p로 되돌려도 RED가 나게.
@@ -1149,13 +1149,13 @@ describe('ApprovalRequestCard — 작업 항목 링크는 게이트 자기 프�
     const textRow = [...container.querySelectorAll('p')].find((el) => el.textContent?.includes('판정') && el.querySelector('button'));
     expect(textRow).toBeTruthy();
     const got = await openChipHrefs(() => textRow!);
-    expect(got).toContain(`/board?story=${W}&p=proj-C`);
+    expect(got).toContain(`/flow?story=${W}&p=proj-C`);
   });
 
   it('풀린 템플릿 칩 — 게이트 project_id가 없으면 현재 p(B) 폴백', async () => {
     await mountResolved(gate({ status: 'approved', work_item_id: '11111111-2222-4333-8444-555555555555' }));
     const hrefs = await openChipHrefs(() => container.querySelector('dl')!);
-    expect(hrefs).toContain('/board?story=11111111-2222-4333-8444-555555555555&p=proj-B');
+    expect(hrefs).toContain('/flow?story=11111111-2222-4333-8444-555555555555&p=proj-B');
   });
 });
 

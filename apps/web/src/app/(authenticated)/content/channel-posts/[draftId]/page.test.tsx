@@ -4565,7 +4565,7 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     await flush();
     expect(captured).toMatchObject({ title: expect.stringContaining('[댓글]') });
-    expect(document.querySelector('[data-testid="comments-convert-success-link"]')?.getAttribute('href')).toBe('/board?story=story-42');
+    expect(document.querySelector('[data-testid="comments-convert-success-link"]')?.getAttribute('href')).toBe('/flow?story=story-42');
   });
 
   // story #3517(PO 정정 2026-09-05) — postTitle 1순위는 draft.source_title(원문에서

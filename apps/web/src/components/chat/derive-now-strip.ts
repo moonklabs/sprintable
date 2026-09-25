@@ -70,12 +70,12 @@ export function nowStripItemHref(item: AttentionItem, withProject: (href: string
     case 'agent_stuck':
       // story #4259 — BE가 agent_stuck에 step run의 project_id를 싣는다 → 항목 자기 프로젝트(옛 응답이라 없으면 주소 그대로 — 지어내지 않음).
       return item.entity_type === 'story'
-        ? withProjectParam(`/board?story=${item.entity_id}`, item.project_id ?? null)
+        ? withProjectParam(`/flow?story=${item.entity_id}`, item.project_id ?? null)
         : withProject('/inbox?tab=gates');
     case 'agent_auth_failure':
       return withProject(`/organization/workforce/${item.member_id}`);
     case 'unanswered_blocker':
-      return withProjectParam(`/board?story=${item.blocked_story_id}`, item.project_id);
+      return withProjectParam(`/flow?story=${item.blocked_story_id}`, item.project_id);
     case 'hypothesis_falsified':
     case 'loop_overdue_hypothesis':
       return withProjectParam('/flow', item.project_id);

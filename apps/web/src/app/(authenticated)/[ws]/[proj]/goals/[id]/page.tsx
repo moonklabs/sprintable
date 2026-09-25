@@ -573,7 +573,7 @@ export default function EpicDetailPage() {
                       <button
                         key={story.id}
                         type="button"
-                        onClick={() => router.push(flatHref(`/board?story=${story.id}`))}
+                        onClick={() => router.push(flatHref(`/flow?story=${story.id}`))}
                         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
                       >
                         <span className="flex-1 truncate text-sm">{story.title}</span>

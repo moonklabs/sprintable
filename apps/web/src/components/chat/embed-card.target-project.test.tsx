@@ -75,13 +75,13 @@ async function renderAndOpen(entityType: string, entityId: string, routes: Recor
 describe('#4253 — 태스크 미리보기 부모 스토리 링크는 태스크 자기 프로젝트', () => {
   it('⭐project_id가 오면 부모 링크가 그 프로젝트(현재 B여도 C)', async () => {
     const hrefs = await renderAndOpen('task', 't3', { '/api/tasks/': { data: { title: '작업 C', status: 'todo', story_id: 's-parent-3', project_id: 'proj-C' } } });
-    expect(hrefs).toContain('/board?story=s-parent-3&p=proj-C');
-    expect(hrefs).not.toContain('/board?story=s-parent-3&p=proj-B');
+    expect(hrefs).toContain('/flow?story=s-parent-3&p=proj-C');
+    expect(hrefs).not.toContain('/flow?story=s-parent-3&p=proj-B');
   });
 
   it('project_id가 없으면 현재 p(B) 폴백', async () => {
     const hrefs = await renderAndOpen('task', 't4', { '/api/tasks/': { data: { title: '작업 D', status: 'todo', story_id: 's-parent-4' } } });
-    expect(hrefs).toContain('/board?story=s-parent-4&p=proj-B');
+    expect(hrefs).toContain('/flow?story=s-parent-4&p=proj-B');
   });
 });
 
@@ -141,9 +141,9 @@ describe('#4253 — slug 없는 문서도 문서 자기 프로젝트(docs/previe
 describe('#4253 — 미리보기 «전체 보기» 폴백은 항목 자기 프로젝트(slug 없음)', () => {
   const noSlug = { org_slug: 'acme', project_slug: null, project_id: 'proj-C' };
 
-  it('⭐태스크 → 부모 스토리 /board?story=…&p=proj-C', async () => {
+  it('⭐태스크 → 부모 스토리 /flow?story=…&p=proj-C', async () => {
     const hrefs = await renderAndOpen('task', 't-9', { '/api/tasks/': { data: { title: 'T', status: 'todo', story_id: 's-9', ...noSlug } } });
-    expect(hrefs).toContain('/board?story=s-9&p=proj-C');
+    expect(hrefs).toContain('/flow?story=s-9&p=proj-C');
   });
 
   it('⭐아티팩트 → 스토리 · 목표', async () => {
@@ -151,7 +151,7 @@ describe('#4253 — 미리보기 «전체 보기» 폴백은 항목 자기 프�
       '/api/visual-artifacts/preview': { data: { projectId: 'proj-C' } },
       '/api/visual-artifacts/art-2': { data: { id: 'art-2', title: 'A', story_id: 's-2', ...noSlug } },
     });
-    expect(hrefs).toContain('/board?story=s-2&p=proj-C');
+    expect(hrefs).toContain('/flow?story=s-2&p=proj-C');
     await act(async () => { root.unmount(); });
     document.querySelectorAll('[data-slot="dialog-portal"], [role="dialog"]').forEach((el) => el.remove());
     root = createRoot(container);
@@ -165,23 +165,23 @@ describe('#4253 — 미리보기 «전체 보기» 폴백은 항목 자기 프�
   // 까디르 codex(4612 델타) · PO 15:17Z — 이 목의 project_id는 이제 실제 계약이다(BE EvidenceResponse GET /{id}가 싣는다 · 같은 PR).
   it('증거 — 응답에 project_id가 없으면(옛 서버) 현재 p(B) 폴백', async () => {
     const hrefs = await renderAndOpen('evidence', 'ev-2', { '/api/evidence/': { data: { resolved_story_id: 's-6', org_slug: 'acme', project_slug: null } } });
-    expect(hrefs).toContain('/board?story=s-6&p=proj-B');
-    expect(hrefs).not.toContain('/board?story=s-6&p=proj-C');
+    expect(hrefs).toContain('/flow?story=s-6&p=proj-B');
+    expect(hrefs).not.toContain('/flow?story=s-6&p=proj-C');
   });
 
   it('⭐증거 → 해소된 스토리', async () => {
     const hrefs = await renderAndOpen('evidence', 'ev-1', { '/api/evidence/': { data: { resolved_story_id: 's-4', ...noSlug } } });
-    expect(hrefs).toContain('/board?story=s-4&p=proj-C');
+    expect(hrefs).toContain('/flow?story=s-4&p=proj-C');
   });
 
   it('⭐스토리 자기 링크 — 응답 project_id가 있으면 그 프로젝트(현재 B여도 C)', async () => {
     const hrefs = await renderAndOpen('story', 's-5', { '/api/stories/': { data: { title: 'S', status: 'todo', ...noSlug } } });
-    expect(hrefs).toContain('/board?story=s-5&p=proj-C');
-    expect(hrefs).not.toContain('/board?story=s-5&p=proj-B');
+    expect(hrefs).toContain('/flow?story=s-5&p=proj-C');
+    expect(hrefs).not.toContain('/flow?story=s-5&p=proj-B');
   });
 
   it('태스크 — 응답에 프로젝트가 없으면 현재 p(B) 폴백', async () => {
     const hrefs = await renderAndOpen('task', 't-8', { '/api/tasks/': { data: { title: 'T', status: 'todo', story_id: 's-8', org_slug: 'acme', project_slug: null } } });
-    expect(hrefs).toContain('/board?story=s-8&p=proj-B');
+    expect(hrefs).toContain('/flow?story=s-8&p=proj-B');
   });
 });

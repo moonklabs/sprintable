@@ -183,13 +183,13 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
     expect(container.querySelector('[data-testid="chat-v3-history-retry"]')).not.toBeNull();
   });
 
-  it('⭐「기준」 줄 — 이력 응답의 entity_title로 스토리 링크(/board?story=)를 만든다(제 3의 콜 0)', async () => {
+  it('⭐「기준」 줄 — 이력 응답의 entity_title로 스토리 링크(/flow?story=)를 만든다(제 3의 콜 0)', async () => {
     await mountWithWorkItem({ type: 'story', id: 's1' }, {
       history: [{ id: 'l1', actor_name: '페드루', action: 'story_created', entity_title: '결재 항목 채팅', created_at: new Date().toISOString(), context: {} }],
     });
     const scope = container.querySelector('[data-testid="chat-v3-context-scope"]');
     expect(scope?.textContent).toBe('결재 항목 채팅 기준');
-    expect(scope?.getAttribute('href')).toBe('/board?story=s1');
+    expect(scope?.getAttribute('href')).toBe('/flow?story=s1');
   });
 
   // CHANGES-2(페드루 PO 판정 2026-09-17 04:37Z·유나 확定 04:42Z) — 제목 출처가 없어도
@@ -198,7 +198,7 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
     await mountWithWorkItem({ type: 'story', id: 's1' }, { history: [] });
     const scope = container.querySelector('[data-testid="chat-v3-context-scope"]');
     expect(scope?.textContent).toBe('이어진 일 열기');
-    expect(scope?.getAttribute('href')).toBe('/board?story=s1');
+    expect(scope?.getAttribute('href')).toBe('/flow?story=s1');
   });
 
   it('workItemRef가 없으면(이어진 일 자체가 없음) 「기준」 줄이 안 뜬다', async () => {

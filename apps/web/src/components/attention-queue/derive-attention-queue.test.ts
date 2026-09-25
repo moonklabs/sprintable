@@ -103,7 +103,7 @@ describe('buildAttentionQueueFromBe', () => {
     expect(items[0]!.actionTone).toBe('neutral');
     expect(items[0]!.claim).toContain('결제 복구 플로우');
     expect(items[0]!.actor).toBeNull(); // BE AttentionItem엔 assignee 필드 없음(no-fiction)
-    expect(items[0]!.href).toBe('/board?story=story-1&p=P'); // #4231 4차 — 큐의 프로젝트를 싣는다
+    expect(items[0]!.href).toBe('/flow?story=story-1&p=P'); // #4231 4차 — 큐의 프로젝트를 싣는다
   });
 
   it('maps merge_ready to a green/ready-tone item', () => {
@@ -203,7 +203,7 @@ describe('buildAttentionQueue', () => {
   function item(kind: AttentionQueueItem['kind'], sortKey: number): AttentionQueueItem {
     return {
       id: `${kind}-${sortKey}`, kind, bucket: BUCKET_BY_KIND[kind], kindLabel: kind, proofState: kind === 'merge_ready' ? 'green' : 'amber',
-      claim: kind, actor: null, actionLabel: '가기', actionTone: 'neutral', href: '/board',
+      claim: kind, actor: null, actionLabel: '가기', actionTone: 'neutral', href: '/flow',
       enteredStateAtMs: null, sortKey,
     };
   }
@@ -263,7 +263,7 @@ describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', 
   function item(id: string, claim: string): AttentionQueueItem {
     return {
       id, kind: 'blocked', bucket: 'BLOCK', kindLabel: '막힘', proofState: 'amber', claim,
-      actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board',
+      actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/flow',
       enteredStateAtMs: null, sortKey: 0,
     };
   }

@@ -48,7 +48,7 @@ export function getEntityHref(entityType: string, entityId: string, withProject:
     // story #4253(유나 4612 design) — 목적지가 있는 갈래는 모두 withProject로 프로젝트를 싣는다. 예전엔 doc만 감싸, 활동 피드의 다른 프로젝트
     // 스토리 링크(`/board?story=`)가 p 없이 옛 자원 리다이렉트를 타 쿠키 프로젝트 셸로 착지했다. /board · /sprints · /storage는 옛 자원 경로라
     // flat 래칫(app/(authenticated) 최상위 폴더 기준)이 세지 못한 자리다.
-    case 'story': return withProject(`/board?story=${entityId}`);
+    case 'story': return withProject(`/flow?story=${entityId}`);
     case 'doc': return withProject(`/docs?id=${entityId}`);
     // AC1 — 은퇴한 이름(/epics/)이 주소로 남아 404였다. 모델은 Goal, 화면은 goals/[id]/page.tsx.
     case 'epic': return withProject(`/goals/${entityId}`);
@@ -621,7 +621,7 @@ export function EntityPreviewModal({
     const t = detail as { story_id?: string | null; org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     resolvedHref = resolveScopedEntityHref(
       t?.org_slug ? { orgSlug: t.org_slug, projectSlug: t.project_slug ?? null } : null,
-      t?.story_id ? `/board?story=${t.story_id}` : null,
+      t?.story_id ? `/flow?story=${t.story_id}` : null,
       (ws, proj) => storyBoardUrl(ws, proj, t!.story_id!),
       ownProjectHref(t?.project_id),
     );
@@ -643,7 +643,7 @@ export function EntityPreviewModal({
     // doc 부모만 예외 — docViewUrl은 doc 자신의 slug가 필요한데 artifact 응답엔 그게 없어(위
     // effect가 /api/docs/preview로 별도 선조회한 docPreview를 쓴다, #2168 재사용 그대로).
     const parentHref = d?.story_id
-      ? resolveScopedEntityHref(ownerSlugs, `/board?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!), ownProjectHref(d.project_id))
+      ? resolveScopedEntityHref(ownerSlugs, `/flow?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!), ownProjectHref(d.project_id))
       : d?.epic_id
       ? resolveScopedEntityHref(ownerSlugs, `/goals/${d.epic_id}`, (ws, proj) => goalUrl(ws, proj, d.epic_id!), ownProjectHref(d.project_id))
       : d?.doc_id
@@ -664,7 +664,7 @@ export function EntityPreviewModal({
     const ev = detail as { resolved_story_id?: string | null; org_slug?: string | null; project_slug?: string | null; project_id?: string | null } | null;
     resolvedHref = resolveScopedEntityHref(
       ev?.org_slug ? { orgSlug: ev.org_slug, projectSlug: ev.project_slug ?? null } : null,
-      ev?.resolved_story_id ? `/board?story=${ev.resolved_story_id}` : null,
+      ev?.resolved_story_id ? `/flow?story=${ev.resolved_story_id}` : null,
       (ws, proj) => storyBoardUrl(ws, proj, ev!.resolved_story_id!),
       ownProjectHref(ev?.project_id),
     );

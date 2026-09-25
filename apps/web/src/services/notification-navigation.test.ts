@@ -30,7 +30,7 @@ describe('attachNotificationHrefs', () => {
       n('story', 's-1'),
     ]);
     expect(gate!.href).toBe('/gates/g-2');
-    expect(story!.href).toBe('/board?story=s-1');
+    expect(story!.href).toBe('/flow?story=s-1');
   });
 
   it('board 딥링크(task/story) · sprints 링크도 대상 프로젝트를 싣는다(story a539c649 S3d 회귀가드 유지)', () => {
@@ -39,8 +39,8 @@ describe('attachNotificationHrefs', () => {
       n('story', 's-1', { target_project_id: 'P' }),
       n('sprint', 'sp-1', { target_project_id: 'P' }),
     ]);
-    expect(task!.href).toBe('/board?task_id=t-1&p=P');
-    expect(story!.href).toBe('/board?story=s-1&p=P');
+    expect(task!.href).toBe('/flow?task_id=t-1&p=P');
+    expect(story!.href).toBe('/flow?story=s-1&p=P');
     expect(sprint!.href).toBe('/sprints?p=P');
   });
 
