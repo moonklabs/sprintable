@@ -125,8 +125,8 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           <span>{t('lineHandoffStuck')}</span>
         </Badge>
         {/* ⓑ S11 GateLineContext 재사용(무변경) */}
-        {/* [SID:4286] 승인자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». 이 섹션은 스토리 상세 패널 안이라
-            (스토리를 눌러야 열림) 보드가 구성원 표를 이미 받은 뒤다 → loaded: true. 흐름 화면 패널은 표를 안 넘겨 늘 «알 수 없음»(PR 본문 (나) 후속). */}
+        {/* [SID:4286] 승인자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원».
+            [SID:4300] 표 = 넘겨받은 프로젝트 범위 + 없을 때 조직 범위(approverNames) · 받는 동안은 빈 글자(문장 안이라 줄 높이 불변). */}
         <GateLineContext step={step} resolveName={(id) => memberLookup(approverNames.memberMap, id, tc, { loaded: approverNames.loaded })?.label ?? ''} />
         {/* ⓒ StuckHandoffDetail */}
         <StuckHandoffDetail step={step} />

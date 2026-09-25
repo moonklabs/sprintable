@@ -101,7 +101,7 @@ export function StandupHistorySection({ projectId, memberNameById = {}, memberNa
             <p className="mb-2 text-xs font-medium text-muted-foreground">{date}</p>
             <div className="space-y-2">
               {byDate[date].map((entry) => (
-                <div key={entry.id} className="text-xs text-foreground/80">
+                <div key={entry.id} className="min-h-4 text-xs text-foreground/80">
                   {/* [SID:4286] 작성자 id 조각(앞 8자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸. */}
                   <span className="font-medium">{authorLabelById.get(entry.author_id) ?? ''}</span>
                   {entry.done ? <span className="ml-2 text-muted-foreground">✅ {entry.done.slice(0, 80)}{entry.done.length > 80 ? '…' : ''}</span> : null}

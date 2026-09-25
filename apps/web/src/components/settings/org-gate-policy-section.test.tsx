@@ -348,6 +348,29 @@ describe('OrgGatePolicySection — 후보 밖 지정 승인자 이름([SID:4300]
     expect(container.textContent).not.toContain('알 수 없는 구성원');
   });
 
+  // [PO 14:30Z] 받는 동안 빈 글자 — 이름 칸이 줄의 유일한 내용이라 빈 동안에도 한 줄 높이(min-h-5 = text-sm 줄).
+  it('조직 표를 받는 동안 승인자 칸은 빈 글자 + 한 줄 높이 → 받은 뒤 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/gate-config/policy') {
+        return { ok: true, status: 200, json: async () => ({ data: { id: 'p1', org_id: 'o1', posture: 'balanced', merge_gate_default_approver_member_id: 'member-9', created_at: '2026-09-02T00:00:00Z', updated_at: '2026-09-02T00:00:00Z' }, error: null, meta: null }) };
+      }
+      if (url === '/api/org-members/eligible-approvers') return { ok: true, status: 200, json: async () => ELIGIBLE_APPROVERS };
+      if (url === ORG_NAMES_URL) { await gate; return { ok: true, status: 200, json: async () => ({ data: [{ id: 'member-9', name: '전 관리자', type: 'human' }] }) }; }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OrgGatePolicySection canEdit={false} />)); });
+    await flush(); await flush();
+    const pending = [...container.querySelectorAll('p.min-h-5')].filter((p) => p.textContent === '');
+    expect(pending.length, '빈 승인자 칸(한 줄 높이)').toBeGreaterThan(0);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    await act(async () => { release(); }); await flush(); await flush();
+    expect(container.textContent).toContain('전 관리자');
+  });
+
   it('조직에도 없으면 «알 수 없는 구성원»', async () => {
     dashCtx.value = { orgId: 'org-1' };
     stubWithOrg([]);

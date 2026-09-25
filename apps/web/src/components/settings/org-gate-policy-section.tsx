@@ -241,7 +241,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                   disabled={loadingApprovers || saving}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">{currentApproverLabel}</p>
+                <p className="min-h-5 text-sm text-muted-foreground">{currentApproverLabel}</p>
               )}
             </div>
 
@@ -256,7 +256,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                   disabled={loadingApprovers || saving}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
+                <p className="min-h-5 text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
               )}
             </div>
 

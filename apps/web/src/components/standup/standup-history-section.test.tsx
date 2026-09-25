@@ -136,6 +136,32 @@ describe('StandupHistorySection — 작성자 이름 조직 보충([SID:4300])',
   });
 });
 
+// [PO 14:30Z] 받는 동안 빈 글자 — 한 일(done)이 없는 기록은 작성자 이름이 줄의 유일한 내용이라 빈 동안에도 한 줄 높이(min-h-4 = text-xs 줄).
+describe('StandupHistorySection — 받는 동안 빈 작성자 줄 높이([SID:4300])', () => {
+  it('조직 보충을 받는 동안 한 일 없는 기록 줄 = 빈 글자 + 한 줄 높이 → 받은 뒤 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) {
+        await gate;
+        return new Response(JSON.stringify({ data: [{ id: 'member-7', name: '쉬는봇', type: 'agent' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [{ ...entry('7', '2026-09-24'), done: null }], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{}} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const rows = [...container.querySelectorAll('div.min-h-4')];
+    expect(rows.length, '기록 줄').toBe(1);
+    expect(rows[0]!.textContent).toBe('');
+    await act(async () => { release(); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('쉬는봇');
+  });
+});
+
 // [SID:4300 · PO 06:37Z] 같은 폴백 글자가 서로 다른 작성자 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(#4284 · 겹칠 때만).
 describe('StandupHistorySection — 겹치는 폴백에만 꼬리([SID:4300])', () => {
   it('명단에 없는 서로 다른 두 작성자 → «알 수 없는 구성원 · member-3» · «… · member-4»', async () => {

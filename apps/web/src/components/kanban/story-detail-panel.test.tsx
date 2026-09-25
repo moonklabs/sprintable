@@ -1441,5 +1441,58 @@ describe('StoryDetailPanel — 이름표 조직 범위 보충([SID:4300])', () =
     await mount(verifiedStory, { memberMap: {}, memberMapLoaded: false });
     expect(membersCalls).toBe(0);
     expect(container.textContent).not.toContain('알 수 없는 구성원');
+    // [PO 14:30Z] 담당 칸은 이름이 줄의 유일한 내용 — 빈 동안에도 한 줄 높이(min-h-5).
+    expect([...container.querySelectorAll('p.min-h-5')].some((p) => p.textContent === ''), '빈 담당 칸(한 줄 높이)').toBe(true);
+  });
+
+  // [SID:4300 · 4651 위 재기반 손질] 4651이 memberLookup(…)!.label로 바꾼 자리(댓글 작성자 · 활동 행위자 · 활동의 담당 전/후)도
+  // 조직 표를 받는 동안엔 빈 글자, 받은 뒤엔 이름 — 활동의 담당 전/후 id도 조직 보충 대상.
+  it('댓글 작성자 · 활동 행위자 · 활동 담당 — 조직 표 받는 동안 «알 수 없는 구성원» 0 → 받은 뒤 조직 이름', async () => {
+    const ORG_ONLY = 'om-org-only';
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; await gate; return { ok: true, json: async () => ({ data: [{ id: ORG_ONLY, name: '조직사람', type: 'human' }] }) }; }
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'c1', story_id: 's1', content: '조직 사람 댓글', created_by: ORG_ONLY, created_at: '2026-09-25T00:00:00Z' }], meta: { next_cursor: null, has_more: false } }) };
+      }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', activity_type: 'assignee_changed', old_value: OWNER, new_value: ORG_ONLY, created_by: ORG_ONLY, created_at: '2026-09-25T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount({ status: 'in-progress', assignee_id: OWNER, assignee_ids: [OWNER] });
+    const tab = (label: string) => [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes(label)) as HTMLElement;
+    for (const label of ['댓글', koMessages.board.activityTab]) {
+      await act(async () => { tab(label).dispatchEvent(new MouseEvent('click', { bubbles: true })); tab(label).click(); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(container.textContent, `${label} 탭 — 받는 동안`).not.toContain('알 수 없는 구성원');
+      expect(container.textContent).not.toContain(ORG_ONLY);
+    }
+    // [PO 14:30Z] 활동의 담당 알약 — 빈 동안에도 채워진 알약과 같은 높이(min-h-5), 폭만 이름만큼 자란다.
+    expect([...container.querySelectorAll('span.min-h-5.rounded')].some((s) => s.textContent === ''), '빈 담당 알약(한 줄 높이)').toBe(true);
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('조직사람');
+    expect(container.textContent).toContain('안나');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(membersCalls).toBe(1);
+  });
+
+  it('다른 id가 전부 프로젝트 표에 있어도 활동의 담당 전/후 id가 없으면 조직 표를 받아 이름(«알 수 없는 구성원» 0)', async () => {
+    const ORG_ONLY = 'om-org-only';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; return { ok: true, json: async () => ({ data: [{ id: ORG_ONLY, name: '조직사람', type: 'human' }] }) }; }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', activity_type: 'assignee_changed', old_value: OWNER, new_value: ORG_ONLY, created_by: OWNER, created_at: '2026-09-25T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount({ status: 'in-progress', assignee_id: OWNER, assignee_ids: [OWNER] });
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes(koMessages.board.activityTab)) as HTMLElement;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); tab.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(membersCalls).toBe(1);
+    expect(container.textContent).toContain('조직사람');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
   });
 });

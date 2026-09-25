@@ -37,7 +37,7 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
-import { memberDisplayLabel, memberLookup, memberNameById, memberRowLabels } from '@/lib/member-display';
+import { memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -390,6 +390,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const nameFallback = useMemberNameFallback(orgId, projectMemberMap, [
     story.assignee_id, ...(story.assignee_ids ?? []), story.human_verified_by, story.human_owner_member_id,
     ...comments.map((c) => c.created_by), ...activities.map((a) => a.created_by),
+    ...activities.flatMap((a) => (a.activity_type === 'assignee_changed' ? [a.old_value, a.new_value] : [])),
   ], memberMapLoaded);
   const memberMap = nameFallback.memberMap as Record<string, KanbanMember>;
   const memberNamesLoaded = nameFallback.loaded;
@@ -1333,15 +1334,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     <span className="inline-flex flex-wrap items-center gap-1 align-middle">
       {oldLabel != null ? (
         <>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
+          <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
           <span className="text-muted-foreground">→</span>
         </>
       ) : null}
-      <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
+      <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
   // [SID:4286 · 까디르 P1] id가 있는데 «—»이던 자리(아는 사람 · 모르는 사람 뭉갬) — id 없음만 «—».
-  const memberName = (id: string | null) => (id ? memberLookup(memberMap, id, tc)!.label : '—');
+  // [SID:4300] 조직 표를 받는 동안은 빈 글자.
+  const memberName = (id: string | null) => (id ? memberLookup(memberMap, id, tc, { loaded: memberNamesLoaded })?.label ?? '' : '—');
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
@@ -1637,9 +1639,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   </Button>
                 </div>
               ) : (
-                <p className="mt-1 text-sm text-foreground">
+                <p className="mt-1 min-h-5 text-sm text-foreground">
                   {localAssigneeIds.length > 0
-                    ? localAssigneeIds.map((id) => memberLookup(memberMap, id, tc)!.label).join(', ')
+                    ? localAssigneeIds.map((id) => memberLookup(memberMap, id, tc, { loaded: memberNamesLoaded })?.label ?? '').filter(Boolean).join(', ')
                     : '—'}
                 </p>
               )}
@@ -2346,7 +2348,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-                            <span>{memberLookup(memberMap, comment.created_by, tc)!.label}</span>
+                            <span>{memberLookup(memberMap, comment.created_by, tc, { loaded: memberNamesLoaded })?.label ?? ''}</span>
                             <span>·</span>
                             <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
@@ -2373,7 +2375,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => {
-                        const actorName = memberLookup(memberMap, activity.created_by, tc)!.label;
+                        const actorName = memberLookup(memberMap, activity.created_by, tc, { loaded: memberNamesLoaded })?.label ?? '';
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (
