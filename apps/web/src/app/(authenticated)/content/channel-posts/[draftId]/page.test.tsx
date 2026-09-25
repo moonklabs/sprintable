@@ -1263,7 +1263,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     blocked_unapproved: true, // story #4264 ④
   };
   // story #4262 — `not_sent`(확실히 안 나감) 추가. 전수 곱에 그대로 들어간다.
-  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true };
+  // story #4305 — `paused`(조직 외부 발행 일시 중지) 추가.
+  const FAILURE_KIND_ALL: Record<FailureKind, true> = { connection: true, needs_check: true, transient: true, not_sent: true, paused: true };
   const CS_VALUES: (CommandStatus | null)[] = [null, ...(Object.keys(COMMAND_STATUS_ALL) as CommandStatus[])];
   const FK_VALUES: (FailureKind | 'unknown_kind_zzz' | null)[] = [null, ...(Object.keys(FAILURE_KIND_ALL) as FailureKind[]), 'unknown_kind_zzz'];
   const PK_VALUES: (string | null)[] = [null, 'awaiting_container'];
@@ -2861,6 +2862,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
       expect(reason?.textContent).toBe(koMessages.content.channelPostsCommandInFlightReasonBlockedUnknown);
       expect(reason?.querySelector('a')).toBeNull();
+      // 까디르 — 배지 머리도 호출 자리에서 사유를 지어내지 않는다(중립).
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureBlockedUnknown);
     });
 
     it('blocked — 발행·예약 상신 버튼이 비활성화되고 blocked 전용 사유가 예약 전용과 다르다', async () => {

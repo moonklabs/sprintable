@@ -89,10 +89,11 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   const canOffer = !!onRetryClick && retryable !== false;
 
   if (action.kind === 'blocked' && action.paused) {
-    // story #4305 — 조직 «외부 발행 일시 중지»로 멈춘 것은 연결 문제가 아니다. 머리는 멈춘 이유(compact도) · 상세는 풀리는 길까지(소유자가 풀면
+    // story #4305 — 조직 «외부 발행 일시 중지»로 멈춘 것은 연결 문제가 아니다. 색은 muted(유나 반려 09:44Z — 스스로 이어지는 상태라
+    // auto_retry · processing과 같은 가족 · 같은 화면 발행 영역 줄 · 댓글 줄도 muted). connection · unknown은 빨강 그대로. 머리는 멈춘 이유(compact도) · 상세는 풀리는 길까지(소유자가 풀면
     // 서버가 스스로 다시 올린다 — 사람 재시도 대상 아님(4654) · 버튼 · 연결 링크 없음).
     return (
-      <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
+      <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {t('channelPostsFailurePaused')}
         {compact ? null : <>{' — '}{t('channelPostsFailurePausedResumes')}</>}
       </p>

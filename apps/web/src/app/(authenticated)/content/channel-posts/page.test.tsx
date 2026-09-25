@@ -324,6 +324,14 @@ describe('ChannelPostListPage (story #3402)', () => {
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
     });
 
+    it('command_status=blocked + 사유 모름 — 목록도 사유를 지어내지 않는다: 중립 머리(story #4305 · 까디르)', async () => {
+      stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'blocked' }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsFailureBlockedUnknown);
+    });
+
     // 페드루 실측(2026-09-09, PR 코멘트) — "processing만으로 빨갛게 칠하진 않는다".
     // 실패 뒤 재시도가 진행 중(command_status=pending ∧ processing_kind=awaiting_
     // container)이면 목록도 상세와 똑같이 "진행 중"(중립)이어야지 「실패」로 남으면

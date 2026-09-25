@@ -14,7 +14,8 @@ export type CommandStatus =
   | 'blocked_unapproved';
 // story #4262 — `not_sent`(확실히 안 나감 · 곧바로 dead_letter). 판정은 dead_letter 갈래에서 «needs_check가 아님»으로 읽혀
 // «자동 재시도를 멈췄어요»가 된다(아래 deriveFailureAction 무변).
-export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent';
+// story #4305(까디르) — `paused`: 조직 «외부 발행 일시 중지»로 멈춘 blocked(BE `FAILURE_KIND_PAUSED`).
+export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent' | 'paused';
 
 // story #4290(까디르 QA ④ · PO 06:40Z) — `retryable`은 서버 한 판정(`command_retryable` = 보는 사람이 지금 다시 시도할 수 있는가)을
 // 그대로 옮긴 값이다. 호출부가 넘길 때만 실린다(모르면 없음) — 배지는 이 값이 false면 버튼을 켜지 않는다(화면이 상태로 따로 가르지 않음).

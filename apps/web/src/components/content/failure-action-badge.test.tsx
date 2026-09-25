@@ -483,6 +483,17 @@ describe('FailureActionBadge — 조직 «외부 발행 일시 중지»로 멈�
     expect(container.textContent).toBe(C.channelPostsFailurePaused);
   });
 
+  it('색 — 일시 중지는 muted(스스로 이어지는 상태 · auto_retry와 같은 가족) · 연결은 빨강 그대로(유나 반려 09:44Z)', async () => {
+    for (const compact of [false, true]) {
+      await renderWith({ action: { kind: 'blocked', paused: true }, compact });
+      const head = container.querySelector('[data-testid="channel-post-failure-badge"]')!;
+      expect(head.className).toContain('text-muted-foreground');
+      expect(head.className).not.toContain('text-destructive');
+    }
+    await renderWith({ action: { kind: 'blocked' }, compact: true });
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')!.className).toContain('text-destructive');
+  });
+
   it('deriveFailureAction — 일시 중지만 paused를 싣고 연결 blocked는 예전 모양 그대로', () => {
     expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'paused' })).toEqual({ kind: 'blocked', paused: true });
     expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'connection' })).toEqual({ kind: 'blocked' });

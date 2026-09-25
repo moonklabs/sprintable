@@ -138,9 +138,10 @@ describe('NewsletterSendStatus — 연결 사유 blocked의 «연결 확인»(st
     expect(q('channel-post-failure-retry-button')).toBeNull();
   });
 
-  it('없는 · 모르는 failure_kind의 blocked는 연결 링크를 받지 않는다(닫힌 판정)', async () => {
+  it('없는 · 모르는 failure_kind의 blocked는 연결 링크를 받지 않는다(닫힌 판정) · 머리도 중립(story #4305)', async () => {
     await mount(gate({ status: 'blocked', failure_kind: null }));
     expect(q('channel-post-failure-connection-link')).toBeNull();
+    expect(q('channel-post-failure-badge')?.textContent).toContain(koMessages.content.channelPostsFailureBlockedUnknown);
   });
 });
 

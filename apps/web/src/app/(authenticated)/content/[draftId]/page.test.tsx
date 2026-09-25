@@ -1743,6 +1743,18 @@ describe('ContentPostEditPage — 외부 목적지 발행 결과(story #3479, �
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).not.toBeNull();
     });
 
+    it('사유 모름(failure_kind 없음) → 중립 머리 · 링크 0(story #4305 · 까디르 — 호출 자리가 연결을 지어내지 않음)', async () => {
+      const unknown = blockedPublication('connection');
+      (unknown.publication.command as { failure_kind: string | null }).failure_kind = null;
+      stubFetchWithVersions([VERSION_1], undefined, undefined, unknown);
+      await act(async () => { root.render(wrap(<ContentPostEditPage />)); });
+      await flush();
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toContain(koMessages.content.channelPostsFailureBlockedUnknown);
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
+    });
+
     it('조직 일시정지(paused) → 연결 화면을 가리키지 않는다(링크 0)', async () => {
       stubFetchWithVersions([VERSION_1], undefined, undefined, blockedPublication('paused'));
       await act(async () => { root.render(wrap(<ContentPostEditPage />)); });

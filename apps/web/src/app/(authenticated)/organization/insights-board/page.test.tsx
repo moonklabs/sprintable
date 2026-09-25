@@ -839,6 +839,14 @@ describe('InsightsBoardPage — 「사람 차례」 행 배지(story #3766)', ()
     expect(badge!.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
   });
 
+  it('blocked + 사유 모름 행 — 보드도 사유를 지어내지 않는다: 중립 머리(story #4305 · 까디르)', async () => {
+    const { failure_kind: _omit, ...unknownRow } = ROW_BLOCKED;
+    stubFetch({ page1: [unknownRow] });
+    await mount();
+    const badge = container.querySelector('[data-testid="insights-board-row"] [data-testid="channel-post-failure-badge"]');
+    expect(badge?.textContent).toBe(koMessages.content.channelPostsFailureBlockedUnknown);
+  });
+
   // 뮤테이션 대조 — BE 필드(command_status)가 응답에서 빠지면(undefined) 배지도 0.
   it('뮤테이션 대조 — command_status 자체가 없으면(BE 필드 누락 시뮬) 배지가 안 뜬다', async () => {
     const { command_status: _omit, ...rowWithoutField } = ROW_DEAD_LETTER;
