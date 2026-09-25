@@ -16,30 +16,14 @@ import {
   verifyResolveCache,
 } from '@/lib/route-resolve';
 import { formatServerTiming, isServerTimingEnabled, logServerTiming, MW_T0_HEADER, withServerTiming } from '@/lib/server-timing';
+import { resolveLocale } from '@/i18n/locale-negotiation';
 
-// story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고,
-// apps/web/src/i18n/request.ts의 getLocale()(next-intl RSC config, `cookies()`/`headers()`
-// 비동기 API)을 그대로 재사용할 수 없다 — 이 파일(proxy)은 NextRequest 동기 API
-// (`request.cookies`/`request.headers`)로 도는 별개 실행 경로다. 그래서 알고리즘만
-// 그대로 이식한다: 쿠키 `locale` 우선 → Accept-Language 부분일치 → 기본값 'en'
-// (request.ts DEFAULT_LOCALE과 동일). 두 구현이 갈리면 SSR 페이지 언어와 이 정적
-// 문서의 언어가 서로 다른 locale로 어긋난다 — request.ts를 바꾸면 이 함수도 같이
-// 바꿔야 한다(proxy.test.ts가 이 함수를, i18n 쪽 테스트가 request.ts를 각각 고정).
-const CONNECT_GUIDE_SUPPORTED_LOCALES = ['en', 'ko'] as const;
-const CONNECT_GUIDE_DEFAULT_LOCALE = 'en';
-
+// story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고, i18n/request.ts의 getLocale()
+// (next-intl RSC config · 비동기 cookies()/headers())을 못 부른다 — 이 파일(proxy)은 NextRequest 동기 API로 도는 별개
+// 실행 경로다. story #4289 — 규칙 사본을 걷고 i18n/locale-negotiation.ts의 resolveLocale 하나를 같이 읽는다(값만 꺼내
+// 넘김). 전엔 두 사본이 같이 «지원 목록 순서(en 먼저) · includes»라 «ko 첫째 · en 둘째» 브라우저가 영어 문서를 받았다.
 function resolveConnectGuideLocale(request: NextRequest): string {
-  const cookieLocale = request.cookies.get('locale')?.value;
-  if (cookieLocale && (CONNECT_GUIDE_SUPPORTED_LOCALES as readonly string[]).includes(cookieLocale)) {
-    return cookieLocale;
-  }
-
-  const acceptLang = request.headers.get('accept-language') ?? '';
-  for (const locale of CONNECT_GUIDE_SUPPORTED_LOCALES) {
-    if (acceptLang.includes(locale)) return locale;
-  }
-
-  return CONNECT_GUIDE_DEFAULT_LOCALE;
+  return resolveLocale({ cookie: request.cookies.get('locale')?.value, acceptLanguage: request.headers.get('accept-language') });
 }
 
 const PUBLIC_EXACT = [

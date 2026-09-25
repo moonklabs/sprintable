@@ -1,8 +1,7 @@
 import { getRequestConfig } from 'next-intl/server';
 import { cookies, headers } from 'next/headers';
 
-const SUPPORTED_LOCALES = ['en', 'ko'];
-const DEFAULT_LOCALE = 'en';
+import { resolveLocale } from './locale-negotiation';
 
 // story #3778 CHANGES(유나 design:changes 2026-09-10 — 카디르 큐 전 발견) — export해
 // BFF(retro-sessions/[id]/export/route.ts)가 이 함수 하나로 로케일을 푼다. 전엔 그
@@ -13,19 +12,11 @@ const DEFAULT_LOCALE = 'en';
 // vs 이 BFF)에 따로 있으면 반드시 이렇게 벌어진다는 하우스 교훈 그대로 재현. 이제
 // 해석은 이 함수 하나뿐 — route.ts는 결과 문자열만 그대로 forward.
 export async function getLocale(): Promise<string> {
-  // 1. 쿠키 확인
+  // story #4289 — 쿠키 `locale` → Accept-Language(헤더 순서 + q값) → 기본값 'en'. 규칙은 locale-negotiation.ts 하나
+  // (전엔 지원 목록 순서 en 먼저 · includes 부분 문자열이라 «ko 첫째 · en 둘째» 브라우저가 영어를 받았다).
   const cookieStore = await cookies();
-  const cookieLocale = cookieStore.get('locale')?.value;
-  if (cookieLocale && SUPPORTED_LOCALES.includes(cookieLocale)) return cookieLocale;
-
-  // 2. Accept-Language 헤더
   const headerStore = await headers();
-  const acceptLang = headerStore.get('accept-language') ?? '';
-  for (const locale of SUPPORTED_LOCALES) {
-    if (acceptLang.includes(locale)) return locale;
-  }
-
-  return DEFAULT_LOCALE;
+  return resolveLocale({ cookie: cookieStore.get('locale')?.value, acceptLanguage: headerStore.get('accept-language') });
 }
 
 export default getRequestConfig(async () => {

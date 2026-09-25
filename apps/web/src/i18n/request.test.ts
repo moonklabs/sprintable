@@ -44,6 +44,13 @@ describe('getLocale() — story #3778 CHANGES 재현·고정', () => {
     expect(await getLocale()).toBe('ko');
   });
 
+  // story #4289 — 한국어 첫째 · 영어 둘째(한국어 크롬에 영어를 더한 흔한 값)는 ko. 옛 규칙(지원 목록 en 먼저 · includes)은 en이었다.
+  it('⭐쿠키 없음·Accept-Language: ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7 → ko(PO 실측값 · 헤더 순서 + q값)', async () => {
+    cookieGet.mockReturnValue(undefined);
+    headerGet.mockReturnValue('ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7');
+    expect(await getLocale()).toBe('ko');
+  });
+
   it('⭐쿠키 없음·헤더도 없음 → en(DEFAULT_LOCALE — ko 아님, 최초본이 실제로 틀렸던 자리)', async () => {
     cookieGet.mockReturnValue(undefined);
     headerGet.mockReturnValue(null);
