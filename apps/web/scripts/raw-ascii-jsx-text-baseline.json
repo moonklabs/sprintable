@@ -55,7 +55,6 @@
     "components/agents/agent-api-key-manager.tsx::Revoke",
     "components/agents/agent-api-key-manager.tsx::Use this key in the Authorization header:",
     "components/agents/agent-connection-settings-section.tsx::.mcp.json",
-    "components/agents/agent-management-tab.tsx::inactive",
     "components/docs/extensions/page-embed-node.tsx::Circular embed detected — a document cannot embed itself.",
     "components/docs/extensions/page-embed-node.tsx::Loading document…",
     "components/settings/usage-dashboard.tsx::Usage tracking is disabled in OSS mode.",

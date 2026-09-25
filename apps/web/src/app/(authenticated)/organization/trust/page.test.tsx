@@ -72,14 +72,14 @@ interface StubMember {
   hit_rate: number | null; resolved: number | null; computed_at: string; pending: number | null;
 }
 
-function stubFetchAdmin(members: StubMember[]) {
+function stubFetchAdmin(members: StubMember[], orgMembers: Array<{ id: string; name: string; email?: string; role?: string }> = []) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === '/api/trust-scores/org-summary') {
       return { ok: true, status: 200, json: async () => ({ members }) };
     }
     if (url === '/api/org-members') {
-      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      return { ok: true, status: 200, json: async () => ({ data: orgMembers }) };
     }
     if (url.startsWith('/api/team-members')) {
       return { ok: true, status: 200, json: async () => ({ data: [] }) };
@@ -174,6 +174,27 @@ describe('OrganizationTrustPage — 콜드스타트 두 갈래(story #3749, 定 
     expect(row?.textContent).toContain(koMessages.organization.trustColdStart);
   });
 
+  // [SID:4282 · 유나 결정] 배포 27 실측 모양 — 같은 이름 «송윤재»가 소유자 · 관리자 두 계정. 이름이 겹친 행에만 역할 꼬리.
+  it('⭐같은 이름 · 다른 구성원 두 줄은 «이름 · 역할»로 갈린다 · 이름이 하나뿐인 행은 그대로', async () => {
+    mountAsAdmin();
+    stubFetchAdmin([
+      { member_id: 'e75ca548', role_key: 'dev', role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 },
+      { member_id: '2fd14616', role_key: 'dev', role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 },
+      { member_id: 'c3', role_key: 'dev', role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 },
+    ], [
+      { id: 'e75ca548', name: '송윤재', email: 'iamyoonjae@moonklabs.com', role: 'owner' },
+      { id: '2fd14616', name: '송윤재', email: 'sellerking@moonklabs.com', role: 'admin' },
+      { id: 'c3', name: 'dosunyun', email: 'dosunyun@moonklabs.com', role: 'admin' },
+    ]);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`송윤재 · ${koMessages.organization.roleGroupOwner}`);
+    expect(text).toContain(`송윤재 · ${koMessages.organization.roleGroupAdmin}`);
+    expect(text).toContain('dosunyun');
+    expect(text).not.toContain(`dosunyun · `);
+  });
+
   it('⭐resolved=0·pending=0 — 「아직 판정한 가설이 없습니다」(수 없음, "3건" 류 계약에 없는 수 0)', async () => {
     mountAsAdmin();
     stubFetchAdmin([
@@ -185,6 +206,9 @@ describe('OrganizationTrustPage — 콜드스타트 두 갈래(story #3749, 定 
     const row = container.querySelector('[data-testid="trust-roster-row"]');
     expect(row?.textContent).toContain(koMessages.organization.trustColdStartEmptyReason);
     expect(row?.textContent).not.toContain(koMessages.organization.trustColdStartPendingReason.replace('{n}', ''));
+    // [SID:4282] 좁은 칸에서 낱말 중간 줄바꿈(«판정한 가/설이») 방지 — 사유 문장을 담은 부제(공용 ListRow)가 break-keep.
+    const reasonEl = Array.from(row?.querySelectorAll('p') ?? []).find((el) => el.textContent?.includes(koMessages.organization.trustColdStartEmptyReason));
+    expect(reasonEl?.className ?? '').toMatch(/(^|\s)break-keep(\s|$)/);
   });
 
   it('resolved=0인데 pending이 null(계약 부재)이면 수 없는 문장으로 떨어진다(모른다≠지어낸 수)', async () => {

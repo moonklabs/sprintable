@@ -237,6 +237,18 @@ describe('ContentRulesPage — UTM 자동 부착 3통(story #3747ⓒ, utm_rules 
     expect(status).toContain('sprintable');
     expect(status).toContain('social');
   });
+
+  // [SID:4282 · 유나 비차단] flex 칸이면 좁은 폭에서 «켜짐»과 세부가 두 칸으로 갈린다 → 한 문단(inline 흐름) · 점과 글자 사이 mr-1.5.
+  it('켜짐 상태는 flex 칸이 아니라 한 문단으로 흐른다', async () => {
+    stubFetch({ rules: { ...RULES_V1, utm_rules: { enabled: true, default_source: 'sprintable', default_medium: 'social', campaign_from: 'campaign_slug', content_from: 'draft_id' } } });
+    await mount('owner');
+    const el = container.querySelector('[data-testid="content-rules-utm-rules-status"]') as HTMLElement;
+    const cls = el.className.split(/\s+/);
+    expect(cls).not.toContain('flex');
+    expect(cls).not.toContain('inline-flex');
+    const dot = el.querySelector('span[aria-hidden="true"]') as HTMLElement;
+    expect(dot.className.split(/\s+/)).toEqual(expect.arrayContaining(['inline-block', 'mr-1.5']));
+  });
 });
 
 describe('ContentRulesPage — 한 번에 한 행만 펼침(page 소유 expandedField)', () => {

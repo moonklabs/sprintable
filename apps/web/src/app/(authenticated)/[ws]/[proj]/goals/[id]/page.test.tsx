@@ -298,10 +298,13 @@ describe('EpicDetailPage — 결과 캡슐 재조립(§2 이중 신호·§4 신�
     return mount(fetchImpl);
   }
 
-  it('이중 신호 캡슐 2개(작업 CLAIMED/결과 VERIFIED)가 나란히 뜬다', async () => {
+  it('이중 신호 캡슐 2개(작업 · 보고됨 / 결과 · 검증됨)가 나란히 뜬다', async () => {
     await mountByUrl({ stories: [{ id: 's1', title: 'S1', status: 'done' }, { id: 's2', title: 'S2', status: 'backlog' }], outcome_status: 'pending' });
-    expect(container.textContent).toContain('CLAIMED');
-    expect(container.textContent).toContain('VERIFIED');
+    // [SID:4282 · 유나 결정] ko 머리는 한국어만(«작업 · 보고됨» · «결과 · 검증됨») — 영어 대문자 0.
+    expect(container.textContent).toContain('작업 · 보고됨');
+    expect(container.textContent).toContain('결과 · 검증됨');
+    expect(container.textContent).not.toContain('CLAIMED');
+    expect(container.textContent).not.toContain('VERIFIED');
     expect(container.textContent).toContain('1/2');
   });
 

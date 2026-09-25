@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, resolveRoleLabel, sortGroupMembersByName, extractSparklineValues, sparklinePoints, disambiguatedNames } from './trust-utils';
 import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 // story #3735(D1) — groupRosterByRole이 이제 t(Translator)를 받아 기본 5키(role_key)면
@@ -219,5 +219,81 @@ describe('sparklinePoints (유나 가디언 지적 PR#2194 — 고정 0-1 스케
     const height = 24, pad = 2;
     expect(yOf(points, 0)).toBeCloseTo(height - pad); // 0 → 바닥
     expect(yOf(points, 1)).toBeCloseTo(pad); // 1 → 천장
+  });
+});
+
+// [SID:4282 · 유나 결정] 같은 이름 · 다른 구성원 행에만 구분 꼬리(역할 → 이메일 → ID 앞 8자).
+describe('disambiguatedNames (SID:4282 — 같은 이름 두 줄 구분)', () => {
+  const role = (r: string) => ({ owner: '소유자', admin: '관리자', member: '구성원' } as Record<string, string>)[r] ?? r;
+  const L = (rows: Array<{ id: string; name: string; email?: string; role?: string }>) => new Map(rows.map((r) => [r.id, r]));
+  it('실측 모양: 송윤재 소유자 · 관리자 두 계정 → 역할 꼬리 · 이름이 하나뿐인 행은 그대로', () => {
+    const lookup = L([
+      { id: 'e75ca548-aaaa', name: '송윤재', email: 'iamyoonjae@moonklabs.com', role: 'owner' },
+      { id: '2fd14616-bbbb', name: '송윤재', email: 'sellerking@moonklabs.com', role: 'admin' },
+      { id: 'c3', name: 'dosunyun', email: 'dosunyun@moonklabs.com', role: 'admin' },
+    ]);
+    const out = disambiguatedNames(['e75ca548-aaaa', '2fd14616-bbbb', 'c3'], (id) => lookup.get(id)!.name, lookup, role);
+    expect(out.get('e75ca548-aaaa')).toBe('송윤재 · 소유자');
+    expect(out.get('2fd14616-bbbb')).toBe('송윤재 · 관리자');
+    expect(out.get('c3')).toBe('dosunyun');
+  });
+  it('역할이 같으면 이메일 · 이메일도 없으면 ID 앞 8자', () => {
+    const lookup = L([
+      { id: 'aaaaaaaa-1111', name: '김', email: 'a@x.com', role: 'member' },
+      { id: 'bbbbbbbb-2222', name: '김', email: 'b@x.com', role: 'member' },
+      { id: 'cccccccc-3333', name: '김' },
+    ]);
+    const out = disambiguatedNames(['aaaaaaaa-1111', 'bbbbbbbb-2222', 'cccccccc-3333'], (id) => lookup.get(id)!.name, lookup, role);
+    expect(out.get('aaaaaaaa-1111')).toBe('김 · a@x.com');
+    expect(out.get('bbbbbbbb-2222')).toBe('김 · b@x.com');
+    expect(out.get('cccccccc-3333')).toBe('김 · cccccccc');
+  });
+  it('셋 중 역할이 하나만 다르면 그 사람만 역할 · 나머지는 이메일', () => {
+    const lookup = L([
+      { id: 'o1', name: '이', email: 'o@x.com', role: 'owner' },
+      { id: 'm1', name: '이', email: 'm1@x.com', role: 'member' },
+      { id: 'm2', name: '이', email: 'm2@x.com', role: 'member' },
+    ]);
+    const out = disambiguatedNames(['o1', 'm1', 'm2'], (id) => lookup.get(id)!.name, lookup, role);
+    expect([out.get('o1'), out.get('m1'), out.get('m2')]).toEqual(['이 · 소유자', '이 · m1@x.com', '이 · m2@x.com']);
+  });
+  it('같은 사람이 직무 둘로 두 행이면(member_id 같음) 꼬리 없음', () => {
+    const lookup = L([{ id: 'p1', name: '박', email: 'p@x.com', role: 'admin' }]);
+    const out = disambiguatedNames(['p1', 'p1'], (id) => lookup.get(id)!.name, lookup, role);
+    expect(out.get('p1')).toBe('박');
+  });
+  it('명단에 없는 구성원 둘(같은 «알 수 없는 구성원») → ID 앞 8자로 갈림', () => {
+    const lookup = L([]);
+    const out = disambiguatedNames(['11111111-x', '22222222-y'], () => '알 수 없는 구성원', lookup, role);
+    expect(out.get('11111111-x')).toBe('알 수 없는 구성원 · 11111111');
+    expect(out.get('22222222-y')).toBe('알 수 없는 구성원 · 22222222');
+  });
+  it('mergeMemberLookup이 org-members의 role을 싣는다', () => {
+    const lookup = mergeMemberLookup([{ id: 'o', name: 'A', email: 'a@x.com', role: 'owner' }], [{ id: 't', name: 'B' }]);
+    expect(lookup.get('o')?.role).toBe('owner');
+    expect(lookup.get('t')?.role).toBeUndefined();
+  });
+});
+
+// [SID:4282 · 까디르 P2] 같은 이름 행 순서는 입력(BE 응답) 순서와 무관해야 한다 — 새로고침마다 두 줄이 자리를 바꾸지 않게.
+describe('sortGroupMembersByName — 같은 이름은 member_id · role_key로 끊는다(SID:4282)', () => {
+  const row = (member_id: string, role_key = 'dev') => ({ member_id, role_key, role_label: '개발', hit_rate: null, resolved: 0, computed_at: '2026-09-09T00:00:00Z', pending: 0 });
+  const lookup = new Map([
+    ['e75ca548', { id: 'e75ca548', name: '송윤재' }],
+    ['2fd14616', { id: '2fd14616', name: '송윤재' }],
+    ['c3', { id: 'c3', name: 'dosunyun' }],
+  ]);
+  it('입력 순서를 뒤집어도 출력 순서가 같다', () => {
+    const a = sortGroupMembersByName([row('e75ca548'), row('2fd14616'), row('c3')], lookup).map((r) => r.member_id);
+    const b = sortGroupMembersByName([row('2fd14616'), row('c3'), row('e75ca548')], lookup).map((r) => r.member_id);
+    expect(a).toEqual(b);
+    expect(a).toEqual(['c3', '2fd14616', 'e75ca548']);
+  });
+  it('같은 사람의 직무 두 행도 순서가 고정(role_key)', () => {
+    const one = new Map([['p1', { id: 'p1', name: '박' }]]);
+    const a = sortGroupMembersByName([row('p1', 'qa'), row('p1', 'dev')], one).map((r) => r.role_key);
+    const b = sortGroupMembersByName([row('p1', 'dev'), row('p1', 'qa')], one).map((r) => r.role_key);
+    expect(a).toEqual(['dev', 'qa']);
+    expect(b).toEqual(['dev', 'qa']);
   });
 });

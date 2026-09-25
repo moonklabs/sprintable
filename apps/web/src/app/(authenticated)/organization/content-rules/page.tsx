@@ -127,10 +127,10 @@ function InlineChip({ children, swatch }: { children: React.ReactNode; swatch?: 
   );
 }
 
-function StatusDot({ on }: { on: boolean }) {
+function StatusDot({ on, className }: { on: boolean; className?: string }) {
   return (
     <span
-      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full align-middle ${on ? 'bg-success' : 'bg-muted-foreground'}`}
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full align-middle ${on ? 'bg-success' : 'bg-muted-foreground'}${className ? ` ${className}` : ''}`}
       aria-hidden="true"
     />
   );
@@ -551,13 +551,14 @@ export default function ContentRulesPage() {
               <RuleRowShell
                 field="utm_rules" rules={rules} canEdit={canEditRules} expandedField={expandedField}
                 setExpandedField={setExpandedField} title={fieldTitle('utm_rules')}
+                // [SID:4282 · 유나 비차단] flex면 390에서 «켜짐»과 세부(· source … · medium …)가 두 칸으로 갈렸다 → 점을 글줄 안에 두고 한 문단으로 흐르게.
                 status={
-                  <span className="flex items-center gap-1.5 text-xs" data-testid="content-rules-utm-rules-status">
+                  <span className="text-xs" data-testid="content-rules-utm-rules-status">
                     {rules.utm_rules === null ? (
                       <span className="text-muted-foreground">{t('contentRulesNotSetLabel')}</span>
                     ) : (
                       <>
-                        <StatusDot on={rules.utm_rules.enabled} />
+                        <StatusDot on={rules.utm_rules.enabled} className="mr-1.5" />
                         {rules.utm_rules.enabled ? (
                           <>
                             {t('utmRulesEnabledOnLabel')}

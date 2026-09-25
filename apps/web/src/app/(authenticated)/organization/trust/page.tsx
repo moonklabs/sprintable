@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
 import {
   coldStartReason,
+  disambiguatedNames,
   groupRosterByRole,
   isColdStart,
   mergeMemberLookup,
@@ -27,6 +28,7 @@ import {
   type SelfScore,
 } from './trust-utils';
 import { fetchWithAuth } from '@/lib/db/client';
+import { orgRoleLabel } from '@/lib/org-role-label';
 
 // story #3749(재설계 ⑤, 시안 ④⑤ v3b 74290976) — 역할별 SectionCard 쪼개기를 걷고
 // 역할 칩으로 좁히는 한 목록으로. admin 뷰만 칩을 갖는다(self 뷰는 이미 "내 역할"
@@ -81,7 +83,7 @@ export default function OrganizationTrustPage() {
       ]);
       if (cancelled) return;
       const summaryJson = summaryRes?.ok ? await summaryRes.json() as { members?: OrgSummaryRow[] } : { members: [] };
-      const orgMembersJson = orgMembersRes?.ok ? await orgMembersRes.json() as { data?: Array<{ id: string; name?: string | null; email?: string | null }> } : { data: [] };
+      const orgMembersJson = orgMembersRes?.ok ? await orgMembersRes.json() as { data?: Array<{ id: string; name?: string | null; email?: string | null; role?: string | null }> } : { data: [] };
       const teamMembersJson = teamMembersRes?.ok ? await teamMembersRes.json() as { data?: Array<{ id: string; name?: string | null }> } : { data: [] };
       if (cancelled) return;
       setRosterRows(summaryJson.members ?? []);
@@ -119,13 +121,21 @@ export default function OrganizationTrustPage() {
     ? sortedRows
     : sortedRows.filter((row) => resolveRoleLabel(row.role_key, row.role_label, t) === roleFilter);
 
+  // [SID:4282] 같은 이름 · 다른 구성원 행에만 구분 꼬리(역할 → 이메일 → ID 앞 8자 · trust-utils.disambiguatedNames).
+  const displayNames = disambiguatedNames(
+    rosterRows.map((row) => row.member_id),
+    (id) => rosterMembers.get(id)?.name ?? t('trustUnknownMember'),
+    rosterMembers,
+    (role) => orgRoleLabel(role, t),
+  );
+
   function renderAdminRow(row: OrgSummaryRow, index: number) {
     return (
       <AdminRow
         key={`${row.member_id}-${row.role_key}`}
         row={row}
         index={index}
-        name={rosterMembers.get(row.member_id)?.name ?? t('trustUnknownMember')}
+        name={displayNames.get(row.member_id) ?? rosterMembers.get(row.member_id)?.name ?? t('trustUnknownMember')}
         t={t}
         displayTimezone={displayTimezone}
       />

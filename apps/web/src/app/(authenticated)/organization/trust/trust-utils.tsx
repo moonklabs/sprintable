@@ -39,6 +39,8 @@ export interface RosterMember {
   id: string;
   name: string;
   email?: string;
+  /** [SID:4282] 조직 역할(owner/admin/member) — /api/org-members에만 있다(같은 이름 구분 꼬리용). */
+  role?: string;
 }
 
 export type Translator = (key: string, values?: Record<string, string | number>) => string;
@@ -104,10 +106,14 @@ export function sortGroupMembersByName(rows: OrgSummaryRow[], lookup: Map<string
   return [...rows].sort((a, b) => {
     const nameA = lookup.get(a.member_id)?.name;
     const nameB = lookup.get(b.member_id)?.name;
-    if (nameA && nameB) return nameA.localeCompare(nameB);
-    if (nameA) return -1;
-    if (nameB) return 1;
-    return a.member_id.localeCompare(b.member_id);
+    if (nameA && nameB) {
+      // [SID:4282 · 까디르 P2] 이름이 같으면(«송윤재» 두 계정) 비교기가 0이라 BE 응답 순서(ORDER BY 없음)를 따라가
+      // 새로고침마다 두 줄 순서가 바뀔 수 있었다 → member_id(같은 사람의 직무 두 행이면 role_key)로 끊는다.
+      const byName = nameA.localeCompare(nameB);
+      if (byName !== 0) return byName;
+    } else if (nameA) return -1;
+    else if (nameB) return 1;
+    return a.member_id.localeCompare(b.member_id) || a.role_key.localeCompare(b.role_key);
   });
 }
 
@@ -116,17 +122,51 @@ export function sortGroupMembersByName(rows: OrgSummaryRow[], lookup: Map<string
 // member_resolver.py canonicalize_member_id 패턴) 어느 쪽 id 공간이든 이름 해소가 가능해야 한다.
 // org-members가 우선(조직 SSOT) — team-members는 org-members에서 못 찾은 것만 보강.
 export function mergeMemberLookup(
-  orgMembers: Array<{ id: string; name?: string | null; email?: string | null }>,
+  orgMembers: Array<{ id: string; name?: string | null; email?: string | null; role?: string | null }>,
   teamMembers: Array<{ id: string; name?: string | null }>,
 ): Map<string, RosterMember> {
   const lookup = new Map<string, RosterMember>();
   for (const m of orgMembers) {
-    lookup.set(m.id, { id: m.id, name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? '?', email: m.email ?? undefined });
+    lookup.set(m.id, { id: m.id, name: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? '?', email: m.email ?? undefined, role: m.role ?? undefined });
   }
   for (const m of teamMembers) {
     if (!lookup.has(m.id)) lookup.set(m.id, { id: m.id, name: m.name?.trim() || '?' });
   }
   return lookup;
+}
+
+// [SID:4282 · 유나 결정 2026-09-25] 같은 이름이 서로 다른 구성원(member_id)에게 붙으면 행만 보고는 못 가른다(배포 27
+// 기기 탐색 점검 14번 — 소유자 · 관리자 두 계정이 같은 이름). 이름이 겹친 행에만 꼬리를 붙인다:
+//   ① 겹친 무리 안에서 이 사람의 조직 역할이 유일하면 역할 라벨(«송윤재 · 소유자»)
+//   ② 아니면(역할이 같거나 모름) 이메일 전체(관리자 전용 화면)
+//   ③ 이메일도 없으면(team-members에서만 해소) ID 앞 8자
+// 같은 사람이 직무 둘로 두 행이면 member_id가 같아 꼬리를 안 붙인다(부제의 직무가 이미 가른다). 반환 = member_id → 보일 이름.
+export function disambiguatedNames(
+  memberIds: string[],
+  nameOf: (memberId: string) => string,
+  lookup: Map<string, RosterMember>,
+  roleLabel: (role: string) => string | null,
+): Map<string, string> {
+  const byName = new Map<string, string[]>();
+  for (const id of new Set(memberIds)) {
+    const n = nameOf(id);
+    if (!byName.has(n)) byName.set(n, []);
+    byName.get(n)!.push(id);
+  }
+  const out = new Map<string, string>();
+  for (const [name, ids] of byName) {
+    if (ids.length < 2) { out.set(ids[0], name); continue; }
+    const roles = ids.map((id) => lookup.get(id)?.role ?? null);
+    ids.forEach((id, i) => {
+      const role = roles[i];
+      const roleUnique = !!role && roles.filter((r) => r === role).length === 1;
+      const roleText = roleUnique ? roleLabel(role as string) : null;
+      const email = lookup.get(id)?.email;
+      const tail = roleText ?? (email || id.slice(0, 8));
+      out.set(id, `${name} · ${tail}`);
+    });
+  }
+  return out;
 }
 
 // story 7e21a8b5(C2a-FE): E-VERIFY 톤 가드레일 — 순위/등급 컬러코딩 금지, chip(중립)만 사용.
