@@ -3,12 +3,14 @@
 import { createElement, useCallback, useState } from 'react';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
-import { DownloadIcon, Loader2, AlertTriangle } from 'lucide-react';
+import { DownloadIcon, Loader2, AlertTriangle, File as FileGlyph } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { getFileIcon } from '@/lib/file-icon';
 import { FILE_TINT_CLASS, fileExtLabel, fileTypeTint } from '@/lib/storage/format';
 import { useToast } from '@/components/ui/toast';
 import { safeAttachmentDataUrl } from '../lib/safe-content-url';
+import { cardVariants } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,7 +139,23 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
     );
   }
 
-  // ── 3. 로드 (legacy / ref 공통·타입 틴트 글리프) ──
+  // ── 3. 열 수 없는 옛 첨부(story #4324 · 유나) — 본문 주소가 있는데 허용된 첨부가 아니고 자산 참조도 없으면, 보기 화면의 막힘 카드와 같은
+  // 모양(파일 이름 + «이 파일은 열 수 없어요» · 내려받기 없음). 누르기 전에 막힌 걸 보여 준다(임베드 막힘 카드와 같은 결).
+  if (data && !assetId && !safeAttachmentDataUrl(data)) {
+    return (
+      <NodeViewWrapper as="div" className="my-3 not-prose">
+        <div className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 opacity-70')}>
+          <FileGlyph className="size-4 flex-shrink-0 text-muted-foreground" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{filename}</p>
+            <p className="text-xs text-muted-foreground">{t('attachFileBlocked')}</p>
+          </div>
+        </div>
+      </NodeViewWrapper>
+    );
+  }
+
+  // ── 4. 로드 (legacy / ref 공통·타입 틴트 글리프) ──
   const tint = FILE_TINT_CLASS[fileTypeTint(mimeType)];
   const meta = `${fileExtLabel(mimeType, filename)} · ${formatFileSize(size)}`;
   return (

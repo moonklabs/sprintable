@@ -41,7 +41,7 @@ async function renderDoc(content: string, opts: { format?: 'html' | 'markdown'; 
           content={content}
           contentFormat={opts.format ?? 'markdown'}
           publicMode={opts.publicMode}
-          untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
+          untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
           wikiLinkTargets={opts.wikiLinkTargets === undefined ? EXISTING : opts.wikiLinkTargets}
         />
       </NextIntlClientProvider>,

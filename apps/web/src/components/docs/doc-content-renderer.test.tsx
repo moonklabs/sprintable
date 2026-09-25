@@ -44,7 +44,7 @@ describe('DocContentRenderer', () => {
 
   it('⭐story #4315 — 본문 링크 글자는 brand-text(밝은 = brand-strong 7.05 · 어두운 = brand-soft 10.48) · 옅은 틴트 brand-soft 아님', () => {
     const markup = renderToStaticMarkup(wrap(
-      <DocContentRenderer content={'[약관](https://example.com/terms) 본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+      <DocContentRenderer content={'[약관](https://example.com/terms) 본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     ));
     expect(markup).toContain('href="https://example.com/terms"');
     expect(markup).toContain('[&amp;_a:not(:where([data-doc-part],[data-doc-part]_*))]:text-brand-text');
@@ -53,7 +53,7 @@ describe('DocContentRenderer', () => {
 
   it('renders raw html embedded in markdown instead of exposing escaped tags', () => {
     const markup = renderToStaticMarkup(wrap(
-      <DocContentRenderer content={'<h2>제목</h2>\n\n본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+      <DocContentRenderer content={'<h2>제목</h2>\n\n본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     ));
 
     expect(markup).toContain('<h2 id="제목">제목</h2>');
@@ -67,7 +67,7 @@ describe('DocContentRenderer', () => {
         content={'# Overview\n\n<h2>HTML Heading In Markdown</h2>\n\n```ts\nconst answer = 42;\n```\n\n| col | val |\n| --- | --- |\n| a | b |'}
         contentFormat="markdown"
         codeCopyLabel="Copy code"
-        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     ));
 
@@ -87,7 +87,7 @@ describe('DocContentRenderer', () => {
         content={'<h1>HTML Title</h1><table><thead><tr><th>A</th></tr></thead><tbody><tr><td>B</td></tr></tbody></table><pre><code>SELECT 1;</code></pre>'}
         contentFormat="html"
         codeCopyLabel="Copy"
-        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     ));
 
@@ -102,7 +102,7 @@ describe('DocContentRenderer', () => {
       <DocContentRenderer
         content={'<div data-page-embed data-doc-id="doc-1" data-title="설계 문서" data-icon="📄" data-slug="design-doc"></div>'}
         contentFormat="markdown"
-        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     ));
 
@@ -118,7 +118,7 @@ describe('DocContentRenderer', () => {
       <DocContentRenderer
         content={'<h1 onclick="alert(1)">제목</h1><h2><img src=x onerror="alert(2)"><strong>ok</strong></h2>'}
         contentFormat="html"
-        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     ));
 
@@ -138,7 +138,7 @@ describe('DocContentRenderer', () => {
       <DocContentRenderer
         content={`참조: [스토리제목](entity:story:${uuid}) [에픽제목](entity:epic:${uuid}) [문서제목](entity:doc:${uuid})`}
         contentFormat="markdown"
-        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요"
+        untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요"
       />,
     ));
 
@@ -156,7 +156,7 @@ describe('DocContentRenderer', () => {
   it('story #2639 mutation guard: entity: scheme survives BOTH the urlTransform and sanitize filters', () => {
     const uuid = '22222222-2222-2222-2222-222222222222';
     const markup = renderToStaticMarkup(wrap(
-      <DocContentRenderer content={`[칩라벨](entity:story:${uuid})`} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+      <DocContentRenderer content={`[칩라벨](entity:story:${uuid})`} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     ));
     expect(markup).toContain('<button type="button"');
     expect(markup).toContain('칩라벨');
@@ -165,7 +165,7 @@ describe('DocContentRenderer', () => {
   // 보안 비회귀 — entity: 예외가 다른 위험 스킴을 함께 열어주지 않는다(기본 sanitize 유지).
   it('story #2639 security non-regression: javascript:/data: hrefs are still stripped', () => {
     const markup = renderToStaticMarkup(wrap(
-      <DocContentRenderer content={'[x](javascript:alert(1)) [y](data:text/plain,hi)'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+      <DocContentRenderer content={'[x](javascript:alert(1)) [y](data:text/plain,hi)'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     ));
     expect(markup).not.toContain('javascript:');
     expect(markup).not.toContain('data:text/plain');
@@ -175,7 +175,7 @@ describe('DocContentRenderer', () => {
   it('story #2639: public share viewer renders entity refs inert (no chip button)', () => {
     const uuid = '33333333-3333-3333-3333-333333333333';
     const markup = renderToStaticMarkup(wrap(
-      <DocContentRenderer content={`[내부참조](entity:story:${uuid})`} contentFormat="markdown" publicMode untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+      <DocContentRenderer content={`[내부참조](entity:story:${uuid})`} contentFormat="markdown" publicMode untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
     ));
     expect(markup).toContain('내부참조');
     expect(markup).not.toContain('<button type="button"');
@@ -186,7 +186,7 @@ describe('DocContentRenderer', () => {
   describe('suppressLeadingTitle(story #2967 §1 — 리더 2중 제목 생략)', () => {
     it('본문 첫 h1이 doc.title과 정규화 동일하면 생략한다(공백·대소문자·# 무시)', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'#   결제 스펙 V2   \n\n본문 내용'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'#   결제 스펙 V2   \n\n본문 내용'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).not.toContain('<h1');
       expect(markup).toContain('<p>본문 내용</p>');
@@ -194,14 +194,14 @@ describe('DocContentRenderer', () => {
 
     it('본문 첫 h1이 doc.title과 다르면 그대로 렌더한다(허구 생략 금지)', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'# 다른 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'# 다른 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).toContain('<h1 id="다른-제목">다른 제목</h1>');
     });
 
     it('두 번째 이후 h1(문서 중간)은 doc.title과 같아도 생략하지 않는다(첫 heading만 대상)', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'# 서론\n\n본문\n\n# 결제 스펙 v2\n\n두 번째 섹션'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'# 서론\n\n본문\n\n# 결제 스펙 v2\n\n두 번째 섹션'} contentFormat="markdown" suppressLeadingTitle="결제 스펙 v2" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).toContain('<h1 id="서론">서론</h1>');
       expect(markup).toContain('결제 스펙 v2</h1>');
@@ -209,7 +209,7 @@ describe('DocContentRenderer', () => {
 
     it('prop을 안 주면(에디터 프리뷰 등 기존 소비처) 첫 h1도 그대로 렌더한다(회귀 0)', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'# 결제 스펙 v2\n\n본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'# 결제 스펙 v2\n\n본문'} contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).toContain('결제 스펙 v2</h1>');
     });
@@ -218,14 +218,14 @@ describe('DocContentRenderer', () => {
     // 스토리 접미를 다는 관례라 본문(접미 없음)과 완전일치가 안 나 2중이 잔존했다.
     it('doc.title에 "(story #NNNN)" 접미가 있고 본문 h1은 접미 없이 같으면 생략한다', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).not.toContain('<h1');
     });
 
     it('반대 방향(본문 h1에 접미·title은 접미 없음)도 생략한다(대칭)', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안(story #1234)\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안(story #1234)\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).not.toContain('<h1');
     });
@@ -233,7 +233,7 @@ describe('DocContentRenderer', () => {
     // 음성대조 — 접미를 벗겨도 완전 다른 제목이면 생략하지 않는다(허구 생략 금지 유지).
     it('접미를 벗겨도 본문 제목이 다르면 여전히 생략하지 않는다(음성대조)', () => {
       const markup = renderToStaticMarkup(wrap(
-        <DocContentRenderer content={'# 전혀 다른 문서 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />,
+        <DocContentRenderer content={'# 전혀 다른 문서 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />,
       ));
       expect(markup).toContain('전혀 다른 문서 제목</h1>');
     });
@@ -242,12 +242,12 @@ describe('DocContentRenderer', () => {
   // story #2967(선생님 실사용 판정 ③) — 다크 본문 체감 눌림 교정(WCAG는 이미 통과·체감 문제).
   describe('bodyEmphasis(story #2967 §3 — 다크 본문 체감 눌림)', () => {
     it('기본값은 기존 text-foreground/92 그대로(회귀 0)', () => {
-      const markup = renderToStaticMarkup(wrap(<DocContentRenderer content="본문" contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />));
+      const markup = renderToStaticMarkup(wrap(<DocContentRenderer content="본문" contentFormat="markdown" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />));
       expect(markup).toContain('text-foreground/92');
     });
 
     it("bodyEmphasis='full'이면 /92 없는 순수 text-foreground를 쓴다(리더 전용 옵트인)", () => {
-      const markup = renderToStaticMarkup(wrap(<DocContentRenderer content="본문" contentFormat="markdown" bodyEmphasis="full" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="열 수 없는 링크예요" unsafeFileLabel="이 파일은 열 수 없어요" />));
+      const markup = renderToStaticMarkup(wrap(<DocContentRenderer content="본문" contentFormat="markdown" bodyEmphasis="full" untitledEmbedLabel="Untitled" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel="이 링크는 열 수 없어요" unsafeFileLabel="이 파일은 열 수 없어요" />));
       expect(markup).not.toContain('text-foreground/92');
       expect(markup).toContain('text-foreground');
     });

@@ -56,7 +56,7 @@ interface DocContentRendererProps {
   /** story #4313(유나 4673 판) — 페이지 임베드가 열리는 문서로 안 풀릴 때(없는 · 지운 문서) 카드 문구(에디터 임베드 오류 상태와 같은 «문서를 찾을 수 없어요»).
    * 필수 — 옵셔널 + 영문 기본값이면 새 호출부가 빼먹어도 조용히 통과한다(untitledEmbedLabel과 같은 이유 · #3935). */
   embedNotFoundLabel: string;
-  /** story #4324 — 일반 링크 임베드 주소가 http/https가 아니라 열지 않을 때 카드 문구(«열 수 없는 링크예요»). 필수(#3935와 같은 이유). */
+  /** story #4324 — 일반 링크 임베드 주소가 http/https가 아니라 열지 않을 때 카드 문구(«이 링크는 열 수 없어요»). 필수(#3935와 같은 이유). */
   unsafeLinkLabel: string;
   /** story #4324 — 옛 첨부 본문 주소가 위험해 열지 않을 때 둘째 줄(«이 파일은 열 수 없어요»). 필수. */
   unsafeFileLabel: string;
@@ -506,7 +506,7 @@ export function DocContentRenderer({
       const url = safeHttpUrl(rawUrl);
       block.innerHTML = '';
       if (!url) {
-        // 유나 스티어 — 날 주소는 화면에 싣지 않는다(공격 글자 노출 · 복사 유도 0) · 한 줄 «열 수 없는 링크예요».
+        // 유나 스티어 — 날 주소는 화면에 싣지 않는다(공격 글자 노출 · 복사 유도 0) · 한 줄 «이 링크는 열 수 없어요».
         block.innerHTML = inertCardHtml('link', null, unsafeLinkLabel);
         return;
       }

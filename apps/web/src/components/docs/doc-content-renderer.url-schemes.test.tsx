@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // story #4324(critical · 저장형 XSS) — 문서 콘텐츠 속성에서 온 주소를 href · src로 쓰기 전 스킴 거름. HTML 형식은 DOMPurify가 data-* 값을 그대로 통과시키고
 // CSP가 'unsafe-inline'이라, 거르지 않으면 `javascript:` 값이 누른 사람 브라우저에서 실행된다.
-// - data-url(일반 링크 임베드): http/https만 링크 카드 · YouTube/Figma 틀. 그 밖은 «열 수 없는 링크예요» 비활성 카드(날 주소 안 보임).
+// - data-url(일반 링크 임베드): http/https만 링크 카드 · YouTube/Figma 틀. 그 밖은 «이 링크는 열 수 없어요» 비활성 카드(날 주소 안 보임).
 // - data-file-data(옛 첨부 본문): data: + 실행되지 않는 MIME만 내려받기. 그 밖은 파일 이름 + «이 파일은 열 수 없어요» 비활성 카드(누름 0).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';

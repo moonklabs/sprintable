@@ -3527,7 +3527,7 @@
     "copyMarkdown": "마크다운 복사",
     "deleteDoc": "삭제",
     "createFailed": "문서 생성에 실패했어요",
-    "embedLinkBlocked": "열 수 없는 링크예요",
+    "embedLinkBlocked": "이 링크는 열 수 없어요",
     "attachFileBlocked": "이 파일은 열 수 없어요",
     "newDocDefaultTitle": "제목 없음",
     "mermaidRenderFailed": "렌더링 실패",
