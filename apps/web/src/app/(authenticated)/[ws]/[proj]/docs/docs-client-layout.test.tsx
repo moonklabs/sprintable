@@ -30,7 +30,9 @@ vi.mock('@/components/docs/use-recent-docs', () => ({
 vi.mock('@/components/docs/use-tree-expanded', () => ({
   useTreeExpanded: () => ({ isExpanded: () => false, toggleExpanded: vi.fn(), expandFolder: vi.fn() }),
 }));
-vi.mock('@/lib/use-swipe-drawer', () => ({
+// [SID:4288] closedDrawerProps(닫힌 서랍 속성)는 실제 것을 쓴다 — 훅만 닫힌 상태로 고정.
+vi.mock('@/lib/use-swipe-drawer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/use-swipe-drawer')>()),
   useSwipeDrawer: () => ({ progress: 0, dragging: false }),
 }));
 vi.mock('@/hooks/use-focus-trap', () => ({ useFocusTrap: () => ({ current: null }) }));
@@ -454,3 +456,29 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(h1s[0]!.className).toContain('sr-only');
   });
 });
+
+// [SID:4288] 닫힌 모바일 트리 서랍 — aria-hidden만이 아니라 inert(초점 · 클릭에서 빠짐)까지 실제 DOM에 붙는다. 안의 닫기 · 문서 버튼이
+// Tab 순서에서 빠져 보이지 않는 곳에 초점이 가지 않는다(라이브 axe · Tab 순회는 배포 뒤 PO 판).
+describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () => {
+  it('닫힘(progress 0) → 서랍에 inert · aria-hidden, 안에 버튼은 있음(숨은 초점 후보를 inert가 덮는다)', async () => {
+    await mount();
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    expect(drawer).toBeTruthy();
+    expect(drawer!.hasAttribute('inert')).toBe(true);
+    expect(drawer!.getAttribute('aria-hidden')).toBe('true');
+    expect(drawer!.querySelectorAll('button').length).toBeGreaterThan(0);
+  });
+
+  // 유나 design 4653 회귀 — 여는 렌더에선 isOpen이 참인데 progress는 아직 0(이 테스트의 훅 mock이 그 상태로 고정)이다. 그때 inert가
+  // 남으면 초점 가두기의 focus()가 실패해 초점이 여는 버튼에 머문다(실 브라우저 · jsdom은 inert를 구현하지 않아 activeElement로는 못 잰다).
+  it('여는 렌더(isOpen 참 · progress 0)에는 inert · aria-hidden이 없다 — 초점 가두기가 서랍 안으로 초점을 옮길 수 있다', async () => {
+    await mount();
+    const opener = container.querySelector(`button[aria-label="${koMessages.docs.openDocTree}"]`) as HTMLButtonElement | null;
+    expect(opener).not.toBeNull();
+    await act(async () => { opener!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    expect(drawer!.hasAttribute('inert')).toBe(false);
+    expect(drawer!.getAttribute('aria-hidden')).toBe('false');
+  });
+});
+

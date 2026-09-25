@@ -11,7 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
-import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
+import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { ChevronDown, Folder as FolderIcon, X } from 'lucide-react';
 import { formatTotalSize } from '@/lib/storage/format';
 import { uploadStorageAsset } from '@/lib/storage/storage-upload';
@@ -504,7 +504,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           transform: `translateX(${(folderDrawerProgress - 1) * 100}%)`,
           transition: folderDrawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
         }}
-        aria-hidden={folderDrawerProgress === 0}
+        {...closedDrawerProps(folderDrawerProgress, folderDrawerOpen)}
         data-testid="storage-folder-drawer"
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">

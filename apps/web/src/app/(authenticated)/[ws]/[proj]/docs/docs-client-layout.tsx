@@ -20,7 +20,7 @@ import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
-import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
+import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -664,7 +664,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               'sticky top-12 z-20 transition-transform',
               '[transition-duration:var(--gnb-hide-duration)]',
               '[transition-timing-function:var(--gnb-hide-easing)]',
-              gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))]',
+              // [SID:4288] 스크롤로 숨은 채 Tab 초점이 들어오면 다시 보인다(내용은 늘 닿아야 해서 inert가 아니라 focus-within).
+              gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))] focus-within:translate-y-0',
             )}
           >
             <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label={t('openDocTree')}>
@@ -711,7 +712,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
           }}
-          aria-hidden={drawerProgress === 0}
+          {...closedDrawerProps(drawerProgress, treeDrawerOpen)}
         >
           <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
             <span className="text-sm font-medium text-foreground">{t('title')}</span>

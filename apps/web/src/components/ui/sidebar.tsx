@@ -51,6 +51,11 @@ type SidebarContextProps = {
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
 
+// [SID:4288 · 까디르 4653 P2 재판정] 데스크톱 오프캔버스로 접히면 컨테이너가 음수 left/right로 화면 밖이다 — 그 안 링크 · 버튼이 Tab
+// 순서에 남지 않게 **내용 칸(머리 · 내용 · 바닥)만** inert. 컨테이너 통째에 걸면 그 안의 SidebarRail(다시 펴기 · 크기 조절)까지 죽는다
+// (inert는 자손이 풀 수 없다). 팔레트(CommandPalette)는 포털 · ⌘K는 window keydown이라 영향 없음.
+const SidebarOffcanvasHiddenContext = React.createContext(false)
+
 function useSidebar() {
   const context = React.useContext(SidebarContext)
   if (!context) {
@@ -240,16 +245,19 @@ function Sidebar({
         )}
         {...props}
       >
-        <div
-          data-sidebar="sidebar"
-          data-slot="sidebar-inner"
-          // story #2969 §2 PR-3(doc proofline-system-layer-2969) — floating variant shadow-sm
-          // 제거(§1.2: 인라인 표면은 그림자 대신 라인 — 기존 ring-1 ring-sidebar-border가 이미
-          // 그 hairline 역할을 겸하고 있어 대체 없이 제거만으로 충분).
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
-        >
-          {children}
-        </div>
+        {/* 오프캔버스로 접힘(화면 밖) → 머리 · 내용 · 바닥이 inert(컨텍스트). 아이콘 접힘(collapsible=icon)은 화면 안이라 그대로. */}
+        <SidebarOffcanvasHiddenContext.Provider value={state === "collapsed" && collapsible === "offcanvas"}>
+          <div
+            data-sidebar="sidebar"
+            data-slot="sidebar-inner"
+            // story #2969 §2 PR-3(doc proofline-system-layer-2969) — floating variant shadow-sm
+            // 제거(§1.2: 인라인 표면은 그림자 대신 라인 — 기존 ring-1 ring-sidebar-border가 이미
+            // 그 hairline 역할을 겸하고 있어 대체 없이 제거만으로 충분).
+            className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          >
+            {children}
+          </div>
+        </SidebarOffcanvasHiddenContext.Provider>
       </div>
     </div>
   )
@@ -384,8 +392,10 @@ function SidebarInput({
 }
 
 function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
+  const offcanvasHidden = React.useContext(SidebarOffcanvasHiddenContext)
   return (
     <div
+      inert={offcanvasHidden}
       data-slot="sidebar-header"
       data-sidebar="header"
       className={cn("flex flex-col gap-2 p-2", className)}
@@ -395,8 +405,10 @@ function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
+  const offcanvasHidden = React.useContext(SidebarOffcanvasHiddenContext)
   return (
     <div
+      inert={offcanvasHidden}
       data-slot="sidebar-footer"
       data-sidebar="footer"
       className={cn("flex flex-col gap-2 p-2", className)}
@@ -420,8 +432,10 @@ function SidebarSeparator({
 }
 
 function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
+  const offcanvasHidden = React.useContext(SidebarOffcanvasHiddenContext)
   return (
     <div
+      inert={offcanvasHidden}
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(

@@ -27,7 +27,11 @@ vi.mock('@/components/docs/use-recent-docs', () => ({
 vi.mock('@/components/docs/use-tree-expanded', () => ({
   useTreeExpanded: () => ({ isExpanded: () => false, toggleExpanded: vi.fn(), expandFolder: vi.fn() }),
 }));
-vi.mock('@/lib/use-swipe-drawer', () => ({ useSwipeDrawer: () => ({ progress: 0, dragging: false }) }));
+// [SID:4288] closedDrawerProps(닫힌 서랍 속성)는 실제 것을 쓴다 — 훅만 닫힌 상태로 고정.
+vi.mock('@/lib/use-swipe-drawer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/use-swipe-drawer')>()),
+  useSwipeDrawer: () => ({ progress: 0, dragging: false }),
+}));
 vi.mock('@/hooks/use-focus-trap', () => ({ useFocusTrap: () => ({ current: null }) }));
 vi.mock('@/components/nav/top-bar-slot', () => ({
   TopBarSlot: ({ title, actions }: { title: React.ReactNode; actions?: React.ReactNode }) => <div>{title}{actions}</div>,
