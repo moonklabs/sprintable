@@ -156,7 +156,7 @@ class ReplyView(BaseModel):
 
 async def _reply_view(
     db: AsyncSession, reply, target_comment_state: str | None, target_text: str | None = None,
-    *, viewer_is_human: bool = False,
+    *, viewer_is_human: bool,
 ) -> ReplyView:
     command = None
     if reply.command_id is not None:

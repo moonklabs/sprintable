@@ -7,6 +7,7 @@
   상세는 retryable=true(화면은 그 값으로 결과 줄을 고른다).
 - 까디르 QA(PO 06:40Z): ① 일시정지 blocked는 사람 재시도 대상 아님(상세 false ⇔ 404) · ② 발행 409가 실제 명령 상태와 같은 판정을
   싣는다 · ③ 에이전트가 보면 command_retryable=false(재시도 엔드포인트는 사람만 · 403) · ④ 성과 보드 행도 같은 판정.
+- 까디르 델타(PO 08:04Z): 캠페인 상세의 변형도 보는 사람 기준(예전엔 보는 쪽을 안 넘겨 사람도 false).
 """
 from __future__ import annotations
 
@@ -226,6 +227,57 @@ async def test_the_publish_409_carries_the_real_status_and_judgement():
                 got[status] = (err.get("command_status"), err.get("command_retryable"), err.get("command_id"))
         assert got["pending"] == ("pending", False, str(command_id)), got
         assert got["dead_letter"] == ("dead_letter", True, str(command_id)), got
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_campaign_detail_variants_carry_the_viewer_judgement():
+    """까디르 델타 ① — 캠페인 상세(`campaigns.get_campaign_detail_endpoint`)의 변형도 목록 · 상세와 같은 판정: 같은 dead_letter 변형을
+    사람은 true · 에이전트는 false. 예전엔 보는 쪽을 안 넘겨 사람도 늘 false였다. 뮤테이션: 캠페인 호출처가 viewer를 빼면 TypeError(필수
+    키워드)로 RED · 늘 false로 넘기면 사람 줄이 RED."""
+    import uuid
+
+    from sqlalchemy import text, update
+
+    from app.models.channel_post_draft import ChannelPostDraft
+    from tests.test_0e960006_command_id_exposure import _setup_org_scoped_app as setup
+    from tests.test_3437_content_ledger_projection import _create_site_post_draft
+
+    engine, Session = await _session_factory()
+    try:
+        app, org_id, draft_id, command_id, human_id, agent_id = await _world(Session)
+        async with Session() as s:
+            project_id = (await s.execute(
+                text("SELECT id FROM projects WHERE org_id = :o LIMIT 1"), {"o": str(org_id)},
+            )).scalar_one()
+            blog_story_id = await _seed_story(s, org_id, project_id)
+        setup(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(f"/api/v2/organizations/{org_id}/campaigns", json={"name": "가을"})
+            assert r.status_code == 201, r.text
+            campaign_id = r.json()["id"]
+        setup(app, Session, org_id, user_id=agent_id, agent=True)
+        async with _client_for(app) as client:
+            content_item_id = await _create_site_post_draft(
+                client, org_id=org_id, work_item_id=blog_story_id, slug="campaign-4290", campaign_id=campaign_id,
+            )
+        async with Session() as s:
+            await s.execute(update(ChannelPostDraft).where(ChannelPostDraft.id == uuid.UUID(str(draft_id))).values(
+                source_content_item_id=content_item_id,
+            ))
+            await s.commit()
+        await _set(Session, command_id, status="dead_letter", failure_kind="needs_check", reason_code="X_POST_TWEET_MISSING_ID")
+        seen = {}
+        for who, user_id, agent in (("human", human_id, False), ("agent", agent_id, True)):
+            setup(app, Session, org_id, user_id=user_id, agent=agent)
+            async with _client_for(app) as client:
+                r = await client.get(f"/api/v2/organizations/{org_id}/campaigns/{campaign_id}")
+            assert r.status_code == 200, r.text
+            variants = [v for ci in r.json()["content_items"] for v in ci["variants"]]
+            seen[who] = [(v["draft_id"], v["command_retryable"]) for v in variants]
+        assert seen == {"human": [(str(draft_id), True)], "agent": [(str(draft_id), False)]}, seen
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

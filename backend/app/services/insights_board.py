@@ -57,7 +57,7 @@ from app.services.insight_snapshots import (
 )
 
 
-def _command_failure_fields(command: PublicationCommand | None, *, viewer_is_human: bool = False) -> dict:
+def _command_failure_fields(command: PublicationCommand | None, *, viewer_is_human: bool) -> dict:
     """story #4264 — 채널 포스트 목록 응답(routers/channel_posts.py)과 같은 네 필드 · 같은 형식.
     story #4290(까디르 QA ④) — 목록과 같은 한 판정 `command_retryable`도(보는 사람 기준 · `viewer_can_retry`)."""
     if command is None:
@@ -270,7 +270,7 @@ async def list_insights_board(
     db: AsyncSession, *, org_id: uuid.UUID, window: str = "30d", channel: str | None = None,
     status: str | None = None, sort: str = "published_at", sort_dir: str = "desc",
     cursor: str | None = None, limit: int = 50, now: datetime | None = None,
-    work_item_id: uuid.UUID | None = None, include_deleted: bool = False, viewer_is_human: bool = False,
+    work_item_id: uuid.UUID | None = None, include_deleted: bool = False, viewer_is_human: bool,
 ) -> dict[str, Any]:
     if window not in _WINDOW_DAYS:
         raise InsightsBoardInvalidWindowError(window)

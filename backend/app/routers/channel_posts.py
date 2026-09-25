@@ -1346,7 +1346,7 @@ def _to_draft_list_item(
     *,
     requester_member_id: uuid.UUID | None = None,
     is_org_admin: bool = False,
-    viewer_is_human: bool = False,
+    viewer_is_human: bool,
 ) -> ChannelPostDraftListItem:
     """story #3403 — 목록·단건 두 엔드포인트가 공유하는 유일한 직렬화 지점. 손으로 두
     번 짜지 않는다(드리프트 원천 차단, list_channel_post_drafts()가 draft_id 필터를

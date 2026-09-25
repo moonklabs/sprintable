@@ -96,7 +96,7 @@ class CommentReplySummary(BaseModel):
     )
 
 
-def _comment_reply_summary(reply, command_by_id: dict, *, viewer_is_human: bool = False) -> CommentReplySummary:
+def _comment_reply_summary(reply, command_by_id: dict, *, viewer_is_human: bool) -> CommentReplySummary:
     """story #3529 — command_id가 있으면 배치 조회된 PublicationCommand에서 4필드를
     그대로 옮긴다(command 행 자체가 없으면(레이스·오탐) 4필드 전부 null — fail-closed,
     지어내지 않는다)."""

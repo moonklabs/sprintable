@@ -85,3 +85,24 @@ def test_the_judgement_table():
     code = next(iter(NEWSLETTER_HUMAN_RETRYABLE_BLOCK_CODES))
     assert human_retryable(cmd("blocked_unapproved", "newsletter_send", code))
     assert not human_retryable(cmd("blocked_unapproved", "newsletter_send", "SOMETHING_ELSE"))
+
+
+def test_every_builder_requires_the_viewer():
+    """까디르 델타 ②(PO 08:04Z) — 응답을 조립하는 함수는 보는 쪽(`viewer_is_human`)을 **기본값 없는 키워드**로 받는다. 새 호출처가 빠뜨리면
+    (예전 캠페인 상세처럼) 조용히 false가 아니라 TypeError로 바로 드러난다. 뮤테이션: 한 곳에 `= False` 기본값을 되살리면 RED."""
+    import inspect
+
+    from app.routers.channel_post_comment_replies import _reply_view
+    from app.routers.channel_post_comments import _comment_reply_summary
+    from app.routers.channel_posts import _to_draft_list_item
+    from app.routers.site_posts import _publication_command_view
+    from app.services.insights_board import _command_failure_fields, list_insights_board
+
+    loose = []
+    for fn in (_to_draft_list_item, _comment_reply_summary, _reply_view, _publication_command_view,
+               _command_failure_fields, list_insights_board):
+        p = inspect.signature(fn).parameters.get("viewer_is_human")
+        if p is None or p.kind is not inspect.Parameter.KEYWORD_ONLY or p.default is not inspect.Parameter.empty:
+            loose.append(fn.__name__)
+    assert not loose, f"보는 쪽을 필수 키워드로 받지 않는 조립 함수: {loose}"
+

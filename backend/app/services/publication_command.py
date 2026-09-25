@@ -427,6 +427,8 @@ def viewer_can_retry(command: PublicationCommand, *, viewer_is_human: bool) -> b
     """story #4290(까디르 QA ③ · PO 06:40Z) — **이 화면을 보는 사람이** 지금 «다시 시도»할 수 있는가. 재시도 엔드포인트
     (`channel_posts._retry_publication_command`)는 사람만 받으므로(`_require_human` · 에이전트 403) 응답의 `command_retryable`도
     보는 쪽이 사람일 때만 참 — 화면은 이 값 하나로 버튼을 가른다(멤버 종류를 따로 보지 않는다)."""
+    # 조립 함수들(`_to_draft_list_item` · `_reply_view` · `_publication_command_view` · 보드 행 등)은 `viewer_is_human`을 기본값 없는
+    # 키워드로 받는다(까디르 델타 ②) — 새 호출처가 보는 쪽을 빠뜨리면 TypeError로 바로 드러난다(예전 캠페인 상세처럼 조용히 false가 아니라).
     return viewer_is_human and human_retryable(command)
 
 

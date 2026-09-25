@@ -799,7 +799,7 @@ def _channel_publication_view(pub) -> ChannelPublicationView | None:
     )
 
 
-def _publication_command_view(cmd, *, viewer_is_human: bool = False) -> PublicationCommandView | None:
+def _publication_command_view(cmd, *, viewer_is_human: bool) -> PublicationCommandView | None:
     if cmd is None:
         return None
     return PublicationCommandView(
