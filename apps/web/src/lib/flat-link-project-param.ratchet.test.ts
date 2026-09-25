@@ -17,7 +17,7 @@ import ts from 'typescript';
 import { MIGRATED_RESOURCES } from './legacy-resource-tables';
 import { describe, expect, it } from 'vitest';
 
-const BASELINE = 4;
+const BASELINE = 0;
 
 const SRC = path.resolve(__dirname, '..');
 const AUTH = path.join(SRC, 'app/(authenticated)');
@@ -31,6 +31,14 @@ const PREDICATE_METHODS = new Set(['startsWith', 'endsWith', 'includes', 'indexO
 // story #4231 다음 조각(래칫 맹점 ③ · 까디르 4614 codex P2) — 옛 자원 · flat 경로를 **조립하는 헬퍼**. 리터럴이 헬퍼 안(`/${resource}`)에
 // 있어 머리 글자로는 못 셌다. 이 헬퍼 호출 = flat 목적지로 센다 — 인자에 프로젝트를 싣는 함수(WRAPPERS)가 있을 때만 세지 않는다.
 const ASSEMBLERS = new Set(['scopedResourceHref', 'destHref', 'resolveTabHref']);
+// story #4231 마지막 조각 — 폴백 경로를 **받아서 감싸는** 헬퍼(계약상 감싸는 함수가 필수 인자). 리터럴은 호출 자리에선 bare로 보이지만
+// 헬퍼가 그 함수로 감싸 내보낸다(`resolveScopedEntityHref(slugs, '/board?story=…', build, withProject)` — #4253 «폴백은 bare로 못 나간다» ·
+// entity-project-url.test.ts가 감쌈을 고정). 감싸는 인자가 실제로 프로젝트를 싣는 함수일 때만 그 폴백 리터럴을 세지 않는다.
+const WRAPPING_HELPERS: ReadonlyMap<string, { fallbackArg: number; wrapperArg: number }> = new Map([
+  ['resolveScopedEntityHref', { fallbackArg: 1, wrapperArg: 3 }],
+]);
+// 프로젝트를 싣는 함수를 **돌려주는** 팩토리(embed-card: 항목 project_id가 있으면 그 p · 없으면 flatHref).
+const WRAPPER_FACTORIES = new Set(['ownProjectHref']);
 
 /** 이동이 아니거나(판정·서버·문맥 전) 감싸면 틀리는 자리 — 파일(SRC 기준) + 리터럴(템플릿은 머리 글자). props가 있으면 그 속성 값일 때만. */
 export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: string[]; reason: string }> = [
@@ -77,6 +85,29 @@ function literalText(node: ts.Node): string | null {
 }
 
 /** 리터럴이 해시(#) 앞 쿼리에 `p` 키를 스스로 싣는지(템플릿은 머리 + 각 조각 꼬리 · 치환 자리는 \u0000). 키 판정은 withProjectParam과 같은 뜻. */
+/** 인자가 «프로젝트를 싣는 함수»인가 — WRAPPERS 이름 · 팩토리 호출 · 본문에서 WRAPPERS를 부르는 화살표. 항등 `(h) => h`는 아니다. */
+function isProjectCarryingFn(arg: ts.Expression | undefined): boolean {
+  if (!arg) return false;
+  if (ts.isIdentifier(arg)) return WRAPPERS.has(arg.text);
+  if (ts.isCallExpression(arg) && ts.isIdentifier(arg.expression)) return WRAPPER_FACTORIES.has(arg.expression.text);
+  if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+    let found = false;
+    const visit = (n: ts.Node) => { if (isWrapperCall(n)) found = true; else ts.forEachChild(n, visit); };
+    visit(arg.body);
+    return found;
+  }
+  return false;
+}
+
+/** 리터럴이 감싸는 헬퍼의 폴백 인자 자리이고, 그 호출이 프로젝트를 싣는 함수를 넘기는가. */
+function isWrappedFallback(node: ts.Node): boolean {
+  const { child, parent } = effectiveParent(node);
+  if (!parent || !ts.isCallExpression(parent) || !ts.isIdentifier(parent.expression)) return false;
+  const spec = WRAPPING_HELPERS.get(parent.expression.text);
+  if (!spec || parent.arguments[spec.fallbackArg] !== child) return false;
+  return isProjectCarryingFn(parent.arguments[spec.wrapperArg]);
+}
+
 function carriesOwnProject(node: ts.Node): boolean {
   const fixed = ts.isTemplateExpression(node)
     ? node.head.text + node.templateSpans.map((sp) => '\u0000' + sp.literal.text).join('')
@@ -164,7 +195,7 @@ export function countBareFlatLinksInSource(fileName: string, text: string, route
     const literal = literalText(node);
     if (literal !== null) {
       const flat = flatRe.test(literal) || isDataPathTemplate(node);
-      if (flat && !carriesOwnProject(node) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
+      if (flat && !carriesOwnProject(node) && !isWrappedFallback(node) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
       if (!ts.isTemplateExpression(node)) return;
     }
     ts.forEachChild(node, visit);
@@ -263,6 +294,20 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count('const h = `/${slug}`;')).toBe(0);
     expect(count('const h = `/${item.pathname}`;')).toBe(0);
     expect(count('if (href === `/${item.path}`) {}')).toBe(0);
+  });
+
+  it('⭐#4231 마지막 조각 — 감싸는 헬퍼의 폴백 리터럴은 감싸는 인자가 프로젝트를 싣는 함수일 때만 세지 않는다', () => {
+    // 양성 — 감싸는 인자가 없거나 · 항등 · 모르는 이름이면 bare 폴백으로 센다.
+    expect(count('const h = resolveScopedEntityHref(s, `/docs?id=${id}`, build);')).toBe(1);
+    expect(count('const h = resolveScopedEntityHref(s, `/docs?id=${id}`, build, (h) => h);')).toBe(1);
+    expect(count('const h = resolveScopedEntityHref(s, `/gates/${id}`, build, keep);')).toBe(1);
+    // 폴백 자리가 아닌 인자에 둔 flat 리터럴은 그대로 센다.
+    expect(count('const h = resolveScopedEntityHref(s, null, () => `/docs?id=${id}`, flatHref);')).toBe(1);
+    // 음성 — 프로젝트를 싣는 함수(이름 · 팩토리 · 그 함수를 부르는 화살표) · 조건식 폴백 갈래.
+    expect(count('const h = resolveScopedEntityHref(s, `/docs?id=${id}`, build, flatHref);')).toBe(0);
+    expect(count('const h = resolveScopedEntityHref(s, `/gates/${id}`, build, ownProjectHref(d.project_id));')).toBe(0);
+    expect(count('const h = resolveScopedEntityHref(s, `/gates/${id}`, build, (x) => withProjectParam(x, pid));')).toBe(0);
+    expect(count('const h = resolveScopedEntityHref(s, id ? `/docs?id=${id}` : null, build, ownProjectHref(pid));')).toBe(0);
   });
 
   it('예외 표 — 파일·리터럴·속성이 모두 맞을 때만(같은 파일의 다른 모양은 그대로 센다)', () => {
