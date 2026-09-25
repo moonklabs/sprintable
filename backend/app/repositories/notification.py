@@ -21,6 +21,7 @@ class NotificationRepository(BaseRepository[Notification]):
         limit: int = 200,
         before: datetime | None = None,
         before_id: uuid.UUID | None = None,
+        notif_type: str | None = None,
     ) -> list[Notification]:  # type: ignore[override]
         """story #2428: `before`(created_at) 단독 커서는 동률(같은 created_at) 시 페이지
         경계에서 행이 누락/중복될 수 있었다 — `before_id`가 같이 오면 (created_at, id) 복합
@@ -34,6 +35,8 @@ class NotificationRepository(BaseRepository[Notification]):
         )
         if is_read is not None:
             q = q.where(Notification.is_read == is_read)
+        if notif_type is not None:  # story #4329
+            q = q.where(Notification.type == notif_type)
         if before is not None and before_id is not None:
             q = q.where(tuple_(Notification.created_at, Notification.id) < tuple_(before, before_id))
         elif before is not None:

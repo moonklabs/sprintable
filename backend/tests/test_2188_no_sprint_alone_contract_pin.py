@@ -91,6 +91,8 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
             epic_ids=None, include_unassigned=False, done_within_days=None,
             # story #3148: exclude_status 신규 Query 파라미터 — 위와 동일 이유로 명시.
             exclude_status=None,
+            # story #4329: priority/no_assignee 신규 Query 파라미터 — 위와 동일 이유로 명시.
+            priority=None, no_assignee=False,
         )
         assert result == []
         repo.list.assert_awaited_once()

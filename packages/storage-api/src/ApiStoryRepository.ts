@@ -38,6 +38,10 @@ export class ApiStoryRepository implements IStoryRepository {
         // from/epic_ids류와 동형) 방지로 신설과 동시에 여기 포함. no_sprint는 여기 없음(위
         // interface 주석 참조 — cursor 페이지네이션과 안 섞인다, route.ts 조기분기 전용).
         exclude_status: filters.exclude_status,
+        // story #4329 — `unassigned`(담당자 없음)가 이 query 객체에서 빠져 BE로 안 갔다(같은 클래스). BE 이름은 no_assignee
+        // (BE include_unassigned = 에픽 없음과 헷갈리지 않게 갈랐다). priority도 BE가 이제 받는다.
+        no_assignee: filters.unassigned,
+        priority: filters.priority,
       },
     });
   }

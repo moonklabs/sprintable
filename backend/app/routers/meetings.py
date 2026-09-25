@@ -1,15 +1,21 @@
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.repositories.meeting import MeetingRepository
-from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
+from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingType, MeetingUpdate
 
 router = APIRouter(prefix="/api/v2/meetings", tags=["meetings", "Work"])
+
+# story #4329 — MCP `list_meetings`가 보내던 날짜 거름을 서버가 실제로 읽는다(전엔 조용히 버려 전체 목록). 오프셋 규칙은 4294와 같다.
+_DATE_FROM_QUERY = Depends(aware_datetime_query("date_from", description="Meeting date >= date_from (inclusive)"))
+_DATE_TO_QUERY = Depends(aware_datetime_query("date_to", description="Meeting date <= date_to (inclusive)"))
 
 
 async def _get_repo(
@@ -70,13 +76,19 @@ async def _get_repo_read(
 
 @router.get("", response_model=list[MeetingResponse])
 async def list_meetings(
-    meeting_type: str | None = Query(default=None),
+    meeting_type: MeetingType | None = Query(default=None),
+    date_from: datetime | None = _DATE_FROM_QUERY,
+    date_to: datetime | None = _DATE_TO_QUERY,
+    # story #4329 — MCP가 보내던 limit도 읽는다. 기본은 전부(웹 목록 회귀 0) · 주면 최신순 앞에서 그만큼.
+    limit: int | None = Query(default=None, ge=1, le=200),
     repo: MeetingRepository = Depends(_get_repo_read),
 ) -> list[MeetingResponse]:
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must not be after date_to")
     filters: dict = {}
     if meeting_type:
         filters["meeting_type"] = meeting_type
-    meetings = await repo.list(**filters)
+    meetings = await repo.list(date_from=date_from, date_to=date_to, limit=limit, **filters)
     return [MeetingResponse.model_validate(m) for m in meetings]
 
 

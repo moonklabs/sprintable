@@ -1,9 +1,12 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from app.core.datetime_query import OffsetDatetime
+
+# story #4329 — DB enum `meeting_type`과 같은 값 넷. 그 밖의 값은 DB 오류(500)가 아니라 요청 검증(422)으로 거절한다.
+MeetingType = Literal["standup", "retro", "general", "review"]
 
 MEETING_TYPES = ("standup", "retro", "general", "review")
 
@@ -11,7 +14,7 @@ MEETING_TYPES = ("standup", "retro", "general", "review")
 class MeetingCreate(BaseModel):
     project_id: uuid.UUID
     title: str
-    meeting_type: str = "general"
+    meeting_type: MeetingType = "general"
     date: OffsetDatetime | None = None
     duration_min: int | None = None
     participants: list[Any] = []
@@ -24,7 +27,7 @@ class MeetingCreate(BaseModel):
 
 class MeetingUpdate(BaseModel):
     title: str | None = None
-    meeting_type: str | None = None
+    meeting_type: MeetingType | None = None
     date: OffsetDatetime | None = None
     duration_min: int | None = None
     participants: list[Any] | None = None

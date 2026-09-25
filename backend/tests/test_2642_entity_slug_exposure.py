@@ -152,6 +152,8 @@ async def test_story_list_and_get_carry_org_project_slug():
                 epic_ids=None, include_unassigned=False, done_within_days=None,
                 # story #3148: exclude_status 신규 Query 파라미터 — 위와 동일 이유로 명시.
                 exclude_status=None,
+                # story #4329: priority/no_assignee 신규 Query 파라미터 — 위와 동일 이유로 명시.
+                priority=None, no_assignee=False,
             )
             assert len(listed) == 1
             assert listed[0].org_slug == org.slug
@@ -240,6 +242,8 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
                     epic_ids=None, include_unassigned=False, done_within_days=None,
                     # story #3148: exclude_status 신규 Query 파라미터 — 위와 동일 이유로 명시.
                     exclude_status=None,
+                    # story #4329: priority/no_assignee 신규 Query 파라미터 — 위와 동일 이유로 명시.
+                    priority=None, no_assignee=False,
                 )
             finally:
                 event.remove(engine.sync_engine, "before_cursor_execute", _before_cursor_execute)

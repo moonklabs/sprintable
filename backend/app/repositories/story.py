@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HypothesisStoryLink
 from app.models.pm import Story
+from app.models.story_assignee import StoryAssignee
 from app.repositories.base import BaseRepository
 from app.schemas.story import STATUS_TRANSITIONS
 
@@ -73,6 +74,15 @@ def _unattached_clause():
     )
 
 
+def _no_assignee_clause():
+    """story #4329 — 담당자 없는 story(MCP `get_unassigned_stories`가 보내던 거름 · 전엔 버려져 전부가 왔다). 응답의 `assignee_ids`
+    (`_attach_assignee_ids`)와 같은 정의 — 복수 담당 join(`story_assignees`) 행이 없고 레거시 단일 `assignee_id`도 비어 있다.
+    `include_unassigned`(에픽 없음 · #3019) · `unattached`(에픽 · 가설 없음 · #2532)와 다른 축이다."""
+    return Story.assignee_id.is_(None) & ~exists(
+        select(StoryAssignee.id).where(StoryAssignee.story_id == Story.id)
+    )
+
+
 async def allocate_story_number(session: AsyncSession, project_id: uuid.UUID) -> int:
     """story 9ac9b80f(FR·대표요청): 프로젝트별 race-safe sequential #N 채번.
 
@@ -104,7 +114,7 @@ class StoryRepository(BaseRepository[Story]):
     async def list(
         self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
         unattached: bool = False, epic_ids: list[uuid.UUID] | None = None,
-        include_unassigned: bool = False, done_within_days: int | None = None, **filters,
+        include_unassigned: bool = False, done_within_days: int | None = None, no_assignee: bool = False, **filters,
     ) -> tuple[list[Story], int]:
         """story #2537(카디르 QA #2932 실측, 2026-08-09) — `list_board()`와 동형으로
         `(stories, total)` 튜플을 반환한다. 이전엔 `list[Story]`만 반환해 이 분기(status
@@ -167,6 +177,8 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.created_at < cursor)
         if unattached:
             query = query.where(_unattached_clause())
+        if no_assignee:
+            query = query.where(_no_assignee_clause())
         if epic_ids is not None:
             epic_clause = Story.epic_id.in_(epic_ids)
             query = query.where(or_(epic_clause, Story.epic_id.is_(None)) if include_unassigned else epic_clause)
@@ -211,6 +223,8 @@ class StoryRepository(BaseRepository[Story]):
         story_number: int | None = None,
         q_text: str | None = None,
         unattached: bool = False,
+        priority: str | None = None,
+        no_assignee: bool = False,
     ) -> tuple[list[Story], int]:
         """CB-S4: 보드 상태별 쿼리 — created_at DESC + priority 보조 정렬 + cursor 페이징.
 
@@ -240,6 +254,11 @@ class StoryRepository(BaseRepository[Story]):
             q = q.where(_title_search_filter(q_text))
         if unattached:
             q = q.where(_unattached_clause())
+        # story #4329 — 두 거름도 이 분기에 붙인다(#2188 부류: 분기가 바뀌며 필터가 사라지지 않게).
+        if priority:
+            q = q.where(Story.priority == priority)
+        if no_assignee:
+            q = q.where(_no_assignee_clause())
 
         # done: 최근 7일 제한
         if status == "done":
@@ -269,6 +288,8 @@ class StoryRepository(BaseRepository[Story]):
         q: str | None = None,
         unattached: bool = False,
         exclude_statuses: list[str] | None = None,
+        priority: str | None = None,
+        no_assignee: bool = False,
     ) -> tuple[list[Story], int]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
 
@@ -320,6 +341,10 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(_title_search_filter(q))
         if unattached:
             query = query.where(_unattached_clause())
+        if priority:
+            query = query.where(Story.priority == priority)
+        if no_assignee:
+            query = query.where(_no_assignee_clause())
 
         count_q = select(func.count()).select_from(query.subquery())
         total = (await self.session.execute(count_q)).scalar_one()
