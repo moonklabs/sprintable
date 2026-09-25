@@ -155,6 +155,9 @@ export function disambiguatedNames(
   nameOf: (memberId: string) => string,
   lookup: Map<string, RosterMember>,
   roleLabel: (role: string) => string | null,
+  // story #4285(유나 4286 판정 · PO 00:32Z) — 대체 낱말(«이름 없는 구성원» · «알 수 없는 구성원»)이 겹치면 꼬리는 ID 앞 8자만 — 이메일 0
+  // (#3755 «이메일 폴백 0»: 이름을 모르는 사람의 이메일을 그 자리에 띄우지 않는다) · 역할도 안 쓴다(같은 대체 낱말 여럿을 한 규칙으로).
+  fallbackNames: ReadonlySet<string> = new Set(),
 ): Map<string, string> {
   const byName = new Map<string, string[]>();
   for (const id of new Set(memberIds)) {
@@ -165,6 +168,10 @@ export function disambiguatedNames(
   const out = new Map<string, string>();
   for (const [name, ids] of byName) {
     if (ids.length < 2) { out.set(ids[0], name); continue; }
+    if (fallbackNames.has(name)) {
+      for (const id of ids) out.set(id, `${name} · ${id.slice(0, 8)}`);
+      continue;
+    }
     const roles = ids.map((id) => lookup.get(id)?.role ?? null);
     ids.forEach((id, i) => {
       const role = roles[i];

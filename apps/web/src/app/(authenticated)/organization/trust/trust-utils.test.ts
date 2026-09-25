@@ -270,6 +270,16 @@ describe('disambiguatedNames (SID:4282 — 같은 이름 두 줄 구분)', () =>
     expect(out.get('11111111-x')).toBe('알 수 없는 구성원 · 11111111');
     expect(out.get('22222222-y')).toBe('알 수 없는 구성원 · 22222222');
   });
+  it('대체 낱말이 겹치면(이름 없는 구성원 여럿) 이메일 · 역할 대신 ID 앞 8자(story #4285 · 유나 4286 판정)', () => {
+    const lookup = L([
+      { id: 'aaaaaaaa-1111', name: '', email: 'a@x.com', role: 'owner' },
+      { id: 'bbbbbbbb-2222', name: '', email: 'b@x.com', role: 'member' },
+    ]);
+    const out = disambiguatedNames(['aaaaaaaa-1111', 'bbbbbbbb-2222'], () => '이름 없는 구성원', lookup, role, new Set(['이름 없는 구성원']));
+    expect(out.get('aaaaaaaa-1111')).toBe('이름 없는 구성원 · aaaaaaaa');
+    expect(out.get('bbbbbbbb-2222')).toBe('이름 없는 구성원 · bbbbbbbb');
+    expect([...out.values()].join(' ')).not.toMatch(/@|소유자|구성원 · 구성원/);
+  });
   it('mergeMemberLookup이 org-members의 role을 싣는다', () => {
     const lookup = mergeMemberLookup([{ id: 'o', name: 'A', email: 'a@x.com', role: 'owner' }], [{ id: 't', name: 'B' }]);
     expect(lookup.get('o')?.role).toBe('owner');

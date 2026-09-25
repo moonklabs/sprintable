@@ -135,6 +135,7 @@ export default function OrganizationTrustPage() {
     (id) => rosterDisplayName(rosterRowById.get(id)!, rosterMembers, rosterNameLabels),
     rosterMembers,
     (role) => orgRoleLabel(role, t),
+    new Set([rosterNameLabels.unknown, rosterNameLabels.unnamed]),
   );
 
   function renderAdminRow(row: OrgSummaryRow, index: number) {
