@@ -993,12 +993,14 @@ function ShikiCodeBlock({
 // TOC/코드카피 장식은 그 소비처 전용이라 안 가져감, 순수 sanitize만).
 export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {
-    sanitize?: (value: string) => string;
-    default?: { sanitize?: (value: string) => string };
+    sanitize?: (value: string, config?: { FORBID_ATTR?: string[] }) => string;
+    default?: { sanitize?: (value: string, config?: { FORBID_ATTR?: string[] }) => string };
   };
 
   const sanitize = maybePurifier.sanitize ?? maybePurifier.default?.sanitize;
-  return sanitize ? sanitize(content) : '';
+  // story #4316 — `data-doc-part`는 렌더러가 스스로 끼워 넣는 부품의 표지(뿌리 본문 문단 · 링크 규칙 밖)다. 문서 글쓴이가 적은 것은 걷는다 —
+  // 남기면 본문 글이 본문 모양을 벗어날 수 있다(DOMPurify 기본은 data-*를 통과시킨다 · 마크다운 경로는 스키마에 없어 원래 걷힘).
+  return sanitize ? sanitize(content, { FORBID_ATTR: ['data-doc-part'] }) : '';
 }
 
 function decorateHtmlContent(content: string, headings: ReturnType<typeof extractDocHeadings>, codeCopyLabel: string): string {

@@ -140,3 +140,19 @@ describe('부품 표지 전수(data-doc-part)', () => {
     expect(ph[0]!.textContent).toContain('그림');
   });
 });
+
+// PO 15:00Z — 글쓴이가 raw HTML에 `data-doc-part`를 적어도 본문 규칙을 못 벗어난다: HTML 경로는 DOMPurify가 걷고(FORBID_ATTR) · 마크다운 경로는
+// sanitize 스키마에 없어 걷힌다. 그 문단은 본문 문단처럼 뿌리 규칙을 탄다.
+describe.each([['html', '<p data-doc-part="x">글쓴이 문단 <a data-doc-part="y" href="https://example.com">링크</a></p>'], ['markdown', '<p data-doc-part="x">글쓴이 문단 <a data-doc-part="y" href="https://example.com">링크</a></p>\n']] as const)('글쓴이가 적은 data-doc-part — %s', (format, content) => {
+  it('⭐표지는 걷히고 그 문단 · 링크는 본문 모양(뿌리 규칙)', async () => {
+    const c = await render(content, format);
+    const p = q('.doc-renderer p');
+    const a = q('.doc-renderer p a');
+    expect(p.hasAttribute('data-doc-part')).toBe(false);
+    expect(a.hasAttribute('data-doc-part')).toBe(false);
+    for (const t of THEMES) {
+      expect(c.computed(p, 'color', t), t).toBe(ref(c, 'fg92', t));
+      expect(c.computed(a, 'text-decoration-line', t), t).toBe('underline');
+    }
+  });
+});
