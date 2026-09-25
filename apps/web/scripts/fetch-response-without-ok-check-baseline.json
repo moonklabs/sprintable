@@ -11,7 +11,6 @@
     "components/chat/add-participant-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
     "components/chat/new-conversation-modal.tsx::fetchWithAuth('/api/team-members?type=agent')",
     "components/chat/new-conversation-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
-    "components/standup/standup-history-section.tsx::fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20`)",
     "ee/components/billing/billing-tab.tsx::fetchWithAuth('/api/billing/status', { credentials: 'include' })",
     "hooks/use-entity-picker.ts::fetchWithAuth(`/api/entities/search?${params}`)"
   ]

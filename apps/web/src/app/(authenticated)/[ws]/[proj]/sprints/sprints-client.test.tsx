@@ -267,3 +267,20 @@ describe('SprintsClient — 페이지 h1 1개(story #3946)', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });
+
+// story #4328 — 스프린트 목록 요청과 「하루 체크인」 요청이 **같은 첫 물결**(예전: 목록이 온 뒤에야 스탠드업 절이 마운트돼 그 요청이 출발).
+describe('SprintsClient — 첫 물결(story #4328)', () => {
+  it('⭐목록 응답이 오기 전에 스탠드업 요청(스탠드업 · 구성원 · 활성 스프린트 · 피드백 · 미작성 · 기록)도 출발한다', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => { calls.push(String(url)); return new Promise(() => {}); }));
+    const { __resetSprintScreenPrefetchForTest } = await import('@/components/sprints/sprint-screen-prefetch');
+    __resetSprintScreenPrefetchForTest();
+    useDashboardContextMock.mockReturnValue({ currentMemberType: 'human', currentTeamMemberId: 'me-1' });
+    await mount();
+    // 목록은 **한 번만** — 선출발 effect가 목록 effect보다 먼저 돌아 목록이 그 응답을 넘겨받는다(순서가 뒤집히면 두 번 간다).
+    expect(calls.filter((u) => u.includes('/api/sprints?project_id=proj-1') && !u.includes('status=active')).length).toBe(1);
+    for (const e of ['/api/standup?date=', '/api/team-members', 'status=active', '/api/standup/feedback', '/api/standup/missing', '/api/standup/history']) {
+      expect(calls.some((u) => u.includes(e)), `${e} 첫 물결`).toBe(true);
+    }
+  });
+});
