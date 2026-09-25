@@ -390,6 +390,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "자동 발행이 실패했어요 — 채널 상태를 확인한 뒤 다시 승인해 주세요.",
         "en": "Auto-publish failed — check the channel, then re-approve.",
     },
+    # story #4264(유나 4632 · PO 처방) — 같은 승인본의 앞 시도가 «나갔는지 모름»으로 멈춰 자동 발행이 다시 쏘지 않았을 때.
+    # «다시 승인»을 권하면 새 명령으로 한 번 더 나갈 수 있으니 채널 확인 → 재시도로만 안내한다.
+    # 유나 조건(PO 23:40Z) — 이 verdict 문장이 뜨는 채팅엔 글 화면 링크가 없어 긴 형(«글 화면에서»)을 쓴다.
+    "events.gate_verdict_recipe_auto_publish_reason_needs_check": {
+        "ko": "채널에 이미 나갔을 수 있어서 다시 보내지 않았어요 — 글 화면에서 확인한 뒤 다시 보내 주세요.",
+        "en": "Not sent again — this may already be on the channel. Check on the post screen, then send it again.",
+    },
     "events.gate_verdict_recipe_auto_publish_reason_unknown_failure": {
         "ko": "자동 발행이 실패했어요 — 다시 승인해 주세요.",
         "en": "Auto-publish failed — re-approve.",
@@ -976,6 +983,12 @@ _CATALOG: dict[str, dict[str, str]] = {
     # 문장은 4필드(title/tags/categoryId/privacyStatus) 중 어느 게 틀렸는지
     # 구체적으로 말하지 않는다(field/reason은 detail의 별도 키로 실림, 문장 자체는
     # 그 4필드 전체를 가리키는 안내).
+    # story #4264(유나 4632 · PO 처방) — «나갔는지 모름»(needs_check)으로 멈춘 발행에 다른 길로 새 발행이 들어왔을 때. 일어난 것
+    # («보내지 않았다»)을 먼저, 다음 행동(확인 → «확인했어요 · 다시 시도»)을 뒤에.
+    "channel_posts.publish_needs_check": {
+        "ko": "채널에 이미 나갔을 수 있어서 다시 보내지 않았어요 — 채널에서 확인한 뒤 «확인했어요 · 다시 시도»로 보내 주세요.",
+        "en": "Not sent again — this may already be on the channel. Check there, then use \"Checked · retry\".",
+    },
     "channel_posts.youtube_metadata_invalid": {
         "ko": "YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.",
         "en": "Check the YouTube title, tags, category, and privacy values.",

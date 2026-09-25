@@ -282,6 +282,26 @@ def classify_failure_kind(error_code: str | None) -> str:
     return FAILURE_KIND_NEEDS_CHECK
 
 
+# story #4264(유나 4632 CHANGES · PO 처방) — «나갔는지 모름»(needs_check)으로 멈춘 명령에 **새 발행 요청**이 들어오면 어댑터를 다시
+# 부르지 않고 거절한다. 멈춘 명령이 앞으로 가는 길은 사람이 채널을 확인한 뒤의 재시도(`retry_dead_letter_command` — failure_kind를
+# 비운다) 하나뿐. 예전엔 즉시 발행(`POST …/publish`)이 `create_or_get_publication_command`로 그 명령을 돌려받아 곧장 어댑터를
+# 다시 불렀다 — 서버 중복 막이는 «이미 published»뿐이라 한 번 더 나갈 수 있었다(4264가 막으려는 이중 발행 그 자체).
+# 워커는 pending만 집으므로(dead_letter인 needs_check 명령은 안 본다) 이 가드는 «새 요청을 받는 동기 진입점»에 선다.
+PUBLICATION_NEEDS_CHECK_CODE = "CHANNEL_POST_NEEDS_CHECK"
+
+
+class PublicationNeedsCheckError(Exception):
+    def __init__(self, command: PublicationCommand):
+        self.command = command
+        super().__init__(f"publication command {command.id} stopped as needs_check — check the channel, then retry")
+
+
+def raise_if_needs_check(command: PublicationCommand) -> None:
+    """새 발행 요청을 받는 동기 진입점이 어댑터를 부르기 전에 부른다(진입점 전수는 PR 4632 본문 · 호출처 가드 테스트)."""
+    if command.failure_kind == FAILURE_KIND_NEEDS_CHECK:
+        raise PublicationNeedsCheckError(command)
+
+
 async def create_or_get_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, gate_id: uuid.UUID, destination: uuid.UUID,
     approved_version: uuid.UUID, requested_by_member_id: uuid.UUID,

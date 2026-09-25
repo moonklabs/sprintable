@@ -1872,6 +1872,18 @@ export default function ChannelPostEditPage() {
         // 「내일 09:00 이후 가능합니다」는 값을 실제로 보간해야 하는 문장이라 정적
         // 번역키 하나로 못 담는다). 나머지 코드는 기존 humanMessageKey/fallback 체인
         // 그대로.
+        // story #4264(유나 4632 · PO 처방) — 서버가 needs_check로 거절했으면(어댑터 0) 버튼 잠금 사유와 같은 문장 · 이 화면도
+        // 곧바로 잠금 상태로(목록을 다시 불러오기 전에 또 누르지 않게).
+        if (info.kind === 'publish_needs_check') {
+          setDraft((prev) => prev && { ...prev, failure_kind: 'needs_check', command_status: 'dead_letter' });
+          setPublishResult({
+            type: 'error',
+            text: t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') }),
+            raw: info.raw,
+            externalImpact: describeExternalImpact(info.kind),
+          });
+          return;
+        }
         const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
           ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
           : info.kind === 'rate_limited' && info.resetAt
@@ -2716,6 +2728,10 @@ export default function ChannelPostEditPage() {
               !canPublish || publishing || blockedByCommandInFlight
               || draft.processing_kind === 'awaiting_container'
               || (view.partialSuccess && blockedByReasonReset)
+              // story #4264(유나 4632 CHANGES) — needs_check(«나갔는지 모름»)면 이 버튼이 확인 없이 다시 보낸다(`POST …/publish` →
+              // 기존 command → 어댑터 재호출 · 서버 중복 막이는 «published 발행물 있음»뿐). 배지의 2단계(채널 확인 → «확인했어요 · 다시
+              // 시도»)만 문으로 남긴다. not_sent(«안 나감»)는 그대로 열린다.
+              || isNeedsCheckGate
             }
             data-testid="channel-post-publish-button"
           >
@@ -2765,6 +2781,11 @@ export default function ChannelPostEditPage() {
             </Button>
           ) : null}
         </div>
+        {canPublish && isNeedsCheckGate ? (
+          <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-locked-needs-check">
+            {t('channelPostsPublishLockedNeedsCheck', { cta: t('channelPostsFailureCheckedRetryCta') })}
+          </p>
+        ) : null}
         {!canPublish ? (
           <p className="text-xs text-muted-foreground" data-testid="channel-post-publish-disabled-reason">
             {view.blockedReason === 'SEAL_MISSING'

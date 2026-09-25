@@ -1573,6 +1573,8 @@ def _recipe_auto_publish_outcome_line(outcome: str | None, resolved_locale: str)
             "connector_error": "events.gate_verdict_recipe_auto_publish_reason_connector_error",
             "rate_limited": "events.gate_verdict_recipe_auto_publish_reason_rate_limited",
             "auth_expired": "events.gate_verdict_recipe_auto_publish_reason_auth_expired",
+            # story #4264 — 레시피 자동 발행이 needs_check로 멈춘 명령 앞에서 서지 않았을 때(`publish_recipe_approved_draft`).
+            "needs_check": "events.gate_verdict_recipe_auto_publish_reason_needs_check",
         }
         if outcome in _reason_key_map:
             _reason_text = t(_reason_key_map[outcome], resolved_locale)

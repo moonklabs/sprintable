@@ -270,6 +270,9 @@ interface RecipeApprovalFacts {
   // 수 있는 값 — 그래도 이 카드가 승인자가 자동발행 여부를 보는 유일한 자리라
   // 여기 싣는다). external_publish(scope_key="") 게이트가 아니면 항상 null.
   publishOutcome: string | null;
+  // story #4264(유나 조건 · PO 23:40Z) — needs_check 라벨은 «확인했어요 · 다시 시도»가 있는 글 화면으로 한 번에 가는 길이 있을 때만
+  // 짧은 형. 레시피가 쥔 채널 초안(BE `linked_channel_draft`)이 있으면 그 글 화면 링크, 없으면 null(긴 형 문장).
+  publishOutcomeDraftHref: string | null;
 }
 
 function recipeApprovalFacts(gate: GateItem, withProject: (href: string) => string): RecipeApprovalFacts | null {
@@ -334,6 +337,9 @@ function recipeApprovalFacts(gate: GateItem, withProject: (href: string) => stri
     budgetSpentMinor: typeof f?.['budget_spent_minor'] === 'number' ? f['budget_spent_minor'] : null,
     budgetRemainingMinor: typeof f?.['budget_remaining_minor'] === 'number' ? f['budget_remaining_minor'] : null,
     publishOutcome: realString(gate.publish_outcome),
+    publishOutcomeDraftHref: gate.linked_channel_draft?.draft_id
+      ? withProject(`/content/channel-posts/${gate.linked_channel_draft.draft_id}`)
+      : null,
   };
   const hasAny = isCommentReply ||
     facts.workItemRef || facts.draftDocRef || facts.draftDocSummary || facts.channel || facts.stage ||
@@ -725,6 +731,8 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
     const failureCode = code.slice('publish_failed:'.length);
     if (failureCode === 'auth_expired') return t('publishOutcomeFailedAuthExpired');
     if (failureCode === 'rate_limited') return t('publishOutcomeFailedRateLimited');
+    // story #4264 — 앞 시도가 «나갔는지 모름»으로 멈춰 자동 발행이 다시 쏘지 않았다(generic «연결 확인»은 틀린 안내).
+    if (failureCode === 'needs_check') return t('publishOutcomeFailedNeedsCheck');
     return t('publishOutcomeFailedGeneric');
   }
   // 미지 코드(구버전 응답 등) — 지어내지 않고 원문 코드 그대로(사람이 읽기엔 어색해도
@@ -1054,7 +1062,23 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.publishOutcome ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalPublishOutcomeLabel')} · </span>
-          <span className="text-foreground">{publishOutcomeLabel(facts.publishOutcome, t)}</span>
+          {facts.publishOutcome === 'publish_failed:needs_check' && !facts.publishOutcomeDraftHref ? (
+            <span className="text-foreground">{t('publishOutcomeFailedNeedsCheckNoLink')}</span>
+          ) : (
+            <span className="text-foreground">{publishOutcomeLabel(facts.publishOutcome, t)}</span>
+          )}
+          {facts.publishOutcome === 'publish_failed:needs_check' && facts.publishOutcomeDraftHref ? (
+            <>
+              {' · '}
+              <a
+                href={facts.publishOutcomeDraftHref}
+                className="text-primary underline underline-offset-2"
+                data-testid="recipe-publish-outcome-needs-check-draft-link"
+              >
+                {t('linkedChannelDraftOpenLink')}
+              </a>
+            </>
+          ) : null}
         </p>
       ) : null}
       {facts.workItemRef ? (

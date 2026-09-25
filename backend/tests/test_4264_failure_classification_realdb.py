@@ -358,6 +358,177 @@ async def test_the_immediate_publish_router_uses_the_same_helper(monkeypatch):
         await engine.dispose()
 
 
+# ── ⑤ «나갔는지 모름»으로 멈춘 명령에 새 발행 요청 — 어댑터 0 · 409(유나 4632 CHANGES · PO 처방) ──────────────────────
+
+
+def _not_sent_code():
+    from app.services import publication_command as pc
+
+    return min(pc._NOT_SENT_CODES)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("first_code, first_kind, second_calls", [
+    ("X_POST_TWEET_MISSING_ID", "needs_check", 0),
+    ("THREADS_CREATE_CONTAINER_FAILED", "transient", 1),
+    (None, "not_sent", 1),
+])
+async def test_a_second_publish_on_a_needs_check_command_is_refused_without_calling_the_adapter(
+    monkeypatch, first_code, first_kind, second_calls,
+):
+    """첫 발행이 needs_check로 멈춘 뒤 `POST …/publish`를 또 누르면 409 CHANNEL_POST_NEEDS_CHECK · 어댑터 호출 0 · 명령 그대로.
+    transient · not_sent로 멈춘 명령은 종전대로 다시 부른다(1). 뮤테이션: 라우터의 `raise_if_needs_check`를 빼면 첫 줄이 호출
+    1 · 응답 503으로 RED."""
+    from sqlalchemy import select
+
+    from app.models.publication_command import PublicationCommand
+    from app.routers import channel_posts as router_module
+    from app.services.channel_posts import ChannelPublishProviderError
+
+    code = first_code or _not_sent_code()
+    calls = {"n": 0}
+
+    async def _raises(*_args, **_kwargs):
+        calls["n"] += 1
+        raise ChannelPublishProviderError(provider_code=code, provider_message="stub")
+
+    monkeypatch.setattr(router_module, "publish_channel_post_draft", _raises)
+    from tests.test_620beefc_channel_post_image_upload import (
+        _approve_gate_directly,
+        _create_draft,
+        _png_bytes,
+        _upload_and_confirm,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        from app.main import app
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        try:
+            async with _client_for(app) as client:
+                draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+                assert (await _upload_and_confirm(client, org_id, draft_id, _png_bytes(800, 800), content_type="image/png")).status_code == 201
+                r_submit = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
+                assert r_submit.status_code == 200, r_submit.text
+                async with Session() as s:
+                    await _approve_gate_directly(s, uuid.UUID(r_submit.json()["gate_id"]))
+                url = f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish"
+                await client.post(url)
+                async with Session() as s:
+                    first = (await s.execute(select(PublicationCommand).where(PublicationCommand.org_id == org_id))).scalar_one()
+                assert first.failure_kind == first_kind
+                before = (first.status, first.attempt_count, first.reason_code)
+                calls["n"] = 0
+                r = await client.post(url, headers={"Accept-Language": "ko"})
+        finally:
+            app.dependency_overrides.clear()
+        assert calls["n"] == second_calls
+        if second_calls:
+            assert r.status_code != 409, r.text
+            return
+        assert r.status_code == 409, r.text
+        detail = r.json()["error"]
+        assert detail["code"] == "CHANNEL_POST_NEEDS_CHECK"
+        assert detail["command_id"] == str(first.id)
+        assert (detail["failure_kind"], detail["command_status"]) == ("needs_check", "dead_letter")
+        assert detail["message"].startswith("채널에 이미 나갔을 수 있어서 다시 보내지 않았어요")
+        async with Session() as s:
+            after = (await s.execute(select(PublicationCommand).where(PublicationCommand.org_id == org_id))).scalar_one()
+        assert (after.status, after.attempt_count, after.reason_code) == before, "거절이 명령을 건드렸다"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_recipe_auto_publish_does_not_resend_a_needs_check_command(monkeypatch):
+    """레시피 ⓓ 승인이 자동 발행하는 길도 같은 문 — 같은 승인본의 명령이 needs_check로 멈춰 있으면 어댑터 0 · 게이트 결과
+    `publish_failed:needs_check`(«다시 승인» 안내가 아니다) · 명령 그대로. 뮤테이션: `publish_recipe_approved_draft`의 가드를 빼면
+    어댑터 호출 1 · outcome published로 RED."""
+    from sqlalchemy import select
+
+    import app.services.channel_posts as channel_posts_module
+    import tests.test_4142_recipe_async_video_publish_command_realdb as t4142
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.gate import Gate
+    from app.models.publication_command import PublicationCommand
+    from app.services.gate_service import transition_gate
+    from app.services.publication_command import create_or_get_publication_command
+    from tests.recipe_reviewed_draft import reviewed_draft_for
+
+    real_adapter = channel_posts_module.publish_channel_post_draft
+    calls = {"n": 0}
+
+    async def _counting(*args, **kwargs):
+        calls["n"] += 1
+        return await real_adapter(*args, **kwargs)
+
+    monkeypatch.setattr(channel_posts_module, "publish_channel_post_draft", _counting)
+    engine, Session = await t4142._realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, owner_member_id, _owner_user_id = await t4142._seed_org_with_owner(s, slug="4264nc")
+            await t4142._seed_default_role(s, org_id)
+            await t4142._seed_system_publisher_teammember_shim(s, org_id, project_id)
+            creator_id = await t4142._seed_agent(s, org_id, project_id, name="댄")
+            story_id = await t4142._seed_story(s, org_id, project_id)
+            await t4142._seed_definition(s)
+            connection_id = await t4142._seed_text_sandbox_connection(s, org_id)
+            await t4142._seed_recipe_channel_binding(s, org_id, connection_id)
+            gate_d_id = await t4142._walk_to_pending_approval_with_abc_approved(
+                s, org_id=org_id, story_id=story_id, creator_id=creator_id, owner_member_id=owner_member_id,
+            )
+
+        t4142._setup_org_scoped_app(app, Session, org_id, user_id=creator_id, agent=True)
+        async with t4142._client_for(app) as client:
+            r_draft = await client.post(
+                f"/api/v2/organizations/{org_id}/channel-posts/drafts",
+                json={"work_item_id": str(story_id), "connection_id": str(connection_id), "text": "4264 needs_check"},
+            )
+            draft_id = uuid.UUID(r_draft.json()["draft_id"])
+            r_submit = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
+            assert r_submit.status_code == 200, r_submit.text
+            scoped_gate_id = uuid.UUID(r_submit.json()["gate_id"])
+
+        # 같은 승인본의 앞 시도가 «나갔는지 모름»으로 멈춘 상태.
+        async with Session() as s:
+            version = (await s.execute(
+                select(ChannelPostVersion).where(ChannelPostVersion.draft_id == draft_id)
+                .order_by(ChannelPostVersion.version.desc()).limit(1)
+            )).scalar_one()
+            command, _ = await create_or_get_publication_command(
+                s, org_id=org_id, gate_id=scoped_gate_id, destination=connection_id,
+                approved_version=version.id, requested_by_member_id=owner_member_id, scheduled_at=None,
+            )
+            command.status, command.failure_kind, command.reason_code = "dead_letter", "needs_check", "X_POST_TWEET_MISSING_ID"
+            command.attempt_count = 1
+            await s.commit()
+
+        async with Session() as s:
+            await transition_gate(
+                s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인",
+                reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id),
+            )
+            await s.commit()
+
+        assert calls["n"] == 0, "needs_check로 멈춘 명령인데 자동 발행이 어댑터를 또 불렀다"
+        async with Session() as s:
+            gate_d = await s.get(Gate, gate_d_id)
+            row = (await s.execute(select(PublicationCommand).where(PublicationCommand.gate_id == scoped_gate_id))).scalar_one()
+        assert gate_d.publish_outcome == "publish_failed:needs_check"
+        assert (row.status, row.failure_kind, row.attempt_count) == ("dead_letter", "needs_check", 1)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ── ④ 승인 필요 · 예산 초과 — 워커와 즉시 발행 라우터가 같은 저장 모양(까디르 codex P2 · PO 17:45Z) ──────────────────
 
 

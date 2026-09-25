@@ -448,9 +448,24 @@ async def test_partial_success_retry_only_calls_publish_not_create_container():
             assert row.status == "failed"
             assert row.external_container_id == "creation-partial"
 
+            # story #4264(유나 4632 · PO 처방) — publish 단계 실패는 «나갔는지 모름»(needs_check)이라 «발행»을 또 눌러도 다시 안
+            # 보낸다(409 · 공급자 호출 0). 앞으로 가는 길은 채널 확인 뒤 «확인했어요 · 다시 시도»(retry) → 워커 하나.
             async with _client_for(app) as client:
                 r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-        assert r2.status_code == 200, r2.text
+                assert r2.status_code == 409, r2.text
+                assert r2.json()["error"]["code"] == "CHANNEL_POST_NEEDS_CHECK"
+                assert publish_fail_then_succeed.call_count == 1
+                r_retry = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/publication-commands/{r2.json()['error']['command_id']}/retry",
+                )
+                assert r_retry.status_code == 200, r_retry.text
+            from datetime import UTC, datetime, timedelta
+
+            from app.services.publication_command import process_due_publication_commands
+
+            async with Session() as s:
+                counts = await process_due_publication_commands(s, now=datetime.now(UTC) + timedelta(minutes=1))
+            assert counts["completed"] == 1, counts
         assert create_mock.call_count == 1, "부분 성공 재시도가 컨테이너를 다시 만들면 안 된다"
         assert publish_fail_then_succeed.call_count == 2
     finally:

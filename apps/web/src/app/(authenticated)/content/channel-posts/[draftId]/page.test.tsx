@@ -6254,3 +6254,50 @@ describe('ChannelPostEditPage — YouTube 메타데이터(story #3815 PR4)', () 
     });
   });
 });
+
+// story #4264(유나 4632 CHANGES) — needs_check(«나갔는지 모름»)면 «발행» 버튼이 확인 없이 다시 보내는 문이 된다(`POST …/publish` → 기존
+// command → 어댑터 재호출). 발행 버튼을 잠그고 버튼 밖에 사유 문장(배지의 «확인했어요 · 다시 시도»로 안내) · not_sent는 그대로 열림.
+// 뮤테이션: 발행 disabled에서 `isNeedsCheckGate`를 빼면 첫 테스트 RED.
+describe('발행 버튼 — needs_check면 잠금(story #4264 · 유나)', () => {
+  // 승인 · 봉인 일치(발행 가능) 초안 — 잠금 사유가 needs_check 하나뿐이게.
+  const PUBLISHABLE = { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' };
+  it.each([
+    ['dead_letter ∧ needs_check', { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-nc' }],
+    ['pending ∧ needs_check', { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-nc' }],
+  ])('⭐%s — 발행 버튼 비활성 · 사유 문장이 배지의 재시도 이름을 가리킴', async (_label, detail) => {
+    stubFetch({ draftDetail: { ...PUBLISHABLE, ...detail } as Record<string, unknown> });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')?.textContent)
+      .toBe(koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', koMessages.content.channelPostsFailureCheckedRetryCta));
+  });
+
+  it('not_sent(«안 나감»)는 잠그지 않는다 · 사유 문장 없음', async () => {
+    stubFetch({ draftDetail: { ...PUBLISHABLE, command_status: 'dead_letter', failure_kind: 'not_sent', command_id: 'cmd-ns' } });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="channel-post-publish-locked-needs-check"]')).toBeNull();
+  });
+
+  it('⭐서버가 409 CHANNEL_POST_NEEDS_CHECK로 거절해도 같은 문장 · 버튼이 곧바로 잠긴다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHABLE,
+      onPublish: () => ({ status: 409, body: { detail: {
+        code: 'CHANNEL_POST_NEEDS_CHECK', message: 'server', command_id: 'cmd-nc', failure_kind: 'needs_check', command_status: 'dead_letter',
+      } } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const publish = container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(false);
+    await act(async () => { publish.click(); });
+    await flush();
+    const sentence = koMessages.content.channelPostsPublishLockedNeedsCheck.replace('{cta}', koMessages.content.channelPostsFailureCheckedRetryCta);
+    expect(container.querySelector('[data-testid="channel-post-publish-error-reason"]')?.textContent).toBe(sentence);
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+});

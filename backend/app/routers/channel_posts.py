@@ -2100,6 +2100,24 @@ async def publish_channel_post_draft_endpoint(
         approved_version=latest.id, requested_by_member_id=resolved.id, scheduled_at=None,
     )
     await db.commit()
+    # story #4264(유나 4632 · PO 처방) — «나갔는지 모름»으로 멈춘 명령이면 어댑터를 다시 부르지 않는다(409). 앞으로 가는 길은 채널
+    # 확인 뒤 재시도(`…/retry`) 하나. 사람 화면 · 에이전트(MCP 발행 도구도 이 라우트) 모두 같은 문을 지난다.
+    from app.services.publication_command import (
+        PUBLICATION_NEEDS_CHECK_CODE,
+        PublicationNeedsCheckError,
+        raise_if_needs_check,
+    )
+
+    try:
+        raise_if_needs_check(command)
+    except PublicationNeedsCheckError as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": PUBLICATION_NEEDS_CHECK_CODE,
+            "message": t("channel_posts.publish_needs_check", resolved_locale),
+            "command_id": str(command.id),
+            "failure_kind": command.failure_kind,
+            "command_status": command.status,
+        }) from exc
     now = datetime.now(timezone.utc)
 
     # story #3808(배포 81 라이브 회차 실 결함, 페드루 PO 정정 決定) — 이 upsert는
