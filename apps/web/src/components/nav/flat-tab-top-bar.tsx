@@ -128,9 +128,11 @@ export function StorageTopBarTitle({ summaryText }: { summaryText?: string }) {
       <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{tStorage('title')}</h1>
       {/* 유나 4688 — 알약이 붙으며 제목 묶음의 기준 폭이 커져 칩이 자리를 내주고 제목이 62px 왼쪽으로 튀었다(390 · 폴백이 먼저 서며 보이게 됨).
           알약 칸은 너비 0에서 남는 폭만 채운다(`w-0 grow` — 묶음의 기준 폭에 안 섞임) · 알약 자체는 글자 폭 그대로 · 모자라면 말줄임(4672 의도).
-          제목과의 간격도 칸 **안**(알약의 왼쪽 여백)에 둔다 — 묶음의 gap · 칸의 margin은 너비 0 칸이어도 기준 폭에 14px를 더해 제목이 그만큼 튀었다(실측). */}
+          제목과의 간격도 칸 **안**(알약의 왼쪽 여백)에 둔다 — 묶음의 gap · 칸의 margin은 너비 0 칸이어도 기준 폭에 14px를 더해 제목이 그만큼 튀었다(실측).
+          폰(sm 미만)에선 알약을 안 그린다(유나 판단 (b)) — 칩이 기준 폭을 지키면 남는 폭이 ~18px라 «…»만 남아 내용이 있는 모양만 보이는 거짓이
+          되고, 전체 글자(`title`)는 호버 전용이라 폰에선 닿을 길이 없다. «지금 어디인가»(칩)가 요약 수보다 우선. */}
       {summaryText !== undefined ? (
-        <span className="flex w-0 min-w-0 grow" data-testid="storage-summary-slot">
+        <span className="hidden w-0 min-w-0 grow sm:flex" data-testid="storage-summary-slot">
           <Badge variant="info" className="ml-3.5 min-w-0 max-w-[calc(100%-0.875rem)] shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
             <span className="min-w-0 truncate">{summaryText}</span>
           </Badge>

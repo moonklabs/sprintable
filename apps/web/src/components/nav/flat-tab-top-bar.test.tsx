@@ -140,6 +140,10 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     expect(slot.contains(pill)).toBe(true);
     const slotClasses = slot.className.split(/\s+/);
     for (const c of ['w-0', 'min-w-0', 'grow']) expect(slotClasses, `칸 ${c}`).toContain(c);
+    // 유나 판단 (b) — 폰(sm 미만)에선 알약 0(«…»만 남는 거짓 · title은 호버 전용) · sm 이상에서만 보인다.
+    expect(slotClasses, 'sm 미만 숨김').toContain('hidden');
+    expect(slotClasses, 'sm 이상 보임').toContain('sm:flex');
+    expect(slotClasses, 'sm 미만에서 보이게 하는 flex 없음').not.toContain('flex');
     const pillClasses = pill.className.split(/\s+/);
     // 알약이 늘면 색 배경이 남는 폭 전부로 번진다 — 알약 자체는 자라지 않고 칸 안에서 말줄임만.
     for (const c of ['grow', 'basis-0', 'flex-1']) expect(pillClasses, `알약 ${c} 없음`).not.toContain(c);
