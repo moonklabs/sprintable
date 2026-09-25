@@ -31,6 +31,7 @@ const FILLER_STORY_COUNT = 16;
 const PROJECT_NAME = '넘침 가드 프로젝트 · 이름이 긴 편';
 // beforeAll이 만든(또는 찾은) 프로젝트 — 모든 이동에 `?p=`로 싣는다(4231 규칙). 안 실으면 소유자의 다른 프로젝트 · 선택기로 떨어져
 // 시드한 긴 데이터를 안 보고도 초록이 될 수 있었다(까디르 검수 P1).
+let ownerIsUnnamed = false;
 let seededProjectId = '';
 // 이미 `p=`가 있으면 그대로(메뉴 링크 대부분은 `/more`가 싣는다) · 없으면 붙인다 — `/more`의 자원 항목(`/docs` · `/loops` · `/storage`)은
 // `p` 없이 나와 프록시가 쿠키 프로젝트로 고르므로 순회가 다른 프로젝트를 잴 수 있었다(까디르 검수 · 그 링크 자체의 결함은 별 카드).
@@ -65,9 +66,13 @@ test.beforeAll(async () => {
   const orgId = org['id'] as string;
   const H = { authorization: `Bearer ${token}`, 'X-Org-Id': orgId };
 
-  // 소유자 이름 — 이름 없는 멤버가 있으면 보드 담당자 필터가 크래시한다(별 카드). 실사용자는 가입 때 이름이 있다.
-  const me = findDeep(await json(await api.patch('/api/v2/me', { headers: H, data: { name: '넘침 가드 소유자' } }), 'me'), (o) => typeof o['id'] === 'string')!;
+  // story #4284 AC3 — 소유자는 **이름 없이** 둔다(CI 시드 그대로 · 예전엔 여기서 이름을 채워 보드 담당자 필터 크래시를 피했다 → 이름 없는
+  // 소유자로 보드 · 필터를 도는 e2e가 0이었다). 이름을 비울 API는 없어(PATCH /me는 name 필수) 이미 이름이 있으면 멈춘다 — 재사용 DB에서
+  // 조용히 이름 있는 소유자로 돌면 이 검사가 헛돈다.
+  const me = findDeep(await json(await api.get('/api/v2/me', { headers: H }), 'me'), (o) => typeof o['id'] === 'string')!;
   const ownerMemberId = me['id'] as string;
+  if (me['name']) throw new Error(`e2e 소유자에 이름이 있다(${String(me['name'])}) — 이름 없는 소유자 시드가 전제(story #4284 AC3 · 새 DB로)`);
+  ownerIsUnnamed = true;
 
   const projects = await json(await api.get('/api/v2/projects', { headers: H }), 'projects');
   let project = findDeep(projects, (o) => o['slug'] === 'overflow-guard');
@@ -259,3 +264,23 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   expect.soft(flow!.innerMoved, '보드 칸 안 세로 스크롤이 실제로 움직임(scrollTop)').toBeGreaterThan(0);
 });
 
+// story #4284 AC3 — 이름 없는 소유자가 있는 프로젝트에서 일감 목록(KanbanBoard · /flow?view=list)이 오류 화면 없이 뜨고, 담당자 필터가
+// 그 소유자를 «이름 없는 구성원»으로 보여 · 보이는 글자로 찾히고 · 고르면 트리거도 그 글자다(예전: `m.name.toLowerCase()`가 null에서
+// throw → 보드 전체 오류 화면).
+test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정상(story #4284 AC3)', async ({ page }) => {
+  expect(ownerIsUnnamed, '이름 없는 소유자 시드').toBe(true);
+  await page.goto(withProject('/flow?view=list'), { waitUntil: 'domcontentloaded' });
+  const trigger = page.getByRole('button', { name: '전체 담당자' });
+  await trigger.waitFor({ timeout: 90_000 });
+  await trigger.click();
+  const unnamed = page.getByRole('menuitem', { name: '이름 없는 구성원' });
+  await expect(unnamed, '이름 없는 소유자가 «이름 없는 구성원» 행으로').toBeVisible();
+  const search = page.getByPlaceholder('담당자 검색...');
+  await search.fill('이름 없는');
+  await expect(unnamed, '보이는 글자로 찾힌다').toBeVisible();
+  await search.fill('zzz-없는-사람');
+  await expect(page.getByText('결과 없음', { exact: true })).toBeVisible();
+  await search.fill('');
+  await unnamed.click();
+  await expect(page.getByRole('button', { name: '이름 없는 구성원' }), '고른 뒤 트리거도 그 글자').toBeVisible();
+});
