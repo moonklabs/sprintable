@@ -2433,12 +2433,17 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(retry?.disabled).toBe(false);
     });
 
-    it('blocked — 서버가 재시도 불가(일시정지 · 에이전트 화면 등)면 문장만 · 버튼 0', async () => {
+    it('blocked — 조직 «외부 발행 일시 중지»로 멈춤(재시도 불가): 일시 중지 문장 · 버튼 0 · 연결 문구 0(story #4305)', async () => {
       stubFetch({ draftDetail: { command_status: 'blocked', failure_kind: 'paused', command_retryable: false } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
-        .toBe(koMessages.content.channelPostsFailureBlocked);
+        .toBe(`${koMessages.content.channelPostsFailurePaused} — ${koMessages.content.channelPostsFailurePausedResumes}`);
+      // 발행 사유줄도 연결이 아니라 일시 중지 문장(연결 화면 링크 0).
+      const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
+      expect(reason?.textContent).toBe(koMessages.content.channelPostsCommandInFlightReasonPaused);
+      expect(reason?.querySelector('a')).toBeNull();
+      expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureBlocked);
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
       // story #4304 — 일시정지는 연결 사유가 아니라 «연결 확인»도 없다.
       expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();

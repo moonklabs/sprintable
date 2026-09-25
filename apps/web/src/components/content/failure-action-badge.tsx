@@ -88,6 +88,16 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   const retryable = 'retryable' in action ? action.retryable : undefined;
   const canOffer = !!onRetryClick && retryable !== false;
 
+  if (action.kind === 'blocked' && action.paused) {
+    // story #4305 — 조직 «외부 발행 일시 중지»로 멈춘 것은 연결 문제가 아니다. 머리는 멈춘 이유(compact도) · 상세는 풀리는 길까지(소유자가 풀면
+    // 서버가 스스로 다시 올린다 — 사람 재시도 대상 아님(4654) · 버튼 · 연결 링크 없음).
+    return (
+      <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
+        {t('channelPostsFailurePaused')}
+        {compact ? null : <>{' — '}{t('channelPostsFailurePausedResumes')}</>}
+      </p>
+    );
+  }
   if (action.kind === 'blocked') {
     // story #4304(유나 확정) — 머리 «연결 문제로 멈춤» ` — ` «연결 확인»(링크) 한 줄 → 아래 «다시 시도»(고치기 → 다시 시도). 링크는 재시도를
     // 못 내밀어도(서버 판정 false) 늘 둔다(댓글 답변과 같음). compact(목록 · 캘린더 · 보드)는 글만(행이 이미 상세 링크).

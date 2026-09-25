@@ -2231,8 +2231,11 @@ export default function ChannelPostEditPage() {
   // 한 문장에 묶으면 절반은 틀린 지시가 된다. command_status만이 아니라 위 축으로
   // 정확히 갈라 서로 다른 문장을 낸다(backoff-pending은 이 잠금 문구 대상이 아니다 —
   // FailureActionBadge의 「{시각}에 자동으로 다시 시도합니다」가 그 상태의 안내를 전담).
+  // story #4305 — blocked라도 조직 «외부 발행 일시 중지»면 연결 문장이 아니라 일시 중지 문장(연결 화면을 가리키지 않는다).
   const commandInFlightReasonKey = draft.command_status === 'blocked'
-    ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonScheduled';
+    ? (blockedByConnection(draft.command_status, draft.failure_kind)
+      ? 'channelPostsCommandInFlightReasonBlocked' : 'channelPostsCommandInFlightReasonPaused')
+    : 'channelPostsCommandInFlightReasonScheduled';
 
   // story #3422 B3(페드루 PO, 2026-09-04 13:14Z) — FailureActionBadge가 정의만 있고
   // 이 화면엔 mount 안 돼 있던 갭(#3422 AC3). deriveFailureAction 입력은 목록/캘린더와

@@ -462,3 +462,31 @@ describe('FailureActionBadge — 연결 사유 blocked의 «연결 확인»(stor
   });
 });
 
+describe('FailureActionBadge — 조직 «외부 발행 일시 중지»로 멈춘 blocked(story #4305)', () => {
+  async function renderWith(props: { action: FailureAction; onRetryClick?: () => void; connectionHref?: string; compact?: boolean }) {
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge displayTimezone="UTC" {...props} />));
+    });
+  }
+  const C = koMessages.content;
+
+  it('⭐상세 — 머리 «일시 중지로 멈춤» + 풀리는 길 · 연결 문구 0 · 버튼 0 · 링크 0(넘겨도)', async () => {
+    await renderWith({ action: { kind: 'blocked', paused: true }, onRetryClick: vi.fn(), connectionHref: '/organization/channels' });
+    expect(container.textContent).toBe(`${C.channelPostsFailurePaused} — ${C.channelPostsFailurePausedResumes}`);
+    expect(container.textContent).not.toContain(C.channelPostsFailureBlocked);
+    expect(container.querySelector('button, a')).toBeNull();
+  });
+
+  it('compact(목록 · 캘린더 · 보드) — 머리만', async () => {
+    await renderWith({ action: { kind: 'blocked', paused: true }, compact: true });
+    expect(container.textContent).toBe(C.channelPostsFailurePaused);
+  });
+
+  it('deriveFailureAction — 일시 중지만 paused를 싣고 연결 blocked는 예전 모양 그대로', () => {
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'paused' })).toEqual({ kind: 'blocked', paused: true });
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'connection' })).toEqual({ kind: 'blocked' });
+    expect(deriveFailureAction({ commandStatus: 'blocked', failureKind: 'paused', retryable: false }))
+      .toEqual({ kind: 'blocked', paused: true, retryable: false });
+  });
+});
+

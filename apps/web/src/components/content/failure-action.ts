@@ -19,7 +19,8 @@ export type FailureKind = 'connection' | 'needs_check' | 'transient' | 'not_sent
 // story #4290(까디르 QA ④ · PO 06:40Z) — `retryable`은 서버 한 판정(`command_retryable` = 보는 사람이 지금 다시 시도할 수 있는가)을
 // 그대로 옮긴 값이다. 호출부가 넘길 때만 실린다(모르면 없음) — 배지는 이 값이 false면 버튼을 켜지 않는다(화면이 상태로 따로 가르지 않음).
 export type FailureAction =
-  | { kind: 'blocked'; retryable?: boolean }
+  // story #4305 — `paused`: 조직 «외부 발행 일시 중지»로 멈춘 blocked(연결 문제 아님). 그때만 실린다(연결 blocked는 예전 모양 그대로).
+  | { kind: 'blocked'; retryable?: boolean; paused?: true }
   | { kind: 'needs_check'; retryable?: boolean }
   | { kind: 'auto_retry'; nextRetryAt: string | null }
   // story #3402 갭(유나 실측·PO 채택 ㉡, 2026-09-10) — BE가 needs_check를 즉시
@@ -143,7 +144,7 @@ function deriveFailureKind(input: FailureActionInput): FailureAction | undefined
       reasonCode: input.reasonCode ?? null, reasonResetAt: input.reasonResetAt ?? null,
     };
   }
-  if (input.commandStatus === 'blocked') return { kind: 'blocked' };
+  if (input.commandStatus === 'blocked') return input.failureKind === 'paused' ? { kind: 'blocked', paused: true } : { kind: 'blocked' };
   if (input.commandStatus === 'completed' || input.commandStatus === 'cancelled' || !input.commandStatus) return undefined;
   // 페드루 PO 정정(2026-09-04 09:49Z) — pending ∧ processing_kind==='awaiting_container'
   // 는 failure_kind보다 먼저 잡는다. 실패가 아니라 "진행 중"이라 §17-2의 실패 갈래
