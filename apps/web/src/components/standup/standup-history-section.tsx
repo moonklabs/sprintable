@@ -7,7 +7,7 @@ import { formatAtLeast } from '@/lib/format-at-least';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { parseCursorMeta } from '@/lib/pagination';
-import { memberLookup } from '@/lib/member-display';
+import { disambiguateFallbackLabels, memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -37,6 +37,11 @@ export function StandupHistorySection({ projectId, memberNameById = {}, memberNa
   const { orgId } = useDashboardContext();
   const authorIds = useMemo(() => entries.map((e) => e.author_id), [entries]);
   const authorNames = useMemberNameFallback(orgId, memberNameById, authorIds, memberNamesLoaded);
+  // [SID:4300 · PO 06:37Z] 같은 폴백 글자(«알 수 없는 구성원» 등)가 서로 다른 작성자 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(#4284 · 겹칠 때만).
+  const authorLabelById = useMemo(() => disambiguateFallbackLabels([...new Set(authorIds)].flatMap((id) => {
+    const r = memberLookup(authorNames.memberMap, id, tCommon, { loaded: authorNames.loaded });
+    return r ? [{ id, ...r }] : [];
+  })), [authorIds, authorNames.memberMap, authorNames.loaded, tCommon]);
   const [loading, setLoading] = useState(true);
   // story #2248 — story-detail-panel.tsx의 활동/댓글 「더보기」 자리를 그대로 본뜬다(발명 금지).
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -98,7 +103,7 @@ export function StandupHistorySection({ projectId, memberNameById = {}, memberNa
               {byDate[date].map((entry) => (
                 <div key={entry.id} className="text-xs text-foreground/80">
                   {/* [SID:4286] 작성자 id 조각(앞 8자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸. */}
-                  <span className="font-medium">{memberLookup(authorNames.memberMap, entry.author_id, tCommon, { loaded: authorNames.loaded })?.label ?? ''}</span>
+                  <span className="font-medium">{authorLabelById.get(entry.author_id) ?? ''}</span>
                   {entry.done ? <span className="ml-2 text-muted-foreground">✅ {entry.done.slice(0, 80)}{entry.done.length > 80 ? '…' : ''}</span> : null}
                 </div>
               ))}

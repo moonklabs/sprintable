@@ -135,3 +135,19 @@ describe('StandupHistorySection — 작성자 이름 조직 보충([SID:4300])',
     expect(calls.filter((u) => u === ORG_NAMES_URL)).toHaveLength(1);
   });
 });
+
+// [SID:4300 · PO 06:37Z] 같은 폴백 글자가 서로 다른 작성자 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(#4284 · 겹칠 때만).
+describe('StandupHistorySection — 겹치는 폴백에만 꼬리([SID:4300])', () => {
+  it('명단에 없는 서로 다른 두 작성자 → «알 수 없는 구성원 · member-3» · «… · member-4»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [entry('1', '2026-09-24'), entry('3', '2026-09-23'), entry('4', '2026-09-22')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{ 'member-1': '안나' }} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = container.textContent ?? '';
+    expect(text).toContain('안나');
+    expect(text).toContain('알 수 없는 구성원 · member-3');
+    expect(text).toContain('알 수 없는 구성원 · member-4');
+  });
+});
+

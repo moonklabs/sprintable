@@ -12,6 +12,9 @@ import {
 } from '@/components/ui/dialog';
 import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
 import { cn } from '@/lib/utils';
+import { disambiguateFallbackLabels, memberLookup } from '@/lib/member-display';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type {
   StandupEntrySummary,
   StandupFeedbackSummary,
@@ -69,6 +72,16 @@ export function StandupFeedbackDialog({
   // 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례 그대로 재사용
   // (§②-1 기존 상태 낱말, 새 키 0).
   const tBoard = useTranslations('board');
+  // [SID:4300 · PO 06:37Z · 유나 짚음] 피드백 작성자 이름 — 예전엔 이름 빔 · 표에 없음 둘 다 «알 수 없음». #4284 규칙: 표에 있는데 이름 빔 =
+  // «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원»(표가 거른 비활성 · 다른 프로젝트 사람은 조직 원천으로 보충). 같은 폴백 글자가
+  // 서로 다른 사람 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(겹칠 때만). 대화상자는 명단을 받은 뒤 열려 loaded=true.
+  const { orgId } = useDashboardContext();
+  const feedbackAuthorIds = useMemo(() => [...new Set(feedback.map((item) => item.feedback_by_id))], [feedback]);
+  const authorNames = useMemberNameFallback(orgId, memberNameById, feedbackAuthorIds, true);
+  const authorLabelById = useMemo(() => disambiguateFallbackLabels(feedbackAuthorIds.flatMap((id) => {
+    const r = memberLookup(authorNames.memberMap, id, tc, { loaded: authorNames.loaded });
+    return r ? [{ id, ...r }] : [];
+  })), [feedbackAuthorIds, authorNames.memberMap, authorNames.loaded, tc]);
   const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
     backlog: 'backlog',
     'ready-for-dev': 'readyForDev',
@@ -287,7 +300,7 @@ export function StandupFeedbackDialog({
             ) : (
               <div className="space-y-2">
                 {feedback.map((item) => {
-                  const authorName = memberNameById[item.feedback_by_id] ?? t('unknown');
+                  const authorName = authorLabelById.get(item.feedback_by_id) ?? '';
                   const isAuthor = currentMemberId === item.feedback_by_id;
                   const isEditing = editingFeedbackId === item.id;
                   return (
