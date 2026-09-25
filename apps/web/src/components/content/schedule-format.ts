@@ -164,3 +164,9 @@ export function dateKeysToInstants(fromKey: string, toKey: string, tz: string): 
     to: toKey ? zonedWallClockToIso(toKey, 23, 59, 59, 999, tz) : null,
   };
 }
+
+/** iso가 tz에서 속한 날짜에 달력일 days를 더한 날의 자정(tz)을 UTC ISO로. 팀 활동 «더 보기»가 7일씩 과거로 갈 때 ms 산술(168시간) 대신
+ * 쓴다 — 서머타임 전환 주에도 정확히 그 tz의 자정에 선다(story #4280 · 까디르 검수 P3). */
+export function shiftDayStartIso(iso: string, tz: string, days: number): string {
+  return zonedWallClockToIso(addCalendarDays(toDateKey(iso, tz), days), 0, 0, 0, 0, tz);
+}

@@ -101,3 +101,52 @@ describe('팀 활동 기본 기간 — 표시 시간대의 오늘(story #4280)',
     expect(params.get('until')).toBe('2026-09-25T14:59:59.999Z');
   });
 });
+
+// story #4280(까디르 검수 P2 · P3) — 날짜 칸을 비우면 경계 null → 예전엔 NaN → toISOString() RangeError로 화면이 깨졌다. «더 보기»는 달력 7일.
+describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
+  function setDate(input: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  const streamCalls = () => fetchWithAuthMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/api/activity-stream'));
+
+  it('⭐시작 날짜를 비우면 오류 없이 since 없이 조회(과거 경계 없음) · 끝 날짜를 비우면 until 없이', async () => {
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    const [fromInput, toInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    fetchWithAuthMock.mockClear();
+    await act(async () => { setDate(fromInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    const afterFrom = new URL(streamCalls().pop()!, 'http://x').searchParams;
+    expect(afterFrom.get('since')).toBeNull();
+    expect(afterFrom.get('until')).toBe('2026-09-25T14:59:59.999Z');
+    await act(async () => { setDate(toInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    const afterTo = new URL(streamCalls().pop()!, 'http://x').searchParams;
+    expect(afterTo.get('since')).toBeNull();
+    expect(afterTo.get('until')).toBeNull();
+  });
+
+  it('«더 보기»는 시작 날짜 자정(KST)에서 달력 7일 전 자정까지', async () => {
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        return { ok: true, status: 200, json: async () => ({ data: { items: [{ activity_id: 'a1', project_id: 'p1', occurred_at: '2026-09-20T00:00:00Z', verb: 'created', object_type: 'story', object_id: 'o1', actor_id: null, source_event_ids: [], recipient_ids: [], recipient_types: [], payload: {}, activity_seq: 1 }] } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    });
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    const more = Array.from(container.querySelectorAll('button')).find((b) => /load more/i.test(b.textContent ?? ''));
+    expect(more, '더 보기 버튼').toBeTruthy();
+    fetchWithAuthMock.mockClear();
+    await act(async () => { more!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    const params = new URL(streamCalls().pop()!, 'http://x').searchParams;
+    expect(params.get('until')).toBe('2026-09-17T15:00:00.000Z');
+    expect(params.get('since')).toBe('2026-09-10T15:00:00.000Z');
+  });
+});
+

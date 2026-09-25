@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDisplayTimezone, toDateKey, formatScheduledAt, defaultCalendarRange, shiftCalendarRange, todayDateKey, defaultPastDaysDateRange, dateKeysToInstants } from './schedule-format';
+import { resolveDisplayTimezone, toDateKey, formatScheduledAt, defaultCalendarRange, shiftCalendarRange, todayDateKey, defaultPastDaysDateRange, dateKeysToInstants, shiftDayStartIso } from './schedule-format';
 
 // story #3422(doc §11-2, 페드루 PO 지적 2026-09-04 08:57Z) — 그룹핑과 표기가 같은 tz를
 // 써야 한다. 21:30 KST(=UTC 12:30, 같은 날)와 09:00 KST(=UTC 전날 24:00 부근)를 각각
@@ -186,3 +186,16 @@ describe('formatScheduledAt 시간대 표기 — 같은 오프셋이면 생략 �
     expect(formatScheduledAt(SUMMER, 'Asia/Seoul', 'Asia/Seoul').utcNote).toBe('= 09-05 12:00 UTC');
   });
 });
+
+// story #4280(까디르 검수 P3) — 팀 활동 «더 보기»가 고정 168시간으로 과거를 밀어 서머타임 주엔 자정이 한 시간 어긋났다.
+describe('shiftDayStartIso — 달력일 단위로 그 tz의 자정', () => {
+  it('⭐LA 서머타임 시작 주: 3/15 00:00 PDT에서 7일 전 = 3/8 00:00 PST(168시간 전이면 3/7 23:00 PST)', () => {
+    const start = '2026-03-15T07:00:00.000Z'; // 3/15 00:00 PDT(−7)
+    expect(shiftDayStartIso(start, 'America/Los_Angeles', -7)).toBe('2026-03-08T08:00:00.000Z'); // 3/8 00:00 PST(−8)
+    expect(new Date(Date.parse(start) - 7 * 86_400_000).toISOString()).toBe('2026-03-08T07:00:00.000Z'); // 옛 계산 = 3/7 23:00 PST
+  });
+  it('서머타임 없는 KST는 168시간과 같다', () => {
+    expect(shiftDayStartIso('2026-09-17T15:00:00.000Z', 'Asia/Seoul', -7)).toBe('2026-09-10T15:00:00.000Z');
+  });
+});
+

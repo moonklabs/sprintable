@@ -13,7 +13,7 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
-import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone, shiftDayStartIso } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
@@ -46,7 +46,7 @@ interface TeamMember {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL = '__all__';
 const PAGE_LIMIT = 200; // BE limit 상한
-const WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 더보기 = 과거로 7일 슬라이드
+const WINDOW_DAYS = 7; // 더보기 = 과거로 달력 7일 슬라이드(표시 시간대 자정 기준 · story #4280)
 const OBJECT_TYPES = ['story', 'epic', 'sprint', 'task', 'doc', 'conversation', 'meeting', 'memo'];
 
 // story #4280 — 기본 기간(최근 7일)은 표시 시간대(조직 timezone → 없으면 브라우저) 기준 «오늘»으로(예전 UTC 날짜 자르기는 KST 00~09시에 «어제»).
@@ -180,8 +180,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [forbidden, setForbidden] = useState(false);
-  // 더보기용 슬라이딩 하한(epoch ms). 필터 로드 때 fromDate 기준으로 초기화된다.
-  const [oldestSince, setOldestSince] = useState(0);
+  // 더보기용 과거 경계(UTC ISO). null = 시작 날짜를 비워 과거 경계가 없음.
+  const [oldestSince, setOldestSince] = useState<string | null>(null);
 
   // 필터 (AC③: project[암묵]·actor·object·verb·time range)
   const [actorFilter, setActorFilter] = useState(ALL);
@@ -216,13 +216,12 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
   // ASC 페치 → client reverse(newest-first). since/until로 윈도우 한정(BE ASC-only 우회).
   const fetchSlice = useCallback(
-    async (sinceMs: number, untilMs: number): Promise<ActivityStreamItem[] | null> => {
-      const p = new URLSearchParams({
-        project_id: projectId,
-        limit: String(PAGE_LIMIT),
-        since: new Date(sinceMs).toISOString(),
-        until: new Date(untilMs).toISOString(),
-      });
+    // story #4280(까디르 검수 P2) — 경계는 UTC ISO 문자열 또는 null(날짜 칸을 비움 = 그 방향 경계 없음). 예전엔 빈 칸이 NaN ms가 되어
+    // `toISOString()`에서 RangeError로 화면이 깨졌다.
+    async (since: string | null, until: string | null): Promise<ActivityStreamItem[] | null> => {
+      const p = new URLSearchParams({ project_id: projectId, limit: String(PAGE_LIMIT) });
+      if (since) p.set('since', since);
+      if (until) p.set('until', until);
       if (actorFilter !== ALL) p.set('actor_id', actorFilter);
       if (verbFilter !== ALL) p.set('verb', verbFilter);
       if (objectTypeFilter !== ALL) p.set('object_type', objectTypeFilter);
@@ -242,8 +241,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
   // 시간 범위 경계(ms). until은 toDate 끝(23:59:59), since 하한은 fromDate 시작.
   // story #4280 — 날짜 칸은 표시 시간대의 날짜라 경계도 그 시간대의 자정 · 자정 직전으로(예전 `new Date('…T00:00:00')`은 브라우저 시간대 자정).
-  const rangeFromMs = useMemo(() => new Date(dateKeysToInstants(fromDate, toDate, displayTimezone).from ?? NaN).getTime(), [fromDate, toDate, displayTimezone]);
-  const rangeToMs = useMemo(() => new Date(dateKeysToInstants(fromDate, toDate, displayTimezone).to ?? NaN).getTime(), [fromDate, toDate, displayTimezone]);
+  const rangeFrom = useMemo(() => dateKeysToInstants(fromDate, toDate, displayTimezone).from, [fromDate, toDate, displayTimezone]);
+  const rangeTo = useMemo(() => dateKeysToInstants(fromDate, toDate, displayTimezone).to, [fromDate, toDate, displayTimezone]);
 
   // 최초 / 필터 변경 → 선택 범위 [from, to] 재로드(newest-first)
   useEffect(() => {
@@ -252,23 +251,26 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       setItems(null);
       setForbidden(false);
       setHasMore(true);
-      const slice = await fetchSlice(rangeFromMs, rangeToMs);
+      const slice = await fetchSlice(rangeFrom, rangeTo);
       if (cancelled) return;
       setItems(slice ?? []);
-      setOldestSince(rangeFromMs);
-      setHasMore((slice?.length ?? 0) > 0);
+      setOldestSince(rangeFrom);
+      // 시작 날짜를 비웠으면 과거 경계가 없어 이미 끝까지 받은 것 — 더 볼 과거가 없다.
+      setHasMore(rangeFrom !== null && (slice?.length ?? 0) > 0);
     }
     void load();
     return () => {
       cancelled = true;
     };
-  }, [fetchSlice, rangeFromMs, rangeToMs]);
+  }, [fetchSlice, rangeFrom, rangeTo]);
 
   // 더 보기 v1 = 선택 범위보다 과거 윈도우 슬라이스 페치 후 append(dedup). 정밀 cursor는 follow-up.
   const loadMore = async () => {
+    if (oldestSince === null) return;
     setLoadingMore(true);
     const until = oldestSince;
-    const since = oldestSince - WINDOW_MS;
+    // story #4280(까디르 검수 P3) — 고정 168시간이 아니라 표시 시간대의 달력 7일 전 자정(서머타임 주에도 한 시간 어긋나지 않게).
+    const since = shiftDayStartIso(oldestSince, displayTimezone, -WINDOW_DAYS);
     const slice = await fetchSlice(since, until);
     if (slice) {
       setItems((prev) => {
