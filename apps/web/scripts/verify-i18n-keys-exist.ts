@@ -33,6 +33,11 @@
  *   템플릿(`` `plainKey` ``, 보간 0개라 값이 사실 정적인)도 문법적으로 템플릿이라 동적
  *   버킷 — 스펙 명시("동적 키: 변수·템플릿·삼항") 그대로, 뒤에 보간이 붙어도 재분류가
  *   안 생기게 일관되게 다룬다.
+ *   예외 하나 — [SID:4286] 삼항의 **모든 가지가 순수 문자열 리터럴**이면(`t(c ? 'a' : 'b')`,
+ *   괄호 · 중첩 삼항 포함) 키 집합이 정적으로 닫혀 있으니 가지마다 리터럴 키로 센다(실존
+ *   대조 · 죽은-키 가드의 소비 둘 다). 총 호출도 가지마다 한 자리로 세어 항등식(리터럴+
+ *   동적=총)을 지킨다. 한 가지라도 리터럴이 아니면(`t(c ? 'a' : k)`) 예전처럼 호출 전체가
+ *   동적 버킷이고 리터럴 가지의 키도 «못 셈»으로 남는다(값을 지어내지 않는다).
  *
  * ## ③ 번역자를 «파라미터»로 받는 함수(CHANGES, 유나 디자인 게이트 지적 2026-09-09)
  * `function C({ t }: { t: ReturnType<typeof useTranslations> })`류(hooks가 아니라 부모가
@@ -190,6 +195,20 @@ const TRANSLATION_METHODS = new Set(['rich', 'raw', 'has']);
 // 이름/다른 훅 0건) — 그래서 ③과 같은 정밀도 원칙(오탐 방지 위해 정확한 이름만)을
 // 여기도 유지한다: 이름이 정확히 `t`/`tc`일 때만 인정.
 const HOOK_RETURNED_TRANSLATOR_NAMES = new Set(['t', 'tc']);
+
+// ② [SID:4286] 첫 인자가 정적으로 닫힌 키 집합이면 그 키들, 아니면 null(동적).
+// 순수 문자열 리터럴 하나 · 모든 가지가 그런 삼항(괄호 · 중첩 포함)만 정적으로 본다.
+function staticKeysOf(expr: ts.Expression): string[] | null {
+  let e = expr;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (ts.isStringLiteral(e)) return [e.text];
+  if (ts.isConditionalExpression(e)) {
+    const whenTrue = staticKeysOf(e.whenTrue);
+    const whenFalse = staticKeysOf(e.whenFalse);
+    return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
+  }
+  return null;
+}
 
 function namespaceFromArgs(args: readonly ts.Expression[]): string | null {
   if (args.length === 0) return '';
@@ -409,18 +428,20 @@ export function scanFileContent(content: string, file: string): {
   }
 
   function countCallWithNamespace(node: ts.CallExpression, ns: string | null): void {
-    totalCallCount += 1;
     const arg = node.arguments[0];
-    if (ns !== null && arg && ts.isStringLiteral(arg)) {
-      const fullKey = ns ? `${ns}.${arg.text}` : arg.text;
+    const keys = arg ? staticKeysOf(arg) : null;
+    if (ns !== null && keys) {
+      // 삼항은 가지마다 한 자리 — 리터럴+동적=총 항등식 유지.
+      totalCallCount += keys.length;
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-      literalRefs.push({ file, line, fullKey });
+      for (const key of keys) literalRefs.push({ file, line, fullKey: ns ? `${ns}.${key}` : key });
     } else {
+      totalCallCount += 1;
       dynamicCount += 1;
       if (ns !== null) {
         dynamicNamespaces.add(ns);
-      } else if (arg && ts.isStringLiteral(arg)) {
-        unknownNsLiteralWords.add(arg.text);
+      } else if (keys) {
+        for (const key of keys) unknownNsLiteralWords.add(key);
       }
     }
   }
@@ -665,7 +686,8 @@ function main(): number {
   console.log(
     `[가드] i18n 키 실존 스캔 — 바인딩 있는 파일 ${result.filesWithBindings}개 · ` +
       `리터럴 호출 ${result.literalRefs.length}건 · 동적 호출 ${result.dynamicCount}건 ` +
-      `(총 호출 ${result.totalCallCount}건 — 리터럴+동적=총) · ko 말단 ${koLeaves.size} · en 말단 ${enLeaves.size}`,
+      `(총 호출 ${result.totalCallCount}건 — 리터럴+동적=총 · 가지가 전부 문자열인 삼항은 가지마다 1건) · ` +
+      `ko 말단 ${koLeaves.size} · en 말단 ${enLeaves.size}`,
   );
 
   let failed = false;
