@@ -82,8 +82,8 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
   });
 
   it.each([
-    ['components/storage/storage-view.tsx', /\{\.\.\.closedDrawerProps\(folderDrawerProgress\)\}/, 'aria-hidden={folderDrawerProgress === 0}'],
-    ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx', /\{\.\.\.closedDrawerProps\(drawerProgress\)\}/, 'aria-hidden={drawerProgress === 0}'],
+    ['components/storage/storage-view.tsx', /\{\.\.\.closedDrawerProps\(folderDrawerProgress, folderDrawerOpen\)\}/, 'aria-hidden={folderDrawerProgress === 0}'],
+    ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx', /\{\.\.\.closedDrawerProps\(drawerProgress, treeDrawerOpen\)\}/, 'aria-hidden={drawerProgress === 0}'],
     ['components/nav/top-bar.tsx', / focus-within:translate-y-0/, ''],
     ['components/docs/doc-editor.tsx', / focus-within:translate-y-0 focus-within:pointer-events-auto/, ''],
     ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx', / focus-within:translate-y-0/, ''],
@@ -109,11 +109,14 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
 });
 
 describe('closedDrawerProps — React 19.2 불리언 inert가 실제 DOM 속성으로([SID:4288])', () => {
-  it.each([[0, true], [0.4, false], [1, false]] as const)('progress %s → inert · aria-hidden %s', async (progress, closed) => {
+  // [유나 design 4653 회귀] 여는 렌더(isOpen 참 · progress 아직 0)에 inert가 남으면 초점 가두기의 focus()가 실패한다 → 둘째 행이 그 상태.
+  it.each([
+    [0, false, true], [0, true, false], [0.4, false, false], [1, false, false], [1, true, false],
+  ] as const)('progress %s · isOpen %s → 닫힘(inert · aria-hidden) %s', async (progress, isOpen, closed) => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
-    await act(async () => { root.render(<div data-testid="d" {...closedDrawerProps(progress)}><button type="button">x</button></div>); });
+    await act(async () => { root.render(<div data-testid="d" {...closedDrawerProps(progress, isOpen)}><button type="button">x</button></div>); });
     const el = host.querySelector('[data-testid="d"]')!;
     expect(el.hasAttribute('inert')).toBe(closed);
     expect(el.getAttribute('aria-hidden')).toBe(String(closed));

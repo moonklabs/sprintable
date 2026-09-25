@@ -712,7 +712,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
           }}
-          {...closedDrawerProps(drawerProgress)}
+          {...closedDrawerProps(drawerProgress, treeDrawerOpen)}
         >
           <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
             <span className="text-sm font-medium text-foreground">{t('title')}</span>

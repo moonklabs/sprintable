@@ -468,5 +468,17 @@ describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () =>
     expect(drawer!.getAttribute('aria-hidden')).toBe('true');
     expect(drawer!.querySelectorAll('button').length).toBeGreaterThan(0);
   });
+
+  // 유나 design 4653 회귀 — 여는 렌더에선 isOpen이 참인데 progress는 아직 0(이 테스트의 훅 mock이 그 상태로 고정)이다. 그때 inert가
+  // 남으면 초점 가두기의 focus()가 실패해 초점이 여는 버튼에 머문다(실 브라우저 · jsdom은 inert를 구현하지 않아 activeElement로는 못 잰다).
+  it('여는 렌더(isOpen 참 · progress 0)에는 inert · aria-hidden이 없다 — 초점 가두기가 서랍 안으로 초점을 옮길 수 있다', async () => {
+    await mount();
+    const opener = container.querySelector(`button[aria-label="${koMessages.docs.openDocTree}"]`) as HTMLButtonElement | null;
+    expect(opener).not.toBeNull();
+    await act(async () => { opener!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    expect(drawer!.hasAttribute('inert')).toBe(false);
+    expect(drawer!.getAttribute('aria-hidden')).toBe('false');
+  });
 });
 

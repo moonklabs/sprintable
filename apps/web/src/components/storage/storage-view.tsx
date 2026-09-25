@@ -504,7 +504,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           transform: `translateX(${(folderDrawerProgress - 1) * 100}%)`,
           transition: folderDrawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
         }}
-        {...closedDrawerProps(folderDrawerProgress)}
+        {...closedDrawerProps(folderDrawerProgress, folderDrawerOpen)}
         data-testid="storage-folder-drawer"
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
