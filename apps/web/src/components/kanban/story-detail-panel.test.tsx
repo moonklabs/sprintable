@@ -1282,3 +1282,31 @@ describe('StoryDetailPanel — 워크셀 메시지의 모르는 작성자(story 
   });
 });
 
+// story #4302(유나 판정) — 댓글 탭 수는 불러온 쪽(20건씩)의 수다: 다음 커서가 있으면 «댓글 (20+)» · 없으면 맨 수.
+describe('StoryDetailPanel — 댓글 탭 수 한계 표기(story #4302)', () => {
+  const comment = (i: number) => ({ id: `c${i}`, story_id: 's1', content: `댓글 ${i}`, created_by: 'm1', created_at: '2026-09-25T00:00:00Z' });
+  async function mountWith(nextCursor: string | null) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: Array.from({ length: 20 }, (_, i) => comment(i)), meta: { next_cursor: nextCursor, has_more: nextCursor !== null } }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    return [...container.querySelectorAll('[role="tab"]')].map((el) => el.textContent ?? '');
+  }
+
+  it('⭐다음 커서가 있으면 «댓글 (20+)»', async () => {
+    expect(await mountWith('2026-09-24T00:00:00Z')).toContain('댓글 (20+)');
+  });
+
+  it('다 불러왔으면 «댓글 (20)»', async () => {
+    const tabs = await mountWith(null);
+    expect(tabs).toContain('댓글 (20)');
+    expect(tabs.some((t) => t.includes('20+'))).toBe(false);
+  });
+});
+
