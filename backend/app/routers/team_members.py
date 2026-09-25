@@ -182,16 +182,18 @@ def _build_org_human_response(row: dict, org_id: uuid.UUID) -> TeamMemberRespons
     id = org_member.id(canonical 휴먼 신원). presence/active_story/색상 등은 휴먼 무의미 → 기본값.
     """
     now = row.get("created_at") or datetime.now(timezone.utc)
+    # story #4303 — 조직을 떠난 사람 행은 옛 기록의 이름 풀이용: 이름 · 종류만(사용자 id · 아바타 · 옛 역할 0 · 비활성).
+    departed = bool(row.get("departed"))
     return TeamMemberResponse(
         id=row["id"],
         project_id=_ORG_LEVEL_HUMAN_PROJECT_ID,
         org_id=org_id,
-        user_id=row.get("user_id"),
+        user_id=None if departed else row.get("user_id"),
         type="human",
         name=row["name"],
-        role=row["role"],
-        avatar_url=row.get("avatar_url"),
-        is_active=True,
+        role="member" if departed else row["role"],
+        avatar_url=None if departed else row.get("avatar_url"),
+        is_active=not departed,
         color="#3385f8",
         created_at=now,
         updated_at=now,
@@ -229,7 +231,8 @@ async def list_team_members(
     if project_id is None:
         result: list[TeamMemberResponse] = []
         if type_filter in (None, "human"):
-            human_rows = await repo.list_org_human_members(user_id=user_id)
+            # story #4303 — include_inactive면 조직을 떠난 사람도(이름만 · is_active=false). 기본 로스터는 그대로.
+            human_rows = await repo.list_org_human_members(user_id=user_id, include_departed=include_inactive)
             result.extend(_build_org_human_response(r, org_id) for r in human_rows)
         if type_filter in (None, "agent"):
             agent_filters: dict = {"type": "agent"}
