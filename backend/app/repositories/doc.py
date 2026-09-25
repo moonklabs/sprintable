@@ -64,7 +64,12 @@ class DocRepository(BaseRepository[Doc]):
         return result.scalar_one_or_none()
 
     async def get_by_alias(self, project_id: uuid.UUID, old_slug: str) -> Doc | None:
-        """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback."""
+        """4dd399c6 AC3: 구 slug(alias) → canonical doc 해소. live(get_by_slug) 미스 시 fallback.
+
+        story #4317(까디르 4673 P1) — alias의 프로젝트뿐 아니라 **문서의 프로젝트도** 이 프로젝트여야 한다. 예전엔 alias 칸만 걸러서, 문서가
+        다른 프로젝트에 있으면(지금은 옮기는 기능이 없어 도달 0) 이 프로젝트 접근권만으로 그 문서를 돌려줄 수 있는 모양이었다. 위키 링크
+        해석기(resolve_wiki_link_targets · 4313)와 같은 규칙.
+        """
         from app.models.doc import DocSlugAlias
 
         result = await self.session.execute(
@@ -73,6 +78,7 @@ class DocRepository(BaseRepository[Doc]):
             .where(
                 self._org_filter(),
                 DocSlugAlias.project_id == project_id,
+                Doc.project_id == project_id,
                 DocSlugAlias.old_slug == old_slug,
                 Doc.deleted_at.is_(None),
             )
