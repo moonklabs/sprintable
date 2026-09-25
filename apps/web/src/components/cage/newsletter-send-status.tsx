@@ -18,7 +18,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
-import { deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
+import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
@@ -118,6 +118,7 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
           // 사람이 아니거나 재시도 대상이 아니면 버튼 없이 상태 줄만(compact).
           compact={!canRetry}
           onRetryClick={canRetry ? openConfirm : undefined}
+          connectionHref={blockedByConnection(command.status, command.failure_kind) ? connectRulesHref : undefined}
         />
       )}
       <ConfirmDialog

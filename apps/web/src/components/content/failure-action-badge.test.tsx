@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { FailureActionBadge } from './failure-action-badge';
-import { deriveFailureAction, type FailureAction } from './failure-action';
+import { blockedByConnection, deriveFailureAction, type FailureAction } from './failure-action';
 import { formatScheduledAt } from './schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -421,3 +421,41 @@ describe('FailureActionBadge — 재시도는 서버 한 판정(story #4290 까�
     expect(deriveFailureAction({ commandStatus: 'blocked' })).toEqual({ kind: 'blocked' });
   });
 });
+
+describe('FailureActionBadge — 연결 사유 blocked의 «연결 확인»(story #4304 · 유나 확정)', () => {
+  async function renderWith(props: { action: FailureAction; onRetryClick?: () => void; connectionHref?: string; compact?: boolean }) {
+    await act(async () => {
+      root.render(wrap(<FailureActionBadge displayTimezone="UTC" {...props} />));
+    });
+  }
+  const link = () => container.querySelector('[data-testid="channel-post-failure-connection-link"]') as HTMLAnchorElement | null;
+  const btn = () => container.querySelector('[data-testid="channel-post-failure-retry-button"]');
+
+  it('⭐머리 «연결 문제로 멈춤 — 연결 확인»(링크) 한 줄 → 아래 «다시 시도» — 고치기가 다시 시도보다 앞', async () => {
+    await renderWith({ action: { kind: 'blocked', retryable: true }, onRetryClick: vi.fn(), connectionHref: '/organization/channels' });
+    const head = link()?.closest('p');
+    expect(head?.textContent).toBe(`${koMessages.content.channelPostsFailureBlocked} — ${koMessages.content.channelPostsFailureConnectionCheckLink}`);
+    expect(link()?.getAttribute('href')).toBe('/organization/channels');
+    expect(head!.compareDocumentPosition(btn()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('재시도를 못 내밀어도(서버 false) 링크는 늘 — 버튼만 없다', async () => {
+    await renderWith({ action: { kind: 'blocked', retryable: false }, onRetryClick: vi.fn(), connectionHref: '/organization/channels' });
+    expect(link()).not.toBeNull();
+    expect(btn()).toBeNull();
+  });
+
+  it('compact(목록 · 캘린더 · 보드)는 글만 — 행이 이미 상세 링크', async () => {
+    await renderWith({ action: { kind: 'blocked', retryable: true }, connectionHref: '/organization/channels', compact: true });
+    expect(link()).toBeNull();
+    expect(container.textContent).toBe(koMessages.content.channelPostsFailureBlocked);
+  });
+
+  it('연결 사유 판정 — blocked 중 조직 일시정지(paused)만 아니다', () => {
+    expect(blockedByConnection('blocked', 'connection')).toBe(true);
+    expect(blockedByConnection('blocked', null)).toBe(true);
+    expect(blockedByConnection('blocked', 'paused')).toBe(false);
+    expect(blockedByConnection('dead_letter', 'connection')).toBe(false);
+  });
+});
+

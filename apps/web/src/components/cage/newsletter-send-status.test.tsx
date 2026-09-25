@@ -126,6 +126,13 @@ describe('NewsletterSendStatus — 상태별 표시(유나 표)', () => {
   });
 });
 
+describe('NewsletterSendStatus — 연결 사유 blocked의 «연결 확인»(story #4304)', () => {
+  it('연결 실패로 멈춘 발송(blocked · connection) — 배지 머리 줄에 «연결 확인» 링크', async () => {
+    await mount(gate({ status: 'blocked', failure_kind: 'connection' }));
+    expect(q('channel-post-failure-connection-link')?.getAttribute('href')).toBe('/organization/channels');
+  });
+});
+
 describe('NewsletterSendStatus — 재시도', () => {
   it('에이전트 화면엔 상태 줄만(버튼 0) — 재시도 API가 사람 전용이라 서버가 command_retryable=false로 싣는다(까디르 QA ③)', async () => {
     await mount(gate({ status: 'dead_letter', failure_kind: 'not_sent', command_retryable: false }));

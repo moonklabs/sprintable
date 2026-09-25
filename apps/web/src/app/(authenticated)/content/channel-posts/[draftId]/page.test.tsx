@@ -2425,6 +2425,9 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       await flush();
       const badge = container.querySelector('[data-testid="channel-post-failure-badge"]');
       expect(badge?.textContent).toContain(koMessages.content.channelPostsFailureBlocked);
+      // story #4304 — 연결 사유면 머리 줄에 «연결 확인»(연결 화면) — 버튼보다 앞.
+      const link = badge?.querySelector('[data-testid="channel-post-failure-connection-link"]');
+      expect(link?.getAttribute('href')).toBe('/organization/channels');
       const retry = badge?.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
       expect(retry?.textContent).toBe(koMessages.content.channelPostsFailureRetryCta);
       expect(retry?.disabled).toBe(false);
@@ -2437,6 +2440,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
         .toBe(koMessages.content.channelPostsFailureBlocked);
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
+      // story #4304 — 일시정지는 연결 사유가 아니라 «연결 확인»도 없다.
+      expect(container.querySelector('[data-testid="channel-post-failure-connection-link"]')).toBeNull();
     });
 
     it('needs_check', async () => {
