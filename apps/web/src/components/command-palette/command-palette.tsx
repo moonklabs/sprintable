@@ -135,9 +135,11 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
       labelSource: 'nav', isWorkspaceless: !isResource,
     };
   });
+  // story #4274(PO · 유나 실측 «메뉴 목적지 전부») — 앵커(스프린트 · 에픽 · 회고 · 목록 · 가설)도 프로젝트 자원이라 다른 resource 항목과 같이
+  // `/{ws}/{proj}/{자원}` 직접 주소로. 예전엔 flat `/sprints`(+`?p=`)라 proxy 307 동안 로딩 경계가 설 자리가 없었다.
   const fromAnchors: DerivedNavItem[] = GUARD_ANCHOR_ITEMS.map((anchor) => ({
-    id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: anchor.href,
-    labelSource: 'anchor', isWorkspaceless: true,
+    id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: resolveResourceHref(anchor.href.replace(/^\//, '')),
+    labelSource: 'anchor', isWorkspaceless: false,
   }));
   return [...fromNav, ...fromAnchors];
 }

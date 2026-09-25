@@ -257,13 +257,18 @@ describe('CommandPalette — 로드맵 P2·PR-E L1(다이얼로그 elevation 토
 });
 
 
-// story #4231 4차 B — 래칫 예외(GUARD_ANCHOR_ITEMS href)의 전제: 앵커는 전부 워크스페이스 없는(flat) 항목이라 소비처가 flatHref로 감싼다.
-// 앵커 하나라도 isWorkspaceless=false가 되면 bare 옛 자원 경로로 나가는데 래칫은 예외라 못 본다 — 이 테스트가 그 전제를 잡는다.
-describe('GUARD_ANCHOR_ITEMS — 래칫 예외 전제(#4231 4차 B)', () => {
-  it('⭐앵커는 전부 isWorkspaceless=true(소비처가 flatHref로 감싼다)', async () => {
+// story #4231 4차 B — 래칫 예외(GUARD_ANCHOR_ITEMS href)의 전제: 앵커 href가 bare 옛 자원 경로로 나가지 않는다.
+// story #4274(PO · 유나 실측) — 앵커도 프로젝트 자원이라 resolveResourceHref(= scopedResourceHref · slug 모르면 flat + `?p=`)를 거쳐
+// `/{ws}/{proj}/{자원}` 직접 주소로 나간다(flat이면 proxy 307 동안 로딩 경계가 설 자리가 없다). 앵커 전부가 그 한 길을 거치는지 잡는다.
+describe('GUARD_ANCHOR_ITEMS — 앵커는 resolveResourceHref로만(#4231 4차 B · #4274)', () => {
+  it('⭐앵커는 전부 자원 경로를 resolveResourceHref에 넘긴 값을 href로 쓴다(bare flat 없음)', async () => {
     const { deriveNavigateItems, GUARD_ANCHOR_ITEMS } = await import('./command-palette');
-    const anchors = deriveNavigateItems(() => '/x').filter((i) => GUARD_ANCHOR_ITEMS.some((a) => a.id === i.id));
+    const anchors = deriveNavigateItems((resource) => `/ws-1/proj-1/${resource}`).filter((i) => GUARD_ANCHOR_ITEMS.some((a) => a.id === i.id));
     expect(anchors).toHaveLength(GUARD_ANCHOR_ITEMS.length);
-    expect(anchors.every((i) => i.isWorkspaceless)).toBe(true);
+    for (const anchor of GUARD_ANCHOR_ITEMS) {
+      const item = anchors.find((i) => i.id === anchor.id)!;
+      expect(item.href).toBe(`/ws-1/proj-1${anchor.href}`);
+      expect(item.isWorkspaceless).toBe(false);
+    }
   });
 });

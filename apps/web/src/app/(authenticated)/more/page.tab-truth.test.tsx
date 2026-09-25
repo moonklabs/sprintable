@@ -12,7 +12,7 @@ import enMessages from '../../../../messages/en.json';
 
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => true, MOBILE_BREAKPOINT: 1024 }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ navV3Flags: { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true } }),
+  useDashboardContext: () => ({ navV3Flags: { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true }, orgMemberships: [], projectMemberships: [] }),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
