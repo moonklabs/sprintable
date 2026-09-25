@@ -54,7 +54,7 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         return list(result.scalars().all())
 
     async def list_org_human_members(
-        self, user_id: uuid.UUID | None = None
+        self, user_id: uuid.UUID | None = None, *, include_departed: bool = False
     ) -> list[dict[str, Any]]:
         """org-level 휴먼 로스터 = **org_members SSOT 직접 해소** (S:166051f0).
 
@@ -72,15 +72,20 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         None 정직). `test_standup_org_roster_166051f0.py`의 noacc@ pin이 이 자리의 예전(email
         폴백) 동작을 pin하던 것이라 이 fix로 함께 뒤집힘(PO 決 2026-09-09).
         """
+        # story #4303 — include_departed면 조직을 떠난 사람(org_members soft delete)도 싣는다. 옛 기록의 작성 · 담당 · 승인
+        # 칸이 이름을 풀 수 있게(감사 흔적 · PO 개인정보 판단: 이름만). 떠난 행은 `departed`로 표시해 응답에서 이름 외를 비운다.
         sql = (
             "SELECT om.id AS id, om.user_id AS user_id, om.role AS role, om.created_at AS created_at, "
-            "       COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name, m.avatar_url AS avatar_url "
+            "       COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name, m.avatar_url AS avatar_url, "
+            "       (om.deleted_at IS NOT NULL) AS departed "
             "FROM org_members om "
             "JOIN users u ON u.id = om.user_id "
             "LEFT JOIN members m ON m.org_id = om.org_id AND m.user_id = om.user_id "
             "                   AND m.type = 'human' AND m.deleted_at IS NULL "
-            "WHERE om.org_id = :org AND om.deleted_at IS NULL"
+            "WHERE om.org_id = :org"
         )
+        if not include_departed:
+            sql += " AND om.deleted_at IS NULL"
         params: dict[str, Any] = {"org": self.org_id}
         # asyncpg 함정 회피: ':uid IS NULL' 분기 대신 Python 조건부로 필터를 붙인다
         # (feedback_asyncpg_text_traps — IS NULL 바인딩 AmbiguousParameterError).
