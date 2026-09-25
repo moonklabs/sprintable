@@ -171,7 +171,7 @@ const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }>
   '/content': { source: '(authenticated)/content/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
   '/content/channel-posts': { source: '(authenticated)/content/channel-posts/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
   '/settings': { source: '(authenticated)/settings/page.tsx', container: 'w-full max-w-3xl mx-auto p-6' },
-  '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto max-w-4xl space-y-6 p-4 lg:p-6' },
+  '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
   '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
   '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]' },
   '/connect-rules': { source: '../components/connect-rules-v3/connect-rules-v3-screen.tsx', container: 'mx-auto max-w-[720px] space-y-8' },
