@@ -17,6 +17,7 @@ vi.mock('next/navigation', async (importOriginal) => ({
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (h: string) => h }));
 
 import { DocContentRenderer, safeAttachmentDataUrl, safeHttpUrl } from './doc-content-renderer';
+import { cardVariants } from '@/components/ui/card';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const LINK_BLOCKED = koMessages.docs.embedLinkBlocked;
@@ -115,6 +116,28 @@ describe('data-file-data(옛 첨부 본문) — data: + 실행되지 않는 MIME
     act(() => { (container.querySelector('[data-type="fileAttachment"]') as HTMLElement).click(); });
     expect(clicked).toEqual(['data:text/plain;base64,YWJj']);
     expect(container.textContent).not.toContain(FILE_BLOCKED);
+  });
+});
+
+// 유나 짚음(PO 확인) — 색 토큰이 hex(`--border: var(--proof-line)` = #E7E4DE)라 `hsl(var(--border))`는 무효 색 → 테두리가 글자색 · 배경 투명으로 떨어진다.
+// 첨부 카드 세 상태(정상 · 공개 보기 · 열 수 없음)의 틀은 공용 cardVariants subtle 면을 쓴다(PO 결정 · 손코딩 카드 가드).
+describe('첨부 카드 틀 — hsl()로 감싼 hex 토큰 0', () => {
+  it.each([
+    ['정상', 'data:text/plain;base64,YWJj', false],
+    ['열 수 없음', 'javascript:alert(1)', false],
+    ['공개 보기', 'data:text/plain;base64,YWJj', true],
+  ] as const)('%s 카드', async (_label, value, publicMode) => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DocContentRenderer content={`<div data-type="fileAttachment" data-filename="a.txt" data-size="3" data-file-data="${attr(value)}"></div>`} contentFormat="html" publicMode={publicMode} publicAttachmentLabel="로그인하면 볼 수 있어요" untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel={LINK_BLOCKED} unsafeFileLabel={FILE_BLOCKED} wikiLinkTargets={{}} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const frame = container.querySelector('[data-type="fileAttachment"] > div') as HTMLElement;
+    expect(frame.className).not.toMatch(/hsl\(var\(--/);
+    // PO 결정(1) — 공용 subtle 면(링크 카드와 같은 면): 그 클래스 전부가 붙는다.
+    for (const cls of cardVariants({ surface: 'subtle', radius: 'compact' }).split(/\s+/)) expect(frame.classList.contains(cls), `${cls} · ${frame.className}`).toBe(true);
   });
 });
 

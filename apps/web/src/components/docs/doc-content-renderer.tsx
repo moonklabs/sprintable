@@ -571,7 +571,7 @@ export function DocContentRenderer({
       }
 
       block.innerHTML = `
-        <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/40 transition-colors">
+        <div class="${cn(ATTACHMENT_CARD_SURFACE, 'cursor-pointer hover:bg-muted/40 transition-colors')}">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
@@ -1033,12 +1033,16 @@ export const RENDERER_INTERNAL_MARKERS = [
   'data-doc-asset-loading',
 ] as const;
 
+// 첨부 카드 면(정상 · 공개 보기 · 열 수 없음 공통) — 공용 cardVariants(손코딩 카드 가드 · 링크 카드와 같은 subtle 면). 예전 `hsl(var(--border))`는
+// 토큰이 hex라 무효 색이었다(테두리가 글자색 · 배경 투명 — 유나 짚음 · 4324).
+const ATTACHMENT_CARD_SURFACE = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+
 // story #4324(유나 스티어) — 열 수 없는 콘텐츠의 비활성 카드: 공개 보기 첨부 자리와 같은 틀(같은 카드 면 + 아이콘 + 흐린 글자 · 링크 · 호버 · 초점 0).
 const INERT_FILE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
 const INERT_LINK_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7"/><path d="M15 7h2a5 5 0 0 1 4 8"/><line x1="8" x2="12" y1="12" y2="12"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
 function inertCardHtml(icon: 'file' | 'link', title: string | null, note: string): string {
   return `
-          <div class="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-4 py-3 opacity-70">
+          <div class="${cn(ATTACHMENT_CARD_SURFACE, 'opacity-70')}">
             ${icon === 'file' ? INERT_FILE_ICON : INERT_LINK_ICON}
             <div class="min-w-0 flex-1">
               ${title != null ? `<p class="truncate text-sm font-medium">${escapeHtmlText(title)}</p>` : ''}
