@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, Bot, Bell, Info, type LucideIcon } from 'lucide-react';
@@ -12,7 +12,7 @@ import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast } from '@/components/ui/toast';
-import { fetchWithAuth } from '@/lib/db/client';
+import { inboxNotificationsUrl, inboxWorkflowExecutionsUrl, takePrefetchedOrFetch, type InboxPrefetchScope } from '@/components/inbox/inbox-prefetch';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import {
@@ -162,14 +162,12 @@ function AgentJoinedDetailPanel({
 // story #2195 — 기본(notifications) 탭이 서버 하드코딩 limit=50 + 커서 없음으로 51번째부터
 // 조용히 잘렸다. BE(#2538, 규약 A)가 이제 has_more/next_cursor를 body meta로 낸다 —
 // cursor를 실어 보내고 그 meta를 그대로 다음 요청에 이어 붙인다.
-async function fetchInboxNotifications(typeFilter: string, cursor?: string | null) {
-  const params = new URLSearchParams();
-  if (typeFilter) params.set('type', typeFilter);
-  if (cursor) params.set('cursor', cursor);
+async function fetchInboxNotifications(typeFilter: string, cursor: string | null | undefined, scope: InboxPrefetchScope) {
 
   // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>null) 알림
   // 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
-  const res = await fetchWithAuth(`/api/notifications?${params}`);
+  // story #4276 — inbox/loading.tsx가 먼저 출발시킨 1쪽 요청이 있으면 그 응답을 한 번 넘겨받는다(규칙은 inbox-prefetch.ts).
+  const res = await takePrefetchedOrFetch(inboxNotificationsUrl(typeFilter, cursor), scope);
   if (!res.ok) return null;
 
   const json = await res.json();
@@ -204,6 +202,11 @@ export default function InboxPage() {
   // 자체의 실제 산출 로직은 그대로, 안정화만 추가).
   const displayTimezone = useMemo(() => resolveDisplayTimezone().tz, []);
   const { currentTeamMemberId, projectId, orgId } = useDashboardContext();
+  // story #4276 — 선출발 응답을 넘겨받을 때 범위 대조용(알림 콜백들의 의존성은 그대로 두려고 ref로).
+  const prefetchScopeRef = useRef<InboxPrefetchScope>({ memberId: currentTeamMemberId, projectId });
+  useEffect(() => {
+    prefetchScopeRef.current = { memberId: currentTeamMemberId, projectId };
+  }, [currentTeamMemberId, projectId]);
   // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
   // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
   const domainLabels = useOrgDomainLabels(orgId, locale);
@@ -239,7 +242,7 @@ export default function InboxPage() {
 
   const refreshNotifications = useCallback(async () => {
     if (pagedBeyondFirst) return;
-    const result = await fetchInboxNotifications('');
+    const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
     if (!result) return;
 
     setNotifications(result.notifications);
@@ -251,7 +254,7 @@ export default function InboxPage() {
   const loadMoreNotifications = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    const result = await fetchInboxNotifications('', nextCursor);
+    const result = await fetchInboxNotifications('', nextCursor, prefetchScopeRef.current);
     if (result) {
       setNotifications((prev) => [...prev, ...result.notifications]);
       setHasMore(result.hasMore);
@@ -266,7 +269,7 @@ export default function InboxPage() {
 
     async function load() {
       setLoading(true);
-      const result = await fetchInboxNotifications('');
+      const result = await fetchInboxNotifications('', null, prefetchScopeRef.current);
       if (!cancelled && result) {
         setNotifications(result.notifications);
         setUnreadCount(result.unreadCount);
@@ -284,10 +287,10 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (!currentTeamMemberId || !projectId) return;
-    const params = new URLSearchParams({ project_id: projectId, member_id: currentTeamMemberId, limit: '10' });
     // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(r.ok?...:null) 워크플로우
-    // 실행 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
-    fetchWithAuth(`/api/workflow-executions?${params.toString()}`)
+    // 실행 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다(선출발 응답도 같은 fetchWithAuth).
+    // story #4276 — inbox/loading.tsx가 먼저 출발시킨 같은 요청이 있으면 그 응답을 한 번 넘겨받는다.
+    takePrefetchedOrFetch(inboxWorkflowExecutionsUrl(projectId, currentTeamMemberId), { memberId: currentTeamMemberId, projectId })
       .then((r) => r.ok ? r.json() : null)
       .then((json) => {
         if (json?.items) setWorkflowExecs(json.items as WorkflowExecItem[]);
