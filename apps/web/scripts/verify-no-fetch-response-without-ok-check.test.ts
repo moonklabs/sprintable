@@ -70,6 +70,20 @@ describe('story #4312 — AST 전환(글자 창 300자 맹점)', () => {
   const LONG = `/* ${'긴 설명 '.repeat(80)} */`;
   const LONG_OPTS = `{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ${Array.from({ length: 30 }, (_, i) => `k${i}: ${i}`).join(', ')} }) }`;
 
+  it('⭐AC1 — 호출과 읽기 사이에 주석 20줄을 끼워도 판정이 같다(양성 · 음성 둘 다)', () => {
+    const pad = Array.from({ length: 20 }, (_, i) => `  // 끼워 넣은 설명 ${i} — 글자 창이면 이만큼 밀린다`).join('\n');
+    const bad = (mid: string) => `async function f() {\n  const res = await fetchWithAuth('/api/x');\n${mid}\n  return await res.json();\n}`;
+    const good = (mid: string) => `async function f() {\n  const res = await fetchWithAuth('/api/x');\n${mid}\n  if (!res.ok) throw new Error('x');\n  return await res.json();\n}`;
+    expect(count(bad(pad))).toBe(count(bad('')));
+    expect(count(bad(pad))).toBe(1);
+    expect(count(good(pad))).toBe(count(good('')));
+    expect(count(good(pad))).toBe(0);
+  });
+
+  it('양성 — `.text()` 읽기도 같은 부류', () => {
+    expect(count("async function f() {\n  const res = await fetchWithAuth('/api/x');\n  return await res.text();\n}")).toBe(1);
+  });
+
   it('⭐양성 — 검사 없는 읽기가 긴 옵션 · 주석 뒤(300자 밖)에 있어도 잡는다(예전 창은 못 봄)', () => {
     expect(count(`async function f() {\n  const res = await fetchWithAuth('/api/x', ${LONG_OPTS});\n  ${LONG}\n  return await res.json();\n}`)).toBe(1);
   });

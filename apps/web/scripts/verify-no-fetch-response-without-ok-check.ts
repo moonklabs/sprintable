@@ -41,7 +41,7 @@ const TEST_RE = /\.test\.[tj]sx?$/;
 
 const FETCH = 'fetchWithAuth';
 /** 응답 본문을 읽는 메서드 — 실패 응답의 에러 바디를 «데이터»로 읽는 자리. */
-const BODY_READS = new Set(['json']);
+const BODY_READS = new Set(['json', 'text']); // story #4312 — `.text()`도 같은 부류(에러 바디를 데이터로 읽음).
 /** 응답 상태를 보는 속성 — 같은 함수 · 같은 대입 구간 안에 있으면 검사한 것으로 친다(읽기 앞이든 뒤든 · 아래 «순서» 참고). */
 const STATUS_PROPS = new Set(['ok', 'status']);
 
