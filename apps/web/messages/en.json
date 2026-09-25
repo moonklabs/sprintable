@@ -2978,7 +2978,7 @@
     "channelPostsCalendarRangePrevWeek": "Previous week",
     "channelPostsCalendarRangeNextWeek": "Next week",
     "channelPostsFailureBlocked": "Blocked by a connection problem",
-    "channelPostsFailureBlockedUnknown": "Stopped",
+    "channelPostsFailureBlockedUnknown": "Held",
     "channelPostsFailurePausedResumes": "goes out once the owner resumes it",
     "channelPostsFailurePaused": "Held by the publishing pause",
     "channelPostsFailureConnectionCheckLink": "check connection",
