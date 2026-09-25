@@ -9,6 +9,8 @@ import type { StandupEntrySummary, StandupFeedbackSummary, StandupMemberSummary 
 
 interface StandupBoardCardProps {
   member: StandupMemberSummary;
+  /** story #4311 — 목록 안에서 갈린 행 라벨(부모가 memberRowLabels로 · 같은 이름이면 꼬리). */
+  rowLabel: string;
   entry?: StandupEntrySummary;
   feedback: StandupFeedbackSummary[];
   isCurrentUser: boolean;
@@ -19,6 +21,7 @@ interface StandupBoardCardProps {
 
 export function StandupBoardCard({
   member,
+  rowLabel,
   entry,
   feedback,
   isCurrentUser,
@@ -39,7 +42,7 @@ export function StandupBoardCard({
       <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-4">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-semibold text-foreground">{member.name}</span>
+            <span className="text-sm font-semibold text-foreground">{rowLabel}</span>
             {isCurrentUser && <Badge variant="info">{t('you')}</Badge>}
             <Badge variant={member.type === 'agent' ? 'secondary' : 'outline'}>
               {member.type === 'agent' ? t('agent') : t('human')}

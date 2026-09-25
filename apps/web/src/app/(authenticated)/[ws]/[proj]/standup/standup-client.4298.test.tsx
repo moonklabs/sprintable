@@ -89,6 +89,25 @@ describe('StandupClient — «안 쓴 사람»(story #4298)', () => {
     expect(container.querySelector('[data-testid="standup-missing-load-failed"]')).toBeNull();
   });
 
+  it('⭐story #4311 — 미작성 칩은 memberRowLabels로 · 이름 없는 둘이면 서로 갈리게 «· ID 앞 8자» 꼬리(하나뿐이면 꼬리 없음)', async () => {
+    setup({ ok: true, body: { data: [{ id: 'aaaaaaaa-1', name: null }, { id: 'bbbbbbbb-2', name: null }, { id: 'm-3', name: '비' }] } });
+    await mount();
+    const chips = [...container.querySelectorAll('span, div')].map((el) => el.textContent ?? '');
+    const unnamed = koMessages.common.memberUnnamed;
+    expect(chips).toContain(`${unnamed} · aaaaaaaa`);
+    expect(chips).toContain(`${unnamed} · bbbbbbbb`);
+    expect(chips).toContain('비');
+  });
+
+  it('⭐story #4311 — 미작성 칩에서 동명이인(배포 29 «송윤재» 둘)도 «· ID 앞 8자»로 갈린다', async () => {
+    setup({ ok: true, body: { data: [{ id: 'e75ca548-1', name: '송윤재' }, { id: '2fd14616-2', name: '송윤재' }, { id: 'm-3', name: '비' }] } });
+    await mount();
+    const chips = [...container.querySelectorAll('span, div')].map((el) => el.textContent ?? '');
+    expect(chips).toContain('송윤재 · e75ca548');
+    expect(chips).toContain('송윤재 · 2fd14616');
+    expect(chips).toContain('비');
+  });
+
   it('조회 실패는 빈 목록(칸 없음)과 다른 문장으로 말한다', async () => {
     setup({ ok: false, body: { error: { code: 'INTERNAL' } } });
     await mount();

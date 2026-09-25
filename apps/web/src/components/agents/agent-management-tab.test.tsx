@@ -97,6 +97,28 @@ describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
     expect(chips).toContain(koMessages.organization.roleGroupOwner);
     for (const raw of ['member', 'admin', 'owner']) expect(chips).not.toContain(raw);
   });
+  it('⭐story #4311(유나 비차단) — 같은 이름 에이전트: 역할 배지가 서로 다르면 꼬리 없음 · 같으면 «· ID 앞 8자»', async () => {
+    stubFetch({ agents: [
+      { id: 'aaaaaaaa-1', name: '점검봇', role: 'member', is_active: true },
+      { id: 'bbbbbbbb-2', name: '점검봇', role: 'admin', is_active: true },
+    ] });
+    await mount();
+    const texts = [...container.querySelectorAll('a span')].map((e) => e.textContent ?? '');
+    expect(texts.filter((x) => x === '점검봇')).toHaveLength(2);
+    expect(texts.some((x) => x.includes('aaaaaaaa'))).toBe(false);
+  });
+
+  it('story #4311 — 같은 이름 · 같은 역할이면 ID 꼬리로 갈린다', async () => {
+    stubFetch({ agents: [
+      { id: 'aaaaaaaa-1', name: '점검봇', role: 'member', is_active: true },
+      { id: 'bbbbbbbb-2', name: '점검봇', role: 'member', is_active: true },
+    ] });
+    await mount();
+    const texts = [...container.querySelectorAll('a span')].map((e) => e.textContent ?? '');
+    expect(texts).toContain('점검봇 · aaaaaaaa');
+    expect(texts).toContain('점검봇 · bbbbbbbb');
+  });
+
   it('모르는 값만 원문으로(유나 결정) — 프로토타입 이름도 원문 문자열이지 함수가 아니다', async () => {
     stubFetch({ agents: [
       { id: 'a1', name: '프로토 에이전트', role: 'constructor', is_active: true },
