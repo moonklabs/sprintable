@@ -21,6 +21,7 @@ describe('storageSummaryText', () => {
   it('다 불러왔으면 맨 수 · 맨 용량(`+` 없음) · en 복수형 그대로', () => {
     expect(render('ko', 48, GB, false)).not.toContain('+');
     expect(render('en', 1, 10, false)).toMatch(/^1 asset · /);
-    expect(render('en', 1, 10, true)).toMatch(/^1\+ asset · .+\+$/);
+    // `+`면 늘 복수(유나 판정) — «1+ assets».
+    expect(render('en', 1, 10, true)).toMatch(/^1\+ assets · .+\+$/);
   });
 });
