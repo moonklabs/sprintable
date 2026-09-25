@@ -9,12 +9,19 @@
  *   (b) 사용처 — `brand-soft`를 **글자색**으로 쓰는 자리 0(`text-brand-soft` · `text-[color:var(--brand-soft)]` · CSS `color: var(--brand-soft)`).
  *       `dark:` 변형 안에서만 쓰는 것은 허용(어두운 테마에선 읽힌다). 틴트(`bg-` · `border-` …)는 대상 아님.
  *
- * ⚠️ 못 잡는 것: 다른 옅은 토큰(예: `--brand-contrast`)을 글자로 쓰는 것 · 인라인 style 객체 · 런타임 조합 문자열.
+ *   (c) story #4318 — `text-brand`(`--brand`: 밝은 배경 4.35 · muted 4.09 — 버튼 채움용이라 값은 안 바꾼다)를 **글자**에 쓰는 자리 0.
+ *       AST로 그 클래스가 붙는 JSX 요소를 찾아, 글자가 아닌 것만 허용: 아이콘(lucide-react에서 가져온 컴포넌트) · 로고(`SprintableLogo`) ·
+ *       글자 없이 아이콘만 감싼 요소 · `aria-hidden` 요소 안의 **장식 글리프**(글자 · 숫자 없는 기호만). `aria-hidden`이어도 안에 본문
+ *       글자(글자 · 숫자 · 식 `{…}`)가 있으면 잡는다. className 속성 밖(변수 · 함수 인자)에 든 `text-brand`는 요소를 모르니 잡는다.
+ *
+ * ⚠️ 못 잡는 것: 다른 옅은 토큰(예: `--brand-contrast`)을 글자로 쓰는 것 · 인라인 style 객체 · 런타임 조합 문자열 ·
+ *    (c)에서 부모의 `text-brand`를 상속받는 자식 글자(색 상속은 추적하지 않음 — 그 부모 요소 안의 글자로 판정).
  * oklch→sRGB · 대비 계산은 verify-accent-color-contrast.ts와 같은 유틸(실 Chromium 캡처 대조 완료)을 재사용한다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { extractCssVarBlock, resolveCssVarValue } from './verify-tint-foreground-contrast';
 import { parseOklchToRgba } from '../src/lib/oklch-contrast';
 import { contrastRatio } from '../src/lib/color-contrast';
@@ -96,6 +103,103 @@ export function findBrandSoftTextUses(content: string, file: string): BrandSoftT
   return hits;
 }
 
+// ─── (c) story #4318 — text-brand를 글자에 ─────────────────────────────────────────────
+const BRAND_TOKEN_RE = /(?<![\w-])((?:[\w&[\]_>*().:-]+?:)*)text-brand(?:\/\d+)?(?![\w-])/;
+const LOGO_COMPONENTS = new Set(['SprintableLogo']);
+/** 글자 · 숫자(한글 포함). 장식 글리프(→ ↗ · 등)는 해당 없음. */
+const TEXTUAL_RE = /[\p{L}\p{N}]/u;
+
+function tagNameOf(el: ts.JsxOpeningLikeElement): string {
+  return el.tagName.getText();
+}
+
+function iconImportsOf(sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const st of sf.statements) {
+    if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier) && st.moduleSpecifier.text === 'lucide-react') {
+      const nb = st.importClause?.namedBindings;
+      if (nb && ts.isNamedImports(nb)) for (const e of nb.elements) names.add(e.name.text);
+    }
+  }
+  return names;
+}
+
+function hasAriaHidden(el: ts.JsxOpeningLikeElement): boolean {
+  return el.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText() === 'aria-hidden'
+    && (!a.initializer || (ts.isStringLiteral(a.initializer) ? a.initializer.text !== 'false'
+      : !(ts.isJsxExpression(a.initializer) && a.initializer.expression?.kind === ts.SyntaxKind.FalseKeyword))));
+}
+
+/** 요소 안에 사람이 읽는 글자가 있나: 글자/숫자 든 JsxText · 식 `{…}`(동적 글자). 아이콘 자식만 있으면 false. */
+function containsText(el: ts.JsxElement | ts.JsxSelfClosingElement, icons: Set<string>): { text: boolean; glyphOnly: boolean } {
+  if (ts.isJsxSelfClosingElement(el)) return { text: false, glyphOnly: false };
+  let text = false;
+  let glyph = false;
+  const visit = (n: ts.Node) => {
+    if (ts.isJsxText(n)) {
+      const t = n.getText().trim();
+      if (t) { if (TEXTUAL_RE.test(t)) text = true; else glyph = true; }
+    } else if (ts.isJsxExpression(n) && n.expression && n.parent && (ts.isJsxElement(n.parent) || ts.isJsxFragment(n.parent))) {
+      // 자식 자리의 식 — 아이콘 요소만 내는 식(`{on && <Check />}`)이 아니면 글자로 본다.
+      const onlyIcons = (e: ts.Node): boolean => {
+        if (ts.isJsxSelfClosingElement(e)) return icons.has(tagNameOf(e));
+        if (ts.isBinaryExpression(e)) return onlyIcons(e.right);
+        if (ts.isConditionalExpression(e)) return onlyIcons(e.whenTrue) && onlyIcons(e.whenFalse);
+        if (ts.isParenthesizedExpression(e)) return onlyIcons(e.expression);
+        return e.kind === ts.SyntaxKind.NullKeyword;
+      };
+      if (!onlyIcons(n.expression)) text = true;
+      return;
+    } else if ((ts.isJsxSelfClosingElement(n) || ts.isJsxElement(n)) && n !== el) {
+      const opening = ts.isJsxElement(n) ? n.openingElement : n;
+      if (icons.has(tagNameOf(opening))) return; // 아이콘 자식은 글자 아님.
+    }
+    ts.forEachChild(n, visit);
+  };
+  el.children.forEach(visit);
+  return { text, glyphOnly: glyph && !text };
+}
+
+export interface BrandOnTextUse { file: string; line: number; text: string; why: string }
+
+export function findBrandOnTextUses(content: string, file: string): BrandOnTextUse[] {
+  if (!/\.tsx?$/.test(file) || !content.includes('text-brand')) return [];
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const icons = iconImportsOf(sf);
+  const hits: BrandOnTextUse[] = [];
+  const report = (node: ts.Node, why: string) => {
+    const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+    hits.push({ file, line: line + 1, text: content.split('\n')[line]!.trim(), why });
+  };
+  const visit = (n: ts.Node) => {
+    if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n))) {
+      const m = BRAND_TOKEN_RE.exec(n.text);
+      if (m && !/(^|:)dark:/.test(m[1] ?? '')) {
+        // 이 문자열이 든 className 속성과 그 요소.
+        let cur: ts.Node = n;
+        while (cur.parent && !ts.isJsxAttribute(cur) && !ts.isStatement(cur)) cur = cur.parent;
+        if (!ts.isJsxAttribute(cur) || cur.name.getText() !== 'className') {
+          report(n, 'className 밖(요소를 모름)');
+        } else {
+          const opening = cur.parent.parent as ts.JsxOpeningLikeElement;
+          const tag = tagNameOf(opening);
+          const el = (ts.isJsxOpeningElement(opening) ? opening.parent : opening) as ts.JsxElement | ts.JsxSelfClosingElement;
+          if (icons.has(tag) || LOGO_COMPONENTS.has(tag)) { /* 아이콘 · 로고 — 비글자 3:1(이미 통과) */ }
+          else {
+            const { text, glyphOnly } = containsText(el, icons);
+            if (!text && !glyphOnly) { /* 글자 없이 아이콘만 감쌈 */ }
+            else if (glyphOnly && hasAriaHidden(opening)) { /* aria-hidden 장식 글리프 */ }
+            else report(n, glyphOnly ? '장식 글리프인데 aria-hidden 없음' : '본문 글자');
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return hits;
+}
+
 function walk(dir: string, out: string[]): void {
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
@@ -110,11 +214,20 @@ function walk(dir: string, out: string[]): void {
 
 const MIN_EXPECTED_FILES = 400;
 
-export function scanRepo(srcRoot: string): BrandSoftTextUse[] {
+function sourceFiles(srcRoot: string): string[] {
   const files: string[] = [];
   walk(srcRoot, files);
   if (files.length < MIN_EXPECTED_FILES) throw new Error(`FAIL: 검사 대상 파일이 ${files.length}개뿐(srcRoot=${srcRoot}) — 가드가 헛돈다.`);
-  return files.flatMap((abs) => findBrandSoftTextUses(readFileSync(abs, 'utf8'), path.relative(srcRoot, abs).split(path.sep).join('/')));
+  return files;
+}
+const rel = (srcRoot: string, abs: string) => path.relative(srcRoot, abs).split(path.sep).join('/');
+
+export function scanRepo(srcRoot: string): BrandSoftTextUse[] {
+  return sourceFiles(srcRoot).flatMap((abs) => findBrandSoftTextUses(readFileSync(abs, 'utf8'), rel(srcRoot, abs)));
+}
+
+export function scanRepoBrandOnText(srcRoot: string): BrandOnTextUse[] {
+  return sourceFiles(srcRoot).flatMap((abs) => findBrandOnTextUses(readFileSync(abs, 'utf8'), rel(srcRoot, abs)));
 }
 
 function main(): number {
@@ -134,6 +247,14 @@ function main(): number {
     for (const u of uses) console.error(`  - ${u.file}:${u.line}: ${u.text.slice(0, 160)}`);
   } else {
     console.log('  brand-soft 글자색 사용처 0(dark: 전용 제외).');
+  }
+  const onText = scanRepoBrandOnText(SRC_ROOT);
+  if (onText.length > 0) {
+    failed = true;
+    console.error(`\n❌ text-brand를 글자에 쓰는 자리 ${onText.length}곳(story #4318 — 밝은 배경 4.35 · muted 4.09 < 4.5). text-brand-text로:`);
+    for (const u of onText) console.error(`  - ${u.file}:${u.line} [${u.why}]: ${u.text.slice(0, 160)}`);
+  } else {
+    console.log('  text-brand 글자 사용처 0(아이콘 · 로고 · 아이콘만 감싼 요소 · aria-hidden 장식 글리프 제외).');
   }
   if (failed) return 1;
   console.log('OK');

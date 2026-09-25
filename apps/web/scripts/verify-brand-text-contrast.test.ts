@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { computeBrandTextContrasts, findBrandSoftTextUses, scanRepo } from './verify-brand-text-contrast';
+import { computeBrandTextContrasts, findBrandOnTextUses, findBrandSoftTextUses, scanRepo, scanRepoBrandOnText } from './verify-brand-text-contrast';
 
 const CSS = readFileSync(path.resolve(__dirname, '../src/app/globals.css'), 'utf8');
 
@@ -54,5 +54,46 @@ describe('story #4315 — brand-soft 글자색 사용처', () => {
 
   it('⭐실 저장소 — brand-soft 글자색 0(dark: 전용 제외)', () => {
     expect(scanRepo(path.resolve(__dirname, '../src'))).toEqual([]);
+  });
+});
+
+describe('story #4318 — text-brand를 글자에(AST)', () => {
+  const LUCIDE = "import { Check, Play } from 'lucide-react';\n";
+  const count = (src: string) => findBrandOnTextUses(LUCIDE + src, 'x.tsx').length;
+
+  it('양성 — 링크 · 라벨 · cn 조건 · 틴트 칩 위 글자 · 식으로 넣은 글자', () => {
+    expect(count('const a = <Link href="/login" className="font-medium text-brand hover:text-brand/80">로그인</Link>;')).toBe(1);
+    expect(count("const a = <span className={cn('text-[11px]', on ? 'bg-brand/10 text-brand' : 'text-muted-foreground')}>{label}</span>;")).toBe(1);
+    expect(count('const a = <div className="text-xs text-brand">{t(\'planLabel\')}</div>;')).toBe(1);
+    expect(count("const c = cn('text-brand');")).toBe(1); // className 밖 — 요소를 모름
+  });
+
+  it('⭐양성 — aria-hidden이어도 안에 본문 글자가 있으면 잡는다(PO 4318: 장식 글리프만 허용)', () => {
+    expect(count('const a = <span aria-hidden className="text-brand"><a href="/terms">이용약관</a></span>;')).toBe(1);
+    expect(count('const a = <span aria-hidden="true" className="text-brand">{label}</span>;')).toBe(1);
+    expect(count('const a = <span aria-hidden className="text-brand">→ 3</span>;')).toBe(1);
+  });
+
+  it('양성 — 장식 글리프인데 aria-hidden이 없으면 잡는다', () => {
+    expect(count('const a = <span className="font-bold text-brand">→</span>;')).toBe(1);
+  });
+
+  it('음성 — 아이콘 · 로고 · 아이콘만 감싼 요소 · aria-hidden 장식 글리프 · dark: 전용 · 새 토큰', () => {
+    expect(count('const a = <Check className="h-4 w-4 text-brand" />;')).toBe(0);
+    expect(count('const a = <SprintableLogo className="text-brand dark:text-white" />;')).toBe(0);
+    expect(count('const a = <span className="rounded-full text-brand"><Play className="size-4" /></span>;')).toBe(0);
+    expect(count('const a = <div className="text-brand">{on && <Check className="size-3" />}</div>;')).toBe(0);
+    expect(count('const a = <span className="font-bold text-brand" aria-hidden>→</span>;')).toBe(0);
+    expect(count('const a = <span aria-hidden="true" className="text-xs text-brand">↗</span>;')).toBe(0);
+    expect(count('const a = <a className="text-brand-text dark:text-brand">링크</a>;')).toBe(0);
+    expect(count('const a = <a className="text-brand-text hover:text-brand-text/85">링크</a>;')).toBe(0);
+  });
+
+  it('음성 — aria-hidden={false}는 허용 근거가 아니다', () => {
+    expect(count('const a = <span aria-hidden={false} className="text-brand">→</span>;')).toBe(1);
+  });
+
+  it('⭐실 저장소 — text-brand 글자 사용처 0', () => {
+    expect(scanRepoBrandOnText(path.resolve(__dirname, '../src'))).toEqual([]);
   });
 });

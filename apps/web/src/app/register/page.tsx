@@ -158,11 +158,11 @@ export default function RegisterPage() {
             />
             <span className="text-xs text-muted-foreground">
               {t('tosPrefix')}{' '}
-              <Link href="/terms" target="_blank" className="font-medium text-brand hover:text-brand/80">
+              <Link href="/terms" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
                 {t('termsOfService')}
               </Link>{' '}
               {t('and')}{' '}
-              <Link href="/privacy" target="_blank" className="font-medium text-brand hover:text-brand/80">
+              <Link href="/privacy" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
                 {t('privacyPolicy')}
               </Link>
             </span>
@@ -211,7 +211,7 @@ export default function RegisterPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           {t('alreadyHaveAccount')}{' '}
-          <Link href="/login" className="font-medium text-brand hover:text-brand/80">
+          <Link href="/login" className="font-medium text-brand-text hover:text-brand-text/85">
             {t('signIn')}
           </Link>
         </p>

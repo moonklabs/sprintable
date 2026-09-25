@@ -118,7 +118,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
           const behavior = RUNG_BEHAVIOR[level];
           const chipClassName = cn(
             'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium transition',
-            active ? 'bg-brand/10 text-brand' : 'text-muted-foreground',
+            active ? 'bg-brand/10 text-brand-text' : 'text-muted-foreground',
             behavior.kind === 'dead' && 'cursor-not-allowed opacity-60',
             behavior.kind === 'reserved' && 'cursor-help',
           );
@@ -192,7 +192,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
         );
         const inner = (
           <>
-            <div className={cn('text-sm font-semibold text-foreground', active && 'text-brand', behavior.kind === 'dead' && 'text-muted-foreground')}>
+            <div className={cn('text-sm font-semibold text-foreground', active && 'text-brand-text', behavior.kind === 'dead' && 'text-muted-foreground')}>
               {t(`ladderName_${level}`)}
             </div>
             <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
@@ -206,7 +206,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
             <span
               className={cn(
                 'absolute bottom-2 left-3 text-[9.5px] font-semibold tracking-wide uppercase',
-                behavior.kind === 'move' ? 'text-brand' : 'text-muted-foreground',
+                behavior.kind === 'move' ? 'text-brand-text' : 'text-muted-foreground',
               )}
             >
               {rungLabel(level)}

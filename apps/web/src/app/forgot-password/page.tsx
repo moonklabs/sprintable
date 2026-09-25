@@ -39,7 +39,7 @@ export default function ForgotPasswordPage() {
             <p className="text-sm text-muted-foreground">
               {t('sentMessage')}
             </p>
-            <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
+            <Link href="/login" className="block text-sm font-medium text-brand-text hover:text-brand-text/85">
               {t('backToLogin')}
             </Link>
           </div>
@@ -64,7 +64,7 @@ export default function ForgotPasswordPage() {
               {loading ? t('sending') : t('submitButton')}
             </button>
             <p className="text-center text-sm text-muted-foreground">
-              <Link href="/login" className="font-medium text-brand hover:text-brand/80">
+              <Link href="/login" className="font-medium text-brand-text hover:text-brand-text/85">
                 {t('backToLogin')}
               </Link>
             </p>

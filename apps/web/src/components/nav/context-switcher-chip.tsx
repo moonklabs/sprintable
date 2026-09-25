@@ -188,7 +188,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               type="button"
               variant="ghost"
               onClick={() => s.setCreateProjectOpen(true)}
-              className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand hover:bg-accent hover:text-brand"
+              className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand-text hover:bg-accent hover:text-brand-text"
             >
               <Plus className="h-4 w-4 shrink-0" />
               <span className="text-sm">{t('switcherNewProject')}</span>
@@ -304,7 +304,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   variant="ghost"
                   disabled={acc.atCap || acc.busy !== null}
                   onClick={() => void acc.handleAdd()}
-                  className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand hover:bg-accent hover:text-brand disabled:opacity-60"
+                  className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand-text hover:bg-accent hover:text-brand-text disabled:opacity-60"
                 >
                   {acc.busy === 'add' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                   <span className="flex-1 text-sm">{acc.t('addAccount')}</span>

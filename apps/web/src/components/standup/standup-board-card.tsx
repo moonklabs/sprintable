@@ -67,7 +67,7 @@ export function StandupBoardCard({
               </p>
             </div>
             <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-brand">{t('planLabel')}</div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-brand-text">{t('planLabel')}</div>
               <p className={cn('whitespace-pre-wrap text-sm', entry.plan ? 'text-foreground/90' : 'text-muted-foreground')}>
                 {entry.plan || t('emptySection')}
               </p>

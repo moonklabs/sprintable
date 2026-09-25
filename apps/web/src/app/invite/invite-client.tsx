@@ -174,7 +174,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
           <div className="text-3xl">✕</div>
           <p className="text-sm text-destructive">{errorMsg}</p>
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
-          <a href="/login" className="text-sm font-medium text-brand hover:text-brand/80">
+          <a href="/login" className="text-sm font-medium text-brand-text hover:text-brand-text/85">
             {t('backToLogin')}
           </a>
         </div>

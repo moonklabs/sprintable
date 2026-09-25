@@ -156,7 +156,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
                 type="button"
                 onClick={() => void handleResend()}
                 disabled={resending}
-                className="font-medium text-brand hover:text-brand/80 disabled:opacity-50"
+                className="font-medium text-brand-text hover:text-brand-text/85 disabled:opacity-50"
               >
                 {resending ? t('setPasswordResending') : t('setPasswordResendButton')}
               </button>
