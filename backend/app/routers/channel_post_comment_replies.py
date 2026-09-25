@@ -25,6 +25,7 @@ from app.services.channel_post_comment_replies import (
     submit_comment_reply,
 )
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
+from app.services.publication_command import human_retryable
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comment-replies"])
 
@@ -135,6 +136,8 @@ class ReplyView(BaseModel):
     next_attempt_at: str | None = Field(
         default=None, description="transient 백오프 다음 시도 시각(ISO) — 없으면 null.",
     )
+    # story #4290 — 사람이 지금 이 답변 명령을 «다시 시도»할 수 있는가(재시도 엔드포인트와 같은 한 판정 `human_retryable`).
+    command_retryable: bool = False
     reason_code: str | None = Field(
         default=None,
         description=(
@@ -168,6 +171,7 @@ async def _reply_view(
         failure_kind=command.failure_kind if command is not None else None,
         next_attempt_at=command.next_attempt_at.isoformat() if command is not None and command.next_attempt_at else None,
         reason_code=command.reason_code if command is not None else None,
+        command_retryable=human_retryable(command) if command is not None else False,
     )
 
 

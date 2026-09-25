@@ -435,7 +435,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: '홍길동', bodyText: '본문',
         externalCreatedAt: '2026-09-05T09:00:00Z', capturedAt: '2026-09-05T10:00:00Z', deletedAt: null,
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyRetryable: false, replyId: null, latestReplyText: null, repliesCount: 0,
         openReplyDraft: null, sentRepliesCount: 0,
       }],
     });
@@ -540,7 +540,7 @@ describe('deriveCommentsFace(story #3517, BE #3865/#3876 응답 매핑)', () => 
       comments: [{
         id: 'c1', authorDisplayName: null, bodyText: 'x',
         externalCreatedAt: null, capturedAt: 't', deletedAt: '2026-09-05T11:00:00Z',
-        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyId: null, latestReplyText: null, repliesCount: 0,
+        replyStatus: 'none', replyExternalUrl: null, replyFailureAction: undefined, replyCommandId: null, replyRetryable: false, replyId: null, latestReplyText: null, repliesCount: 0,
         openReplyDraft: null, sentRepliesCount: 0,
       }],
     });

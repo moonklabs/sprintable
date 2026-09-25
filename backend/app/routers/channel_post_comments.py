@@ -20,6 +20,7 @@ from app.services.channel_post_comments import (
     refresh_comments_now,
 )
 from app.services.member_resolver import resolve_member
+from app.services.publication_command import human_retryable
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comments"])
 
@@ -71,6 +72,14 @@ class CommentReplySummary(BaseModel):
     next_attempt_at: str | None = Field(
         default=None, description="transient 백오프 다음 시도 시각(ISO) — 없으면 null.",
     )
+    command_retryable: bool = Field(
+        default=False,
+        # story #4290 — 재시도 엔드포인트와 같은 한 판정(`publication_command.human_retryable`). 화면 버튼 · 404 뒤 결과 줄이 이 값만 본다.
+        description=(
+            "Whether a person can retry this reply's publication command right now — the same server judgement the retry "
+            "endpoint uses (story #4290). False when there is no command."
+        ),
+    )
     reason_code: str | None = Field(
         default=None,
         description=(
@@ -101,6 +110,7 @@ def _comment_reply_summary(reply, command_by_id: dict) -> CommentReplySummary:
             command.next_attempt_at.isoformat() if command is not None and command.next_attempt_at else None
         ),
         reason_code=command.reason_code if command is not None else None,
+        command_retryable=human_retryable(command) if command is not None else False,
     )
 
 

@@ -23,6 +23,7 @@ from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.project_auth import require_project_access
+from app.services.publication_command import human_retryable
 from app.services.channel_posts import (
     _NEWSLETTER_CHANNELS,
     ChannelConnectionAuthError,
@@ -363,6 +364,9 @@ class ChannelPostDraftListItem(BaseModel):
     # 행인지 알아야 한다 — command_status와 같은 latest_command 행에서 id만 additive로
     # 꺼낸다(신규 조회 0, N+1 없음).
     command_id: uuid.UUID | None = None
+    # story #4290 — 사람이 지금 이 명령을 «다시 시도»할 수 있는가. 재시도 엔드포인트와 같은 한 판정(`human_retryable`)이라 화면 배지
+    # 버튼 · 404 뒤 다시 읽은 결과 줄이 이 값 하나만 본다(명령이 없으면 false).
+    command_retryable: bool = False
     # gate.sealed_scheduled_at — publication_command.scheduled_at이 아니다(그 값은 요청
     # 시점 스냅샷이라 재승인 뒤 갱신 안 됨, story #3414). 화면 캘린더(§11-1)가 보는 "지금
     # 승인된 예약 시각"은 이 값.
@@ -1478,6 +1482,7 @@ def _to_draft_list_item(
             if latest_command and latest_command.reason_reset_at else None
         ),
         command_id=latest_command.id if latest_command else None,
+        command_retryable=human_retryable(latest_command) if latest_command else False,
         thumbnail_url=public_url_for_object_path(latest_image.final_object_path) if latest_image else None,
         image_original_width=latest_image.original_width if latest_image else None,
         image_original_bytes=latest_image.original_bytes if latest_image else None,

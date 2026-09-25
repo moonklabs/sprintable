@@ -18,7 +18,9 @@ export type PublicationRetryResult =
   // reloadFailed — 재시도 뒤(성공 · 404) 상태 다시 읽기가 실패했다(까디르 codex 4634 P2 · PO). 화면은 이전 상태를 그대로 두고, 결과 줄은
   // «다시 불러왔어요»라고 말하지 않고 «다시 불러오지 못했어요» 한 줄을 더한다.
   | { type: 'success'; reloadFailed?: boolean }
-  | { type: 'not_retryable'; reloadFailed?: boolean }
+  // stoppedAgain(story #4290 · 유나 03:29Z) — 404였는데 다시 읽은 서버 판정(`command_retryable`)이 참: 그 사이 다른 시도가 있었고 그 시도도
+  // 멈췄다. «지금은 다시 시도할 수 없어요»는 거짓이 되고, 켜진 버튼이 맞다.
+  | { type: 'not_retryable'; reloadFailed?: boolean; stoppedAgain?: boolean }
   /** messageKey 없음 = 모르는 실패 · 네트워크 → «다시 시도하지 못했어요.»(렌더 자리에서 t 리터럴 — 죽은 키 가드가 읽는 형태). */
   | { type: 'error'; messageKey?: string; raw?: string };
 
@@ -35,14 +37,25 @@ export async function postPublicationRetry(url: string): Promise<PublicationRetr
   }
 }
 
+/** 다시 읽기 결과 — false = 실패 · true = 반영함 · `{ retryable }` = 반영함 + 다시 읽은 서버 판정(`command_retryable`, story #4290). */
+export type ReloadOutcome = boolean | { retryable: boolean };
+
 /**
  * 재시도 결과가 성공 · 404면 상태를 다시 읽고, 다시 읽기가 실패하면 reloadFailed를 단다. reload는 **실패해도 이전 상태를 지우지 않는**
- * 함수여야 한다(true = 새 상태를 화면에 반영함). 오류 결과는 다시 읽지 않는다(상태가 바뀌지 않았다).
+ * 함수여야 한다. 오류 결과는 다시 읽지 않는다(상태가 바뀌지 않았다). 404 뒤 다시 읽은 서버 판정이 «다시 시도 가능»이면 stoppedAgain.
  */
-export async function withReload(result: PublicationRetryResult, reload: () => Promise<boolean>): Promise<PublicationRetryResult> {
+export async function withReload(result: PublicationRetryResult, reload: () => Promise<ReloadOutcome>): Promise<PublicationRetryResult> {
   if (result.type === 'error') return result;
-  const ok = await Promise.resolve().then(reload).then((v) => v === true).catch(() => false);
-  return ok ? result : { ...result, reloadFailed: true };
+  const outcome = await Promise.resolve().then(reload).catch((): ReloadOutcome => false);
+  if (outcome === false) return { ...result, reloadFailed: true };
+  if (result.type === 'not_retryable' && typeof outcome === 'object' && outcome.retryable) return { ...result, stoppedAgain: true };
+  return result;
+}
+
+/** 404 결과 줄 문장 키 — 결과 줄 · 댓글 답변 자리가 같은 규칙(유나 03:29Z). */
+export function notRetryableMessageKey(result: Extract<PublicationRetryResult, { type: 'not_retryable' }>): string {
+  if (result.reloadFailed) return 'publicationRetryNotRetryable';
+  return result.stoppedAgain ? 'publicationRetryStoppedAgainReloaded' : 'publicationRetryNotRetryableReloaded';
 }
 
 /** 확인 창 밖(창을 닫은 뒤) 화면에 남는 결과 줄. */
@@ -53,7 +66,8 @@ export function PublicationRetryResultLine({ result, testId }: { result: Publica
   const reloadFailed = result.type !== 'error' && result.reloadFailed === true;
   const text = result.type === 'success' ? t('channelPostsRetrySuccess')
     : result.type === 'not_retryable'
-      ? (reloadFailed ? t('publicationRetryNotRetryable') : t('publicationRetryNotRetryableReloaded'))
+      ? (reloadFailed ? t('publicationRetryNotRetryable')
+        : result.stoppedAgain ? t('publicationRetryStoppedAgainReloaded') : t('publicationRetryNotRetryableReloaded'))
       : result.messageKey ? t(result.messageKey) : t('channelPostsRetryFailed');
   return (
     <Alert variant={isError ? 'destructive' : 'default'} role={isError ? 'alert' : 'status'} data-testid={testId}>

@@ -186,6 +186,10 @@ function stubFetch(opts: {
   // command_status='pending').
   onRetry?: (commandId: string) => { status: number; body?: unknown };
   draftAfterRetry?: Record<string, unknown>;
+  // story #4290 — 재시도가 거절(404)됐을 때 서버의 지금 상태(그 사이 다른 시도가 명령을 움직였다). 없으면 거절 전 그대로.
+  draftAfterRejectedRetry?: Record<string, unknown>;
+  // story #4290 — 답변 재시도 뒤 다시 읽는 댓글 목록(없으면 처음 목록 그대로).
+  commentsAfterReplyRetry?: Parameters<typeof stubFetch>[0]['commentsResponse'];
   // story #3499 — /publications/{id}/insights 응답. 넘기지 않으면(대부분 테스트가
   // publication_id 자체가 null이라 이 fetch를 아예 안 탄다) 빈 배열.
   insightSnapshots?: unknown[];
@@ -199,7 +203,7 @@ function stubFetch(opts: {
       reply?: {
         id: string; status: string; external_reply_url: string | null; command_id: string | null;
         command_status: string | null; failure_kind: string | null;
-        next_attempt_at: string | null; reason_code: string | null;
+        next_attempt_at: string | null; reason_code: string | null; command_retryable?: boolean;
       } | null;
       // story #3596(BE additive) — 「이어서 답변」 3갈래 판정에 쓴다(옵션, 대부분
       // 시나리오는 생략 — 없으면 open_reply_draft=null·sent_replies_count=0 폴백).
@@ -264,6 +268,7 @@ function stubFetch(opts: {
   if (opts.omitGateStatusKey) delete draftDetail.gate_status;
   let currentDraftDetail = draftDetail;
   let rejectNextDraftRefetch = false;
+  let commentReplyRetried = false;
   let currentImages = opts.initialImages ?? [];
   vi.stubGlobal(
     'fetch',
@@ -275,7 +280,10 @@ function stubFetch(opts: {
         // 「다음」 이 URL 호출(=재조회)만 네트워크단 reject한다(최초 페이지 로드
         // 호출은 그대로 성공).
         if (rejectNextDraftRefetch) { rejectNextDraftRefetch = false; throw new Error('network down'); }
-        return { ok: true, status: 200, json: async () => ({ data: currentDraftDetail, error: null, meta: null }) };
+        // story #4290 — 서버처럼 command_retryable을 싣는다(`human_retryable`: dead_letter · blocked → 참). 테스트가 값을 직접 주면 그 값.
+        const served = 'command_retryable' in currentDraftDetail ? currentDraftDetail
+          : { ...currentDraftDetail, command_retryable: currentDraftDetail.command_status === 'dead_letter' || currentDraftDetail.command_status === 'blocked' };
+        return { ok: true, status: 200, json: async () => ({ data: served, error: null, meta: null }) };
       }
       // story #3402·PR#3767 — GATE_ALREADY_HELD best-effort 상대 초안 단건 조회. 테스트의
       // holding_draft_id는 항상 'd9'(현재 편집 중인 DRAFT_ID와 다른 값)로 고정한다.
@@ -502,6 +510,7 @@ function stubFetch(opts: {
         const result = opts.onRetry?.(commandId) ?? { status: 200, body: { id: commandId, status: 'pending' } };
         const ok = result.status < 400;
         if (ok) currentDraftDetail = { ...currentDraftDetail, command_status: 'pending', ...opts.draftAfterRetry };
+        else if (opts.draftAfterRejectedRetry) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterRejectedRetry };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url.startsWith(`/api/organizations/${ORG_ID}/publications/`) && url.endsWith('/insights')) {
@@ -523,7 +532,15 @@ function stubFetch(opts: {
         if (opts.commentsStatus && opts.commentsStatus >= 400) {
           return { ok: false, status: opts.commentsStatus, json: async () => ({ detail: 'boom' }) };
         }
-        const data = opts.commentsResponse ?? { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 };
+        const raw = (commentReplyRetried && opts.commentsAfterReplyRetry) || opts.commentsResponse
+          || { last_collected_at: null, comments: [], active_count: 0, deleted_count: 0 };
+        // story #4290 — 답변 명령도 서버처럼 command_retryable(dead_letter · blocked → 참) · 테스트가 직접 주면 그 값.
+        const data = {
+          ...raw,
+          comments: raw.comments.map((c) => (c.reply && !('command_retryable' in c.reply)
+            ? { ...c, reply: { ...c.reply, command_retryable: c.reply.command_status === 'dead_letter' || c.reply.command_status === 'blocked' } }
+            : c)),
+        };
         return { ok: true, status: 200, json: async () => ({ data, error: null, meta: null }) };
       }
       // story #3517(BE #3867 조각②) — 댓글 「작업으로 전환」·「답변」.
@@ -560,6 +577,7 @@ function stubFetch(opts: {
       // publication-commands/{id}/retry, channel-posts/publication-commands 쪽과
       // 다른 URL — handleRetryReply 전용 자리).
       if (url.match(/\/organizations\/[^/]+\/publication-commands\/[^/]+\/retry$/) && init?.method === 'POST') {
+        commentReplyRetried = true;
         const result = opts.onCommentReplyRetry?.() ?? { status: 200, body: { id: 'cmd-1', status: 'pending' } };
         const ok = result.status < 400;
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
@@ -2557,6 +2575,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       stubFetch({
         draftDetail: { command_status: 'dead_letter', command_id: 'cmd-1' },
         onRetry: () => ({ status: 404, body: { detail: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' } }),
+        // 그 사이 다른 시도가 명령을 pending으로 돌렸다(서버: 지금 재시도 불가).
+        draftAfterRejectedRetry: { command_status: 'pending', failure_kind: null },
       });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
@@ -2572,6 +2592,42 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
       expect(document.body.textContent).not.toContain('command를 찾을 수 없거나');
       expect(draftGets()).toBe(before + 1); // 상태를 다시 읽었다
+    });
+
+    // story #4290 — 낡은 화면: 다른 시도가 먼저 받아 내 재시도는 404인데, 그 사이 워커가 또 멈춰 같은 명령이 새 dead_letter(서버
+    // command_retryable=true). 결과 줄은 «그 사이 다시 시도됐고…» · 버튼은 켜진 채(같은 사실). 뮤테이션: withReload가 다시 읽은 판정을
+    // 무시하면 «지금은 다시 시도할 수 없는 상태예요»로 RED.
+    it('⭐#4290 AC3 — 404 + 다시 읽은 글이 새 멈춤 → «그 사이 다시 시도됐고…» · 버튼 켜짐', async () => {
+      stubFetch({
+        draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-1' },
+        onRetry: () => ({ status: 404, body: { detail: 'x' } }),
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const retryBtn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement;
+      await act(async () => { retryBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      const checklist = document.body.querySelector('[data-testid="channel-post-retry-confirm-checklist"]') as HTMLInputElement;
+      await act(async () => { checklist.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const confirmBtn = [...document.body.querySelectorAll('button')].filter((b) => b !== retryBtn).find((b) => b.textContent === koMessages.content.channelPostsRetryConfirmAction);
+      await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-retry-result"] p')?.textContent)
+        .toBe(koMessages.content.publicationRetryStoppedAgainReloaded);
+      expect((container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // story #4290 AC2 — 버튼은 서버 판정(command_retryable)만 본다. 화면이 상태로 따로 가르던 틈(pending + needs_check → 버튼 켜짐 · 서버
+    // 404)과, 서버가 거짓이라고 한 dead_letter 모두 버튼 없음. 뮤테이션: 배지에 늘 onRetryClick을 넘기면 두 줄 다 RED.
+    it.each([
+      ['pending ∧ needs_check(예전 화면 판정 틈)', { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-9' }],
+      ['dead_letter인데 서버 판정 false', { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-9', command_retryable: false }],
+    ])('⭐#4290 AC2 — %s → 다시 시도 버튼이 눌리지 않는다', async (_label, detail) => {
+      stubFetch({ draftDetail: detail as Record<string, unknown> });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const btn = container.querySelector('[data-testid="channel-post-failure-retry-button"]') as HTMLButtonElement | null;
+      expect(btn === null || btn.disabled).toBe(true);
     });
 
     // 까디르 codex 4634 P2① — 재시도 뒤 다시 읽기가 실패하면 «다시 불러왔어요»라고 말하지 않고 이전 상태(배지)를 그대로 둔다.
@@ -2623,7 +2679,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     // AC2 — needs_check 2단계: 체크 前 확認 버튼 비활성, 체크 後 활성.
     it('⭐AC2 — needs_check는 체크리스트가 뜨고, 체크 前엔 다이얼로그 확認 버튼이 비활성이다', async () => {
-      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-2' } });
+      stubFetch({ draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-2' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -2641,7 +2697,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     });
 
     it('AC2 — needs_check 확認 문구는 dead_letter와 다르다', async () => {
-      stubFetch({ draftDetail: { command_status: 'pending', failure_kind: 'needs_check', command_id: 'cmd-2' } });
+      stubFetch({ draftDetail: { command_status: 'dead_letter', failure_kind: 'needs_check', command_id: 'cmd-2' } });
       await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
       await flush();
 
@@ -4893,6 +4949,18 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
           },
         }],
       },
+      // 그 사이 명령이 다른 길로 끝났다 — 전제가 바뀌어 voided(서버: 지금 재시도 불가 · 답변은 여전히 실패라 줄이 보인다).
+      commentsAfterReplyRetry: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'voided', failure_kind: null, next_attempt_at: null, reason_code: 'CONTENT_CHANGED',
+          },
+        }],
+      },
       onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'command를 찾을 수 없거나 재시도 대상이 아닙니다' }, meta: null } }),
     });
     await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
@@ -4901,12 +4969,66 @@ describe('ChannelPostEditPage — 댓글 섹션(story #3517)', () => {
     expect(retryBtn).not.toBeNull();
     await act(async () => { retryBtn.click(); });
     await flush();
-    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')?.textContent)
-      .toBe(koMessages.content.publicationRetryNotRetryableReloaded);
+    // story #4290 — 다시 읽은 답변이 더 이상 다시 시도할 멈춤이 아니면(여기선 voided) 그 줄이 새 상태를 말한다 — 낡은 «다시 시도» 버튼 ·
+    // «지금은 다시 시도할 수 없어요» 오류 줄은 남지 않는다(다시 시도 가능한 새 멈춤이면 아래 #4290 테스트의 문장).
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-button"]')).toBeNull();
     expect(document.body.textContent).not.toContain('재시도 대상이 아닙니다');
     const commentGets = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .filter(([u, i]) => String(u).includes('/comments') && !String(u).endsWith('/refresh') && !(i as RequestInit | undefined)?.method).length;
     expect(commentGets).toBeGreaterThanOrEqual(2); // 첫 로드 + 404 뒤 다시 읽기
+  });
+
+  // story #4290(유나 03:29Z) — 404 뒤 다시 읽은 답변 명령이 다시 시도 가능한 새 멈춤(서버 command_retryable=true)이면 «그 사이 다시
+  // 시도됐고…» · 글 상세와 같은 키. 뮤테이션: withReload가 다시 읽은 판정을 무시하면 «지금은 다시 시도할 수 없어요»로 RED.
+  // story #4290 AC2 — 답변 «다시 보내기» 버튼도 서버 판정(command_retryable)만 본다. 뮤테이션: comments-section이 command_id만 보고
+  // 버튼을 켜면 RED.
+  it('⭐#4290 AC2 — 서버가 다시 시도 불가라고 한 실패 답변엔 «다시 보내기» 버튼이 없다', async () => {
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: {
+        last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+        comments: [{
+          id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+          external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+          reply: {
+            id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+            command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+            command_retryable: false,
+          },
+        }],
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const btn = container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement | null;
+    expect(btn === null || btn.disabled).toBe(true);
+  });
+
+  it('⭐#4290 — 「다시 보내기」 404 + 다시 읽은 답변이 새 멈춤 → «그 사이 다시 시도됐고…» · 버튼 켜짐', async () => {
+    const stopped = {
+      last_collected_at: '2026-09-05T10:00:00Z', active_count: 1, deleted_count: 0,
+      comments: [{
+        id: 'c1', external_comment_id: 'ext-1', author_display_name: '홍길동', text: '언제 되나요?',
+        external_created_at: null, captured_at: '2026-09-05T10:00:00Z', deleted_at: null,
+        reply: {
+          id: 'reply-1', status: 'failed', external_reply_url: null, command_id: 'cmd-1',
+          command_status: 'dead_letter', failure_kind: 'needs_check', next_attempt_at: null, reason_code: null,
+        },
+      }],
+    };
+    stubFetch({
+      draftDetail: PUBLISHED_DRAFT,
+      commentsResponse: stopped,
+      onCommentReplyRetry: () => ({ status: 404, body: { data: null, error: { code: 'NOT_FOUND', message: 'x' }, meta: null } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="comments-item-reply-retry-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-error"]')?.textContent)
+      .toBe(koMessages.content.publicationRetryStoppedAgainReloaded);
+    expect(container.querySelector('[data-testid="comments-item-reply-retry-button"]')).not.toBeNull();
   });
 
   // 까디르 codex 4634 P2 — 목록 다시 읽기가 실패하면 목록은 그대로(오류 면으로 안 바꿈) · «다시 불러왔어요» 대신 «불러오지 못했어요».
