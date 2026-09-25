@@ -5253,6 +5253,8 @@
     "deliveredCount": "{count}명에게 전달",
     "system": "시스템",
     "loadMore": "더 보기",
+    "endOfRange": "이 기간의 활동을 다 봤어요. 더 이전 활동은 시작일을 앞당기면 보여요.",
+    "endOfAll": "처음 활동까지 다 봤어요.",
     "emptyTitle": "아직 활동이 없어요",
     "emptyDesc": "필터를 바꾸거나, 팀이 행동하면 여기에 정규화되어 쌓여요.",
     "forbiddenTitle": "접근 제한",

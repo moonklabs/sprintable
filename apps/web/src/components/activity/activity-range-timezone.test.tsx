@@ -194,11 +194,42 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     expect(container.textContent).toContain('item-1');
   });
 
+  it('⭐끝까지 오면 끝 문장 — 시작일이 있으면 «이 기간의 활동을 다 봤어요…» · 비우면 «처음 활동까지 다 봤어요.»(유나 판정)', async () => {
+    stubStream({ first: { items: [ITEM(3)], next_before_seq: null } });
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    expect(container.textContent).toContain(enMessages.teamActivity.endOfRange);
+    expect(container.textContent).not.toContain(enMessages.teamActivity.endOfAll);
+    const [fromInput] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+    await act(async () => { setDate(fromInput!, ''); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(container.textContent).toContain(enMessages.teamActivity.endOfAll);
+    expect(container.textContent).not.toContain(enMessages.teamActivity.endOfRange);
+  });
+
+  it('«더 보기» 실패는 끝이 아니다 — 버튼 그대로 · 끝 문장 없음', async () => {
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/activity-stream')) {
+        if (new URL(url, 'http://x').searchParams.get('before_seq')) return { ok: false, status: 502, json: async () => null };
+        return { ok: true, status: 200, json: async () => ({ data: { items: [ITEM(9)], next_after_seq: null, next_before_seq: 9 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    });
+    const { TeamActivityView } = await import('./team-activity-view');
+    await render(<TeamActivityView projectId="p1" />);
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(moreButton()).toBeTruthy();
+    expect(container.textContent).not.toContain(enMessages.teamActivity.endOfRange);
+  });
+
   it('첫 쪽이 비어 있고 서버 커서가 없으면 «더 보기»를 그리지 않는다', async () => {
     stubStream({});
     const { TeamActivityView } = await import('./team-activity-view');
     await render(<TeamActivityView projectId="p1" />);
     expect(moreButton()).toBeUndefined();
+    expect(container.textContent, '0건은 빈 상태가 맡는다 — 끝 문장 없음').not.toContain(enMessages.teamActivity.endOfRange);
   });
 });
 

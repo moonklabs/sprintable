@@ -417,7 +417,13 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                     {loadingMore ? tc('loading') : t('loadMore')}
                   </Button>
                 </li>
-              ) : null}
+              ) : (
+                // story #4297(유나 판정) — 버튼만 사라지면 실패인지 끝인지 못 가른다. 이 목록의 끝은 «기간 안의 끝»이라, 시작일이 있으면
+                // 더 이전으로 가는 길(시작일 앞당기기)을 말한다. 0건이면 이 목록 대신 빈 상태가 그려지고(위), 더 보기 실패는 커서가 남아 버튼이 그대로다.
+                <li className="pt-3 text-center text-xs text-muted-foreground">
+                  {rangeFrom ? t('endOfRange') : t('endOfAll')}
+                </li>
+              )}
             </ul>
           )}
         </div>
