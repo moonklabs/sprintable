@@ -86,7 +86,8 @@ describe('StandupHistorySection — 더 보기(story #2248)', () => {
     });
     await renderSection();
 
-    expect(container.querySelectorAll('[data-slot="badge"]')[0]?.textContent).toBe('1');
+    // story #4302 — 더 남았으니 불러온 수는 한계 표기(«1+»).
+    expect(container.querySelectorAll('[data-slot="badge"]')[0]?.textContent).toBe('스탠드업 1+개');
 
     const clickLoadMore = async () => {
       const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기') as HTMLButtonElement;
@@ -99,5 +100,7 @@ describe('StandupHistorySection — 더 보기(story #2248)', () => {
     expect(container.textContent).toContain('2026-07-26');
     // 3페이지째 has_more:false라 버튼이 사라진다.
     expect(Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기')).toBeUndefined();
+    // story #4302 — 다 불러왔으면 맨 수(`+` 없음).
+    expect(container.querySelectorAll('[data-slot="badge"]')[0]?.textContent).toBe('스탠드업 2개');
   });
 });

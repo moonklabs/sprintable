@@ -211,6 +211,7 @@
     "title": "Storage",
     "breadcrumb": "Workspace",
     "summary": "{count, plural, one {# asset} other {# assets}} · {size}",
+    "summaryAtLeast": "{count, plural, one {#+ asset} other {#+ assets}} · {size}+",
     "allAssets": "All assets",
     "folderSearchPlaceholder": "Search folders",
     "newFolderAction": "New folder",

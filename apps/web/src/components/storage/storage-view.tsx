@@ -385,11 +385,11 @@ export function StorageView({ projectId }: { projectId: string }) {
         <span className="shrink-0 text-[12px] text-muted-foreground">/</span>
         <h1 className="shrink-0 text-[15px] font-[650] tracking-[-0.01em] text-foreground">{t('title')}</h1>
         <Badge variant="info" className="ml-1 shrink-0 font-bold">
-          {t('summary', { count: items.length, size: formatTotalSize(totalBytes) })}
+          {storageSummaryText(t, items.length, totalBytes, nextCursor !== null)}
         </Badge>
       </div>
     ),
-    [t, items.length, totalBytes],
+    [t, items.length, totalBytes, nextCursor],
   );
 
   const supportsInlinePanel = detailPanel.supportsInlinePanel;
@@ -564,4 +564,15 @@ export function StorageView({ projectId }: { projectId: string }) {
 
     </div>
   );
+}
+
+// story #4302(유나 판정) — 상단 뱃지 «{수}개 자산 · {용량}». 자산은 커서로 나눠 받으므로 수 · 용량 둘 다 «불러온 것»의 합이다:
+// 더 남았으면(hasMore) 둘 다 `+`. en이 복수형 키라 `+`를 숫자 인자에 붙이지 않고 형제 키(summaryAtLeast)에 둔다(formatAtLeast 주석 참고).
+// 컴포넌트 아래에 둔다 — i18n 키 스캐너가 위에서부터 읽으며 `t = useTranslations('storage')` 바인딩을 먼저 봐야 이 안의 키를 storage.*로 센다.
+export function storageSummaryText(
+  t: (key: 'summary' | 'summaryAtLeast', values: { count: number; size: string }) => string,
+  count: number, totalBytes: number, hasMore: boolean,
+): string {
+  const values = { count, size: formatTotalSize(totalBytes) };
+  return hasMore ? t('summaryAtLeast', values) : t('summary', values);
 }

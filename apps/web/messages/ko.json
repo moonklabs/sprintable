@@ -211,6 +211,7 @@
     "title": "스토리지",
     "breadcrumb": "워크스페이스",
     "summary": "{count}개 자산 · {size}",
+    "summaryAtLeast": "{count}+개 자산 · {size}+",
     "allAssets": "전체 자산",
     "folderSearchPlaceholder": "폴더 검색",
     "newFolderAction": "새 폴더",

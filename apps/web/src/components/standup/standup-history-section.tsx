@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, startTransition } from 'react';
 import { ClipboardList } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { formatAtLeast } from '@/lib/format-at-least';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { parseCursorMeta } from '@/lib/pagination';
@@ -75,7 +76,8 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
           <ClipboardList className="h-4 w-4" aria-hidden />
           {t('history')}
         </h2>
-        <Badge variant="chip">{entries.length}</Badge>
+        {/* story #4302 — 20건씩 받는 목록이라 불러온 수는 전체가 아니다: 더 남았으면 «48+»(formatAtLeast · 유나 판정). */}
+        <Badge variant="chip">{t('entryCount', { count: formatAtLeast(entries.length, nextCursor !== null) })}</Badge>
       </div>
       <div className="space-y-4">
         {sortedDates.map((date) => (
