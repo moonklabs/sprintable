@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Bot, User } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useTranslations } from 'next-intl';
 import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
@@ -157,7 +157,7 @@ export function Avatar({
             )}
             aria-label={a11yName}
           >
-            {isAgent ? <Bot style={{ width: iconSize, height: iconSize }} /> : <User style={{ width: iconSize, height: iconSize }} />}
+            <UnnamedMemberIcon type={isAgent ? 'agent' : 'human'} style={{ width: iconSize, height: iconSize }} />
           </span>
         )}
       </div>

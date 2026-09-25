@@ -526,9 +526,9 @@ describe('OrganizationTrustPage — 이름 빈 구성원 · 지워진 구성원(
 
 
 // story #4285(유나 재검 03:02Z) — 진짜 이름이 없는 행의 표식은 대체 낱말의 첫 글자(«이» · «알»)가 아니라 아이콘(에이전트 Bot · 그 외
-// UserRound) · 이름 있는 행은 머리글자 그대로. 뮤테이션: AdminRow가 hasRealName을 무시하고 늘 initial(name)을 그리면 RED.
+// User · UnnamedMemberIcon) · 이름 있는 행은 머리글자 그대로. 뮤테이션: AdminRow가 hasRealName을 무시하고 늘 initial(name)을 그리면 RED.
 describe('OrganizationTrustPage — 이름 없는 행 표식은 아이콘(story #4285 · 유나 재검)', () => {
-  it('⭐이름 빈 에이전트 → Bot · 지워진 구성원 → UserRound · 표식 안에 글자 0 · 이름 있는 행은 머리글자', async () => {
+  it('⭐이름 빈 에이전트 → Bot · 지워진 구성원 → User · 표식 안에 글자 0 · 이름 있는 행은 머리글자', async () => {
     mountAsAdmin();
     const base = { role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 2, computed_at: '2026-09-24T00:00:00+00:00', pending: 0 };
     const summary: Array<StubMember & { name?: string | null; member_type?: 'human' | 'agent' | null; member_deleted?: boolean }> = [

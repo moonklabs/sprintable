@@ -233,3 +233,45 @@ describe('StoryCard — deleteStoryDialogBody 조사(story #4120)', () => {
     expect(document.body.textContent).not.toContain('을(를)');
   });
 });
+
+// story #4284 — 이름 없는 구성원(BE name null)은 머리글자 대신 사람 아이콘(User · 유나 판정 신원 폴백 한 벌) · title은 «이름 없는 구성원». 예전 타입이 거짓이라
+// null이면 `name.slice` throw 또는 빈 동그라미였다.
+describe('StoryCard — 이름 없는 담당자(story #4284)', () => {
+  it('⭐담당자 동그라미가 «?» · «이름» 머리글자가 아니라 사람 아이콘이고, title은 «이름 없는 구성원»', () => {
+    const markup = render(makeStory({ assignee_id: 'm-unnamed', assignee_ids: ['m-unnamed'] }), [{ id: 'm-unnamed', name: null, type: 'human' }]);
+    expect(markup).toContain(`title="${koMessages.common.memberUnnamed}"`);
+    expect(markup).toMatch(/lucide-user(?![-\w])/);
+    expect(markup).not.toContain('lucide-user-round');
+    expect(markup).not.toMatch(/>\?</);
+    expect(markup).not.toContain('>이름<');
+  });
+
+  it('⭐이름 없는 에이전트 담당자는 Bot 아이콘(사람 아이콘 + 에이전트 점으로 어긋나지 않게 · 유나 판정)', () => {
+    const markup = render(makeStory({ assignee_id: 'a-unnamed', assignee_ids: ['a-unnamed'] }), [{ id: 'a-unnamed', name: null, type: 'agent' }]);
+    expect(markup).toContain('lucide-bot');
+    expect(markup).not.toMatch(/lucide-user/);
+  });
+
+  it('실명 담당자는 그대로 머리글자', () => {
+    const markup = render(makeStory({ assignee_id: 'm-1', assignee_ids: ['m-1'] }), [{ id: 'm-1', name: 'Pedro', type: 'human' }]);
+    expect(markup).toContain('title="Pedro"');
+    expect(markup).toContain('>PE<');
+  });
+});
+
+// story #4284(PO 검토 ②) — 신원 이름(머리글자)엔 name(null이면 사람 아이콘) · 읽는 글자엔 label. 라벨을 이름 자리에 넘기면 «이름 없는 구성원»의 첫 글자가 머리글자가 된다.
+describe('StoryCard — 이름 없는 검증자 씰(story #4284)', () => {
+  it('⭐검증 씰 머리글자가 «이»가 아니라 사람 아이콘 · 글자는 «이름 없는 구성원»', () => {
+    const markup = renderToStaticMarkup(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <DndContext>
+          <StoryCard story={makeStory({ status: 'done', human_verified: true, human_verified_at: '2026-09-01T00:00:00Z' } as Partial<KanbanStory>)} verifiedBy={{ id: 'v1', name: null, type: 'human' }} onClick={() => {}} />
+        </DndContext>
+      </NextIntlClientProvider>,
+    );
+    expect(markup).toContain(koMessages.common.memberUnnamed);
+    expect(markup).not.toMatch(/>이</);
+    expect(markup).not.toContain('null');
+  });
+});
+

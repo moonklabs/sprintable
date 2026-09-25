@@ -7,6 +7,7 @@ import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
+import { memberNameById } from '@/lib/member-display';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
   open: 'rollupOpen',
@@ -35,6 +36,8 @@ export function CommentThreadCard({
   thread, memberMap = {}, active, onSelectPin, onResolve, onReply, className,
 }: CommentThreadCardProps) {
   const t = useTranslations('canvas');
+  // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed).
+  const tc = useTranslations('common');
   const [replyDraft, setReplyDraft] = useState('');
   const resolved = thread.rollup === 'resolved';
   // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -67,7 +70,7 @@ export function CommentThreadCard({
         {thread.comments.map((c) => (
           <div key={c.id}>
             <p className="text-[11px] text-muted-foreground">
-              <strong className="text-foreground">{memberMap[c.author_id]?.name ?? '—'}</strong>
+              <strong className="text-foreground">{memberNameById(memberMap, c.author_id, tc, '—')}</strong>
             </p>
             <p className="mt-0.5 text-xs leading-relaxed text-foreground">{c.body}</p>
           </div>
@@ -78,7 +81,7 @@ export function CommentThreadCard({
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—', josa: pickIGaJosa(memberMap[thread.resolved_by]?.name ?? '—') })}</p>
+          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberNameById(memberMap, thread.resolved_by, tc, '—'), josa: pickIGaJosa(memberNameById(memberMap, thread.resolved_by, tc, '—')) })}</p>
         ) : null}
 
         {!resolved ? (

@@ -1686,3 +1686,92 @@ describe('KanbanBoard — 필터 메뉴를 열면 초점 = 검색칸(story #4306
   });
 });
 
+// story #4284 — BE `team_members.name`은 nullable(표시 이름 없는 휴먼 · story #3758). FE 타입이 `name: string`이라 tsc가 못 잡았고,
+// 이름 없는 구성원이 하나라도 있으면 담당자 필터 렌더(`m.name.toLowerCase()`)에서 throw → 일감 보드 전체가 오류 화면이었다.
+describe('KanbanBoard — 이름 없는 구성원(story #4284)', () => {
+  const MEMBERS = [
+    { id: 'm-unnamed', name: null, type: 'human' },
+    { id: 'm-named', name: '송윤재', type: 'human' },
+    { id: 'a-1', name: '디디', type: 'agent' },
+  ];
+
+  async function openAssigneeFilter(): Promise<HTMLElement> {
+    const trigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.board.allAssignees));
+    expect(trigger, '담당자 필터 버튼').toBeTruthy();
+    // DropdownMenu는 Base UI Menu — 클릭으로 열린다(내용은 body 포털).
+    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    expect(menu, '담당자 필터 메뉴').toBeTruthy();
+    return menu!;
+  }
+
+  it('⭐보드가 오류 화면 없이 그려지고, 담당자 필터에 «이름 없는 구성원»이 뜬다', async () => {
+    stubFetch([{ id: 's1', title: '이름 없는 담당자 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-unnamed' }], MEMBERS);
+    await mount();
+    expect(container.textContent).toContain('이름 없는 담당자 스토리');
+    const menu = await openAssigneeFilter();
+    expect(menu.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(menu.textContent).toContain('송윤재');
+  });
+
+  it('⭐보드 전체 검색 — 담당자의 보이는 라벨(«이름 없는»)로도 스토리가 찾힌다', async () => {
+    stubFetch([
+      { id: 's1', title: '이름 없는 사람 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-unnamed' },
+      { id: 's2', title: '실명 스토리', status: 'backlog', priority: 'medium', assignee_id: 'm-named' },
+    ], MEMBERS);
+    await mount();
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === koMessages.board.searchPlaceholder)!;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input[type="search"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, '이름 없는 구성원'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(container.textContent).toContain('이름 없는 사람 스토리');
+    expect(container.textContent).not.toContain('실명 스토리');
+  });
+
+  it('⭐이름 없는 사람 둘 → 필터 행이 id 꼬리로 갈리고, 고른 뒤 트리거도 같은 라벨 · 묶음에 하나뿐인 이름 없는 에이전트는 꼬리 없음(유나 판정)', async () => {
+    const TWO = [
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'human' },
+      { id: 'c3000000-0000-4000-8000-000000000003', name: null, type: 'agent' },
+    ];
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], TWO);
+    await mount();
+    const menu = await openAssigneeFilter();
+    const rowTexts = [...menu.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim() ?? '');
+    const unnamed = koMessages.common.memberUnnamed;
+    expect(rowTexts).toContain(`${unnamed} · a1000000`);
+    expect(rowTexts).toContain(`${unnamed} · b2000000`);
+    expect(rowTexts, '에이전트 묶음엔 이름 없는 행이 하나 — 꼬리 없음').toContain(unnamed);
+  });
+
+  it('⭐이름 없는 사람 둘 중 하나를 고른 상태 → 필터 트리거도 그 행 라벨(id 꼬리)', async () => {
+    searchRef.current = 'assignee_id=b2000000-0000-4000-8000-000000000002';
+    try {
+      stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], [
+        { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+        { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'human' },
+      ]);
+      await mount();
+      const trigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(`${koMessages.common.memberUnnamed} · b2000000`));
+      expect(trigger, '필터 트리거가 고른 행과 같은 라벨').toBeTruthy();
+    } finally {
+      searchRef.current = '';
+    }
+  });
+
+  it('담당자 검색 — 보이는 라벨로 찾는다(«이름 없는»으로 이름 없는 구성원이 걸리고, 실명 검색에서 오류 없음)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }], MEMBERS);
+    await mount();
+    const menu = await openAssigneeFilter();
+    const input = menu.querySelector('input') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, '이름 없는'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(menu.textContent).toContain(koMessages.common.memberUnnamed);
+    expect(menu.textContent).not.toContain('송윤재');
+    await act(async () => { setter.call(input, '송윤'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(menu.textContent).toContain('송윤재');
+    expect(menu.textContent).not.toContain(koMessages.common.memberUnnamed);
+  });
+});

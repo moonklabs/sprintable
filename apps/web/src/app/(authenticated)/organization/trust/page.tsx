@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Bot, HeartHandshake, UserRound } from 'lucide-react';
+import { HeartHandshake } from 'lucide-react';
+import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -50,16 +51,14 @@ function initial(name: string): string {
 // 용도라 그 자체를 바꾸면 채널 목록이 깨진다 — 이 화면 전용 표식을 따로 둔다(색
 // 코딩 없음, 이 화면엔 애초에 "역할"이 색으로 갈릴 이유가 없다는 원 판단은 무변).
 // story #4285(유나 재검 03:02Z · 4646 Avatar 계약과 같은 규칙) — 진짜 이름이 없는 행(«이름 없는 구성원» · «알 수 없는 구성원»)은
-// 대체 낱말의 첫 글자(«이» · «알»)가 누구의 머리글자처럼 읽힌다 — 글자 대신 같은 원에 아이콘(에이전트 Bot · 그 외 UserRound).
+// 대체 낱말의 첫 글자(«이» · «알»)가 누구의 머리글자처럼 읽힌다 — 글자 대신 같은 원에 아이콘(UnnamedMemberIcon · 에이전트 Bot · 그 외 User).
 function PersonMark({ label, icon }: { label?: string; icon?: 'agent' | 'person' }) {
   return (
     <span
       aria-hidden="true"
       className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
     >
-      {icon === 'agent' ? <Bot className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-agent" />
-        : icon === 'person' ? <UserRound className="size-3.5" aria-hidden="true" data-testid="trust-mark-icon-person" />
-        : label}
+      {icon ? <UnnamedMemberIcon type={icon === 'agent' ? 'agent' : 'human'} className="size-3.5" data-testid={`trust-mark-icon-${icon}`} /> : label}
     </span>
   );
 }

@@ -405,7 +405,9 @@ export interface KanbanSprint {
 
 export interface KanbanMember {
   id: string;
-  name: string;
+  // story #4284 — BE `team_members.name`은 nullable(story #3758: 표시 이름 없는 휴먼은 이메일로 지어내지 않고 NULL을 정직하게 저장).
+  // 예전 `name: string`은 거짓 계약이라 tsc가 null 소비를 못 잡았다(보드 담당자 필터 `m.name.toLowerCase()` → 보드 전체 오류 화면).
+  name: string | null;
   type: string;
   // story #3997 CHANGES(자체 그라운딩 확장, 2026-09-17) — story-detail-panel.tsx의 담당자
   // 토글 피커가 이 목록을 그대로 쓴다. memberMap(기존 배정 표시 해소)은 이 필드로 안

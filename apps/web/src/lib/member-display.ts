@@ -21,6 +21,49 @@ export function memberDisplayLabel(name: string | null | undefined, t: (key: str
   return name ? name : t('memberUnnamed');
 }
 
+/** story #4284 — `/api/members` · `/api/team-members` 한 줄의 공용 모양. BE `team_members.name`은 nullable(표시 이름 없는 휴먼 · #3758)이라
+ * `name: string | null` — 소비처가 인라인 `{ name: string }`으로 받으면 tsc가 null 소비를 못 잡는다(채팅 멘션 · 보드 필터가 그렇게 깨졌다). */
+export interface MemberRow {
+  id: string;
+  name: string | null;
+  type?: string;
+  role?: string | null;
+  runtime_type?: string | null;
+}
+
+/** story #4284(유나 판정 · 4638 규칙) — 목록 **행** 라벨. 이름 없는 행이 둘 이상이면 서로 갈리게: 역할 라벨이 그 행들 사이에서 유일하면
+ * 그걸로 충분(행에 이미 보인다) · 같거나 없으면 «· ID 앞 8자» 꼬리. 이름 있는 행 · 이름 없는 행이 하나뿐이면 꼬리 없음.
+ * 본문에 넣는 글자(예: 멘션 `@…`)엔 쓰지 않는다 — 그건 memberDisplayLabel 그대로. */
+export function memberRowLabels<T extends { id: string; name: string | null }>(
+  rows: T[],
+  t: (key: string) => string,
+  roleLabel: (row: T) => string,
+): Map<string, string> {
+  const unnamed = rows.filter((r) => !r.name);
+  const out = new Map<string, string>();
+  for (const row of rows) {
+    const base = memberDisplayLabel(row.name, t);
+    if (row.name || unnamed.length < 2) { out.set(row.id, base); continue; }
+    const role = roleLabel(row);
+    const roleIsUnique = role !== '' && unnamed.filter((u) => roleLabel(u) === role).length === 1;
+    out.set(row.id, roleIsUnique ? base : `${base} · ${row.id.slice(0, 8)}`);
+  }
+  return out;
+}
+
+// story #4284 — id로 구성원 이름을 찾을 때 «목록에 있는데 이름이 없음»(→ memberDisplayLabel의 «이름 없는 구성원»)과
+// «목록에 없음»(→ 호출부가 정한 unknownFallback · 예: «—»)을 가른다. 예전 `memberMap[id]?.name ?? fallback`은 이름이 null인 실존
+// 구성원까지 fallback(id 조각 등)으로 떨어뜨려, 식별자를 이름처럼 보이던 #3755 클래스와 같은 모양이 됐다. `t`는 common 네임스페이스.
+export function memberNameById(
+  memberMap: Record<string, { name: string | null }> | undefined,
+  id: string,
+  t: (key: string) => string,
+  unknownFallback: string,
+): string {
+  const member = memberMap?.[id];
+  return member ? memberDisplayLabel(member.name, t) : unknownFallback;
+}
+
 // story #3758(9번째, PO 決 2026-09-09) — 대화 참여자 전용. `resolved === false`(진짜
 // orphan — member/alias 해소 자체가 실패)는 t('unknownMember')(「알 수 없는 구성원」,
 // 낱말 정 적용 — chats.unknownMember 값 자체는 이 스토리가 갱신) · 그 외(실존 구성원,

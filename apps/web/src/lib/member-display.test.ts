@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { memberDisplayLabel, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
+import { memberDisplayLabel, memberNameById, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
   const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원' };
@@ -88,3 +88,22 @@ describe('participantDisplayLabel — story #3758', () => {
     expect(participantDisplayLabel({ name: '피오' }, tChats, t)).toBe('피오');
   });
 });
+
+// story #4284 — id로 이름 찾기: «목록에 있는데 이름 없음»과 «목록에 없음»을 가른다(예전 `?.name ?? fallback`은 둘을 섞어 이름 없는
+// 실존 구성원까지 id 조각 같은 fallback으로 떨어뜨렸다 — #3755 클래스).
+describe('memberNameById', () => {
+  const tc = (key: string) => (key === 'memberUnnamed' ? '이름 없는 구성원' : key);
+  const map = { named: { name: '송윤재' }, unnamed: { name: null }, blank: { name: '' } };
+  it('실명은 그대로', () => {
+    expect(memberNameById(map, 'named', tc, 'x')).toBe('송윤재');
+  });
+  it('⭐목록에 있는데 이름이 없으면(null · 빈 문자열) «이름 없는 구성원» — fallback으로 떨어지지 않는다', () => {
+    expect(memberNameById(map, 'unnamed', tc, 'unname')).toBe('이름 없는 구성원');
+    expect(memberNameById(map, 'blank', tc, 'blank-')).toBe('이름 없는 구성원');
+  });
+  it('⭐목록에 없는 id만 호출부 fallback', () => {
+    expect(memberNameById(map, 'missing-id', tc, 'missin')).toBe('missin');
+    expect(memberNameById(undefined, 'x', tc, '—')).toBe('—');
+  });
+});
+

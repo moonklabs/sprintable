@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
+import { memberNameById } from '@/lib/member-display';
 
 interface ArtifactVersionRailProps {
   artifact: VisualArtifact;
@@ -23,6 +24,8 @@ interface ArtifactVersionRailProps {
  */
 export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSelectVersion, memberMap = {}, descriptionSlot }: ArtifactVersionRailProps) {
   const t = useTranslations('canvas');
+  // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed).
+  const tc = useTranslations('common');
   const [descOpen, setDescOpen] = useState(false);
   const sorted = [...versions].sort((a, b) => b.version - a.version);
 
@@ -34,7 +37,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
           const isCurrent = v.version === artifact.current_version;
           const isAnchor = v.version === artifact.anchor_version;
           const isSelected = v.version === selectedVersion;
-          const authorName = memberMap[v.created_by]?.name ?? '—';
+          const authorName = memberNameById(memberMap, v.created_by, tc, '—');
           return (
             <li key={v.id}>
               <button

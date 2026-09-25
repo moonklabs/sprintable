@@ -1204,3 +1204,81 @@ describe('StoryDetailPanel — 담당자 배정 토글 시스템 발행 제외(s
     expect(candidateBtns.some((t) => t.includes('점검봇'))).toBe(true);
   });
 });
+
+// story #4284(유나 판정) — 담당자 고르기 목록에는 사람 · 에이전트가 섞인다. 이름 없는 구성원의 머리글자 자리는 타입대로(에이전트 Bot · 사람 User).
+describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 구성원 아이콘(story #4284)', () => {
+  it('⭐이름 없는 에이전트는 Bot · 이름 없는 사람은 User', async () => {
+    stubFetch();
+    const members = [
+      { id: 'a-unnamed', name: null, type: 'agent' },
+      { id: 'h-unnamed', name: null, type: 'human' },
+    ];
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} members={members} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const edit = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith("✎"));
+    expect(edit, '담당자 편집 버튼').toBeTruthy();
+    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rows = [...container.querySelectorAll('button')].filter((b) => b.textContent?.includes(koMessages.common.memberUnnamed));
+    expect(rows).toHaveLength(2);
+    const iconOf = (i: number) => rows[i]!.querySelector('svg')?.getAttribute('class') ?? '';
+    expect(iconOf(0)).toContain('lucide-bot');
+    expect(iconOf(1)).toMatch(/lucide-user(?![-\w])/);
+  });
+});
+
+describe('StoryDetailPanel — 담당자 고르기 목록의 이름 없는 행 가르기(story #4284 유나 판정)', () => {
+  async function openPicker(members: Array<{ id: string; name: string | null; type: string }>) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={{}} members={members} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const edit = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim().startsWith('✎'));
+    await act(async () => { edit!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    return [...container.querySelectorAll('button')].filter((b) => b.textContent?.includes(koMessages.common.memberUnnamed)).map((b) => b.textContent?.trim() ?? '');
+  }
+
+  it('⭐이름 없는 구성원 둘 → 행 라벨이 id 꼬리로 서로 다르다', async () => {
+    const rows = await openPicker([
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'b2000000-0000-4000-8000-000000000002', name: null, type: 'agent' },
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('a1000000');
+    expect(rows[1]).toContain('b2000000');
+  });
+
+  it('이름 없는 구성원이 하나면 꼬리 없음', async () => {
+    const rows = await openPicker([
+      { id: 'a1000000-0000-4000-8000-000000000001', name: null, type: 'human' },
+      { id: 'm-named', name: 'Pedro', type: 'human' },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toContain('a1000000');
+  });
+});
+
+// story #4284(까디르 CHANGES) — 워크셀 메시지 작성자: 목록에 없는 작성자는 id 통째가 아니라 «알 수 없는 구성원».
+describe('StoryDetailPanel — 워크셀 메시지의 모르는 작성자(story #4284)', () => {
+  it('⭐목록에 없는 작성자 → «알 수 없는 구성원» · 작성자 id는 화면에 없음', async () => {
+    const UNKNOWN = 'f00dcafe-0000-4000-8000-00000000abcd';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'c1', story_id: 's1', content: '모르는 작성자 댓글', created_by: UNKNOWN, created_at: '2026-09-25T00:00:00Z' }], meta: {} }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({ status: 'in-progress' })} tasks={[]} onClose={() => {}} memberMap={{}} />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(container.textContent).toContain('모르는 작성자 댓글');
+    expect(container.textContent).toContain(koMessages.chats.unknownMember);
+    expect(container.textContent).not.toContain(UNKNOWN);
+  });
+});
+
