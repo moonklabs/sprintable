@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
+import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
 // story #3845(§① 2026-09-14) — 「하루 체크인」 절. 독립 /standup 라우트가 은퇴(legacy-
 // resource-tables.ts RENAMED_RESOURCES 참고)하며 이 컴포넌트의 유일한 마운트 지점이
 // 됐다 — 경로는 그대로 두고(비route 파일로 남김, 파일 이동에 따른 import 처짐 회피)
@@ -724,7 +725,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   };
 
   if (loading) {
-    return <p className="p-6 text-sm text-muted-foreground">{t('loading')}</p>;
+    // story #4274(유나 판정) — 서버 page는 곧바로 끝나고 보이는 로딩은 이 분기라, 맨 글자만 그리면 보드 → 스프린트 이동 때 탭 줄이
+    // ~1.4s 사라졌다(sprints/loading.tsx의 탭 줄이 여기서 끊김). 같은 프레임 스켈레톤(탭 줄 · sticky 자리)으로.
+    return <WorkspaceFrameLoading active="sprints" layout="sticky" />;
   }
 
   return (

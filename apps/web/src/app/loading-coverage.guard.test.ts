@@ -256,6 +256,8 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     // 까디르 델타 — 표의 컨테이너 토큰만 보면 셸 감싸개(V3ShellLoading)를 빼도 초록이었다. 감싸개 사용 + 그 감싸개가 v3 셸 뿌리 클래스를 쓰는지.
     const shell = codeOnly(readFileSync(join(APP_ROOT, '../components/nav/v3-shell-loading.tsx'), 'utf8'));
     expect(shell).toMatch(/className="v3-shell-root\b/);
+    // 유나 판정(4643) — v3 화면은 하단 탭바를 스스로 그린다 → 셸 loading에도(없으면 390에서 탭바가 사라졌다 돌아온다).
+    expect(shell).toMatch(/<MobileTabBar\b/);
     const problems: string[] = [];
     for (const k of ['/today', '/chat', '/connect-rules']) {
       const dir = routeDirOf(destinations.get(k)!);

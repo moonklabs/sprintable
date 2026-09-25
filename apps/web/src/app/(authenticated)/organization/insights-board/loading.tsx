@@ -5,5 +5,5 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton variant="cards" className="mx-auto w-full max-w-6xl space-y-6 p-6" />;
+  return <PageSkeleton variant="cards" eyebrow className="mx-auto w-full max-w-6xl space-y-6 p-6" />;
 }

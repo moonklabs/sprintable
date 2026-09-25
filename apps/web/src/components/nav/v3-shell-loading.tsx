@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { NavV3Sidebar, type NavV3ItemKey } from '@/components/nav/nav-v3-item-list';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 
 /**
@@ -28,6 +29,9 @@ export function V3ShellLoading({
           {children}
         </div>
       </div>
+      {/* 유나 판정(4643) — v3 화면은 하단 탭바(MobileTabBar)를 스스로 그린다 → loading에도 같은 자리에(없으면 390에서 탭바가 사라졌다 돌아온다).
+          읽지 않은 수는 loading 동안 모름 — 0(배지 없음). */}
+      <MobileTabBar chatUnreadTotal={0} navV3Flags={flags} />
     </div>
   );
 }
