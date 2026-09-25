@@ -2,7 +2,14 @@
 // 화면이 안 바뀌었다(«탭→주소» 536~1000ms · 있는 결재 · 대화는 44~193ms). 결재(inbox/loading.tsx)와 같은 문법의 스켈레톤으로 즉시 반응.
 // 전체(/more) — 메뉴 목록 모양(제목 · 줄 여럿).
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { MoreTopBarTitle, TopBarFallbackHolder } from '@/components/nav/flat-tab-top-bar';
 
 export default function Loading() {
-  return <PageSkeleton className="space-y-6 p-4" />;
+  // story #4326 — 불러오는 동안 상단바 제목 · 칩이 비지 않게 도착 화면의 제목을 폴백으로 쥔다.
+  return (
+    <>
+      <TopBarFallbackHolder title={<MoreTopBarTitle />} showContextChip />
+      <PageSkeleton className="space-y-6 p-4" />
+    </>
+  );
 }

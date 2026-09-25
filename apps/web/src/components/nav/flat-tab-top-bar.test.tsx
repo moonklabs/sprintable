@@ -1,0 +1,88 @@
+// @vitest-environment jsdom
+// story #4326 — «전체» · «결재» · «대화»로 옮기는 사이(loading.tsx가 뜬 동안) 상단바 제목 · 칩이 비었다. 각 loading이 도착 화면과 **같은
+// 제목 컴포넌트**를 폴백으로 쥐고(칩 표시), 화면 슬롯이 붙으면 화면이 이긴다(4291 AC3과 같은 방식).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../messages/ko.json';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+
+const nav = vi.hoisted(() => ({ tab: null as string | null }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(nav.tab ? `tab=${nav.tab}` : ''),
+}));
+// 결재 loading의 선행 요청 조각은 이 검사와 무관 — 네트워크 없이 비운다.
+vi.mock('@/components/inbox/inbox-prefetch-starter', () => ({ InboxPrefetchStarter: () => null }));
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+beforeEach(() => { nav.tab = null; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
+
+function TitleProbe() {
+  const { title, showContextChip } = useTopBar();
+  return <div data-testid="topbar-title" data-chip={String(showContextChip)}>{title}</div>;
+}
+
+async function render(node: React.ReactNode) {
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <TopBarProvider>
+          <TitleProbe />
+          {node}
+        </TopBarProvider>
+      </NextIntlClientProvider>,
+    );
+  });
+}
+const probe = () => container.querySelector('[data-testid="topbar-title"]') as HTMLElement;
+
+describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(story #4326)', () => {
+  it('⭐«전체»(/more) 로딩 — 제목 = 전체 메뉴 제목 · 칩 표시', async () => {
+    const { default: Loading } = await import('@/app/(authenticated)/more/loading');
+    await render(<Loading />);
+    expect(probe().textContent).toBe(koMessages.nav.moreMenuTitle);
+    expect(probe().querySelector('h1')).not.toBeNull();
+    expect(probe().dataset.chip).toBe('true');
+  });
+
+  it('⭐«대화»(/chats) 로딩 — 제목 = 대화 제목 · 칩 표시', async () => {
+    const { default: Loading } = await import('@/app/(authenticated)/chats/loading');
+    await render(<Loading />);
+    expect(probe().textContent).toBe(koMessages.chats.title);
+    expect(probe().dataset.chip).toBe('true');
+  });
+
+  it('⭐«결재»(/inbox) 로딩 — 도착 탭 이름(?tab=) · 기본은 알림 · 수는 아직 모르니 안 붙임', async () => {
+    const { default: Loading } = await import('@/app/(authenticated)/inbox/loading');
+    await render(<Loading />);
+    expect(probe().textContent).toBe(koMessages.inbox.notificationsTabLabel);
+    nav.tab = 'gates';
+    await render(<Loading />);
+    expect(probe().textContent).toBe(koMessages.cage.gateTabLabel);
+    nav.tab = 'attention';
+    await render(<Loading />);
+    expect(probe().textContent).toBe(koMessages.inbox.attentionTabLabel);
+    expect(probe().dataset.chip).toBe('true');
+  });
+
+  it('화면 슬롯이 붙으면 화면이 이긴다(폴백은 슬롯이 빈 사이에만)', async () => {
+    const { default: Loading } = await import('@/app/(authenticated)/more/loading');
+    await render(<><Loading /><TopBarSlot title={<h1>화면 제목</h1>} showContextChip={false} /></>);
+    expect(probe().textContent).toBe('화면 제목');
+    expect(probe().dataset.chip).toBe('false');
+  });
+
+  it('로딩이 떠나면 폴백을 비운다(다음 화면에 옛 제목이 남지 않게)', async () => {
+    const { default: Loading } = await import('@/app/(authenticated)/chats/loading');
+    await render(<Loading />);
+    expect(probe().textContent).toBe(koMessages.chats.title);
+    await render(null);
+    expect(probe().textContent).toBe('');
+  });
+});

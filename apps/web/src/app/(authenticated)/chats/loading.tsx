@@ -1,11 +1,14 @@
 import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ChatsTopBarTitle, TopBarFallbackHolder } from '@/components/nav/flat-tab-top-bar';
 
 export default function Loading() {
   // story #4274(까디르 검수 P3) — PageSkeleton과 같게 화면 읽기 프로그램에 «불러오는 중» 상태를 알린다.
   const t = useTranslations('common');
   return (
     <div className="flex min-h-0 flex-1 flex-col" role="status" aria-busy="true">
+      {/* story #4326 — 불러오는 동안 상단바 제목 · 칩이 비지 않게 «대화» 제목을 폴백으로 쥔다. */}
+      <TopBarFallbackHolder title={<ChatsTopBarTitle />} showContextChip />
       <span className="sr-only">{t('loading')}</span>
       <div className="border-b border-border px-4 py-3">
         <Skeleton className="h-5 w-24" />

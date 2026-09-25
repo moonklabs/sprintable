@@ -26,6 +26,7 @@ import { composeNotificationDisplay, type Notification } from './inbox-notificat
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
 
 // 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
 function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
@@ -228,12 +229,8 @@ export default function InboxPage() {
   // 둘 다 이 어긋남에서 발생). 탭마다 전용 키로 갈라(notificationsTabLabel/attentionTabLabel/
   // cage.gateTabLabel="결재함"으로 개명) 헤더가 항상 **현재 활성 탭의 진짜 이름**을 보여주게
   // 한다 — 탭을 이동해도 헤더가 거짓말하지 않는다.
-  const INBOX_TABS = [
-    { key: 'attention', label: t('attentionTabLabel') },
-    { key: 'notifications', label: t('notificationsTabLabel') },
-    { key: 'gates', label: tCage('gateTabLabel') },
-  ] as const;
-  const activeTabLabel = INBOX_TABS.find((tab) => tab.key === activeTab)?.label ?? t('notificationsTabLabel');
+  // story #4326 — 탭 이름 표는 상단바 제목 · 로딩 폴백과 한 곳(flat-tab-top-bar)에서 읽는다(폴백 글자가 화면과 갈리지 않게).
+  const INBOX_TABS = useInboxTabLabels();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -526,16 +523,7 @@ export default function InboxPage() {
   return (
     <>
       <TopBarSlot
-        title={
-          <div className="flex items-center gap-2">
-            <h1 className="text-sm font-medium">{activeTabLabel}</h1>
-            {/* story #4281 — 이 숫자는 알림 탭의 안 읽은 수다. 오늘 · 결재함 탭엔 그 탭의 수를 모르므로 안 붙인다(예전엔 탭과
-                무관하게 알림 수가 떠 «오늘 50»처럼 읽혔다). */}
-            {activeTab === 'notifications' && unreadCount > 0 ? (
-              <span className="text-sm tabular-nums text-muted-foreground">{unreadCount}</span>
-            ) : null}
-          </div>
-        }
+        title={<InboxTopBarTitle tab={activeTab} unreadCount={unreadCount} />}
         actions={
           // story #4277 — 402폭에서 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 상단바가 가로로 넘쳤다(409/402). 스프린트 상단바 관례:
           // 폰은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
