@@ -165,7 +165,7 @@ describe('useHookPerformances — hookKeys만큼 병렬 GET .../hook-performance
     await flush();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('/api/material-lineage/hook-performance?hook_key=hook+a', undefined);
+    expect(fetchMock).toHaveBeenCalledWith('/api/material-lineage/hook-performance?hook_key=hook+a', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(dump().keys).toEqual(['hook a']);
   });
 

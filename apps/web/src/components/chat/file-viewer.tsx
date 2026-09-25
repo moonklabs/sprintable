@@ -640,9 +640,9 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
 
     (async () => {
       try {
+        // story #4310 — 동기 변환(Gotenberg 왕복 BE 120s)이라 fetchWithAuth 기본 30s 상한 대신 위 화면 상한(130s)과 같게.
         const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
-          method: 'POST',
-          signal: controller.signal,
+          method: 'POST', signal: controller.signal, timeoutMs: 130_000,
         });
         const convertJson = (await convertRes.json().catch(() => null)) as
           | { data?: { asset_id?: string }; error?: { message?: string } }

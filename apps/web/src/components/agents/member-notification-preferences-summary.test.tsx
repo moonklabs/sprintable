@@ -42,9 +42,9 @@ describe('MemberNotificationPreferencesSummary — story #2623', () => {
     vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<MemberNotificationPreferencesSummary memberId="agent-1" memberLabel="Agent One" />)); });
     await act(async () => {});
-    // story #2691 — fetchWithAuth(url)가 내부에서 fetch(input, init)을 호출하며 init 생략 시
-    // undefined를 명시로 넘긴다(래퍼 도입 전엔 raw fetch(url) 단일 인자였다).
-    expect(fetchMock).toHaveBeenCalledWith('/api/notification-preferences?member_id=agent-1', undefined);
+    // story #2691 — fetchWithAuth(url)가 내부에서 fetch(input, init)을 호출한다(래퍼 도입 전엔 raw fetch(url) 단일 인자였다).
+    // story #4310 — init을 안 넘겨도 시간 제한 신호(signal)가 실린다.
+    expect(fetchMock).toHaveBeenCalledWith('/api/notification-preferences?member_id=agent-1', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('conversation·sse 항목만 골라 대화id×레벨로 보여준다(다른 scope_type/channel은 걸러짐)', async () => {

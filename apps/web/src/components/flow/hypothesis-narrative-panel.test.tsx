@@ -91,7 +91,7 @@ describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소�
     await renderPanel(fetchMock);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('/api/hypotheses/h1/lifecycle', { cache: 'no-store' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/hypotheses/h1/lifecycle', expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) }));
   });
 
   it('질문(statement)이 렌더된다', async () => {

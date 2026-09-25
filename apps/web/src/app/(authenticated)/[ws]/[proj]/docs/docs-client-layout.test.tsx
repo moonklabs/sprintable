@@ -370,6 +370,27 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(container.textContent).toContain('불러오지 못했어요');
   });
 
+  // story #4310 AC3 — 트리 요청이 응답 없이 걸려도 fetchWithAuth 시간 제한(30s) 뒤 실패 문구 + 다시 시도(망 오류와 같은 갈래).
+  // 예전엔 «불러오는 중»이 CF 524(~100초)까지 그대로였다. 실제 fetch처럼 신호가 끊겨야만 reject한다.
+  it('⭐트리 요청이 응답 없이 걸려도 30s 뒤 «불러오지 못했어요» + 다시 시도(그 전엔 불러오는 중)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+      })));
+      await mountWithIndex();
+      await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
+      expect(container.textContent).not.toContain('불러오지 못했어요');
+      expect(container.textContent).toContain('불러오는 중');
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(container.textContent).toContain('불러오지 못했어요');
+      expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
+      expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('다시 시도'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // story #3784(카디르 QA·페드루 재현, 10:02Z) — 실패 뒤 「다시 시도」를 누른 순간부터 그
   // 재시도가 응답하기 전까지, fetchTree()가 loading을 다시 켜지 않으면
   // loading=false·loadError=false·tree=[]인 순간이 생겨 두 페인이 또 "없어요"를 단정한다

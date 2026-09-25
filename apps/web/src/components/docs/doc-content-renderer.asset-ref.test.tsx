@@ -76,7 +76,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     await mount(<DocContentRenderer content={ASSET_REF_HTML} contentFormat="html" untitledEmbedLabel="Untitled" />);
 
     // image: signed route hit → img.src set to the signed URL (was blank before the fix).
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const img = container.querySelector<HTMLImageElement>('img[data-asset-id="img-1"]');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
@@ -92,9 +92,8 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — 이 클릭 경로는 fetchWithAuth로 전환됨(마운트시 img 경로는 미전환·1인자
-    // 유지). fetchWithAuth(url)이 내부에서 fetch(input, init)을 호출해 init 생략 시 undefined를
-    // 명시로 넘긴다.
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=file-1&disposition=attachment'), undefined);
+    // 유지). fetchWithAuth(url)은 init을 안 받아도 시간 제한 신호(signal)를 실은 init으로 fetch한다(story #4310).
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=file-1&disposition=attachment'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
   });
 
@@ -151,7 +150,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     const md = 'Intro\n\n<img data-asset-id="md-1" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">\n\nOutro';
     await mount(<DocContentRenderer content={md} contentFormat="markdown" untitledEmbedLabel="Untitled" />);
 
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const img = container.querySelector<HTMLImageElement>('img');
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
     // it is the resolver-rendered <img>, NOT a blank NextImage (mock tags those data-next-image).
@@ -173,7 +172,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — fetchWithAuth 전환(위와 동일 사유).
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
   });
 
