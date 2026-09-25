@@ -11,6 +11,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { EpicsSkeleton } from '@/components/epics/epics-skeleton';
 import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
 import { WORKSPACE_FRAME_TABS } from '@/components/workspace/workspace-frame-tabs';
+import { RouteTopBarFallback } from '@/components/nav/flat-tab-top-bar';
 
 export default function Loading() {
   // /{ws}/{proj}/{자원}/… — 셋째 조각이 자원 경로.
@@ -20,6 +21,7 @@ export default function Loading() {
   if (tab) return <WorkspaceFrameLoading />;
   // 자기 loading.tsx가 일반 PageSkeleton이 아닌 자원 — 부모 경계도 같은 모양(안 그러면 «일반 → 자기» 두 번 바뀐다 · 목표는 동적 layout이라 부모가 보임).
   // 자기 loading과 같은 모양인지는 loading.parity.test.tsx가 폴더 전수로 대조한다.
-  if (segment === 'goals') return <EpicsSkeleton />;
+  // story #4326(PO 4688) — 목표는 동적 layout이 풀리는 동안 이 부모 경계가 먼저 보인다 — 상단바 폴백도 자기 loading과 같은 것을 쥔다(목록으로 올 때만).
+  if (segment === 'goals') return (<><RouteTopBarFallback route="[ws]/[proj]/goals" /><EpicsSkeleton /></>);
   return <PageSkeleton />;
 }

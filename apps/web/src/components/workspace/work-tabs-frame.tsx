@@ -56,7 +56,7 @@ function WorkTabTitleFallback({ tab }: { tab: WorkspaceFrameTabKey }) {
   const tBoard = useTranslations('board');
   const tRetro = useTranslations('retro');
   const tNav = useTranslations('nav');
-  const { setFallback } = useTopBar();
+  const { holdFallback } = useTopBar();
   const title =
     tab === 'board' ? <h1 className="text-sm font-display font-extrabold">{tFlow('title')}</h1>
       : tab === 'workList' ? <h1 className="text-sm font-medium">{tWorkList('title')}</h1>
@@ -65,10 +65,9 @@ function WorkTabTitleFallback({ tab }: { tab: WorkspaceFrameTabKey }) {
             : tab === 'retro' ? <h1 className="text-sm font-medium">{tRetro('title')}</h1>
               : <h1 className="text-sm font-medium">{tNav('hypothesis')}</h1>;
   useEffect(() => {
-    setFallback({ title, showContextChip: true });
-    return () => setFallback(null);
+    return holdFallback({ title, showContextChip: true });
     // title은 tab과 로케일에서만 파생 — 매 렌더 새 엘리먼트라 deps에 넣지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, setFallback]);
+  }, [tab, holdFallback]);
   return null;
 }

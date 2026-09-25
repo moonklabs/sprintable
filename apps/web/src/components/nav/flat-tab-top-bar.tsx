@@ -1,14 +1,14 @@
 'use client';
 
 import { useLayoutEffect, type ReactNode } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useTopBar } from '@/components/nav/top-bar-context';
 
 /**
  * story #4326 — «전체» · «결재» · «대화»로 옮기는 사이(옛 화면 언마운트 → 도착 화면 마운트 전 · loading.tsx가 뜬 동안) 상단바 제목 · 칩이
  * 0.3~1.4초 비었다(402 · 배포 30 곁 측정). 4291 AC3가 일감 탭에서 막은 부류의 남은 자리 — 같은 방식: 도착 화면이 쓰는 제목을 **폴백**으로 쥔다
- * (top-bar-context `setFallback` · 화면 슬롯이 붙으면 늘 그쪽이 이긴다). 제목 모양은 화면과 폴백이 **같은 컴포넌트**를 써서 갈리지 않는다.
+ * (top-bar-context `holdFallback` · 화면 슬롯이 붙으면 늘 그쪽이 이긴다). 제목 모양은 화면과 폴백이 **같은 컴포넌트**를 써서 갈리지 않는다.
  */
 
 /** «전체»(/more) 상단바 제목 — 화면(more/page)과 폴백(more/loading)이 같이 쓴다. */
@@ -56,13 +56,13 @@ export function InboxTopBarTitle({ tab, unreadCount = 0 }: { tab: string; unread
  * 칠하지 않게) · 떠날 때 비운다(화면 슬롯이 이미 붙어 있으니 비워도 안 보인다).
  */
 export function TopBarFallbackHolder({ title, showContextChip }: { title: ReactNode; showContextChip: boolean }) {
-  const { setFallback } = useTopBar();
+  const { holdFallback } = useTopBar();
   useLayoutEffect(() => {
-    setFallback({ title, showContextChip });
-    return () => setFallback(null);
+    // 자기가 세운 폴백만 치운다(떠나는 쪽의 늦은 정리가 도착 폴백을 지우지 않게 · top-bar-context holdFallback).
+    return holdFallback({ title, showContextChip });
     // title은 경로 · 로케일에서만 파생 — 매 렌더 새 엘리먼트라 deps에 넣지 않는다(4291 WorkTabTitleFallback과 같은 이유).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setFallback, showContextChip]);
+  }, [holdFallback, showContextChip]);
   return null;
 }
 
@@ -83,6 +83,12 @@ export function RewardsTopBarTitle() {
   return <h1 className="text-sm font-medium">{t('title')}</h1>;
 }
 
+/** «목표»(`[ws]/[proj]/goals` 목록) 상단바 제목 — 화면(목록 · 로딩 분기)과 폴백이 같이 쓴다. 본문 마스트헤드가 진짜 h1이라 비-헤딩(story #3945). */
+export function GoalsTopBarTitle() {
+  const t = useTranslations('goals');
+  return <p className="text-sm font-medium">{t('title')}</p>;
+}
+
 /** 결재 폴백 제목 — 도착 탭(?tab=)의 이름(수는 아직 모름 → 안 붙임). */
 function InboxFallbackTitle() {
   const tab = useSearchParams().get('tab') ?? 'notifications';
@@ -90,9 +96,11 @@ function InboxFallbackTitle() {
 }
 
 /**
- * PO 판단(4688) — 셸 밖 평면 목적지의 **«경로 → 제목» 표 하나**(키 = `app/(authenticated)/<키>/` 경로 폴더 이름 · 이동 주소가 아니다 — 주소는
- * nav-v3 목적지 모듈이 정한다). 각 경로의 loading.tsx가 이 표로 폴백을 쥐고, 화면은 같은 제목 컴포넌트로
- * 슬롯을 채운다(정의 한 곳). 일감 탭은 4291(WorkTabsFrame)이 따로 쥔다.
+ * PO 판단(4688) — 일감 탭 밖 목적지의 **«경로 → 제목» 표 하나**(키 = `app/(authenticated)/` 아래 경로 폴더 · 이동 주소가 아니다 — 주소는
+ * nav-v3 목적지 모듈이 정한다). 각 경로의 loading.tsx가 이 표로 폴백을 쥐고, 화면은 같은 제목 컴포넌트로 슬롯을 채운다(정의 한 곳).
+ * 일감 탭은 4291(WorkTabsFrame)이 따로 쥔다.
+ * 목록 전용: 폴더의 loading.tsx는 그 아래 상세(`chats/[conversation_id]` · `goals/[id]`)도 덮는다 — 상세는 제목(뒤로 · 이름)이 다르고 칩이 없으니,
+ * 도착 주소의 마지막 조각이 이 폴더 이름일 때(= 목록 자체)만 쥔다. 상세 로딩 중엔 예전처럼 비워 둔다(틀린 제목 · 칩을 잠깐 세우지 않게).
  */
 export const FLAT_ROUTE_TOP_BAR = {
   more: { Title: MoreTopBarTitle, showContextChip: true },
@@ -100,13 +108,22 @@ export const FLAT_ROUTE_TOP_BAR = {
   chats: { Title: ChatsTopBarTitle, showContextChip: true },
   channel: { Title: () => <ChannelTopBarTitle />, showContextChip: true },
   rewards: { Title: RewardsTopBarTitle, showContextChip: true },
+  '[ws]/[proj]/goals': { Title: GoalsTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
 
 export type FlatRoute = keyof typeof FLAT_ROUTE_TOP_BAR;
 
-/** loading.tsx 한 줄 — 그 경로의 제목을 폴백으로 쥔다. 결재는 탭이 바뀌면 다시 쥔다(key). */
+/** 도착 주소가 그 폴더의 목록 자체인가(마지막 조각 = 폴더 이름). 상세(`…/chats/<id>`)면 아니다. */
+export function isRouteListPath(route: FlatRoute, pathname: string | null): boolean {
+  const last = (pathname ?? '').split('/').filter(Boolean).pop();
+  return last === route.split('/').pop();
+}
+
+/** loading.tsx 한 줄 — 그 경로의 목록으로 올 때 제목을 폴백으로 쥔다. 결재는 탭이 바뀌면 다시 쥔다(key). */
 export function RouteTopBarFallback({ route }: { route: FlatRoute }) {
   const entry = FLAT_ROUTE_TOP_BAR[route];
+  const pathname = usePathname();
   const tab = useSearchParams().get('tab');
+  if (!isRouteListPath(route, pathname)) return null;
   return <TopBarFallbackHolder key={route === 'inbox' ? `inbox:${tab ?? ''}` : route} title={<entry.Title />} showContextChip={entry.showContextChip} />;
 }
