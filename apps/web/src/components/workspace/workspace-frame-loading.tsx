@@ -13,6 +13,16 @@ import { WorkspaceFrameTabs, type WorkspaceFrameTabKey } from './workspace-frame
  * - `inset`: `space-y-* p-4` 안 첫 줄(보드 flow-client · 목록 work-list-shell · 에픽 epic-swimlane-board · 가설 hypotheses-list-shell)
  * - `sticky`: `sticky top-0 px-6 pt-3` 띠(스프린트 sprints-client · 회고 retro/page)
  */
+/** 탭마다 화면이 탭 줄을 두는 자리(위 `layout` 설명) — 부모 `[ws]/[proj]/loading.tsx`가 도착 경로로 고를 때 쓰는 한 표. */
+export const WORKSPACE_FRAME_LOADING_LAYOUT: Record<WorkspaceFrameTabKey, 'inset' | 'sticky'> = {
+  workList: 'inset',
+  board: 'inset',
+  epic: 'inset',
+  hypothesis: 'inset',
+  sprints: 'sticky',
+  retro: 'sticky',
+};
+
 export function WorkspaceFrameLoading({ active, layout }: { active: WorkspaceFrameTabKey; layout: 'inset' | 'sticky' }) {
   const t = useTranslations('common');
   const rows = (
