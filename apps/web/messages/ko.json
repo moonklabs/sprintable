@@ -235,6 +235,7 @@
     "colOwner": "업로더 · 수정",
     "usageCount": "{count}곳",
     "usageNone": "—",
+    "rowActionsLabel": "{name} 작업",
     "system": "시스템",
     "tabDetail": "상세",
     "tabUsage": "사용처",

@@ -235,6 +235,7 @@
     "colOwner": "Uploader · Updated",
     "usageCount": "{count, plural, one {# ref} other {# refs}}",
     "usageNone": "—",
+    "rowActionsLabel": "Actions for {name}",
     "system": "System",
     "tabDetail": "Details",
     "tabUsage": "Used in",

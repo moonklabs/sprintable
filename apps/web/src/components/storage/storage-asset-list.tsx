@@ -15,7 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { StorageAssetRow } from './storage-asset-row';
+import { ASSET_ROW_GRID, StorageAssetRow } from './storage-asset-row';
 import { StorageAssetGrid } from './storage-asset-grid';
 import type { Asset, AssetSort, StorageViewMode } from '@/lib/storage/types';
 
@@ -42,7 +42,7 @@ interface StorageAssetListProps {
   onLoadMore: () => void;
 }
 
-const HEADER_GRID = 'grid grid-cols-[26px_1fr_92px_78px_150px_30px] items-center gap-[10px] px-[18px]';
+// story #4277 — 칸 정의는 행과 한 상수(ASSET_ROW_GRID · storage-asset-row.tsx).
 
 export function StorageAssetList({
   assets,
@@ -145,19 +145,25 @@ export function StorageAssetList({
       </div>
 
       {/* body */}
-      <div className="focus-inset min-h-0 flex-1 overflow-auto">
+      {/* story #4277 — e2e가 행 출현을 기다리지 않고 «다 불러온 뒤 한 번 세도록» 지금 상태를 싣는다(행 0이면 즉시 건너뜀). */}
+      <div
+        className="focus-inset min-h-0 flex-1 overflow-auto"
+        data-testid="storage-asset-list-body"
+        data-state={loading ? 'loading' : error ? 'error' : assets.length === 0 ? 'empty' : 'rows'}
+      >
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className={cn(HEADER_GRID, 'h-[52px] border-b border-border')}>
+              <div key={i} className={cn(ASSET_ROW_GRID, 'h-[52px] border-b border-border')}>
                 <Skeleton variant="circle" className="size-[26px]" />
                 <div className="space-y-1.5">
                   <Skeleton className="h-3 w-1/2" />
                   <Skeleton className="h-2 w-1/4" />
                 </div>
-                <Skeleton className="h-3 w-10" />
-                <Skeleton className="h-3 w-12" />
-                <Skeleton className="h-3 w-24" />
+                {/* 행과 같은 모양 — lg 미만은 세 칸(사용처 · 크기 · 업로더 칸 없음). */}
+                <Skeleton className="hidden h-3 w-10 lg:block" />
+                <Skeleton className="hidden h-3 w-12 lg:block" />
+                <Skeleton className="hidden h-3 w-24 lg:block" />
                 <span />
               </div>
             ))}
@@ -195,7 +201,8 @@ export function StorageAssetList({
         ) : (
           <>
             {/* sticky header */}
-            <div className={cn(HEADER_GRID, 'sticky top-0 z-10 h-[34px] border-b border-border bg-background text-[11px] font-semibold text-muted-foreground')}>
+            {/* story #4277(유나 판정) — 머리 줄은 lg 이상만(lg 미만은 한 칸짜리 두 줄 행 · 정렬은 툴바 메뉴). */}
+            <div className={cn(ASSET_ROW_GRID, 'sticky top-0 z-10 hidden h-[34px] border-b border-border bg-background text-[11px] font-semibold text-muted-foreground lg:grid')}>
               <span />
               <span>{t('colName')}</span>
               <span>{t('colUsage')}</span>

@@ -179,6 +179,26 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   await expect.soft(page.locator('[data-testid="storage-folder-drawer-trigger"]')).toBeVisible();
   const listWidth = await page.locator('[data-testid="storage-asset-list"]').evaluate((e) => e.getBoundingClientRect().width);
   expect.soft(listWidth, '스토리지 목록 폭(402폭)').toBeGreaterThan(300);
+  // story #4277(PO 라이브 반려) — 목록 폭만 보면 이름 칸이 0px여도 초록이었다(행 고정 칸 합 462 > 402). 행이 있으면 첫 행의 이름 블록 실제 폭을 잰다.
+  // 시드: 로컬 저장소 공급자는 업로드(PUT)를 아직 못 받아(story dc3d62f4) 이 스펙이 자산을 만들 수 없다 — 칸 예산은 단위 테스트
+  // (storage-asset-row.grid-budget.test.tsx)가 결정적으로 잡고, 여기선 자산이 있는 환경에서만 실측한다.
+  // CI 36138526074 — 예전엔 `.first().evaluate()`가 행 **출현을 기다려** 자산 0이면 테스트 제한시간까지 걸린 뒤(~6분) 실패 · 재시도했다.
+  // 행을 기다리지 않는다: 목록 몸통이 «불러오는 중»을 벗어나길 짧게 기다려 상태를 **한 번** 읽고, 행이 있을 때만 잰다.
+  const listBody = page.locator('[data-testid="storage-asset-list-body"]:not([data-state="loading"])');
+  await listBody.waitFor({ timeout: 30_000 });
+  const listState = await listBody.getAttribute('data-state');
+  expect.soft(listState, '스토리지 목록 불러오기 실패').not.toBe('error');
+  const firstNameWidth = listState === 'rows'
+    ? await page.locator('[data-testid="storage-asset-list"] [role="button"][aria-pressed] > div.min-w-0').first()
+      .evaluate((e) => e.getBoundingClientRect().width, undefined, { timeout: 10_000 }).catch(() => null)
+    : null;
+  if (firstNameWidth !== null) {
+    expect.soft(firstNameWidth, '스토리지 첫 행 이름 칸 폭(402폭)').toBeGreaterThanOrEqual(200);
+  } else {
+    // 재지 않고 초록으로 넘어가지 않게(PO 4277 — «목록 폭 > 300»처럼 헛도는 가드 금지): 건너뜀을 결과 · 로그에 남긴다. 가드는 칸 예산 단위 테스트.
+    test.info().annotations.push({ type: 'skipped-check', description: `스토리지 이름 칸 폭: 자산 행 0(목록 상태 ${listState} · 로컬 업로드 불가 · story dc3d62f4) — 칸 예산 단위 테스트가 가드` });
+    console.log(`[mobile-width-overflow] SKIPPED storage name-width check: no asset rows (list state ${listState} · seed upload unsupported · story dc3d62f4)`);
+  }
 
   // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639 · 까디르 검수 P2):
   // - 명시 높이 틀(flow-board-frame) 안에서 보드가 넘치지 않는다(틀 scrollHeight − clientHeight ≤ 1 — 자동 높이 부모 기준이면 0이 당연해 뜻이 없다).
