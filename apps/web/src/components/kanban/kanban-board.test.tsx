@@ -16,7 +16,8 @@ import koMessages from '../../../messages/ko.json';
 // story #4171 — 스프린트 칩 라벨 테스트가 ?sprint_id를 싣는다(기본은 빈 쿼리 — 기존 테스트 무변).
 const { searchRef } = vi.hoisted(() => ({ searchRef: { current: '' } }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  // story #4307 — replace가 실제로 쿼리를 바꾸게(필터 변경 → 다시 불러오기 재현). 다른 테스트는 다시 그리지 않으니 무영향.
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn((url: string) => { searchRef.current = url.includes('?') ? url.slice(url.indexOf('?') + 1) : ''; }) }),
   useSearchParams: () => new URLSearchParams(searchRef.current),
 }));
 
@@ -1683,6 +1684,192 @@ describe('KanbanBoard — 필터 메뉴를 열면 초점 = 검색칸(story #4306
     const input = document.querySelector(`input[placeholder="${B[placeholderKey]}"]`)!;
     expect(input.getAttribute('aria-label')).toBe(B[placeholderKey]!.replace(/(\.{3}|…)\s*$/, '').trim());
     expect(input.getAttribute('aria-label')).not.toMatch(/(\.{3}|…)$/);
+  });
+
+  it.each(['allSprints', 'allEpics', 'allAssignees'])('⭐#4308 — %s 메뉴의 목록 스크롤 칸은 탭 순서 밖(tabindex=-1) · 이름 없는 초점 칸 0', async (triggerKey) => {
+    stubFetch([], [{ id: 'm1', name: 'Alice', type: 'human' }]);
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const menu = document.querySelector('[role="menu"]')!;
+    const scrollers = [...menu.querySelectorAll<HTMLElement>('div')].filter((el) => /\boverflow-y-auto\b/.test(el.className));
+    expect(scrollers.length).toBeGreaterThan(0);
+    for (const el of scrollers) expect(el.getAttribute('tabindex')).toBe('-1');
+  });
+});
+
+// story #4307(유나 · PO 10:42Z) — 스프린트 · 담당자 필터는 서버 조회 조건이라 고르면 다시 불러온다. 예전엔 그동안 `if (loading) return <KanbanSkeleton />`
+// 가 보드 전체(툴바 포함)를 갈아끼워 필터 버튼이 사라지고 초점이 body로 빠졌다(목표 · 라벨은 화면 안 거르기라 안 빠짐). 이제 전면 스켈레톤은
+// 첫 불러오기만 · 다시 불러오는 동안 툴바는 그대로 · 컬럼 자리만 스켈레톤 + aria-busy. 뮤테이션: 전면 스켈레톤을 되살리면 RED.
+describe('KanbanBoard — 필터를 고른 뒤 초점 = 그 필터 버튼 · 다시 불러오는 동안 툴바 유지(story #4307)', () => {
+  const B = koMessages.board as unknown as Record<string, string>;
+  const frames = async () => {
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    }
+  };
+  let releaseRefetch: (() => void) | null = null;
+
+  function stubBoard() {
+    releaseRefetch = null;
+    let gate: Promise<void> | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/stories') {
+        // 필터가 걸린 다시 불러오기는 붙잡아 둔다(불러오는 동안의 화면을 재려고).
+        if (u.searchParams.get('sprint_id') || u.searchParams.get('assignee_id')) {
+          gate ??= new Promise<void>((r) => { releaseRefetch = r; });
+          await gate;
+        }
+        return { ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) };
+      }
+      if (u.pathname === '/api/sprints') return { ok: true, json: async () => ({ data: [{ id: 'spr-1', title: '스프린트 A', status: 'active' }] }) };
+      if (u.pathname === '/api/goals') return { ok: true, json: async () => ({ data: [{ id: 'ep-1', title: '목표 A' }], meta: { nextCursor: null } }) };
+      if (u.pathname === '/api/members') return { ok: true, json: async () => ({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }) };
+      if (u.pathname === '/api/labels') return { ok: true, json: async () => [{ id: 'lb-1', name: '라벨 A', color: '#000' }] };
+      return { ok: false, json: async () => null };
+    }));
+  }
+
+  const triggerFor = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
+  const itemNamed = (name: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.textContent?.includes(name));
+
+  it.each([
+    ['스프린트', 'allSprints', '스프린트 A', true],
+    ['담당자', 'allAssignees', 'Alice', true],
+    ['목표', 'allEpics', '목표 A', false],
+    ['라벨', 'allLabels', '라벨 A', false],
+  ])('⭐%s — 키보드로 고른 뒤 초점 = 그 필터 버튼(다시 불러오는 동안에도 툴바 · 버튼 그대로)', async (_n, triggerKey, itemName, refetches) => {
+    stubBoard();
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!)!;
+    expect(trigger).toBeDefined();
+    await act(async () => { trigger.focus(); trigger.click(); });
+    await frames();
+    const item = itemNamed(itemName)!;
+    expect(item, `${itemName} 항목`).toBeDefined();
+    await act(async () => { item.focus(); item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); item.click(); });
+    await mount(); // 바뀐 쿼리(searchRef)로 다시 그림 = 실제 앱의 useSearchParams 갱신
+    await frames();
+    const area = container.querySelector('[data-testid="kanban-content-area"]');
+    if (refetches) {
+      // 다시 불러오는 중 — 툴바의 필터 버튼은 그대로 · 컬럼 자리만 스켈레톤 + aria-busy(툴바엔 안 검).
+      expect(area?.getAttribute('aria-busy')).toBe('true');
+      expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).not.toBeNull();
+    }
+    // 초점은 바로 그 필터 버튼(같은 DOM 노드 — 툴바가 갈아끼워지지 않았으니 그대로 남아 있다).
+    expect(document.activeElement).toBe(trigger);
+    expect(container.contains(trigger)).toBe(true);
+    await act(async () => { releaseRefetch?.(); });
+    await frames();
+    expect(area?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('포인터로 고른 담당자도 초점 = 필터 버튼 · 다시 불러오는 동안 전면 스켈레톤이 아니다(툴바 버튼이 DOM에 남음)', async () => {
+    stubBoard();
+    await mount();
+    const trigger = triggerFor(B.allAssignees!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed('Alice')!.click(); });
+    await mount();
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).not.toBeNull();
+    const assigneeButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Alice'));
+    expect(assigneeButton, '툴바의 담당자 버튼(이제 «Alice»)이 DOM에 남아 있다').toBeDefined();
+    expect(document.activeElement).toBe(trigger);
+    await act(async () => { releaseRefetch?.(); });
+    await frames();
+  });
+
+  it('목록 보기에서도 같은 원칙 — 다시 불러오는 동안 행 자리만 스켈레톤(툴바 그대로 · 유나 확정)', async () => {
+    stubBoard();
+    await mount();
+    const listToggle = container.querySelector(`button[aria-label="${B.listViewLabel}"]`) as HTMLButtonElement;
+    await act(async () => { listToggle.click(); });
+    const trigger = triggerFor(B.allSprints!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed('스프린트 A')!.click(); });
+    await mount();
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-list-skeleton"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+    expect(container.contains(trigger)).toBe(true);
+    await act(async () => { releaseRefetch?.(); });
+    await frames();
+  });
+
+  // PO 10:51Z — 다시 불러오기가 실패하면(망 오류 · 5xx) 스켈레톤 · busy가 남지 않고 컬럼 자리에 오류 + 다시 시도 · 늦게 실패한 옛 요청은 새 화면을 덮지 않는다.
+  type Outcome = 'ok' | 'fail5xx' | 'network';
+  function stubControlled(plan: { sprint: Outcome; assignee?: Outcome }) {
+    const waiters: Record<string, () => void> = {};
+    const gates: Record<string, Promise<void>> = {};
+    const gate = (key: string) => (gates[key] ??= new Promise<void>((r) => { waiters[key] = r; }));
+    let retryOk = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/stories') {
+        const key = u.searchParams.get('assignee_id') ? 'assignee' : u.searchParams.get('sprint_id') ? 'sprint' : null;
+        if (key && !retryOk) {
+          await gate(key);
+          const outcome = key === 'sprint' ? plan.sprint : (plan.assignee ?? 'ok');
+          if (outcome === 'network') throw new TypeError('Failed to fetch');
+          if (outcome === 'fail5xx') return { ok: false, status: 503, json: async () => null };
+        }
+        return { ok: true, json: async () => ({ data: [], meta: { nextCursor: null } }) };
+      }
+      if (u.pathname === '/api/sprints') return { ok: true, json: async () => ({ data: [{ id: 'spr-1', title: '스프린트 A', status: 'active' }] }) };
+      if (u.pathname === '/api/members') return { ok: true, json: async () => ({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }) };
+      return { ok: false, json: async () => null };
+    }));
+    return {
+      release: async (key: string) => { await act(async () => { gate(key); waiters[key]?.(); }); await frames(); },
+      allowRetry: () => { retryOk = true; },
+    };
+  }
+  const choose = async (triggerKey: string, itemName: string) => {
+    const trigger = triggerFor(B[triggerKey]!)!;
+    await act(async () => { trigger.click(); });
+    await frames();
+    await act(async () => { itemNamed(itemName)!.click(); });
+    await mount();
+    await frames();
+    return trigger;
+  };
+
+  it.each([['5xx', 'fail5xx'], ['망 오류', 'network']] as const)('⭐다시 불러오기 실패(%s) — busy가 풀리고 컬럼 자리에 오류 + 다시 시도 · 다시 시도하면 컬럼이 돌아온다', async (_n, outcome) => {
+    const ctl = stubControlled({ sprint: outcome });
+    await mount();
+    await choose('allSprints', '스프린트 A');
+    const area = () => container.querySelector('[data-testid="kanban-content-area"]');
+    expect(area()?.getAttribute('aria-busy')).toBe('true');
+    await ctl.release('sprint');
+    expect(area()?.getAttribute('aria-busy')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
+    const err = container.querySelector('[data-testid="kanban-load-error"]');
+    expect(err?.getAttribute('role')).toBe('alert');
+    expect(err?.textContent).toContain((koMessages.board as unknown as Record<string, string>).boardLoadFailed);
+    // 버튼은 공용 «다시 시도»(common.retry) — 남의 자리 키(에픽 줄)를 빌리지 않는다(PO 10:57Z).
+    expect(container.querySelector('[data-testid="kanban-load-retry"]')?.textContent).toBe(koMessages.common.retry);
+    ctl.allowRetry();
+    await act(async () => { (container.querySelector('[data-testid="kanban-load-retry"]') as HTMLButtonElement).click(); });
+    await frames();
+    expect(container.querySelector('[data-testid="kanban-load-error"]')).toBeNull();
+    expect(area()?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('⭐그 사이 필터를 또 바꾸면 — 앞(스프린트) 요청이 늦게 실패해도 새(담당자) 조건 화면을 덮지 않는다', async () => {
+    const ctl = stubControlled({ sprint: 'fail5xx', assignee: 'ok' });
+    await mount();
+    await choose('allSprints', '스프린트 A');
+    await choose('allAssignees', 'Alice');
+    await ctl.release('assignee');
+    expect(container.querySelector('[data-testid="kanban-content-area"]')?.getAttribute('aria-busy')).toBeNull();
+    await ctl.release('sprint'); // 옛 요청이 이제야 실패
+    expect(container.querySelector('[data-testid="kanban-load-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-columns-skeleton"]')).toBeNull();
   });
 });
 
