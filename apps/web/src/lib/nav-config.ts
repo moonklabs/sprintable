@@ -185,7 +185,8 @@ export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
     }
     if (group.id === 'connect-rules' && dest.connectRules) {
       const v3Item: NavItemConfig = {
-        id: 'connect-rules-v3', labelKey: 'zoneConnectRules', descriptionKey: 'descConnectRulesV3',
+        // story #4278(유나) — 구역 이름과 같은 «연결·규칙»이 구역 안에 또 있었다 → 이 항목은 «모아 보기»(구역 › 모아 보기).
+        id: 'connect-rules-v3', labelKey: 'connectRulesOverview', descriptionKey: 'descConnectRulesV3',
         icon: Link2, kind: 'static', path: dest.connectRules.path, scope: 'org',
       };
       return { ...group, items: [v3Item, ...group.items] };

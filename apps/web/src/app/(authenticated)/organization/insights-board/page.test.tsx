@@ -960,3 +960,16 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
     expect(hookAHeader.textContent).toContain(koMessages.insightsBoard.groupMemberCount.replace('{n}', '2'));
   });
 });
+
+// story #4278(유나 결정 ③) — 셸 메뉴 «결과»(구역 이름)를 눌러 온 화면이라 머리가 «결과 › 성과 보드»로 이어진다(메뉴 이름 · 제목 키는
+// 그대로). 뮤테이션: PageHeader의 eyebrow를 빼면 RED.
+describe('InsightsBoardPage — 머리의 구역 표시(story #4278)', () => {
+  it('⭐h1 «성과 보드» 바로 위에 구역 «결과»', async () => {
+    stubFetch({ page1: [] });
+    await mount();
+    const h1 = [...container.querySelectorAll('h1')].find((el) => el.textContent === koMessages.insightsBoard.pageTitle);
+    expect(h1).toBeTruthy();
+    expect(h1!.parentElement!.textContent).toContain(koMessages.nav.navResults);
+    expect(h1!.previousElementSibling?.textContent).toBe(koMessages.nav.navResults);
+  });
+});

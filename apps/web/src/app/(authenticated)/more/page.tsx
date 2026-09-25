@@ -3,12 +3,15 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { groupVisibleLegacyByTarget, MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
-import { pickEunNeunJosa } from '@/lib/korean-particle';
+import { groupVisibleLegacyByTarget, LEGACY_NAV_ITEMS, MOBILE_HUB_GROUP_ORDER, resolveNavGroups } from '@/lib/nav-config';
+import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID } from '@/lib/mobile-hub-groups';
+import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
+import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
@@ -36,29 +39,30 @@ export default function MorePage() {
   // 머리말을 낸다(nav-config.ts SSOT, AC3). 흡수 화면이 착지해 어느 머리말의 항목이
   // 0이 되면 그 소묶음만 안 뜬다(빈 묶음 렌더 0, AC4 — groupVisibleLegacyByTarget이
   // 이미 빈 그룹을 걸러 낸다). 카드 자체가 비면(전 소묶음 0) 카드도 안 뜬다.
-  const LEGACY_CARD_ID = 'legacy-other-screens';
-  const legacySubgroups = useMemo(() => groupVisibleLegacyByTarget(), []);
-  const legacyItems = useMemo(() => legacySubgroups.flatMap((g) => g.items), [legacySubgroups]);
-
-  const hubGroups = useMemo(
-    () =>
-      [
-        ...MOBILE_HUB_GROUP_ORDER
-          .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
-          .filter((g): g is NonNullable<typeof g> => !!g)
-          .map((g) => ({
-            id: g.id,
-            labelKey: g.labelKey,
-            items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)),
-            subgroups: undefined as typeof legacySubgroups | undefined,
-          })),
-        { id: LEGACY_CARD_ID, labelKey: 'moreOtherScreens', items: legacyItems, subgroups: legacySubgroups },
-      ].filter((g) => g.items.length > 0),
-    [legacyItems, legacySubgroups],
-  );
+  // story #4278(유나 결정 ①②) — 구역 · 빼는 항목 · 머리 안내의 탭 이름이 모두 «지금 탭바가 그리는 탭»(플래그)에서 나온다
+  // (nav-config.ts buildMobileHubGroups · mobile-tab-bar.tsx tabDestinationNavIds · visibleTabLabels).
+  const LEGACY_CARD_ID = MOBILE_LEGACY_CARD_ID;
+  const { navV3Flags } = useDashboardContext();
+  const flags = navV3Flags ?? DEFAULT_NAV_V3_FLAGS;
+  const hubGroups = useMemo(() => buildMobileHubGroups({
+    groups: resolveNavGroups(flags),
+    groupOrder: MOBILE_HUB_GROUP_ORDER,
+    legacyGroups: groupVisibleLegacyByTarget(),
+    legacyItems: LEGACY_NAV_ITEMS,
+    excludeIds: tabDestinationNavIds(flags),
+  }), [flags]);
 
   const totalScreenCount = useMemo(() => hubGroups.reduce((sum, g) => sum + g.items.length, 0), [hubGroups]);
   const totalSectionCount = hubGroups.length;
+
+  // story #4278(유나 결정 ①) — 탭 이름은 탭바가 실제로 그리는 탭 그대로(«전체» 뺌 · 탭바 순서). ko 「」·로 잇고, en은 "…"를 목록 접속으로.
+  const locale = useLocale();
+  const tabNames = useMemo(() => {
+    const names = visibleTabLabels(flags).map(({ namespace, labelKey }) => (namespace === 'nav' ? t(labelKey) : tMore(labelKey)));
+    return locale.startsWith('ko')
+      ? names.map((n) => `「${n}」`).join('·')
+      : new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(names.map((n) => `"${n}"`));
+  }, [flags, locale, t, tMore]);
 
   const normalizedQuery = query.trim().toLowerCase();
   // story #fddd0e6b(C) — 찾기는 이름·설명 둘 다 부분일치(대소문자 무시)로 거른다. 서버
@@ -105,17 +109,7 @@ export default function MorePage() {
             늘 그리고 lg:(탭 바가 없는 폭 · 훅의 1024)에서만 숨긴다(display:none — 데스크톱 스크린리더에도 안 읽힘). */}
         {(
           <p className="text-xs text-muted-foreground lg:hidden" data-testid="more-tab-hint">
-            {t('moreTabHint', {
-              board: t('board'), inbox: t('inbox'), chats: t('chats'),
-              // story #3824 — nav.chats 값이 바뀌어도(받침 유무 무관) 항상 맞는 조사.
-              particle: pickEunNeunJosa(t('chats')),
-              // story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은
-              // 낱말": 바텀 탭 「지금」·「채팅」과 허브 「오늘」·「대화」는 같은 두 화면을
-              // 가리키므로 문구 값이 아니라 labelKey 자체를 공유한다(nav.zoneNow·nav.chats
-              // — mobile-tab-bar.tsx의 TABS도 이제 이 두 키를 그대로 쓴다). 「결재」 탭은
-              // 모바일 IA 통합 후속 카드 스코프라 tMore('approvals') 그대로.
-              now: t('zoneNow'), approvals: tMore('approvals'), chat: t('chats'),
-            })}
+            {t('moreTabHint', { tabs: tabNames })}
           </p>
         )}
       </div>

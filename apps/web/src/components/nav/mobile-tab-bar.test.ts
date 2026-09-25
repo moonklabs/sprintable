@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import { getActiveTabKey, TABS } from './mobile-tab-bar';
+import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 
 describe('getActiveTabKey', () => {
   it('/{ws}/{proj}/flow 및 하위 경로는 now — story #2224, "지금" 탭의 새 목적지', () => {
@@ -141,5 +142,25 @@ describe('TABS — story #4020 AC2 목적지 기준 labelKey 대조(같은 화�
       tab.labelKey,
       `${tab.key} 탭(labelKey=${tab.labelKey})과 사이드바 「${matching.labelKey}」(같은 목적지 ${tabResource})가 이름이 다름`,
     ).toBe(matching.labelKey);
+  });
+});
+
+// story #4278(민 기기 점검 4번) — 「일감」 위 줄(WorkspaceFrameTabs)의 여섯 화면 전부에서 탭바가 «일감»을 켠다. 예전엔 보드(/flow)만
+// «일감»이고 목록 · 스프린트 · 에픽 · 회고 · 가설 다섯은 «전체»였다(사이드바는 #3844에서 이미 같은 목록으로 고침). 표는 SSOT
+// (WORKSPACE_FRAME_TAB_PATHS)를 그대로 돈다 — 탭이 늘면 이 테스트도 늘어난다. 뮤테이션: isWorkPath를 dest.work.path 한 조각으로
+// 되돌리면 다섯 줄이 «more»로 RED.
+
+describe('경로 → 탭 — 「일감」 위 줄 전부(story #4278)', () => {
+  const V3_ON = { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true };
+
+  it.each(WORKSPACE_FRAME_TAB_PATHS.map((p) => [p]))('⭐/{ws}/{proj}/%s(+하위) — 플래그 OFF «일감»(now) · v3 ON «일감»(work)', (path) => {
+    for (const pathname of [`/qa-org/qa-proj/${path}`, `/qa-org/qa-proj/${path}/abc`, `/${path}`]) {
+      expect(getActiveTabKey(pathname), pathname).toBe('now');
+      expect(getActiveTabKey(pathname, V3_ON), pathname).toBe('work');
+    }
+  });
+
+  it('표 자체: 여섯(목록 · 보드 · 스프린트 · 에픽 · 회고 · 가설) — 카드의 다섯 + 보드', () => {
+    expect([...WORKSPACE_FRAME_TAB_PATHS].sort()).toEqual(['epics', 'flow', 'hypotheses', 'retro', 'sprints', 'work-list']);
   });
 });

@@ -139,6 +139,8 @@ export default function InsightsBoardPage() {
   // story #3656 — 훅 미태깅 묶음 라벨은 새 낱말을 안 만들고 docs 네임스페이스 기존
   // 키(indexCategoryUncategorized, 「미분류」)를 재사용한다(유나 確定).
   const tDocs = useTranslations('docs');
+  // story #4278(유나 결정 ③) — 셸 메뉴 «결과»(구역 이름)를 눌러 온 화면이라 머리에 구역을 싣는다(«결과 › 성과 보드»).
+  const tNav = useTranslations('nav');
   const channelLabel = useChannelLabel();
   const displayTimezone = resolveDisplayTimezone().tz;
 
@@ -657,7 +659,7 @@ export default function InsightsBoardPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-      <PageHeader title={t('pageTitle')} description={t('pageDescription')} actions={windowControl} />
+      <PageHeader eyebrow={tNav('navResults')} title={t('pageTitle')} description={t('pageDescription')} actions={windowControl} />
 
       {/* story #3979(AC1, 시안 ④) — 첫 화면 요약 4칸(나간 글·자연 조회·쓴 광고비·
           남은 한도), 채널별 표보다 위. */}
