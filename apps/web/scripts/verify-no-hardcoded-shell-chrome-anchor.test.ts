@@ -47,6 +47,12 @@ describe('findHardcodedShellChromeAnchors (story #4131 — 하드코딩 뷰포�
     );
   });
 
+  it('story #4291 — 레이아웃이 실측한 일감 탭 띠 높이를 더 빼는 한 형태는 허용 · 그 자리에 하드코딩을 섞으면 RED', () => {
+    expect(hit('h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))]')).toHaveLength(0);
+    expect(hit('h-[calc(100svh-var(--shell-chrome-h)-3rem)]')).toHaveLength(1);
+    expect(hit('h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h))]'), '폴백 없는 변형도 RED(띠 없는 화면에서 0이 아님)').toHaveLength(1);
+  });
+
   it('does NOT scan globals.css (역사적 맥락 주석 제외)', () => {
     withTempSrc(
       { 'app/globals.css': `/* calc(100svh-3rem) 역사적 설명 */\n` },

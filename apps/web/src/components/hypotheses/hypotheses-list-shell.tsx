@@ -5,7 +5,6 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import { useLocale, useTranslations } from 'next-intl';
 import { HYPOTHESIS_STATUSES, type HypothesisStatus } from '@sprintable/core-storage';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -83,7 +82,6 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
         showContextChip
       />
       <div className="min-w-0 flex-1 space-y-3 p-4">
-      <WorkspaceFrameTabs active="hypothesis" />
 
       <div className="flex flex-wrap items-center gap-1.5">
         <Button

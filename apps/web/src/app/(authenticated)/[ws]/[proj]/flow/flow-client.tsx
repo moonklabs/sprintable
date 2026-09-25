@@ -15,7 +15,6 @@ import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface FlowPageClientProps {
@@ -237,7 +236,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
             sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 ScaleLadder와 다른
             층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
-        <WorkspaceFrameTabs active="board" />
 
         {/* story #3112(Board IA·D0(a), 선생님 승인 2026-08-26·카드 520beb8b) — 옛 3칸 렌즈
             세그(가설|갈래|칸반, story #2531/#3043)를 여기서 제거했다. ScaleLadder가 «축척

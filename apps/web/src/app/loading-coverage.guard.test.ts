@@ -13,8 +13,9 @@
  * 1. 모든 목적지 경로가 app/ 아래 실제 page.tsx로 풀린다(라우트 그룹 `(…)` 통과) — 못 풀리면 RED(조용히 버리지 않는다).
  * 2. 그 page.tsx를 덮는 loading.tsx가 있고, 그 loading은 화면 읽기 프로그램에 상태를 알린다 — loading 파일 자체나 그것이 import한
  *    `@/components/…` 스켈레톤 소스에 `role="status"` · `aria-busy="true"` · `sr-only` 라벨 셋 다(이름이 아니라 실제 소스를 본다).
- * 3. 일감 프레임 여섯 경로(WorkspaceFrameTabs의 탭)는 **자기** loading.tsx가 탭 줄을 품는다(`<WorkspaceFrameLoading active="그 탭">`) —
- *    부모 `[ws]/[proj]/loading.tsx`(일반 스켈레톤)가 덮으면 형제 탭 이동 때 탭 줄이 사라졌다 돌아온다(유나 스트리밍 대조: 보드 → 목록 ~290ms).
+ * 3. 일감 프레임 여섯 경로(WorkspaceFrameTabs의 탭)의 탭 줄은 `[ws]/[proj]/layout.tsx`(WorkTabsFrame)가 **한 곳에서** 쥔다(story #4291) —
+ *    레이아웃은 형제 탭 이동에서 다시 그려지지 않아 로딩 경계가 떠도 탭 줄이 남는다. 그래서 자기 loading.tsx는 몸(`<WorkspaceFrameLoading />`)만
+ *    그리고, `<WorkspaceFrameTabs`를 그리는 소스는 그 띠 하나뿐이다(화면 · 로더가 다시 품으면 탭 줄이 두 줄 · 자리가 다시 갈린다).
  * 4. 스켈레톤이 도착 페이지와 같은 폭 · 여백(유나 판정) — 목적지 전수를 EXPECTED_CONTAINERS(컨테이너 + 그 선언 파일) · NO_CONTAINER(이유)
  *    두 표로 덮고(합 = 목적지 · 겹침 0), 표의 컨테이너가 선언 파일에 그대로 있는지 + 그 목적지를 덮는 loading(조상 loader 포함)에 같은
  *    배치 토큰(mx-auto · w-full · max-w · p-* · lg:w/p-*)이 다 있는지 본다.
@@ -185,8 +186,8 @@ const NO_CONTAINER: Record<string, string> = {
   '/organization/workforce': '에이전트 화면 전폭',
   'resource:artifacts': '산출물 갤러리 전폭',
   'resource:docs': '문서 트리 · 편집기 전폭',
-  'resource:flow': '일감 프레임 — 탭 줄 품은 WorkspaceFrameLoading(별 단언)',
-  'resource:work-list': '일감 프레임 — 탭 줄 품은 WorkspaceFrameLoading(별 단언)',
+  'resource:flow': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',
+  'resource:work-list': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',
   'resource:goals': '목표 전용 스켈레톤(EpicsSkeleton)',
   'resource:loops': '실행 목록 전폭',
   'resource:storage': '스토리지 2단(폰 1단) 전폭',
@@ -217,17 +218,35 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(problems).toEqual([]);
   });
 
-  it('⭐일감 프레임 여섯 경로는 자기 loading.tsx가 탭 줄을 품는다(해당 탭 켜짐)', () => {
+  it('⭐일감 프레임 여섯 경로: 자기 loading.tsx는 몸 스켈레톤(<WorkspaceFrameLoading />)만 · 탭 줄은 품지 않음', () => {
     expect(WORKSPACE_FRAME_TABS.length).toBeGreaterThanOrEqual(6);
     const problems: string[] = [];
     for (const tab of WORKSPACE_FRAME_TABS) {
       const own = join(APP_ROOT, '(authenticated)', '[ws]', '[proj]', tab.path, 'loading.tsx');
-      if (!existsSync(own)) { problems.push(`${tab.path}: 자기 loading.tsx 없음(부모 일반 스켈레톤이 탭 줄을 지운다)`); continue; }
-      if (!new RegExp(`<WorkspaceFrameLoading\\b[^>]*\\bactive="${tab.key}"`).test(codeOnly(readFileSync(own, 'utf8')))) {
-        problems.push(`${tab.path}: WorkspaceFrameLoading active="${tab.key}" 아님`);
-      }
+      if (!existsSync(own)) { problems.push(`${tab.path}: 자기 loading.tsx 없음`); continue; }
+      const src = codeOnly(readFileSync(own, 'utf8'));
+      if (!/<WorkspaceFrameLoading\s*\/>/.test(src)) problems.push(`${tab.path}: <WorkspaceFrameLoading /> 아님`);
+      if (/<WorkspaceFrameTabs\b/.test(src)) problems.push(`${tab.path}: 로더가 탭 줄을 품음(레이아웃 띠와 두 줄)`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('⭐탭 줄(<WorkspaceFrameTabs>)을 그리는 소스는 레이아웃 띠(WorkTabsFrame) 하나 · `[ws]/[proj]/layout.tsx`가 그 띠를 씌운다', () => {
+    const SRC = join(APP_ROOT, '..');
+    const renderers: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) { if (name !== 'node_modules') walk(full); continue; }
+        if (!/\.tsx$/.test(name) || /\.test\.tsx$/.test(name)) continue;
+        if (/<WorkspaceFrameTabs\b/.test(codeOnly(readFileSync(full, 'utf8')))) renderers.push(relative(SRC, full));
+      }
+    };
+    walk(SRC);
+    expect(renderers).toEqual(['components/workspace/work-tabs-frame.tsx']);
+    const layout = join(APP_ROOT, '(authenticated)', '[ws]', '[proj]', 'layout.tsx');
+    expect(existsSync(layout), '[ws]/[proj]/layout.tsx').toBe(true);
+    expect(codeOnly(readFileSync(layout, 'utf8'))).toMatch(/<WorkTabsFrame\b/);
   });
 
   it('⭐컨테이너 표가 목적지 전수를 덮는다(표 ∪ 없음 목록 = 목적지 · 겹침 0)', () => {

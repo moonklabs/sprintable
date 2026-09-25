@@ -159,14 +159,14 @@ export default function MorePage() {
               );
             };
             // story #4292 — 머리 규칙은 구역 조립 한 곳(sectionHeader): 한 항목 이름과 같은 글자의 머리는 그리지 않는다(사이드바와 같은 모양).
-            // 머리를 안 그린 카드도 구역으로 읽히게 role=group + 번역된 구역 이름(까디르 QA ②).
-            const { headerKey, name: sectionName } = sectionHeader(group, (key) => t(key));
+            // story #4291(PO) — 머리를 안 그린 카드엔 group 이름을 붙이지 않는다: 머리가 없는 건 구역 이름이 그 한 항목 이름과 같을 때라
+            // (sectionHeader), 붙이면 화면 읽기가 같은 낱말을 두 번(«오늘» 묶음 · «오늘» 링크) 읽는다. 항목 링크 자체가 이름이다.
+            const { headerKey } = sectionHeader(group, (key) => t(key));
             return (
               <Card
                 key={group.id}
                 className="overflow-hidden"
                 data-testid="more-section-card"
-                {...(headerKey ? {} : { role: 'group', 'aria-label': sectionName })}
               >
                 {headerKey ? (
                   <CardHeader>

@@ -204,9 +204,10 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #4274 — 탭 · 메뉴 목적지 loading.tsx 12개 신설([ws]/[proj] · more · org-briefing · content · organization/ 여덟)로 106→118,
   // 까디르 검수 P2(v3 플래그 ON 목적지 today · connect-rules · (v3)/chat loading.tsx 셋)로 118→121, 일감 프레임 탭 줄을 품는 loading.tsx
   // 넷(work-list · flow · epics · hypotheses — sprints · retro는 기존 파일 교체)으로 121→125(위반 0건 그대로 — default export만).
-  it('실 트리(apps/web/src/app) — 라우트 파일 125개·위반 0건', () => {
+  // story #4291 — `[ws]/[proj]/layout.tsx`(일감 탭 띠 WorkTabsFrame) 하나로 125→126(default export만).
+  it('실 트리(apps/web/src/app) — 라우트 파일 126개·위반 0건', () => {
     const { violations, fileCount } = scanRepo(APP_ROOT);
-    expect(fileCount).toBe(125);
+    expect(fileCount).toBe(126);
     expect(violations).toEqual([]);
   }, 1000);
 });

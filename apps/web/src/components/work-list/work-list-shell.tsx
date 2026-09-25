@@ -7,7 +7,6 @@ import { ListFilter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -205,7 +204,6 @@ export function WorkListShell({ projectId }: { projectId: string }) {
           기존 use-mobile.ts 768 문턱 재사용 — 새 breakpoint 0). */}
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 space-y-3 p-4">
-          <WorkspaceFrameTabs active="workList" />
 
         {data && filtered ? (
           <>

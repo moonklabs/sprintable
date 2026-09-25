@@ -88,9 +88,8 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
       ['오늘', '결과', expect.any(String), expect.any(String)],
     );
-    // 머리 없는 카드도 구역으로 읽힌다 — role=group + 번역된 구역 이름(까디르 QA ②). 머리 있는 카드엔 붙이지 않는다(h2가 이름).
-    expect(cards.slice(0, 2).map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual([['group', '오늘'], ['group', '결과']]);
-    expect(cards.slice(2).every((c) => c.getAttribute('role') === null)).toBe(true);
+    // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
+    expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
     // 같은 낱말이 한 카드에 두 번(머리 · 항목) 보이지 않는다.
     for (const card of cards) {
       const header = card.querySelector('[data-testid="more-section-header"]')?.textContent;

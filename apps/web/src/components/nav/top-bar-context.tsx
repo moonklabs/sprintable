@@ -12,9 +12,17 @@ interface TopBarState {
   showContextChip: boolean;
 }
 
+type TopBarFallback = { title: ReactNode; showContextChip: boolean } | null;
+
 interface TopBarStore extends TopBarState {
   setSlot: (slot: Pick<TopBarState, 'title' | 'actions'> & Partial<Pick<TopBarState, 'showContextChip'>>) => void;
   clearSlot: () => void;
+  /**
+   * story #4291(AC3) — 화면이 슬롯을 비운 사이(옛 화면 언마운트 → 새 화면 마운트 전 · 로딩 경계가 뜬 동안) 보일 제목. 레이아웃이 쥔다
+   * (예: 일감 탭 띠가 도착 탭의 제목). 화면 슬롯이 있으면 늘 그쪽이 이긴다 — 레이아웃 effect가 화면 effect보다 늦게 돌아도 덮어쓰지 않게
+   * 슬롯과 따로 둔다. actions는 폴백에 없다(화면만 안다).
+   */
+  setFallback: (fallback: TopBarFallback) => void;
   hidden: boolean;
   setHidden: (h: boolean) => void;
   scrollContainer: HTMLElement | null;
@@ -25,10 +33,15 @@ const TopBarCtx = createContext<TopBarStore | null>(null);
 
 export function TopBarProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<TopBarState>({ title: null, actions: null, showContextChip: false });
+  const [fallback, setFallback] = useState<TopBarFallback>(null);
+  const slotEmpty = state.title === null;
   const [hidden, setHidden] = useState(false);
   const [scrollContainer, setScrollContainer] = useState<HTMLElement | null>(null);
   const value: TopBarStore = {
     ...state,
+    title: slotEmpty ? (fallback?.title ?? null) : state.title,
+    showContextChip: slotEmpty ? (fallback?.showContextChip ?? false) : state.showContextChip,
+    setFallback,
     setSlot: (slot) => setState({ showContextChip: false, ...slot }),
     clearSlot: () => setState({ title: null, actions: null, showContextChip: false }),
     hidden,
