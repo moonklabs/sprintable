@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -25,7 +25,7 @@ import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
-import { fetchWithAuth } from '@/lib/db/client';
+import { INBOX_GATES_HELD_URL, INBOX_GATES_PENDING_URL, takePrefetchedOrFetch, type InboxPrefetchScope } from './inbox-prefetch';
 import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -63,11 +63,12 @@ interface FetchGatesResult {
   heldFailed: boolean;
 }
 
-async function fetchGates(): Promise<FetchGatesResult> {
+// story #4276 — inbox/loading.tsx가 먼저 출발시킨 같은 요청이 있으면 그 응답을 한 번 넘겨받는다(규칙은 inbox-prefetch.ts).
+async function fetchGates(scope: InboxPrefetchScope): Promise<FetchGatesResult> {
   const [pendingResult, heldResult] = await Promise.allSettled([
-    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true')
+    takePrefetchedOrFetch(INBOX_GATES_PENDING_URL, scope)
       .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
-    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true')
+    takePrefetchedOrFetch(INBOX_GATES_HELD_URL, scope)
       .then((r) => (r.ok ? r.json() as Promise<GateInboxItem[]> : Promise.reject(new Error(`status ${r.status}`)))),
   ]);
   return {
@@ -167,7 +168,12 @@ export function ApprovalsQueue() {
   // 같은 버그클래스: 이 큐는 그 판정을 미리 안 보고 에이전트 계정에도 승인/반려 버튼을
   // 무조건 열었다. Gate와 달리 HitlInboxItem엔 per-item can_approve 필드가 없어(BE 응답
   // shape 차이) 계정 자체의 type(human/agent, DashboardContext #2103 신규)으로 게이팅한다.
-  const { orgMemberships, currentMemberType, currentTeamMemberId } = useDashboardContext();
+  const { orgMemberships, currentMemberType, currentTeamMemberId, projectId } = useDashboardContext();
+  // story #4276 — 선출발 응답을 넘겨받을 때 범위 대조용(loadGates 의존성은 그대로 두려고 ref로).
+  const prefetchScopeRef = useRef<InboxPrefetchScope>({ memberId: currentTeamMemberId, projectId });
+  useEffect(() => {
+    prefetchScopeRef.current = { memberId: currentTeamMemberId, projectId };
+  }, [currentTeamMemberId, projectId]);
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -255,7 +261,7 @@ export function ApprovalsQueue() {
     let cancelled = false;
     setLoading(true);
     setLoadFailed(false);
-    void fetchGates()
+    void fetchGates(prefetchScopeRef.current)
       .then((result) => {
         if (cancelled) return;
         setItems(result.items);
