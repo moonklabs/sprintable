@@ -28,7 +28,7 @@ const TABS = [
   { key: 'hypothesis', labelKey: 'hypothesis', path: 'hypotheses' },
 ] as const;
 
-type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
+export type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
 
 // story #3844(PO 지적 2026-09-14 07:53Z, 캡처 3 라이브 눈확認로 발견) — app-sidebar.tsx의
 // 「일감」 1차 메뉴(id 'board')가 resourceLink('flow') 단일 경로만 활성 판정해 /work-list·
@@ -37,6 +37,8 @@ type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
 // (app-sidebar.tsx가 TABS를 직접 import하지 않는 건 'use client' 순환 없이 얇은 경로
 // 목록만 필요해서 — 경로 문자열만 뽑아 재수출한다).
 export const WORKSPACE_FRAME_TAB_PATHS: readonly string[] = TABS.map((tab) => tab.path);
+// story #4274 — 여섯 경로의 loading.tsx가 탭 줄을 품는지 가드가 키 · 경로 짝으로 대조한다(loading-coverage.guard.test.ts).
+export const WORKSPACE_FRAME_TABS: ReadonlyArray<{ key: WorkspaceFrameTabKey; path: string }> = TABS;
 
 /**
  * story #2930(P0-G) I3(doc ia-4zone-redesign-2930, PO 스코프 확定 ①=ⓒ 2026-08-22) — nav에서

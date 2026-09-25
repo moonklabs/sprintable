@@ -9,7 +9,7 @@ import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { groupVisibleLegacyByTarget, LEGACY_NAV_ITEMS, MOBILE_HUB_GROUP_ORDER, resolveNavGroups } from '@/lib/nav-config';
 import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeader } from '@/lib/mobile-hub-groups';
-import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
+import { DEFAULT_NAV_V3_FLAGS, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -42,7 +42,11 @@ export default function MorePage() {
   // story #4278(유나 결정 ①②) — 구역 · 빼는 항목 · 머리 안내의 탭 이름이 모두 «지금 탭바가 그리는 탭»(플래그)에서 나온다
   // (nav-config.ts buildMobileHubGroups · mobile-tab-bar.tsx tabDestinationNavIds · visibleTabLabels).
   const LEGACY_CARD_ID = MOBILE_LEGACY_CARD_ID;
-  const { navV3Flags } = useDashboardContext();
+  const { navV3Flags, orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  // story #4274(유나 실측 · PO) — resource 항목(목표 · 문서 · 루프 · 산출물 · 스토리지 · 보드)은 사이드바 · 탭바와 같은 scopedResourceHref로
+  // `/{ws}/{proj}/{자원}` 직접 주소를 만든다. 예전엔 bare `/goals`라 proxy의 legacyResourceRedirect(307) 동안 로딩 경계가 설 자리가 없어
+  // 390에서 1.45~1.54초 «전체» 화면이 그대로였다. slug를 모르는 찰나에만 flat + `?p=`(useFlatHref).
+  const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const flags = navV3Flags ?? DEFAULT_NAV_V3_FLAGS;
   const hubGroups = useMemo(() => buildMobileHubGroups({
     groups: resolveNavGroups(flags),
@@ -134,7 +138,7 @@ export default function MorePage() {
           {filteredGroups.map((group) => {
             const isLegacy = group.id === LEGACY_CARD_ID;
             const renderItemRow = (item: (typeof group.items)[number]) => {
-              const href = item.kind === 'static' ? flatHref(item.path) : `/${item.path}`;
+              const href = item.kind === 'static' ? flatHref(item.path) : scopedResourceHref(item.path, orgSlug, currentProjectSlug, flatHref);
               const Icon = item.icon;
               return (
                 <Link
