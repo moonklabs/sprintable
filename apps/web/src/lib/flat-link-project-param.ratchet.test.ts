@@ -87,6 +87,20 @@ function carriesOwnProject(node: ts.Node): boolean {
   return beforeHash.slice(q + 1).split('&').some((pair) => pair.split('=')[0] === 'p');
 }
 
+// story #4296(까디르 4639 codex · PO 08:16Z) — 머리 글자로 세는 셈법의 맹점 ④: 목적지가 **데이터**에서 오는 템플릿(`/${item.path}` ·
+// `/${resource}`)은 머리가 `/` 하나라 flat 목적지로 안 보였다(«전체» 메뉴 자원 항목이 bare로 나간 자리). 머리가 `/`뿐이고 첫 치환이
+// 경로 · 자원을 담는 이름(`path` · `resource`로 끝나는 식별자나 속성)이면 flat 목적지로 센다. scoped 조립(`/${ws}/${proj}/…`)은 첫 치환이
+// 조직 · 프로젝트라 세지 않는다.
+const DATA_PATH_NAME = /(?:^|[a-z])(?:path|resource)$/i;
+
+function isDataPathTemplate(node: ts.Node): boolean {
+  if (!ts.isTemplateExpression(node) || node.head.text !== '/') return false;
+  const first = node.templateSpans[0]?.expression;
+  if (!first) return false;
+  const name = ts.isIdentifier(first) ? first.text : ts.isPropertyAccessExpression(first) ? first.name.text : null;
+  return name !== null && DATA_PATH_NAME.test(name);
+}
+
 function isWrapperCall(node: ts.Node): boolean {
   return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && WRAPPERS.has(node.expression.text);
 }
@@ -149,7 +163,8 @@ export function countBareFlatLinksInSource(fileName: string, text: string, route
     }
     const literal = literalText(node);
     if (literal !== null) {
-      if (flatRe.test(literal) && !carriesOwnProject(node) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
+      const flat = flatRe.test(literal) || isDataPathTemplate(node);
+      if (flat && !carriesOwnProject(node) && !isStructurallyNonNav(node) && !isExempt(rel, literal, enclosingPropName(node))) n += 1;
       if (!ts.isTemplateExpression(node)) return;
     }
     ts.forEachChild(node, visit);
@@ -234,6 +249,20 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count('const h = resolveTabHref(tab, dest, scope, withProject);')).toBe(0);
     expect(count("const TABS = [{ href: destHref(D.work, {}, keepHref) }];", 'components/nav/mobile-tab-bar.tsx')).toBe(0);
     expect(count("const x = destHref(D.work, {}, keepHref);", 'components/nav/mobile-tab-bar.tsx')).toBe(1);
+  });
+
+  it('⭐#4296 맹점 ④ — 데이터에서 오는 경로 템플릿(`/${item.path}` · `/${resource}`)도 flat 목적지로 센다', () => {
+    // 양성: «전체» 메뉴가 자원 항목을 bare로 내보내던 바로 그 줄 모양 · 이름이 path/resource로 끝나는 치환.
+    expect(count("const href = item.kind === 'static' ? flatHref(item.path) : `/${item.path}`;")).toBe(1);
+    expect(count('const h = `/${resource}`;')).toBe(1);
+    expect(count('router.push(`/${dest.resourcePath}?tab=x`);')).toBe(1);
+    // 음성: 감싼 자리 · 스스로 p를 싣는 자리 · scoped 조립(첫 치환이 조직 · 프로젝트) · path가 아닌 치환 · 비교.
+    expect(count('const h = withProject(`/${resource}`);')).toBe(0);
+    expect(count('const h = `/${item.path}?p=${pid}`;')).toBe(0);
+    expect(count('const h = `/${orgSlug}/${projectSlug}/${resource}`;')).toBe(0);
+    expect(count('const h = `/${slug}`;')).toBe(0);
+    expect(count('const h = `/${item.pathname}`;')).toBe(0);
+    expect(count('if (href === `/${item.path}`) {}')).toBe(0);
   });
 
   it('예외 표 — 파일·리터럴·속성이 모두 맞을 때만(같은 파일의 다른 모양은 그대로 센다)', () => {
