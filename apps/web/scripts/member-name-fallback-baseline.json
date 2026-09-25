@@ -25,7 +25,7 @@
   },
   {
     "key": "lib/auth-helpers.ts::email-whole::const name = user.user_metadata?.name || user.user_metadata?.full_name || user.email || tc('unknown');",
-    "reason": "EE supabase 경로(agents 페이지 · 레이아웃)의 팀원 자동 생성이 이름 없으면 이메일 통째를 저장(데이터 층) — register 줄과 같은 부류 · PO 별도 판단(까디르 4651 P1 여러 줄 스캔이 찾음)"
+    "reason": "도달 0(SaaS dev 빌드) — 이메일 통째를 이름으로 저장하는 supabase 팀원 자동 생성(resolveTeamMemberFromMemberships). 호출처 getMyTeamMember · getMyMembershipContext는 apps/web/src 안 0(테스트 mock뿐 · story #3926 주석)이고 ee/apps/web/src(layout · agents)뿐인데, 그 트리는 빌드 밖이다: apps/web/Dockerfile은 apps/web만 빌드하고 tsconfig는 @ee/*→ee/packages만 가리키며, 그 파일들이 import하는 @/lib/supabase/server는 apps/web/src에 없다(컴파일되면 빌드 실패 — dev 빌드는 성공). @supabase/supabase-js도 웹 의존성에 없다."
   },
   {
     "key": "services/memo.ts::id-fragment::const authorName = memberById.get(reply.created_by)?.name ?? reply.created_by;",
