@@ -18,7 +18,8 @@ function files(dir: string, out: string[] = []): string[] {
 
 export function autoFocusInsideMenus(src: string): number {
   let n = 0;
-  for (const m of src.matchAll(/<DropdownMenuContent[\s\S]*?<\/DropdownMenuContent>/g)) {
+  // 까디르 QA(PO 10:06Z) — 하위 메뉴(DropdownMenuSubContent)도 같은 초점 관리라 같이 본다.
+  for (const m of src.matchAll(/<DropdownMenu(Sub)?Content[\s\S]*?<\/DropdownMenu\1Content>/g)) {
     n += (m[0].match(/\bautoFocus\b/g) ?? []).length;
   }
   return n;
@@ -35,5 +36,6 @@ describe('드롭다운 메뉴 안 autoFocus 0(story #4306)', () => {
   it('양성대조 — 메뉴 안 autoFocus는 잡고 메뉴 밖은 안 잡는다', () => {
     expect(autoFocusInsideMenus('<DropdownMenuContent><Input autoFocus value={q} /></DropdownMenuContent>')).toBe(1);
     expect(autoFocusInsideMenus('<Input autoFocus /><DropdownMenuContent><MenuSearchInput /></DropdownMenuContent>')).toBe(0);
+    expect(autoFocusInsideMenus('<DropdownMenuSubContent><Input autoFocus /></DropdownMenuSubContent>')).toBe(1);
   });
 });

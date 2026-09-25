@@ -1624,5 +1624,65 @@ describe('KanbanBoard — 필터 메뉴를 열면 초점 = 검색칸(story #4306
     await frames();
     expect(document.activeElement).toBe(input);
   });
+
+  it('⭐Escape는 메뉴로 통과 — 메뉴가 닫히고 초점이 트리거로 돌아온다(까디르 QA · PO 10:06Z)', async () => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B.allSprints!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    expect(input.placeholder).toBe(B.searchSprints);
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.querySelector(`input[placeholder="${B.searchSprints}"]`)).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('⭐↓ = 목록 첫 항목(보이는 순서 · «전체 담당자») → 첫 항목에서 ↑ = 검색칸으로(맨 끝으로 감지 않음) · 유나 확정', async () => {
+    stubFetch([], [{ id: 'm1', name: 'Alice', type: 'human' }, { id: 'm2', name: 'Bob', type: 'human' }]);
+    await mount();
+    const trigger = triggerFor(B.allAssignees!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); });
+    await frames();
+    const first = document.activeElement as HTMLElement;
+    expect(first.getAttribute('role')).toBe('menuitem');
+    expect(first).toBe(document.querySelector('[role="menu"] [role="menuitem"]'));
+    expect(first.textContent).toContain(B.allAssignees);
+    await act(async () => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('Enter(검색칸) = 아무것도 안 함 — 메뉴는 열린 채 · 초점 검색칸', async () => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B.allSprints!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.activeElement as HTMLInputElement;
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    await frames();
+    expect(document.activeElement).toBe(input);
+    expect(document.querySelector(`input[placeholder="${B.searchSprints}"]`)).not.toBeNull();
+  });
+
+  it.each([
+    ['allSprints', 'searchSprints'],
+    ['allEpics', 'searchEpics'],
+    ['allAssignees', 'searchAssignees'],
+  ])('검색칸 접근 이름 = 번역된 자리표시 글자(끝 말줄임 뺌) — %s', async (triggerKey, placeholderKey) => {
+    stubFetch([]);
+    await mount();
+    const trigger = triggerFor(B[triggerKey]!);
+    await act(async () => { trigger!.focus(); trigger!.click(); });
+    await frames();
+    const input = document.querySelector(`input[placeholder="${B[placeholderKey]}"]`)!;
+    expect(input.getAttribute('aria-label')).toBe(B[placeholderKey]!.replace(/(\.{3}|…)\s*$/, '').trim());
+    expect(input.getAttribute('aria-label')).not.toMatch(/(\.{3}|…)$/);
+  });
 });
 
