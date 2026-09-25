@@ -6,6 +6,7 @@
 import { getServerSession } from '@/lib/db/server';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getLocale } from '@/i18n/request';
+import { formatRouteTiming, isServerTimingEnabled, logRouteTiming, routeKindForPath, startRouteTimer, withServerTiming, type RouteTimer } from '@/lib/server-timing';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
 // fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
@@ -60,7 +61,28 @@ export async function proxyToFastapi(
   fastapiPath: string,
   options: ProxyOptions = {},
 ): Promise<Response> {
+  // story #4299 — dev 전용 구간 계측(SERVER_TIMING_MARKERS). 꺼져 있으면 타이머 · 계측 범위 · 로그 0 — 원래 처리로 바로.
+  if (!isServerTimingEnabled()) return proxyToFastapiImpl(request, fastapiPath, options, null);
+  const timer = startRouteTimer(request);
+  const { value: response, spans } = await withServerTiming(() => proxyToFastapiImpl(request, fastapiPath, options, timer));
+  const summary = timer.summary();
+  try {
+    response.headers.set('Server-Timing', formatRouteTiming(summary, spans));
+  } catch {
+    // 불변 헤더 응답(Response.error 등)이면 헤더는 건너뛰고 로그만 — 계측이 응답을 깨면 안 된다.
+  }
+  logRouteTiming(routeKindForPath(fastapiPath), response.status, summary, spans);
+  return response;
+}
+
+async function proxyToFastapiImpl(
+  request: Request,
+  fastapiPath: string,
+  options: ProxyOptions,
+  timer: RouteTimer | null,
+): Promise<Response> {
   const authHeader = await resolveAuthHeader(request);
+  timer?.mark('auth');
   if (!authHeader && !options.public) {
     return ApiErrors.unauthorized();
   }
@@ -91,10 +113,12 @@ export async function proxyToFastapi(
     const fallback = request.headers.get('Accept-Language');
     if (fallback) headers['Accept-Language'] = fallback;
   }
+  timer?.mark('locale');
   if (options.extraHeaders) Object.assign(headers, options.extraHeaders);
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   const body = hasBody ? await request.text() : undefined;
+  timer?.mark('reqbody');
 
   let res: Response;
   try {
@@ -116,8 +140,10 @@ export async function proxyToFastapi(
     // "진짜 상류 실패"의 503 계열로 분류한다.
     return apiError('UPSTREAM_UNREACHABLE', '서버에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
   }
+  timer?.mark('be_ttfb');
 
   const resBody = await res.text();
+  timer?.mark('be_body');
   const resHeaders: Record<string, string> = { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' };
   // story #2190 — board 분기(list_stories status+project_id 조합)가 커서 페이지네이션 신호를
   // 이 두 헤더로만 내보내는데(X-Total-Count/X-Next-Cursor, backend/app/routers/stories.py),
