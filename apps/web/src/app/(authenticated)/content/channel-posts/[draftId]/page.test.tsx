@@ -2441,7 +2441,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
         .toBe(`${koMessages.content.channelPostsFailurePaused} — ${koMessages.content.channelPostsFailurePausedResumes}`);
       // 발행 사유줄도 연결이 아니라 일시 중지 문장(연결 화면 링크 0).
       const reason = container.querySelector('[data-testid="channel-post-command-inflight-reason"]');
-      expect(reason?.textContent).toBe(koMessages.content.channelPostsCommandInFlightReasonPaused);
+      expect(reason?.textContent).toBe(koMessages.content.errorExternalPublishPaused);
       expect(reason?.querySelector('a')).toBeNull();
       expect(container.textContent).not.toContain(koMessages.content.channelPostsFailureBlocked);
       expect(container.querySelector('[data-testid="channel-post-failure-retry-button"]')).toBeNull();
