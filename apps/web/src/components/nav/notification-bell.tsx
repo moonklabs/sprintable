@@ -669,6 +669,9 @@ export function NotificationBell() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         onKeyDown={panelKeys.onTriggerKeyDown}
+        aria-expanded={open}
+        // 패널형 ARIA(#4349 공용 훅) — 열렸을 때 보이는 면을 가리킨다(lg 이상 포털 패널 · 그 밑 풀스크린 오버레이).
+        aria-controls={open ? (isDesktopViewport ? panelKeys.id : `${panelKeys.id}-overlay`) : undefined}
         // story #3518(유나 사전 스티어 G, 2026-09-05) — 이름엔 원수(unreadCount)를
         // 쓴다. 배지 표시(badgeLabel)는 '99+' 문자열이라 그대로 넣으면 "알림 99+개"
         // 처럼 문법이 어긋난다 — 100 이상은 전용 문장(bellAriaLabelCountCapped)으로
@@ -678,9 +681,6 @@ export function NotificationBell() {
             ? (unreadCount > 99 ? t('bellAriaLabelCountCapped') : t('bellAriaLabelCount', { count: unreadCount }))
             : t('panelTitle')
         }
-        aria-expanded={open}
-        // 패널형 ARIA(까디르 4724 · 공용 훅): 열렸을 때 실제로 보이는 면을 가리킨다 — lg 이상은 포털 패널, 그 밑은 풀스크린 오버레이.
-        aria-controls={open ? (isDesktopViewport ? panelKeys.id : `${panelKeys.id}-overlay`) : undefined}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >
         <Bell className="size-4" />
