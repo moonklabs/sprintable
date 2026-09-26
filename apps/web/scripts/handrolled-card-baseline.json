@@ -32,7 +32,7 @@
     "app/(authenticated)/[ws]/[proj]/loops/[id]/loop-detail-client.tsx::rounded-lg border border-border bg-muted/40 p-3",
     "app/(authenticated)/[ws]/[proj]/loops/loops-client.tsx::group w-full cursor-pointer rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-all duration-150 hover:border-primary/30 hover:bg-primary/5",
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::flex flex-col gap-3 rounded-xl border border-border bg-card p-4",
-    "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::flex items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2",
+    "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg border border-border/60 bg-background px-3 py-2",
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::rounded-lg border bg-background p-2.5 transition",
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::rounded-xl border border-border bg-card p-4 space-y-2",
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::rounded-xl border border-border bg-card p-4 space-y-4",
