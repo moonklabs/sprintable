@@ -40,6 +40,7 @@ from app.models.human_api_key import HumanApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.offering_version import OfferingVersion
+from app.models.operator_alert import OperatorAlert
 from app.models.grandfather_policy import GrandfatherPolicy
 from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.plan_tier_limit import PlanTierLimit
@@ -207,6 +208,7 @@ __all__ = [
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
+    "OperatorAlert",
     "PricingVersion",
     "OfferingVersion",
     "GrandfatherPolicy",
