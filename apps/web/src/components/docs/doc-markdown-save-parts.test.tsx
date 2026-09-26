@@ -134,6 +134,33 @@ describe('주입 가드 — raw HTML로 남는 부품 속성은 값이 무엇이
   });
 });
 
+describe('수식 — 마크다운 저장 → 다시 열기 → 수식 값이 선다(유나 4708 대조판)', () => {
+  /** 편집기(A)에서 저장한 md를 편집기(B)로 다시 연 뒤의 수식 글. */
+  function reopenedLatex(html: string): string[] {
+    const first = makeDocEditor(html);
+    const saved = htmlToMarkdown(first.getHTML());
+    first.destroy();
+    const second = makeDocEditor(markdownToHtml(saved));
+    try {
+      return (second.getJSON().content ?? []).filter((n) => n.type === 'mathBlock').map((n) => (n.content ?? []).map((c) => c.text ?? '').join(''));
+    } finally {
+      second.destroy();
+    }
+  }
+  const MATH = '<div data-type="mathBlock" data-latex="E = mc^2">E = mc^2</div>';
+  it.each([
+    ['단독', MATH],
+    ['속성만(MCP 모양)', '<div data-type="mathBlock" data-latex="E = mc^2"></div>'],
+    ['제목 뒤', `<h2>수식</h2>${MATH}`],
+    ['문단 사이', `<p>앞</p>${MATH}<p>뒤</p>`],
+    ['문서 임베드 뒤', `<div data-page-embed="" data-doc-id="x" data-title="T" data-icon="" data-slug="s"></div>${MATH}`],
+    ['밑줄 · 역슬래시', '<div data-type="mathBlock" data-latex="x_1 + \\frac{a}{b}">x_1 + \\frac{a}{b}</div>'],
+  ])('⭐%s', (_name, html) => {
+    const expected = html.includes('frac') ? 'x_1 + \\frac{a}{b}' : 'E = mc^2';
+    expect(reopenedLatex(html)).toEqual([expected]);
+  });
+});
+
 describe('이미지 alt의 따옴표 — 불러오기에서 안 잘린다(저장 쪽 escapeAttr의 읽기 짝 · 유나 4708)', () => {
   it('⭐md `![a "b" c](…)` → markdownToHtml → 편집기 → alt 그대로', () => {
     const html = markdownToHtml('![작은 "따옴표" 그림](https://example.com/q.png)');
