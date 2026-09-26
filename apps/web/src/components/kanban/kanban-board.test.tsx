@@ -420,6 +420,59 @@ describe('KanbanBoard — 스프린트 칩 라벨이 거짓말하지 않는다(s
   });
 });
 
+describe('KanbanBoard — 딥링크로 보드와 패널이 함께 열릴 때 명단 전 «알 수 없는 구성원» 0([SID:4300] 까디르 4682 ①)', () => {
+  // 보드는 스토리 · 구성원을 같은 Promise.all로 받고 스토리를 먼저 세운 뒤 구성원 본문을 파싱한다. 구성원 응답은 오되 본문(json)은
+  // 늦게 풀리게 해 «스토리는 섰는데 명단은 아직»인 창을 재현한다.
+  const story = { id: 's1', title: 'S1 딥링크', status: 'backlog', priority: 'medium', assignee_id: 'm1', assignee_ids: ['m1'], trust_stage: 'queued' };
+  let resolveMembersJson!: (v: unknown) => void;
+  function stubDeepLink() {
+    searchRef.current = 'story=s1';
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const data = new URL(url, 'http://localhost').searchParams.get('status') === 'backlog' ? [story] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/members')) return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveMembersJson = r; }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+
+  it('명단 본문을 받기 전엔 «알 수 없는 구성원»이 어디에도 안 서고, 명단이 오면 패널에 이름', async () => {
+    stubDeepLink();
+    await mount();
+    const everywhere = () => document.body.textContent ?? '';
+    expect(everywhere()).not.toContain(koMessages.common.memberUnknown);
+    await act(async () => { resolveMembersJson({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('S1 딥링크');
+    expect(dialog?.textContent).toContain('Alice');
+    expect(everywhere()).not.toContain(koMessages.common.memberUnknown);
+  });
+
+  // 지금은 첫 불러오기 스켈레톤이 명단 파싱까지 패널을 가려(loading → setMembersLoaded 뒤 해제) 위 테스트가 이 줄 없이도 초록이다 —
+  // 스켈레톤이 바뀌어도(예: 4307 뒤 부분 로딩) 패널이 패널 기본값(true)으로 «알 수 없는»을 먼저 세우지 않게 배선을 핀으로 둔다.
+  it('보드가 패널에 memberMapLoaded를 명시로 넘긴다(보드의 명단 상태 그대로) — 패널 기본값(true)에 기대지 않는다', async () => {
+    const seen: Array<boolean | undefined> = [];
+    vi.resetModules();
+    vi.doMock('./story-detail-panel', () => ({
+      StoryDetailPanel: (props: { memberMapLoaded?: boolean }) => { seen.push(props.memberMapLoaded); return <div role="dialog">panel</div>; },
+    }));
+    try {
+      stubDeepLink();
+      await mount();
+      await act(async () => { resolveMembersJson({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      expect(seen.length).toBeGreaterThan(0); // 패널이 그려졌다
+      expect(seen.every((v) => typeof v === 'boolean')).toBe(true); // 넘기지 않으면 undefined(패널 기본값 true로 떨어짐)
+      expect(seen[seen.length - 1]).toBe(true);
+    } finally {
+      vi.doUnmock('./story-detail-panel');
+      vi.resetModules();
+    }
+  });
+});
+
 describe('KanbanBoard — 늦게 온 이전 실행 결과는 버린다(story #4171 까디르 QA c)', () => {
   it('프로젝트 전환 뒤 이전 프로젝트 goals가 늦게 파싱돼도 새 goals를 덮지 않는다', async () => {
     let resolveOldGoals!: (v: unknown) => void;

@@ -1983,6 +1983,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           tasksTotalCount={storyTasksTotalCount}
           tasksLoading={storyTasksLoading}
           memberMap={memberMap}
+          // [SID:4300 · 까디르 4682 ①] 명단을 받기 전엔 «알 수 없는 구성원» 대신 빈 칸 — 딥링크(?story=)로 보드와 패널이 함께 열릴 때
+          // 패널 기본값(true)이면 명단이 오기 전에 거짓 «알 수 없는»이 먼저 섰다가 이름으로 바뀌었다.
+          memberMapLoaded={membersLoaded}
           members={members}
           getStatusLabel={domainLabels.statusLabel}
           getEntityTypeLabel={domainLabels.entityTypeLabel}
