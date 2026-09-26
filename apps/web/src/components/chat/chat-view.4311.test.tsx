@@ -63,28 +63,6 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-function stubFetch(messagesOk: boolean) {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (typeof url === 'string' && url.includes('/messages?')) {
-      return messagesOk
-        ? { ok: true, json: async () => ({ data: [], meta: { next_cursor: null, has_more: false } }) }
-        : { ok: false, json: async () => ({}) };
-    }
-    return { ok: true, json: async () => ({ data: [] }) };
-  }));
-}
-
-// story #3638(유나 재판정 CHANGES) — fetch 자체가 던지는 표본(오프라인·DNS 등, !res.ok
-// 분기를 아예 안 거친다). stubFetch(false)는 {ok:false}를 정상 반환해 이 표본을 못 잡는다.
-function stubFetchThrows() {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (typeof url === 'string' && url.includes('/messages?')) {
-      throw new Error('network down');
-    }
-    return { ok: true, json: async () => ({ data: [] }) };
-  }));
-}
-
 async function mount() {
   const { ChatView } = await import('./chat-view');
   const { ChatRailProvider } = await import('../../app/(authenticated)/chats/chat-rail-context');
