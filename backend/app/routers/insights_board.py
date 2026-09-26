@@ -325,6 +325,7 @@ async def create_publication_follow_up_endpoint(
         result = await create_publication_follow_up(
             db, org_id=org_id, publication_id=publication_id, kind=body.kind,
             title=body.title, note=body.note, requested_by_member_id=resolved.id,
+            caller_user_id=uuid.UUID(auth.user_id),
         )
     except FollowUpPublicationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"publication을 찾을 수 없습니다: {exc}") from exc
@@ -352,8 +353,17 @@ async def reconcile_publication_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await resolve_member(auth, org_id, db)
+    # story #4351(쓰기 IDOR · PO 2026-09-26) — 접근 못 하는 프로젝트의 발행물에 대조 행을 쓰지 않는다. 응답은 «없는 발행물»과
+    # 똑같이(409 INSIGHT_PUBLICATION_NOT_FOUND) — 다르게 돌려주면 그 발행물이 있다는 게 샌다.
+    from app.services.insights_board import caller_can_access_publication
+
+    from app.services.publication_reconciliation import publication_not_found
 
     try:
+        if not await caller_can_access_publication(
+            db, org_id=org_id, publication_id=publication_id, user_id=uuid.UUID(auth.user_id),
+        ):
+            raise publication_not_found(publication_id)
         record = await reconcile_publication(
             db, org_id=org_id, publication_id=publication_id, requested_by_member_id=resolved.id,
         )

@@ -13,6 +13,14 @@ from app.routers.gates import list_gates
 from app.services.member_resolver import ResolvedMember
 
 
+@pytest.fixture(autouse=True)
+def _full_access_caller():
+    """story #4351 — list_gates가 제한된 caller면 접근 가능 프로젝트로 좁히며 그 판정에 조회를 쓴다. 이 파일은 execute 순서를 세는 목
+    세션이라 판정을 «전체 접근(None)»으로 고정한다(범위 규칙 자체는 test_4351_gates_scope_realdb.py 실 PG)."""
+    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)):
+        yield
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -87,7 +95,8 @@ async def test_story_gate_summary_enriched_via_project_id_batch_no_extra_query()
     session.execute = AsyncMock(side_effect=[gates_res, story_batch_res])
     with patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type=None, status=None,
-                               assigned_to_me=False, session=session, org_id=org, auth=None)
+                               assigned_to_me=False, session=session, org_id=org,
+                               auth=SimpleNamespace(user_id=str(uuid.uuid4())))  # story #4351 — list_gates가 caller 범위를 본다
     # story #3784a8d0(3038, 실사고 fix) — merge 게이트(work_item_type=='story')도 이제
     # work_item_summary가 채워진다(예전엔 이 테스트명대로 "no enrich"였으나, 그게 바로
     # #3038의 버그 그 자체였다 — 테스트명은 유지하되 단언은 새 계약으로 갱신).
