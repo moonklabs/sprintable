@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -41,6 +41,7 @@ class GoalRepository(BaseRepository[Goal]):
         limit: int | None = None,
         cursor: datetime | None = None,
         order_by: str = "created_at",
+        project_ids: Collection[uuid.UUID] | None = None,
         **filters: Any,
     ) -> tuple[list[Goal], int]:
         """기본 페이지네이션 + 연결 가설 집계(hypothesis_count·risky_status) + 스토리 집계
@@ -52,21 +53,25 @@ class GoalRepository(BaseRepository[Goal]):
         파라미터는 이 모드에서 미지원 — v1 스코프, #2056 기본 정렬 경로는 완전 무변경).
         """
         if order_by == "position":
-            goals, total = await self._list_paginated_by_position(limit=limit, **filters)
+            goals, total = await self._list_paginated_by_position(limit=limit, project_ids=project_ids, **filters)
         else:
             goals, total = await super().list_paginated(
-                limit=limit, cursor=cursor, order_by=order_by, **filters
+                limit=limit, cursor=cursor, order_by=order_by, project_ids=project_ids, **filters
             )
         await self._attach_hypothesis_aggregates(goals)
         await self._attach_story_aggregates(goals)
         return goals, total
 
     async def _list_paginated_by_position(
-        self, *, limit: int | None, **filters: Any,
+        self, *, limit: int | None, project_ids: Collection[uuid.UUID] | None = None, **filters: Any,
     ) -> tuple[list[Goal], int]:
         conds = [self._org_filter()]
         for attr, val in filters.items():
             conds.append(getattr(Goal, attr) == val)
+        if project_ids is not None:  # story #4350 — base.list_paginated와 같은 규칙
+            if not project_ids:
+                return [], 0
+            conds.append(Goal.project_id.in_(list(project_ids)))
 
         count_result = await self.session.execute(
             select(func.count()).select_from(Goal).where(*conds)

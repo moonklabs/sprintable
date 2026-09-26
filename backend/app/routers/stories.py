@@ -343,10 +343,16 @@ async def list_stories(
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
     cursor_dt = _parse_stories_cursor(cursor)
+    # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트로만(SEC-S8 선생님 확정: org 전체 노출 = 갭 · sprints와 같은 규칙 ·
+    # ids= 분기와 같은 해소기). SQL에서 좁혀 limit · X-Total-Count가 맞는다.
+    project_ids = None
+    if not project_id:
+        from app.services.project_auth import accessible_project_ids_in_org
+        project_ids = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
     stories, total = await repo.list(
         limit=limit, q=q, cursor=cursor_dt, unattached=unattached,
         epic_ids=parsed_epic_ids, include_unassigned=include_unassigned,
-        done_within_days=done_within_days, no_assignee=no_assignee, **filters,
+        done_within_days=done_within_days, no_assignee=no_assignee, project_ids=project_ids, **filters,
     )
     if response is not None:
         response.headers["X-Total-Count"] = str(total)

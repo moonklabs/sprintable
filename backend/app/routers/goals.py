@@ -129,8 +129,13 @@ async def list_goals(
                 status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
             ) from exc
 
+    # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트로만(SEC-S8 선생님 확정: org 전체 노출 = 갭 · sprints와 같은 규칙).
+    project_ids = None
+    if not project_id:
+        from app.services.project_auth import accessible_project_ids_in_org
+        project_ids = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), org_id)
     goals, total = await repo.list_paginated(
-        limit=limit, cursor=cursor_dt, order_by=order_by, **filters
+        limit=limit, cursor=cursor_dt, order_by=order_by, project_ids=project_ids, **filters
     )
 
     if include != "glance":
