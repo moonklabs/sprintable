@@ -34,6 +34,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { actorRowLabels } from '@/lib/member-display';
 import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
@@ -885,6 +886,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, [messages]);
 
   const groups = groupByDate(messages, locale, displayTimezone);
+  // [SID:4311 PR 3] 발신자 라벨 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 불러온 메시지 안에서만).
+  // 내 메시지는 «나»로 서서 셈에서 뺀다(내 이름이 남의 줄에 꼬리를 만들지 않게).
+  const senderLabels = actorRowLabels(messages.filter((m) => m.created_by !== currentTeamMemberId).map((m) => ({ id: m.created_by, label: m.sender_name || t('team') })));
 
   // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
   // 이후·타인 발신(§4-1 BE unread 정의 sender IS DISTINCT FROM 나와 동형) 첫 메시지 앞.
@@ -1049,6 +1053,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             }
                             isMine={msg.created_by === currentTeamMemberId}
                             isGrouped={isGrouped}
+                            senderLabel={senderLabels.get(msg.created_by)}
                             onOpenThread={openThread}
                             onOpenReadingPanel={openReadingPanel}
                             onDelete={handleDeleteMessage}

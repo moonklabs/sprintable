@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
+import { actorRowLabels } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import { seedFromCompose } from './chat-v3-compose';
@@ -220,6 +221,9 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
 
   let lastDay: string | null = null;
 
+  // [SID:4311 PR 3] 발신자 라벨 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 내 메시지는 «나»라 셈에서 뺌).
+  const senderLabels = actorRowLabels((messages ?? []).filter((m) => m.created_by !== meId).map((m) => ({ id: m.created_by, label: m.sender_name })));
+
   return (
     <section className="flex min-w-0 flex-1 flex-col border-r border-border bg-background" data-testid="chat-v3-messages-column">
       {loadError ? (
@@ -246,7 +250,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                   <p className="mb-3 text-center text-xs text-muted-foreground">{formatDayLabel(key, locale)}</p>
                 ) : null}
                 <div className={isMine ? 'ml-auto max-w-[78%] text-right' : 'max-w-[78%]'}>
-                  <p className="mb-1 text-xs text-muted-foreground">{isMine ? t('meLabel') : m.sender_name}</p>
+                  <p className="mb-1 text-xs text-muted-foreground">{isMine ? t('meLabel') : (senderLabels.get(m.created_by) ?? m.sender_name)}</p>
                   <Card
                     radius="compact"
                     className={cn(

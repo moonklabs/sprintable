@@ -103,7 +103,7 @@ describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
       { id: 'bbbbbbbb-2', name: '점검봇', role: 'admin', is_active: true },
     ] });
     await mount();
-    const texts = [...container.querySelectorAll('a span')].map((e) => e.textContent ?? '');
+    const texts = [...container.querySelectorAll('a [data-row-name]')].map((e) => e.textContent ?? '');
     expect(texts.filter((x) => x === '점검봇')).toHaveLength(2);
     expect(texts.some((x) => x.includes('aaaaaaaa'))).toBe(false);
   });
@@ -114,7 +114,7 @@ describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
       { id: 'bbbbbbbb-2', name: '점검봇', role: 'member', is_active: true },
     ] });
     await mount();
-    const texts = [...container.querySelectorAll('a span')].map((e) => e.textContent ?? '');
+    const texts = [...container.querySelectorAll('a [data-row-name]')].map((e) => e.textContent ?? '');
     expect(texts).toContain('점검봇 · aaaaaaaa');
     expect(texts).toContain('점검봇 · bbbbbbbb');
   });

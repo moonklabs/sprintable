@@ -26,6 +26,7 @@ import {
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels, memberLookup } from '@/lib/member-display';
+import { storyAssigneeChipLabels } from '@/components/standup/story-assignee-label';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
@@ -226,6 +227,11 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   const currentEntry = currentTeamMemberId ? entryByAuthorId[currentTeamMemberId] : undefined;
   // a9e67531(PO 트림): picker 후보는 scoped stories만 — cross-board plan story를 picker 후보로 늘리는 것은
   // selection(write) 측이라 Track E v3 브릿지 모달 영역(PO AC 後 별건). #1689는 순수 read/render fix로 한정.
+  // [SID:4311 PR 3] 스토리 담당 칩(스프린트 목록 · 계획 고르기 — 같은 스토리 묶음) — 담당 없음 · 이름 빔 · 표에 없음을 가르고 같은 이름 둘은 꼬리.
+  const assigneeChipLabel = useMemo(
+    () => storyAssigneeChipLabels(stories, memberNameById, tc, tBoard('unassigned'), { loaded: !loading }),
+    [stories, memberNameById, tc, tBoard, loading],
+  );
   const storyPickerStories = useMemo(() => stories.slice().sort((left, right) => {
     const leftPriority = left.assignee_id === currentTeamMemberId ? 0 : 1;
     const rightPriority = right.assignee_id === currentTeamMemberId ? 0 : 1;
@@ -605,7 +611,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                   <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                 </div>
                                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                  <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                  <Badge variant="chip">{assigneeChipLabel(story.assignee_id)}</Badge>
                                   <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
@@ -825,7 +831,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                             <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
                                           </div>
                                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                            <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                            <Badge variant="chip">{assigneeChipLabel(story.assignee_id)}</Badge>
                                             <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
                                           </div>
                                         </div>

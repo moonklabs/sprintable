@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { memberOrAgentLabel, memberRowLabels } from '@/lib/member-display';
 
 interface Agent {
   id: string;
-  name: string;
+  name: string | null;
   type: string;
   is_active: boolean;
   // story #3994 — 「시스템 발행」은 키를 발급받을 연결 대상이 아니다(제외, AC4와
@@ -16,8 +18,11 @@ interface Agent {
 }
 
 export default function ApiKeysPage() {
+  const tc = useTranslations('common');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  // [SID:4311 PR 3] 에이전트 칸 머리 — 같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»(목록 행 규칙 한 곳).
+  const agentLabels = useMemo(() => memberRowLabels(agents, tc, () => '', (a) => memberOrAgentLabel(a, tc)), [agents, tc]);
 
   useEffect(() => {
     async function loadAgents() {
@@ -56,7 +61,7 @@ export default function ApiKeysPage() {
         <div className="space-y-6">
           {agents.map((agent) => (
             <div key={agent.id} className="space-y-4">
-              <AgentApiKeyManager agentId={agent.id} agentName={agent.name} />
+              <AgentApiKeyManager agentId={agent.id} agentName={agent.name ?? ''} agentLabel={agentLabels.get(agent.id)} />
             </div>
           ))}
         </div>

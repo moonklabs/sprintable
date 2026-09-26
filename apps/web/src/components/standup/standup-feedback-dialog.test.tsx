@@ -116,3 +116,37 @@ describe('StandupFeedbackDialog — 4311 꼬리 규칙 × 받는 동안 빈 글�
     expect(text).toContain('송윤재 · dup-bbbb');
   });
 });
+
+// [SID:4311 PR 3] 연결 스토리 담당 칩 — 스탠드업 화면과 같은 규칙(예전 `assignee_name ?? t('unknown')`가 셋을 «알 수 없음»으로 뭉갬).
+describe('StandupFeedbackDialog — 연결 스토리 담당 칩([SID:4311 PR 3])', () => {
+  it('담당 없음 · 이름 빔 · 표에 없음을 가르고 «송윤재» 둘은 꼬리로 갈린다', async () => {
+    const story = (id: string, title: string, assignee_id: string | null) => ({ id, title, status: 'in-progress', assignee_id, assignee_name: null, task_count: 2, done_task_count: 1 });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <StandupFeedbackDialog
+            open
+            onOpenChange={() => {}}
+            member={{ id: 'm-anna', name: '안나', type: 'human' }}
+            entry={{ id: 'e1', author_id: 'm-anna', date: '2026-09-25', done: '', plan: '', blockers: null, plan_story_ids: ['s1', 's2', 's3', 's4', 's5'] }}
+            feedback={[]}
+            stories={[story('s1', '첫 일감', 'e75ca548-1'), story('s2', '둘째 일감', '2fd14616-2'), story('s3', '셋째 일감', null), story('s4', '넷째 일감', 'm-noname'), story('s5', '다섯째 일감', 'm-gone')]}
+            memberNameById={{ 'e75ca548-1': '송윤재', '2fd14616-2': '송윤재', 'm-noname': null as unknown as string }}
+            currentMemberId="me"
+            onCreateFeedback={() => {}}
+            onUpdateFeedback={() => {}}
+            onDeleteFeedback={() => {}}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    const chip = (title: string) => [...document.querySelectorAll('p')].find((el) => el.textContent === title)?.parentElement?.nextElementSibling?.firstElementChild?.textContent;
+    expect(chip('첫 일감')).toBe('송윤재 · e75ca548');
+    expect(chip('둘째 일감')).toBe('송윤재 · 2fd14616');
+    expect(chip('셋째 일감')).toBe(koMessages.board.unassigned);
+    expect(chip('넷째 일감')).toBe(koMessages.common.memberUnnamed);
+    expect(chip('다섯째 일감')).toBe(koMessages.common.memberUnknown);
+  });
+});
+

@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
 
 type MessagingMode = 'creator_only' | 'org_wide' | 'list';
 const MODES: MessagingMode[] = ['creator_only', 'list', 'org_wide'];
@@ -287,7 +288,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                             {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
                           </div>
                           {/* [SID:4286 · PO 12:06Z 같은 부류] 이메일 없이 이름만 그리는 고르기 목록 — 이름 없는 사람이 둘 이상이면 겹친 행에만 «· ID 앞 8자». */}
-                          <span className="flex-1 truncate">{pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}</span>
+                          <RowName className="flex-1" label={pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)} id={m.id} />
                           {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-brand" />}
                         </button>
                       </li>

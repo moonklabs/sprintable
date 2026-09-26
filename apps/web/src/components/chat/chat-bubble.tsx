@@ -44,6 +44,8 @@ interface ChatBubbleProps {
   message: ChatMessage;
   isMine: boolean;
   isGrouped?: boolean;
+  /** [SID:4311 PR 3] 목록이 actorRowLabels로 지은 발신자 라벨(같은 이름 둘이면 «· ID 앞 8자») — 머리글자 · 아바타는 원래 이름. */
+  senderLabel?: string;
   onOpenThread?: (message: ChatMessage) => void;
   onDelete?: (messageId: string) => void;
   /** story #2349 — 생략하면(undefined) 컨텍스트 메뉴에 「사용자 차단」 항목 자체가 안 뜬다
@@ -401,7 +403,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
 const LONG_PRESS_MS = 500;
 
 export function ChatBubble({
-  message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
+  message, isMine, isGrouped = false, senderLabel, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
@@ -443,7 +445,7 @@ export function ChatBubble({
   const hasAttachments = (message.attachments?.length ?? 0) > 0;
   const cmdName = isCmd ? commandName(message.content) : null;
   const args = isCmd ? commandArgs(message.content) : '';
-  const displayName = isMine ? t('you') : (message.sender_name || t('team'));
+  const displayName = isMine ? t('you') : (senderLabel || message.sender_name || t('team'));
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date(message.created_at));
   const replyCount = message.reply_count ?? 0;
   const lastReplyAt = message.last_reply_at;

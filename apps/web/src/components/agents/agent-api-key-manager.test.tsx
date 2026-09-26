@@ -218,3 +218,28 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     expect(parsed.expires_at).toBeNull();
   });
 });
+
+// [SID:4311 PR 3] 머리 줄은 목록 라벨(같은 이름 둘이면 «· ID 앞 8자») · 없으면 agentName 그대로.
+describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
+  it('agentLabel이 오면 머리 줄에 그 라벨 · 안 오면 agentName', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="aaaa1111-1" agentName="봇" agentLabel="봇 · aaaa1111" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('h3')?.textContent).toBe('API Keys - 봇 · aaaa1111');
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="aaaa1111-1" agentName="봇" />
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(document.querySelector('h3')?.textContent).toBe('API Keys - 봇');
+  });
+});
+

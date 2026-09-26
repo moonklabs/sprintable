@@ -467,3 +467,25 @@ describe('ChatV3Messages — 대화 전환 시 시드 처리(story #4028 CHANGES
     expect(posts.length).toBe(0);
   });
 });
+
+// [SID:4311 PR 3] 발신자 줄 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번) · 내 메시지는 «나»라 셈에서 뺀다
+// (내 이름이 남의 줄에 꼬리를 만들지 않음).
+describe('ChatV3Messages — 발신자 동명이인([SID:4311 PR 3])', () => {
+  it('«송윤재» 둘 = 줄마다 id 앞 8자 · 같은 사람 두 줄 = 같은 꼬리 · 나와 같은 이름의 남 = 꼬리 없음', async () => {
+    // 실 응답 모양 — 발신자는 중첩 sender(normalizeToMessage가 sender_name으로 푼다).
+    const msg = (id: string, created_by: string, sender_name: string) => ({
+      id, sender: { id: created_by, name: sender_name, type: 'human' },
+      content: `본문 ${id}`, attachments: [], created_at: '2026-09-16T06:41:00Z', references: [], approval_target: null,
+    });
+    stub({ messages: { data: [
+      msg('m1', 'e75ca548-1', '송윤재'),
+      msg('m2', '2fd14616-2', '송윤재'),
+      msg('m3', 'e75ca548-1', '송윤재'),
+      msg('m4', 'me-1', '안나'),
+      msg('m5', 'other-anna', '안나'),
+    ] } });
+    await mount(createRef<ChatV3MessagesHandle>());
+    const labels = [...container.querySelectorAll('p.mb-1.text-xs')].map((el) => el.textContent);
+    expect(labels).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '송윤재 · e75ca548', koMessages.chatV3.meLabel, '안나']);
+  });
+});

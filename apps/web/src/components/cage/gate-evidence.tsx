@@ -20,6 +20,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
+import { actorRowLabels } from '@/lib/member-display';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -618,6 +619,10 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
   }, [gateId, refreshKey]);
 
   if (items === null) return null;
+  // [SID:4311 PR 3] 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만).
+  // 이름 빔은 기존 폴백 그대로(story #2975) — 이 응답은 떠난 사람과 이름 없는 사람을 둘 다 null로 싣어(gates.py actor_name_map) 가를 수 없다.
+  const actorLabel = (item: GateActivityLogItem) => item.actor_name || t('gateActivityActorFallback');
+  const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? actorLabel(item) : null })));
 
   return (
     <div>
@@ -632,7 +637,7 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
             const adsBoostLabel = adsBoostActivityLabel(item, t);
             return (
               <li key={item.id} className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">{item.actor_name ?? t('gateActivityActorFallback')}</span>
+                <span className="font-medium text-foreground">{(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? actorLabel(item)}</span>
                 {' · '}
                 {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}

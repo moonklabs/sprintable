@@ -15,6 +15,7 @@ import type { CardState as GateCardState } from '@/components/chat/approval-requ
 import type { EventDefinitionSummary } from '@/lib/block-template';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { actorRowLabels } from '@/lib/member-display';
 
 // story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
@@ -187,6 +188,9 @@ export function ThreadPanel({
     shouldScrollToBottomRef.current = true;
   }, [conversationId, parentMessage.id, onReplyAdded]);
 
+  // [SID:4311 PR 3] 원본 + 답글 한 목록 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 내 메시지는 «나»라 셈에서 뺌).
+  const senderLabels = actorRowLabels([parentMessage, ...messages].filter((m) => m.created_by !== currentTeamMemberId).map((m) => ({ id: m.created_by, label: m.sender_name || t('team') })));
+
   return (
     <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">
       {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
@@ -239,6 +243,7 @@ export function ThreadPanel({
           message={parentMessage}
           isMine={parentMessage.created_by === currentTeamMemberId}
           isGrouped={false}
+          senderLabel={senderLabels.get(parentMessage.created_by)}
           projectId={projectId}
           entityStatusByKey={entityStatusByKey}
           eventDefinitionsByKey={eventDefinitionsByKey}
@@ -270,6 +275,7 @@ export function ThreadPanel({
                   message={msg}
                   isMine={msg.created_by === currentTeamMemberId}
                   isGrouped={isGrouped}
+                  senderLabel={senderLabels.get(msg.created_by)}
                   projectId={projectId}
                   entityStatusByKey={entityStatusByKey}
                   eventDefinitionsByKey={eventDefinitionsByKey}

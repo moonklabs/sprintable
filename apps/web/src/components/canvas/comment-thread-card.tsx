@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { memberLookup } from '@/lib/member-display';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
@@ -39,7 +39,10 @@ export function CommentThreadCard({
   // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed).
   const tc = useTranslations('common');
   // [SID:4286 · 까디르 P1/P4] 작성자 · 처리자 이름 칸의 «—» 폴백 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
-  const nameOf = (id: string) => memberLookup(memberMap, id, tc)!.label;
+  const baseNameOf = (id: string) => memberLookup(memberMap, id, tc)!.label;
+  // [SID:4311 PR 3] 댓글 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번). 해결한 사람 문장도 같은 표(한 카드 안에서 같은 사람 = 같은 글자).
+  const authorLabels = actorRowLabels(thread.comments.map((c) => ({ id: c.author_id, label: baseNameOf(c.author_id) })));
+  const nameOf = (id: string) => authorLabels.get(id) ?? baseNameOf(id);
   const [replyDraft, setReplyDraft] = useState('');
   const resolved = thread.rollup === 'resolved';
   // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).

@@ -36,10 +36,12 @@ interface ApiKey {
 interface AgentApiKeyManagerProps {
   agentId: string;
   agentName: string;
+  /** [SID:4311 PR 3] 머리 줄에만 쓰는 목록 라벨(같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»). 에이전트에게 보내는 온보딩 문구는 agentName 그대로. */
+  agentLabel?: string;
   onNewKey?: (apiKey: string, mcpConfig?: string | null) => void;
 }
 
-export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKeyManagerProps) {
+export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -215,7 +217,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     <SectionCard className="p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold">API Keys - {agentName}</h3>
+          <h3 className="text-lg font-semibold">API Keys - {agentLabel ?? agentName}</h3>
           <p className="text-sm text-muted-foreground">
             Manage API keys for agent authentication
           </p>

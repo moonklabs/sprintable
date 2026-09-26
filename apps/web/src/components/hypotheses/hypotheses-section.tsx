@@ -12,7 +12,7 @@ import { HypothesisResolveDialog, type HypothesisResolveResult } from './hypothe
 import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
-import { memberLookup } from '@/lib/member-display';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
@@ -144,7 +144,10 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 재요청
   // 되게 orgSyncVersion을 얹는다(다른 opt-in 컴포넌트와 동일 패턴).
   // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸.
-  const resolveMemberName = (id: string): string => memberLookup(memberNames, id, tc, { loaded: memberNamesLoaded })?.label ?? '';
+  const baseMemberName = (id: string): string => memberLookup(memberNames, id, tc, { loaded: memberNamesLoaded })?.label ?? '';
+  // [SID:4311 PR 3] 가설 행의 담당(@) — 같은 이름 서로 다른 담당 둘이면 «· ID 앞 8자»(담당 id마다 한 번). 같은 칸의 결재 문장도 같은 표(같은 사람 = 같은 글자).
+  const ownerLabels = actorRowLabels((items ?? []).map((h) => ({ id: h.owner_member_id, label: h.owner_member_id ? baseMemberName(h.owner_member_id) : null })));
+  const resolveMemberName = (id: string): string => ownerLabels.get(id) ?? baseMemberName(id);
   const orgSyncVersion = useOrgSyncVersion();
   useEffect(() => { void load(); }, [load, orgSyncVersion]);
 

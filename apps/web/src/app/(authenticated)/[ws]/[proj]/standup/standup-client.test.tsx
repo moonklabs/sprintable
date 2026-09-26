@@ -41,7 +41,7 @@ afterEach(async () => {
   vi.resetModules();
 });
 
-function stubFetch(opts: { missingReject?: boolean; entries?: unknown[]; members?: unknown[] } = {}) {
+function stubFetch(opts: { missingReject?: boolean; entries?: unknown[]; members?: unknown[]; stories?: unknown[] } = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => null };
     if (url.includes('/api/standup?date=')) return { ok: true, json: async () => ({ data: opts.entries ?? [] }) };
@@ -55,8 +55,10 @@ function stubFetch(opts: { missingReject?: boolean; entries?: unknown[]; members
       return { ok: true, json: async () => ({ data: [] }) };  // story #4298 — BE `[{id, name}]`(BFF가 data로 감쌈)
     }
     if (url.includes('/api/stories?project_id=')) {
-      return { ok: true, json: async () => ({ data: [], meta: {} }) };
+      return { ok: true, json: async () => ({ data: opts.stories ?? [], meta: {} }) };
     }
+    // [SID:4311 PR 3] 스토리마다 일 진척 요약(없으면 목록 로드가 실패로 끝난다).
+    if (url.includes('/api/tasks?story_id=')) return { ok: true, json: async () => ({ data: [], meta: { totalCount: 0, doneCount: 0 } }) };
     return { ok: false, json: async () => null };
   }));
 }
@@ -165,3 +167,43 @@ describe('StandupClient — 막힘 모음 작성자 이름([SID:4300])', () => {
     expect(text).not.toContain(koMessages.common.memberUnknown);
   });
 });
+
+// [SID:4311 PR 3] 스프린트 스토리 담당 칩 — 예전 `assignee_name ?? t('unknown')`는 담당 없음 · 표에 없음 · 이름 빔을 «알 수 없음» 하나로 뭉갰다.
+// 담당 없음 = «담당자 없음» · 이름 빔 = «이름 없는 구성원» · 표에 없음 = «알 수 없는 구성원» · 같은 이름 둘 = «· ID 앞 8자».
+describe('StandupClient — 스토리 담당 칩([SID:4311 PR 3])', () => {
+  it('담당 없음 · 이름 빔 · 표에 없음을 가르고 «송윤재» 둘은 꼬리로 갈린다', async () => {
+    const story = (id: string, title: string, assignee_id: string | null) => ({ id, title, status: 'in-progress', assignee_id, sprint_id: 'sp1', project_id: 'p1' });
+    stubFetch({
+      members: [
+        { id: 'e75ca548-1', name: '송윤재', type: 'human' },
+        { id: '2fd14616-2', name: '송윤재', type: 'human' },
+        { id: 'm-anna', name: '안나', type: 'human' },
+        { id: 'm-noname', name: null, type: 'human' },
+      ],
+      stories: [
+        story('s1', '첫 일감', 'e75ca548-1'),
+        story('s2', '둘째 일감', '2fd14616-2'),
+        story('s3', '셋째 일감', 'm-anna'),
+        story('s4', '넷째 일감', null),
+        story('s5', '다섯째 일감', 'm-noname'),
+        story('s6', '여섯째 일감', 'm-gone'),
+      ],
+    });
+    await mount();
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // 스프린트 스토리 카드는 접힌 칸 — 펼친 뒤 칩을 읽는다.
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.standup.expandSprintStories));
+    await act(async () => { toggle?.click(); });
+    const chip = (title: string) => {
+      const p = [...container.querySelectorAll('p')].find((el) => el.textContent === title);
+      return p?.parentElement?.nextElementSibling?.firstElementChild?.textContent;
+    };
+    expect(chip('첫 일감')).toBe('송윤재 · e75ca548');
+    expect(chip('둘째 일감')).toBe('송윤재 · 2fd14616');
+    expect(chip('셋째 일감')).toBe('안나');
+    expect(chip('넷째 일감')).toBe(koMessages.board.unassigned);
+    expect(chip('다섯째 일감')).toBe(koMessages.common.memberUnnamed);
+    expect(chip('여섯째 일감')).toBe(koMessages.common.memberUnknown);
+  });
+});
+

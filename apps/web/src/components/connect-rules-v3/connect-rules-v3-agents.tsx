@@ -15,6 +15,7 @@ import {
 } from './connect-rules-v3-section-state';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
 
 /**
  * story #3982 §(c) 연결된 에이전트 — `GET /api/team-members?type=agent` 1콜만 마운트
@@ -176,7 +177,7 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span className="truncate font-medium text-foreground">{rowLabels.get(agent.id)}</span>
+                    <RowName className="font-medium text-foreground" label={rowLabels.get(agent.id)} id={agent.id} />
                     {roleLine ? <span className="text-xs text-muted-foreground">{roleLine}</span> : null}
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{presenceLabel}</p>

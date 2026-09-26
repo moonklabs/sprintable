@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { memberLookup } from '@/lib/member-display';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
+import { RowName } from '@/components/shared/row-name';
 
 interface ArtifactVersionRailProps {
   artifact: VisualArtifact;
@@ -28,6 +29,8 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
   const tc = useTranslations('common');
   const [descOpen, setDescOpen] = useState(false);
   const sorted = [...versions].sort((a, b) => b.version - a.version);
+  // [SID:4311 PR 3] 판 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번).
+  const authorLabels = actorRowLabels(sorted.map((v) => ({ id: v.created_by, label: memberLookup(memberMap, v.created_by, tc)!.label })));
 
   return (
     <div className="border-l border-border p-3">
@@ -38,7 +41,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
           const isAnchor = v.version === artifact.anchor_version;
           const isSelected = v.version === selectedVersion;
           // [SID:4286 · 까디르 P1/P4] «—»로 아는 사람(이름 빔)과 모르는 사람을 뭉개던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
-          const authorName = memberLookup(memberMap, v.created_by, tc)!.label;
+          const authorName = authorLabels.get(v.created_by) ?? memberLookup(memberMap, v.created_by, tc)!.label;
           return (
             <li key={v.id}>
               <button
@@ -67,8 +70,11 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                       <span className="rounded bg-success/10 px-1 py-0.5 text-[9px] font-bold text-foreground">{t('versionAnchorTag')}</span>
                     ) : null}
                   </p>
-                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                    {authorName}{v.summary ? ` · ${v.summary}` : ''}
+                  {/* [SID:4311 PR 3 · 유나 1440 실측] «이름 · 꼬리 · 요약» 한 줄 — 요약 → 이름 순으로 잘리고 꼬리는 늘 보인다(예전 한 덩어리 truncate는
+                      13자 이상 이름에서 꼬리가 말줄임에 먹혔다). 요약은 `flex-1`(바탕 0 · 남는 폭만 차지) · 앞 « · »는 줄바꿈 없는 공백. */}
+                  <p className="mt-0.5 flex min-w-0 items-baseline text-[11px] text-muted-foreground">
+                    <RowName label={authorName} id={v.created_by} />
+                    {v.summary ? <span className="min-w-0 flex-1 truncate">{`\u00a0· ${v.summary}`}</span> : null}
                   </p>
                 </div>
               </button>
