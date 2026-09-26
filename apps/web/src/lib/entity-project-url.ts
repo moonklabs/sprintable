@@ -46,7 +46,7 @@ export function resolveScopedEntityHref(
  * `?story=`를 자동 병합한다(story #2224 실측 확認·comment) — 이 함수는 그 리네이밍 관심사와
  * 결합하지 않고 `/board`만 짓는다(IA 이름이 또 바뀌어도 이 파일은 안 바뀐다). */
 export function storyBoardUrl(wsSlug: string, projSlug: string, storyId: string): string {
-  return `/${wsSlug}/${projSlug}/board?story=${storyId}`;
+  return `/${wsSlug}/${projSlug}/flow?story=${storyId}`;
 }
 
 /** epic(목표) 착지 — `[ws]/[proj]/goals/[id]/page.tsx` 경로 파라미터. */

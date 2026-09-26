@@ -189,6 +189,6 @@ export function resolveDeeplinkHref(link: AssetSourceLink, withProject: (href: s
       : `/chats/${encodeURIComponent(d.conversation_id)}`);
   }
   if ('doc_slug' in d && d.doc_slug) return withProject(`/docs/${encodeURIComponent(d.doc_slug)}`);
-  if ('story_id' in d && d.story_id) return withProject(`/board?story=${encodeURIComponent(d.story_id)}`); // 옛 자원 경로도 flat(#4231 4차)
+  if ('story_id' in d && d.story_id) return withProject(`/flow?story=${encodeURIComponent(d.story_id)}`); // 옛 자원 경로도 flat(#4231 4차)
   return null;
 }

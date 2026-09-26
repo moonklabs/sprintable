@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from './entity-project-url';
 
 describe('storyBoardUrl / goalUrl / sprintUrl / assetStorageUrl — ws/proj-scoped 착지', () => {
-  it('story — /{ws}/{proj}/board?story={id}(next.config.ts redirects()가 flow로 자동 병합)', () => {
-    expect(storyBoardUrl('moonklabs', 'proj-a', 'story-1')).toBe('/moonklabs/proj-a/board?story=story-1');
+  it('story — /{ws}/{proj}/flow?story={id}(story #4327 — 지금 이름 flow로 바로 · 옛 /board는 proxy 리다이렉트 왕복이 한 번 더 붙었다)', () => {
+    expect(storyBoardUrl('moonklabs', 'proj-a', 'story-1')).toBe('/moonklabs/proj-a/flow?story=story-1');
   });
 
   it('epic(목표) — /{ws}/{proj}/goals/{id} 경로 파라미터', () => {
@@ -26,16 +26,16 @@ describe('resolveScopedEntityHref — 선조회 성공/실패 갈래(PO 08-14 �
   it('orgSlug+projectSlug 둘 다 있으면 스코프드 URL을 짓는다(뷰어 현재 프로젝트 추측 안 거침)', () => {
     const href = resolveScopedEntityHref(
       { orgSlug: 'moonklabs', projectSlug: 'proj-a' },
-      '/board?story=story-1',
+      '/flow?story=story-1',
       (ws, proj) => storyBoardUrl(ws, proj, 'story-1'),
       toC,
     );
-    expect(href).toBe('/moonklabs/proj-a/board?story=story-1');
+    expect(href).toBe('/moonklabs/proj-a/flow?story=story-1');
   });
 
   it('⭐선조회 자체가 null(미도착/실패)이면 폴백 경로를 항목 프로젝트로 감싼다(bare 금지)', () => {
-    const href = resolveScopedEntityHref(null, '/board?story=story-1', (ws, proj) => storyBoardUrl(ws, proj, 'story-1'), toC);
-    expect(href).toBe('/board?story=story-1&p=proj-C');
+    const href = resolveScopedEntityHref(null, '/flow?story=story-1', (ws, proj) => storyBoardUrl(ws, proj, 'story-1'), toC);
+    expect(href).toBe('/flow?story=story-1&p=proj-C');
   });
 
   it('⭐projectSlug가 null(옛 미백필 프로젝트)이면 폴백 경로 + 항목 프로젝트(?p=)', () => {

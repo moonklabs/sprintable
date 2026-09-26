@@ -30,12 +30,12 @@ function hrefForNotification(notification: NotificationReference): string | null
   switch (notification.reference_type) {
     // story a539c649 S3d — '/boards'(오탈자)+task_id 누락으로 항상 무효였던 링크를 getEntityHref와 동형(/board?task_id=)으로 정정.
     case 'task':
-      return withProjectParam(`/board?task_id=${referenceId}`, p);
+      return withProjectParam(`/flow?task_id=${referenceId}`, p);
     case 'sprint':
       return withProjectParam('/sprints', p);
     // f2ec5395: story 참조 알림(status_changed 등) 클릭 내비(getEntityHref 동형).
     case 'story':
-      return withProjectParam(`/board?story=${referenceId}`, p);
+      return withProjectParam(`/flow?story=${referenceId}`, p);
     case 'doc': {
       const slug = notification.target_doc_slug;
       return withProjectParam(slug ? `/docs/${slug}` : '/docs', p);

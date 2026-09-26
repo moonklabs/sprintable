@@ -568,7 +568,7 @@ describe('ChatV3Screen — 특정 대화 주소(story #4018)', () => {
       await mount();
       await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
       const scope = container.querySelector('[data-testid="chat-v3-context-scope"]');
-      expect(scope?.getAttribute('href')).toBe('/board?story=story-77&p=proj-b');
+      expect(scope?.getAttribute('href')).toBe('/flow?story=story-77&p=proj-b');
     });
 
     it('⭐404(단건 조회) — 「열 수 없어요」 중립 안내', async () => {

@@ -115,7 +115,7 @@ describe('deriveSilentStallClusters', () => {
     const clusters = deriveSilentStallClusters(
       response([item({ story_id: 's1', project_id: 'p1', project_slug: 'sprintable' })]), undefined, NOW,
     );
-    expect(clusters.buckets.flatMap((b) => b.items)[0]!.href).toBe('/board?story=s1&p=p1'); // #4231 4차 — 항목 자기 프로젝트
+    expect(clusters.buckets.flatMap((b) => b.items)[0]!.href).toBe('/flow?story=s1&p=p1'); // #4231 4차 — 항목 자기 프로젝트
   });
 
   // story #3153(93b076c8 후속, org-wide 커버리지) — 항목별 project_id/project_slug로
@@ -127,7 +127,7 @@ describe('deriveSilentStallClusters', () => {
         response([item({ story_id: 's1', project_id: 'p-other', project_slug: 'other-proj' })]),
         { orgSlug: 'moonklabs', activeProjectId: 'p-active' }, NOW,
       );
-      expect(clusters.buckets.flatMap((b) => b.items)[0]!.href).toBe('/moonklabs/other-proj/board?story=s1');
+      expect(clusters.buckets.flatMap((b) => b.items)[0]!.href).toBe('/moonklabs/other-proj/flow?story=s1');
     });
 
     it('같은 프로젝트 소속이면 crossProjectLabel이 null(노이즈 절제)', () => {
@@ -156,8 +156,8 @@ describe('deriveSilentStallClusters', () => {
       );
       const bucket = clusters.buckets.find((b) => b.key === '48h-1w')!;
       const byId = Object.fromEntries(bucket.items.map((i) => [i.id, i.href]));
-      expect(byId['s-a']).toBe('/moonklabs/proj-a/board?story=s-a');
-      expect(byId['s-b']).toBe('/moonklabs/proj-b/board?story=s-b');
+      expect(byId['s-a']).toBe('/moonklabs/proj-a/flow?story=s-a');
+      expect(byId['s-b']).toBe('/moonklabs/proj-b/flow?story=s-b');
     });
   });
 });

@@ -52,14 +52,14 @@ const scopeHref = () => container.querySelector('[data-testid="chat-v3-context-s
 describe('ChatV3ContextPanel — «기준» 링크의 대상 프로젝트(story #4314)', () => {
   it('⭐다른 프로젝트 대화(현재 p = CUR · 대화 p = proj-b) — 작업 항목 링크는 대화 프로젝트 `?p=proj-b` · 현재 p 0', async () => {
     await mount('proj-b');
-    expect(scopeHref()).toBe('/board?story=s1&p=proj-b');
+    expect(scopeHref()).toBe('/flow?story=s1&p=proj-b');
     expect(scopeHref()).not.toContain('CUR');
   });
 
   it('대화 프로젝트를 모르면(옛 응답 · 값 없음) 현재 p 폴백', async () => {
     await mount(null);
-    expect(scopeHref()).toBe('/board?story=s1&p=CUR');
+    expect(scopeHref()).toBe('/flow?story=s1&p=CUR');
     await mount(undefined);
-    expect(scopeHref()).toBe('/board?story=s1&p=CUR');
+    expect(scopeHref()).toBe('/flow?story=s1&p=CUR');
   });
 });

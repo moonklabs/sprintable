@@ -74,9 +74,9 @@ export function getEntityHref(
   const p = notification.target_project_id ?? null;
   switch (source_entity_type) {
     case 'story':
-      return withProjectParam(`/board?story=${source_entity_id}`, p);
+      return withProjectParam(`/flow?story=${source_entity_id}`, p);
     case 'task':
-      return withProjectParam(`/board?task_id=${source_entity_id}`, p);
+      return withProjectParam(`/flow?task_id=${source_entity_id}`, p);
     case 'epic':
       // ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — 이 딥링크는 story #2956이 지운
       // RENAMED_RESOURCES(epics→goals) 301에 얹혀 살고 있었다: `/epics/{id}`가 bare 승격

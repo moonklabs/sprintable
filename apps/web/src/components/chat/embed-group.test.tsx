@@ -180,7 +180,7 @@ describe('EmbedGroup — story #2905 open-panel 클릭 왕복(회귀가드)', ()
       entityId: 's-1',
       title: '스토리 하나',
       status: null,
-      href: '/board?story=s-1',
+      href: '/flow?story=s-1',
     });
   });
 

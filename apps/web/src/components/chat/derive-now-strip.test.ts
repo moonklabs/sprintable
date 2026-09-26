@@ -133,7 +133,7 @@ describe('nowStripItemKey — 7종 각자 안정 key(SID 3150 회귀 금지, gen
 
 describe('nowStripItemHref — §1a 링크 대상(원탭 도달)', () => {
   it('agent_stuck(entity_type=story)은 보드로', () => {
-    expect(nowStripItemHref(AGENT_STUCK, same)).toBe('/board?story=s-1');
+    expect(nowStripItemHref(AGENT_STUCK, same)).toBe('/flow?story=s-1');
   });
 
   it('agent_stuck(entity_type≠story, 예: epic)은 게이트 인박스로(제네릭 폴백)', () => {
@@ -146,7 +146,7 @@ describe('nowStripItemHref — §1a 링크 대상(원탭 도달)', () => {
 
   // #4231 4차(PO 07:53Z) — 조직 전체 목록이라 옛 자원 경로는 **항목 자기 project_id**를 싣는다(현재 p 아님).
   it('unanswered_blocker는 차단 스토리 보드로 · 항목의 프로젝트', () => {
-    expect(nowStripItemHref(UNANSWERED_BLOCKER, same)).toBe(`/board?story=story-2&p=${UNANSWERED_BLOCKER.project_id}`);
+    expect(nowStripItemHref(UNANSWERED_BLOCKER, same)).toBe(`/flow?story=story-2&p=${UNANSWERED_BLOCKER.project_id}`);
   });
 
   it('hypothesis 2종(falsified/overdue)은 전용 상세 페이지가 없어(embed-card.tsx 실측) /flow로', () => {
@@ -204,7 +204,7 @@ describe('nowStripItemHref — flat 목적지는 withProject로 프로젝트를 
   it('결재함 · 에이전트 상세(조직 단위 flat)는 싣고 · 보드(워크스페이스 경로)는 그대로', () => {
     expect(nowStripItemHref({ ...AGENT_STUCK, entity_type: 'epic' }, addP)).toBe('/inbox?tab=gates&p=proj-A');
     expect(nowStripItemHref(AGENT_AUTH_FAILURE, addP)).toBe('/organization/workforce/m-1?p=proj-A');
-    expect(nowStripItemHref(AGENT_STUCK, addP)).toBe('/board?story=s-1');
+    expect(nowStripItemHref(AGENT_STUCK, addP)).toBe('/flow?story=s-1');
   });
 });
 
@@ -214,15 +214,15 @@ describe('nowStripItemHref — 다른 프로젝트 항목은 그 항목의 p(#42
   const current = (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=CURRENT`;
   it('⭐unanswered_blocker(다른 프로젝트) → 그 항목의 p · 현재 p 아님', () => {
     const href = nowStripItemHref({ ...UNANSWERED_BLOCKER, project_id: 'OTHER' }, current);
-    expect(href).toBe('/board?story=story-2&p=OTHER');
+    expect(href).toBe('/flow?story=story-2&p=OTHER');
     expect(href).not.toContain('CURRENT');
   });
   it('agent_stuck(스토리) — 옛 응답이라 project_id가 없으면 주소 그대로(지어내지 않음)', () => {
-    expect(nowStripItemHref(AGENT_STUCK, current)).toBe('/board?story=s-1');
+    expect(nowStripItemHref(AGENT_STUCK, current)).toBe('/flow?story=s-1');
   });
   it('⭐agent_stuck(스토리) — BE가 싣는 project_id(#4259)면 그 항목의 p · 현재 p 아님', () => {
     const href = nowStripItemHref({ ...AGENT_STUCK, project_id: 'OTHER' } as typeof AGENT_STUCK, current);
-    expect(href).toBe('/board?story=s-1&p=OTHER');
+    expect(href).toBe('/flow?story=s-1&p=OTHER');
     expect(href).not.toContain('CURRENT');
   });
 });
