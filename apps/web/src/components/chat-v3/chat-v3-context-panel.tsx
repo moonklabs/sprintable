@@ -17,6 +17,7 @@ import type { EvidenceItem, EvidenceType } from '@/services/verify';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
+import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
 
 interface ArtifactDetail {
   title: string | null;
@@ -35,6 +36,8 @@ export interface ChatV3WorkItemRef {
 // 쓰라"는 뜻이지 지금 없는 심볼을 import하라는 뜻이 아니다).
 interface ActivityLogItem {
   id: string;
+  // [SID:4311 PR 3] 같은 응답에 이미 실려 온다(activity-log-view.tsx::ActivityLogItem) — 행위자 꼬리(id 앞 8자)의 기준.
+  actor_id: string | null;
   actor_name: string | null;
   action: string;
   entity_title: string | null;
@@ -253,6 +256,11 @@ export function ChatV3ContextPanel({
     ? t('contextWorkItemScopeLabel', { title: scopeTitle })
     : (workItemRef ? t('contextOpenLinkedWorkItem') : null);
 
+  // [SID:4311 PR 3] 이력 행의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 이력 안에서만).
+  // 이름 있으면 이름 · 행위자 있는데 이름 빔 = «이름 없는 구성원»(#4284 · 작업 목록 이력과 같음) · 행위자 없음 = «누군가» 그대로. 조사는 최종 라벨 끝소리.
+  const historyActorLabel = (item: ActivityLogItem) => item.actor_name || (item.actor_id ? memberDisplayLabel(null, tCommon) : t('historyUnknownActor'));
+  const historyActorLabels = actorRowLabels((history.kind === 'ready' ? history.items : []).map((item) => ({ id: item.actor_id, label: item.actor_id ? historyActorLabel(item) : null })));
+
   return (
     <section className="flex w-full shrink-0 flex-col bg-card lg:w-[340px]" data-testid="chat-v3-context-panel">
       <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
@@ -351,7 +359,7 @@ export function ChatV3ContextPanel({
           ) : (
             <ul className="space-y-1.5" data-testid="chat-v3-history-list">
               {history.items.map((item) => {
-                const actorName = item.actor_name ?? t('historyUnknownActor');
+                const actorName = (item.actor_id ? historyActorLabels.get(item.actor_id) : undefined) ?? historyActorLabel(item);
                 return (
                   <li key={item.id} className="text-xs">
                     <span className="text-foreground">{actorName}{pickIGaJosa(actorName)} {historyClaim(item, workItemRef.type, t, locale)}</span>

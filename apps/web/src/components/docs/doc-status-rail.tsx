@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { memberLookup } from '@/lib/member-display';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { CheckCircle, ExternalLink, RotateCcw, Shield, ShieldCheck, ShieldX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -240,6 +240,8 @@ interface AuditEvent {
   kind: AuditKind;
   proofState: ProofState;
   name: string;
+  /** [SID:4311 PR 3] 행위자 id — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자» 꼬리의 기준. */
+  actorId: string | null;
   at: string;
   version?: number;
   note?: string | null;
@@ -258,17 +260,19 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
   revisions.forEach((rev, i) => {
     auditEvents.push({
       key: `rev-${rev.id}`, kind: i === 0 ? 'request' : 'resubmit', proofState: AUDIT_KIND_PROOF[i === 0 ? 'request' : 'resubmit'],
-      name: resolveName(rev.created_by), at: rev.created_at ?? '', version: i + 1,
+      name: resolveName(rev.created_by), actorId: rev.created_by ?? null, at: rev.created_at ?? '', version: i + 1,
     });
   });
   if (gate?.resolved_at) {
     if (gate.status === 'approved' || gate.status === 'confirmed') {
-      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', proofState: 'green', name: resolveName(gate.resolver_id), at: gate.resolved_at });
+      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', proofState: 'green', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at });
     } else if (gate.status === 'rejected' || gate.status === 'denied') {
-      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', proofState: 'red', name: resolveName(gate.resolver_id), at: gate.resolved_at, note: gate.resolution_note });
+      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', proofState: 'red', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at, note: gate.resolution_note });
     }
   }
   auditEvents.sort((a, b) => b.at.localeCompare(a.at));
+  // [SID:4311 PR 3] 감사 이력 줄 — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자»(행위자 id마다 한 번). 읽는 글자(label)에만 · 머리글자는 이름.
+  const auditLabels = actorRowLabels(auditEvents.map((ev) => ({ id: ev.actorId, label: ev.name })));
 
   // story #3493 — 감사 이력 항목 시각은 "기록"(정본 formatRelativeTime).
   const fmtDate = (s: string) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
@@ -294,7 +298,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
             stateLabel={auditKindLabel[ev.kind]}
             claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
             now={fmtDate(ev.at)}
-            human={{ name: ev.name, role: '' }}
+            human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
           />
         ))}
       </div>
@@ -321,7 +325,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
               stateLabel={auditKindLabel[ev.kind]}
               claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
               now={fmtDate(ev.at)}
-              human={{ name: ev.name, role: '' }}
+              human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
             />
             {ev.note?.trim() ? (
               <p className="mt-1 whitespace-pre-wrap border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>

@@ -5,11 +5,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../../../../messages/ko.json';
 import ApiKeysPage from './page';
 
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
-  AgentApiKeyManager: ({ agentId, agentName }: { agentId: string; agentName: string }) => (
-    <div data-testid="stub-agent-api-key-manager" data-agent-id={agentId}>{agentName}</div>
+  AgentApiKeyManager: ({ agentId, agentName, agentLabel }: { agentId: string; agentName: string; agentLabel?: string }) => (
+    <div data-testid="stub-agent-api-key-manager" data-agent-id={agentId} data-agent-label={agentLabel ?? ''}>{agentName}</div>
   ),
 }));
 
@@ -31,7 +33,8 @@ afterEach(async () => {
 });
 
 async function mount() {
-  await act(async () => { root.render(<ApiKeysPage />); });
+  // [SID:4311 PR 3] 페이지가 목록 라벨(«이름 없는 에이전트» 등)에 common 문구를 쓴다.
+  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ApiKeysPage /></NextIntlClientProvider>); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -57,3 +60,24 @@ describe('ApiKeysPage — 시스템 발행 제외(story #3994)', () => {
     expect(container.querySelectorAll('[data-testid="stub-agent-api-key-manager"]').length).toBe(1);
   });
 });
+
+// [SID:4311 PR 3] 에이전트 칸 머리 — 같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트» · 에이전트에게 보내는 이름(agentName)은 원래 이름.
+describe('ApiKeysPage — 에이전트 동명이인([SID:4311 PR 3])', () => {
+  it('«봇» 둘 = 머리 라벨에 id 앞 8자 · 이름 빔 = «이름 없는 에이전트» · agentName은 원래 이름', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members?')) {
+        return { ok: true, json: async () => ({ data: [
+          { id: 'aaaa1111-1', name: '봇', type: 'agent', is_active: true, runtime_type: 'claude-code' },
+          { id: 'bbbb2222-2', name: '봇', type: 'agent', is_active: true, runtime_type: 'claude-code' },
+          { id: 'cccc3333-3', name: null, type: 'agent', is_active: true, runtime_type: 'claude-code' },
+        ] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const cards = [...container.querySelectorAll('[data-testid="stub-agent-api-key-manager"]')];
+    expect(cards.map((c) => c.getAttribute('data-agent-label'))).toEqual(['봇 · aaaa1111', '봇 · bbbb2222', koMessages.common.agentUnnamed]);
+    expect(cards.map((c) => c.textContent)).toEqual(['봇', '봇', '']);
+  });
+});
+

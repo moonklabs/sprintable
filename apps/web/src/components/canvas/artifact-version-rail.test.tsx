@@ -67,3 +67,26 @@ describe('ArtifactVersionRail (C1 Lv1 — lineage, raw 편집 나열 금지·의
     expect(markup).not.toContain('C2 슬롯 내용');
   });
 });
+
+// [SID:4311 PR 3] 판 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번).
+describe('ArtifactVersionRail — 작성자 동명이인([SID:4311 PR 3])', () => {
+  it('«송윤재» 둘 = 판마다 id 앞 8자 · 안나 = 꼬리 없음', () => {
+    const members = {
+      'e75ca548-1': { id: 'e75ca548-1', name: '송윤재' },
+      '2fd14616-2': { id: '2fd14616-2', name: '송윤재' },
+      'm-anna': { id: 'm-anna', name: '안나' },
+    };
+    const v = MOCK_VERSIONS[0];
+    const versions = [
+      { ...v, id: 'v-3', version: 3, created_by: 'e75ca548-1', summary: '' },
+      { ...v, id: 'v-2', version: 2, created_by: '2fd14616-2', summary: '' },
+      { ...v, id: 'v-1', version: 1, created_by: 'm-anna', summary: '' },
+    ];
+    const markup = renderToStaticMarkup(wrap(
+      <ArtifactVersionRail artifact={{ ...MOCK_ARTIFACT, current_version: 3, anchor_version: 1 }} versions={versions} selectedVersion={3} onSelectVersion={vi.fn()} memberMap={members} />,
+    ));
+    const authors = [...markup.matchAll(/<p class="mt-0\.5 truncate[^"]*">([^<]*)<\/p>/g)].map((m) => m[1]);
+    expect(authors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나']);
+  });
+});
+

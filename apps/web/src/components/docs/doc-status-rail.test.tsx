@@ -240,6 +240,26 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     expect(container.querySelector('ol')).not.toBeNull();
   });
 
+  // [SID:4311 PR 3] 감사 이력 줄 — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자»(행위자 id마다 한 번) · 다른 이름은 꼬리 없음.
+  it('[SID:4311 PR 3] 검토 요청 «송윤재» 둘(서로 다른 사람) = 줄마다 id 앞 8자 · 승인자 윤도선 = 꼬리 없음', async () => {
+    stubFetch({
+      gates: [gate({ status: 'approved', resolver_id: 'm1', resolved_at: '2026-08-21T14:32:00Z' })],
+      revisions: [
+        { id: 'r1', created_by: 'e75ca548-1', created_at: '2026-08-18T00:00:00Z' },
+        { id: 'r2', created_by: '2fd14616-2', created_at: '2026-08-19T00:00:00Z' },
+      ],
+      members: [{ id: 'm1', name: '윤도선' }, { id: 'e75ca548-1', name: '송윤재' }, { id: '2fd14616-2', name: '송윤재' }],
+    });
+    const { DocEvidenceRail } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="confirmed" />)); });
+    await flush();
+    const text = container.textContent ?? '';
+    expect(text).toContain('송윤재 · e75ca548');
+    expect(text).toContain('송윤재 · 2fd14616');
+    expect(text).toContain('윤도선');
+    expect(text).not.toContain('윤도선 · ');
+  });
+
   it('이력이 전혀 없으면(draft, gate/revision 0건) 아무것도 렌더하지 않는다(노이즈 0)', async () => {
     stubFetch({});
     const { DocEvidenceRail } = await import('./doc-status-rail');

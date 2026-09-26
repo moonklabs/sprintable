@@ -247,3 +247,31 @@ describe('ChatV3ContextPanel — 근거·이력(story #3990, work-item 스코프
     expect(list?.textContent).not.toContain('A글');
   });
 });
+
+// [SID:4311 PR 3] 이력 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자» · 조사는 꼬리 붙은 최종 라벨 끝소리(«…3이» · «…d가») ·
+// 행위자 있는데 이름 빔 = «이름 없는 구성원» · 행위자 없음 = «누군가»(작업 목록 이력과 같은 규칙).
+describe('ChatV3ContextPanel — 이력 행위자 동명이인([SID:4311 PR 3])', () => {
+  it('«송윤재» 둘 = 꼬리로 갈리고 조사는 꼬리 끝소리를 따른다 · 같은 사람 두 줄 = 같은 꼬리', async () => {
+    const now = new Date().toISOString();
+    const row = (id: string, actor_id: string | null, actor_name: string | null) => ({ id, actor_id, actor_name, action: 'story_created', entity_title: '제목', created_at: now, context: {} });
+    await mountWithWorkItem({ type: 'story', id: 's1' }, {
+      history: [
+        row('h1', 'aaaa1113-1', '송윤재'),
+        row('h2', 'bbbbbbbd-2', '송윤재'),
+        row('h3', 'm-yuna', '유나'),
+        row('h4', 'aaaa1113-1', '송윤재'),
+        row('h5', 'm-unnamed', null),
+        row('h6', null, null),
+      ],
+    });
+    const rows = [...container.querySelectorAll('[data-testid="chat-v3-history-list"] li > span:first-child')].map((el) => el.textContent);
+    expect(rows).toEqual([
+      '송윤재 · aaaa1113이 만들었어요',
+      '송윤재 · bbbbbbbd가 만들었어요',
+      '유나가 만들었어요',
+      '송윤재 · aaaa1113이 만들었어요',
+      `${koMessages.common.memberUnnamed}이 만들었어요`,
+      '누군가가 만들었어요',
+    ]);
+  });
+});

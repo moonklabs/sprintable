@@ -13,6 +13,7 @@ import {
 import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
 import { cn } from '@/lib/utils';
 import { disambiguateFallbackLabels, memberLookup } from '@/lib/member-display';
+import { storyAssigneeChipLabels } from '@/components/standup/story-assignee-label';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type {
@@ -141,6 +142,11 @@ export function StandupFeedbackDialog({
       .map((storyId) => stories.find((story) => story.id === storyId))
       .filter((story): story is StandupStorySummary => Boolean(story));
   }, [entry?.plan_stories, entry?.plan_story_ids, stories]);
+  // [SID:4311 PR 3] 연결 스토리 담당 칩 — 스탠드업 화면과 같은 규칙(담당 없음 · 이름 빔 · 표에 없음 · 같은 이름 둘은 꼬리). 창은 명단을 받은 뒤 열린다.
+  const assigneeChipLabel = useMemo(
+    () => storyAssigneeChipLabels(linkedStories, memberNameById, tc, tBoard('unassigned')),
+    [linkedStories, memberNameById, tc, tBoard],
+  );
 
   const canAddFeedback = Boolean(entry) && currentMemberId !== member.id;
 
@@ -266,7 +272,7 @@ export function StandupFeedbackDialog({
                     {story.task_count != null ? (
                       <>
                         <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                          <Badge variant="chip">{assigneeChipLabel(story.assignee_id)}</Badge>
                           <span>{t('taskProgress', { done: story.done_task_count ?? 0, total: story.task_count })}</span>
                         </div>
                         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">

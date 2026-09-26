@@ -20,6 +20,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
+import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -591,6 +592,7 @@ function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof u
  */
 export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; refreshKey?: number }) {
   const t = useTranslations('cage');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
@@ -618,6 +620,10 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
   }, [gateId, refreshKey]);
 
   if (items === null) return null;
+  // [SID:4311 PR 3] 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만).
+  // 이름 있으면 이름 · 행위자 있는데 이름 빔 = «이름 없는 구성원»(#4284) · 행위자 없음 = 기존 폴백 그대로.
+  const actorLabel = (item: GateActivityLogItem) => item.actor_name || (item.actor_id ? memberDisplayLabel(null, tc) : t('gateActivityActorFallback'));
+  const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? actorLabel(item) : null })));
 
   return (
     <div>
@@ -632,7 +638,7 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
             const adsBoostLabel = adsBoostActivityLabel(item, t);
             return (
               <li key={item.id} className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">{item.actor_name ?? t('gateActivityActorFallback')}</span>
+                <span className="font-medium text-foreground">{(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? actorLabel(item)}</span>
                 {' · '}
                 {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}

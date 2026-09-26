@@ -337,3 +337,29 @@ describe('ThreadPanel — 원 메시지 요약 칩 HTML 주석 평문화(story #
     expect(header.textContent).toContain('원본 메시지');
   });
 });
+
+// [SID:4311 PR 3] 원본 + 답글 한 목록의 발신자 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번) · 내 메시지는 «나»라
+// 셈에서 뺀다(나와 같은 이름의 남에게 꼬리를 만들지 않음).
+describe('ThreadPanel — 발신자 동명이인([SID:4311 PR 3])', () => {
+  it('원본 «송윤재»와 답글 «송윤재»(다른 사람)는 꼬리로 갈림 · 같은 사람은 같은 꼬리 · 나와 같은 이름의 남 = 꼬리 없음', async () => {
+    const reply = (id: string, sid: string, name: string, at: string) => ({ id, created_by: sid, sender: { id: sid, name, type: 'human' }, content: `답글 ${id}`, created_at: at });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/messages?thread_id=')) {
+        return { ok: true, json: async () => ({ data: [
+          reply('r1', '2fd14616-2', '송윤재', '2026-08-08T00:01:00.000Z'),
+          reply('r2', 'e75ca548-1', '송윤재', '2026-08-08T00:02:00.000Z'),
+          reply('r3', 'member-1', '안나', '2026-08-08T00:03:00.000Z'),
+          reply('r4', 'other-anna', '안나', '2026-08-08T00:04:00.000Z'),
+        ] }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const parent = { ...parentMessage, created_by: 'e75ca548-1', sender_name: '송윤재', sender_type: 'human' };
+    await act(async () => {
+      root.render(wrap(<ThreadPanel parentMessage={parent} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />));
+    });
+    await flush();
+    const names = [...container.querySelectorAll('span.text-\\[11px\\].font-medium')].map((el) => el.textContent).filter((n) => n !== koMessages.chats.you);
+    expect(names).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '송윤재 · e75ca548', '안나']);
+  });
+});
