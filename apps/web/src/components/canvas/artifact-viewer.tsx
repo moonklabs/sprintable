@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Clock, Download, Import, Maximize2, MessageCircle, Pencil, Sparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ui/button';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
 import { ArtifactVersionRail } from './artifact-version-rail';
@@ -101,6 +102,15 @@ export function ArtifactViewer({
   }, [needsContent, listedVersion, fetched]);
   const activeVersion = !needsContent ? listedVersion : typeof fetched === 'object' ? fetched : undefined;
   const versionLoadFailed = needsContent && (fetched === 'failed' || !loadVersion);
+  // 유나(4723) — 한 번 실패한 버전이 «부른 적 있음» 표시 때문에 다시 안 불려 늘 «못 했어요»였다 → 그 버전만 표시를 지우고 다시 부른다.
+  const retryVersion = (n: number) => {
+    requestedVersionsRef.current.delete(n);
+    setFetchedVersions((cur) => {
+      const next = { ...cur };
+      delete next[n];
+      return next;
+    });
+  };
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
   const selectedThreadDescription = selectedThread?.anchor.element_id
     ? (nodes.find((n) => n.id === selectedThread.anchor.element_id)?.description ?? null)
@@ -248,8 +258,13 @@ export function ArtifactViewer({
           <div className="relative min-w-0 bg-muted/20 p-4">
             {!activeVersion && needsContent ? (
               // story #4343 — 이전 버전 실물을 받는 중 · 못 받음(빈 캔버스로 «그 버전이 비었다»는 거짓을 그리지 않는다).
-              <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className="flex h-[320px] w-full items-center justify-center text-xs text-muted-foreground" role={versionLoadFailed ? 'alert' : 'status'}>
-                {versionLoadFailed ? t('versionLoadFailed') : tc('loading')}
+              <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className="flex h-[320px] w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <p role={versionLoadFailed ? 'alert' : 'status'}>{versionLoadFailed ? t('versionLoadFailed') : tc('loading')}</p>
+                {versionLoadFailed && loadVersion && listedVersion ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
+                    {tc('retry')}
+                  </Button>
+                ) : null}
               </div>
             ) : null}
             {activeVersion ? (

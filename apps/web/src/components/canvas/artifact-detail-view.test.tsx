@@ -163,30 +163,40 @@ describe('ArtifactDetailView — 새 좌표 코멘트 생성(story #2725, standa
 // 이제 레일 줄 = 목록 수 · 현재/기준/선택 표시 · 이전 버전을 고르면 그 버전 실물(`GET /{id}/versions/{n}`)이 뷰어에 뜬다.
 // `versions: [version]`로 되돌리면(목록 안 합침) 레일이 한 줄이 되어 RED.
 describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(story #4343)', () => {
-  const detailOf = (n: number, html: string) => ({
-    id: 'artifact-1', title: '흐름판 재설계 시안', story_id: null, epic_id: null, doc_id: null,
+  const detailOf = (n: number, html: string, id = 'artifact-1') => ({
+    id, title: '흐름판 재설계 시안', story_id: null, epic_id: null, doc_id: null,
     source: 'created', latest_version_number: 3, anchor_version: 1, created_by: null,
     created_at: `2026-09-0${n}T00:00:00Z`, version_number: n, version_summary: `판 ${n}`,
     nodes: [{ id: `n${n}`, type: 'html_blob', parent_id: null, order: 0, props: { html }, description: null }],
   });
   const summaries = [3, 2, 1].map((n) => ({ id: `row-${n}`, version_number: n, summary: `판 ${n}`, created_by: null, created_at: `2026-09-0${n}T00:00:00Z`, source_comment_id: null }));
   let versionDetailCalls: number[];
+  let versionDetailIds: string[];
+  let heldVersion: (() => void) | null;
 
-  function stubVersions({ failVersion }: { failVersion?: number } = {}) {
+  // 본문에 산출물 id를 싣는다(`artifact-1 v2 본문`) — 산출물이 바뀌었는데 옛 산출물의 버전이 보이면 잡히게.
+  // `hold`: 그 번호의 버전 실물 응답을 `heldVersion()`이 부를 때까지 붙잡는다(받는 중 상태를 실제로 본다).
+  function stubVersions({ failVersion, failOnce, hold }: { failVersion?: number; failOnce?: number; hold?: number } = {}) {
     versionDetailCalls = [];
+    versionDetailIds = [];
+    heldVersion = null;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/pins') || url.includes('/backlinks') || url.includes('/comments')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
       if (url.includes('/api/gates')) return { ok: true, status: 200, json: async () => [] };
+      const id = /\/visual-artifacts\/([^/?]+)/.exec(url)?.[1] ?? 'artifact-1';
       const one = /\/versions\/(\d+)$/.exec(url);
       if (one) {
         const n = Number(one[1]);
         versionDetailCalls.push(n);
+        versionDetailIds.push(id);
+        if (n === hold) await new Promise<void>((resolve) => { heldVersion = resolve; });
         if (n === failVersion) return { ok: false, status: 404, json: async () => ({}) };
-        return { ok: true, status: 200, json: async () => ({ data: detailOf(n, `<p>v${n} 본문</p>`) }) };
+        if (n === failOnce && versionDetailCalls.filter((x) => x === n).length === 1) return { ok: false, status: 503, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ data: detailOf(n, `<p>${id} v${n} 본문</p>`, id) }) };
       }
       if (url.endsWith('/versions')) return { ok: true, status: 200, json: async () => ({ data: summaries }) };
-      return { ok: true, status: 200, json: async () => ({ data: detailOf(3, '<p>v3 본문</p>') }) };
+      return { ok: true, status: 200, json: async () => ({ data: detailOf(3, `<p>${id} v3 본문</p>`, id) }) };
     }) as unknown as ReturnType<typeof vi.fn>);
   }
   const rail = () => [...container.querySelectorAll('p')].find((p) => p.textContent === (koMessages.canvas as LooseMessages).versionLineage)!.parentElement!;
@@ -233,13 +243,63 @@ describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(sto
     expect(stageHtml()).toContain('v2 본문');
   });
 
+  // 까디르(4723) — 예전 테스트는 곧바로 풀리는 fetch라 받는 중 상태를 한 번도 안 봤다 → 응답을 붙잡고 본다.
+  it('받는 중 — 응답 전엔 «불러오는 중…»(role=status) · 캔버스 0 · 응답 뒤 그 버전 본문', async () => {
+    stubVersions({ hold: 2 });
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([2]);
+    const loading = container.querySelector('[data-version-loading="loading"] p');
+    expect(loading?.textContent).toBe((koMessages.common as LooseMessages).loading);
+    expect(loading?.getAttribute('role')).toBe('status');
+    expect(container.querySelector('[data-version-loading] button')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    await act(async () => { heldVersion!(); });
+    await flush();
+    expect(container.querySelector('[data-version-loading]')).toBeNull();
+    expect(stageHtml()).toContain('artifact-1 v2 본문');
+  });
+
+  // 까디르(4723) — 받은 버전 캐시는 버전 번호로만 키라, 같은 뷰어가 다른 산출물을 받으면 옛 산출물의 v2가 그대로 쓰였다 → key={artifact.id}.
+  it('산출물이 바뀌면 받아 둔 버전을 버린다 — 같은 번호(v2)도 새 산출물 것을 다시 받음', async () => {
+    stubVersions();
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await flush();
+    expect(stageHtml()).toContain('artifact-1 v2 본문');
+    await mount('artifact-2');
+    await flush();
+    await act(async () => { rowOf(2).click(); });
+    await flush();
+    expect(versionDetailIds).toEqual(['artifact-1', 'artifact-2']);
+    expect(stageHtml()).toContain('artifact-2 v2 본문');
+    expect(stageHtml()).not.toContain('artifact-1');
+  });
+
   it('받는 중엔 «불러오는 중…» · 못 받으면 «이 버전을 불러오지 못했어요.»(빈 캔버스로 «비었다»는 거짓 0)', async () => {
     stubVersions({ failVersion: 2 });
     await mount('artifact-1');
     await act(async () => { rowOf(2).click(); });
     await flush();
     expect(versionDetailCalls).toEqual([2]);
-    expect(container.querySelector('[data-version-loading="failed"]')?.textContent).toBe((koMessages.canvas as LooseMessages).versionLoadFailed);
+    expect(container.querySelector('[data-version-loading="failed"] p')?.textContent).toBe((koMessages.canvas as LooseMessages).versionLoadFailed);
     expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  // 유나(4723) — 한 번 실패한 버전이 다시 안 불려 늘 «못 했어요»였다 → «다시 시도»로 그 버전만 다시 부른다.
+  it('실패 → «다시 시도» → 그 버전만 다시 받아 뷰어에(다른 버전 요청 0)', async () => {
+    stubVersions({ failOnce: 2 });
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([2]);
+    const retry = [...container.querySelectorAll('[data-version-loading="failed"] button')].find((b) => b.textContent === (koMessages.common as LooseMessages).retry) as HTMLButtonElement;
+    expect(retry).toBeTruthy();
+    await act(async () => { retry.click(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([2, 2]);
+    expect(stageHtml()).toContain('v2 본문');
+    expect(container.querySelector('[data-version-loading]')).toBeNull();
   });
 });
