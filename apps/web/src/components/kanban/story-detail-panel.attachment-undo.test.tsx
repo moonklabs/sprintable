@@ -268,8 +268,8 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     expect(shown(A1)).toBe(false);
   });
 
-  // 까디르 4718 ① — 삭제 둘이 겹치면(A 가는 중 → B 닫힘) 응답 전 목록에 남은 A를 B가 되살렸다.
-  it('겹친 삭제 — A가 가는 중에 B가 닫히면 B 본문에 A 없음 · 늦게 온 A 응답이 B를 되살리지 않음', async () => {
+  // 까디르 · PO 4718 ① — 삭제 둘이 겹치면(A 가는 중 → B 닫힘) 응답 전 목록에 남은 A를 B가 되살렸다 → 한 패널에서 가는 PATCH는 늘 하나.
+  it('줄 세우기 — A가 가는 중에 B가 닫히면 B는 A 응답 뒤에 나가고, 그때의 최신 목록으로 계산된다', async () => {
     holdPatch = (n) => n === 1;
     await render(<Harness initial={[A1, A2, A3]} />);
     await settle();
@@ -278,15 +278,49 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     expect(urlsOf(0)).toEqual([A2.url, A3.url]);
     await act(async () => { removeBtnOf(A2).click(); });
     await closeToast();
+    await advance(20000);
+    expect(patches).toHaveLength(1); // B는 A 응답을 기다린다
+    await release();
+    expect(patches).toHaveLength(2);
     expect(urlsOf(1)).toEqual([A3.url]);
-    await release(); // A 응답([A2, A3])이 B 응답보다 늦게 온다
+    expect([A1, A2].some(shown)).toBe(false);
+    expect(shown(A3)).toBe(true);
+  });
+
+  it('되돌리기(되넣기)도 줄에 선다 — 탭 숨김 flush 응답 전에 눌러도 응답 뒤에 되넣는다', async () => {
+    holdPatch = (n) => n === 1;
+    await removeA1();
+    await hideTab();
+    expect(patches).toEqual([{ attachments: [A2], keepalive: true }]);
+    await act(async () => { undoBtn()!.click(); });
+    await settle();
+    expect(patches).toHaveLength(1); // 삭제 응답 전 — 목록에 아직 A1이 있어 보여도 «이미 있음»으로 끝내지 않는다
+    await release();
+    expect(patches).toHaveLength(2);
+    expect(urlsOf(1)).toEqual([A1.url, A2.url]);
+    expect(shown(A1)).toBe(true);
+  });
+
+  // 줄을 안 기다리는 단 한 길(탭 숨김 · pagehide = 페이지가 곧 멈출 수 있음)이 가는 PATCH와 겹칠 때.
+  it('겹침(탭 숨김이 줄을 안 기다림) — 가는 중인 삭제를 빼고 보냄 · 늦게 온 옛 응답이 목록을 되돌리지 않음', async () => {
+    holdPatch = (n) => n === 1;
+    await render(<Harness initial={[A1, A2, A3]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast(); // PATCH 1(A 삭제)이 가는 중
+    await act(async () => { removeBtnOf(A2).click(); });
+    await hideTab(); // B는 지금 보낸다
+    expect(patches).toHaveLength(2);
+    expect(urlsOf(1)).toEqual([A3.url]); // 가는 중인 A도 뺐다
+    await release(); // A 응답([A2, A3])이 B 응답보다 늦게 온다 → 버림
+    await closeToast();
     await act(async () => { removeBtnOf(A3).click(); });
     await closeToast();
     expect(urlsOf(2)).toEqual([]);
     expect([A1, A2, A3].some(shown)).toBe(false);
   });
 
-  it('되넣기가 가는 중에 다른 삭제가 닫혀도 — 그 본문에 되넣는 항목이 제자리에 있다(되돌린 것을 다시 지우지 않게)', async () => {
+  it('겹침 — 되넣기가 가는 중에 탭이 숨으면 그 삭제 본문에 되넣는 항목이 제자리에 있다(되돌린 것을 다시 지우지 않게)', async () => {
     holdPatch = (n) => n === 2;
     await render(<Harness initial={[A1, A2, A3]} />);
     await settle();
@@ -295,9 +329,9 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     expect(urlsOf(0)).toEqual([A2.url, A3.url]);
     await act(async () => { undoBtn()!.click(); });
     await settle();
-    expect(urlsOf(1)).toEqual([A1.url, A2.url, A3.url]);
+    expect(urlsOf(1)).toEqual([A1.url, A2.url, A3.url]); // 되넣기가 가는 중
     await act(async () => { removeBtnOf(A2).click(); });
-    await closeToast();
+    await hideTab();
     expect(urlsOf(2)).toEqual([A1.url, A3.url]);
     await release();
     expect(shown(A1)).toBe(true);

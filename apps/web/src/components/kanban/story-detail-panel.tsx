@@ -1211,16 +1211,20 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // - 서버에 지우는 요청은 **토스트가 닫힐 때**(시간 끝 · ✕ · 새 토스트에 밀려남) 한 번 — 포인터/초점이 토스트 안이면 안 닫혀서,
   //   «되돌리기»가 보이는 동안엔 요청이 안 나간다. 보낼 때는 **그때의 최신 목록**에서 그 url만 뺀다(묵은 목록으로 남의 새 첨부를 지우지 않게).
   // - 되돌리기: 아직 안 보냈으면 요청 취소(실패 없음). 이미 보냈으면(화면 떠남 · 탭 숨김 flush) 지금 목록에 그 한 항목만 되넣기(이미 있으면 요청 0).
-  // - 요청이 겹쳐도 서로를 되돌리지 않게(까디르 4718): 보내는 목록 = 최신 서버 목록에서 **가는 중인 삭제는 빼고 · 가는 중인 되넣기는 넣은** 것
-  //   (안 빼면 응답 전 목록에 남은 A를 B가 되살린다). 응답은 **더 늦게 보낸 요청의 응답이 이미 반영됐으면 버린다**(늦게 온 옛 응답이 목록을 되돌리지 않게).
+  // - **한 패널에서 가는 PATCH는 늘 하나**(까디르 · PO 4718): 다음 일(삭제 · 되넣기)은 앞 응답이 반영된 뒤 그때의 최신 목록으로 계산해 보낸다.
+  //   목록 통째 PATCH라, 겹치면 앞 요청이 모르는 삭제를 뒤 요청이 되살리거나 서버가 순서를 바꿔 처리할 수 있어서다.
+  //   예외: `pagehide` · `visibilitychange(hidden)`은 페이지가 곧 멈출 수 있어 줄을 기다리지 않고 keepalive로 **지금** 보낸다(뒤의 일은 이것도 기다림).
+  //   이것이 이미 가는 PATCH와 겹칠 때만 두 요청이 함께 간다 — 그래서 보내는 목록은 가는 중인 삭제를 빼고 가는 중인 되넣기를 넣으며,
+  //   응답은 더 늦게 보낸 요청의 응답이 이미 반영됐으면 버린다(늦게 온 옛 응답이 목록을 되돌리지 않게).
   // - 부모 갱신(`onStoryUpdate`)은 마운트 중에만 — 닫은 뒤 응답이 오면 칸반이 그 스토리를 다시 골라 닫힌 패널이 다시 열린다(kanban-board onStoryUpdate).
-  // - 화면을 떠나거나(언마운트) `pagehide` · `visibilitychange(hidden)`이면 대기 중인 삭제를 keepalive로 즉시 한 번 보낸다(의도가 조용히 버려지지 않게).
+  // - 화면을 떠나면(언마운트) 대기 중인 삭제를 keepalive로 줄에 세운다(의도가 조용히 버려지지 않게 · 앱 안 이동이라 줄은 계속 돈다).
   // - 보낸 삭제가 실패하면 항목이 다시 보이고 «첨부를 삭제하지 못했어요» 토스트 · 되넣기가 실패하면 «첨부를 되돌리지 못했어요».
   type SendResult = { updated: KanbanStory | null; seq: number };
-  // state: pending = 토스트 열림(안 보냄) · sent = 요청이 가는 중 · done = 응답 옴(토스트가 닫힐 때까지 되돌리기용으로 남김).
-  type PendingRemoval = { attachment: SendAttachment; index: number; state: 'pending' | 'sent' | 'done'; inflight: Promise<SendResult> | null };
+  // state: pending = 토스트 열림(안 보냄) · queued = 줄에 섬 · sent = 가는 중 · done = 응답 옴(토스트가 닫힐 때까지 되돌리기용으로 남김).
+  type PendingRemoval = { attachment: SendAttachment; index: number; state: 'pending' | 'queued' | 'sent' | 'done'; closed: boolean };
   const pendingRemovalsRef = useRef(new Map<string, PendingRemoval>());
   const restoringRef = useRef(new Map<string, { attachment: SendAttachment; index: number }>());
+  const chainRef = useRef<Promise<unknown>>(Promise.resolve());
   const sendSeqRef = useRef(0);
   const appliedSeqRef = useRef(0);
   const [hiddenAttachmentUrls, setHiddenAttachmentUrls] = useState<string[]>([]);
@@ -1249,6 +1253,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     }
   }, []);
 
+  /** 줄에 세운다 — 앞 일이 끝난(응답이 반영된) 뒤에 돈다. */
+  const enqueue = useCallback((job: () => Promise<void>) => {
+    chainRef.current = chainRef.current.then(job, job);
+  }, []);
+
   /** 보낼 목록 — 최신 서버 목록에서 `drop` · 가는 중인 삭제를 빼고, 가는 중인 되넣기는 제자리에 넣는다. */
   const outgoingAttachments = useCallback((drop: Set<string>): SendAttachment[] => {
     const gone = new Set(drop);
@@ -1269,94 +1278,113 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     if (mountedRef.current) latestRef.current.onStoryUpdate?.(merged);
   }, []);
 
-  /** 대기 중인 삭제(들)를 한 PATCH로 — 최신 목록에서 그 url들만 뺀다. 이미 보낸 것은 다시 안 보낸다. */
-  const sendPendingRemovals = useCallback((urls: string[], keepalive: boolean) => {
+  /** 삭제를 지금 보낸다(아직 안 보낸 것만 · 한 PATCH). 끝나면 응답을 반영하고, 토스트가 이미 닫힌 대기표는 치운다. */
+  const sendRemovals = useCallback(async (urls: string[], keepalive: boolean): Promise<void> => {
     const targets = urls.map((url) => [url, pendingRemovalsRef.current.get(url)] as const)
-      .filter((e): e is readonly [string, PendingRemoval] => !!e[1] && e[1].state === 'pending');
+      .filter((e): e is readonly [string, PendingRemoval] => !!e[1] && (e[1].state === 'pending' || e[1].state === 'queued'));
     if (targets.length === 0) return;
     const next = outgoingAttachments(new Set(targets.map(([url]) => url)));
-    const inflight = sendAttachments(next, keepalive);
-    for (const [, p] of targets) { p.state = 'sent'; p.inflight = inflight; }
-    void inflight.then((result) => {
-      for (const [, p] of targets) if (p.state === 'sent') p.state = 'done';
+    for (const [, p] of targets) p.state = 'sent';
+    const result = await sendAttachments(next, keepalive);
+    for (const [url, p] of targets) {
+      const own = pendingRemovalsRef.current.get(url) === p;
       if (!result.updated) {
-        for (const [url] of targets) {
-          pendingRemovalsRef.current.delete(url);
-          unhideAttachment(url);
-        }
-        if (mountedRef.current) latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRemoveFailed') });
-        return;
+        if (own) pendingRemovalsRef.current.delete(url);
+        unhideAttachment(url);
+      } else {
+        p.state = 'done';
+        // 숨김은 그대로 — 부모가 새 목록을 안 내려줘도 지운 첨부가 다시 나타나지 않게.
+        if (own && p.closed) pendingRemovalsRef.current.delete(url);
       }
-      applySent(result, next);
-    });
+    }
+    if (!result.updated) {
+      if (mountedRef.current) latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRemoveFailed') });
+      return;
+    }
+    applySent(result, next);
   }, [sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
 
-  const undoRemoveAttachment = useCallback(async (url: string) => {
+  /** 대기 중인 삭제를 줄에 세운다(토스트 닫힘 · 언마운트). */
+  const queueRemovals = useCallback((urls: string[], keepalive: boolean) => {
+    const targets = urls.filter((url) => pendingRemovalsRef.current.get(url)?.state === 'pending');
+    if (targets.length === 0) return;
+    for (const url of targets) pendingRemovalsRef.current.get(url)!.state = 'queued';
+    enqueue(() => sendRemovals(targets, keepalive));
+  }, [enqueue, sendRemovals]);
+
+  /** 페이지가 곧 멈출 수 있을 때(pagehide · 탭 숨김) — 줄에 선 것까지 keepalive로 지금 보내고, 뒤의 일은 이것도 기다리게 한다. */
+  const flushRemovalsNow = useCallback(() => {
+    const urls = [...pendingRemovalsRef.current].filter(([, p]) => p.state === 'pending' || p.state === 'queued').map(([url]) => url);
+    if (urls.length === 0) return;
+    const inflight = sendRemovals(urls, true);
+    chainRef.current = Promise.all([chainRef.current, inflight]);
+  }, [sendRemovals]);
+
+  const undoRemoveAttachment = useCallback((url: string) => {
     const p = pendingRemovalsRef.current.get(url);
     if (!p) return;
     pendingRemovalsRef.current.delete(url);
-    if (p.state === 'pending') { unhideAttachment(url); return; } // 요청 취소 — 실패 없음
-    // 누른 순간부터 «되넣는 중» — 그 사이 닫히는 다른 삭제의 목록에도 이 항목이 들어간다(되돌린 것을 다시 지우지 않게).
+    if (p.state === 'pending' || p.state === 'queued') { unhideAttachment(url); return; } // 아직 안 보냄 — 요청 취소(줄의 일은 이 항목을 건너뜀)
+    // 누른 순간부터 «되넣는 중» — 그 사이 지금 보내지는(탭 숨김) 삭제의 목록에도 이 항목이 들어간다(되돌린 것을 다시 지우지 않게).
     restoringRef.current.set(url, { attachment: p.attachment, index: p.index });
-    try {
-      // 보낸 삭제가 끝난 뒤에(그 사이 되넣기가 삭제보다 먼저 닿지 않게). 보낸 삭제가 실패했으면 이미 다시 보이고 서버에도 그대로다 → 할 일 0.
-      const sent = await p.inflight;
-      if (!sent?.updated) { unhideAttachment(url); return; }
-      // 서버에선 이미 빠졌다 — 지금 목록(그 사이 더해진 첨부 포함)에 그 한 항목만 제자리에 되넣는다. 이미 있으면 변경 없음(요청 0).
-      if ((latestRef.current.story.attachments ?? []).some((a) => a.url === url)) { unhideAttachment(url); return; }
-      const next = outgoingAttachments(new Set());
-      const result = await sendAttachments(next, false);
-      if (!result.updated) {
-        // 되넣기 실패 — 서버엔 지워진 채라 숨긴 채 둔다(보이면 거짓). 이 길에서만 뜨는 문구.
-        latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRestoreFailed') });
-        return;
+    enqueue(async () => {
+      try {
+        // 줄 덕에 보낸 삭제의 응답은 이미 반영됐다. 목록에 있으면(삭제 실패 · 다른 곳에서 다시 올림) 변경 없음(요청 0).
+        if ((latestRef.current.story.attachments ?? []).some((a) => a.url === url)) { unhideAttachment(url); return; }
+        // 서버에선 빠졌다 — 지금 목록(그 사이 더해진 첨부 포함)에 그 한 항목만 제자리에 되넣는다.
+        const next = outgoingAttachments(new Set());
+        const result = await sendAttachments(next, false);
+        if (!result.updated) {
+          // 되넣기 실패 — 서버엔 지워진 채라 숨긴 채 둔다(보이면 거짓). 이 길에서만 뜨는 문구.
+          latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRestoreFailed') });
+          return;
+        }
+        applySent(result, next);
+        unhideAttachment(url);
+      } finally {
+        restoringRef.current.delete(url);
       }
-      applySent(result, next);
-      unhideAttachment(url);
-    } finally {
-      restoringRef.current.delete(url);
-    }
-  }, [sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
+    });
+  }, [enqueue, sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
 
   const handleRemoveAttachment = (url: string) => {
     const list = story.attachments ?? [];
     const index = list.findIndex((a) => a.url === url);
     if (index < 0 || pendingRemovalsRef.current.has(url)) return;
-    pendingRemovalsRef.current.set(url, { attachment: list[index], index, state: 'pending', inflight: null });
+    pendingRemovalsRef.current.set(url, { attachment: list[index], index, state: 'pending', closed: false });
     setHiddenAttachmentUrls((cur) => [...cur, url]);
     addToast({
       title: t('attachmentRemovedToast'),
       body: list[index].name ?? undefined,
       bodySingleLine: true,
-      action: { label: t('attachmentUndoAction'), onClick: () => { void undoRemoveAttachment(url); } },
+      action: { label: t('attachmentUndoAction'), onClick: () => { undoRemoveAttachment(url); } },
       onClose: (reason) => {
-        if (reason === 'action') return;
-        sendPendingRemovals([url], false);
-        // 보낸 뒤엔 대기표만 치운다 — 숨김은 그대로(부모가 새 목록을 안 내려줘도 지운 첨부가 다시 나타나지 않게). 실패면 위에서 다시 보인다.
         const p = pendingRemovalsRef.current.get(url);
-        void p?.inflight?.then(() => {
-          if (pendingRemovalsRef.current.get(url) === p) pendingRemovalsRef.current.delete(url);
-        });
+        if (reason === 'action' || !p) return;
+        // 토스트가 닫히면 되돌리기 길이 끝난다 — 응답이 이미 왔으면 대기표를 지금, 아니면 응답 뒤에 치운다.
+        p.closed = true;
+        if (p.state === 'done') { pendingRemovalsRef.current.delete(url); return; }
+        queueRemovals([url], false);
       },
     });
   };
 
   const visibleAttachments = (story.attachments ?? []).filter((a) => !hiddenAttachmentUrls.includes(a.url));
 
-  // 화면을 떠나거나 탭이 숨으면 대기 중인 삭제를 keepalive로 즉시(한 번만).
+  // 탭이 숨거나 페이지를 떠나면 대기 중인 삭제를 keepalive로 지금(한 번만) · 화면을 떠나면(언마운트) 줄에 세운다.
   useEffect(() => {
     mountedRef.current = true;
-    const flush = () => sendPendingRemovals([...pendingRemovalsRef.current.keys()], true);
-    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
-    window.addEventListener('pagehide', flush);
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushRemovalsNow(); };
+    const onLeave = () => queueRemovals([...pendingRemovalsRef.current.keys()], true); // 떠나는 순간의 대기표(살아 있는 Map)
+    window.addEventListener('pagehide', flushRemovalsNow);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('pagehide', flushRemovalsNow);
       document.removeEventListener('visibilitychange', onVisibility);
       mountedRef.current = false;
-      flush();
+      onLeave();
     };
-  }, [sendPendingRemovals]);
+  }, [flushRemovalsNow, queueRemovals]);
 
   // Fetch comments
   useEffect(() => {
