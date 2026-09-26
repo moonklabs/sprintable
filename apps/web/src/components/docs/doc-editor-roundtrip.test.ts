@@ -9,54 +9,30 @@
  * - 판정: 부품(data-type · data-page-embed 뿌리)마다 입력의 data-* 전부가 출력에 같은 값으로 있다.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { Editor } from '@tiptap/core';
-import { createDocEditorExtensions } from './doc-editor-extensions';
+import type { Editor } from '@tiptap/core';
+import { makeDocEditor, partsOf, PARTS_FIXTURE } from './doc-editor-roundtrip.fixture';
 import { RENDERER_CONTENT_ATTRIBUTES } from './doc-content-renderer';
 
-const SLASH_STRINGS = new Proxy({}, { get: () => 'x' }) as never;
+/** 렌더러는 안 읽지만 편집기가 저장하고 다시 여는 속성 — 이유와 함께(늘리지 않는 것이 원칙). */
+const EDITOR_ONLY_ATTRIBUTES: Record<string, string> = {
+  'data-doc-id': '문서 임베드 · 위키 링크의 대상 id — 편집기가 미리보기 · 이동에 쓰고, 렌더러는 slug로 연다',
+  'data-mime-type': '첨부 형식 — 편집기 카드 아이콘 · 다운로드 형식 판정',
+  'data-cols': '두/세 열 수 — 편집기 NodeView 전환 버튼 · 읽기 화면은 CSS([data-cols])로 그린다',
+};
 
-export function makeDocEditor(content: string): Editor {
-  return new Editor({
-    extensions: createDocEditorExtensions({
-      placeholder: '',
-      projectId: 'p1',
-      currentDocId: 'doc-self',
-      onNavigate: () => {},
-      wikiLinkNotFoundLabel: 'not found',
-      storyPickerEmptyLabel: 'empty',
-      slashMenuStrings: SLASH_STRINGS,
-    }),
-    content,
-  });
-}
-
-/** 라이브 검증 문서(e0aa9f72)의 부품 + 렌더러가 읽는 나머지 부품(수식 · 위키 링크 · 자산 첨부 · 코드 언어). */
-export const PARTS_FIXTURE = [
-  '<div data-page-embed="" data-doc-id="64c2e43b-4323-4714-b49e-61f0b70fea60" data-title="공유 시각검증 문서" data-icon="📄" data-slug="ortega-visual-share"></div>',
-  '<div data-page-embed="" data-doc-id="" data-title="지운 문서 제목(QA)" data-icon="" data-slug="qa-d31-missing-embed-target-4316"></div>',
-  '<div data-type="fileAttachment" data-filename="qa-d31-attachment.txt" data-size="40" data-mime-type="text/plain" data-file-data="data:text/plain;base64,UUEgZGVwbG95IDMxIGF0dGFjaG1lbnQgZm9yIHN0b3J5IDQzMjQuCg=="></div>',
-  '<div data-type="fileAttachment" data-filename="report.pdf" data-size="2048" data-mime-type="application/pdf" data-asset-id="a1b2c3d4-0000-4000-8000-000000000001"></div>',
-  '<div data-type="embedBlock" data-url="https://example.com/"></div>',
-  '<div data-type="toggleBlock" data-open="true"><div data-type="toggleSummary"><p>토글 제목</p></div><div data-type="toggleContent"><p>토글 안 내용</p></div></div>',
-  '<div data-type="columnsBlock" data-cols="2"><div data-type="columnBlock"><p>왼쪽 단 — <a href="https://example.org/">링크</a></p></div><div data-type="columnBlock"><p>오른쪽 단</p></div></div>',
-  '<div data-type="columnsBlock" data-cols="3"><div data-type="columnBlock"><p>하나</p></div><div data-type="columnBlock"><p>둘</p></div><div data-type="columnBlock"><p>셋</p></div></div>',
-  '<div data-type="mathBlock" data-latex="E=mc^2"></div>',
-  '<p><span data-type="wikiLink" data-doc-id="d0c1d000-0000-4000-8000-000000000002" data-slug="other-doc" data-title="다른 문서">다른 문서</span></p>',
-  '<pre data-language="python"><code class="language-python">print(1)</code></pre>',
-].join('\n');
-
-type Part = { key: string; attrs: Record<string, string>; text: string };
-
-/** 부품 뿌리(data-type · data-page-embed)마다 data-* 속성과 글. 순서대로. */
-export function partsOf(html: string): Part[] {
+/** 픽스처의 모든 요소에서 `태그|data-속성` 짝. */
+function fixtureAttributeSites(html: string): Set<string> {
   const root = document.createElement('div');
   root.innerHTML = html;
-  return [...root.querySelectorAll<HTMLElement>('[data-type], [data-page-embed], pre[data-language]')].map((el) => {
-    const attrs: Record<string, string> = {};
-    for (const a of [...el.attributes]) if (a.name.startsWith('data-')) attrs[a.name] = a.value;
-    const key = el.getAttribute('data-type') ?? (el.hasAttribute('data-page-embed') ? 'pageEmbed' : `pre`);
-    return { key, attrs, text: (el.textContent ?? '').trim() };
-  });
+  const sites = new Set<string>();
+  for (const el of root.querySelectorAll('*')) for (const a of [...el.attributes]) if (a.name.startsWith('data-')) sites.add(`${el.tagName.toLowerCase()}|${a.name}`);
+  return sites;
+}
+
+function isExplainedSite(site: string): boolean {
+  const [tag, attr] = site.split('|') as [string, string];
+  if (attr in EDITOR_ONLY_ATTRIBUTES) return true;
+  return RENDERER_CONTENT_ATTRIBUTES.some((e) => e.attr === attr && e.elements.includes(tag));
 }
 
 let editor: Editor | null = null;
@@ -88,12 +64,23 @@ describe('HTML 문서 → 편집기 → 저장 직렬화 왕복(story #4339)', (
     expect(editor.getHTML()).toBe(once);
   });
 
-  it('⭐양방향 가드 — 렌더러가 읽는 콘텐츠 속성(RENDERER_CONTENT_ATTRIBUTES) 전부가 이 픽스처에 있다(새 속성을 렌더러에만 더하면 RED)', () => {
-    const inFixture = new Set(partsOf(PARTS_FIXTURE).flatMap((p) => Object.keys(p.attrs)));
-    const root = document.createElement('div');
-    root.innerHTML = PARTS_FIXTURE;
-    for (const el of root.querySelectorAll('*')) for (const a of [...el.attributes]) if (a.name.startsWith('data-')) inFixture.add(a.name);
-    const missing = RENDERER_CONTENT_ATTRIBUTES.map((e) => e.attr).filter((attr) => !inFixture.has(attr));
+  it('⭐가드(렌더러 → 픽스처) — 렌더러가 읽는 콘텐츠 속성(RENDERER_CONTENT_ATTRIBUTES) 전부가 그 속성을 허용한 요소에 실려 이 픽스처에 있다(새 속성을 렌더러에만 더하면 RED)', () => {
+    const seen = fixtureAttributeSites(PARTS_FIXTURE);
+    const missing = RENDERER_CONTENT_ATTRIBUTES.filter((e) => !e.elements.some((tag) => seen.has(`${tag}|${e.attr}`))).map((e) => e.attr);
     expect(missing).toEqual([]);
+  });
+
+  it('⭐가드(픽스처 → 렌더러 · 까디르 4708 ①) — 픽스처의 data-*는 전부 렌더러 목록에 그 요소로 있거나 · 편집기만 쓰는 속성 표에 이유와 함께 있다(목록 밖 속성 · 허용 안 된 요소면 RED)', () => {
+    const unexplained = [...fixtureAttributeSites(PARTS_FIXTURE)].filter((site) => !isExplainedSite(site));
+    expect(unexplained).toEqual([]);
+    // 편집기만 쓰는 표의 항목도 실제로 픽스처에 있다(헛도는 예외 0).
+    const seenAttrs = new Set([...fixtureAttributeSites(PARTS_FIXTURE)].map((site) => site.split('|')[1]));
+    expect(Object.keys(EDITOR_ONLY_ATTRIBUTES).filter((a) => !seenAttrs.has(a))).toEqual([]);
+  });
+
+  it('가드 대조 — 목록 밖 속성 · 목록에 있어도 허용 안 된 요소면 설명되지 않음으로 잡힌다(양성)', () => {
+    expect(isExplainedSite('div|data-bogus')).toBe(false);
+    expect(isExplainedSite('p|data-url')).toBe(false);
+    expect(isExplainedSite('div|data-url')).toBe(true);
   });
 });

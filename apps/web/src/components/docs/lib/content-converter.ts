@@ -1,10 +1,11 @@
 import TurndownService from 'turndown';
 
+const safeAttr = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 // fileAttachment 노드는 내용 없는 <div>(non-void) → turndown 의 blank 처리에 의해 drop 된다
-// (이미지는 <img> 가 void 라 살아남음). blankReplacement 에서 fileAttachment 만 특별 처리해 보존.
+// (이미지는 <img> 가 void 라 살아남음). blankReplacement 에서 EMPTY_PART_SERIALIZERS(아래)로 보존.
 function serializeFileAttachment(el: HTMLElement): string {
-  const safeAttr = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const filename = safeAttr(el.getAttribute('data-filename') ?? '');
   const size = safeAttr(el.getAttribute('data-size') ?? '0');
   const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
@@ -16,15 +17,44 @@ function serializeFileAttachment(el: HTMLElement): string {
   return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}"${tail}></div>\n`;
 }
 
+function serializeEmbedBlock(el: HTMLElement): string {
+  // 값은 속성으로만 싣는다(escape). 읽을 때 URL은 렌더러의 4324 안전 도우미(safeHttpUrl)를 그대로 지난다 — 새 싱크 0.
+  return `\n<div data-type="embedBlock" data-url="${safeAttr(el.getAttribute('data-url') ?? '')}"></div>\n`;
+}
+
+function serializeMathBlock(el: HTMLElement): string {
+  // 수식 원본 = 글 · 글이 없으면(MCP · 렌더러 형식의 속성만) data-latex(story #4339 — 빈 div라 blank로 버려지던 모양).
+  const latex = (el.textContent ?? '').trim() ? el.textContent ?? '' : el.getAttribute('data-latex') ?? '';
+  return `\n<div data-type="mathBlock" data-latex="${safeAttr(latex)}">${safeAttr(latex)}</div>\n`;
+}
+
+function serializePageEmbed(el: HTMLElement): string {
+  const attr = (name: string) => safeAttr(el.getAttribute(name) ?? '');
+  return `\n<div data-page-embed data-doc-id="${attr('data-doc-id')}" data-title="${attr('data-title')}" data-icon="${attr('data-icon')}" data-slug="${attr('data-slug')}"></div>\n`;
+}
+
+/**
+ * story #4339 — **내용 없는 부품 div** 한 곳. turndown은 규칙보다 먼저 «빈 노드»를 blankReplacement로 보내 버린다 — 여기 없는 빈 부품은
+ * 마크다운 문서를 저장할 때 조용히 사라졌다(링크 카드 · 문서 임베드 — pageEmbed 규칙이 있어도 빈 div라 규칙까지 못 갔다).
+ * 새 빈 부품은 여기에 더한다 — 가드(doc-editor-roundtrip.test)가 왕복 픽스처의 빈 부품 뿌리가 전부 여기 걸리는지 대조한다.
+ */
+export const EMPTY_PART_SERIALIZERS: ReadonlyArray<{ name: string; matches: (el: HTMLElement) => boolean; serialize: (el: HTMLElement) => string }> = [
+  { name: 'fileAttachment', matches: (el) => el.getAttribute('data-type') === 'fileAttachment', serialize: serializeFileAttachment },
+  { name: 'embedBlock', matches: (el) => el.getAttribute('data-type') === 'embedBlock', serialize: serializeEmbedBlock },
+  { name: 'pageEmbed', matches: (el) => el.hasAttribute('data-page-embed'), serialize: serializePageEmbed },
+  { name: 'mathBlock', matches: (el) => el.getAttribute('data-type') === 'mathBlock', serialize: serializeMathBlock },
+];
+
 const turndown = new TurndownService({
   headingStyle: 'atx',
   codeBlockStyle: 'fenced',
   bulletListMarker: '-',
-  // 내용-없는 fileAttachment <div> 가 blank 로 drop 되지 않도록 raw HTML 로 보존(legacy·ref 공통).
+  // 내용 없는 부품 <div>가 blank로 drop되지 않도록 raw HTML로 보존(EMPTY_PART_SERIALIZERS).
   blankReplacement: (_content: string, node: unknown) => {
     const el = node as HTMLElement & { isBlock?: boolean };
-    if (el && typeof el.getAttribute === 'function' && el.getAttribute('data-type') === 'fileAttachment') {
-      return serializeFileAttachment(el);
+    if (el && typeof el.getAttribute === 'function') {
+      const part = EMPTY_PART_SERIALIZERS.find((p) => p.matches(el));
+      if (part) return part.serialize(el);
     }
     return el?.isBlock ? '\n\n' : '';
   },
@@ -125,13 +155,7 @@ turndown.addRule('mathBlock', {
   filter: (node) =>
     node.nodeName === 'DIV' &&
     (node as HTMLElement).getAttribute('data-type') === 'mathBlock',
-  replacement: (_content, node) => {
-    const el = node as HTMLElement;
-    const latex = el.textContent ?? '';
-    const safeAttr = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `\n<div data-type="mathBlock" data-latex="${safeAttr(latex)}">${safeAttr(latex)}</div>\n`;
-  },
+  replacement: (_content, node) => serializeMathBlock(node as HTMLElement),
 });
 
 // Preserve math inline nodes as raw HTML
@@ -204,14 +228,7 @@ turndown.addRule('toggleBlock', {
 // Preserve page-embed atoms — must be before the generic block rule
 turndown.addRule('pageEmbed', {
   filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-page-embed'),
-  replacement: (_content, node) => {
-    const el = node as HTMLElement;
-    const docId = el.getAttribute('data-doc-id') ?? '';
-    const title = el.getAttribute('data-title') ?? '';
-    const icon = el.getAttribute('data-icon') ?? '';
-    const slug = el.getAttribute('data-slug') ?? '';
-    return `\n<div data-page-embed data-doc-id="${docId}" data-title="${title}" data-icon="${icon}" data-slug="${slug}"></div>\n`;
-  },
+  replacement: (_content, node) => serializePageEmbed(node as HTMLElement),
 });
 
 // Preserve callout divs
