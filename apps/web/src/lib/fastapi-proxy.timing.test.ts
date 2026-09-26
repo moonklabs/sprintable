@@ -63,11 +63,12 @@ const keyRequest = (path: string, extra: Record<string, string> = {}) =>
 const timingLogs = () => logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('"server_timing"'));
 
 // 까디르 4652 — «타이밍 로그만 걸러 없음»이 아니라 호출 자체가 0인지를 직접 잰다: console.log 호출 0 · Server-Timing 없음 ·
-// undici 채널 구독 0. 새 모듈로(구독 여부는 모듈 상태라 앞 테스트가 이미 구독했으면 안 보인다) 같은 측정을 켜짐에도 돌려 셋 다
-// 잡히는 것을 옆에 둔다(양성 대조 — 측정이 틀릴 수 있어야 한다).
+// undici 채널 구독 0. 새 모듈로(구독 여부는 프로세스 공유 상태(globalThis · 4299 AC2)라 앞 테스트가 이미 구독했으면 안 보인다 —
+// 새 모듈 전에 비운다) 같은 측정을 켜짐에도 돌려 셋 다 잡히는 것을 옆에 둔다(양성 대조 — 측정이 틀릴 수 있어야 한다).
 describe('꺼짐 호출 0 직접 단언 + 켜짐 양성 대조(새 모듈)', () => {
   async function freshRun(enabled: boolean) {
     vi.resetModules();
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for('sprintable.serverTiming.state.v1')];
     if (enabled) process.env['SERVER_TIMING_MARKERS'] = 'true';
     else delete process.env['SERVER_TIMING_MARKERS'];
     const dc = (await import('node:diagnostics_channel')).default;
@@ -144,7 +145,7 @@ describe('켜면(dev) 구간 · 연결 판정 · 미들웨어 몫', () => {
     const sum = ['bff_auth', 'bff_locale', 'bff_reqbody', 'bff_be_ttfb', 'bff_be_body'].reduce((a, k) => a + t.get(k)!.dur, 0);
     expect(sum).toBeLessThanOrEqual(t.get('bff')!.dur + 5); // 칸마다 반올림
     expect(t.get('bff_be_ttfb')!.dur).toBeGreaterThanOrEqual(25);
-    expect(t.get('be0-other')!.desc).toMatch(/^t\+\d+ wait=\d+ conn=(new|reuse)$/);
+    expect(t.get('be0-other')!.desc).toMatch(/^t\+\d+ wait=\d+ proto=h1 conn=(new|reuse)$/); // story #4299 AC2 — 협상 판(평문 로컬 서버 = h1)
     expect(startRouteTimerSpy).toHaveBeenCalledTimes(1);
   });
 

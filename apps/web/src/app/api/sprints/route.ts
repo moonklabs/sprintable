@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { withRouteTiming } from '@/lib/server-timing';
 import { buildHeaderCursorPageMeta } from '@/lib/pagination';
 import { createSprintSchema } from '@sprintable/shared';
 import { createSprintRepository } from '@/lib/storage/factory';
@@ -35,7 +36,8 @@ export async function POST(request: Request) {
 }
 
 // GET /api/sprints — 목록
-export async function GET(request: Request) {
+// story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+export const GET = withRouteTiming('sprints', async (request: Request) => {
   try {
     const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
@@ -87,4 +89,4 @@ export async function GET(request: Request) {
   } catch (err: unknown) {
     return handleApiError(err);
   }
-}
+});
