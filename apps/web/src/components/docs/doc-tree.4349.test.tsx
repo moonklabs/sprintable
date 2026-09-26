@@ -136,4 +136,24 @@ describe('DocTree 행 메뉴 — 목록 밖(body)에 · 모자라면 위로 · �
     act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     expect(menu()).toBeNull();
   });
+
+  // 까디르(4724) — ↑↓ 키보드 길을 얹어 «메뉴»가 됐으니 보조기기에도 메뉴로: 버튼 넷이 아니라 메뉴 항목 넷.
+  it('메뉴 역할 — 트리거 aria-haspopup=menu · aria-expanded(닫힘 false · 열림 true) · aria-controls = 패널 id · 패널 role=menu · 항목 role=menuitem', () => {
+    mount();
+    const trig = trigger();
+    expect(trig.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trig.getAttribute('aria-expanded')).toBe('false');
+    expect(trig.hasAttribute('aria-controls')).toBe(false); // 닫혀 있으면 가리킬 패널이 없다
+    openByKey();
+    expect(trig.getAttribute('aria-expanded')).toBe('true');
+    const panel = menu()!;
+    expect(panel.getAttribute('role')).toBe('menu');
+    expect(panel.id).not.toBe('');
+    expect(trig.getAttribute('aria-controls')).toBe(panel.id);
+    expect(document.getElementById(panel.id)).toBe(panel);
+    expect(items().map((b) => b.getAttribute('role'))).toEqual(['menuitem', 'menuitem']);
+    key(items()[0], 'Escape');
+    expect(trig.getAttribute('aria-expanded')).toBe('false');
+    expect(trig.hasAttribute('aria-controls')).toBe(false);
+  });
 });
