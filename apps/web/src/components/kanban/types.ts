@@ -3,6 +3,9 @@ import type { SendAttachment } from '@/hooks/use-chat-sse';
 
 export interface KanbanStory {
   id: string;
+  // story #4345(까디르 4718) — 서버가 늘 싣는 판 표지(BE StoryResponse.updated_at · 갱신마다 단조 증가 — models/pm.py MONOTONIC_UPDATED_AT_ONUPDATE).
+  // 스토리 상세 패널이 «부모가 넘긴 story가 마지막 서버 목록보다 옛것인가»를 가르는 데 쓴다. 테스트 픽스처엔 없을 수 있어 선택.
+  updated_at?: string;
   // story 9ac9b80f: 프로젝트 내 사람-읽는 순차 #N. 서버 채번, 백필 전 구스토리는 null 가능.
   story_number?: number | null;
   title: string;

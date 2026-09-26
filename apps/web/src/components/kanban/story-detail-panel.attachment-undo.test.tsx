@@ -23,8 +23,10 @@ const A1: Att = { url: 'gs://b/a1.pdf', name: 'report.pdf', content_type: 'appli
 const A2: Att = { url: 'gs://b/a2.pdf', name: 'plan.pdf', content_type: 'application/pdf' };
 const A3: Att = { url: 'gs://b/a3.pdf', name: 'later.pdf', content_type: 'application/pdf' };
 
-function makeStory(attachments: Att[]): KanbanStory {
+// updatedAt: 서버 판(선택) — 있으면 패널이 «부모가 넘긴 story가 옛 판인가»를 가른다.
+function makeStory(attachments: Att[], updatedAt?: string): KanbanStory {
   return {
+    ...(updatedAt ? { updated_at: updatedAt } : {}),
     id: 's1', story_number: 1, title: 'Story', status: 'backlog', priority: 'medium',
     story_points: null, assignee_id: null, epic_id: null, sprint_id: null,
     description: null, acceptance_criteria: null, attachments: attachments as KanbanStory['attachments'], position: null,
@@ -90,7 +92,8 @@ beforeEach(() => {
       const n = patches.length;
       if (holdPatch(n)) await new Promise<void>((resolve) => { held.push(resolve); });
       if (failPatch(n)) return { ok: false, json: async () => null };
-      return { ok: true, json: async () => ({ data: makeStory(body.attachments) }) };
+      // 서버처럼 PATCH마다 판(updated_at)을 올린다(2026-09-26T00:00:0N).
+      return { ok: true, json: async () => ({ data: makeStory(body.attachments, new Date(Date.UTC(2026, 8, 26, 0, 0, n)).toISOString()) }) };
     }
     if (url === '/api/stories/s1/attachments' && init?.method === 'POST') {
       const name = ((init.body as FormData).get('file') as File).name;
@@ -296,6 +299,33 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     await act(async () => { removeBtnOf(A1).click(); });
     await closeToast();
     expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+  });
+
+  // 까디르 4718(12:23Z) — 에픽 스윔레인은 버전 없는 재조회 결과로 목록을 간다. 삭제 **전에** 출발한 재조회가 삭제 **뒤에** 도착하면
+  // «새 객체인데 옛 목록»이라 객체 비교만으로는 받아 버려 다음 PATCH가 지운 항목을 되살렸다 → 판(updated_at)이 옛것이면 버린다.
+  it('스윔레인 모양 — 삭제 뒤 도착한 옛 판(updated_at) 새 객체는 무시 · 다음 삭제 본문에 지운 항목 0', async () => {
+    const T0 = '2026-09-25T23:59:00.000Z'; // PATCH 1 응답 판(00:00:01)보다 옛것
+    await render(<Harness initial={[A1, A2, A3]} />);
+    await act(async () => { setStoryOutside!(makeStory([A1, A2, A3], T0)); });
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast();
+    expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+    await act(async () => { setStoryOutside!(makeStory([A1, A2, A3], T0)); }); // 삭제 전에 출발한 재조회가 이제 도착
+    await act(async () => { removeBtnOf(A2).click(); });
+    await closeToast();
+    expect(urlsOf(1)).toEqual([A3.url]);
+  });
+
+  it('새 판(updated_at이 더 늦음) 새 객체는 받아들인다(대조) — 그 사이 다른 곳에서 더한 첨부가 남음', async () => {
+    await render(<Harness initial={[A1, A2]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast(); // PATCH 1 응답 판 00:00:01
+    await act(async () => { setStoryOutside!(makeStory([A2, A3], '2026-09-26T00:05:00.000Z')); });
+    await act(async () => { removeBtnOf(A2).click(); });
+    await closeToast();
+    expect(urlsOf(1)).toEqual([A3.url]);
   });
 
   // 까디르 4718 ③ — 업로드가 줄을 안 타고 올리기 시작할 때의 목록 스냅숏으로 PATCH해서, 삭제가 가는 중에 업로드가 끝나면 지운 항목을 되넣었다.

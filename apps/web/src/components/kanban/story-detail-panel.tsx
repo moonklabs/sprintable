@@ -366,6 +366,14 @@ export function DescriptionViewer({
   );
 }
 
+/** story #4345 — `incoming`이 `current`보다 옛 판인가(둘 다 `updated_at`이 있을 때만 · 같으면 옛것 아님). 서버 판은 갱신마다 단조 증가. */
+function isOlderStory(incoming: Pick<KanbanStory, 'updated_at'>, current: Pick<KanbanStory, 'updated_at'>): boolean {
+  if (!incoming.updated_at || !current.updated_at) return false;
+  const a = Date.parse(incoming.updated_at);
+  const b = Date.parse(current.updated_at);
+  return Number.isFinite(a) && Number.isFinite(b) && a < b;
+}
+
 export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap: projectMemberMap = {}, memberMapLoaded = true, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
@@ -1194,11 +1202,15 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // 보내는 목록의 원천 = 마지막 서버 목록(까디르 4718 ②). 매 렌더 props로 덮으면, 부모가 갱신을 안 돌려주는 자리(flow 노드 패널 —
   // onStoryUpdate 없음)에서 첫 삭제 성공 뒤의 서버 목록이 다음 렌더에 옛 props 목록(지운 항목 포함)으로 돌아가 둘째 삭제가 그걸 되살렸다.
   // 부모가 **다른 story 객체**를 넘길 때만(부모가 새로 받거나 우리 갱신을 받아 넘김) 받아들인다 — 같은 객체면 새 소식이 없다.
+  // 새 객체라도 **옛 판**이면 버린다(까디르 4718): 에픽 스윔레인은 버전 없는 재조회 결과로 목록을 갈아서, 삭제 전에 출발한 재조회가 삭제 뒤에
+  // 도착하면 «새 객체인데 옛 목록»이 된다. 판 = `updated_at`(서버가 갱신마다 단조 증가). 둘 중 하나라도 없으면 객체 비교만.
   const adoptedStoryRef = useRef(story);
   useEffect(() => {
     const fromParent = adoptedStoryRef.current !== story;
     adoptedStoryRef.current = story;
-    latestRef.current = { story: fromParent ? story : latestRef.current.story, onStoryUpdate, addToast, t };
+    const current = latestRef.current.story;
+    const adopt = fromParent && !isOlderStory(story, current);
+    latestRef.current = { story: adopt ? story : current, onStoryUpdate, addToast, t };
   });
   const mountedRef = useRef(true);
   const unhideAttachment = useCallback((url: string) => {
@@ -1245,7 +1257,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const applySent = useCallback((result: SendResult, sent: SendAttachment[]) => {
     if (!result.updated || result.seq < appliedSeqRef.current) return;
     appliedSeqRef.current = result.seq;
-    const merged = { ...latestRef.current.story, attachments: result.updated.attachments ?? sent };
+    // 응답의 판(updated_at)도 싣는다 — 다음에 부모가 넘기는 story가 이보다 옛것인지 가르는 기준.
+    const merged = { ...latestRef.current.story, attachments: result.updated.attachments ?? sent, updated_at: result.updated.updated_at ?? latestRef.current.story.updated_at };
     latestRef.current = { ...latestRef.current, story: merged }; // 화면을 떠난 뒤의 되돌리기도 서버 목록 기준으로
     if (mountedRef.current) latestRef.current.onStoryUpdate?.(merged);
   }, []);
