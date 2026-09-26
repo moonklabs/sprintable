@@ -28,7 +28,7 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn(async () => new Respons
 
 const { DocEditor } = await import('./doc-editor');
 const { useDocSync } = await import('./use-doc-sync');
-const { makeDocEditor } = await import('./doc-editor-roundtrip.fixture');
+const { makeDocEditor, partsOf } = await import('./doc-editor-roundtrip.fixture');
 const { ToastProvider } = await import('../ui/toast');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -104,6 +104,62 @@ describe('DocEditor — 편집 없이 열면 onChange 0', () => {
     await act(async () => { editorOf().commands.insertContentAt(1, '입력 '); });
     expect(changes).toHaveLength(1);
     expect(changes[0]).toContain('입력 ');
+  });
+});
+
+describe('DocEditor — docChanged 막이가 실제 편집 경로를 막지 않는다', () => {
+  async function openEditable(body: string) {
+    const changes: string[] = [];
+    await act(async () => {
+      root.render(
+        <Providers>
+          <DocEditor value={body} contentFormat="html" onChange={(v) => { changes.push(v); }} labels={LABELS} currentDocId="d1" projectId="p1" />
+        </Providers>,
+      );
+    });
+    await settle();
+    expect(changes).toEqual([]);
+    return { changes, editor: editorOf() };
+  }
+
+  it('입력 · 되돌리기 · 다시하기 · 붙여넣기 · 노드 속성 바꿈(토글 열기 · 업로드 교체 모양) · 표 넣기 · autolink가 각각 onChange를 낸다', async () => {
+    const { changes, editor } = await openEditable('<p>첫 문단</p><div data-type="toggleBlock" data-open="true"><div data-type="toggleSummary"><p>제목</p></div><div data-type="toggleContent"><p>안</p></div></div>');
+    const step = async (label: string, run: () => void, expectInLast?: string) => {
+      const before = changes.length;
+      await act(async () => { run(); });
+      expect(changes.length, label).toBeGreaterThan(before);
+      if (expectInLast) expect(changes.at(-1), label).toContain(expectInLast);
+    };
+    await step('입력', () => { editor.commands.insertContentAt(1, '가'); }, '가첫 문단');
+    await step('되돌리기', () => { editor.commands.undo(); });
+    expect(changes.at(-1)).not.toContain('가첫 문단');
+    await step('다시하기', () => { editor.commands.redo(); }, '가첫 문단');
+    // jsdom엔 ClipboardEvent가 없다 — 이벤트를 넘겨 pasteHTML이 만들지 않게 한다.
+    await step('붙여넣기', () => { editor.commands.setTextSelection(1); editor.view.pasteHTML('<p>붙인 글</p>', new Event('paste') as ClipboardEvent); }, '붙인 글');
+    let togglePos = -1;
+    editor.state.doc.descendants((node, pos) => { if (node.type.name === 'toggleBlock') togglePos = pos; });
+    // 토글 열기/닫기 · 업로드 교체(image-upload.ts updateNodeByUploadId)와 같은 모양 — setNodeMarkup + addToHistory false.
+    await step('노드 속성 바꿈', () => {
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(togglePos, undefined, { open: false }).setMeta('addToHistory', false));
+    }, 'data-open="false"');
+    await step('표 넣기', () => { editor.commands.setTextSelection(1); editor.commands.insertTable({ rows: 2, cols: 2 }); }, '<table');
+    await step('autolink', () => {
+      editor.commands.setTextSelection(1);
+      editor.commands.insertContent('https://example.net ');
+    }, 'href="https://example.net"'); // 링크 표시는 뿌리 거래(입력)에 붙은 appendTransaction이 단다 — 같은 onChange 값에 실린다
+  });
+
+  it('정규화가 필요한 본문에 한 글자 입력 → 나가는 값 = 원 내용 그대로(부품 · 글 · 링크 주소) + 그 글자', async () => {
+    const { changes, editor } = await openEditable(NEEDS_NORMALIZING);
+    await act(async () => { editor.commands.insertContentAt(1, '가'); });
+    expect(changes).toHaveLength(1);
+    const saved = changes[0]!;
+
+    expect(partsOf(saved)).toEqual(partsOf(NEEDS_NORMALIZING));
+    const textOf = (html: string) => { const el = document.createElement('div'); el.innerHTML = html; return (el.textContent ?? '').replace(/\s+/g, ''); };
+    expect(textOf(saved)).toBe(`가${textOf(NEEDS_NORMALIZING)}`);
+    const hrefsOf = (html: string) => { const el = document.createElement('div'); el.innerHTML = html; return [...el.querySelectorAll('a')].map((a) => a.getAttribute('href')); };
+    expect(hrefsOf(saved)).toEqual(hrefsOf(NEEDS_NORMALIZING));
   });
 });
 
