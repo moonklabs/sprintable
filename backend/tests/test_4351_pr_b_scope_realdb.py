@@ -233,3 +233,37 @@ async def test_today_result_counts_and_workflow_line_metrics_count_only_accessib
             )
         assert counts["member_user"] == (1, 2, 1), counts
         assert counts["owner_user"] == (2, 3, 2), counts
+
+
+async def test_material_performance_of_inaccessible_publication_is_not_looked_up(monkeypatch):
+    """⑧ 형제(가드 첫 스캔) — 발행물 성과는 마스터 스토리 프로젝트 소속. 접근 불가면 스냅샷 조회 자체를 안 하고 org 밖 id와 같은 `[]` ·
+    자기 프로젝트 · owner는 조회한다(시드 발행물엔 스냅샷이 없어 응답은 셋 다 `[]` → 조회 여부로 가른다)."""
+    import app.routers.material_lineage as lineage_router
+    from sqlalchemy import select
+
+    from app.models.material_lineage import MaterialLineage
+
+    looked_up: list[uuid.UUID] = []
+
+    async def _record(session, *, org_id, publication_id):
+        looked_up.append(publication_id)
+        return []
+
+    async def _head(session, *, publication_id):
+        return publication_id
+
+    monkeypatch.setattr(lineage_router, "list_insight_snapshots_for_publication", _record)
+    monkeypatch.setattr(lineage_router, "resolve_head_publication_id", _head)
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            derived = {
+                key: (await s.execute(select(MaterialLineage.derived_id).where(MaterialLineage.work_item_id == seeded[f"story_{key}"]))).scalar_one()
+                for key in ("a", "b")
+            }
+        path = "/api/v2/material-lineage/material-performance?derived_id={}"
+        other = await _get(Session, seeded, path.format(derived["b"]), seeded["member_user"])
+        assert other.status_code == 200 and other.json() == [] and looked_up == [], (other.text[:200], looked_up)
+        own = await _get(Session, seeded, path.format(derived["a"]), seeded["member_user"])
+        owner = await _get(Session, seeded, path.format(derived["b"]), seeded["owner_user"])
+        assert own.status_code == 200 and owner.status_code == 200
+        assert looked_up == [derived["a"], derived["b"]], "자기 프로젝트 · owner는 조회한다(회귀 0)"
