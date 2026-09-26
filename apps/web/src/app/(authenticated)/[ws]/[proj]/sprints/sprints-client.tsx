@@ -44,6 +44,8 @@ import type { RetroHypothesisResult } from '@/services/retro-session';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { prefetchSprintScreen, sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -455,10 +457,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     }
   }, []);
 
+  // story #4328 — 첫 물결 선출발: 스프린트 목록 + 아래 「하루 체크인」(embedded 스탠드업 · 목록이 온 뒤에야 마운트된다)의 요청 여섯을 **같이**
+  // 출발시키고 각자 넘겨받는다(로딩 경계에서 이미 출발했으면 규칙상 다시 안 보냄). 목록 effect보다 **먼저** 선언 — effect는 선언 순서로 돈다
+  // (뒤에 두면 목록이 먼저 새로 요청하고 선출발이 또 보내 두 번 간다).
+  const { currentTeamMemberId: prefetchMemberId } = useDashboardContext();
+  useEffect(() => { prefetchSprintScreen({ memberId: prefetchMemberId, projectId }); }, [prefetchMemberId, projectId]);
+
   const loadSprints = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchWithAuth(`/api/sprints?project_id=${projectId}`);
+      const res = await takeSprintScreenOrFetch(sprintScreenUrls.sprintList(projectId), { memberId: prefetchMemberId, projectId });
       if (res.ok) {
         const json = await res.json();
         setSprints(json.data ?? []);
@@ -466,7 +474,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, prefetchMemberId]);
 
   useEffect(() => { void loadSprints(); }, [loadSprints]);
 

@@ -164,18 +164,34 @@ describe('묶음 열기 — 읽음 실패 토스트는 한 번(story #4295 PO �
   });
 });
 
-// story #4295 × #4276(까디르 렌즈) — loading에서 먼저 출발시킨 1쪽 요청이 실패해도, 넘겨받는 화면은 같은 실패 상자(영원히 로딩 아님).
-describe('선출발 넘겨받은 응답이 실패여도 같은 실패 상자(story #4295 × #4276)', () => {
-  it('⭐선출발 요청이 망 오류 → 화면이 그 실패를 넘겨받아 실패 상자 · 새 요청 없이(1회용 넘겨받기)', async () => {
+// story #4295 × #4276(까디르 렌즈) — loading에서 먼저 출발시킨 1쪽 요청이 실패해도 화면은 영원히 로딩이 아니다.
+// story #4328(까디르 4694 ②) — 규칙이 바뀌었다: 실패한 선출발은 넘기지 않고 버린다 → 화면이 제 요청을 **한 번** 한다(선출발은 없을 때보다
+// 나빠지면 안 된다 · 화면 열기 직전 일시 실패를 그대로 받지 않게). 제 요청도 실패하면 같은 실패 상자.
+describe('선출발이 실패하면 화면이 제 요청을 한 번(story #4295 × #4276 · 4328)', () => {
+  const notifCalls = () => vi.mocked(fetch).mock.calls.filter(([u, init]) => String(u).includes('/api/notifications') && (init as RequestInit | undefined)?.method !== 'PATCH');
+
+  it('⭐선출발 요청이 망 오류 → 화면이 제 요청 1회 → 성공이면 목록(실패 상자 없음)', async () => {
     stubFetch(['network', okPage([NOTIF('1')])]);
     const { prefetchInbox, __resetInboxPrefetchForTest } = await import('@/components/inbox/inbox-prefetch');
     __resetInboxPrefetchForTest();
     prefetchInbox({ memberId: 'me-1', projectId: 'proj-1' }, 'notifications');
     await mount();
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(errorBox()).toBeNull();
+    expect(container.textContent).toContain('notif-1');
+    expect(notifCalls()).toHaveLength(2);
+  });
+
+  it('선출발도 제 요청도 실패 → 같은 실패 상자(영원히 로딩 아님 · 다시 돌지 않는다)', async () => {
+    stubFetch(['network', 'network']);
+    const { prefetchInbox, __resetInboxPrefetchForTest } = await import('@/components/inbox/inbox-prefetch');
+    __resetInboxPrefetchForTest();
+    prefetchInbox({ memberId: 'me-1', projectId: 'proj-1' }, 'notifications');
+    await mount();
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
     expect(skeletonCount()).toBe(0);
     expect(errorBox()?.textContent).toContain(koMessages.inbox.notificationsLoadError);
-    const notifCalls = vi.mocked(fetch).mock.calls.filter(([u, init]) => String(u).includes('/api/notifications') && (init as RequestInit | undefined)?.method !== 'PATCH');
-    expect(notifCalls).toHaveLength(1);
+    expect(notifCalls()).toHaveLength(2);
   });
 });
 

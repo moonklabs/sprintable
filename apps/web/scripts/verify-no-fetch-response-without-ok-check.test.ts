@@ -18,6 +18,13 @@ describe('findFetchOkViolations (story #3688 regression guard)', () => {
     expect(hits).toHaveLength(1);
   });
 
+  it('flags 선출발 넘겨받기 래퍼도 같은 부류(story #4328 — 래퍼로 바꾸면 조용히 빠지던 자리)', () => {
+    for (const name of ['takePrefetchedOrFetch', 'takeSprintScreenOrFetch']) {
+      expect(findFetchOkViolations(`function f() { return ${name}('/api/x', s).then((r) => r.json()); }`, 'f.ts'), name).toHaveLength(1);
+      expect(findFetchOkViolations(`function f() { return ${name}('/api/x', s).then((r) => { if (!r.ok) throw new Error('x'); return r.json(); }); }`, 'f.ts'), `${name} ok`).toHaveLength(0);
+    }
+  });
+
   it('does not flag await+분리 형 with .ok check', () => {
     const hits = findFetchOkViolations(
       "async function f() {\n  const res = await fetchWithAuth('/api/x');\n  if (!res.ok) throw new Error('x');\n  return await res.json();\n}",

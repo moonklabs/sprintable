@@ -10,6 +10,7 @@ import { parseCursorMeta } from '@/lib/pagination';
 import { disambiguateFallbackLabels, memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface HistoryEntry {
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export function StandupHistorySection({ projectId, memberNameById = {}, memberNamesLoaded }: Props) {
+  const { currentTeamMemberId } = useDashboardContext();
   const t = useTranslations('standup');
   const tCommon = useTranslations('common');
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
@@ -50,16 +52,22 @@ export function StandupHistorySection({ projectId, memberNameById = {}, memberNa
 
   useEffect(() => {
     if (!projectId) return;
+    // 까디르 4694 ① — 프로젝트(또는 사람)가 바뀐 뒤 늦게 온 옛 응답은 버린다(다른 화면에 옛 기록이 붙지 않게).
+    let cancelled = false;
     startTransition(() => setLoading(true));
-    fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20`)
-      .then((r) => r.json())
+    // story #4328 — 스프린트 화면이 첫 물결에 먼저 출발시킨 같은 요청을 한 번 넘겨받는다(주소는 sprintScreenUrls 한 곳).
+    takeSprintScreenOrFetch(sprintScreenUrls.history(projectId), { memberId: currentTeamMemberId, projectId })
+      // 실패 응답의 에러 바디를 기록으로 읽지 않는다(verify:no-fetch-response-without-ok-check) — 실패면 빈 채(예전과 같은 결과).
+      .then((r) => { if (!r.ok) throw new Error(`standup history ${r.status}`); return r.json(); })
       .then((json) => {
+        if (cancelled) return;
         if (json?.data && Array.isArray(json.data)) setEntries(json.data);
         setNextCursor(parseCursorMeta(json.meta, 'standup-history-section').nextCursor);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [projectId]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, currentTeamMemberId]);
 
   const handleLoadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;

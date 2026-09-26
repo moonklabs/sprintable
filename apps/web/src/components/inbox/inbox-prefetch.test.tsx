@@ -108,12 +108,14 @@ describe('takePrefetchedOrFetch — 넘겨받기 규칙', () => {
     expect(countOf(INBOX_GATES_PENDING_URL)).toBe(2);
   });
 
-  it('선출발이 실패해도 처리 안 된 거부로 새지 않고, 넘겨받는 쪽은 그 실패를 그대로 받는다', async () => {
+  // story #4328(까디르 4694 ②) — 실패한 선출발은 넘기지 않는다: 넘겨받는 쪽은 제 요청을 한 번 해 그 결과를 받는다.
+  it('선출발이 실패해도 처리 안 된 거부로 새지 않고, 넘겨받는 쪽은 제 요청을 한 번 해 그 결과를 받는다', async () => {
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
     fetchWithAuthMock.mockImplementationOnce(async () => { throw new Error('network'); });
     prefetchInbox(SCOPE, 'notifications', 1_000);
-    await expect(takePrefetchedOrFetch(inboxNotificationsUrl(), SCOPE, 1_100)).rejects.toThrow('network');
+    fetchWithAuthMock.mockImplementationOnce(async () => new Response('fresh'));
+    expect(await (await takePrefetchedOrFetch(inboxNotificationsUrl(), SCOPE, 1_100)).text()).toBe('fresh');
     await new Promise((r) => setTimeout(r, 0));
     process.off('unhandledRejection', unhandled);
     expect(unhandled).not.toHaveBeenCalled();

@@ -29,6 +29,7 @@ import { memberLookup } from '@/lib/member-display';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
+import { sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
 
 interface BridgedStory {
   id: string;
@@ -269,9 +270,18 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
       try {
         // d9847ef0: org-level(항상) — standup entries(project_id 생략→org_id scoped 전체)·members(org-level).
         // standalone org write 진입(프로젝트 미선택)에서도 작성/조회 가능.
+        // story #4328 — 첫 화면 요청은 **한 물결**로: 스탠드업 · 구성원과 (프로젝트 안이면) 활성 스프린트 · 피드백 · 미작성을 같이 출발시킨다
+        // (예전엔 앞 둘을 기다린 뒤에야 뒤 셋이 출발 — 뒤 셋은 앞 결과가 필요 없다). 스프린트 화면이 먼저 출발시킨 응답은 한 번 넘겨받는다.
+        const scope = { memberId: currentTeamMemberId, projectId };
+        const projectLegs = projectId ? [
+          takeSprintScreenOrFetch(sprintScreenUrls.activeSprints(projectId), scope),
+          takeSprintScreenOrFetch(sprintScreenUrls.feedback(projectId, date), scope),
+          // missing은 부수 — 망 오류(reject)여도 주 데이터를 막지 않게 leg 자체를 격리(story #3519).
+          takeSprintScreenOrFetch(sprintScreenUrls.missing(projectId, date), scope).catch(() => null),
+        ] as const : null;
         const [entriesRes, membersRes] = await Promise.all([
-          fetchWithAuth(`/api/standup?date=${date}`),
-          fetchWithAuth(`/api/team-members`),
+          takeSprintScreenOrFetch(sprintScreenUrls.entries(date), scope),
+          takeSprintScreenOrFetch(sprintScreenUrls.members(), scope),
         ]);
 
         const [entriesData, membersData] = await Promise.all([
@@ -294,11 +304,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           // Promise.all 안에 있었다. missingRes의 fetch 자체가 네트워크단 reject(HTTP
           // status가 아니라)하면 이 Promise.all 전체가 던져 주 데이터 둘도 같이 못
           // 얻었다 — 주석과 코드가 어긋난 결함. missingRes만 leg 자체를 격리한다.
-          const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
-            fetchWithAuth(`/api/sprints?project_id=${projectId}&status=active`),
-            fetchWithAuth(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
-            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`).catch(() => null),
-          ]);
+          const [sprintsRes, feedbackRes, missingRes] = await Promise.all(projectLegs!);
 
           const [sprintsData, fbData] = await Promise.all([
             readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
@@ -371,7 +377,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     return () => {
       cancelled = true;
     };
-  }, [date, projectId, refreshToken, t]);
+  }, [date, projectId, refreshToken, t, currentTeamMemberId]);
 
   const humanMembersSorted = useMemo(() => {
     if (!currentTeamMemberId) return humanMembers;

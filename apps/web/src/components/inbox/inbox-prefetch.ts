@@ -11,7 +11,7 @@
  * - 범위: 항목마다 선출발한 사람(member) · 프로젝트를 같이 적고, 넘겨받는 쪽의 현재 값과 다르면 버린다(그 사이 프로젝트 · 계정 전환).
  * - 탭: gates 요청은 결재 탭(`?tab=gates`)으로 올 때만 선출발한다(다른 탭으로 오면 안 쓰는 요청이 되니).
  */
-import { fetchWithAuth } from '@/lib/db/client';
+import { createResponsePrefetch } from '@/lib/response-prefetch';
 
 export const PREFETCH_TTL_MS = 10_000;
 
@@ -36,25 +36,15 @@ export interface InboxPrefetchScope {
   projectId: string | null | undefined;
 }
 
-interface Entry {
-  startedAt: number;
-  scopeKey: string;
-  response: Promise<Response>;
-}
-
-const entries = new Map<string, Entry>();
+// story #4328 — 규칙(1회용 · 기한 · 범위 · 중복 출발 없음)은 공용 `lib/response-prefetch`로 옮겼다(스탠드업 선출발이 같은 규칙을 쓴다).
+const store = createResponsePrefetch(PREFETCH_TTL_MS);
 
 function scopeKeyOf(scope: InboxPrefetchScope): string {
   return `${scope.memberId ?? ''}|${scope.projectId ?? ''}`;
 }
 
 function start(url: string, scope: InboxPrefetchScope, now: number): void {
-  const existing = entries.get(url);
-  if (existing && existing.scopeKey === scopeKeyOf(scope) && now - existing.startedAt <= PREFETCH_TTL_MS) return;
-  const response = fetchWithAuth(url);
-  // 아무도 안 넘겨받고 기한이 지나 버려질 수 있다 — 그때 실패가 «처리 안 된 거부»로 새지 않게. 넘겨받는 쪽은 원래 promise로 실패를 그대로 받는다.
-  response.catch(() => {});
-  entries.set(url, { startedAt: now, scopeKey: scopeKeyOf(scope), response });
+  store.start(url, scopeKeyOf(scope), now);
 }
 
 /** `inbox/loading.tsx`가 뜨는 순간 부른다. `tab`은 도착 주소의 `?tab=` 값. */
@@ -69,13 +59,10 @@ export function prefetchInbox(scope: InboxPrefetchScope, tab: string | null, now
 
 /** 선출발한 같은 요청이 규칙(1회용 · 기한 · 범위)에 맞으면 그 응답을, 아니면 새로 요청한다. */
 export function takePrefetchedOrFetch(url: string, scope: InboxPrefetchScope, now: number = Date.now()): Promise<Response> {
-  const entry = entries.get(url);
-  entries.delete(url);
-  if (entry && entry.scopeKey === scopeKeyOf(scope) && now - entry.startedAt <= PREFETCH_TTL_MS) return entry.response;
-  return fetchWithAuth(url);
+  return store.take(url, scopeKeyOf(scope), now);
 }
 
 /** 테스트 전용 — 모듈 상태 비우기. */
 export function __resetInboxPrefetchForTest(): void {
-  entries.clear();
+  store.reset();
 }

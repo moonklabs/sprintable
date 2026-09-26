@@ -39,7 +39,11 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const EXT_RE = /\.tsx?$/;
 const TEST_RE = /\.test\.[tj]sx?$/;
 
-const FETCH = 'fetchWithAuth';
+/**
+ * 응답을 돌려주는 요청 함수 — `fetchWithAuth`와 그 응답을 그대로 넘겨주는 선출발 넘겨받기(story #4328 · 4276). 선출발 래퍼를 빼면 그 자리
+ * 소비가 이 가드에서 조용히 빠진다(4328에서 스탠드업 기록 소비가 래퍼로 바뀌며 baseline 키만 stale로 남음 — 실측).
+ */
+const FETCHES = new Set(['fetchWithAuth', 'takePrefetchedOrFetch', 'takeSprintScreenOrFetch']);
 /** 응답 본문을 읽는 메서드 — 실패 응답의 에러 바디를 «데이터»로 읽는 자리. */
 const BODY_READS = new Set(['json', 'text']); // story #4312 — `.text()`도 같은 부류(에러 바디를 데이터로 읽음).
 /** 응답 상태를 보는 속성 — 같은 함수 · 같은 대입 구간 안에 있으면 검사한 것으로 친다(읽기 앞이든 뒤든 · 아래 «순서» 참고). */
@@ -70,7 +74,7 @@ function unwrapFetch(e: ts.Expression, allowAwait: boolean): ts.CallExpression |
       cur = cur.expression.expression; // `fetchWithAuth(…).catch(() => null)` — 결과는 여전히 응답(또는 null).
     } else break;
   }
-  return ts.isCallExpression(cur) && ts.isIdentifier(cur.expression) && cur.expression.text === FETCH ? cur : null;
+  return ts.isCallExpression(cur) && ts.isIdentifier(cur.expression) && FETCHES.has(cur.expression.text) ? cur : null;
 }
 
 function isFunctionLike(n: ts.Node): n is ts.SignatureDeclaration {
