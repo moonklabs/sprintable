@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnchoredPopover, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { withProjectParam } from '@/lib/with-project-param';
 import { useRouter } from 'next/navigation';
 import {
@@ -419,6 +420,10 @@ export function NotificationBell() {
   const [syncDegraded, setSyncDegraded] = useState(false);
   const offsetRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  // story #4349(전수 15번) — 넓은 화면 드롭다운은 셸 스크롤 면(`overflow-y-auto`) 안의 absolute였다(창보다 길면 잘림) → body로 포털.
+  // 포털이라 DOM 순서상 벨 뒤가 아니다 → 벨에서 Tab이면 패널 첫 조작으로 · 끝을 넘거나 Esc면 닫고 벨로(패널형 · 공용 훅).
+  const desktopPanelRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLButtonElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // story #2061 — 모바일 풀스크린 오버레이(< lg)만 손수구현 모달이라 포커스 트랩 배선.
   // 데스크톱 드롭다운(lg+)은 풀스크린이 아니라 대상 밖(범위 밖 판정, AC1 ⓑ). 데스크톱에서는
@@ -553,7 +558,8 @@ export function NotificationBell() {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (containerRef.current && !containerRef.current.contains(target) && !desktopPanelRef.current?.contains(target)) {
         setOpen(false);
       }
     };
@@ -652,13 +658,17 @@ export function NotificationBell() {
   );
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+  const closePanel = useCallback(() => setOpen(false), []);
+  const panelKeys = usePortalMenuKeys({ open, onClose: closePanel, popoverRef: desktopPanelRef, triggerRef: bellRef, kind: 'panel' });
 
   return (
     <div ref={containerRef} className="relative">
       {/* 벨 버튼 */}
       <button
+        ref={bellRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={panelKeys.onTriggerKeyDown}
         // story #3518(유나 사전 스티어 G, 2026-09-05) — 이름엔 원수(unreadCount)를
         // 쓴다. 배지 표시(badgeLabel)는 '99+' 문자열이라 그대로 넣으면 "알림 99+개"
         // 처럼 문법이 어긋난다 — 100 이상은 전용 문장(bellAriaLabelCountCapped)으로
@@ -683,7 +693,7 @@ export function NotificationBell() {
       {/* 데스크톱 드롭다운 (lg+) */}
       {open && (
         // story #3007(로드맵 P2·PR-E, L1) — 드롭다운 패널은 floating이라 --elev-overlay.
-        <div className="absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
+        <AnchoredPopover anchorRef={containerRef} popoverRef={desktopPanelRef} align="end" gap={4} onKeyDown={panelKeys.onPopoverKeyDown} data-dropdown-panel="notification-bell" className="z-50 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}
@@ -694,7 +704,7 @@ export function NotificationBell() {
             onLoadMore={() => void handleLoadMore()}
             syncDegraded={syncDegraded}
           />
-        </div>
+        </AnchoredPopover>
       )}
 
       {/* 모바일 풀스크린 오버레이 (< lg) */}

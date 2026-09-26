@@ -46,7 +46,8 @@ async function openAt(viewport: number, rawLeft: number) {
     );
   });
   await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
-  const panel = container.querySelector('[data-dropdown-panel="doc-toc"]') as HTMLElement;
+  // story #4349 — 목차 패널은 body로 포털된다 → container가 아니라 document에서 찾는다.
+  const panel = document.querySelector('[data-dropdown-panel="doc-toc"]') as HTMLElement;
   const shift = Number(/translateX\((-?[\d.]+)px\)/.exec(panel.style.transform)?.[1] ?? 0);
   return { panel, left: rawLeft + shift, right: rawLeft + shift + PANEL_W };
 }
@@ -64,7 +65,8 @@ describe('DocToc — 좁은 화면 뷰포트 안(story #4342)', () => {
 
   it('폭 상한 — 뷰포트보다 넓어질 수 없게 max-w-[calc(100vw-1rem)]', async () => {
     const { panel } = await openAt(390, -37);
-    expect(panel.className.split(/\s+/)).toEqual(expect.arrayContaining(['w-64', 'max-w-[calc(100vw-1rem)]', 'right-0']));
+    expect(panel.className.split(/\s+/)).toEqual(expect.arrayContaining(['w-64', 'max-w-[calc(100vw-1rem)]']));
+    expect(panel.hasAttribute('data-anchored-popover')).toBe(true); // 트리거 오른쪽 끝 정렬(예전 right-0)은 AnchoredPopover align="end"가 맡는다
   });
 
   it('1440: 넘치지 않으면 아무것도 안 건다(develop과 같은 자리 · 같은 모양)', async () => {
@@ -75,9 +77,10 @@ describe('DocToc — 좁은 화면 뷰포트 안(story #4342)', () => {
 });
 
 // 유나 4714 CHANGES(09:43Z) — 실 셸에선 목차가 **문서 에디터 카드 안**이다: 문서 본문 `overflow-hidden px-4`(docs/[slug]/page.tsx:427) →
-// 에디터 카드 `overflow-hidden rounded-xl border`(doc-editor.tsx:326 · 16px 안쪽 · 테두리 1px). 뷰포트 기준 8px 여백이면 카드 가장자리에서
-// 왼쪽 테두리 · 모서리가 잘렸다 → 보이는 상자 = 뷰포트 ∩ 카드 안쪽 상자, 그 안에서 8px. 조상 클립을 빼면(뷰포트만) RED.
-describe('DocToc — 에디터 카드 안(실 셸 부모 사슬 · 유나 4714 CHANGES)', () => {
+// 에디터 카드 `overflow-hidden rounded-xl border`(doc-editor.tsx:326 · 16px 안쪽 · 테두리 1px). 4714는 패널이 카드 안에 있어 «뷰포트 ∩ 카드 안쪽»으로 밀었다.
+// story #4349(전수 11번)부터 패널은 body로 포털(fixed)이라 **카드가 더는 자르지 않는다** → 보이는 상자 = 뷰포트, 그 안에서 8px.
+// (패널이 카드 밖에 있는지 · body 직속인지도 본다 — 카드 안으로 되돌리면 RED.)
+describe('DocToc — 에디터 카드 안이어도 포털이라 카드가 안 자름(유나 4714 CHANGES → #4349)', () => {
   beforeEach(() => {
     (HTMLElement.prototype.getBoundingClientRect as unknown as ReturnType<typeof vi.fn>).mockImplementation(function (this: HTMLElement) {
       const r = this.getAttribute('data-dropdown-panel') === 'doc-toc'
@@ -105,17 +108,20 @@ describe('DocToc — 에디터 카드 안(실 셸 부모 사슬 · 유나 4714 C
       );
     });
     await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
-    const panel = container.querySelector('[data-dropdown-panel="doc-toc"]') as HTMLElement;
+    const panel = document.querySelector('[data-dropdown-panel="doc-toc"]') as HTMLElement;
     const shift = Number(/translateX\((-?[\d.]+)px\)/.exec(panel.style.transform)?.[1] ?? 0);
-    return { cardInnerLeft: 17, cardInnerRight: 17 + cardW - 2, left: rawLeft + shift, right: rawLeft + shift + PANEL_W };
+    return { panel, left: rawLeft + shift, right: rawLeft + shift + PANEL_W };
   }
 
   it.each([
     [390, -37],
     [360, -67],
-  ] as const)('%ipx: 목록 경계가 [카드 안쪽 + 8, 카드 안쪽 − 8] 안 — 왼쪽 테두리 · 모서리 안 잘림', async (viewport, rawLeft) => {
-    const { cardInnerLeft, cardInnerRight, left, right } = await openInCard(viewport, rawLeft);
-    expect(left).toBe(cardInnerLeft + VIEWPORT_GUTTER_PX);
-    expect(right).toBeLessThanOrEqual(cardInnerRight - VIEWPORT_GUTTER_PX);
+  ] as const)('%ipx: 패널은 body 직속(카드 밖) · 경계는 뷰포트 [8, 폭 − 8] 안', async (viewport, rawLeft) => {
+    const { panel, left, right } = await openInCard(viewport, rawLeft);
+    expect(panel.parentElement).toBe(document.body);
+    expect(container.contains(panel)).toBe(false);
+    expect(panel.style.position).toBe('fixed');
+    expect(left).toBe(VIEWPORT_GUTTER_PX);
+    expect(right).toBeLessThanOrEqual(viewport - VIEWPORT_GUTTER_PX);
   });
 });

@@ -15,7 +15,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
-import { AnchoredPopover } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -219,28 +219,9 @@ function TreeNode({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  useEffect(() => {
-    if (contextMenuOpen) menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, [contextMenuOpen]);
-
-  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
-    const i = items.indexOf(document.activeElement as HTMLButtonElement);
-    const closeToTrigger = () => { setContextMenuOpen(false); menuTriggerRef.current?.focus(); };
-    if (e.key === 'Escape') {
-      // 서랍의 초점 트랩(document keydown · Esc = 서랍 닫기)까지 가지 않게 — 메뉴만 닫는다.
-      e.preventDefault();
-      e.stopPropagation();
-      closeToTrigger();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const n = items.length;
-      items[e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n]?.focus();
-    } else if (e.key === 'Tab' && (e.shiftKey ? i <= 0 : i === items.length - 1)) {
-      e.preventDefault();
-      closeToTrigger();
-    }
-  }, []);
+  // 포털 메뉴 키보드 길(열면 첫 항목 · ↑↓ · Tab 넘김/Esc = 닫고 «⋮»로 · Esc는 서랍 트랩까지 안 감) — 공용 훅(#4349).
+  const closeMenu = useCallback(() => setContextMenuOpen(false), []);
+  const { onPopoverKeyDown: handleMenuKeyDown } = usePortalMenuKeys({ open: contextMenuOpen, onClose: closeMenu, popoverRef: menuRef, triggerRef: menuTriggerRef, kind: 'menu' });
 
   useEffect(() => {
     if (!contextMenuOpen) return;
