@@ -461,6 +461,87 @@ async def test_worker_budget_stop_stores_the_same_body_as_the_publish_now_422():
         await engine.dispose()
 
 
+from tests.test_4336_preflight_error_body_classes import _cases as _preflight_failure_cases  # noqa: E402
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", sorted(_preflight_failure_cases()))
+async def test_every_preflight_failure_the_worker_meets_stores_the_same_body_as_the_request(failure, monkeypatch):
+    """PO P2(09:08Z) — 조건 2를 **모든** preflight 실패로: 요청 때 통과했는데 워커의 같은 검사에서 걸리면(종류 전수 — 봉인 · 승인 ·
+    일시 중지 · 연결 · 메타데이터 · 이어쓰기 · 초안 없음 · 예산 · 할당량 · 글자 수) 명령에 남은 본문(초안 상세 `command_failure_detail`)이
+    같은 실패를 요청에서 만났을 때의 4xx 본문과 키 · 값 모두 같다(명령 상태 두 칸 빼고).
+    뮤테이션: 워커의 한 갈래가 `failure_detail`을 안 적으면 그 종류가 None으로 RED · 라우터 한 갈래가 다른 모양을 내면 그 종류가 RED."""
+    from app.main import app
+    from app.routers import channel_posts as router_module
+    from app.services import channel_posts as service_module
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    exc = _preflight_failure_cases()[failure]
+
+    async def _raise(*_a, **_k):
+        raise exc
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, (queued, probe) = await _x_org_with_budget(Session, limit_minor=100000, drafts=2)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                assert r.status_code == 200 and r.json()["processing"] is True, r.text
+                monkeypatch.setattr(service_module, "publish_channel_post_draft", _raise)  # 워커 차례의 같은 검사에서 걸림
+                await run_worker_tick(Session)
+                stored = (await draft_detail(client, org_id, queued))["command_failure_detail"]
+                monkeypatch.setattr(router_module, "preflight_channel_post_publish", _raise)  # 요청 때 걸림
+                r_now = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{probe}/publish")
+        finally:
+            app.dependency_overrides.clear()
+        assert 400 <= r_now.status_code < 500, (failure, r_now.status_code, r_now.text)
+        request_body = {k: v for k, v in r_now.json()["error"].items() if k not in ("command_status", "next_attempt_at")}
+        assert stored is not None, failure
+        # 응답 봉투(main.py HTTPException 처리)는 dict 본문에 `message`가 없으면 빈 문자열을 채운다 — 같은 규칙을 저장본에 입혀 대조.
+        assert {"message": stored.get("message", ""), **stored} == request_body, (failure, stored, request_body)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_resuming_a_paused_command_clears_the_stored_body(monkeypatch):
+    """PO P2 — 다시 시도(일시 중지 재개 포함 · 같은 `retry_dead_letter_command`)는 새 시도: 지난 멈춤의 본문을 화면에 남기지 않는다
+    (워커가 다시 집기 전 1분 동안 «일시 중지» 문장이 대기 중인 글 위에 남던 틈).
+    뮤테이션: 재시도 초기화에서 `failure_detail = None`을 빼면 재개 뒤에도 본문이 남아 RED."""
+    from app.main import app
+    from app.services import channel_posts as service_module
+    from app.services.external_publish_pause import ExternalPublishPausedError, _requeue_paused_commands
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    async def _paused(*_a, **_k):
+        raise ExternalPublishPausedError(reason=None)
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, (queued,) = await _x_org_with_budget(Session, limit_minor=100000, drafts=1)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                assert r.status_code == 200, r.text
+                monkeypatch.setattr(service_module, "publish_channel_post_draft", _paused)
+                await run_worker_tick(Session)
+                before = await draft_detail(client, org_id, queued)
+                async with Session() as s:
+                    assert await _requeue_paused_commands(s, org_id=org_id) == 1
+                    await s.commit()
+                after = await draft_detail(client, org_id, queued)
+        finally:
+            app.dependency_overrides.clear()
+        assert before["command_status"] == "blocked"
+        assert before["command_failure_detail"] == {"code": "EXTERNAL_PUBLISH_PAUSED", "message": "EXTERNAL_PUBLISH_PAUSED"}
+        assert after["command_status"] == "pending" and after["command_failure_detail"] is None, after
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_two_queued_posts_cannot_both_spend_past_the_budget():
     """PO 조건 3 — 한도(30)가 한 건(20)만 허용하는데 둘이 동시에 요청 검사를 통과해 대기열에 들어갔다: 워커의 재검사가 실제 한도를

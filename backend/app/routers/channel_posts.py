@@ -51,6 +51,9 @@ from app.services.channel_posts import (
     ChannelRateLimitedError,
     ChannelScopeInsufficientError,
     ChannelTextTooLongError,
+    ChannelThreadSegmentLimitExceededError,
+    ChannelThreadSegmentTooLongError,
+    ChannelThreadUnsupportedError,
     ChannelTokenExpiredError,
     ChannelUnpublishUnsupportedError,
     ChannelVideoRequiredError,
@@ -2239,7 +2242,7 @@ async def publish_channel_post_draft_endpoint(
         await db.commit()
         raise HTTPException(
             status_code=404,
-            detail=_with_command_state({"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     except ExternalPublishGateNotApprovedError as exc:
         # story #3474 — publish_channel_post_draft 내부 게이트 재검증이 여기서 막았다
@@ -2257,7 +2260,7 @@ async def publish_channel_post_draft_endpoint(
         await db.commit()
         raise HTTPException(
             status_code=403,
-            detail=_with_command_state({"code": "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "message": str(exc)}),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     except ExternalPublishPausedError as exc:
         # story #3953(블루프린트 §1-5) — 조직 owner가 외부 발행을 일시 중지했다.
@@ -2278,7 +2281,7 @@ async def publish_channel_post_draft_endpoint(
         # (publication_command.py 워커 경로의 last_error와 동형).
         raise HTTPException(
             status_code=423,
-            detail=_with_command_state({"code": "EXTERNAL_PUBLISH_PAUSED", "message": str(exc)}),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — 위 EXTERNAL_PUBLISH_APPROVAL_REQUIRED와 동형 처리(adapter
@@ -2354,11 +2357,18 @@ async def publish_channel_post_draft_endpoint(
         await db.commit()
         raise HTTPException(
             status_code=422,
-            detail=_with_command_state({
-                "code": "YOUTUBE_METADATA_INVALID",
-                "message": t("channel_posts.youtube_metadata_invalid", resolved_locale),
-                "field": exc.field, "reason": exc.reason,
-            }),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
+        ) from exc
+    except (ChannelThreadUnsupportedError, ChannelThreadSegmentLimitExceededError, ChannelThreadSegmentTooLongError) as exc:
+        # story #4336(PO P2) — 예전엔 이 세 예외를 잡는 절이 없어 발행 경로에서 코드 없는 500이 났다. 이어쓰기 검사는 HTTP 호출 전이라
+        # 확실히 안 나감(글자 수 · 메타데이터와 같은 422 입력 형태 부류).
+        thread_code = preflight_error_facts(exc)["code"]
+        await _record_this_attempt(approval_check="ok", adapter_called=provider_call_marked(), result_code=thread_code)
+        await apply_command_failure(db, command, error_code=thread_code, last_error=str(exc), now=now)
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     except ChannelPostSealMissingError as exc:
         # story #3474(페드루 리뷰 보정①) — channel_posts.py:1095, httpx 클라이언트 블록
@@ -2370,7 +2380,7 @@ async def publish_channel_post_draft_endpoint(
         await db.commit()
         raise HTTPException(
             status_code=409,
-            detail=_with_command_state({"code": "SITE_POST_SEAL_MISSING", "message": str(exc)}),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     except ChannelPostReapprovalRequiredError as exc:
         # story #3414 — 추가② 훅이 대개 이 상황 전에 command를 이미 voided로 무효화해
@@ -2383,7 +2393,7 @@ async def publish_channel_post_draft_endpoint(
         await db.commit()
         raise HTTPException(
             status_code=409,
-            detail=_with_command_state({"code": "SITE_POST_REAPPROVAL_REQUIRED", "message": str(exc)}),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     except ChannelConnectionNotActiveError as exc:
         # story #3474(페드루 리뷰 보정①) — channel_posts.py:1129, `create_container`
@@ -2395,7 +2405,7 @@ async def publish_channel_post_draft_endpoint(
         await db.commit()
         raise HTTPException(
             status_code=409,
-            detail=_with_command_state({"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)}),
+            detail=_with_command_state(preflight_error_body(preflight_error_facts(exc), resolved_locale)),
         ) from exc
     # story #3605(실측 정정) — ChannelConnectionRevokedError·ChannelConnectionAuthError
     # 둘 다 ChannelTokenExpiredError의 서브클래스라 부모보다 먼저 잡아야 한다. 안 그러면
