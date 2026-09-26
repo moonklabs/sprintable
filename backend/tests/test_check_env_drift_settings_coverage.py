@@ -272,7 +272,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # story #4335 AC4 — toss_test_charge_response_delay_seconds 1필드 신설(dev 라이브 검증용 «느린 Toss» · prod에선 무시)로
     # 127→128. 가드가 신규 필드를 설계대로 잡은 것.
     assert "TOSS_TEST_CHARGE_RESPONSE_DELAY_SECONDS" in keys
-    assert len(keys) == 128
+    # story #4341 — ops_alert_conversation_id 1필드 신설(운영 알림 받는 운영 대화 · 빈 값 = 미설정)로 128→129.
+    # 가드가 신규 필드를 설계대로 잡은 것.
+    assert "OPS_ALERT_CONVERSATION_ID" in keys
+    assert len(keys) == 129
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():

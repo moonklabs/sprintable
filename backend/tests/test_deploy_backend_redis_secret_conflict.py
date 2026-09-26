@@ -322,6 +322,8 @@ _DECLARED_SUBSTITUTIONS = {
     # 직접 참조.
     "_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID", "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID",
     "_SUPPORT_ESCALATION_TARGET_ORG_SLUG", "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG",
+    # story #4341 — 운영 알림 받는 곳(운영 대화 id). deploy-backend ENV_VARS가 직접 참조.
+    "_OPS_ALERT_CONVERSATION_ID",
     # story #3279(지원v1·후속) — 운영자 회신 배달 착지 URL. _NEXT_PUBLIC_SUPPORT_GATEWAY_URL은
     # 이전엔 deploy-frontend(순수 gcloud args 리스트 — 이 가드가 스캔하는 4개 bash 스텝 밖)
     # 에서만 쓰여 이 목록에 없어도 무해했으나(_APPLE_TEAM_ID와 동형 선례), deploy-backend
@@ -432,6 +434,8 @@ def _run_env_vars_assembly(
         "_SUPPORT_ESCALATION_APPROVER_MEMBER_ID": "",
         "_SUPPORT_ESCALATION_TARGET_ORG_SLUG": "moonklabs",
         "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG": "sprintable",
+        # story #4341 — cloudbuild.yaml substitutions 기본값(빈 문자열 = 미설정)과 정합.
+        "_OPS_ALERT_CONVERSATION_ID": "",
         # story #3279 — GOTENBERG_SERVICE_URL과 동일 이유(set -u라 미설정이면 스크립트가
         # 죽는다). 기본 빈 문자열(substitutions 기본값과 정합 — gateway 자체가 아직
         # dev 전용 프로비저닝이라 prod엔 이 값이 없다).
@@ -793,6 +797,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story 194acb63 — 베이스 문자열 맨 끝(SUPPORT_ESCALATION_TARGET_PROJECT_SLUG 다음)에
         # 이어붙는다 — REDIS_URL 등 조건부 append는 그 뒤.
         "PUBLIC_SITE_BASE_URL=https://sprintable.ai,"
+        # story #4341 — 베이스 문자열 맨 끝(PUBLIC_SITE_BASE_URL 다음). 빈 값 = 운영 알림 미설정(not_configured).
+        "OPS_ALERT_CONVERSATION_ID=,"
         "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
