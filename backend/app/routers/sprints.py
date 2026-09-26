@@ -7,6 +7,7 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.models.pm import Story
@@ -54,7 +55,7 @@ class SprintHypothesisDeclareRequest(BaseModel):
     hypothesis_id: uuid.UUID | None = None
     statement: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
 
     @model_validator(mode="after")
     def _exactly_one_shape(self) -> "SprintHypothesisDeclareRequest":

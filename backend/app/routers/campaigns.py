@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.routers.channel_posts import ChannelPostDraftListItem, _to_draft_list_item
@@ -36,8 +37,8 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
 
 class CreateCampaignRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=300)
-    starts_at: datetime | None = None
-    ends_at: datetime | None = None
+    starts_at: OffsetDatetime | None = None
+    ends_at: OffsetDatetime | None = None
 
     # story #3437(후속 묶음, 페드루 PO 確定 2026-09-05) — conversations.py:1259-1265 정본
     # 미러(새 패턴 발명 0).

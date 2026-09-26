@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
+from app.core.datetime_query import OffsetDatetime
 from app.schemas.attachment import validate_attachment_url
 
 _METRIC_SOURCES = frozenset({"internal_ops", "ga4", "manual"})
@@ -133,7 +134,7 @@ class StoryCreate(BaseModel):
     # E-OUTCOME-LOOP: 의도 필드
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
 
     @field_validator("metric_definition")
     @classmethod
@@ -178,7 +179,7 @@ class StoryUpdate(BaseModel):
     # E-OUTCOME-LOOP: 의도 필드 (Update 허용)
     success_hypothesis: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
     # E-CAGE-REFEREE P1: 오염 마킹 (PO 직접 플래그, 자동 대량 마킹 금지)
     is_excluded: bool | None = None
@@ -191,7 +192,7 @@ class StoryUpdate(BaseModel):
     # 약한 쪽이었다). expected_updated_at 제공 시 BE가 현재 updated_at과 exact match 검사 →
     # 불일치면 409(opt-in·미제공=무체크 하위호환). force_overwrite=True면 검사 우회(last-write-
     # wins 의도적). ⚠️ 이 2필드는 strip 금지(BE 수용, docs.py와 동일 주의).
-    expected_updated_at: datetime | None = None
+    expected_updated_at: OffsetDatetime | None = None
     force_overwrite: bool | None = None
 
     @field_validator("metric_definition")

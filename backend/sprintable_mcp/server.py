@@ -535,7 +535,9 @@ _TOOL_DEFS: list[tuple] = [
      "「통지 수신자 0」 warning이 실립니다.",
      AddStoryInput, add_story),
     ("sprintable_update_story",
-     "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
+     "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateStoryInput, update_story),
     # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
     ("sprintable_assign_story_to_sprint",
@@ -579,7 +581,9 @@ _TOOL_DEFS: list[tuple] = [
      "([제목](entity:epic:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      AddGoalInput, add_goal),
     ("sprintable_update_goal",
-     "[일감] 목표 수정. 응답 reference_token은 sprintable_add_goal과 동일.",
+     "[일감] 목표 수정. 응답 reference_token은 sprintable_add_goal과 동일."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateGoalInput, update_goal),
     # story #2010: 목표 lifecycle 전이 전용 도구(rename B1 이후 신설이라 구 _epic 별칭 없음 —
     # update_goal의 status 필드는 백엔드가 422로 거부해 이 도구만이 유일한 전이 경로).
@@ -598,7 +602,9 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] [DEPRECATED→sprintable_add_goal] 에픽 생성.",
      AddGoalInput, add_goal),
     ("sprintable_update_epic",
-     "[일감] [DEPRECATED→sprintable_update_goal] 에픽 수정.",
+     "[일감] [DEPRECATED→sprintable_update_goal] 에픽 수정."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateGoalInput, update_goal),
     # Hypotheses (6)
     ("sprintable_list_hypotheses",
@@ -615,10 +621,14 @@ _TOOL_DEFS: list[tuple] = [
      "source='ga4'이면 추가 필수: property_id, ga4_metric(enum: activeUsers|newUsers|sessions|"
      "conversions|eventCount|screenPageViews), date_range_days(양의 정수).\n"
      "owner_member_id: agent 호출은 휴먼 멤버 owner_member_id를 반드시 명시해야 한다"
-     "(미지정 시 백엔드가 400 HUMAN_OWNER_REQUIRED 반환). list_team_members로 휴먼 멤버 id 조회.",
+     "(미지정 시 백엔드가 400 HUMAN_OWNER_REQUIRED 반환). list_team_members로 휴먼 멤버 id 조회."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      CreateHypothesisInput, create_hypothesis),
     ("sprintable_update_hypothesis",
-     "[일감] 가설 수정 (문장/지표/측정일/owner). 상태 전이는 confirm으로.",
+     "[일감] 가설 수정 (문장/지표/측정일/owner). 상태 전이는 confirm으로."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("measure_after"),
      UpdateHypothesisInput, update_hypothesis),
     ("sprintable_link_hypothesis",
      "[일감] 가설을 epic/story에 연결/재연결.",
@@ -672,7 +682,9 @@ _TOOL_DEFS: list[tuple] = [
      CreateDocInput, create_doc),
     ("sprintable_update_doc",
      "[지식] 문서 수정. 응답 reference_token은 sprintable_create_doc과 동일. next_action"
-     " 동봉 규칙도 동일.",
+     " 동봉 규칙도 동일."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("expected_updated_at"),
      UpdateDocInput, update_doc),
     ("sprintable_submit_for_approval",
      "[지식] 문서를 결재 상신한다(draft→pending, 승인 게이트 생성) — 문서 결재 상신은 이"
@@ -951,10 +963,14 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] 미팅 상세 조회.",
      MeetingIdInput, get_meeting),
     ("sprintable_create_meeting",
-     "[일감] 미팅 생성.",
+     "[일감] 미팅 생성."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("date"),
      CreateMeetingInput, create_meeting),
     ("sprintable_update_meeting",
-     "[일감] 미팅 수정 (raw_transcript/ai_summary/decisions/action_items 포함).",
+     "[일감] 미팅 수정 (raw_transcript/ai_summary/decisions/action_items 포함)."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("date"),
      UpdateMeetingInput, update_meeting),
     ("sprintable_delete_meeting",
      "[일감] 미팅 소프트 삭제.",
@@ -1035,10 +1051,14 @@ _TOOL_DEFS: list[tuple] = [
      ListAuditLogsInput, list_audit_logs),
     # Agent Runs (3)
     ("sprintable_emit_event",
-     "[일감] 에이전트 런 이벤트 발행.",
+     "[일감] 에이전트 런 이벤트 발행."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("finished_at", "started_at"),
      EmitEventInput, emit_event),
     ("sprintable_update_run_status",
-     "[일감] 에이전트 런 상태 업데이트.",
+     "[일감] 에이전트 런 상태 업데이트."
+     # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
+     + offset_required_note("finished_at", "started_at"),
      UpdateRunStatusInput, update_run_status),
     ("sprintable_poll_events",
      "에이전트 수신 대기 이벤트 폴링.",

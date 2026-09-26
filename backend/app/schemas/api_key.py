@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.core.datetime_query import OffsetDatetime
 
 
 class ApiKeyResponse(BaseModel):
@@ -52,7 +53,7 @@ class CreateApiKeyRequest(BaseModel):
     # repository 층에서 90일이 몰래 각인됐다(실사고: 유나 세션 침묵). 이제 발급 UI를 포함한
     # 어떤 호출자든 반드시 명시(값 있으면 그 시각, null이면 명시적 무만료)해야 한다 — 값
     # 자체는 여전히 nullable(무만료 표현), 필드 생략만 422로 거부.
-    expires_at: datetime | None
+    expires_at: OffsetDatetime | None
 
     @field_validator("scope")
     @classmethod

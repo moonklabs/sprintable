@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.core.datetime_query import OffsetDatetime
 
 
 class LoopCreate(BaseModel):
@@ -23,7 +24,7 @@ class LoopCreate(BaseModel):
     goal_tags: list[str] = []
     goal: str | None = None
     metric_definition: dict[str, Any] | None = None
-    measure_after: datetime | None = None
+    measure_after: OffsetDatetime | None = None
     # agent caller가 goal 경로를 탈 때만 필요(HypothesisCreate.owner_member_id와 동일 정책 —
     # hypothesis.create_hypothesis의 기존 HUMAN_OWNER_REQUIRED 검증을 그대로 통과시킨다).
     owner_member_id: uuid.UUID | None = None

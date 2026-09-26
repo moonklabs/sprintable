@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.core.datetime_query import aware_datetime_query
 from app.core.error_envelope import human_error
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -596,7 +597,7 @@ class SubmitChannelPostDraftRequest(BaseModel):
     # story #3414(PO 確定, 2026-09-04) — 예약 발행 시각도 게이트 봉인 범위(블루프린트
     # v3 §3). 생략/null=즉시. 승인 뒤 이 값만 바꿔도(본문은 그대로) 재승인이 필요하다 —
     # submit_channel_post_draft가 그 판정을 한다(신규 엔드포인트 없음).
-    scheduled_at: datetime | None = None
+    scheduled_at: OffsetDatetime | None = None
     # story #3498(페드루 PO 決定 2026-09-05) — site_posts.py와 동형(submit 전용, draft
     # 컬럼 아님). 생략/null=검사 없음(AC2).
     estimated_cost_minor: int | None = None

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+from app.core.datetime_query import OffsetDatetime
 
 MEETING_TYPES = ("standup", "retro", "general", "review")
 
@@ -11,7 +12,7 @@ class MeetingCreate(BaseModel):
     project_id: uuid.UUID
     title: str
     meeting_type: str = "general"
-    date: datetime | None = None
+    date: OffsetDatetime | None = None
     duration_min: int | None = None
     participants: list[Any] = []
     raw_transcript: str | None = None
@@ -24,7 +25,7 @@ class MeetingCreate(BaseModel):
 class MeetingUpdate(BaseModel):
     title: str | None = None
     meeting_type: str | None = None
-    date: datetime | None = None
+    date: OffsetDatetime | None = None
     duration_min: int | None = None
     participants: list[Any] | None = None
     raw_transcript: str | None = None

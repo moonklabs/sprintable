@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -48,8 +49,8 @@ class CreateBoostRequest(BaseModel):
     ad_connection_id: uuid.UUID
     budget_minor: int = Field(gt=0)
     currency: str
-    starts_at: datetime
-    ends_at: datetime
+    starts_at: OffsetDatetime
+    ends_at: OffsetDatetime
     objective: str
 
 
