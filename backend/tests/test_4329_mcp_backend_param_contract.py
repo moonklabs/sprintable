@@ -441,9 +441,9 @@ def test_mcp_enums_equal_the_backend_value_sets():
     """까디르 ①(4689) — MCP가 str로 받던 값 중 백엔드가 고정 집합으로 거르는 자리는 MCP도 같은 Literal로. 한쪽만 바뀌면 RED."""
     from app.models.evidence import _CLIENT_CREATABLE_TYPES
     from app.routers.evidence import _WORK_ITEM_TYPES
-    from app.schemas.visual_artifact import _SPEC_PIN_ANCHOR_TYPES
+    from app.schemas.visual_artifact import _SPEC_PIN_ANCHOR_TYPES, ARTIFACT_NODE_OPS
     from sprintable_mcp.tools.evidence import AddEvidenceInput
-    from sprintable_mcp.tools.visual_artifacts import CreateSpecPinInput
+    from sprintable_mcp.tools.visual_artifacts import ArtifactNodeOperationInput, CreateSpecPinInput
 
     def values(model, field_name):
         return set(_literal_values(typing.get_type_hints(model)[field_name]))
@@ -451,3 +451,4 @@ def test_mcp_enums_equal_the_backend_value_sets():
     assert values(AddEvidenceInput, "work_item_type") == set(_WORK_ITEM_TYPES)
     assert values(AddEvidenceInput, "type") == set(_CLIENT_CREATABLE_TYPES)
     assert values(CreateSpecPinInput, "anchor_type") == set(_SPEC_PIN_ANCHOR_TYPES)
+    assert values(ArtifactNodeOperationInput, "op") == set(ARTIFACT_NODE_OPS)

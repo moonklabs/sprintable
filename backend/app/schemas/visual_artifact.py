@@ -328,6 +328,10 @@ class ArtifactExportResponse(BaseModel):
     download_url: str | None = None
 
 
+# 노드 편집 연산 — MCP `ArtifactNodeOperationInput.op`(Literal)과 같은 집합이어야 한다(story #4329 · 까디르: 동일성 테스트가 고정).
+ARTIFACT_NODE_OPS = ("add", "update", "delete")
+
+
 class ArtifactNodeOperation(BaseModel):
     """E-CANVAS C3-S7(story 940266db): 딸깍 편집(휴먼)·MCP 편집(에이전트) 공용 연산 — 동일
     서비스 경로를 경유해 "같은 객체를 양쪽이 편집"을 보장한다."""
@@ -342,8 +346,8 @@ class ArtifactNodeOperation(BaseModel):
     @field_validator("op")
     @classmethod
     def _validate_op(cls, v: str) -> str:
-        if v not in ("add", "update", "delete"):
-            raise ValueError("op must be 'add', 'update', or 'delete'")
+        if v not in ARTIFACT_NODE_OPS:
+            raise ValueError(f"op must be one of {', '.join(repr(o) for o in ARTIFACT_NODE_OPS)}")
         return v
 
 
