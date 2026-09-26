@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { User, UserPlus } from 'lucide-react';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { initials as toInitials } from '@/lib/storage/format';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 /**
  * 박스1: 담당자 아바타 + popover. 슬림 헤더 액션 클러스터에 glanceable owner 신호(누가 owner인지 보여야 함).
@@ -28,6 +29,7 @@ export function DocAssigneeControl({
 }) {
   const t = useTranslations('docs');
   const [open, setOpen] = useState(false);
+  const panelClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
   const ref = useRef<HTMLDivElement>(null);
   const memberName = assigneeName;
 
@@ -65,7 +67,7 @@ export function DocAssigneeControl({
       </button>
       {open ? (
         // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]">
+        <div ref={panelClampRef} data-dropdown-panel="doc-assignee" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]">
           <EntityDispatchPanel
             entityType="doc"
             entityId={docId}

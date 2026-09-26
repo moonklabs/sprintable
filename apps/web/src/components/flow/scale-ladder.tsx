@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 /**
  * story #2531(E-FLOW-V4 S1)에서 지구층 전용으로 태어났다가, story #2535(S5)에서 다른 층
@@ -82,6 +83,8 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
   // 오인돼 즉시 재닫히는 것을 막는다(sender-profile-popover.tsx와 동형 관행).
   const [openReservedLevel, setOpenReservedLevel] = useState<LadderLevel | null>(null);
   const reservedWrapperRef = useRef<HTMLDivElement>(null);
+  // story #4342 — 좁은 화면 뷰포트 안으로. compact · 전체 두 갈래의 안내 팝오버가 같이 쓴다(한 번에 한 갈래 · 한 칸만 열림).
+  const infoClampRef = useViewportClampRef<HTMLDivElement>();
 
   useEffect(() => {
     if (openReservedLevel === null) return;
@@ -158,7 +161,9 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
                   <div
                     id={infoId}
                     role="tooltip"
-                    className="absolute left-0 top-full z-20 mt-2 w-56 rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                    ref={infoClampRef}
+                    data-dropdown-panel="scale-ladder-info"
+                    className="absolute left-0 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
                   >
                     {t('ladderReservedInfo')}
                   </div>
@@ -254,9 +259,11 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
               </button>
               {open && (
                 <div
+                  ref={infoClampRef}
+                  data-dropdown-panel="scale-ladder-info-full"
                   id={infoId}
                   role="tooltip"
-                  className="absolute left-3 top-full z-20 mt-2 w-56 rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                  className="absolute left-3 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
                 >
                   {t('ladderReservedInfo')}
                 </div>

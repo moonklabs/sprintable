@@ -34,6 +34,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { copyTextSafely } from '@/lib/clipboard';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 interface DocDetail {
   id: string;
@@ -92,6 +93,7 @@ export default function DocSlugPage() {
   // 클립보드에 보내려던 markdown을 선택 가능하게 보여준다.
   const [mdCopyFailedRaw, setMdCopyFailedRaw] = useState<string | null>(null);
   const mdCopyFailedPanelRef = useRef<HTMLDivElement>(null);
+  const mdCopyFailedClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -338,7 +340,7 @@ export default function DocSlugPage() {
             mdCopyFailed(3초 코스메틱)와 분리해 mdCopyFailedRaw만으로 뜬다 — 손으로
             고를 시간을 3초로 자르지 않는다(다음 성공·바깥 클릭·Esc·✕로 닫는다). */}
         {mdCopyFailedRaw != null ? (
-          <div ref={mdCopyFailedPanelRef} className="absolute right-0 top-full z-50 mt-1 w-72 space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
+          <div ref={(el) => { mdCopyFailedPanelRef.current = el; mdCopyFailedClampRef(el); }} data-dropdown-panel="md-copy-failed" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
             <div className="flex items-start justify-between gap-2">
               <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
               <Button

@@ -13,6 +13,7 @@ import {
 } from '../lib/shiki-highlighter';
 import { renderMermaid } from '../lib/mermaid-renderer';
 import { copyTextSafely } from '@/lib/clipboard';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 // ─── Mermaid Block ───────────────────────────────────────────────────────────
 
@@ -107,6 +108,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const langListClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
 
   const language = (node.attrs as { language?: string }).language ?? null;
   const resolvedLang = resolveLanguage(language);
@@ -180,7 +182,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
               {isEditable && <ChevronDown className="size-3" />}
             </button>
             {showLangMenu && (
-              <div className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
+              <div ref={langListClampRef} data-dropdown-panel="code-lang" className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-border bg-popover py-1">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang}

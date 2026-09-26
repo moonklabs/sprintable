@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { List, X } from 'lucide-react';
 import type { DocHeading } from './doc-heading-utils';
 import { cn } from '@/lib/utils';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 interface DocTocProps {
   headings: DocHeading[];
@@ -17,6 +18,8 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
   const t = useTranslations('docs');
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  // story #4342 — 목록이 좁은 화면에서 뷰포트 밖으로 나가지 않게(열릴 때 재서 안으로 밀어 넣음 · 폭 상한).
+  const listClampRef = useViewportClampRef<HTMLDivElement>();
 
   // Close on outside click
   useEffect(() => {
@@ -55,7 +58,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-border bg-background">
+        <div ref={listClampRef} data-dropdown-panel="doc-toc" className="absolute right-0 top-full z-50 mt-1.5 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-background">
           <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
             <span className="text-xs font-semibold text-foreground">{t('tocSection')}</span>
             <button
