@@ -10,6 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import { DocTree } from './doc-tree';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -50,11 +51,11 @@ afterEach(async () => {
 
 const DOC = { id: 'd1', parent_id: null, title: '회의록', slug: 'd1', icon: null, sort_order: 0 };
 
-function mount() {
+function mount(doc: typeof DOC = DOC, locale: 'ko' | 'en' = 'ko') {
   act(() => {
     root.render(
-      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DocTree docs={[DOC]} selectedSlug={null} onSelect={() => {}} onDelete={async () => {}} onRename={async () => {}} projectId="p1" />
+      <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+        <DocTree docs={[doc]} selectedSlug={null} onSelect={() => {}} onDelete={async () => {}} onRename={async () => {}} projectId="p1" />
       </NextIntlClientProvider>,
     );
   });
@@ -155,5 +156,19 @@ describe('DocTree 행 메뉴 — 목록 밖(body)에 · 모자라면 위로 · �
     key(items()[0], 'Escape');
     expect(trig.getAttribute('aria-expanded')).toBe('false');
     expect(trig.hasAttribute('aria-controls')).toBe(false);
+  });
+
+  // 까디르 · 유나(4724) — 아이콘뿐이라 이름 없는 메뉴 버튼이었다 → docs.treeRowMenuAriaLabel(그 행 문서 제목 끼움 · 빈 제목 = newDocDefaultTitle).
+  it('«⋮» 접근 가능한 이름 = 행 문서 제목을 끼운 문구 · 빈 제목이면 «제목 없음» · en도 같은 틀', () => {
+    mount();
+    expect(trigger().getAttribute('aria-label')).toBe('회의록 메뉴 열기');
+    act(() => { root.unmount(); });
+    root = createRoot(container);
+    mount({ ...DOC, title: '   ' });
+    expect(trigger().getAttribute('aria-label')).toBe('제목 없음 메뉴 열기');
+    act(() => { root.unmount(); });
+    root = createRoot(container);
+    mount(DOC, 'en');
+    expect(trigger().getAttribute('aria-label')).toBe('Open menu — 회의록');
   });
 });

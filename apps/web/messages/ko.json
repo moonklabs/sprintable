@@ -3534,6 +3534,7 @@
     "embedLinkBlocked": "이 링크는 열 수 없어요",
     "attachFileBlocked": "이 파일은 열 수 없어요",
     "newDocDefaultTitle": "제목 없음",
+    "treeRowMenuAriaLabel": "{title} 메뉴 열기",
     "mermaidRenderFailed": "렌더링 실패",
     "mermaidRendering": "렌더링 중…",
     "mermaidEditingCode": "코드 편집 중",

@@ -351,6 +351,8 @@ function TreeNode({
           ref={menuTriggerRef}
           role="button"
           tabIndex={0}
+          // 까디르 · 유나(4724) — 아이콘뿐이라 이름 없는 메뉴 버튼이었다 → 그 행 문서 제목을 끼운 이름(행마다 같은 소리 방지 · 빈 제목 = «제목 없음»).
+          aria-label={t('treeRowMenuAriaLabel', { title: doc.title?.trim() || t('newDocDefaultTitle') })}
           aria-haspopup="menu"
           aria-expanded={contextMenuOpen}
           aria-controls={contextMenuOpen ? menuId : undefined}
