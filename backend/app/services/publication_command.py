@@ -201,6 +201,8 @@ _NOT_SENT_CODES = frozenset({
     "CHANNEL_POST_DRAFT_NOT_FOUND", "CHANNEL_TEXT_TOO_LONG", "SITE_POST_SEAL_MISSING", "YOUTUBE_QUOTA_EXCEEDED",
     "YOUTUBE_METADATA_INVALID", "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "GENERATION_BUDGET_EXCEEDED",
     "API_USAGE_BUDGET_EXCEEDED",
+    # story #4336(PO P2) — 이어쓰기 검사(HTTP 호출 전). 예전엔 코드가 없어 미분류로 떨어졌다.
+    "CHANNEL_THREAD_UNSUPPORTED", "CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED", "CHANNEL_THREAD_SEGMENT_TOO_LONG",
     # 어댑터가 provider_code로 싣는 사전 검사 · 명시 거절(`provider_error_code`로 승격).
     "INSTAGRAM_IMAGE_REQUIRED", "INSTAGRAM_REELS_VIDEO_REQUIRED", "FACEBOOK_REELS_VIDEO_REQUIRED",
     "CHANNEL_REELS_UNSUPPORTED", "CHANNEL_CAROUSEL_UNSUPPORTED", "YOUTUBE_IMAGE_CONTAINER_UNSUPPORTED",
@@ -501,6 +503,7 @@ async def retry_dead_letter_command(
     command.stop_notice_state = None
     command.last_error = None
     command.failure_kind = None
+    command.failure_detail = None  # story #4336 — 다시 시도(재개 포함)는 새 시도: 지난 멈춤의 본문을 화면에 남기지 않는다
     return command
 
 
@@ -665,6 +668,9 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         ChannelPublishProviderError,
         ChannelRateLimitedError,
         ChannelTextTooLongError,
+        ChannelThreadSegmentLimitExceededError,
+        ChannelThreadSegmentTooLongError,
+        ChannelThreadUnsupportedError,
         ChannelTokenExpiredError,
         ChannelYouTubeMetadataError,
         ExternalPublishGateNotApprovedError,
@@ -754,9 +760,11 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         command.status = "voided"
         command.reason_code = "CONTENT_CHANGED"
         command.last_error = str(exc)[:2000]
+        command.failure_detail = preflight_error_facts(exc)  # story #4336(PO P2) — 모든 preflight 실패가 요청 때와 같은 본문
         return
     except ChannelPostDraftNotFoundError as exc:
         error_code, last_error = "CHANNEL_POST_DRAFT_NOT_FOUND", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
     except ExternalPublishGateNotApprovedError as exc:
         # story #3474 — 새 terminal 상태(blocked_unapproved). apply_command_failure로
         # 안 보낸다 — "재시도해도 안 되는" 종류가 아니라 "재시도라는 개념 자체가 안
@@ -766,6 +774,7 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
             started_at=attempt_started_at, finished_at=now, result_code=None,
         )
         mark_blocked_unapproved(command, reason_code="EXTERNAL_PUBLISH_APPROVAL_REQUIRED", last_error=str(exc))
+        command.failure_detail = preflight_error_facts(exc)
         return
     except GenerationBudgetExceededError as exc:
         # story #3498(AC4) — site_post 쪽의 GENERATION_BUDGET_EXCEEDED 처리와 동형
@@ -811,11 +820,13 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         return
     except ChannelPostSealMissingError as exc:
         error_code, last_error = "SITE_POST_SEAL_MISSING", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
     except ChannelTextTooLongError as exc:
         error_code, last_error = "CHANNEL_TEXT_TOO_LONG", str(exc)
         command.failure_detail = preflight_error_facts(exc)  # story #4336 — 즉시 발행 응답과 같은 사실
     except ChannelConnectionNotActiveError as exc:
         error_code, last_error = "CHANNEL_CONNECTION_NOT_ACTIVE", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
     # story #3605(실측 정정) — ChannelConnectionRevokedError·ChannelConnectionAuthError
     # 둘 다 ChannelTokenExpiredError의 서브클래스(신규 except 절 없이 기존 라우터가
     # 계속 잡는다는 설계, #3598)라 Python except 순서상 **부모보다 먼저** 와야 한다
@@ -843,6 +854,12 @@ async def _process_one_command(db: AsyncSession, command: PublicationCommand, *,
         # story #4264 — 예전엔 이 절이 없어 아래 미분류(None → needs_check)로 떨어졌다. 메타데이터 검사는 HTTP 호출 전이라
         # 확실히 안 나감(즉시 발행 라우터는 이미 이 코드를 쓴다).
         error_code, last_error = "YOUTUBE_METADATA_INVALID", str(exc)
+        command.failure_detail = preflight_error_facts(exc)
+    except (ChannelThreadUnsupportedError, ChannelThreadSegmentLimitExceededError, ChannelThreadSegmentTooLongError) as exc:
+        # story #4336(PO P2) — 예전엔 절이 없어 아래 미분류(공급자 호출 전 → 자동 재시도)로 떨어져, 고칠 때까지 안 풀리는 입력
+        # 오류를 계속 다시 돌렸다. 이어쓰기 검사는 HTTP 호출 전 — 확실히 안 나감(글자 수 · 메타데이터와 같은 부류).
+        command.failure_detail = preflight_error_facts(exc)
+        error_code, last_error = command.failure_detail["code"], str(exc)
     except ChannelPublishInProgressError as exc:
         error_code, last_error = "CHANNEL_PUBLISH_IN_PROGRESS", str(exc)
     except ExternalPublishPausedError as exc:
@@ -1435,6 +1452,10 @@ async def _block_for_external_publish_pause(
     command.status = "blocked"
     command.failure_kind = FAILURE_KIND_PAUSED
     command.last_error = f"EXTERNAL_PUBLISH_PAUSED: {reason}" if reason else "EXTERNAL_PUBLISH_PAUSED"
+    # story #4336(PO P2) — 진입 검사 · 발행 함수 안 두 번째 검사 둘 다 여기로 온다: 즉시 발행 423과 같은 본문.
+    from app.services.external_publish_pause import ExternalPublishPausedError
+
+    command.failure_detail = preflight_error_facts(ExternalPublishPausedError(reason=reason))
 
 
 # story #4287(PO 00:16Z) — in_progress로 집힌 채 이 시간을 넘긴 명령은 워커가 도중에 죽은 것으로 본다. 워커 요청은 Cloud Run 요청

@@ -2089,6 +2089,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       await flush();
       expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull(); // #4336 AC4 — 알림 하나(배지 중복 0)
+      // #4336 M11(까디르) — 정상 진행 줄엔 발행 취소 버튼이 없다(취소는 워커 예산 밖으로 멈춘 줄에만).
+      expect(container.querySelector('[data-testid="channel-post-cancel-publish-button"]')).toBeNull();
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
       await flush();
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
@@ -5440,6 +5442,57 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededFact);
     expect(container.querySelector('[data-testid="generation-budget-exceeded-limit"]')?.textContent).toBe('100,000원');
     expect(container.querySelector('[data-testid="generation-budget-exceeded-remaining"]')?.textContent).toBe('10,000원');
+  });
+
+  // story #4336(PO P2) — 워커가 남긴 본문은 **종류 전수**(봉인 · 승인 · 일시 중지 · 연결 · 재승인 · 메타데이터 · 이어쓰기 · 초안 없음)가
+  // 같은 본문을 즉시 발행 4xx로 받았을 때와 글자까지 같은 줄(이유 + 외부 영향)을 그린다. 입력 검사 부류는 «안 나감».
+  // 뮤테이션: 저장본 효과를 끄면 저장본 쪽이 비어 RED · 새 코드 표를 빼면 이어쓰기 · 초안 없음이 «나갔는지 모름»으로 RED.
+  const P2_BODIES: Array<[number, Record<string, unknown>, 'not_sent' | 'unknown']> = [
+    [409, { code: 'SITE_POST_SEAL_MISSING', message: 'seal missing' }, 'not_sent'],
+    [409, { code: 'SITE_POST_REAPPROVAL_REQUIRED', message: 'content changed' }, 'not_sent'],
+    [403, { code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED', message: 'approval required' }, 'not_sent'],
+    [423, { code: 'EXTERNAL_PUBLISH_PAUSED', message: 'EXTERNAL_PUBLISH_PAUSED' }, 'not_sent'],
+    [409, { code: 'CHANNEL_CONNECTION_NOT_ACTIVE', message: 'inactive' }, 'not_sent'],
+    [422, { code: 'YOUTUBE_METADATA_INVALID', message: 'YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.', field: 'title', reason: 'empty' }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_UNSUPPORTED', message: '이 채널은 이어쓰기를 지원하지 않아요.', channel: 'threads' }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED', message: '이 채널은 이어쓰기를 최대 10건까지 지원해요.', max_segments: 10, current_count: 11 }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_SEGMENT_TOO_LONG', message: '2번째 글이 280자 한도를 넘어요(300자).', segment_number: 2, max_length: 280, current_length: 300 }, 'not_sent'],
+    [404, { code: 'CHANNEL_POST_DRAFT_NOT_FOUND', message: 'draft missing' }, 'not_sent'],
+  ];
+  it.each(P2_BODIES)('⭐#4336 P2 — 저장본 %#(%s) = 즉시 발행 4xx와 같은 줄', async (status, body, impact) => {
+    const readLine = () => ({
+      reason: container.querySelector('[data-testid="channel-post-publish-error-reason"]')?.textContent ?? null,
+      impact: container.querySelector('[data-testid="channel-post-publish-external-impact"]')?.textContent ?? null,
+    });
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'dead_letter', failure_kind: 'not_sent', command_reason_code: String(body.code),
+        command_failure_detail: body,
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const fromStored = readLine();
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({
+      draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+      onPublish: () => ({ status, body: { detail: body } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const fromRequest = readLine();
+
+    expect(fromStored.reason).toBeTruthy();
+    expect(fromStored).toEqual(fromRequest);
+    expect(fromStored.impact).toBe(impact === 'not_sent'
+      ? koMessages.content.channelPostsExternalImpactNotSent : koMessages.content.channelPostsExternalImpactUnknown);
+    if (String(body.code).startsWith('CHANNEL_THREAD_') || body.code === 'YOUTUBE_METADATA_INVALID') expect(fromStored.reason).toBe(body.message);
+    if (body.code === 'CHANNEL_POST_DRAFT_NOT_FOUND') expect(fromStored.reason).toBe(koMessages.content.editNotFound);
   });
 
   it('⭐#4336 조건 2 — 워커가 남긴 글자 수 초과 본문도 422와 같은 보간 문장', async () => {

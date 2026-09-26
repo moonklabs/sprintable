@@ -1050,3 +1050,52 @@ async def test_a_90_second_provider_publish_answers_in_seconds_and_the_worker_co
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cancelling_a_publish_the_worker_already_picked_up_is_refused_and_the_publish_finishes(monkeypatch):
+    """story #4336 M6(까디르 · PO 09:08Z) — 워커가 이미 집은(claimed · 공급자 호출 직전) 발행을 사람이 취소하면 409
+    `PUBLICATION_ALREADY_STARTED`이고, 발행은 멈추지 않고 끝까지 간다(초안 상세 published · 명령 completed). 취소 요청은 워커가
+    공급자를 부르기 바로 전에 끼워 넣는다(실제 경합 자리).
+    뮤테이션: 취소 거절 조건(상태 · 집힘 · 공급자 표식)을 통째로 빼면 이 자리에서 취소가 200으로 먹혀 RED(집힌 명령은 이미
+    in_progress라 한 칸만 빼면 나머지가 막는다 — 칸별 대조는 test_4287의 취소 테스트들)."""
+    from app.main import app
+    from app.services import channel_posts as service_module
+
+    real_publish = service_module.publish_channel_post_draft
+    cancel_responses: list = []
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            connection_id = await _create_sandbox_connection(client, org_id)
+            draft_id, _gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id, text="취소 경합",
+            )
+            cancel_url = f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/cancel-publish"
+
+            async def _cancel_then_publish(*args, **kwargs):
+                cancel_responses.append(await client.post(cancel_url))
+                return await real_publish(*args, **kwargs)
+
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            assert r.status_code == 200 and r.json()["processing"] is True, r.text
+            monkeypatch.setattr(service_module, "publish_channel_post_draft", _cancel_then_publish)
+            counts = await run_worker_tick(Session)
+            detail = await draft_detail(client, org_id, draft_id)
+        assert len(cancel_responses) == 1
+        refused = cancel_responses[0]
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["error"]["code"] == "PUBLICATION_ALREADY_STARTED"
+        assert counts["completed"] == 1, counts
+        assert detail["publication_status"] == "published" and detail["command_status"] == "completed", detail
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

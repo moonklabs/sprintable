@@ -999,6 +999,20 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.",
         "en": "Check the YouTube title, tags, category, and privacy values.",
     },
+    # story #4336(PO P2) — 발행 전 검사의 이어쓰기 실패(요청 422 · 워커가 남긴 본문 공용). 넘침 문장은 편집 화면
+    # `channelPostsThreadOverCap`과 같은 낱말.
+    "channel_posts.thread_unsupported": {
+        "ko": "이 채널은 이어쓰기를 지원하지 않아요.",
+        "en": "This channel doesn't support continuation segments.",
+    },
+    "channel_posts.thread_over_cap": {
+        "ko": "이 채널은 이어쓰기를 최대 {max}건까지 지원해요.",
+        "en": "Up to {max} continuation segments on this channel.",
+    },
+    "channel_posts.thread_segment_too_long": {
+        "ko": "{segment}번째 글이 {max}자 한도를 넘어요({current}자).",
+        "en": "Segment {segment} is over the {max}-character limit ({current}).",
+    },
     # story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13, PR B) —
     # approval_delivery.py::dispatch_approval_request_cards의 스레드 답글 문구.
     # 그 파일 자신은 EXEMPT_FILES 대상이 아니라(verify_no_new_korean_user_
