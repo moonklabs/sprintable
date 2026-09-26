@@ -18,6 +18,9 @@ const OLD = Object.keys(RENAMED_RESOURCES);
 const SEG = `(?:${OLD.join('|')})(?=[/?#]|\\$\\{\\}|$)`;
 const FLAT_RE = new RegExp(`^/${SEG}`);
 const SCOPED_RE = new RegExp(`^/\\$\\{\\}/\\$\\{\\}/${SEG}`);
+// 까디르 4696 — 머리만 보던 빈틈: 치환 **뒤 꼬리**(`${resolveAppUrl(null)}/glance`) · 절대 주소의 호스트 뒤(`https://x/board`)도 센다.
+// 문자열 이어붙이기(`base + '/glance'`)는 그 조각 리터럴이 `/glance`로 시작해 FLAT_RE가 이미 센다.
+const TAIL_RE = new RegExp(`(?:\\$\\{\\}|://[^/?#\\s]+)/${SEG}`);
 
 /** 옛 이름을 받아 새 이름으로 보내는 장치 — 옛 이름을 알아야 하는 곳. */
 const MACHINERY = new Set(['proxy.ts', 'lib/legacy-resource-tables.ts', 'lib/route-resolve.ts']);
@@ -61,7 +64,7 @@ export function findRenamedResourceLinks(file: string, text: string): string[] {
   const out: string[] = [];
   const visit = (n: ts.Node) => {
     const r = render(n);
-    if (r !== null && (FLAT_RE.test(r) || SCOPED_RE.test(r)) && !isJudgement(n)) {
+    if (r !== null && (FLAT_RE.test(r) || SCOPED_RE.test(r) || TAIL_RE.test(r)) && !isJudgement(n)) {
       out.push(`${file}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1} ${r}`);
     }
     // 템플릿 안 조각은 위에서 통째로 봤으니 내려가지 않는다.
@@ -92,6 +95,11 @@ describe('이름이 바뀐 자원은 지금 이름으로 조립한다(story #432
     expect(count('router.push(`/${a}/${b}/standup`)')).toBe(1);
     expect(count("const x = '/board'")).toBe(1);
     expect(count('router.replace(`/${ws}/${proj}/board${qs ? `?${qs}` : \'\'}`)'), '이름 바로 뒤 치환').toBe(1);
+    // 까디르 4696 — 치환 뒤 꼬리 · 절대 주소 · 이어붙이기.
+    expect(count('NextResponse.redirect(`${resolveAppUrl(null)}/glance`, 303)'), '치환 뒤 꼬리').toBe(1);
+    expect(count('const u = `${origin}/board?x=${y}`'), '치환 뒤 꼬리 + 쿼리').toBe(1);
+    expect(count("const u = 'https://app.example.com/standup'"), '절대 주소').toBe(1);
+    expect(count("const u = resolveAppUrl(null) + '/glance'"), '이어붙이기').toBe(1);
   });
 
   it('음성 — 지금 이름 · 다른 단어(boards · standups) · 판정 · 주석 · API 경로', () => {
@@ -103,6 +111,9 @@ describe('이름이 바뀐 자원은 지금 이름으로 조립한다(story #432
     expect(count("switch (p) { case '/board': break; }")).toBe(0);
     expect(count('// router.push(`/board`)')).toBe(0);
     expect(count("fetch('/api/board')")).toBe(0);
+    expect(count('fetch(`${base}/api/board`)'), '치환 뒤 API 경로').toBe(0);
+    expect(count('const u = `${origin}/flow`'), '치환 뒤 지금 이름').toBe(0);
+    expect(count("const u = 'https://app.example.com/boards'"), '절대 주소 · 다른 단어').toBe(0);
   });
 
   it('⭐실 저장소 — 옛 이름 조립 0(proxy 등 리다이렉트 장치 제외)', () => {
