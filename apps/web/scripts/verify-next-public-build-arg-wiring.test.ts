@@ -7,10 +7,11 @@
 // 그래서 AC2①(ARG 부재 재현)은 실 레포가 아니라 «합성 미니 레포 픽스처»로 고정하고,
 // 실 레포 통합 테스트는 `missing.length === 0`을 단언한다(#3947 착지 前엔 이 테스트가
 // 실패하는 게 «정답» — 착지 순서로 푸는 것이지 가드를 느슨하게 푸는 게 아니다).
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { measureFsReads } from './test-utils/fs-work';
 import {
   extractSourceKeys,
   extractCloudbuildFrontendBuildArgValues,
@@ -272,12 +273,13 @@ describe('listScanFiles/isScannable — Route Handler·Middleware·테스트 파
     expect(isScannable('/repo/apps/web/src/components/Bar.tsx')).toBe(true);
   });
 
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 레포 스캔 결과에 route.ts·proxy.ts·middleware.ts가 단 하나도 없다(필터가 실제로 배선됐는지)', () => {
     const files = listScanFiles();
     expect(files.length).toBeGreaterThan(500); // 회귀 감지용 하한(현재 881개 규모)
     expect(files.some((f) => /[\\/]route\.tsx?$/.test(f))).toBe(false);
     expect(files.some((f) => /(^|[\\/])(proxy|middleware)\.tsx?$/.test(f))).toBe(false);
-  }, 3000);
+  });
 });
 
 // C1 — AC2① 양성대조를 실 레포 시점 의존 없이 합성 미니 레포로 고정.
@@ -419,11 +421,11 @@ describe('checkWiring — 합성 미니 레포 픽스처(AC2①②③, 시점 �
 describe('checkWiring — 실 develop HEAD 통합(1회 계산 공유, story #4346 패턴)', () => {
   let sharedResult: ReturnType<typeof checkWiring>;
 
-  // story #3902/#4346 패턴 — 전수 스캔(881파일)은 vitest 기본 5000ms를 넘길 수 있어
-  // 넉넉한 예산을 준다(로컬 실측 800ms대, CI 변동 감안 3배 여유).
+  // story #4333(까디르 4701 ①) — 예전 `beforeAll(…, 3000)`은 기본(5000ms)보다 **낮은** 벽시계 예산이었다(주석은 «넉넉히»라 했지만
+  // 실제로는 더 조였다). 시한은 기본 행 가드만 — 전수 스캔의 양은 describe당 1회로 이미 묶였다(#4346).
   beforeAll(() => {
     sharedResult = checkWiring();
-  }, 3000);
+  });
 
   // C1 — #3947(PR#4352) 착지 前엔 이 단언이 실패하는 게 «정답»이다(가드가 실제로
   // 재는 그 실사고를 지금 이 순간 잡고 있다는 뜻). 착지+rebase 뒤 GREEN 전환.
@@ -450,29 +452,46 @@ describe('checkWiring — 실 develop HEAD 통합(1회 계산 공유, story #434
     expect(sharedResult.cloudbuildStepMissing).toBe(false);
   });
 
-  // AC2② — 실 레포 경로에 프로브 키를 실제로 심어(임시 픽스처, listScanFiles가 도는
-  // 실경로) RED로 잡히는지, 원복하면 다시 사라지는지 — 이 케이스만 파일시스템을
-  // 건드리므로 beforeAll 공유 결과와 별도로 자기만의 checkWiring() 호출을 쓴다.
-  describe('AC2② — 실 레포 경로 프로브 주입(원복 시 no-op)', () => {
-    const fixturePath = path.resolve(__dirname, '../src/__3948-probe-fixture.ts');
+  // AC2② — 실 레포의 스캔 목록(listScanFiles) + 프로브 키 파일 하나를 넘겨 RED로 잡히는지, 빼면 다시 사라지는지.
+  // story #4333 — 예전엔 프로브 파일을 실 src 트리에 심었다 → 같은 전체 판의 다른 실 트리 스캐너가 그 임시 파일을 세어 까닭 없이 RED.
+  // 이제 프로브는 os.tmpdir() 아래 격리 루트에 쓰고 목록에 더한다. «실 경로를 도는지»는 목록이 apps/web/src를 덮는지로 따로 고정한다.
+  // checkWiring은 cloudbuild.yaml을 추출기 둘(빌드 인자 · substitution)이 각자 한 번씩 읽는다 — 트리 크기와 무관한 상수 2회라 «두 번 읽음»
+  // 단언에서만 뺀다. 훑는 소스 파일은 여전히 한 번씩(story #4333).
+  const CLOUDBUILD_ONCE_PER_EXTRACTOR = path.resolve(__dirname, '../../../cloudbuild.yaml');
+  describe('AC2② — 실 스캔 목록 + 격리 프로브(빼면 no-op)', () => {
+    let dir = '';
+    let fixturePath = '';
 
-    afterEach(() => {
-      if (existsSync(fixturePath)) unlinkSync(fixturePath);
+    beforeAll(() => {
+      dir = mkdtempSync(path.join(tmpdir(), 'next-public-probe-'));
+      fixturePath = path.join(dir, '__3948-probe-fixture.ts');
+      writeFileSync(fixturePath, 'export const probe = process.env.NEXT_PUBLIC_ZZZ_PROBE;\n');
+    });
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+    it('실 스캔 목록이 apps/web/src를 덮는다(프로브를 거기 두던 까닭 — 실 경로 배선)', () => {
+      const files = listScanFiles();
+      expect(files.some((f) => f.split(path.sep).join('/').includes('apps/web/src/'))).toBe(true);
     });
 
-    it('process.env.NEXT_PUBLIC_ZZZ_PROBE 참조를 심으면 missing에 즉시 뜬다', () => {
-      writeFileSync(fixturePath, 'export const probe = process.env.NEXT_PUBLIC_ZZZ_PROBE;\n');
-      const result = checkWiring();
+    // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
+    it('process.env.NEXT_PUBLIC_ZZZ_PROBE 참조를 넣으면 missing에 즉시 뜬다', () => {
+      const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => checkWiring({ files: [...listScanFiles(), fixturePath] }), { ignore: [CLOUDBUILD_ONCE_PER_EXTRACTOR] });
+      const result = __scan;
+      expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+      expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
       const probe = result.missing.find((m) => m.key === 'NEXT_PUBLIC_ZZZ_PROBE');
       expect(probe).toBeDefined();
       expect(probe?.refs.some((r) => r.file.endsWith('__3948-probe-fixture.ts'))).toBe(true);
-    }, 3000);
+    });
 
-    it('픽스처를 지우면(원복) 더 이상 안 뜬다 — 무관 PR no-op', () => {
-      writeFileSync(fixturePath, 'export const probe = process.env.NEXT_PUBLIC_ZZZ_PROBE;\n');
-      unlinkSync(fixturePath);
-      const result = checkWiring();
+    // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
+    it('프로브를 빼면(원복) 더 이상 안 뜬다 — 무관 PR no-op', () => {
+      const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => checkWiring({ files: listScanFiles() }), { ignore: [CLOUDBUILD_ONCE_PER_EXTRACTOR] });
+      const result = __scan;
+      expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+      expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
       expect(result.missing.some((m) => m.key === 'NEXT_PUBLIC_ZZZ_PROBE')).toBe(false);
-    }, 3000);
+    });
   });
 });

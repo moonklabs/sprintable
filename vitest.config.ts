@@ -14,7 +14,11 @@ export default defineConfig({
     // vitest.setup.ts 참고(왜 top-level 1회가 아니라 beforeEach인지 그 파일에 설명). 절대경로로
     // 넘긴다 — apps/web에서 CWD로 실행되는 vitest 호출부(package.json test 스크립트 등)가
     // './vitest.setup.ts'를 자기 CWD 기준으로 잘못 찾는 것을 막는다(위 resolve.alias와 동일 원칙).
-    setupFiles: [fileURLToPath(new URL('./vitest.setup.ts', import.meta.url))],
+    // story #4333 — 테스트가 저장소 트리에 쓰면 즉시 실패(전체 판 스캐너끼리 실 트리 임시 파일로 서로 흔들던 결함). 맨 앞에 둬 다른 설정 파일의 쓰기도 본다.
+    setupFiles: [
+      fileURLToPath(new URL('./vitest.repo-write-guard.ts', import.meta.url)),
+      fileURLToPath(new URL('./vitest.setup.ts', import.meta.url)),
+    ],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// ⚠️story #4333 — 아래 «측정치×3»(duration으로 시한을 정하는 관례)은 폐기됐다: 벽시계 예산은 부하 따라 까닭 없이 RED라 시한은 행 가드
+// (5초 이상)만 · 일의 양은 결정적으로(scripts/test-utils/fs-work.ts · 가드 no-wallclock-test-budget). 이 스크립트의 표는 느린 테스트를
+// 찾는 관측용으로 남는다.
+//
 // story #3904 — CI vitest 단계가 `pnpm vitest run | tail -80`(기본 리포터)라 개별 테스트
 // duration이 로그에 안 남는다(성공 run에서 값을 읽을 수 없다 — story #3902의 「측정치×3」이
 // CI 실측 대신 로컬 5회 관측으로 대체된 원인). vitest JSON 리포터(`--reporter=json

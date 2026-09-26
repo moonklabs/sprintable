@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findHardcodedAppDomain, scanRepository } from './verify-no-hardcoded-app-domain';
+import { measureFsReads } from './test-utils/fs-work';
 
 describe('findHardcodedAppDomain — 단위(패턴 자체)', () => {
   it('리터럴 sprintable.app을 잡는다(양성대조 — story #3905가 실제로 겪은 모양)', () => {
@@ -19,8 +20,11 @@ describe('findHardcodedAppDomain — 단위(패턴 자체)', () => {
 });
 
 describe('story #3905 회귀가드 — 전수 스캔 0건', () => {
-  // story #3902 패턴(공유머신 부하로 vitest 기본 5000ms 초과 가능) 재사용 — 여유 타임아웃.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('새 FAIL은 없다(#3905가 알려진 2곳을 전부 고친 뒤의 clean-slate)', () => {
-    expect(scanRepository()).toEqual([]);
-  }, 1000);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
+    expect(__scan).toEqual([]);
+  });
 });

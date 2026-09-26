@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALLOWLIST, computeNewViolations, computeStaleBaseline, loadBaseline, refKey, scanContent, scanRepo } from './verify-no-raw-ascii-jsx-text';
+import { measureFsReads } from './test-utils/fs-work';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const BASELINE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'raw-ascii-jsx-text-baseline.json');
@@ -131,15 +132,17 @@ describe('실 파일 실측 양성대조 — page-embed-node.tsx("Loading docume
 });
 
 describe('scanRepo — story #3876(실 트리 실행)', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 543·727·675·678·723ms 중 최댓값 727ms → ×3 ≈ 2181ms → 2500ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 트리(apps/web/src) — ALLOWLIST+baseline과 정확히 일치(신규 0·stale 0)', () => {
-    const refs = scanRepo(SRC_ROOT);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(SRC_ROOT));
+    const refs = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(refs.length).toBeGreaterThan(0);
     const baseline = loadBaseline(BASELINE_PATH);
     const newViolations = computeNewViolations(refs, ALLOWLIST, baseline);
     const staleBaseline = computeStaleBaseline(refs.filter((r) => !ALLOWLIST.has(refKey(r))), baseline);
     expect(newViolations).toEqual([]);
     expect(staleBaseline).toEqual([]);
-  }, 2500);
+  });
 });

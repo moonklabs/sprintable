@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { measureFsReads } from './test-utils/fs-work';
 import {
   countDynamicKeyCalls,
   EXEMPT_PAIRS,
@@ -341,29 +342,37 @@ describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조�
 describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
   // story #3902 — 이 파일은 scanRepository()(실 apps/web/src 전수 스캔, 메모이즈 없음)를
   // 여러 it()이 독립적으로 다시 호출한다 — 부하 시 vitest 기본 5000ms를 넘길 수 있어 각
-  // 호출부마다 개별 실측(동시부하 재현 5회)×3을 적용한다. 이 테스트: 89·115·77·146·108ms
-  // 중 최댓값 146ms → ×3 ≈ 438ms → 500ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실제 저장소 스캔에서 지금 걸리는 grandfather는 16건이다(정리 후 선언 수와 일치)', () => {
-    const { grandfatherHit } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { grandfatherHit } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(grandfatherHit.size).toBe(16);
-  }, 500);
+  });
 
-  // story #3902 — 83·101·90·89·98ms 중 최댓값 101ms → ×3 ≈ 303ms → 500ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('새 FAIL은 없다(#2410 자체가 신규 회귀를 안 냈다는 증거)', () => {
-    const { newFindings } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { newFindings } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(newFindings.size).toBe(0);
-  }, 500);
+  });
 
   // story #2413(2026-08-02) — #2410 직후엔 EXEMPT_PAIRS가 비어 있었지만 그게 "영구히 비어야
   // 한다"는 규칙은 아니었다(#2410은 오탐 정밀화였지 EXEMPT_PAIRS 금지가 아니다). 이 테스트는
   // "0건"이 아니라 "선언된 예외가 전부 실제로 쓰이고 있는가"(죽은 예외 없음)를 잰다 — sprints.days
   // <-> sprints.overdueBadge(#2413, PO 승인)가 첫 실사용 사례다.
-  // story #3902 — 83·163·86·151·93ms 중 최댓값 163ms → ×3 ≈ 489ms → 500ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('EXEMPT_PAIRS에 선언된 항목은 전부 실제로 걸린다(죽은 예외가 없다)', () => {
     expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
-    const { exemptHit } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { exemptHit } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
-  }, 500);
+  });
 });
 
 // story #3758(BE·표시명·결함 클래스 별건④, 페드루/유나 2026-09-09 — 「구성원」/「멤버」
@@ -371,11 +380,14 @@ describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실�
 // 이 자리(8키 중 하나)를 되돌리면 이 테스트가 즉시 RED가 되어 CI가 말한다(exempt/
 // grandfather 없음 — 이 축은 발견되면 그 자리에서 고치는 게 규칙).
 describe('MEMBER_SYNONYM_BASELINE_TEST — story #3758(「구성원」/「멤버」 동의어 축)', () => {
-  // story #3902 — 87·108·100·110·67ms 중 최댓값 110ms → ×3 ≈ 330ms → 500ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실제 저장소 스캔에서 지금 걸리는 동의어 충돌은 0건이다', () => {
-    const { memberSynonymFindings } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { memberSynonymFindings } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(memberSynonymFindings.size).toBe(0);
-  }, 500);
+  });
 });
 
 // story #3758(카디르 qa:changes 2026-09-09) — findMemberSynonymCollisions 유닛 테스트
@@ -474,22 +486,28 @@ describe('hasLetterOrNumber — story #3582', () => {
 // story #3582 — 비교 쌍을 만들기 «전»에 제외되므로, 글자·숫자 0개 값과 다른 값의 짝은
 // exempt/grandfather/new 어디로도 안 잡히고(=이미 빠진 것) symbolOnlyExcluded에만 잡힌다.
 describe('scanRepository — 글자·숫자 0개 값 사전 제외(story #3582)', () => {
-  // story #3902 — 112·188·106·193·109ms 중 최댓값 193ms → ×3 ≈ 579ms → 1000ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('content.originAuthorUnknown("—")이 symbolOnlyExcluded에 잡힌다(인스턴스별 EXEMPT 없이도 비교 자체를 안 한다)', () => {
-    const { symbolOnlyExcluded } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { symbolOnlyExcluded } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(symbolOnlyExcluded.has('content.originAuthorUnknown')).toBe(true);
-  }, 1000);
+  });
 
-  // story #3902 — 71·174·76·99·92ms 중 최댓값 174ms → ×3 ≈ 522ms → 1000ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('원래 EXEMPT였던 세 쌍(3402 2·3575 1)은 이제 EXEMPT_PAIRS 등재 없이도 새 충돌로 안 걸린다(규칙이 대신 안다)', () => {
     expect(EXEMPT_PAIRS.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
     expect(EXEMPT_PAIRS.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
     expect(EXEMPT_PAIRS.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
-    const { newFindings } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { newFindings } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(newFindings.has('content.channelPostsTextTooLong <-> content.originAuthorUnknown')).toBe(false);
     expect(newFindings.has('content.channelPostsRateLimitedUntil <-> content.originAuthorUnknown')).toBe(false);
     expect(newFindings.has('content.errorChannelVideoUploadFailedWithStatus <-> content.originAuthorUnknown')).toBe(false);
-  }, 1000);
+  });
 
   // 유나 비차단(2026-09-06, #3931 Design review) — 위 두 테스트는 "제외가 일했다"와
   // "애초에 그 쌍이 안 겹쳤다"를 못 가른다. 주석의 약속("제외 로직을 끄면 다시 RED")을
@@ -587,7 +605,7 @@ describe('scanRepository — 4233 EXEMPT 6건 중 (a) 확장형 2건만 걷힌�
     ).toBe(false);
   });
 
-  // story #3902 — 97·96·89·88·84ms 중 최댓값 97ms → ×3 ≈ 291ms → 500ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('(b) 4건은 여전히 EXEMPT_PAIRS에 있고 실제로 걸린다(죽은 예외 아님)', () => {
     const bPairs = [
       pairKey('content.apiUsageBudgetRemainingCompactOverLimit', 'content.apiUsageBudgetRemainingLabel'),
@@ -596,13 +614,19 @@ describe('scanRepository — 4233 EXEMPT 6건 중 (a) 확장형 2건만 걷힌�
       pairKey('content.generationBudgetRemainingCompactOverLimit', 'content.generationBudgetRemainingLabel'),
     ];
     for (const pk of bPairs) expect(EXEMPT_PAIRS.has(pk)).toBe(true);
-    const { exemptHit } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { exemptHit } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     for (const pk of bPairs) expect(exemptHit.has(pk)).toBe(true);
-  }, 500);
+  });
 
-  // story #3902 — 83·160·119·91·78ms 중 최댓값 160ms → ×3 ≈ 480ms → 500ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('(a) 2건도 (b) 4건도 새 충돌로 재부상하지 않는다(newFindings 0)', () => {
-    const { newFindings } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { newFindings } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(newFindings.size).toBe(0);
-  }, 500);
+  });
 });
