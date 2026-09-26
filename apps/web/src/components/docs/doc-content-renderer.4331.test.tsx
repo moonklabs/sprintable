@@ -23,6 +23,7 @@ vi.mock('@/lib/db/client', async (orig) => ({ ...(await orig<Record<string, unkn
 
 import { DocContentRenderer, attachmentSizeLabel } from './doc-content-renderer';
 import { cardVariants } from '@/components/ui/card';
+import { buttonVariants } from '@/components/ui/button';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -83,6 +84,19 @@ describe('정상 첨부 카드 = 진짜 button([SID:4331] AC1)', () => {
     expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
     expect(String(fetchWithAuthMock.mock.calls[0][0])).toContain('/api/attachments/sign?asset_id=as-1');
     expect(open).toHaveBeenCalledWith('https://signed.test/report.pdf', '_blank', 'noopener,noreferrer');
+  });
+
+  // PO 05:42Z — 명령형 DOM 템플릿 button도 디자인 Button의 클래스 토큰(초점 링 · 최소 크기 · 호버)을 입는다(손으로 적은 버튼 모양 0) · 면은 첨부 카드 면.
+  it('첨부 button = 디자인 Button 토큰(초점 링 · 최소 크기) + 첨부 카드 면', async () => {
+    await render('<div data-type="fileAttachment" data-filename="a.txt" data-size="3" data-asset-id="as-1"></div>');
+    const button = container.querySelector('[data-type="fileAttachment"] button') as HTMLElement;
+    const ghost = buttonVariants({ variant: 'ghost' }).split(/\s+/);
+    for (const token of ['focus-visible:ring-3', 'focus-visible:ring-proof-citron', 'focus-visible:border-proof-citron', 'outline-none', 'min-h-11']) {
+      expect(ghost, `버튼 토큰 원천에 ${token}`).toContain(token);
+      expect(button.classList.contains(token), `${token} · ${button.className}`).toBe(true);
+    }
+    for (const cls of cardVariants({ surface: 'subtle', radius: 'compact' }).split(/\s+/)) expect(button.classList.contains(cls), `면 ${cls}`).toBe(true);
+    expect(button.classList.contains('hover:bg-muted/40'), '손으로 적은 호버 0').toBe(false);
   });
 
   it('옛 data: 첨부: button을 누르면 임시 a[download] 한 번(현 동작 유지)', async () => {

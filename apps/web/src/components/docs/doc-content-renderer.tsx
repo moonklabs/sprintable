@@ -19,6 +19,7 @@ import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { cardVariants } from '@/components/ui/card';
+import { buttonVariants } from '@/components/ui/button';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -582,10 +583,10 @@ export function DocContentRenderer({
         return () => {};
       }
 
-      // story #4331 — 누르는 자리는 진짜 `<button>`(Tab 초점 · Enter/Space · 예전엔 click만 건 div라 키보드로 못 받았다). `<a download>`가 아닌 까닭:
-      // 링크는 Space로 안 눌리고, 자산 참조는 누른 뒤에야 서명 주소가 생긴다. 접근 가능한 이름 = 파일 이름 + 크기(DOM으로 설정 · 글자는 이스케이프).
+      // story #4331 — 누르는 자리는 진짜 button 요소(Tab 초점 · Enter/Space · 예전엔 click만 건 div라 키보드로 못 받았다). 다운로드 링크(a download)가 아닌
+      // 까닭: 링크는 Space로 안 눌리고, 자산 참조는 누른 뒤에야 서명 주소가 생긴다. 접근 가능한 이름 = 파일 이름 + 크기(속성 이스케이프).
       block.innerHTML = `
-        <button type="button" class="${cn(ATTACHMENT_CARD_SURFACE, 'w-full cursor-pointer text-left hover:bg-muted/40 transition-colors')}">
+        <button type="button" aria-label="${escapeHtmlAttribute(sizeLabel ? `${filename} ${sizeLabel}` : filename)}" class="${ATTACHMENT_BUTTON_CLASS}">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           <span class="block min-w-0 flex-1">
             <span class="block truncate text-sm font-medium">${escapeHtmlText(filename)}</span>
@@ -594,7 +595,6 @@ export function DocContentRenderer({
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>`;
       const button = block.querySelector('button')!;
-      button.setAttribute('aria-label', sizeLabel ? `${filename} ${sizeLabel}` : filename);
 
       const handleClick = () => {
         // legacy(base64 data-url) — blob href 직접 다운로드(현 동작 유지).
@@ -686,7 +686,7 @@ export function DocContentRenderer({
     }
 
     // Toggle block click handlers (viewer)
-    // story #4331 — 요약은 글자 · 링크를 품은 블록이라 `<button>`으로 못 바꾼다 → 버튼 의미(role · Tab 초점 · Enter/Space) + 펼침 상태(aria-expanded) ·
+    // story #4331 — 요약은 글자 · 링크를 품은 블록이라 button 요소로 못 바꾼다 → 버튼 의미(role · Tab 초점 · Enter/Space) + 펼침 상태(aria-expanded) ·
     // 가리키는 내용(aria-controls). 예전엔 click만 건 div라 키보드로 못 열고, 열림 · 닫힘을 읽어 주지도 않았다.
     const toggleSummaries = Array.from(root.querySelectorAll<HTMLElement>('[data-type="toggleSummary"]'));
     const toggleCleanup = toggleSummaries.map((summary, index) => {
@@ -1096,6 +1096,10 @@ export const RENDERER_INTERNAL_MARKERS = [
 // 첨부 카드 면(정상 · 공개 보기 · 열 수 없음 공통) — 공용 cardVariants(손코딩 카드 가드 · 링크 카드와 같은 subtle 면). 예전 `hsl(var(--border))`는
 // 토큰이 hex라 무효 색이었다(테두리가 글자색 · 배경 투명 — 유나 짚음 · 4324).
 const ATTACHMENT_CARD_SURFACE = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+
+// story #4331(PO 05:42Z) — 정상 첨부 카드의 button은 명령형 DOM 템플릿이라 React `Button`을 못 쓴다 → 디자인 Button의 클래스 토큰
+// (buttonVariants: 초점 링 · 누름 · 최소 크기 · 호버)을 그대로 입고, 면은 첨부 카드 면(뒤에 와서 테두리 · 배경 · 모서리가 이긴다) · 손으로 적는 건 배치뿐.
+const ATTACHMENT_BUTTON_CLASS = cn(buttonVariants({ variant: 'ghost' }), ATTACHMENT_CARD_SURFACE, 'h-auto w-full justify-start text-left whitespace-normal');
 
 /** story #4331(유나 결정) — 첨부 카드 크기 줄. 속성 없음 · 빈 글자 · 숫자 아님 · 음수 → '' (줄 없음) · 0 → «0 B» · 나머지 공용 formatFileSize. */
 export function attachmentSizeLabel(attr: string | null): string {
