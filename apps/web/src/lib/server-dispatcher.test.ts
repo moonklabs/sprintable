@@ -32,12 +32,22 @@ const reply = (req: { httpVersion: string }, res: { setHeader: (k: string, v: st
 
 async function listen(server: https.Server | http2.Http2SecureServer): Promise<Srv> {
   let n = 0;
-  server.on('secureConnection', () => { n += 1; });
+  // 닫을 때 살아 있는 TLS 연결(keep-alive · h2 세션)을 직접 끊는다 — 풀이 연결을 오래 살려 두므로 server.close()만으로는
+  // 연결이 끝나길 기다리다 멈춘다(CI Node 22에서 afterAll 10초 초과).
+  const sockets = new Set<{ destroy: () => void }>();
+  server.on('secureConnection', (sock: { destroy: () => void; once: (e: string, f: () => void) => void }) => {
+    n += 1;
+    sockets.add(sock);
+    sock.once('close', () => sockets.delete(sock));
+  });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   return {
     url: `https://127.0.0.1:${(server.address() as AddressInfo).port}`,
     conns: () => n,
-    close: () => new Promise<void>((r) => { server.close(() => r()); (server as { closeAllConnections?: () => void }).closeAllConnections?.(); }),
+    close: () => new Promise<void>((r) => {
+      server.close(() => r());
+      for (const sock of sockets) sock.destroy();
+    }),
   };
 }
 
@@ -69,14 +79,21 @@ afterAll(async () => {
 });
 
 let prev: Dispatcher | null = null;
+// 테스트가 만든 디스패처 — 끝날 때 destroy해 연결을 정리한다(서버를 닫기 전에).
+const made: Dispatcher[] = [];
+function track<T extends Dispatcher>(d: T): T {
+  made.push(d);
+  return d;
+}
 function swapDispatcher(d: Dispatcher) {
   prev = prev ?? getGlobalDispatcher();
-  setGlobalDispatcher(d);
+  setGlobalDispatcher(track(d));
 }
-afterEach(() => {
+afterEach(async () => {
   if (prev) setGlobalDispatcher(prev);
   prev = null;
   delete process.env['NEXT_PUBLIC_FASTAPI_URL'];
+  await Promise.all(made.splice(0).map((d) => d.destroy().catch(() => {})));
 });
 
 /** 실 전역 fetch로 n건을 동시에 — 새로 연 연결 수와 받은 HTTP 판(겹치지 않게 모음). */
@@ -140,7 +157,7 @@ describe('외부 origin — keep-alive만(h2 · 파이프라인 없음)', () => 
     await sleep(4_500);
     expect((await burst(extH1, 1)).newConns).toBe(0);
     // 양성 대조 — 같은 측정으로 기본 설정(keep-alive 4초)은 새 연결을 연다(측정이 틀릴 수 있어야 한다).
-    setGlobalDispatcher(new Agent({ connect: { ca: cert } }));
+    setGlobalDispatcher(track(new Agent({ connect: { ca: cert } })));
     await burst(extH1, 1);
     await sleep(4_500);
     expect((await burst(extH1, 1)).newConns).toBe(1);
@@ -229,7 +246,7 @@ describe('installBffDispatcher — 한 번 · 백엔드 origin은 fastapiBaseUrl
     prev = getGlobalDispatcher();
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'https://backend.example.run.app/some/base';
     expect(installedBackendOrigin()).toBeNull();
-    const a = installBffDispatcher();
+    const a = track(installBffDispatcher());
     expect(getGlobalDispatcher()).toBe(a);
     expect(installBffDispatcher()).toBe(a);
     expect(installedBackendOrigin()).toBe('https://backend.example.run.app');
