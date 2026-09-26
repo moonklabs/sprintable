@@ -20,7 +20,7 @@ import { contentPostStatusLabelKey } from '@/components/content/post-status';
 import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
-import { blockedByConnection, blockedReason, deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { blockedByConnection, blockedReason, deriveFailureAction, WORKER_TICK_BUDGET_TOO_SMALL, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
@@ -502,8 +502,6 @@ const BLOCKED_REASON_LINE_KEYS: Record<string, string> = {
 
 // story #4336 — 워커가 발행하는 동안 초안을 다시 읽는 간격(워커는 1분마다 돈다).
 const PUBLISH_WORKER_POLL_MS = 5000;
-// BE publication_command.OVER_TICK_BUDGET_CODE와 같은 값(한 건 최악이 워커 틱 예산보다 김).
-const WORKER_TICK_BUDGET_TOO_SMALL = 'WORKER_TICK_BUDGET_TOO_SMALL';
 
 export default function ChannelPostEditPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -2476,7 +2474,9 @@ export default function ChannelPostEditPage() {
             container 같은 조합은 «서버상 도달 불가»다. 도달 가능한 상태에선 kind!=='processing'
             억제와 동작이 같고, 이 넓힌 조건은 그 도달 불가 조합에 대한 «방어»다(전수 곱
             테스트가 그 조합까지 돌려도 실패 신호가 1개로 유지되게 한다). */}
-        {failureAction && draft.processing_kind !== 'awaiting_container' ? (
+        {/* story #4336 AC4 — publishing · publish_stuck은 위 상태 알림(발행 중 · 예산 밖 + 발행 취소)이 이미 말한다 — 배지로 두 번 말하지 않는다. */}
+        {failureAction && draft.processing_kind !== 'awaiting_container'
+          && failureAction.kind !== 'publishing' && failureAction.kind !== 'publish_stuck' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
             // story #3402 갭 후속(페드루 PO, 2026-09-10 ②) — 이 화면(상세)엔 아래

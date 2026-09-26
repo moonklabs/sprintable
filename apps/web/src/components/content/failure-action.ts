@@ -46,7 +46,14 @@ export type FailureAction =
   // 완료 대기 중일 때. §17-15 "자동으로 이어서 처리 중"(중립·버튼 없음) — transient의
   // "다시 시도"(실패 후 재시도)와 뜻이 다르다(이건 실패가 아니라 진행 중), 같은 값으로
   // 묶지 않는다(§17-15 "모양은 같고 뜻은 다르다").
-  | { kind: 'processing' };
+  | { kind: 'processing' }
+  // story #4336 AC4(PO 08:47Z «목록 · 게이트 화면 = PR 1») — 즉시 발행이 워커 대기열로 간 뒤 목록 · 캘린더 카드도 상세와 같은 두 상태를
+  // 말한다. 판정은 서버 한 곳(`processing_kind=publishing` · `command_reason_code=WORKER_TICK_BUDGET_TOO_SMALL`) — 화면은 옮기기만.
+  | { kind: 'publishing' }
+  | { kind: 'publish_stuck' };
+
+/** story #4336 — 워커 한 틱 예산보다 긴 명령에 서버가 다는 사유(대기 · 비종결, 발행 안 되는 중). */
+export const WORKER_TICK_BUDGET_TOO_SMALL = 'WORKER_TICK_BUDGET_TOO_SMALL';
 
 // story #3422 N2(페드루 PO 지적, 2026-09-04 12:41Z) — command_reason_code 원시값을
 // 화면에 그대로 노출하지 않는다(entity-status-labels.ts::STATUS_LABELS와 동형 규율 —
@@ -156,6 +163,11 @@ function deriveFailureKind(input: FailureActionInput): FailureAction | undefined
   // 는 failure_kind보다 먼저 잡는다. 실패가 아니라 "진행 중"이라 §17-2의 실패 갈래
   // 축과 아예 다르다(실패 여부를 먼저 걸러야 failure_kind 유무로 오판 안 함).
   if (input.commandStatus === 'pending' && input.processingKind === 'awaiting_container') return { kind: 'processing' };
+  // story #4336 — 예산 밖은 «발행 중»보다 먼저(서버도 이 사유면 processing_kind를 publishing으로 안 준다 — 방어).
+  if (input.commandStatus === 'pending' && input.reasonCode === WORKER_TICK_BUDGET_TOO_SMALL) return { kind: 'publish_stuck' };
+  if (input.processingKind === 'publishing' && (input.commandStatus === 'pending' || input.commandStatus === 'in_progress')) {
+    return { kind: 'publishing' };
+  }
   // pending·in_progress — 실패가 아직 자동 재시도 큐에 있는 상태. failure_kind가 없으면
   // (예: 아직 한 번도 실패한 적 없는 정상 대기) 표시할 실패 자체가 없다.
   if (!input.failureKind) return undefined;

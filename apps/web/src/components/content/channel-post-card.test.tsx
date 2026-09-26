@@ -87,6 +87,19 @@ describe('ChannelPostCard — story #3422, 격자·레인 공용 렌더 단위',
   // 어디에도 mount 안 돼 있던 갭. 표본 5종이 카드에서 실제로 「보인다」를 pin한다(존재
   // 여부가 아니라 렌더 여부 — deriveFailureAction을 다시 짜지 않고 그대로 재사용).
   describe('⭐B3 — 실패 배지 5종이 카드에서 보인다', () => {
+    it('⭐#4336 AC4 — 워커 대기 중인 즉시 발행은 «발행하고 있어요», 예산 밖이면 사유 문장', async () => {
+      await act(async () => {
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'pending', processing_kind: 'publishing' }} displayTimezone="Asia/Seoul" />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsPublishingNotice);
+      await act(async () => {
+        root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL' }} displayTimezone="Asia/Seoul" />));
+      });
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsPublishStuckNotice);
+    });
+
     it('blocked', async () => {
       await act(async () => {
         root.render(wrap(<ChannelPostCard item={{ ...BASE_ITEM, command_status: 'blocked', failure_kind: 'connection' }} displayTimezone="Asia/Seoul" />));
