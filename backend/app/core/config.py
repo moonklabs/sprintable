@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     # 직접 주입(PO 본인 지시, 2026-08-31 — email 방식보다 견고).
     support_escalation_approver_member_id: str = ""
 
+    # story #4341 — 플랫폼 운영 알림(결제 늦은 성공 무효 · 확정 환불 실패 · 발행 예산 밖)을 받는 운영 대화 id. 빈 값 = 미설정 →
+    # 알림은 «전달 안 됨»(not_configured)을 돌려주고 pending으로 남아, 값이 들어오면 재시도가 보낸다(거짓 성공 0).
+    # 조직은 그 대화 행에서 읽는다(따로 적지 않는다 — 두 값이 어긋날 자리를 만들지 않게).
+    ops_alert_conversation_id: str = ""
+
     # CORS (쉼표 구분 origins, Cloud Run 환경변수 CORS_ORIGINS로 주입)
     cors_origins: str = "http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 

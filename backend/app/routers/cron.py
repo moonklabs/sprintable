@@ -1423,6 +1423,14 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("entity-references-backfill sweep tick error: %s", exc)
             counts["entity_references_backfill"] = {"error": "unhandled"}
+        # story #4341 — 운영 알림 재시도(전달 실패 · 받는 곳 미설정으로 pending인 것). 위 축들과 같은 피기백 사상(새 Cloud Scheduler
+        # 잡 0) — 독립 try. 자기 세션으로 돌고 한 틱 몫(건수 · 초, operator_alerts.RETRY_TICK_*) 안에서만 — 발행 처리 예산을 먹지 않게.
+        try:
+            from app.services.operator_alerts import process_due_operator_alerts
+            counts["operator_alerts"] = await process_due_operator_alerts()
+        except Exception as exc:
+            logger.exception("operator-alerts retry tick error: %s", exc)
+            counts["operator_alerts"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)
