@@ -60,8 +60,20 @@ describe('startBillingAuth — 위젯 인증 시작(story #2510)', () => {
     // 실제로 막혔다. 'self' 고정으로 frame-src를 열지 않고 우회.
     expect(arg.windowTarget).toBe('self');
     // billing_cycle API 값은 yearly(FE 내부 표기) -> annual(BE 계약, #2890)로 변환돼야 한다.
-    expect(arg.successUrl).toBe(`${ORIGIN}/settings?tab=billing&tier=starter&cycle=annual&checkout=success`);
-    expect(arg.failUrl).toBe(`${ORIGIN}/settings?tab=billing&tier=starter&cycle=annual&checkout=fail`);
+    // story #4335 — 결제 시도 id(UUID)를 위젯 가기 전에 만들어 복귀 URL 둘 다에 같은 값으로 싣는다.
+    const success = new URL(arg.successUrl);
+    const attemptId = success.searchParams.get('attempt') ?? '';
+    expect(attemptId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(arg.successUrl).toBe(`${ORIGIN}/settings?tab=billing&tier=starter&cycle=annual&attempt=${attemptId}&checkout=success`);
+    expect(arg.failUrl).toBe(`${ORIGIN}/settings?tab=billing&tier=starter&cycle=annual&attempt=${attemptId}&checkout=fail`);
+  });
+
+  it('위젯을 열 때마다 새 시도 id(두 번 열면 서로 다름)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { customer_key: 'org-abc-123' } }) })));
+    await startBillingAuth({ tier: 'team', cycle: 'monthly' });
+    await startBillingAuth({ tier: 'team', cycle: 'monthly' });
+    const ids = requestBillingAuthMock.mock.calls.map((c) => new URL((c[0] as { successUrl: string }).successUrl).searchParams.get('attempt'));
+    expect(new Set(ids).size).toBe(2);
   });
 
   it('customer-key 응답이 실패(non-ok)면 위젯을 열지 않고 던진다', async () => {
@@ -87,62 +99,36 @@ describe('startBillingAuth — 위젯 인증 시작(story #2510)', () => {
   });
 });
 
-describe('completeCheckout — authKey로 실 체크아웃 완결(story #2510)', () => {
+describe('completeCheckout — 결제 시도 시작(story #2510 · #4335)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('status=active 응답 → {kind:"active"}', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ data: { org_id: 'o1', tier: 'team', billing_cycle: 'monthly', status: 'active', current_period_start: null, current_period_end: null, declined_reason: null } }),
-      })),
-    );
+  const ATTEMPT = { attempt_id: 'a-1', kind: 'checkout', status: 'processing', tier: 'team', billing_cycle: 'monthly', declined_reason: null, reauth_required: false, subscription: null };
 
-    const outcome = await completeCheckout({ authKey: 'ak', tier: 'team', billingCycle: 'monthly' });
-    expect(outcome.kind).toBe('active');
-  });
-
-  it('status=pending(카드거절) 응답 → {kind:"declined"} — 에러로 취급하지 않는다', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ data: { org_id: 'o1', tier: 'team', billing_cycle: 'monthly', status: 'pending', current_period_start: null, current_period_end: null, declined_reason: '카드 한도 초과' } }),
-      })),
-    );
-
-    const outcome = await completeCheckout({ authKey: 'ak', tier: 'team', billingCycle: 'monthly' });
-    expect(outcome.kind).toBe('declined');
-    if (outcome.kind === 'declined') {
-      expect(outcome.result.declined_reason).toBe('카드 한도 초과');
-    }
-  });
-
-  it('HTTP 에러(예: 403/502) → {kind:"error", status}', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 502, json: async () => ({}) })));
-
-    const outcome = await completeCheckout({ authKey: 'ak', tier: 'team', billingCycle: 'monthly' });
-    expect(outcome).toEqual({ kind: 'error', status: 502 });
-  });
-
-  it('/api/billing/checkout에 {auth_key, tier, billing_cycle} 그대로 POST한다', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ data: { org_id: 'o1', tier: 'business', billing_cycle: 'annual', status: 'active', current_period_start: null, current_period_end: null, declined_reason: null } }),
-    }));
+  it('/api/billing/checkout에 {attempt_id, auth_key, tier, billing_cycle}를 POST하고 시도 상태를 돌려준다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 202, json: async () => ({ data: ATTEMPT }) }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await completeCheckout({ authKey: 'ak-xyz', tier: 'business', billingCycle: 'annual' });
+    const result = await completeCheckout({ attemptId: 'a-1', authKey: 'ak-xyz', tier: 'business', billingCycle: 'annual' });
 
+    expect(result).toEqual({ kind: 'ok', attempt: ATTEMPT });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/billing/checkout',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ auth_key: 'ak-xyz', tier: 'business', billing_cycle: 'annual' }),
+        body: JSON.stringify({ attempt_id: 'a-1', auth_key: 'ak-xyz', tier: 'business', billing_cycle: 'annual' }),
       }),
     );
+  });
+
+  it('HTTP 에러(예: 409 · 502) → {kind:"rejected", status} — 시도가 만들어지지 않음', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({}) })));
+    expect(await completeCheckout({ attemptId: 'a-1', authKey: 'ak', tier: 'team', billingCycle: 'monthly' })).toEqual({ kind: 'rejected', status: 409 });
+  });
+
+  it('네트워크 · 시간 초과 → {kind:"unreached"} — 화면은 재요청이 아니라 조회로 넘어간다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    expect(await completeCheckout({ attemptId: 'a-1', authKey: 'ak', tier: 'team', billingCycle: 'monthly' })).toEqual({ kind: 'unreached' });
   });
 });

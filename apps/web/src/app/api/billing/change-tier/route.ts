@@ -7,9 +7,9 @@ import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
  */
 export async function POST(request: Request): Promise<Response> {
   return proxyToFastapiWrapped(request, '/api/v2/org-subscriptions/change-tier', {
-    // story #4320(까디르 QA ③) — 요금제 변경(청구 · 부분 환불) — 끊으면 다시 누를 때 이중 청구 — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    // story #4320(까디르 QA ③) — 결제 시도를 만드는 요청 — 브라우저가 끊어도 시도 행까지는 끝까지 간다 · 시간 제한만.
     timeLimitOnly: true,
-    // 까디르 QA ① — 백엔드 최악(결제 사슬)은 프런트 한도를 넘는다 → 한도 안 천장 · 결과는 주문번호 조회로 확정(후속 카드). 근거는 표.
+    // story #4335 — 시작은 곧바로 답한다(청구 · 부분 환불은 응답 뒤 작업) · 결과는 시도 조회. 근거는 표.
     timeoutMs: LONG_ROUTES.billingChangeTier.bffMs,
   });
 }

@@ -63,12 +63,32 @@ function platformSettingsResponse(overrides: Partial<{ billing_price_public: boo
   };
 }
 
+// story #4335 — 결제 시도 조회(`GET /api/billing/attempts/{id}`) 응답. 테스트마다 차례로 돌려줄 값을 넣는다.
+let attemptResponses: Array<unknown> = [];
+const attemptFetchUrls: string[] = [];
+
+function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean }> = {}) {
+  return {
+    attempt_id: 'att-1', kind: overrides.kind ?? 'checkout', status: overrides.status ?? 'processing', tier: overrides.tier ?? 'team',
+    billing_cycle: 'monthly', declined_reason: overrides.declined_reason ?? null, reauth_required: overrides.reauth_required ?? false,
+    subscription: null,
+  };
+}
+
+function attemptResponse(body: unknown, status = 200) {
+  return { ok: status < 400, status, json: async () => ({ data: body }) };
+}
+
 async function mount(
   statusFetchImpl: () => Promise<unknown>,
   platformSettingsFetchImpl: () => Promise<unknown> = async () => platformSettingsResponse(),
 ) {
   vi.stubGlobal('fetch', vi.fn((url: string) => {
     if (typeof url === 'string' && url.includes('/platform-settings')) return platformSettingsFetchImpl();
+    if (typeof url === 'string' && url.includes('/api/billing/attempts/')) {
+      attemptFetchUrls.push(url);
+      return Promise.resolve(attemptResponses.shift() ?? attemptResponse(attempt()));
+    }
     return statusFetchImpl();
   }));
   await act(async () => {
@@ -94,6 +114,19 @@ beforeEach(() => {
   replaceMock.mockClear();
   startBillingAuthMock.mockReset();
   completeCheckoutMock.mockReset();
+  attemptResponses = [];
+  attemptFetchUrls.length = 0;
+  // 이 jsdom 설정엔 localStorage가 없다 — 재진입(기억한 시도) 판을 재현하려고 메모리 저장소를 단다.
+  const memory = new Map<string, string>();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => memory.get(k) ?? null,
+      setItem: (k: string, v: string) => { memory.set(k, v); },
+      removeItem: (k: string) => { memory.delete(k); },
+      clear: () => memory.clear(),
+    },
+  });
 });
 
 afterEach(async () => {
@@ -234,48 +267,136 @@ describe('BillingTab — platform-settings 소비(story #2728, 선생님 결정�
   });
 });
 
-describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)', () => {
-  it('checkout=success + active 응답 → 성공 배너를 보이고 쿼리를 지운다', async () => {
-    searchParams = new URLSearchParams({ checkout: 'success', tier: 'team', cycle: 'monthly', authKey: 'ak-1' });
-    completeCheckoutMock.mockResolvedValue({
-      kind: 'active',
-      result: { org_id: 'org-1', tier: 'team', billing_cycle: 'monthly', status: 'active', current_period_start: null, current_period_end: null, declined_reason: null },
-    });
+describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 · #4335 결제 시도)', () => {
+  const RETURN = { checkout: 'success', tier: 'team', cycle: 'monthly', attempt: 'att-1', authKey: 'ak-1' };
+
+  it('복귀 → 시도 id로 결제 요청 · 끝나면 authKey를 지우고 attempt만 남긴다 · 바로 완료면 성공 배너', async () => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'succeeded' }) });
     await mount(async () => statusResponse({ tier: 'free' }));
 
-    expect(completeCheckoutMock).toHaveBeenCalledWith({ authKey: 'ak-1', tier: 'team', billingCycle: 'monthly' });
+    expect(completeCheckoutMock).toHaveBeenCalledWith({ attemptId: 'att-1', authKey: 'ak-1', tier: 'team', billingCycle: 'monthly' });
     expect(container.textContent).toContain(koMessages.pricingPlans.checkoutSuccessBanner.replace('{tier}', 'Team'));
-    expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing');
+    expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing&attempt=att-1');
   });
 
-  it('checkout=success + pending/declined 응답 → 거절 사유가 담긴 배너를 보인다', async () => {
-    searchParams = new URLSearchParams({ checkout: 'success', tier: 'starter', cycle: 'annual', authKey: 'ak-2' });
-    completeCheckoutMock.mockResolvedValue({
-      kind: 'declined',
-      result: { org_id: 'org-1', tier: 'starter', billing_cycle: 'annual', status: 'pending', current_period_start: null, current_period_end: null, declined_reason: '한도초과' },
-    });
+  it('거절 → 경고색 · 거절 문장 + 카드사 안내 줄 + «청구된 금액은 없어요»', async () => {
+    searchParams = new URLSearchParams({ ...RETURN, tier: 'starter', cycle: 'annual' });
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'declined', tier: 'starter', declined_reason: '한도초과' }) });
     await mount(async () => statusResponse());
 
-    const alertEl = container.querySelector('[role="alert"]');
-    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedBanner.replace('{reason}', '한도초과'));
-    expect(alertEl?.textContent).toContain('한도초과');
-    // 유나 design 가디언(2026-08-07) — declined는 502 등 시스템오류(destructive)와 색으로
-    // 구분돼야 한다. warning이어야지 destructive면 안 된다.
+    const alertEl = container.querySelector('[data-payment-attempt-state="declined"]');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedBanner);
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReason.replace('{reason}', '한도초과'));
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+    // 유나 design 가디언(2026-08-07) — declined는 502 등 시스템오류(destructive)와 색으로 구분 — warning.
     expect(alertEl?.className).toContain('warning-tint');
     expect(alertEl?.className).not.toContain('destructive-tint');
-    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
   });
 
-  it('checkout=success 이지만 completeCheckout이 HTTP 에러를 반환하면 에러 배너를 보인다', async () => {
-    searchParams = new URLSearchParams({ checkout: 'success', tier: 'team', cycle: 'monthly', authKey: 'ak-3' });
-    completeCheckoutMock.mockResolvedValue({ kind: 'error', status: 502 });
+  it('결제 요청 자체가 거절(HTTP 409 · 502) → 경고색 · 오류 문장 + «청구된 금액은 없어요»(시도가 안 만들어짐 = 청구 0 · 유나)', async () => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'rejected', status: 502 });
     await mount(async () => statusResponse());
-
-    expect(container.textContent).toContain(koMessages.pricingPlans.checkoutErrorBanner);
+    const alertEl = container.querySelector('[data-payment-attempt-state="rejected"]');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutErrorBanner);
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+    expect(alertEl?.className).toContain('warning-tint');
+    expect(alertEl?.className).not.toContain('destructive-tint');
   });
 
-  it('checkout=fail(Toss 위젯 인증 실패/취소) → 위젯 실패 배너를 보이고 completeCheckout은 호출하지 않는다', async () => {
-    searchParams = new URLSearchParams({ checkout: 'fail', code: 'USER_CANCEL', message: '취소' });
+  it('⭐결제 확인 중엔 요금제 카드의 결제 · 변경 버튼이 잠긴다 · 결과가 나오면 풀린다(유나 · 두 번째 결제 0)', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams({ tab: 'billing', attempt: 'att-1' });
+      attemptResponses = [attemptResponse(attempt({ status: 'processing' })), attemptResponse(attempt({ status: 'succeeded' }))];
+      await mount(async () => statusResponse({ tier: 'free' }));
+      const upgradeButtons = () => [...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.pricingPlans.upgradeCta);
+      expect(upgradeButtons().length).toBeGreaterThan(0);
+      expect(upgradeButtons().every((b) => b.disabled)).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(container.querySelector('[data-payment-attempt-state="succeeded"]')).not.toBeNull();
+      expect(upgradeButtons().some((b) => !b.disabled)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐응답이 끊김(시간 초과) → «확인 중» · 결제 요청을 다시 보내지 않고 조회로 완료 확정', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams(RETURN);
+      completeCheckoutMock.mockResolvedValue({ kind: 'unreached' });
+      attemptResponses = [attemptResponse(attempt({ status: 'processing' })), attemptResponse(attempt({ status: 'succeeded' }))];
+      await mount(async () => statusResponse());
+
+      expect(container.querySelector('[data-payment-attempt-state="checking"]')?.textContent).toContain(koMessages.pricingPlans.paymentAttemptChecking);
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+      for (let i = 0; i < 2; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      }
+      expect(attemptFetchUrls).toEqual(['/api/billing/attempts/att-1', '/api/billing/attempts/att-1']);
+      expect(completeCheckoutMock).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toContain(koMessages.pricingPlans.checkoutSuccessBanner.replace('{tier}', 'Team'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐새로고침(attempt만 남은 URL) → 결제 요청 0 · 조회로 같은 시도 결과(카드 인증부터 다시)', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams({ tab: 'billing', attempt: 'att-1' });
+      attemptResponses = [attemptResponse(attempt({ status: 'failed', reauth_required: true }))];
+      await mount(async () => statusResponse());
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+      expect(completeCheckoutMock).not.toHaveBeenCalled();
+      const alertEl = container.querySelector('[data-payment-attempt-state="reauth"]');
+      expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptReauthRequired);
+      expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDialogConfirm);
+      expect(alertEl?.className).toContain('warning-tint');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐재진입(파라미터 없음) → 기억해 둔 진행 중 시도를 조회로 보여줌 · 실패면 «청구된 금액은 없어요» + 다시 시도', async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem('sprintable.billing.paymentAttempt', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
+      attemptResponses = [attemptResponse(attempt({ status: 'failed', kind: 'change_tier' }))];
+      await mount(async () => statusResponse({ tier: 'starter' }));
+      expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing&attempt=att-9');
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+      expect(attemptFetchUrls).toEqual(['/api/billing/attempts/att-9']);
+      const alertEl = container.querySelector('[data-payment-attempt-state="failed"]');
+      expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptFailed);
+      expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+      expect(alertEl?.textContent).toContain(koMessages.common.retry);
+      expect(window.localStorage.getItem('sprintable.billing.paymentAttempt')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('확인이 길어지면(20초) 한 줄 더 — 창을 닫아도 된다는 안내', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams({ tab: 'billing', attempt: 'att-1' });
+      await mount(async () => statusResponse());
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      expect(container.textContent).toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('checkout=fail(Toss 위젯 인증 실패/취소) → 위젯 실패 배너를 보이고 결제 요청은 하지 않는다', async () => {
+    searchParams = new URLSearchParams({ checkout: 'fail', code: 'USER_CANCEL', message: '취소', attempt: 'att-1' });
     await mount(async () => statusResponse());
 
     expect(container.textContent).toContain(koMessages.pricingPlans.checkoutWidgetFailedBanner);
@@ -283,18 +404,22 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)',
     expect(replaceMock).toHaveBeenCalledWith('/settings?tab=billing');
   });
 
-  it('checkout=success인데 authKey가 없으면(위젯 계약 위반) 위젯 실패 배너로 안전하게 폴백한다', async () => {
-    searchParams = new URLSearchParams({ checkout: 'success', tier: 'team', cycle: 'monthly' });
-    await mount(async () => statusResponse());
-
-    expect(container.textContent).toContain(koMessages.pricingPlans.checkoutWidgetFailedBanner);
+  it('checkout=success인데 authKey나 attempt가 없으면(위젯 계약 위반) 위젯 실패 배너로 안전하게 폴백한다', async () => {
+    for (const missing of ['authKey', 'attempt']) {
+      const params = new URLSearchParams(RETURN);
+      params.delete(missing);
+      searchParams = params;
+      await mount(async () => statusResponse());
+      expect(container.textContent).toContain(koMessages.pricingPlans.checkoutWidgetFailedBanner);
+    }
     expect(completeCheckoutMock).not.toHaveBeenCalled();
   });
 
-  it('checkout 쿼리가 없으면 아무 배너도 안 뜨고 completeCheckout도 안 부른다', async () => {
+  it('checkout 쿼리 · 기억한 시도가 없으면 아무 배너도 안 뜨고 결제 요청 · 조회도 안 한다', async () => {
     await mount(async () => statusResponse());
     expect(completeCheckoutMock).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutSuccessBanner.replace('{tier}', 'Team'));
+    expect(attemptFetchUrls).toEqual([]);
+    expect(container.querySelector('[data-payment-attempt-state]')).toBeNull();
   });
 });
 

@@ -525,6 +525,16 @@ async def test_charge_org_duplicated_order_id_not_done_marks_failed(monkeypatch)
 
 
 # ─── story #3209 PR-2 — _confirm_with_ledger의 결제 완료 메일 배선 ──────────
+# story #4335 AC2 — 메일은 결제 확정 경로가 기다리지 않는 떼어 낸 작업이 자기 세션으로 보낸다.
+_FAKE_EMAIL_SESSION = object()
+
+
+class _FakeSessionFactory:
+    async def __aenter__(self):
+        return _FAKE_EMAIL_SESSION
+
+    async def __aexit__(self, *exc):
+        return False
 
 def _rowcount_result(rowcount: int, refetch_row=None) -> MagicMock:
     """update() 실행 결과 mock — rowcount만 쓴다(_claimed_result와 동형, 이름만 이 파일
@@ -550,14 +560,17 @@ async def test_confirm_with_ledger_sends_receipt_email_on_first_confirmation(mon
     send_mock = AsyncMock()
     monkeypatch.setattr(email_svc, "send_payment_receipt_email", send_mock)
 
+    monkeypatch.setattr(svc, "_receipt_session_factory", lambda: _FakeSessionFactory)
+
     result = await svc._confirm_with_ledger(
         session, org_id=org_id, order_id="ord-1", amount_minor=49000, currency="krw",
         payment_key="pay_1", receipt_url="https://dashboard.tosspayments.com/receipt/abc",
     )
+    await svc.drain_receipt_emails()  # story #4335 AC2 — 메일은 떼어 낸 작업(자기 세션)
 
     assert result is confirmed_row
     send_mock.assert_awaited_once_with(
-        session, org_id=org_id, receipt_url="https://dashboard.tosspayments.com/receipt/abc",
+        _FAKE_EMAIL_SESSION, org_id=org_id, receipt_url="https://dashboard.tosspayments.com/receipt/abc",
         amount_minor=49000, currency="krw",
     )
 
@@ -578,10 +591,13 @@ async def test_confirm_with_ledger_skips_email_on_idempotent_reentry(monkeypatch
     send_mock = AsyncMock()
     monkeypatch.setattr(email_svc, "send_payment_receipt_email", send_mock)
 
+    monkeypatch.setattr(svc, "_receipt_session_factory", lambda: _FakeSessionFactory)
+
     result = await svc._confirm_with_ledger(
         session, org_id=org_id, order_id="ord-2", amount_minor=49000, currency="krw",
         payment_key="pay_2", receipt_url="https://dashboard.tosspayments.com/receipt/xyz",
     )
+    await svc.drain_receipt_emails()
 
     assert result is already_confirmed_row
     send_mock.assert_not_awaited()
@@ -600,10 +616,12 @@ async def test_confirm_with_ledger_email_failure_does_not_break_confirmation(mon
 
     monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
     monkeypatch.setattr(email_svc, "send_payment_receipt_email", AsyncMock(side_effect=RuntimeError("smtp down")))
+    monkeypatch.setattr(svc, "_receipt_session_factory", lambda: _FakeSessionFactory)
 
     result = await svc._confirm_with_ledger(
         session, org_id=org_id, order_id="ord-3", amount_minor=49000, currency="krw",
         payment_key="pay_3", receipt_url="https://dashboard.tosspayments.com/receipt/qwe",
     )
+    await svc.drain_receipt_emails()  # 떼어 낸 작업의 예외도 새지 않는다
 
     assert result is confirmed_row  # 예외가 새지 않고, confirmed 결과가 그대로 반환된다.

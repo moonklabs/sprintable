@@ -269,7 +269,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 125→126. 가드가 신규 필드를 설계대로 잡은 것(파서 결함 아님, 이 assert만 stale).
     assert "GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY" in keys
     # story #4332 — DB_TIMING_LOG_ENABLED(요청 DB 몫 로그 한 줄 · dev만 켬) 신설로 126→127(가드가 신규 필드를 설계대로 잡음).
-    assert len(keys) == 127
+    # story #4335 AC4 — toss_test_charge_response_delay_seconds 1필드 신설(dev 라이브 검증용 «느린 Toss» · prod에선 무시)로
+    # 127→128. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "TOSS_TEST_CHARGE_RESPONSE_DELAY_SECONDS" in keys
+    assert len(keys) == 128
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():

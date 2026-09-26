@@ -30,7 +30,9 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { PricingPlanCard } from './pricing-plan-card';
 import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
-import { completeCheckout, startBillingAuth, type CheckoutOutcome } from './toss-checkout';
+import { completeCheckout, startBillingAuth } from './toss-checkout';
+import { newAttemptId, recallAttempt } from './payment-attempt';
+import { PaymentAttemptBanner, usePaymentAttempt } from './payment-attempt-status';
 import { PaymentMethodSection } from './payment-method-section';
 import { OrderHistorySection } from './order-history-section';
 import {
@@ -38,7 +40,6 @@ import {
   changeTier,
   reserveDowngrade,
   revokePendingChange,
-  type ChangeTierOutcome,
 } from './billing-actions';
 import {
   AUTOMATION_PACK,
@@ -93,8 +94,8 @@ export function BillingTab({ orgId }: { orgId: string }) {
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [upgradeTarget, setUpgradeTarget] = useState<TierId | null>(null);
   const [packTarget, setPackTarget] = useState<{ kind: PackKind; quantity: number } | null>(null);
-  const [checkoutProcessing, setCheckoutProcessing] = useState(false);
-  const [checkoutOutcome, setCheckoutOutcome] = useState<CheckoutOutcome | { kind: 'widgetFailed' } | null>(null);
+  // story #4335 — 결제(checkout · change-tier)는 시도 하나로: 처리 중 · 확인 중 · 결과를 조회로만 확정한다.
+  const [widgetFailed, setWidgetFailed] = useState(false);
   // story #2909② — 유료→유료 상향(change-tier)/하향 예약/취소 예약. 신규 결제(checkout,
   // 위 upgradeTarget)와 별개 진입점 — 셋 다 authKey/위젯 리다이렉트가 없다.
   const [changeTierTarget, setChangeTierTarget] = useState<Exclude<TierId, 'free'> | null>(null);
@@ -128,44 +129,63 @@ export function BillingTab({ orgId }: { orgId: string }) {
       .catch(() => setPlatformSettings({ billing_price_public: false, billing_checkout_enabled: false }));
   }, []);
 
+  const paymentAttempt = usePaymentAttempt({
+    onSettled: (attempt) => {
+      if (attempt.status === 'succeeded') refetchStatus();
+    },
+  });
+  // 결제 시도가 처리 중 · 확인 중이면 요금제 카드의 결제 · 변경 버튼을 잠근다(유나 · 두 번째 결제가 열리지 않게).
+  const paymentBusy = paymentAttempt.state != null && paymentAttempt.state.phase !== 'done';
+  const showAttemptInUrl = (attemptId: string) =>
+    router.replace(flatHref(`/settings?tab=billing&attempt=${encodeURIComponent(attemptId)}`));
+
   // 결제②-D(#2510) — Toss 위젯 리다이렉트 왕복 복귀 처리. successUrl/failUrl 둘 다
   // /settings?tab=billing 으로 돌아오므로 여기서 쿼리파라미터로 왕복 결과를 판별한다.
-  // 처리 後 즉시 쿼리를 지워 새로고침 시 같은 authKey로 이중 체크아웃되는 것을 막는다.
+  // story #4335 — 복귀 URL의 `attempt`(위젯 가기 전에 만든 시도 id)로 결제 시도를 시작하고, 요청이 끝나면(성공 · 끊김 무관)
+  // authKey를 URL에서 지우고 `attempt`만 남긴다 → 그 뒤 새로고침은 조회만. 요청 중 새로고침은 같은 시도 id로 다시 가서 새 결제 0.
+  // `attempt`만 있는 URL(새로고침)이나 기억해 둔 진행 중 시도(재진입)는 조회로 이어 보여준다.
   useEffect(() => {
     const checkoutParam = searchParams.get('checkout');
-    if (checkoutParam == null) return;
-
-    const clearQuery = () => router.replace(flatHref('/settings?tab=billing'));
+    const attemptParam = searchParams.get('attempt');
 
     if (checkoutParam === 'fail') {
-      setCheckoutOutcome({ kind: 'widgetFailed' });
-      clearQuery();
+      setWidgetFailed(true);
+      router.replace(flatHref('/settings?tab=billing'));
       return;
     }
-    if (checkoutParam !== 'success') return;
-
-    const authKey = searchParams.get('authKey');
-    const tier = searchParams.get('tier');
-    const billingCycleParam = searchParams.get('cycle');
-    if (!authKey || !tier || (billingCycleParam !== 'monthly' && billingCycleParam !== 'annual')) {
-      setCheckoutOutcome({ kind: 'widgetFailed' });
-      clearQuery();
-      return;
-    }
-
-    setCheckoutProcessing(true);
-    completeCheckout({ authKey, tier: tier as Exclude<TierId, 'free'>, billingCycle: billingCycleParam })
-      .then((outcome) => {
-        setCheckoutOutcome(outcome);
-        if (outcome.kind === 'active') refetchStatus();
-      })
-      .catch(() => setCheckoutOutcome({ kind: 'error', status: 0 }))
-      .finally(() => {
-        setCheckoutProcessing(false);
-        clearQuery();
+    if (checkoutParam === 'success') {
+      const authKey = searchParams.get('authKey');
+      const tier = searchParams.get('tier');
+      const billingCycleParam = searchParams.get('cycle');
+      if (!attemptParam || !authKey || !tier || (billingCycleParam !== 'monthly' && billingCycleParam !== 'annual')) {
+        setWidgetFailed(true);
+        router.replace(flatHref('/settings?tab=billing'));
+        return;
+      }
+      const request = completeCheckout({
+        attemptId: attemptParam, authKey, tier: tier as Exclude<TierId, 'free'>, billingCycle: billingCycleParam,
       });
+      paymentAttempt.start(attemptParam, 'checkout', request);
+      void request.finally(() => showAttemptInUrl(attemptParam));
+      return;
+    }
+    if (attemptParam) {
+      paymentAttempt.resume(attemptParam, recallAttempt()?.id === attemptParam ? recallAttempt()!.kind : 'checkout');
+      return;
+    }
+    const remembered = recallAttempt();
+    if (remembered) {
+      paymentAttempt.resume(remembered.id, remembered.kind);
+      showAttemptInUrl(remembered.id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const startTierChange = (tierId: Exclude<TierId, 'free'>) => {
+    const attemptId = newAttemptId();
+    paymentAttempt.start(attemptId, 'change_tier', changeTier(tierId, attemptId));
+    showAttemptInUrl(attemptId);
+  };
 
   if (loading) {
     return (
@@ -201,37 +221,22 @@ export function BillingTab({ orgId }: { orgId: string }) {
         </Alert>
       )}
 
-      {checkoutProcessing && (
-        <Alert variant="info">
-          <AlertDescription className="flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {t('checkoutProcessing')}
-          </AlertDescription>
-        </Alert>
+      {paymentAttempt.state && (
+        <PaymentAttemptBanner
+          state={paymentAttempt.state}
+          onRetry={({ kind, tier }) => {
+            paymentAttempt.dismiss();
+            if (kind === 'checkout') setUpgradeTarget(toTierId(tier));
+            else setChangeTierTarget(toTierId(tier) as Exclude<TierId, 'free'>);
+          }}
+          onReauth={({ tier, billingCycle }) => {
+            startBillingAuth({
+              tier: toTierId(tier) as Exclude<TierId, 'free'>, cycle: billingCycle === 'annual' ? 'yearly' : 'monthly',
+            }).catch(() => setWidgetFailed(true));
+          }}
+        />
       )}
-
-      {!checkoutProcessing && checkoutOutcome?.kind === 'active' && (
-        <Alert variant="success">
-          <AlertDescription>{t('checkoutSuccessBanner', { tier: t(`tierName_${checkoutOutcome.result.tier}`) })}</AlertDescription>
-        </Alert>
-      )}
-      {!checkoutProcessing && checkoutOutcome?.kind === 'declined' && (
-        // 유나 design 가디언(2026-08-07) — declined(카드거절)는 502 등 시스템오류와 색으로
-        // 구분돼야 한다(내 카드 문제 vs 서비스 문제). destructive(red)가 아니라 warning.
-        <Alert variant="warning">
-          <AlertDescription>
-            {t('checkoutDeclinedBanner', { reason: checkoutOutcome.result.declined_reason ?? '' })}
-            {' '}
-            {t('checkoutDeclinedReassurance')}
-          </AlertDescription>
-        </Alert>
-      )}
-      {!checkoutProcessing && checkoutOutcome?.kind === 'error' && (
-        <Alert variant="destructive">
-          <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
-        </Alert>
-      )}
-      {!checkoutProcessing && checkoutOutcome?.kind === 'widgetFailed' && (
+      {widgetFailed && (
         <Alert variant="destructive">
           <AlertDescription>{t('checkoutWidgetFailedBanner')}</AlertDescription>
         </Alert>
@@ -266,8 +271,9 @@ export function BillingTab({ orgId }: { orgId: string }) {
               displayPriceMonthlyKrw={displayPriceMonthlyKrw}
               pendingTier={pendingTierId}
               pendingChangeApplyAt={status?.pending_change_apply_at ?? null}
+              paymentBusy={paymentBusy}
               onUpgrade={(target) => {
-                if (!canManage || !checkoutEnabled || target === 'free') return;
+                if (!canManage || !checkoutEnabled || paymentBusy || target === 'free') return;
                 // story #2909② P0 — currentTier가 이미 유료면 checkout(신규 결제)이 아니라
                 // change-tier(기존 billing_key로 즉시 전액+잔여 부분취소)를 타야 한다.
                 // checkout은 BE가 이제 활성 유료 org 재진입을 400으로 거부한다(#2909①).
@@ -278,7 +284,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
                 }
               }}
               onDowngrade={(target) => {
-                if (!canManage || !checkoutEnabled || target === 'free') return;
+                if (!canManage || !checkoutEnabled || paymentBusy || target === 'free') return;
                 setDowngradeTarget(target as Exclude<TierId, 'free'>);
               }}
               onCancel={() => canManage && checkoutEnabled && setCancelDialogOpen(true)}
@@ -314,7 +320,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
       <ChangeTierConfirmDialog
         tierId={changeTierTarget}
         onClose={() => setChangeTierTarget(null)}
-        onDone={() => refetchStatus()}
+        onConfirm={startTierChange}
       />
       <DowngradeConfirmDialog
         tierId={downgradeTarget}
@@ -433,40 +439,25 @@ export function UpgradeCheckoutDialog({
 function ChangeTierConfirmDialog({
   tierId,
   onClose,
-  onDone,
+  onConfirm,
 }: {
   tierId: Exclude<TierId, 'free'> | null;
   onClose: () => void;
-  onDone: () => void;
+  /** story #4335 — 결제 시도를 시작하고(화면 위 배너가 처리 중 · 확인 중 · 결과를 보여줌) 창은 바로 닫힌다. */
+  onConfirm: (tierId: Exclude<TierId, 'free'>) => void;
 }) {
   const t = useTranslations('pricingPlans');
-  const [submitting, setSubmitting] = useState(false);
-  const [outcome, setOutcome] = useState<ChangeTierOutcome | null>(null);
   if (tierId == null) return null;
   const tier = TIER_DEFINITIONS[tierId];
   const chargeKrw = withVatKrw(tier.priceMonthlyKrw);
 
   const handleConfirm = () => {
-    if (submitting) return;
-    setSubmitting(true);
-    setOutcome(null);
-    changeTier(tierId)
-      .then((result) => {
-        setOutcome(result);
-        setSubmitting(false);
-        if (result.kind === 'active') {
-          onDone();
-          onClose();
-        }
-      })
-      .catch(() => {
-        setOutcome({ kind: 'error', status: 0 });
-        setSubmitting(false);
-      });
+    onConfirm(tierId);
+    onClose();
   };
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !submitting && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('changeTierDialogTitle', { tier: t(`tierName_${tierId}`) })}</DialogTitle>
@@ -482,27 +473,15 @@ function ChangeTierConfirmDialog({
             <dd className="font-semibold">{t('changeTierDialogRefundValue')}</dd>
           </div>
         </dl>
-        {outcome?.kind === 'declined' && (
-          <Alert variant="warning">
-            <AlertDescription>{t('checkoutDeclinedBanner', { reason: outcome.result.declined_reason ?? '' })}</AlertDescription>
-          </Alert>
-        )}
-        {outcome?.kind === 'error' && (
-          <Alert variant="destructive">
-            <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
-          </Alert>
-        )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={submitting}>
+          <Button variant="outline" onClick={onClose}>
             {t('checkoutDialogCancel')}
           </Button>
           <Button
             variant="default"
             className="bg-brand text-brand-foreground hover:bg-brand/90"
             onClick={handleConfirm}
-            disabled={submitting}
           >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" /> : null}
             {t('changeTierDialogConfirm')}
           </Button>
         </DialogFooter>

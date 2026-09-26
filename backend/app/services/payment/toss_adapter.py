@@ -10,6 +10,7 @@ cancel/verify_webhook)는 후속 스토리(C2~C4) 대상으로 `NotImplementedEr
 토큰)를 발급받는다."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -185,7 +186,7 @@ class TossAdapter(PaymentProvider):
         confirm 못 받고 영구 pending). 호출부(billing_charge_amount.py)에서도 고쳤지만,
         이 어댑터가 PG로 나가는 «최종 경계»이므로 여기서도 한 번 더 강제 변환한다 —
         미래의 다른 호출부가 같은 계약을 또 어겨도 이 함수를 지나는 순간 사고가 죽는다."""
-        return await self._post(
+        result = await self._post(
             f"/v1/billing/{billing_key}",
             json={
                 "customerKey": customer_key,
@@ -196,6 +197,11 @@ class TossAdapter(PaymentProvider):
             timeout=65,  # Toss 문서: 최대 60초 소요 가능 — 여유 5초.
             op_label="charge",
         )
+        # story #4335 AC4 — dev 전용 지연 주입(청구는 이미 끝났고 응답만 늦다). prod에선 설정값과 무관하게 0.
+        if not settings.is_prod_deploy and (delay := settings.toss_test_charge_response_delay_seconds) > 0:
+            logger.warning("Toss charge response delayed %.0fs for live verification (non-prod only)", delay)
+            await asyncio.sleep(delay)
+        return result
 
     async def get_payment_by_order_id(self, *, order_id: str, quiet_codes: frozenset[str] = frozenset()) -> dict:
         """GET /v1/payments/orders/{orderId} — PaymentProvider 8메서드 밖의 보조 조회

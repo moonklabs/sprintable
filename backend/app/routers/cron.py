@@ -1134,8 +1134,12 @@ async def toss_billing_maintenance(
             sweep_stale_pending_orders,
             trigger_due_charges,
         )
+        from app.services.billing_payment_attempt import sweep_processing_attempts
         from app.services.org_subscription_downgrade import sweep_pending_tier_downgrades
 
+        # story #4335 — 아무도 조회하지 않은 결제 시도(checkout · change-tier)를 먼저 대사해 권리 전이까지 끝낸다(그 order는
+        # 아래 pending 대사도 다시 볼 수 있지만, 시도 쪽이 구독 전이 · 슬롯 해제까지 한 번에 한다).
+        attempt_sweep_result = await sweep_processing_attempts(session)
         renewal_result = await trigger_due_charges(session)
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
@@ -1149,7 +1153,7 @@ async def toss_billing_maintenance(
         return _ok({
             "renewal": renewal_result, "dunning": dunning_result,
             "reconciliation": reconciliation_result, "grant_sweep": grant_sweep_result,
-            "downgrade_sweep": downgrade_sweep_result,
+            "downgrade_sweep": downgrade_sweep_result, "attempt_sweep": attempt_sweep_result,
         })
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)

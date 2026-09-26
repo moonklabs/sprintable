@@ -61,9 +61,9 @@ describe('긴 라우트 표(bff-route-timeouts · 까디르 QA ①②)', () => {
       expect(r.syncImpossible, key).toBe(r.backendWorstMs === null || r.backendWorstMs >= BFF_CEILING_MS);
       expect(r.basis.length, `${key} 근거(백엔드 파일:줄)`).toBeGreaterThan(10);
     }
-    // 동기로 못 기다리는 줄 — 후속 카드(결제: 주문번호 조회 · 제공자 긴 작업: 비동기화).
+    // 동기로 못 기다리는 줄 — 후속 카드(제공자 긴 작업: 비동기화). 결제는 story #4335(시도 + 조회)로 이 목록에서 빠졌다.
     expect(Object.entries(LONG_ROUTES).filter(([, r]) => r.syncImpossible).map(([k]) => k).sort()).toEqual(
-      ['attachmentConvert', 'billingChangeTier', 'billingCheckout', 'channelAssetConfirm', 'channelDraftSubmit', 'channelPublishNow', 'gateTransition', 'loopContextPack'],
+      ['attachmentConvert', 'channelAssetConfirm', 'channelDraftSubmit', 'channelPublishNow', 'gateTransition', 'loopContextPack'],
     );
   });
 
@@ -74,15 +74,25 @@ describe('긴 라우트 표(bff-route-timeouts · 까디르 QA ①②)', () => {
   });
 });
 
-describe('결제 경로 — 30초 넘게 걸리는 백엔드를 끝까지 기다린다(까디르 QA ① P1)', () => {
-  it('⭐백엔드가 31초 뒤에 답하면 성공(예전 기본 30초면 503 — 이중 결제 위험)', async () => {
-    backendRepliesAfter(31_000, { data: { subscription_id: 'sub-1' } });
-    const { POST } = await import('@/app/api/billing/checkout/route');
-    const pending = POST(authed('/api/billing/checkout'));
-    await vi.advanceTimersByTimeAsync(31_000);
-    const res = await pending;
-    expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+describe('결제 경로 — 시작은 곧바로 · 결과는 시도 조회(story #4335 · 예전 까디르 QA ① P1)', () => {
+  it('⭐결제 시작 · 시도 조회의 BFF 시한은 표 값 — 그 안에 답하면 성공 · 넘으면 503 봉투(결제 결과는 시도 조회가 확정)', async () => {
+    for (const [route, key, call] of [
+      ['@/app/api/billing/checkout/route', 'billingCheckout', (m: { POST: (r: Request) => Promise<Response> }) => m.POST(authed('/api/billing/checkout'))],
+      ['@/app/api/billing/attempts/[id]/route', 'billingAttemptStatus', (m: { GET: (r: Request, c: { params: Promise<{ id: string }> }) => Promise<Response> }) => m.GET(authed('/api/billing/attempts/a-1', { method: 'GET', body: undefined }), { params: Promise.resolve({ id: 'a-1' }) })],
+    ] as const) {
+      const limit = LONG_ROUTES[key].bffMs;
+      backendRepliesAfter(limit - 1_000, { data: { attempt_id: 'a-1', status: 'processing' } });
+      const mod = await import(route);
+      let pending = (call as (m: unknown) => Promise<Response>)(mod);
+      await vi.advanceTimersByTimeAsync(limit - 1_000);
+      expect((await pending).status, key).toBe(200);
+
+      backendRepliesAfter(limit + 1_000);
+      pending = (call as (m: unknown) => Promise<Response>)(mod);
+      await vi.advanceTimersByTimeAsync(limit);
+      const res = await pending;
+      expect([res.status, (await res.json()).error.code], key).toEqual([503, 'UPSTREAM_TIMEOUT']);
+    }
   });
 });
 

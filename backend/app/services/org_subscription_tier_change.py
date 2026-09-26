@@ -100,7 +100,7 @@ async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> Org
     ).scalar_one()
 
 
-async def _latest_confirmed_subscription_order(session: AsyncSession, org_id: uuid.UUID) -> BillingOrder | None:
+async def latest_confirmed_subscription_order(session: AsyncSession, org_id: uuid.UUID) -> BillingOrder | None:
     """⛔카디르 CRITICAL(2026-08-21, PR#3306 리뷰) — 이전 버전은 org_id+status='confirmed'
     로만 걸러 pack 구매 order를 «직전 구독 결제»로 오인했다(billing_pack.py도 같은
     billing_orders 테이블에 confirmed row를 남긴다 — 실PG 2시나리오 재현 확定: pack금액<
@@ -118,7 +118,10 @@ async def _latest_confirmed_subscription_order(session: AsyncSession, org_id: uu
     ).scalar_one_or_none()
 
 
-async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str) -> OrgSubscription:
+async def validate_change_tier(
+    session: AsyncSession, *, org_id: uuid.UUID, new_tier: str,
+) -> tuple[OrgSubscription, OfferingVersion, OfferingVersion]:
+    """상향 진입 가드(Toss · 쓰기 0) → (지금 구독, 옛 offering, 새 offering). `change_tier` · 결제 시도(story #4335) 공용."""
     if new_tier not in PAID_TIERS:
         raise TierChangeError(f"new_tier={new_tier!r}는 유료 티어만(starter/team/business)")
 
@@ -167,11 +170,12 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
             f"new_offering.monthly_price_minor({new_offering.monthly_price_minor}) <= "
             f"old_offering.monthly_price_minor({old_offering.monthly_price_minor}) — 상향 아님"
         )
+    return sub, old_offering, new_offering
 
-    # ⓐ claim — checkout_subscription()과 동형(같은 필드, 같은 WHERE 가드 — org당 진행 中
-    # 결제 작업 슬롯은 하나). rowcount==0이면 이미 다른 checkout/change-tier가 이 org를
-    # 쥐고 있다는 뜻(이중 클릭·동시 호출 모두 여기서 막힌다).
-    now = datetime.now(timezone.utc)
+
+async def claim_tier_change_slot(session: AsyncSession, *, org_id: uuid.UUID, now: datetime, commit: bool = True) -> bool:
+    """ⓐ claim — checkout과 같은 필드 · 같은 WHERE 가드(org당 진행 中 결제 작업 슬롯은 하나). True = 이 호출이 쥠.
+    False면 이미 다른 checkout/change-tier가 이 org를 쥐고 있다(이중 클릭 · 동시 호출 모두 여기서 막힌다)."""
     claim_result = await session.execute(
         update(OrgSubscription)
         .where(
@@ -183,8 +187,67 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
         )
         .values(checkout_claimed_at=now)
     )
-    await session.commit()
-    if claim_result.rowcount == 0:
+    if commit:
+        await session.commit()
+    return claim_result.rowcount == 1
+
+
+async def apply_tier_change(
+    session: AsyncSession, *, org_id: uuid.UUID, claim_value: datetime, new_tier: str, new_offering_id: uuid.UUID,
+) -> int:
+    """④권리 — 신 전액 confirmed 뒤 tier · offering · period 리셋(과금일 = claim 시각). claim 값 CAS · 커밋은 호출자."""
+    new_period_start, new_period_end = new_subscription_period(now=claim_value, billing_cycle="monthly")
+    result = await session.execute(
+        update(OrgSubscription)
+        .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == claim_value)
+        .values(
+            tier=new_tier, offering_version_id=new_offering_id,
+            current_period_start=new_period_start, current_period_end=new_period_end,
+        )
+    )
+    return result.rowcount
+
+
+async def refund_old_remainder(
+    session: AsyncSession, *, org_id: uuid.UUID, old_offering: OfferingVersion,
+    old_period_start: datetime, old_period_end: datetime, refund_target: BillingOrder | None,
+    from_tier: str, to_tier: str, now: datetime,
+) -> None:
+    """②③ 구 tier 잔여분 부분취소. refund_target이 없으면(예: 최초 체크아웃
+    직후 잔여 팩분 정산 등 예외 상태) 부분취소할 대상 자체가 없다는 뜻 — charge는
+    이미 confirmed로 완결됐으니 여기서 실패로 되돌리지 않고 조용히 skip(로그만)."""
+    if refund_target is None:
+        logger.warning(
+            "tier change org_id=%s: no prior confirmed billing_order to partially refund "
+            "(charge already confirmed, tier/period already advanced — skipping refund step)",
+            org_id,
+        )
+        return
+    # story #3097(선생님 결정 2026-08-26) — refund_target.amount_minor는
+    # 원래 청구 시점에 이미 VAT 가산된 값이다(compute_full_charge_for_new_offering
+    # 경로가 이 fix로 그렇게 청구한다) — 부분취소도 그 실제로 걷은 금액 기준으로
+    # 일할해야 한다. raw monthly_price_minor(공급가)로 그대로 일할하면 환불액이
+    # VAT분만큼 과소산정된다(실 청구액보다 덜 돌려줌).
+    settings = await get_platform_settings(session)
+    taxed_old_monthly = apply_vat_minor(old_offering.monthly_price_minor, settings.vat_rate_bp)
+    refund_amount = prorate_minor(
+        taxed_old_monthly, now=now,
+        period_start=old_period_start, period_end=old_period_end,
+    )
+    if refund_amount > 0:
+        await _attempt_partial_refund(
+            session, org_id=org_id, order=refund_target, refund_amount=refund_amount,
+            from_tier=from_tier, to_tier=to_tier,
+        )
+
+
+async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str) -> OrgSubscription:
+    """동기 한 번에 끝까지(claim → 신 전액 청구 → tier · period 리셋 → 옛 결제 부분취소). 웹 요청 경로는 story #4335부터
+    결제 시도(`billing_payment_attempt`)를 쓴다 — 이 함수는 같은 단계 함수를 한 호출 안에서 잇는 판(테스트 · 내부 호출)."""
+    sub, old_offering, new_offering = await validate_change_tier(session, org_id=org_id, new_tier=new_tier)
+
+    now = datetime.now(timezone.utc)
+    if not await claim_tier_change_slot(session, org_id=org_id, now=now):
         raise TierChangeInProgress(f"org_id={org_id}에 다른 결제 작업이 이미 진행 중 — 완료 후 재시도")
 
     try:
@@ -194,7 +257,7 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
         # 넣는다. claim이 이 시점부터 이 org의 결제 작업을 배타적으로 쥐므로, 이 조회와
         # 아래 charge_org 사이에 다른 호출이 새 order를 confirmed로 만들 여지가 없다
         # (레이스 없음 — 스냅샷 의미는 그대로).
-        old_confirmed_order = await _latest_confirmed_subscription_order(session, org_id)
+        old_confirmed_order = await latest_confirmed_subscription_order(session, org_id)
 
         try:
             amount_minor, currency = await compute_full_charge_for_new_offering(
@@ -210,8 +273,8 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
             # 불요(이건 실제로 청구되는 돈이라 "charge" 분류가 맞다).
             order = await charge_org(
                 session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
-                currency=currency, order_name=f"Sprintable {sub.tier}→{new_tier} 상향",
-                ledger_metadata={"kind": "tier_change", "from_tier": sub.tier, "to_tier": new_tier},
+                currency=currency, order_name=tier_change_order_name(sub.tier, new_tier),
+                ledger_metadata=tier_change_ledger_metadata(sub.tier, new_tier),
             )
         except TossApiError as exc:
             refreshed = await _refetch_subscription(session, org_id)
@@ -222,45 +285,17 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
         if order.status != "confirmed":
             return await _refetch_subscription(session, org_id)
 
-        old_period_start, old_period_end = sub.current_period_start, sub.current_period_end
-        new_period_start, new_period_end = new_subscription_period(now=now, billing_cycle="monthly")
-        await session.execute(
-            update(OrgSubscription)
-            .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == now)
-            .values(
-                tier=new_tier, offering_version_id=new_offering.id,
-                current_period_start=new_period_start, current_period_end=new_period_end,
-            )
+        old_period_start, old_period_end, from_tier = sub.current_period_start, sub.current_period_end, sub.tier
+        await apply_tier_change(
+            session, org_id=org_id, claim_value=now, new_tier=new_tier, new_offering_id=new_offering.id,
         )
         await session.commit()
 
-        # ②③ 구 tier 잔여분 부분취소. old_confirmed_order가 없으면(예: 최초 체크아웃
-        # 직후 잔여 팩분 정산 등 예외 상태) 부분취소할 대상 자체가 없다는 뜻 — charge는
-        # 이미 confirmed로 완결됐으니 여기서 실패로 되돌리지 않고 조용히 skip(로그만).
-        if old_confirmed_order is not None:
-            # story #3097(선생님 결정 2026-08-26) — old_confirmed_order.amount_minor는
-            # 원래 청구 시점에 이미 VAT 가산된 값이다(compute_full_charge_for_new_offering
-            # 경로가 이 fix로 그렇게 청구한다) — 부분취소도 그 실제로 걷은 금액 기준으로
-            # 일할해야 한다. raw monthly_price_minor(공급가)로 그대로 일할하면 환불액이
-            # VAT분만큼 과소산정된다(실 청구액보다 덜 돌려줌).
-            settings = await get_platform_settings(session)
-            taxed_old_monthly = apply_vat_minor(old_offering.monthly_price_minor, settings.vat_rate_bp)
-            refund_amount = prorate_minor(
-                taxed_old_monthly, now=now,
-                period_start=old_period_start, period_end=old_period_end,
-            )
-            if refund_amount > 0:
-                await _attempt_partial_refund(
-                    session, org_id=org_id, order=old_confirmed_order, refund_amount=refund_amount,
-                    from_tier=sub.tier, to_tier=new_tier,
-                )
-        else:
-            logger.warning(
-                "tier change org_id=%s: no prior confirmed billing_order to partially refund "
-                "(charge already confirmed, tier/period already advanced — skipping refund step)",
-                org_id,
-            )
-
+        await refund_old_remainder(
+            session, org_id=org_id, old_offering=old_offering,
+            old_period_start=old_period_start, old_period_end=old_period_end,
+            refund_target=old_confirmed_order, from_tier=from_tier, to_tier=new_tier, now=now,
+        )
         return await _refetch_subscription(session, org_id)
     finally:
         await session.execute(
@@ -269,6 +304,15 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
             .values(checkout_claimed_at=None)
         )
         await session.commit()
+
+
+def tier_change_order_name(from_tier: str, to_tier: str) -> str:
+    """Toss 주문명(영수증에 보임) — 동기 경로 · 결제 시도(story #4335) 공용."""
+    return f"Sprintable {from_tier}→{to_tier} 상향"
+
+
+def tier_change_ledger_metadata(from_tier: str, to_tier: str) -> dict:
+    return {"kind": "tier_change", "from_tier": from_tier, "to_tier": to_tier}
 
 
 async def _attempt_partial_refund(

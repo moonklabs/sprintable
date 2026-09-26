@@ -343,6 +343,9 @@ class Settings(BaseSettings):
     # 확認 전까지 미배선 — 값이 비어 있으면 PolarAdapter의 "토큰 없으면 mock" 분기와 동형으로 TossAdapter
     # 도 fail-safe해야 한다(C1 구현 시 준수).
     toss_payments_secret_key: str = ""
+    # story #4335 AC4 — dev 라이브 검증용 «느린 Toss»: 청구가 Toss에서 끝난 뒤 응답을 이만큼 늦게 돌려받는다(응답 뒤 작업이 결론을
+    # 늦게 내는 판 → 조회 대사가 order_id로 완료를 확정하는지 본다). 기본 0(끔) · prod 배포에선 값과 무관하게 무시.
+    toss_test_charge_response_delay_seconds: float = 0.0
     toss_payments_client_key: str = ""
     toss_payments_crypto_key: str = ""
     toss_merchant_id: str = "bill_sprint1d9"  # 비민감 — Secret Manager 대상 아님(PO 확認)

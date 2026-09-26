@@ -45,10 +45,13 @@ function route(backendWorstMs: number | null, basis: string): LongRoute {
 }
 
 export const LONG_ROUTES = {
-  /** 결제 시작 — 빌링키 발급 15 + 옛 키 삭제 15 + 청구 65 + 중복 주문 조회 15 + 영수 메일(청구 안에서 await). */
-  billingCheckout: route(110_000, 'toss_adapter.py:152(발급 15) · :142(삭제 15) · :196(청구 65) · :213(조회 15) · billing_charge.py:93(영수 메일 await) · org_subscription_checkout.py:199,206'),
-  /** 요금제 변경 — 청구 65 (+ 중복 조회 15) + 부분 환불 15 + 영수 메일. */
-  billingChangeTier: route(95_000, 'toss_adapter.py:196(청구 65) · :213(조회 15) · :258(환불 15) · org_subscription_tier_change.py:211,253,283'),
+  /** 결제 시작(story #4335) — 결제 시도를 만들고 곧바로 답한다: 검증 · 슬롯 claim(DB) + 멈춘 이전 시도가 있으면 대사(Toss 조회 15).
+   * 빌링키 발급 · 청구 · 영수 메일은 응답 뒤 작업 — 결과는 시도 조회(billingAttemptStatus). */
+  billingCheckout: route(15_000, 'billing_payment_attempt.py start_checkout_attempt → _settle_other_processing → reconcile_attempt → toss_adapter.py:213(조회 15) · 청구는 run_attempt(응답 뒤)'),
+  /** 요금제 변경 시작(story #4335) — checkout과 같다(청구 · 부분 환불은 응답 뒤 작업). */
+  billingChangeTier: route(15_000, 'billing_payment_attempt.py start_change_tier_attempt → _settle_other_processing → toss_adapter.py:213(조회 15) · 청구는 run_attempt(응답 뒤)'),
+  /** 결제 시도 조회(story #4335) — 멈춘 시도면 이어받아 결론: Toss 조회 15 + change-tier 확정이면 옛 결제 부분 환불 15. */
+  billingAttemptStatus: route(30_000, 'billing_payment_attempt.py reconcile_attempt → toss_adapter.py:213(조회 15) · _finalize → refund_old_remainder → :258(환불 15)'),
   /** 채널 즉시 발행 — 텍스트 4 × 20 = 80초 · X 스레드 최대 10조각 × 2 × 20 ≈ 400초 · YouTube 큰 영상 상한 없음. */
   channelPublishNow: route(null, 'channel_posts.py:1887(provider_client 20 · 4단계 = 80) · :2998 · channel_adapters.py:564(X 스레드 ≤10) · youtube_publish.py ~:143-158(상한 없음)'),
   /** 초안 제출 — 레시피 게이트가 자동 충족되면 그 자리에서 발행(channelPublishNow와 같은 경로). */

@@ -1,0 +1,74 @@
+"""story #4335 — 결제 시도(checkout · change-tier) 한 번 = 행 하나. 요청은 시도를 만들고 곧바로 돌려주고, 결과는 이 행으로 확정한다.
+
+- `id`: 브라우저가 만든 UUID(멱등 키) — 같은 id로 다시 오면 새 작업 없이 이 행의 상태를 돌려준다(새로고침 · 끊긴 뒤 재요청).
+- `order_id`: 시도에서 정한 Toss orderId(행을 만들 때 적음) — 같은 시도 = 같은 orderId라 Toss 멱등 · `billing_orders` claim 둘 다로 청구 1.
+- `stage`: received → key_issued(checkout만) → charge_started → charged. `charge_started`는 Toss 청구 호출 **직전**에 커밋하는
+  영속 표식(0408 `provider_call_started_at`과 같은 규율) — 이 단계 전에 멈춘 시도는 «청구 0»이 행으로 증명된다.
+- `lease_token` · `lease_expires_at`: 이 시도를 지금 모는 쪽(응답 뒤 작업 · 조회 대사). 청구 직전 울타리와 확정 전이가 이 토큰을 확인한다.
+- `claim_value`: 이 시도가 쥔 `org_subscriptions.checkout_claimed_at` 값(org당 결제 작업 슬롯 하나 — 해제는 이 값 CAS).
+- change-tier 재료 `new_offering_id` · `refund_target_order_id`: 요청 시점에 고정(나중에 누가 확정해도 같은 값으로).
+
+부분 인덱스 `ix_billing_payment_attempts_processing` — 조회 대사 · 쓸기가 진행 중 행만 본다.
+
+번호: 착지 순 사다리 — develop 머리 0409 위. 열린 PR 중 마이그 있는 것 0(2026-09-26 01:3xZ 전수 확인).
+
+Revision ID: 0410
+Revises: 0409
+"""
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+from alembic import op
+
+revision = "0410"
+down_revision = "0409"
+branch_labels = None
+depends_on = None
+
+_TABLE = "billing_payment_attempts"
+_PROCESSING_INDEX = "ix_billing_payment_attempts_processing"
+
+
+def upgrade() -> None:
+    op.create_table(
+        _TABLE,
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("org_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("requested_by", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("kind", sa.Text(), nullable=False),
+        sa.Column("tier", sa.Text(), nullable=False),
+        sa.Column("billing_cycle", sa.Text(), nullable=True),
+        sa.Column("status", sa.Text(), nullable=False, server_default="processing"),
+        sa.Column("stage", sa.Text(), nullable=False, server_default="received"),
+        sa.Column("order_id", sa.Text(), nullable=False),
+        sa.Column("lease_token", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("charge_started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("claim_value", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("new_offering_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("refund_target_order_id", sa.Text(), nullable=True),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("reauth_required", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.CheckConstraint("kind IN ('checkout', 'change_tier')", name="ck_billing_payment_attempts_kind"),
+        sa.CheckConstraint(
+            "status IN ('processing', 'succeeded', 'declined', 'failed')", name="ck_billing_payment_attempts_status",
+        ),
+        sa.CheckConstraint(
+            "stage IN ('received', 'key_issued', 'charge_started', 'charged')", name="ck_billing_payment_attempts_stage",
+        ),
+        sa.UniqueConstraint("order_id", name="uq_billing_payment_attempts_order_id"),
+    )
+    op.create_index("ix_billing_payment_attempts_org_id", _TABLE, ["org_id"])
+    op.create_index(
+        _PROCESSING_INDEX, _TABLE, ["org_id", "lease_expires_at"], unique=False,
+        postgresql_where=sa.text("status = 'processing'"),
+    )
+
+
+def downgrade() -> None:
+    op.drop_index(_PROCESSING_INDEX, table_name=_TABLE)
+    op.drop_index("ix_billing_payment_attempts_org_id", table_name=_TABLE)
+    op.drop_table(_TABLE)

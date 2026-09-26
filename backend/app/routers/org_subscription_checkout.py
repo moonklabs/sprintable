@@ -8,25 +8,24 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
+from app.models.billing_payment_attempt import BillingPaymentAttempt
 from app.models.org_subscription import OrgSubscription
+from app.services import billing_payment_attempt as attempts
 from app.services.org_subscription_checkout import (
     ActivePaidSubscriptionExists,
-    CheckoutDeclined,
     CheckoutError,
     CheckoutInProgress,
-    checkout_subscription,
 )
 from app.services.org_subscription_tier_change import (
-    TierChangeDeclined,
     TierChangeError,
     TierChangeInProgress,
-    change_tier,
 )
 from app.services.platform_settings import get_platform_settings, require_billing_checkout_enabled
 
@@ -34,12 +33,15 @@ router = APIRouter(prefix="/api/v2/org-subscriptions", tags=["billing", "Organiz
 
 
 class CheckoutRequest(BaseModel):
+    # story #4335 — 브라우저가 카드 인증(위젯) 가기 전에 만든 시도 id(멱등 키). 같은 id로 다시 오면 새 작업 없이 그 시도 상태.
+    attempt_id: uuid.UUID
     auth_key: str
     tier: Literal["starter", "team", "business"]
     billing_cycle: Literal["monthly", "annual"]
 
 
 class ChangeTierRequest(BaseModel):
+    attempt_id: uuid.UUID
     new_tier: Literal["starter", "team", "business"]
 
 
@@ -63,6 +65,44 @@ class CheckoutResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PaymentAttemptResponse(BaseModel):
+    """story #4335 — 결제 시도 상태. `status`: processing(결과 대기 — 조회로 확정) · succeeded · declined(카드사 거절 · 청구 0) ·
+    failed(청구 0이 행으로 증명된 실패). `reauth_required`면 카드 인증부터 다시(authKey 1회용). `subscription`은 끝난 뒤에만."""
+
+    attempt_id: uuid.UUID
+    kind: str
+    status: str
+    tier: str
+    billing_cycle: str | None
+    declined_reason: str | None = None
+    reauth_required: bool = False
+    subscription: CheckoutResponse | None = None
+
+
+async def _attempt_response(session: AsyncSession, attempt: BillingPaymentAttempt) -> PaymentAttemptResponse:
+    subscription = None
+    if attempt.status != "processing":
+        sub = (
+            await session.execute(
+                select(OrgSubscription).where(OrgSubscription.org_id == attempt.org_id).execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        subscription = _to_response(sub) if sub is not None else None
+    return PaymentAttemptResponse(
+        attempt_id=attempt.id, kind=attempt.kind, status=attempt.status, tier=attempt.tier,
+        billing_cycle=attempt.billing_cycle,
+        declined_reason=attempt.reason if attempt.status == "declined" else None,
+        reauth_required=attempt.reauth_required, subscription=subscription,
+    )
+
+
+async def _require_admin(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID) -> None:
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+
 def _to_response(sub: OrgSubscription, *, declined_reason: str | None = None) -> CheckoutResponse:
     return CheckoutResponse(
         org_id=sub.org_id, tier=sub.tier, billing_cycle=sub.billing_cycle, status=sub.status,
@@ -74,17 +114,18 @@ def _to_response(sub: OrgSubscription, *, declined_reason: str | None = None) ->
     )
 
 
-@router.post("/checkout", response_model=CheckoutResponse)
+@router.post("/checkout", response_model=PaymentAttemptResponse, status_code=202)
 async def checkout(
     body: CheckoutRequest,
+    response: Response,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
-) -> CheckoutResponse:
-    """카드 인증 완료(authKey) → 빌링키 발급 + 구독 pending 생성 + 즉시 1차 청구 →
-    청구 성공 時에만 active. 청구가 카드 거절 등으로 실패하면 200으로 status='pending'
-    바디를 반환한다(시스템 오류가 아니라 재시도 가능한 비즈니스 결과 — 502는 Toss API
-    자체에 도달 못 한 진짜 시스템 오류에만 쓴다).
+) -> PaymentAttemptResponse:
+    """카드 인증 완료(authKey) → 결제 시도를 만들고 곧바로 202 `{attempt_id, status: processing}`(story #4335). 빌링키 발급 ·
+    즉시 1차 청구 · active 전이는 응답 뒤 작업이 몰고, 결과는 `GET /attempts/{attempt_id}`로 확정한다(끊긴 뒤 재요청이 아니라
+    조회). 같은 `attempt_id`로 다시 오면 새 작업 없이 그 시도 상태(끝났으면 200).
 
     story #2728(선생님 결정②) — Toss 심사 완료 前엔 이 엔드포인트가 서버측에서 무조건
     거부한다(FE 버튼 숨김만으로는 반쪽 — 「금지 AC=서버가 거부」). 어드민에서 스위치를
@@ -92,20 +133,17 @@ async def checkout(
     기능 자체가 꺼진 상태에선 호출자의 org 권한과 무관하게 전원 차단이 정답."""
     settings = await get_platform_settings(session)
     require_billing_checkout_enabled(settings)
-
-    from app.services.project_auth import is_org_owner_or_admin
-
-    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
-        raise HTTPException(status_code=403, detail="org admin/owner role required")
+    await _require_admin(session, auth, org_id)
 
     try:
-        sub = await checkout_subscription(
-            session, org_id=org_id, auth_key=body.auth_key, tier=body.tier, billing_cycle=body.billing_cycle,
+        attempt, token = await attempts.start_checkout_attempt(
+            session, attempt_id=body.attempt_id, org_id=org_id, requested_by=uuid.UUID(auth.user_id),
+            tier=body.tier, billing_cycle=body.billing_cycle,
         )
-    except CheckoutDeclined as exc:
-        return _to_response(exc.subscription, declined_reason=str(exc))
+    except attempts.AttemptNotFound as exc:
+        raise HTTPException(status_code=404, detail="payment attempt not found") from exc
     except CheckoutInProgress as exc:
-        # #2511 — 같은 org의 다른 checkout이 진행 中. 사용자 입력·내부 상태 오류가 아니라
+        # #2511 — 같은 org의 다른 결제가 진행 中. 사용자 입력·내부 상태 오류가 아니라
         # 타이밍 충돌이라 409(재시도 가능함을 뜻함).
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ActivePaidSubscriptionExists as exc:
@@ -117,50 +155,69 @@ async def checkout(
         # 남은 원인은 offering_version 카탈로그 갭 같은 내부 상태 문제(사용자 입력 오류
         # 아님)라 422가 아니라 500.
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return _to_response(sub)
+    if token is not None:
+        background_tasks.add_task(attempts.run_attempt, attempt.id, token, auth_key=body.auth_key)
+    if attempt.status != "processing":
+        response.status_code = 200
+    return await _attempt_response(session, attempt)
 
 
-@router.post("/change-tier", response_model=CheckoutResponse)
+@router.post("/change-tier", response_model=PaymentAttemptResponse, status_code=202)
 async def change_tier_endpoint(
     body: ChangeTierRequest,
+    response: Response,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
-) -> CheckoutResponse:
+) -> PaymentAttemptResponse:
     """story #2880(결제 트랙 갭①, 선생님 최종 확定 2026-08-21) — 월납 유료→유료 상향.
     신 offering 전액 즉시 청구 → confirmed 後 tier+과금일(period) 즉시 리셋 → 직전
     결제 건에 잔여기간 일할 부분취소(Toss cancel). checkout과 달리 authKey 불요(기존
-    active billing_key로 즉시 청구) — 신규 결제(checkout)와는 별개 진입점이다.
+    active billing_key로 즉시 청구).
 
-    청구가 카드 거절로 실패하면 200으로 status=원 tier 그대로인 바디를 반환한다
-    (checkout과 동형 — 재시도 가능한 비즈니스 결과, 502는 Toss API 자체에 도달 못 한
-    시스템 오류에만). 정책 위반(하향·연납·활성 유료 아님 등)은 400 — 캐치가능한
-    호출자 입력 오류로 분류(checkout의 CheckoutError=500과 다른 이유: 그쪽은 카탈로그
-    갭 같은 순수 내부 상태 문제뿐이지만, 이쪽은 «잘못된 대상 tier 선택»이 호출자가 고칠
-    수 있는 흔한 경로다)."""
+    story #4335 — checkout과 같은 결제 시도 흐름: 곧바로 202 · 결과는 `GET /attempts/{attempt_id}`. 정책 위반(하향 · 연납 ·
+    활성 유료 아님 등)은 시도를 만들기 전에 400 — 호출자가 고칠 수 있는 입력 오류."""
     settings = await get_platform_settings(session)
     require_billing_checkout_enabled(settings)
-
-    from app.services.project_auth import is_org_owner_or_admin
-
-    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
-        raise HTTPException(status_code=403, detail="org admin/owner role required")
+    await _require_admin(session, auth, org_id)
 
     try:
-        sub = await change_tier(session, org_id=org_id, new_tier=body.new_tier)
-    except TierChangeDeclined as exc:
-        return _to_response(exc.subscription, declined_reason=str(exc))
+        attempt, token = await attempts.start_change_tier_attempt(
+            session, attempt_id=body.attempt_id, org_id=org_id, requested_by=uuid.UUID(auth.user_id),
+            new_tier=body.new_tier,
+        )
+    except attempts.AttemptNotFound as exc:
+        raise HTTPException(status_code=404, detail="payment attempt not found") from exc
     except TierChangeInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TierChangeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return _to_response(sub)
+    if token is not None:
+        background_tasks.add_task(attempts.run_attempt, attempt.id, token)
+    if attempt.status != "processing":
+        response.status_code = 200
+    return await _attempt_response(session, attempt)
+
+
+@router.get("/attempts/{attempt_id}", response_model=PaymentAttemptResponse)
+async def get_payment_attempt(
+    attempt_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> PaymentAttemptResponse:
+    """story #4335 — 결제 시도 상태 조회. 진행 중인데 모는 쪽 기한이 지났으면 여기서 이어받아(Toss는 조회만) 결론을 낸다 —
+    응답 뒤 작업이 멈췄거나 사라져도 이 조회가 마무리한다. 새로고침 · 재진입도 이 조회로 같은 결과."""
+    await _require_admin(session, auth, org_id)
+    try:
+        await attempts.get_attempt(session, attempt_id, org_id=org_id)
+        attempt = await attempts.reconcile_attempt(session, attempt_id)
+    except attempts.AttemptNotFound as exc:
+        raise HTTPException(status_code=404, detail="payment attempt not found") from exc
+    return await _attempt_response(session, attempt)
 
 
 @router.post("/downgrade", response_model=CheckoutResponse)
