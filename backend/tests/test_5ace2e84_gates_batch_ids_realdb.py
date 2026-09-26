@@ -228,10 +228,10 @@ async def test_ids_omitted_matches_pre_existing_default_behavior():
                 sort=None, assigned_to_me=False, limit=None, offset=0,
                 session=s, org_id=ORG, auth=_auth_human(CALLER_USER),
             )
-        # ids 미지정 + work_item_id 미지정 = 기존(#5ace2e84 이전) 그대로 org 스코프 무필터 목록 —
-        # PROJ_B(caller 접근권 없음) 게이트도 여기선 걸러지지 않는다(#2042가 손댄 건 work_item_id
-        # 필터 경로뿐, 이 일반 목록 경로는 그때도 지금도 동일 — 이 테스트는 회귀 0만 확인).
-        assert {g.id for g in listed} == {gate_a1, gate_a2, gate_b1}, (
+        # ids 미지정 + work_item_id 미지정 = 일반 목록. story #4351(SEC-S8 · PO 2026-09-26)부터 제한된 caller에겐 접근 가능 프로젝트의
+        # 게이트만 — PROJ_B(caller 접근권 없음) 게이트는 빠진다. 예전 이 단언은 «PROJ_B도 걸러지지 않는다»를 고정해 바로 그 새는 동작을
+        # 회귀 기준으로 삼고 있었다(단언을 바꾼 유일한 자리 · PR 본문에 이유). ids 파라미터가 이 경로에 영향 없음(원래 관심)은 그대로.
+        assert {g.id for g in listed} == {gate_a1, gate_a2}, (
             "ids 파라미터 추가가 기존(일반 목록, ids/work_item_id 둘 다 미지정) 경로의 동작을 "
             "바꾸면 안 된다 — 회귀"
         )

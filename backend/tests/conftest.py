@@ -946,3 +946,41 @@ async def seed_org_with_human_owner(session, *, slug: str, org_name: str = "Org"
         await session.commit()
 
     return org.id, project.id, owner_member.id
+
+
+async def grant_org_projects(session, org_id, *, user_id=None, agent_member_id=None) -> None:
+    """story #4351 — 테스트 호출자에게 그 org의 **지금 있는** 프로젝트 전부 접근 grant(`accessible_project_ids_in_org`가 보는 축 그대로).
+
+    project 필터 없는 목록 · 단건이 caller 접근 가능 프로젝트로 좁혀지면서(SEC-S8), org 전체 공개를 전제로 grant 없이 쓰인 기존 테스트의
+    시드에 이 한 줄을 더한다 — 단언은 그대로. 사람(user_id) = org_member 경유 grant. 에이전트(agent_member_id) = members 행(없으면 만듦 ·
+    옛 team_members 시드 호환) + member_id 경유 grant. 이미 있는 grant는 건너뛴다."""
+    from sqlalchemy import select
+
+    from app.models.member import Member
+    from app.models.project import OrgMember, Project
+    from app.models.project_access import ProjectAccess
+
+    project_ids = list((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+    if user_id is not None:
+        om_id = (await session.execute(
+            select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+        )).scalar_one()
+        have = set((await session.execute(
+            select(ProjectAccess.project_id).where(ProjectAccess.org_member_id == om_id)
+        )).scalars())
+        for pid in project_ids:
+            if pid not in have:
+                session.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, org_member_id=om_id, permission="granted", role="member"))
+    if agent_member_id is not None:
+        if await session.get(Member, agent_member_id) is None:
+            session.add(Member(id=agent_member_id, org_id=org_id, type="agent", name="agent", is_active=True))
+            await session.flush()
+        have = set((await session.execute(
+            select(ProjectAccess.project_id).where(ProjectAccess.member_id == agent_member_id)
+        )).scalars())
+        for pid in project_ids:
+            if pid not in have:
+                session.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, member_id=agent_member_id, permission="granted", role="member"))
+    await session.commit()

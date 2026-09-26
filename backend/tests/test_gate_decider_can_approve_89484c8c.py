@@ -17,6 +17,14 @@ from app.routers.gates import can_approve_doc_gate_reason, list_gates
 from app.services.member_resolver import ResolvedMember
 
 
+@pytest.fixture(autouse=True)
+def _full_access_caller():
+    """story #4351 — list_gates가 제한된 caller면 접근 가능 프로젝트로 좁히며 그 판정에 조회를 쓴다. 이 파일은 execute 순서를 세는 목
+    세션이라 판정을 «전체 접근(None)»으로 고정한다(범위 규칙 자체는 test_4351_gates_scope_realdb.py 실 PG)."""
+    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)):
+        yield
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

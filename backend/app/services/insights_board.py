@@ -737,10 +737,8 @@ async def create_publication_follow_up(
     if story is None:
         raise FollowUpPublicationNotFoundError(publication_id)
     # story #4351 — 원 스토리의 프로젝트에 caller가 접근할 수 있어야 그 프로젝트에 후속 스토리를 만든다(쓰기 IDOR 차단 · SEC-S8).
-    # 접근 불가면 «없는 발행물»과 같은 404(존재 비노출).
-    from app.services.project_auth import has_project_access
-
-    if not await has_project_access(db, caller_user_id, story.project_id, org_id):
+    # 접근 불가면 «없는 발행물»과 같은 404(존재 비노출). reconcile과 같은 판정 한 곳(`caller_can_access_publication`).
+    if not await caller_can_access_publication(db, org_id=org_id, publication_id=publication_id, user_id=caller_user_id):
         raise FollowUpPublicationNotFoundError(publication_id)
 
     from app.services.insight_snapshots import get_latest_insight_snapshot
