@@ -9,6 +9,8 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
 
 /**
@@ -162,11 +164,15 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
   // [SID:4286] 지정 승인자가 후보(owner/admin)에 없을 때 UUID 통째를 이름 칸에 싣던 것 — 후보 목록을 다 불러왔으면
   // «알 수 없는 구성원», 불러오는 중이면 빈 칸(자리 칸이 «불러오는 중» placeholder를 이미 보인다).
   const approverLabelTable = Object.fromEntries(approverOptions.map((o) => [o.value, o.label])) as Record<string, string>;
+  // [SID:4300] 후보(owner/admin · 고르는 목록)에 없는 지정 승인자 — 역할이 바뀐 사람 등 — 도 조직 범위로 이름을 채운다(아는 사람을
+  // «알 수 없는 구성원»이라 하지 않게). 고르는 목록은 후보 그대로.
+  const { orgId } = useDashboardContext();
+  const approverNames = useMemberNameFallback(orgId, approverLabelTable, [approverId, recipeApproverId], !loadingApprovers);
   const currentApproverLabel = approverId
-    ? (memberLookup(approverLabelTable, approverId, tc, { loaded: !loadingApprovers })?.label ?? '')
+    ? (memberLookup(approverNames.memberMap, approverId, tc, { loaded: approverNames.loaded })?.label ?? '')
     : t('approverUnset');
   const currentRecipeApproverLabel = recipeApproverId
-    ? (memberLookup(approverLabelTable, recipeApproverId, tc, { loaded: !loadingApprovers })?.label ?? '')
+    ? (memberLookup(approverNames.memberMap, recipeApproverId, tc, { loaded: approverNames.loaded })?.label ?? '')
     : t('approverUnset');
 
   return (
@@ -235,7 +241,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                   disabled={loadingApprovers || saving}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">{currentApproverLabel}</p>
+                <p className="min-h-5 text-sm text-muted-foreground">{currentApproverLabel}</p>
               )}
             </div>
 
@@ -250,7 +256,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                   disabled={loadingApprovers || saving}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
+                <p className="min-h-5 text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
               )}
             </div>
 

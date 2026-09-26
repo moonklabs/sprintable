@@ -14,6 +14,7 @@ import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk'
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 
 /**
  * story #2955 §3/§7(doc docs-index-reader-redesign-handoff) — 셸 B "에디토리얼 리더"의
@@ -70,7 +71,8 @@ export function useDocGateData(docId: string, status: string | undefined) {
     const [gates, revsJson, membersJson] = await Promise.all([
       fetchWithAuth(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetchWithAuth(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
-      fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+      fetchWithAuth(ORG_NAMES_URL).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
     ]);
     if (signal?.aborted) return;
     const gs = (Array.isArray(gates) ? gates : []) as GateItem[];

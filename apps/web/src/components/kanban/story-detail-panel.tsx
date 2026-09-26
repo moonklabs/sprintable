@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -35,7 +37,7 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
-import { memberDisplayLabel, memberLookup, memberNameById, memberRowLabels } from '@/lib/member-display';
+import { memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -106,6 +108,8 @@ interface StoryDetailPanelProps {
   onStoryUpdate?: (updated: KanbanStory) => void;
   onDeleteSuccess?: (storyId: string) => void;
   memberMap?: Record<string, KanbanMember>;
+  /** [SID:4300] memberMap(프로젝트 범위)을 다 받았는지. 받기 전엔 «표에 없음»을 판단하지 않는다(기본 true — 보드는 표를 받은 뒤 패널을 연다). */
+  memberMapLoaded?: boolean;
   members?: KanbanMember[];
   storyMap?: Record<string, { title: string; status: string }>;
   epicMap?: Record<string, string>;
@@ -360,7 +364,7 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap: projectMemberMap = {}, memberMapLoaded = true, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
@@ -379,6 +383,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const [deleting, setDeleting] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  // [SID:4300] 이름표 = 넘겨받은 프로젝트 범위 + 이 패널에 보이는 id가 거기 없을 때만 조직 범위(권한 회수 · 다른 프로젝트 에이전트).
+  // 보드로 열든 흐름 그래프로 열든 같은 이름이 서게 패널 안에서 채운다. 담당자 «고르는» 목록(members)은 프로젝트 범위 그대로.
+  // OrgMember는 KanbanMember와 같은 모양({id, name, type, runtime_type} · #4284 뒤 name nullable)이라 그대로 넘긴다.
+  const { orgId } = useDashboardContext();
+  const nameFallback = useMemberNameFallback(orgId, projectMemberMap, [
+    story.assignee_id, ...(story.assignee_ids ?? []), story.human_verified_by, story.human_owner_member_id,
+    ...comments.map((c) => c.created_by), ...activities.map((a) => a.created_by),
+    ...activities.flatMap((a) => (a.activity_type === 'assignee_changed' ? [a.old_value, a.new_value] : [])),
+  ], memberMapLoaded);
+  const memberMap = nameFallback.memberMap as Record<string, KanbanMember>;
+  const memberNamesLoaded = nameFallback.loaded;
   const [nextCommentsCursor, setNextCommentsCursor] = useState<string | null>(null);
   const [nextActivitiesCursor, setNextActivitiesCursor] = useState<string | null>(null);
   const [loadingComments, setLoadingComments] = useState(false);
@@ -959,9 +974,15 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
   // [SID:4286] 검증자 id 조각(앞 6자)을 이름 칸 · 머리글자에 싣지 않는다 — 읽는 글자: 표에 있는데 이름 빔 → «이름 없는 구성원», 표에 없음 →
   // «알 수 없는 구성원». 신원(머리글자)은 이름 그대로 · 없거나 표에 없으면 null → 사람 아이콘(#4284 name/label 계약).
-  const humanVerifiedByName = story.human_verified_by ? memberNameById(memberMap, story.human_verified_by, tc, tc('memberUnknown')) : null;
+  // [SID:4300] 표는 프로젝트 범위 + 없을 때 조직 범위(위 nameFallback). 조직 표를 받는 동안(null)은 봉인 자체를 미룬다 — «알 수
+  // 없음»이나 «주장만» 봉인이 먼저 섰다가 «검증됨 · 이름»으로 바뀌는 거짓을 안 만든다.
+  const verifiedByLookup = story.human_verified_by
+    ? memberLookup(memberMap, story.human_verified_by, tc, { loaded: memberNamesLoaded })
+    : null;
+  const verifiedByPending = !!story.human_verified_by && verifiedByLookup === null;
+  const humanVerifiedByName = verifiedByLookup?.label ?? null;
   const humanVerifiedByIdentity = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? null) : null;
-  const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
+  const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined = verifiedByPending ? undefined :
     story.human_verified && humanVerifiedByName && story.human_verified_at
       ? { variant: 'verified', humanName: humanVerifiedByIdentity, humanLabel: humanVerifiedByIdentity ? undefined : humanVerifiedByName, when: formatDate(story.human_verified_at, displayTimezone) }
       : story.self_reported
@@ -990,7 +1011,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   };
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
     // [SID:4286 · 까디르 P1] 작성자 id 통째를 이름 칸에 싣던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
-    author: memberLookup(memberMap, c.created_by, tc)!.label,
+    // [SID:4300] 조직 표를 받는 동안은 빈 글자.
+    author: memberLookup(memberMap, c.created_by, tc, { loaded: memberNamesLoaded })?.label ?? '',
     body: c.content,
   }));
 
@@ -1312,15 +1334,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     <span className="inline-flex flex-wrap items-center gap-1 align-middle">
       {oldLabel != null ? (
         <>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
+          <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
           <span className="text-muted-foreground">→</span>
         </>
       ) : null}
-      <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
+      <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
   // [SID:4286 · 까디르 P1] id가 있는데 «—»이던 자리(아는 사람 · 모르는 사람 뭉갬) — id 없음만 «—».
-  const memberName = (id: string | null) => (id ? memberLookup(memberMap, id, tc)!.label : '—');
+  // [SID:4300] 조직 표를 받는 동안은 빈 글자.
+  const memberName = (id: string | null) => (id ? memberLookup(memberMap, id, tc, { loaded: memberNamesLoaded })?.label ?? '' : '—');
   const epicName = (id: string | null) => (id ? (epicMap[id] ?? '—') : '—');
   const sprintName = (id: string | null) => (id ? (sprintMap[id] ?? '—') : '—');
 
@@ -1490,6 +1513,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               humanVerifiedBy={story.human_verified_by}
               humanVerifiedAt={story.human_verified_at}
               memberMap={memberMap}
+              memberNamesLoaded={memberNamesLoaded}
             />
             {/* story #2265(C-7) PR1b — "대화 근거"(proof). EvidenceSection 바로 아래,
                 "근거" 계열 이름으로(구조 이름 "참조"·"임베드" 미노출, PO 확定). 0건이면
@@ -1615,9 +1639,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   </Button>
                 </div>
               ) : (
-                <p className="mt-1 text-sm text-foreground">
+                <p className="mt-1 min-h-5 text-sm text-foreground">
                   {localAssigneeIds.length > 0
-                    ? localAssigneeIds.map((id) => memberLookup(memberMap, id, tc)!.label).join(', ')
+                    ? localAssigneeIds.map((id) => memberLookup(memberMap, id, tc, { loaded: memberNamesLoaded })?.label ?? '').filter(Boolean).join(', ')
                     : '—'}
                 </p>
               )}
@@ -2324,7 +2348,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-                            <span>{memberLookup(memberMap, comment.created_by, tc)!.label}</span>
+                            <span>{memberLookup(memberMap, comment.created_by, tc, { loaded: memberNamesLoaded })?.label ?? ''}</span>
                             <span>·</span>
                             <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
@@ -2351,7 +2375,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => {
-                        const actorName = memberLookup(memberMap, activity.created_by, tc)!.label;
+                        const actorName = memberLookup(memberMap, activity.created_by, tc, { loaded: memberNamesLoaded })?.label ?? '';
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (

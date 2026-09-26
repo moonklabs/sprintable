@@ -25,6 +25,8 @@ import {
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { memberLookup } from '@/lib/member-display';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
 
@@ -141,7 +143,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     const key = storyStatusKeyMap[slug];
     return key ? tBoard(key) : slug;
   };
-  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships, orgId } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
@@ -192,16 +194,22 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     return map;
   }, [feedback]);
 
+  // [SID:4300] 막힘 모음 작성자 이름 = 오늘 명단 표(조직 범위 · 활성만) + 거기 없는 작성자만 비활성까지 싣는 조직 원천으로 보충.
+  const blockerAuthorIds = useMemo(() => entries.filter((entry) => Boolean(entry.blockers?.trim())).map((entry) => entry.author_id), [entries]);
+  const blockerNames = useMemberNameFallback(orgId, memberNameById, blockerAuthorIds, !loading);
+
   // A2(9f27af8f): 블로커 롤업 — 기존 entries에서 파생, 신규 fetch 0.
   const blockerEntries = useMemo(() => (
     entries
       .filter((entry) => Boolean(entry.blockers?.trim()))
       .map((entry) => ({
         authorId: entry.author_id,
-        name: memberNameById[entry.author_id] ?? t('unknown'),
+        // [SID:4300] 이름이 빈 구성원을 «알 수 없음»으로 쓰던 자리 — #4284 계약대로 표에 있는데 이름 빔 = «이름 없는 구성원»,
+        // 표에 없음 = «알 수 없는 구성원». 조직 보충을 받는 동안은 빈 글자.
+        name: memberLookup(blockerNames.memberMap, entry.author_id, tc, { loaded: blockerNames.loaded })?.label ?? '',
         blockers: entry.blockers as string,
       }))
-  ), [entries, memberNameById, t]);
+  ), [entries, blockerNames.memberMap, blockerNames.loaded, tc]);
 
   const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
   const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);

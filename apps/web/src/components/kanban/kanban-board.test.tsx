@@ -420,6 +420,59 @@ describe('KanbanBoard — 스프린트 칩 라벨이 거짓말하지 않는다(s
   });
 });
 
+describe('KanbanBoard — 딥링크로 보드와 패널이 함께 열릴 때 명단 전 «알 수 없는 구성원» 0([SID:4300] 까디르 4682 ①)', () => {
+  // 보드는 스토리 · 구성원을 같은 Promise.all로 받고 스토리를 먼저 세운 뒤 구성원 본문을 파싱한다. 구성원 응답은 오되 본문(json)은
+  // 늦게 풀리게 해 «스토리는 섰는데 명단은 아직»인 창을 재현한다.
+  const story = { id: 's1', title: 'S1 딥링크', status: 'backlog', priority: 'medium', assignee_id: 'm1', assignee_ids: ['m1'], trust_stage: 'queued' };
+  let resolveMembersJson!: (v: unknown) => void;
+  function stubDeepLink() {
+    searchRef.current = 'story=s1';
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/stories?')) {
+        const data = new URL(url, 'http://localhost').searchParams.get('status') === 'backlog' ? [story] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ data, meta: { total: data.length, nextCursor: null } }) });
+      }
+      if (url.startsWith('/api/members')) return Promise.resolve({ ok: true, json: () => new Promise((r) => { resolveMembersJson = r; }) });
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+  }
+
+  it('명단 본문을 받기 전엔 «알 수 없는 구성원»이 어디에도 안 서고, 명단이 오면 패널에 이름', async () => {
+    stubDeepLink();
+    await mount();
+    const everywhere = () => document.body.textContent ?? '';
+    expect(everywhere()).not.toContain(koMessages.common.memberUnknown);
+    await act(async () => { resolveMembersJson({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('S1 딥링크');
+    expect(dialog?.textContent).toContain('Alice');
+    expect(everywhere()).not.toContain(koMessages.common.memberUnknown);
+  });
+
+  // 지금은 첫 불러오기 스켈레톤이 명단 파싱까지 패널을 가려(loading → setMembersLoaded 뒤 해제) 위 테스트가 이 줄 없이도 초록이다 —
+  // 스켈레톤이 바뀌어도(예: 4307 뒤 부분 로딩) 패널이 패널 기본값(true)으로 «알 수 없는»을 먼저 세우지 않게 배선을 핀으로 둔다.
+  it('보드가 패널에 memberMapLoaded를 명시로 넘긴다(보드의 명단 상태 그대로) — 패널 기본값(true)에 기대지 않는다', async () => {
+    const seen: Array<boolean | undefined> = [];
+    vi.resetModules();
+    vi.doMock('./story-detail-panel', () => ({
+      StoryDetailPanel: (props: { memberMapLoaded?: boolean }) => { seen.push(props.memberMapLoaded); return <div role="dialog">panel</div>; },
+    }));
+    try {
+      stubDeepLink();
+      await mount();
+      await act(async () => { resolveMembersJson({ data: [{ id: 'm1', name: 'Alice', type: 'human' }] }); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      expect(seen.length).toBeGreaterThan(0); // 패널이 그려졌다
+      expect(seen.every((v) => typeof v === 'boolean')).toBe(true); // 넘기지 않으면 undefined(패널 기본값 true로 떨어짐)
+      expect(seen[seen.length - 1]).toBe(true);
+    } finally {
+      vi.doUnmock('./story-detail-panel');
+      vi.resetModules();
+    }
+  });
+});
+
 describe('KanbanBoard — 늦게 온 이전 실행 결과는 버린다(story #4171 까디르 QA c)', () => {
   it('프로젝트 전환 뒤 이전 프로젝트 goals가 늦게 파싱돼도 새 goals를 덮지 않는다', async () => {
     let resolveOldGoals!: (v: unknown) => void;
@@ -2015,5 +2068,49 @@ describe('KanbanBoard — 걸린 요청은 30s 뒤 풀림(story #4310)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// [SID:4300] 보드 카드 담당 — 프로젝트 구성원 목록(담당자 고르는 목록 · 권한 있는 사람)에 없는 담당자(다른 프로젝트 에이전트 · 권한 회수)가
+// 카드에서 조용히 빠지던 것을 조직 범위(비활성 포함)로 채운다. 첫 화면 뒤 · 없을 때만 — 다 풀리면 조직 요청 0.
+describe('KanbanBoard — 카드 담당 이름 조직 범위 보충([SID:4300])', () => {
+  function stubWithOrg(members: Array<Record<string, unknown>>, orgRows: Array<Record<string, unknown>>) {
+    const calls: string[] = [];
+    const stories = [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: 'ag-other', assignee_ids: ['ag-other'], trust_stage: deriveDefaultTrustStage('backlog') }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.startsWith('/api/stories?')) {
+        const status = new URL(url, 'http://localhost').searchParams.get('status');
+        const matched = stories.filter((st) => st.status === status);
+        return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+      }
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: members }) };
+      if (url === '/api/team-members?include_inactive=true') return { ok: true, json: async () => ({ data: orgRows }) };
+      return { ok: false, json: async () => null };
+    }));
+    return calls;
+  }
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+
+  it('프로젝트 목록 밖 담당자 → 조직 목록 한 번으로 카드에 이름', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', bottomDockBannerSlot: bannerSlot, orgId: 'org-1',
+    });
+    const calls = stubWithOrg([], [{ id: 'ag-other', name: '다른봇', type: 'agent' }]);
+    await mount();
+    await settle();
+    expect(container.querySelector('[title="다른봇"]')).not.toBeNull();
+    expect(calls.filter((u) => u === '/api/team-members?include_inactive=true')).toHaveLength(1);
+  });
+
+  it('담당자가 전부 프로젝트 목록에 있으면 조직 요청 0', async () => {
+    useDashboardContextMock.mockReturnValue({
+      currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', bottomDockBannerSlot: bannerSlot, orgId: 'org-1',
+    });
+    const calls = stubWithOrg([{ id: 'ag-other', name: '우리봇', type: 'agent' }], []);
+    await mount();
+    await settle();
+    expect(container.querySelector('[title="우리봇"]')).not.toBeNull();
+    expect(calls.filter((u) => u.startsWith('/api/team-members'))).toHaveLength(0);
   });
 });

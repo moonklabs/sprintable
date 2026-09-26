@@ -10,7 +10,9 @@ import { GateLineContext } from '@/components/cage/gate-line-context';
 import { StuckHandoffDetail } from '@/components/cage/stuck-handoff-detail';
 import type { KanbanMember, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
-import { memberNameById } from '@/lib/member-display';
+import { memberLookup } from '@/lib/member-display';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 /**
  * E-DG S12 ① — detail drawer "워크플로우 라인 상태" 섹션(story-detail-panel DISPATCH 직후 마운트).
@@ -36,6 +38,11 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   const [fallback, setFallback] = useState<FallbackState>('idle');
   const [withdraw, setWithdraw] = useState<WithdrawState>('idle');
   const { addToast } = useToast();
+
+  // [SID:4300] 승인자 이름 = 넘겨받은 표(스토리 패널 · 프로젝트 범위 + 조직 보충) + 이 칸의 승인자가 거기 없을 때만 조직 범위.
+  // 이 칸은 자기 데이터(workflow-line/status)를 따로 받아, 패널이 모르는 id가 여기서만 보일 수 있다. 조직 목록은 org별 한 번(캐시).
+  const { orgId } = useDashboardContext();
+  const approverNames = useMemberNameFallback(orgId, memberMap, (step?.approvers ?? []).map((a) => a.member_id), true);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,8 +125,9 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           <span>{t('lineHandoffStuck')}</span>
         </Badge>
         {/* ⓑ S11 GateLineContext 재사용(무변경) */}
-        {/* [SID:4286] 승인자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». */}
-        <GateLineContext step={step} resolveName={(id) => memberNameById(memberMap, id, tc, tc('memberUnknown'))} />
+        {/* [SID:4286] 승인자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원».
+            [SID:4300] 표 = 넘겨받은 프로젝트 범위 + 없을 때 조직 범위(approverNames) · 받는 동안은 빈 글자(문장 안이라 줄 높이 불변). */}
+        <GateLineContext step={step} resolveName={(id) => memberLookup(approverNames.memberMap, id, tc, { loaded: approverNames.loaded })?.label ?? ''} />
         {/* ⓒ StuckHandoffDetail */}
         <StuckHandoffDetail step={step} />
         {/* ⓓ fallback action(상태머신) */}

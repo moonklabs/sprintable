@@ -15,6 +15,7 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { memberLookup } from '@/lib/member-display';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 
 /**
  * Epic-detail Hypotheses section (E1-S8 §4.1). The first human-facing surface that
@@ -121,7 +122,8 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       const [pendingGates, rejectedGates, membersJson] = await Promise.all([
         fetchWithAuth('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
         fetchWithAuth('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
-        fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+        // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+        fetchWithAuth(ORG_NAMES_URL).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
       ]);
       const gmap: Record<string, GateItem> = {};
       // pending 우선·rejected는 pending 없을 때만(한 hyp에 둘 다면 진행중 pending이 우세).

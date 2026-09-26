@@ -531,7 +531,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 ) : null}
               </div>
             ) : null}
-            <div className="flex items-center justify-between gap-2">
+            {/* [SID:4300 · 유나 4682 PASS 비차단] 담당 아바타(h-6)가 조직 보충 뒤 늦게 붙으면 이 줄이 20 → 24px로 늘어 카드가 +4px 흔들렸다(390 · 95.2 → 99.2).
+                아바타 줄 높이(24px)를 처음부터 잡아 둔다 — 채워진 모양과 같은 높이라 겉모습은 그대로. */}
+            <div className="flex min-h-6 items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 {assigneeList.length > 0 ? (
                   <div className="flex -space-x-1.5">

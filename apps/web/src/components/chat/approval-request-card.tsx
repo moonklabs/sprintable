@@ -26,6 +26,7 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { fetchWithAuth } from '@/lib/db/client';
+import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { fetchGateById } from '@/lib/fetch-gate';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { useToast } from '@/components/ui/toast';
@@ -465,7 +466,8 @@ function ApprovalRequestBody({
     const idsKey = `${needsDesignatedName ? gate.designated_approver_id : ''}|${needsResolverName ? gate.resolver_id : ''}|${needsRequesterName ? requesterId : ''}|${needsDiscussRequesterName ? discussionRequested?.requestedByMemberId : ''}`;
     if (idsKey === '|||' || fetchedNameIdsRef.current === idsKey) return;
     fetchedNameIdsRef.current = idsKey;
-    void fetchWithAuth('/api/team-members')
+    // [SID:4300] 이름만 쓰는 표 — 비활성 에이전트도 «목록이 거른 것»이라 비활성까지 싣는 조직 원천(떠난 사람은 BE 4303 대기).
+    void fetchWithAuth(ORG_NAMES_URL)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;

@@ -14,6 +14,7 @@ import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
+import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -1361,3 +1362,137 @@ describe('StoryDetailPanel — 이름 없는 에이전트 라벨([SID:4286])', (
   });
 });
 
+// [SID:4300] 이름표 = 넘겨받은 프로젝트 범위 + 패널에 보이는 id가 거기 없을 때만 조직 범위(ORG_NAMES_URL · 비활성 포함).
+// 보드로 열든 흐름 그래프로 열든 같은 표(프로젝트 범위)를 넘기므로, 권한이 회수된 검증자도 두 진입 모두 이름으로 선다.
+describe('StoryDetailPanel — 이름표 조직 범위 보충([SID:4300])', () => {
+  const VERIFIER = 'om-revoked';
+  const OWNER = 'om-a';
+  const projectMap = { [OWNER]: { id: OWNER, name: '안나', type: 'human' } };
+  const verifiedStory = { human_verified: true, human_verified_by: VERIFIER, human_verified_at: '2026-08-20T00:00:00Z', status: 'in-review', trust_stage: 'claimed_done', assignee_id: OWNER, assignee_ids: [OWNER] } as const;
+
+  let membersCalls = 0;
+  let orgResponse: () => Promise<unknown>;
+  beforeEach(() => {
+    resetOrgMembersCacheForTests();
+    membersCalls = 0;
+    orgResponse = async () => ({ ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) });
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human', orgId: 'org-1' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; return orgResponse(); }
+      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
+        return { ok: true, json: async () => [{ id: 'gate-1', gate_type: 'merge', status: 'approved', neutral_facts: {} }] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  });
+
+  async function mount(story: Record<string, unknown>, extra: { memberMap?: Record<string, { id: string; name: string; type: string }>; memberMapLoaded?: boolean } = {}) {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory(story as Partial<KanbanStory>)} tasks={[]} onClose={() => {}} memberMap={extra.memberMap ?? projectMap} memberMapLoaded={extra.memberMapLoaded} />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('프로젝트 표에 없는 검증자(권한 회수) → 조직 표로 이름 «권회수 검증» · 조직 목록 요청 1', async () => {
+    await mount(verifiedStory);
+    expect(container.textContent).toContain('권회수 검증');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(membersCalls).toBe(1);
+  });
+
+  it('보이는 id가 전부 프로젝트 표에 있으면 조직 목록 요청 0', async () => {
+    await mount({ ...verifiedStory, human_verified_by: OWNER });
+    expect(container.textContent).toContain('안나 검증');
+    expect(membersCalls).toBe(0);
+  });
+
+  it('조직 표를 받는 동안엔 검증 봉인을 미룬다 — «알 수 없는 구성원 검증»이 먼저 서지 않는다', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    orgResponse = async () => { await gate; return { ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) }; };
+    await mount(verifiedStory);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(container.textContent).not.toContain('검증 대기');
+    expect(container.textContent).not.toContain('권회수');
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('권회수 검증');
+  });
+
+  it('주장(self_reported)도 있는 스토리 — 조직 표를 받는 동안 «주장만» 봉인(검증 대기)이 먼저 서지 않는다', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    orgResponse = async () => { await gate; return { ok: true, json: async () => ({ data: [{ id: VERIFIER, name: '권회수', type: 'human' }] }) }; };
+    await mount({ ...verifiedStory, self_reported: true });
+    expect(container.textContent).not.toContain(koMessages.verify.trustSealAwaitingVerification);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('권회수 검증');
+  });
+
+  it('조직 표에도 없으면(떠난 사람 · 비활성 에이전트 — BE 원천 대기) «알 수 없는 구성원 검증»', async () => {
+    orgResponse = async () => ({ ok: true, json: async () => ({ data: [] }) });
+    await mount(verifiedStory);
+    expect(container.textContent).toContain('알 수 없는 구성원 검증');
+  });
+
+  it('프로젝트 표를 아직 받는 중이면(memberMapLoaded=false) 조직 목록을 안 부른다', async () => {
+    await mount(verifiedStory, { memberMap: {}, memberMapLoaded: false });
+    expect(membersCalls).toBe(0);
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    // [PO 14:30Z] 담당 칸은 이름이 줄의 유일한 내용 — 빈 동안에도 한 줄 높이(min-h-5).
+    expect([...container.querySelectorAll('p.min-h-5')].some((p) => p.textContent === ''), '빈 담당 칸(한 줄 높이)').toBe(true);
+  });
+
+  // [SID:4300 · 4651 위 재기반 손질] 4651이 memberLookup(…)!.label로 바꾼 자리(댓글 작성자 · 활동 행위자 · 활동의 담당 전/후)도
+  // 조직 표를 받는 동안엔 빈 글자, 받은 뒤엔 이름 — 활동의 담당 전/후 id도 조직 보충 대상.
+  it('댓글 작성자 · 활동 행위자 · 활동 담당 — 조직 표 받는 동안 «알 수 없는 구성원» 0 → 받은 뒤 조직 이름', async () => {
+    const ORG_ONLY = 'om-org-only';
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; await gate; return { ok: true, json: async () => ({ data: [{ id: ORG_ONLY, name: '조직사람', type: 'human' }] }) }; }
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'c1', story_id: 's1', content: '조직 사람 댓글', created_by: ORG_ONLY, created_at: '2026-09-25T00:00:00Z' }], meta: { next_cursor: null, has_more: false } }) };
+      }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', activity_type: 'assignee_changed', old_value: OWNER, new_value: ORG_ONLY, created_by: ORG_ONLY, created_at: '2026-09-25T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount({ status: 'in-progress', assignee_id: OWNER, assignee_ids: [OWNER] });
+    const tab = (label: string) => [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes(label)) as HTMLElement;
+    for (const label of ['댓글', koMessages.board.activityTab]) {
+      await act(async () => { tab(label).dispatchEvent(new MouseEvent('click', { bubbles: true })); tab(label).click(); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(container.textContent, `${label} 탭 — 받는 동안`).not.toContain('알 수 없는 구성원');
+      expect(container.textContent).not.toContain(ORG_ONLY);
+    }
+    // [PO 14:30Z] 활동의 담당 알약 — 빈 동안에도 채워진 알약과 같은 높이(min-h-5), 폭만 이름만큼 자란다.
+    expect([...container.querySelectorAll('span.min-h-5.rounded')].some((s) => s.textContent === ''), '빈 담당 알약(한 줄 높이)').toBe(true);
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('조직사람');
+    expect(container.textContent).toContain('안나');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+    expect(membersCalls).toBe(1);
+  });
+
+  it('다른 id가 전부 프로젝트 표에 있어도 활동의 담당 전/후 id가 없으면 조직 표를 받아 이름(«알 수 없는 구성원» 0)', async () => {
+    const ORG_ONLY = 'om-org-only';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) { membersCalls += 1; return { ok: true, json: async () => ({ data: [{ id: ORG_ONLY, name: '조직사람', type: 'human' }] }) }; }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'a1', activity_type: 'assignee_changed', old_value: OWNER, new_value: ORG_ONLY, created_by: OWNER, created_at: '2026-09-25T00:00:00Z' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount({ status: 'in-progress', assignee_id: OWNER, assignee_ids: [OWNER] });
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes(koMessages.board.activityTab)) as HTMLElement;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); tab.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(membersCalls).toBe(1);
+    expect(container.textContent).toContain('조직사람');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+  });
+});

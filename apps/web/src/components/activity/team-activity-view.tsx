@@ -13,6 +13,7 @@ import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notificatio
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { memberLookup, memberOptionLabels } from '@/lib/member-display';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
@@ -223,18 +224,25 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       })
       .finally(() => setMembersLoaded(true));
   }, [projectId]);
+  // [SID:4300] 이름표 = 프로젝트 범위 + 활동에 보이는 행위자가 거기 없을 때만 조직 범위(권한 회수 · 다른 프로젝트 에이전트).
+  // 행위자 필터 선택지(members)는 프로젝트 범위 그대로.
+  const { orgId } = useDashboardContext();
+  const projectMemberTable = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m])), [members]);
+  const actorIds = useMemo(() => (items ?? []).map((it) => it.actor_id), [items]);
+  const actorNames = useMemberNameFallback(orgId, projectMemberTable, actorIds, membersLoaded);
   const nameById = useMemo(
-    () => Object.fromEntries(members.map((m) => [m.id, m.name])) as Record<string, string | null>,
-    [members],
+    () => Object.fromEntries(Object.entries(actorNames.memberMap).map(([id, m]) => [id, m.name])) as Record<string, string | null>,
+    [actorNames.memberMap],
   );
+  const namesLoaded = actorNames.loaded;
 
   const memberName = useCallback(
     (id: string | null): string => {
       if (!id) return t('system'); // actor.id=null → "시스템" graceful
       // [SID:4286] 구성원 id 조각(#앞 8자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원» · 불러오는 중 → 빈 칸.
-      return memberLookup(nameById, id, tc, { loaded: membersLoaded })?.label ?? '';
+      return memberLookup(nameById, id, tc, { loaded: namesLoaded })?.label ?? '';
     },
-    [nameById, membersLoaded, t, tc],
+    [nameById, namesLoaded, t, tc],
   );
 
   // story #4297 — 최신부터 한 쪽(order=desc) · 이전 쪽은 before_seq 커서. 예전엔 오름차순 LIMIT를 받아 뒤집어, 창 안 활동이 200건을 넘으면

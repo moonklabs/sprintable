@@ -346,7 +346,7 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
   });
 
   // 축 (a) 객체 맵 — doc-gate-section.tsx의 AUDIT_META(status→{dot,Icon,labelKey}) 프로퍼티
-  // 조회가 className에 들어가는 실 자리(438행 `${am.dot}` span). 그 span의 유일한 자식
+  // 조회가 className에 들어가는 실 자리(440행 `${am.dot}` span). 그 span의 유일한 자식
   // (AIcon)을 건드리지 않고 muted 텍스트를 하나 더 끼워 넣는다 — 원래 있던 AIcon 아이콘은
   // 그대로 두고 "실수로 muted 텍스트를 추가했다"를 재현.
   describe('축 (a) 객체 맵 — doc-gate-section.tsx (AUDIT_META)', () => {
@@ -354,17 +354,17 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
     const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
     const original = readFileSync(ABS_FILE, 'utf8');
 
-    // 전제 확인 — story #3865(AC1 정밀화, PO 조건①②) 뒤로는 438행이 더 이상 위반이 아니다.
+    // 전제 확인 — story #3865(AC1 정밀화, PO 조건①②) 뒤로는 440행이 더 이상 위반이 아니다.
     // am.dot 바인딩이 AUDIT_META 4개 항목의 class 후보를 하나의 그룹으로 모으는데, 그 그룹의
     // 어느 «한» 후보 문자열도 tint+muted를 동시에 담지 않는다(resubmit 항목은 순수
     // bg-muted+text-muted-foreground, 나머지 3항목은 순수 tint) — 같은 그룹=상호배타라
-    // 실제 공존 0(sameElementCoOccurs, story #3865). 남은 위반은 408행(기존 #3839
+    // 실제 공존 0(sameElementCoOccurs, story #3865). 남은 위반은 410행(기존 #3839
     // GRANDFATHER_BASELINE 등재분)뿐이다.
-    it('전제: 원본은 408행(destructive)만 위반 — 438행은 #3865 정밀화로 더 이상 위반 아님', () => {
+    it('전제: 원본은 410행(destructive)만 위반 — 440행은 #3865 정밀화로 더 이상 위반 아님', () => {
       const violations = scanContent(original, REL_FILE, componentMap);
       expect(violations).toHaveLength(1);
-      expect(violations.find((v) => v.line === 438)).toBeUndefined();
-      expect(violations.find((v) => v.line === 408)?.family).toBe('destructive');
+      expect(violations.find((v) => v.line === 440)).toBeUndefined();
+      expect(violations.find((v) => v.line === 410)?.family).toBe('destructive');
     });
 
     it('AIcon 옆에 muted 텍스트를 끼워 넣으면(객체 맵으로 조회된 tint가 조상으로 인식돼) 위반이 +1 된다', () => {

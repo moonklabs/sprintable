@@ -15,6 +15,7 @@ import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -165,6 +166,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     ...memberRowLabels(members.filter((m) => m.type === 'agent'), tc, () => ''),
   ]);
   const assigneeRowLabel = (m: KanbanMember) => assigneeRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc);
+  // [SID:4300] 프로젝트 구성원 목록을 한 번이라도 받아 봤는지(성공 · 실패 모두) — 이름표 조직 범위 보충의 «없음» 판단 시점.
+  // `loading`에 묶지 않는다: 다시 불러오는 동안 조직 이름이 잠깐 빠졌다 돌아오는 깜빡임을 안 만든다.
+  const [membersLoaded, setMembersLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   // story #4307(유나 · PO 10:42Z) — 첫 불러오기가 끝났는지. 전면 스켈레톤(툴바까지 갈아끼움)은 첫 불러오기에만 — 그 뒤 스프린트 · 담당자 필터로
   // 다시 불러올 때는 툴바를 그대로 둔다(예전엔 툴바째 사라져 필터 버튼으로 돌아갈 초점이 body로 빠지고 보드 전체가 깜빡였다).
@@ -302,11 +306,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   const epicMap: Record<string, string> = {};
   for (const e of epics) epicMap[e.id] = e.title;
-  const memberMap: Record<string, KanbanMember> = {};
+  const projectMemberMap: Record<string, KanbanMember> = {};
   for (const m of members) {
-    memberMap[m.id] = m;
+    projectMemberMap[m.id] = m;
     const userId = (m as unknown as { user_id?: string | null }).user_id;
-    if (userId) memberMap[userId] = m;
+    if (userId) projectMemberMap[userId] = m;
   }
 
   // CB-S4: status별 stories fetch helper
@@ -357,6 +361,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
   // t(col.i18nKey) 그대로(회귀 0).
   const domainLabels = useOrgDomainLabels(orgId, locale);
+  // [SID:4300] 이름표 = 프로젝트 범위 + 카드에 보이는 id(담당 · 검증자)가 거기 없을 때만 조직 범위(첫 화면 뒤 · 없을 때만 — PO 決).
+  // 권한이 회수된 담당자 · 다른 프로젝트 에이전트가 카드에서 조용히 빠지던 것을 이름으로 채운다. 담당자 «고르는» 목록(members)은
+  // 프로젝트 범위 그대로. OrgMember는 KanbanMember와 같은 모양({id, name, type, runtime_type} · #4284 뒤 name nullable).
+  const boardNames = useMemberNameFallback(
+    orgId, projectMemberMap,
+    stories.flatMap((s) => [s.assignee_id, ...(s.assignee_ids ?? []), s.human_verified_by]),
+    membersLoaded,
+  );
+  const memberMap = boardNames.memberMap as Record<string, KanbanMember>;
 
   // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
   // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
@@ -556,6 +569,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         if (stale()) return;
         setMembers(json.data);
       }
+      setMembersLoaded(true);
     } finally {
       if (!stale()) {
         setLoading(false);
@@ -1969,6 +1983,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           tasksTotalCount={storyTasksTotalCount}
           tasksLoading={storyTasksLoading}
           memberMap={memberMap}
+          // [SID:4300 · 까디르 4682 ①] 명단을 받기 전엔 «알 수 없는 구성원» 대신 빈 칸 — 딥링크(?story=)로 보드와 패널이 함께 열릴 때
+          // 패널 기본값(true)이면 명단이 오기 전에 거짓 «알 수 없는»이 먼저 섰다가 이름으로 바뀌었다.
+          memberMapLoaded={membersLoaded}
           members={members}
           getStatusLabel={domainLabels.statusLabel}
           getEntityTypeLabel={domainLabels.entityTypeLabel}

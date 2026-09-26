@@ -8,6 +8,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { StandupHistorySection } from './standup-history-section';
+import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+
+// [SID:4300] 기본 org 없음(조직 보충 안 함 — 기존 테스트 그대로). 보충 테스트만 orgId를 채운다.
+const dashCtx = vi.hoisted(() => ({ value: {} as { orgId?: string } }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -37,6 +42,8 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  dashCtx.value = {};
+  resetOrgMembersCacheForTests();
 });
 
 function stubFetchByCursor(pages: Record<string, { data: ReturnType<typeof entry>[]; meta: { has_more: boolean; next_cursor: string | null } }>) {
@@ -104,3 +111,116 @@ describe('StandupHistorySection — 더 보기(story #2248)', () => {
     expect(container.querySelectorAll('[data-slot="badge"]')[0]?.textContent).toBe('2');
   });
 });
+
+// [SID:4300] 지난 기록 작성자 — 부모 표(활성만)에 없는 작성자(비활성 에이전트의 옛 기록)를 비활성까지 싣는 조직 원천으로 보충.
+describe('StandupHistorySection — 작성자 이름 조직 보충([SID:4300])', () => {
+  it('부모 표에 없는 작성자 → 조직 원천 이름 · 표에 있는 작성자는 그대로 · 조직에도 없으면 «알 수 없는 구성원»', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url === ORG_NAMES_URL) {
+        return new Response(JSON.stringify({ data: [{ id: 'member-2', name: '쉬는봇', type: 'agent' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [entry('1', '2026-09-24'), entry('2', '2026-09-23'), entry('3', '2026-09-22')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{ 'member-1': '안나' }} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = container.textContent ?? '';
+    expect(text).toContain('안나');
+    expect(text).toContain('쉬는봇');
+    expect(text).toContain('알 수 없는 구성원');
+    expect(calls.filter((u) => u === ORG_NAMES_URL)).toHaveLength(1);
+  });
+});
+
+// [PO 14:30Z] 받는 동안 빈 글자 — 한 일(done)이 없는 기록은 작성자 이름이 줄의 유일한 내용이라 빈 동안에도 한 줄 높이(min-h-4 = text-xs 줄).
+describe('StandupHistorySection — 받는 동안 빈 작성자 줄 높이([SID:4300])', () => {
+  it('조직 보충을 받는 동안 한 일 없는 기록 줄 = 빈 글자 + 한 줄 높이 → 받은 뒤 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) {
+        await gate;
+        return new Response(JSON.stringify({ data: [{ id: 'member-7', name: '쉬는봇', type: 'agent' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [{ ...entry('7', '2026-09-24'), done: null }], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{}} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const rows = [...container.querySelectorAll('div.min-h-4')];
+    expect(rows.length, '기록 줄').toBe(1);
+    expect(rows[0]!.textContent).toBe('');
+    await act(async () => { release(); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('쉬는봇');
+  });
+});
+
+// [SID:4300 · PO 06:37Z] 같은 폴백 글자가 서로 다른 작성자 둘 이상에 서면 그 폴백에만 id 앞 8자 꼬리(#4284 · 겹칠 때만).
+describe('StandupHistorySection — 겹치는 폴백에만 꼬리([SID:4300])', () => {
+  it('명단에 없는 서로 다른 두 작성자 → «알 수 없는 구성원 · member-3» · «… · member-4»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [entry('1', '2026-09-24'), entry('3', '2026-09-23'), entry('4', '2026-09-22')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{ 'member-1': '안나' }} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const text = container.textContent ?? '';
+    expect(text).toContain('안나');
+    expect(text).toContain('알 수 없는 구성원 · member-3');
+    expect(text).toContain('알 수 없는 구성원 · member-4');
+  });
+});
+
+// [SID:4300 · PO 16:27Z · story #4311 뒤] 꼬리 규칙이 «보이는 글자가 같으면»으로 바뀌었다(4678) — 받는 동안 빈 글자 행은 규칙에 안 들어가
+// (memberLookup null → 목록에서 뺌) « · id»만 보이는 줄이 없어야 하고, 받은 뒤 동명이인 둘은 id 앞 8자로 갈린다.
+describe('StandupHistorySection — 4311 꼬리 규칙 × 받는 동안 빈 글자([SID:4300])', () => {
+  it('조직 원천 받는 동안 작성자 둘 = 빈 글자 · « · » 꼬리 0 → 받은 뒤 동명이인 «송윤재» 둘 = 두 줄에 id 앞 8자', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) {
+        await gate;
+        return new Response(JSON.stringify({ data: [{ id: 'member-5', name: '송윤재', type: 'human' }, { id: 'member-6', name: '송윤재', type: 'human' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [entry('5', '2026-09-24'), entry('6', '2026-09-23')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{}} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const names = () => [...container.querySelectorAll('div.min-h-4 > span.font-medium')].map((el) => el.textContent ?? '');
+    expect(names()).toEqual(['', '']);
+    expect(container.textContent).not.toMatch(/ · member-/);
+    await act(async () => { release(); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(names().sort()).toEqual(['송윤재 · member-5', '송윤재 · member-6']);
+  });
+});
+
+// [SID:4300 · 4303 AC1 · PR 4658] 조직을 떠난 사람도 조직 원천(ORG_NAMES_URL)에 이름만 실린다(user_id null · is_active false) — 떠난 사람이
+// 작성한 지난 기록에 «알 수 없는 구성원» 대신 그 이름이 선다.
+describe('StandupHistorySection — 떠난 사람이 작성자([SID:4300] · 4303)', () => {
+  it('부모 명단(활성)에 없는 떠난 사람 → 조직 원천의 이름', async () => {
+    dashCtx.value = { orgId: 'org-1' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === ORG_NAMES_URL) {
+        return new Response(JSON.stringify({ data: [{ id: 'member-2', name: '떠난이', type: 'human', user_id: null, is_active: false, role: 'member' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ data: [entry('1', '2026-09-24'), entry('2', '2026-09-23')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await act(async () => {
+      root.render(withIntl(<StandupHistorySection projectId="proj-1" memberNameById={{ 'member-1': '안나' }} memberNamesLoaded />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('떠난이');
+    expect(container.textContent).not.toContain('알 수 없는 구성원');
+  });
+});
+
