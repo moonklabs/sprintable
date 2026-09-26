@@ -28,16 +28,17 @@ TIME_LIKE = re.compile(r"^(since|until|from_?|to|start|end|before|after|date|dat
 OFFSET_REQUIRED = "offset_required"  # BE 기간 쿼리 — 오프셋 없으면 422
 DATE_ONLY = "date_only"  # YYYY-MM-DD(시각 없음)
 CURSOR = "cursor"  # 서버가 발급한 값을 그대로 돌려줌
+# 아래 둘은 story #4330 뒤로 쓰는 곳이 없다(본문 일시도 오프셋 필수) — BE 본문이 오프셋을 안 요구하는 새 필드가 생길 때만 쓴다.
 CONCURRENCY_TOKEN = "concurrency_token"  # 서버가 준 updated_at을 그대로 돌려줌(낙관적 잠금)
-WRITE_TIMESTAMP = "write_timestamp"  # 기간 질의가 아니라 기록하는 값(본문) — 4294 범위 밖
+WRITE_TIMESTAMP = "write_timestamp"  # 기간 질의가 아니라 기록하는 값(본문)
 NOT_APPLIED_BY_SERVER = "not_applied_by_server"  # 서버가 읽지 않는 파라미터(별도 결함으로 PO 보고)
 
 SNAPSHOT: dict[str, dict[str, str]] = {
     "sprintable_get_session_context": {"since": OFFSET_REQUIRED},
     "sprintable_add_goal": {"target_date": DATE_ONLY},
-    "sprintable_update_goal": {"target_date": DATE_ONLY, "measure_after": WRITE_TIMESTAMP},
+    "sprintable_update_goal": {"target_date": DATE_ONLY, "measure_after": OFFSET_REQUIRED},
     "sprintable_add_epic": {"target_date": DATE_ONLY},
-    "sprintable_update_epic": {"target_date": DATE_ONLY, "measure_after": WRITE_TIMESTAMP},
+    "sprintable_update_epic": {"target_date": DATE_ONLY, "measure_after": OFFSET_REQUIRED},
     "sprintable_create_sprint": {"start_date": DATE_ONLY, "end_date": DATE_ONLY},
     "sprintable_update_sprint": {"start_date": DATE_ONLY, "end_date": DATE_ONLY},
     "sprintable_standup_missing": {"date": DATE_ONLY},
@@ -47,15 +48,16 @@ SNAPSHOT: dict[str, dict[str, str]] = {
     "sprintable_checkin_sprint": {"date": DATE_ONLY},
     "sprintable_list_chat_messages": {"before": CURSOR},
     "sprintable_check_notifications": {"before": CURSOR},
-    "sprintable_update_doc": {"expected_updated_at": CONCURRENCY_TOKEN},
-    "sprintable_create_meeting": {"date": WRITE_TIMESTAMP},
-    "sprintable_update_meeting": {"date": WRITE_TIMESTAMP},
-    "sprintable_emit_event": {"started_at": WRITE_TIMESTAMP, "finished_at": WRITE_TIMESTAMP},
-    "sprintable_update_run_status": {"started_at": WRITE_TIMESTAMP, "finished_at": WRITE_TIMESTAMP},
-    # measure_after — 결과를 잴 시각(본문 datetime · 기록하는 값).
-    "sprintable_create_hypothesis": {"measure_after": WRITE_TIMESTAMP},
-    "sprintable_update_hypothesis": {"measure_after": WRITE_TIMESTAMP},
-    "sprintable_update_story": {"measure_after": WRITE_TIMESTAMP},
+    # story #4330 AC4 — 요청 본문의 일시도 `OffsetDatetime`이라 오프셋 없으면 422(쿼리와 같은 봉투). 기록하는 값 · 서버가 준
+    # 값을 돌려주는 동시성 토큰도 본문 필드라 같은 규칙 — 아래 층 대조(본문)가 BE 본문 모델과 맞춰 본다.
+    "sprintable_update_doc": {"expected_updated_at": OFFSET_REQUIRED},
+    "sprintable_create_meeting": {"date": OFFSET_REQUIRED},
+    "sprintable_update_meeting": {"date": OFFSET_REQUIRED},
+    "sprintable_emit_event": {"started_at": OFFSET_REQUIRED, "finished_at": OFFSET_REQUIRED},
+    "sprintable_update_run_status": {"started_at": OFFSET_REQUIRED, "finished_at": OFFSET_REQUIRED},
+    "sprintable_create_hypothesis": {"measure_after": OFFSET_REQUIRED},
+    "sprintable_update_hypothesis": {"measure_after": OFFSET_REQUIRED},
+    "sprintable_update_story": {"measure_after": OFFSET_REQUIRED},
     # GET /api/v2/meetings는 date_from · date_to를 읽지 않는다(필터가 조용히 무시됨) — 4294 범위 밖, PO에 별도 보고.
     "sprintable_list_meetings": {"date_from": NOT_APPLIED_BY_SERVER, "date_to": NOT_APPLIED_BY_SERVER},
 }
@@ -113,6 +115,53 @@ def handler_forwards(src: str, guarded: dict[str, set[str]]) -> set[str]:
     return out
 
 
+def _offset_checked(ann, checked: bool = False) -> bool:
+    """본문 필드 타입에 `OffsetDatetime`의 오프셋 검사가 붙었나(`OffsetDatetime | None`처럼 합집합 안쪽 `Annotated` 포함)."""
+    import typing
+
+    from app.core.datetime_query import _require_offset
+
+    origin = typing.get_origin(ann)
+    if origin is typing.Annotated:
+        base, *meta = typing.get_args(ann)
+        return _offset_checked(base, checked or any(getattr(m, "func", None) is _require_offset for m in meta))
+    args = typing.get_args(ann)
+    return any(_offset_checked(a, checked) for a in args) if args else checked
+
+
+def guarded_be_bodies() -> list[tuple[set[str], re.Pattern[str], set[str]]]:
+    """story #4330 — (메서드들, 경로 정규식, 오프셋을 요구하는 본문 최상위 필드) — 실제 FastAPI 라우트에서 읽는다."""
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    out = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or route.body_field is None:
+            continue
+        model = route.body_field.field_info.annotation
+        fields = getattr(model, "model_fields", {})
+        offset = {name for name, f in fields.items() if _offset_checked(f.annotation)}
+        if offset:
+            out.append((set(route.methods), re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", route.path_format) + "$"), offset))
+    return out
+
+
+def handler_body_targets(src: str) -> list[tuple[str, str]]:
+    """핸들러가 본문을 보내는 (메서드, 경로) — `client.post(f"/api/v2/goals/{args.goal_id}", json=…)` → ("POST", "/api/v2/goals/X")."""
+    return [(m.upper(), re.sub(r"\{[^}]+\}", "X", path)) for m, path in re.findall(r'client\.(post|patch|put)\(\s*f?"([^"]+)"', src)]
+
+
+def body_offset_args(src: str, time_like: set[str], bodies) -> set[str]:
+    """도구의 일시 파라미터 중, 핸들러가 부르는 BE 라우트의 본문에서 오프셋을 요구하는 필드와 이름이 같은 것."""
+    out: set[str] = set()
+    for method, path in handler_body_targets(src):
+        for methods, pattern, fields in bodies:
+            if method in methods and pattern.match(path):
+                out |= time_like & fields
+    return out
+
+
 # ── 1. 스냅샷 ──────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_tool_list_time_like_params_match_snapshot(monkeypatch):
@@ -151,6 +200,22 @@ def test_every_mcp_arg_reaching_a_guarded_be_query_is_classified_offset_required
     assert wrong == []
 
 
+def test_every_mcp_arg_sent_into_an_offset_checked_be_body_field_is_classified_offset_required(monkeypatch):
+    """story #4330 AC4 — 층 대조(본문): MCP 도구가 부르는 BE 라우트의 본문 필드가 `OffsetDatetime`이면 그 이름의 도구 파라미터는
+    «오프셋 필수»로 분류돼 있어야 한다(= 2번 가드로 도구 설명 한 줄이 강제된다)."""
+    from sprintable_mcp.server import _TOOL_DEFS
+
+    bodies = guarded_be_bodies()
+    assert any(pattern.match("/api/v2/meetings") and "date" in fields for _m, pattern, fields in bodies), "스캔이 실제 BE 본문을 읽는지"
+    wrong = []
+    for name, _doc, cls, fn in _TOOL_DEFS:
+        time_like = {p for p in cls.model_fields if TIME_LIKE.match(p)}
+        for arg in body_offset_args(inspect.getsource(fn), time_like, bodies):
+            if SNAPSHOT.get(name, {}).get(arg) != OFFSET_REQUIRED:
+                wrong.append(f"{name}:{arg}")
+    assert wrong == []
+
+
 # ── 양성 대조 ───────────────────────────────────────────────────────────────
 def test_controls_catch_missing_note_new_param_and_misclassification():
     from sprintable_mcp.datetime_params import offset_required_note
@@ -168,3 +233,8 @@ def test_controls_catch_missing_note_new_param_and_misclassification():
     src = 'params = {}\n    if args.from_:\n        params["from"] = args.from_\n    return await client.get("/api/v2/activity-logs", params=params)'
     assert handler_forwards(src, guarded) == {"from_"}
     assert handler_forwards(src.replace("activity-logs", "stories"), guarded) == set()
+
+    bodies = [({"POST", "PUT"}, re.compile(r"^/api/v2/meetings(/[^/]+)?$"), {"date"})]
+    assert body_offset_args('return ok(await client.put(f"/api/v2/meetings/{args.meeting_id}", json=body))', {"date"}, bodies) == {"date"}
+    assert body_offset_args('return ok(await client.patch(f"/api/v2/meetings/{args.meeting_id}", json=body))', {"date"}, bodies) == set()  # 메서드 다름
+    assert body_offset_args('return ok(await client.post("/api/v2/stories", json=body))', {"date"}, bodies) == set()  # 경로 다름
