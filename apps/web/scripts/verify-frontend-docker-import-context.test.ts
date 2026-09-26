@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { measureFsReads } from './test-utils/fs-work';
 import {
   parseCopiedPrefixes,
   parseRelativeSpecifiers,
@@ -119,15 +120,15 @@ describe('isInsideContext — 접두 매칭', () => {
 // (c) 실사고 재현+회귀가드 — 배포 58을 일으킨 정확한 import(#3729 前 상태)를 합성 픽스처로
 // 재현한다. 현재 develop(3729 착지 뒤)은 이 위반이 없어야 한다는 것도 같이 고정.
 describe('scanRepository — 실 저장소 스캔(현재 develop 기준)', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: apps/web
-  // 전체 스위트 동시부하 재현 5회 = 276·278·325·241·274ms 중 최댓값 325ms → ×3 ≈ 975ms →
-  // 1000ms로 반올림). CI 리포터가 기본값이라 개별 테스트 duration이 로그에 안 남아 전체
-  // 스위트 동시부하 재현치를 대체 자로 씀.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('apps/web 비-테스트 파일 전수 스캔 — 컨텍스트 밖 상대 import 0건(#3729 핫픽스+#3731 이관 뒤)', () => {
-    const { violations, scanned } = scanRepository();
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
+    const { violations, scanned } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(scanned).toBeGreaterThan(1000); // 유나 실측 1,233개 규모 — 큰 폭 감소는 walk 로직 회귀 신호
     expect(violations).toEqual([]);
-  }, 1000);
+  });
 });
 
 // AC㉤(커밋③) — 주석 속 import 문자열은 stripComments()로 제외된다. 이 자체는 scanRepository

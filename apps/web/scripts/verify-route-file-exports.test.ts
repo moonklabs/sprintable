@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP_ROUTER_EXPORT_WHITELIST, ROUTE_FILE_BASENAME_RE, scanFileContent, scanRepo } from './verify-route-file-exports';
+import { measureFsReads } from './test-utils/fs-work';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app');
 
@@ -206,11 +207,15 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // 넷(work-list · flow · epics · hypotheses — sprints · retro는 기존 파일 교체)으로 121→125(위반 0건 그대로 — default export만).
   // story #4291 — `[ws]/[proj]/layout.tsx`(일감 탭 띠 WorkTabsFrame) 하나로 125→126(default export만).
   // story #4326(까디르 4688) — `organization/workforce/runs/loading.tsx`(실행 목록 상단바 폴백) 하나로 126→127(default export만).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 트리(apps/web/src/app) — 라우트 파일 127개·위반 0건', () => {
-    const { violations, fileCount } = scanRepo(APP_ROOT);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(APP_ROOT));
+    const { violations, fileCount } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(fileCount).toBe(127);
     expect(violations).toEqual([]);
-  }, 1000);
+  });
 });
 
 describe('APP_ROUTER_EXPORT_WHITELIST — story #3760 AC1', () => {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { scanJsxFileContent, scanI18nMessages, scanRepo } from './verify-no-count-in-title-string';
+import { measureFsReads } from './test-utils/fs-work';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const KO_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages/ko.json');
@@ -81,12 +82,14 @@ describe('scanI18nMessages — story #3764 셀프테스트(i18n 값형)', () => 
 });
 
 describe('scanRepo — story #3764(실 트리 실행)', () => {
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 621·930·852·963·809ms 중 최댓값 963ms → ×3 ≈ 2889ms → 3000ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 트리(apps/web/src + ko/en.json) — JSX 조립형·i18n 값형 둘 다 0건(ALLOWLIST 제외), ALLOWLIST는 전부 실제로 걸린다', () => {
     const koMessages = JSON.parse(readFileSync(KO_PATH, 'utf8')) as Record<string, unknown>;
     const enMessages = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, unknown>;
-    const { jsxRefs, i18nRefs, fileCount, jsxAllowlistHit, i18nAllowlistHit } = scanRepo(SRC_ROOT, koMessages, enMessages);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(SRC_ROOT, koMessages, enMessages));
+    const { jsxRefs, i18nRefs, fileCount, jsxAllowlistHit, i18nAllowlistHit } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(fileCount).toBeGreaterThan(400);
     expect(jsxRefs).toEqual([]);
     expect(i18nRefs).toEqual([]);
@@ -94,5 +97,5 @@ describe('scanRepo — story #3764(실 트리 실행)', () => {
     // (202870e0f 위 rebase) — 지금 남은 건 탭 라벨 영구 예외 2키(i18n)뿐, JSX는 0.
     expect(jsxAllowlistHit.size).toBe(0);
     expect(i18nAllowlistHit.size).toBe(2);
-  }, 3000);
+  });
 });

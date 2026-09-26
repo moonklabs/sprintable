@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALLOWLIST, compareToBaseline, scanJsxFileContent, scanRepo } from './verify-no-raw-role-jsx-text';
+import { measureFsReads } from './test-utils/fs-work';
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -141,16 +142,18 @@ describe('scanRepo — story #3770(실 트리 실행)', () => {
   // ALLOWLIST에 없다). CHANGES(PO 2026-09-14 13:36Z) — 키를 file:line에서
   // file::field::표현식 텍스트(+개수)로 교체(muted-on-tint GRANDFATHER_BASELINE 동형,
   // compareToBaseline으로 정확 일치 판정).
-  // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-  // 재현 5회 = 620·860·871·1085·721ms 중 최댓값 1085ms → ×3 ≈ 3255ms → 3500ms로 반올림).
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('실 트리(apps/web/src) — ALLOWLIST와 정확히 일치(신규 0·stale 0)', () => {
-    const { allRefs, fileCount, actualCounts } = scanRepo(SRC_ROOT);
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(SRC_ROOT));
+    const { allRefs, fileCount, actualCounts } = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     expect(fileCount).toBeGreaterThan(400);
     expect(allRefs.length).toBeGreaterThan(0);
     const { increased, stale } = compareToBaseline(actualCounts, ALLOWLIST);
     expect(increased).toEqual([]);
     expect(stale).toEqual([]);
-  }, 3500);
+  });
 });
 
 // story #3878(§⑤ 낱말 드리프트) — 실 파일 뮤테이션(합성 표본 아님, AC2 명시): 7곳 中 대표

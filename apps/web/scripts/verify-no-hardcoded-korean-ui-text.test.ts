@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { measureFsReads } from './test-utils/fs-work';
 import {
   computeDeadExemptFiles, computeNewViolations, computeStaleBaseline, EXEMPT_FILES, loadBaseline,
   scanContent, scanRepo, violationKey,
@@ -313,13 +314,16 @@ describe('창건 사례 — scanRepo가 실제로 한글 위반을 재는지(합
 });
 
 describe('EXEMPT_FILES — 내부 도그푸드·약관(스토리 明示 ④)', () => {
-  // story #3902 — 635·850·728·851·686ms 중 최댓값 851ms → ×3 ≈ 2553ms → 3000ms로 반올림.
+  // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
   it('exempt로 등재된 파일은 위반이 있어도 스캔에서 완전히 제외된다', () => {
-    const violations = scanRepo(path.resolve(__dirname, '../src'));
+    const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(path.resolve(__dirname, '../src')));
+    const violations = __scan;
+    expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
+    expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
     for (const exempt of EXEMPT_FILES) {
       expect(violations.some((v) => v.file === exempt)).toBe(false);
     }
-  }, 3000);
+  });
 });
 
 // story #3776(유나 지적 06:09Z) — EXEMPT_FILES는 baseline stale 검사와 달리 자가만료가

@@ -2405,6 +2405,8 @@ jobs:
         # 위 `| tail -80` 계약·판정/exit code 전부 무변, A/B 로컬 실측상 시간 증가도 노이즈
         # 수준). 이 JSON이 있어야 다음 스텝들이 «성공 run에서도» 테스트별 duration을 읽을
         # 수 있다(story #3902의 «측정치×3»이 CI 로그 실측 없이 로컬 관측으로 대체된 갭 처방).
+        # ⚠️story #4333 — «측정치×3»으로 시한을 거는 관례 자체는 폐기(벽시계 예산 = 부하 따라 까닭 없이 RED). 이 duration 표는
+        # 느린 테스트를 **찾는** 관측용으로만 남는다 — 시한은 행 가드(5초 이상)뿐 · 일의 양은 결정적으로(scripts/test-utils/fs-work.ts).
         run: |
           set -o pipefail
           pnpm vitest run --reporter=default --reporter=json --outputFile.json=/tmp/vitest-results.json 2>&1 | tail -80
