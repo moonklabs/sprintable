@@ -15,6 +15,7 @@ import koMessages from '../../../messages/ko.json';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 import { ORG_NAMES_URL, resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+import { HOVER_REVEAL } from '@/lib/hover-reveal';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -1546,5 +1547,44 @@ describe('StoryDetailPanel — 댓글 · 활동 작성자 동명이인([SID:4311
     await openTab((text) => text === koMessages.board.activityTab);
     const actors = [...container.querySelectorAll('li div.mt-1 > span:first-child')].map((el) => el.textContent);
     expect(actors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '송윤재 · e75ca548']);
+  });
+});
+
+// [SID:4345] 의존 행의 «차단/의존 전환» · «의존 관계 제거»는 `hidden group-hover:block`이었다 — display:none이라 터치에서 늘 없고,
+// 키보드 탭 순서에서도 빠졌다. 이제 HOVER_REVEAL(호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점에서) 모양이고 늘 DOM · 탭 순서에 있다.
+// jsdom은 CSS를 안 입혀서 보임 여부는 클래스 모양으로 핀한다(실제 계산 값은 PR 본문 실브라우저 판 · 유나 실측).
+describe('StoryDetailPanel — 의존 행 조작 버튼이 호버 전용이 아님([SID:4345])', () => {
+  it('네 갈래 의존 행(막힘 · 막음 · 의존 · 의존받음)의 전환 · 제거 8개 = HOVER_REVEAL · 숨김 토큰 0 · 탭 순서 안', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/dependencies?')) {
+        return { ok: true, json: async () => [
+          { id: 'e1', from_id: 'x1', to_id: 's1', dep_type: 'blocks' },
+          { id: 'e2', from_id: 's1', to_id: 'x2', dep_type: 'blocks' },
+          { id: 'e3', from_id: 's1', to_id: 'x3', dep_type: 'depends_on' },
+          { id: 'e4', from_id: 'x4', to_id: 's1', dep_type: 'depends_on' },
+        ] };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} projectId="proj-1" />));
+    });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    const byLabel = (label: string) => [...container.querySelectorAll('button')].filter((b) => b.getAttribute('aria-label') === label);
+    const removes = byLabel(koMessages.board.dep.remove);
+    const toggles = byLabel(koMessages.board.dep.toggleType);
+    expect(removes).toHaveLength(4);
+    expect(toggles).toHaveLength(4);
+    for (const el of [...removes, ...toggles]) {
+      const tokens = el.className.split(/\s+/);
+      for (const t of HOVER_REVEAL.split(' ')) expect(tokens, `${el.getAttribute('aria-label')} · ${t}`).toContain(t);
+      expect(tokens).not.toContain('hidden');
+      expect(tokens.filter((t) => /(^|:)group-hover:(block|flex)$/.test(t))).toEqual([]);
+      expect(tokens).not.toContain('opacity-0');
+      // 누르는 자리 24×24(PO · 유나 10:01Z) — 디자인 Button의 min-h-0 줄임을 걷고 상수로 · 행 높이는 -my-1로 무변
+      expect(tokens).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6', '-my-1', 'p-1.5']));
+      expect(tokens).not.toContain('min-h-0');
+      expect(el.tabIndex).toBe(0);
+    }
   });
 });

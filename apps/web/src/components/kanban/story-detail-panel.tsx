@@ -37,6 +37,8 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
+import { cn } from '@/lib/utils';
+import { HOVER_REVEAL, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { actorRowLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
@@ -362,6 +364,14 @@ export function DescriptionViewer({
       {prepared}
     </ReactMarkdown>
   );
+}
+
+/** story #4345 — `incoming`이 `current`보다 옛 판인가(둘 다 `updated_at`이 있을 때만 · 같으면 옛것 아님). 서버 판은 갱신마다 단조 증가. */
+function isOlderStory(incoming: Pick<KanbanStory, 'updated_at'>, current: Pick<KanbanStory, 'updated_at'>): boolean {
+  if (!incoming.updated_at || !current.updated_at) return false;
+  const a = Date.parse(incoming.updated_at);
+  const b = Date.parse(current.updated_at);
+  return Number.isFinite(a) && Number.isFinite(b) && a < b;
 }
 
 export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap: projectMemberMap = {}, memberMapLoaded = true, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
@@ -1165,7 +1175,188 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     else addToast({ type: 'error', title: t('acSaveFailed') });
   };
 
+  // story #4345(유나 규격 · PO 10:02~10:03Z) — 터치에서 늘 보이게 된 첨부 삭제 ✕가 첨부(열기 대상) 위에 있어, 오탭 한 번이면
+  // 확인 · 되돌리기 없이 지워졌다. 이제:
+  // - 누르면 목록에서만 곧바로 숨기고 «첨부를 삭제했어요» + 파일 이름 + «되돌리기» 토스트를 띄운다(확인 창 없음).
+  // - 서버에 지우는 요청은 **토스트가 닫힐 때**(시간 끝 · ✕ · 새 토스트에 밀려남) 한 번 — 포인터/초점이 토스트 안이면 안 닫혀서,
+  //   «되돌리기»가 보이는 동안엔 요청이 안 나간다. 보낼 때는 **그때의 최신 목록**에서 그 url만 뺀다(묵은 목록으로 남의 새 첨부를 지우지 않게).
+  // - 되돌리기: 아직 안 보냈으면 요청 취소(실패 없음). 이미 보냈으면(화면 떠남 · 탭 숨김 flush) 지금 목록에 그 한 항목만 되넣기(이미 있으면 요청 0).
+  // - **한 패널에서 가는 PATCH는 늘 하나**(까디르 · PO 4718): 다음 일(삭제 · 되넣기)은 앞 응답이 반영된 뒤 그때의 최신 목록으로 계산해 보낸다.
+  //   목록 통째 PATCH라, 겹치면 앞 요청이 모르는 삭제를 뒤 요청이 되살리거나 서버가 순서를 바꿔 처리할 수 있어서다.
+  //   예외: `pagehide` · `visibilitychange(hidden)`은 페이지가 곧 멈출 수 있어 줄을 기다리지 않고 keepalive로 **지금** 보낸다(뒤의 일은 이것도 기다림).
+  //   이것이 이미 가는 PATCH와 겹칠 때만 두 요청이 함께 간다 — 그래서 보내는 목록은 가는 중인 삭제를 빼고 가는 중인 되넣기를 넣으며,
+  //   응답은 더 늦게 보낸 요청의 응답이 이미 반영됐으면 버린다(늦게 온 옛 응답이 목록을 되돌리지 않게).
+  // - 부모 갱신(`onStoryUpdate`)은 마운트 중에만 — 닫은 뒤 응답이 오면 칸반이 그 스토리를 다시 골라 닫힌 패널이 다시 열린다(kanban-board onStoryUpdate).
+  // - 화면을 떠나면(언마운트) 대기 중인 삭제를 keepalive로 줄에 세운다(의도가 조용히 버려지지 않게 · 앱 안 이동이라 줄은 계속 돈다).
+  // - 보낸 삭제가 실패하면 항목이 다시 보이고 «첨부를 삭제하지 못했어요» 토스트 · 되넣기가 실패하면 «첨부를 되돌리지 못했어요».
+  type SendResult = { updated: KanbanStory | null; seq: number };
+  // state: pending = 토스트 열림(안 보냄) · queued = 줄에 섬 · sent = 가는 중 · done = 응답 옴(토스트가 닫힐 때까지 되돌리기용으로 남김).
+  type PendingRemoval = { attachment: SendAttachment; index: number; state: 'pending' | 'queued' | 'sent' | 'done'; closed: boolean };
+  const pendingRemovalsRef = useRef(new Map<string, PendingRemoval>());
+  const restoringRef = useRef(new Map<string, { attachment: SendAttachment; index: number }>());
+  const chainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const sendSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
+  const [hiddenAttachmentUrls, setHiddenAttachmentUrls] = useState<string[]>([]);
+  const latestRef = useRef({ story, onStoryUpdate, addToast, t });
+  // 보내는 목록의 원천 = 마지막 서버 목록(까디르 4718 ②). 매 렌더 props로 덮으면, 부모가 갱신을 안 돌려주는 자리(flow 노드 패널 —
+  // onStoryUpdate 없음)에서 첫 삭제 성공 뒤의 서버 목록이 다음 렌더에 옛 props 목록(지운 항목 포함)으로 돌아가 둘째 삭제가 그걸 되살렸다.
+  // 부모가 **다른 story 객체**를 넘길 때만(부모가 새로 받거나 우리 갱신을 받아 넘김) 받아들인다 — 같은 객체면 새 소식이 없다.
+  // 새 객체라도 **옛 판**이면 버린다(까디르 4718): 에픽 스윔레인은 버전 없는 재조회 결과로 목록을 갈아서, 삭제 전에 출발한 재조회가 삭제 뒤에
+  // 도착하면 «새 객체인데 옛 목록»이 된다. 판 = `updated_at`(서버가 갱신마다 단조 증가). 둘 중 하나라도 없으면 객체 비교만.
+  const adoptedStoryRef = useRef(story);
+  useEffect(() => {
+    const fromParent = adoptedStoryRef.current !== story;
+    adoptedStoryRef.current = story;
+    const current = latestRef.current.story;
+    const adopt = fromParent && !isOlderStory(story, current);
+    latestRef.current = { story: adopt ? story : current, onStoryUpdate, addToast, t };
+  });
+  const mountedRef = useRef(true);
+  const unhideAttachment = useCallback((url: string) => {
+    if (mountedRef.current) setHiddenAttachmentUrls((cur) => cur.filter((u) => u !== url));
+  }, []);
+
+  const sendAttachments = useCallback(async (attachments: SendAttachment[], keepalive: boolean): Promise<SendResult> => {
+    sendSeqRef.current += 1;
+    const seq = sendSeqRef.current;
+    try {
+      const res = await fetch(`/api/stories/${latestRef.current.story.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachments }),
+        keepalive,
+      });
+      if (!res.ok) return { updated: null, seq };
+      const json = await res.json();
+      return { updated: (json.data as KanbanStory) ?? null, seq };
+    } catch {
+      return { updated: null, seq };
+    }
+  }, []);
+
+  /** 줄에 세운다 — 앞 일이 끝난(응답이 반영된) 뒤에 돈다. 그 일의 약속을 돌려준다(업로드가 제 PATCH를 기다린다). */
+  const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
+    const run = chainRef.current.then(job, job);
+    chainRef.current = run;
+    return run;
+  }, []);
+
+  /** 보낼 목록 — 최신 서버 목록에서 `drop` · 가는 중인 삭제를 빼고, 가는 중인 되넣기는 제자리에 넣는다. */
+  const outgoingAttachments = useCallback((drop: Set<string>): SendAttachment[] => {
+    const gone = new Set(drop);
+    for (const [url, p] of pendingRemovalsRef.current) if (p.state === 'sent') gone.add(url);
+    const next: SendAttachment[] = (latestRef.current.story.attachments ?? []).filter((a) => !gone.has(a.url));
+    for (const [url, r] of restoringRef.current) {
+      if (!gone.has(url) && !next.some((a) => a.url === url)) next.splice(Math.min(r.index, next.length), 0, r.attachment);
+    }
+    return next;
+  }, []);
+
+  /** 성공 응답 반영 — 더 늦게 보낸 요청의 응답이 이미 반영됐으면 버린다. 부모 갱신은 마운트 중에만. */
+  const applySent = useCallback((result: SendResult, sent: SendAttachment[]) => {
+    if (!result.updated || result.seq < appliedSeqRef.current) return;
+    appliedSeqRef.current = result.seq;
+    // 응답의 판(updated_at)도 싣는다 — 다음에 부모가 넘기는 story가 이보다 옛것인지 가르는 기준.
+    const merged = { ...latestRef.current.story, attachments: result.updated.attachments ?? sent, updated_at: result.updated.updated_at ?? latestRef.current.story.updated_at };
+    latestRef.current = { ...latestRef.current, story: merged }; // 화면을 떠난 뒤의 되돌리기도 서버 목록 기준으로
+    if (mountedRef.current) latestRef.current.onStoryUpdate?.(merged);
+  }, []);
+
+  /** 삭제를 지금 보낸다(아직 안 보낸 것만 · 한 PATCH). 끝나면 응답을 반영하고, 토스트가 이미 닫힌 대기표는 치운다. */
+  const sendRemovals = useCallback(async (urls: string[], keepalive: boolean): Promise<void> => {
+    const targets = urls.map((url) => [url, pendingRemovalsRef.current.get(url)] as const)
+      .filter((e): e is readonly [string, PendingRemoval] => !!e[1] && (e[1].state === 'pending' || e[1].state === 'queued'));
+    if (targets.length === 0) return;
+    const next = outgoingAttachments(new Set(targets.map(([url]) => url)));
+    for (const [, p] of targets) p.state = 'sent';
+    const result = await sendAttachments(next, keepalive);
+    for (const [url, p] of targets) {
+      const own = pendingRemovalsRef.current.get(url) === p;
+      if (!result.updated) {
+        if (own) pendingRemovalsRef.current.delete(url);
+        unhideAttachment(url);
+      } else {
+        p.state = 'done';
+        // 숨김은 그대로 — 부모가 새 목록을 안 내려줘도 지운 첨부가 다시 나타나지 않게.
+        if (own && p.closed) pendingRemovalsRef.current.delete(url);
+      }
+    }
+    if (!result.updated) {
+      if (mountedRef.current) latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRemoveFailed') });
+      return;
+    }
+    applySent(result, next);
+  }, [sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
+
+  /** 대기 중인 삭제를 줄에 세운다(토스트 닫힘 · 언마운트). */
+  const queueRemovals = useCallback((urls: string[], keepalive: boolean) => {
+    const targets = urls.filter((url) => pendingRemovalsRef.current.get(url)?.state === 'pending');
+    if (targets.length === 0) return;
+    for (const url of targets) pendingRemovalsRef.current.get(url)!.state = 'queued';
+    enqueue(() => sendRemovals(targets, keepalive));
+  }, [enqueue, sendRemovals]);
+
+  /** 페이지가 곧 멈출 수 있을 때(pagehide · 탭 숨김) — 줄에 선 것까지 keepalive로 지금 보내고, 뒤의 일은 이것도 기다리게 한다. */
+  const flushRemovalsNow = useCallback(() => {
+    const urls = [...pendingRemovalsRef.current].filter(([, p]) => p.state === 'pending' || p.state === 'queued').map(([url]) => url);
+    if (urls.length === 0) return;
+    const inflight = sendRemovals(urls, true);
+    chainRef.current = Promise.all([chainRef.current, inflight]);
+  }, [sendRemovals]);
+
+  const undoRemoveAttachment = useCallback((url: string) => {
+    const p = pendingRemovalsRef.current.get(url);
+    if (!p) return;
+    pendingRemovalsRef.current.delete(url);
+    if (p.state === 'pending' || p.state === 'queued') { unhideAttachment(url); return; } // 아직 안 보냄 — 요청 취소(줄의 일은 이 항목을 건너뜀)
+    // 누른 순간부터 «되넣는 중» — 그 사이 지금 보내지는(탭 숨김) 삭제의 목록에도 이 항목이 들어간다(되돌린 것을 다시 지우지 않게).
+    restoringRef.current.set(url, { attachment: p.attachment, index: p.index });
+    enqueue(async () => {
+      try {
+        // 줄 덕에 보낸 삭제의 응답은 이미 반영됐다. 목록에 있으면(삭제 실패 · 다른 곳에서 다시 올림) 변경 없음(요청 0).
+        if ((latestRef.current.story.attachments ?? []).some((a) => a.url === url)) { unhideAttachment(url); return; }
+        // 서버에선 빠졌다 — 지금 목록(그 사이 더해진 첨부 포함)에 그 한 항목만 제자리에 되넣는다.
+        const next = outgoingAttachments(new Set());
+        const result = await sendAttachments(next, false);
+        if (!result.updated) {
+          // 되넣기 실패 — 서버엔 지워진 채라 숨긴 채 둔다(보이면 거짓). 이 길에서만 뜨는 문구.
+          latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRestoreFailed') });
+          return;
+        }
+        applySent(result, next);
+        unhideAttachment(url);
+      } finally {
+        restoringRef.current.delete(url);
+      }
+    });
+  }, [enqueue, sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
+
+  const handleRemoveAttachment = (url: string) => {
+    const list = story.attachments ?? [];
+    const index = list.findIndex((a) => a.url === url);
+    if (index < 0 || pendingRemovalsRef.current.has(url)) return;
+    pendingRemovalsRef.current.set(url, { attachment: list[index], index, state: 'pending', closed: false });
+    setHiddenAttachmentUrls((cur) => [...cur, url]);
+    addToast({
+      title: t('attachmentRemovedToast'),
+      body: list[index].name ?? undefined,
+      bodySingleLine: true,
+      action: { label: t('attachmentUndoAction'), onClick: () => { undoRemoveAttachment(url); } },
+      onClose: (reason) => {
+        const p = pendingRemovalsRef.current.get(url);
+        if (reason === 'action' || !p) return;
+        // 토스트가 닫히면 되돌리기 길이 끝난다 — 응답이 이미 왔으면 대기표를 지금, 아니면 응답 뒤에 치운다.
+        p.closed = true;
+        if (p.state === 'done') { pendingRemovalsRef.current.delete(url); return; }
+        queueRemovals([url], false);
+      },
+    });
+  };
+
   // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
+  // story #4345(까디르 4718 ③) — 업로드의 PATCH도 **같은 줄**에 선다. 예전엔 올리기 시작할 때의 목록 스냅숏으로 PATCH해서, 삭제가 가는 중에
+  // 업로드가 끝나면 지운 항목을 되넣었다(이 PR이 삭제를 늦추며 생긴 창). 이제 보내는 순간의 최신 서버 목록(가는 중 삭제 빼고 · 되넣는 중 넣고)에 새 파일을 붙인다.
   const handleAttachFiles = async (files: File[]) => {
     if (files.length === 0 || uploadingAttachment) return;
     const current = story.attachments ?? [];
@@ -1183,9 +1374,14 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         if (!res.ok) throw new Error('upload failed');
         uploaded.push(await res.json() as SendAttachment);
       }
-      const next = [...current, ...uploaded]; // 전체 교체: 기존 보존 + 신규 누적
-      const { story: updated } = await patchStory({ attachments: next });
-      onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
+      const ok = await enqueue(async () => {
+        const base = outgoingAttachments(new Set());
+        const next = [...base, ...uploaded.filter((u) => !base.some((a) => a.url === u.url))]; // 전체 교체: 최신 목록 보존 + 신규 누적
+        const result = await sendAttachments(next, false);
+        applySent(result, next);
+        return !!result.updated;
+      });
+      if (!ok) setAttachError(true);
     } catch {
       setAttachError(true);
     } finally {
@@ -1203,11 +1399,22 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     }
   };
 
-  const handleRemoveAttachment = async (url: string) => {
-    const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
-    const { story: updated } = await patchStory({ attachments: next });
-    onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
-  };
+  const visibleAttachments = (story.attachments ?? []).filter((a) => !hiddenAttachmentUrls.includes(a.url));
+
+  // 탭이 숨거나 페이지를 떠나면 대기 중인 삭제를 keepalive로 지금(한 번만) · 화면을 떠나면(언마운트) 줄에 세운다.
+  useEffect(() => {
+    mountedRef.current = true;
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushRemovalsNow(); };
+    const onLeave = () => queueRemovals([...pendingRemovalsRef.current.keys()], true); // 떠나는 순간의 대기표(살아 있는 Map)
+    window.addEventListener('pagehide', flushRemovalsNow);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flushRemovalsNow);
+      document.removeEventListener('visibilitychange', onVisibility);
+      mountedRef.current = false;
+      onLeave();
+    };
+  }, [flushRemovalsNow, queueRemovals]);
 
   // Fetch comments
   useEffect(() => {
@@ -1859,9 +2066,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 accept="image/*,.pdf,.txt,.md,.csv"
                 onChange={(e) => { void handleAttachFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }}
               />
-              {story.attachments && story.attachments.length > 0 ? (
+              {visibleAttachments.length > 0 ? (
                 <div className="mt-2 flex flex-col gap-1.5">
-                  {story.attachments.map((att, i) => {
+                  {visibleAttachments.map((att, i) => {
                     const isImage = att.content_type?.startsWith('image/');
                     const Icon = getFileIcon(att.content_type);
                     const label = att.name ?? t('attachmentFileFallback');
@@ -1878,8 +2085,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <Button
                           type="button"
                           variant="ghost"
-                          onClick={() => void handleRemoveAttachment(att.url)}
-                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95"
+                          onClick={() => handleRemoveAttachment(att.url)}
+                          // story #4345 — 누르는 자리 24×24(아이콘 그대로 · padding) · 첨부 위 모서리 자리 그대로 바깥쪽으로(안쪽 가장자리 고정).
+                          className={cn('h-auto absolute -right-1 -top-1 rounded bg-destructive-tint p-1.5 text-destructive hover:brightness-95', HOVER_REVEAL, HOVER_REVEAL_HIT)}
                           aria-label={t('attachmentDelete')}
                         >
                           <X className="size-3" />
@@ -1932,21 +2140,24 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <>
                   {storyLabels.length > 0 ? (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
+                    <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
                       {storyLabels.map((label) => (
                         <span key={label.itemLabelId} className="group relative inline-flex">
                           <LabelChip label={label} />
+                          {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
+                              모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
                           <Button
                             type="button"
                             variant="ghost"
                             onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는
-                            // 이 테마에 매핑이 없는 no-op. trust-seal.tsx 선례로 hover 상태도
-                            // 테마별 반전(dark:hover:).
-                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-white dark:hover:text-proof-bg group-hover:flex"
+                            className={cn('h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
                             aria-label={t('removeItemAction', { item: label.name })}
                           >
-                            <X className="size-2" />
+                            {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
+                                trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
+                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-white dark:group-hover/button:text-proof-bg">
+                              <X className="size-2" />
+                            </span>
                           </Button>
                         </span>
                       ))}
@@ -2077,10 +2288,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2098,10 +2309,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2119,10 +2330,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2140,10 +2351,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
