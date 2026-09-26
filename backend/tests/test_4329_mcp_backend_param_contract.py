@@ -28,17 +28,26 @@ U = "11111111-1111-4111-8111-111111111111"
 # 입력을 다 채우면 도구 자체 검증에 걸려 요청 전에 멈추는 도구 — 그 필드만 비우거나 바꾼다(각 이유).
 INPUT_OVERRIDES: dict[str, dict[str, typing.Any]] = {
     # attachments는 {content_base64, name, content_type} 구조 검증 + 별도 업로드 경로 — 대조 대상(본문 필드)과 무관
-    "sprintable_update_story": {"attachments": None},
     "sprintable_update_doc": {"attachments": None},
     "sprintable_send_chat_message": {"attachments": None},
     # image_base64 · image_path 중 정확히 하나
     "sprintable_import_image_artifact": {"image_path": None, "image_base64": "iVBORw0KGgo="},
     # type 거름은 서버 미지원이라 도구가 스스로 막는다(조용한 전체 읽음 처리 방지 — 이 가드와 같은 취지의 선례)
     "sprintable_mark_all_notifications_read": {"type": None},
+    # 구조 검증이 있는 dict(가드 대상은 이름 · 타입 · enum이지 이 자유 구조가 아니다) — 서버 검증을 통과하는 최소 모양.
+    "sprintable_create_hypothesis": {"metric_definition": {"metric": "m", "source": "manual", "target": 1, "direction": "up"}},
+    "sprintable_update_hypothesis": {"metric_definition": {"metric": "m", "source": "manual", "target": 1, "direction": "up"}},
+    "sprintable_update_story": {"attachments": None, "metric_definition": {"metric": "m", "source": "manual", "target": 1, "direction": "up"}},
+    # 서버: name은 key와 같으면 안 된다.
+    "sprintable_register_event_definition": {"key": "org.slug.domain.act", "name": "Human name"},
+    # 서버 교차 규칙: coord 핀은 node_id 없이 · node 핀은 좌표 없이(node 갈래는 아래 EXTRA_SCENARIOS).
+    "sprintable_create_spec_pin": {"anchor_type": "coord", "node_id": None},
 }
 
 # 입력에 따라 다른 요청을 내는 도구의 추가 갈래(도구 이름 → 입력 덮어쓰기 목록).
-EXTRA_SCENARIOS: dict[str, list[dict[str, typing.Any]]] = {}
+EXTRA_SCENARIOS: dict[str, list[dict[str, typing.Any]]] = {
+    "sprintable_create_spec_pin": [{"anchor_type": "node", "node_id": U, "anchor_x": None, "anchor_y": None}],
+}
 
 # 라우트가 `Request`를 직접 받아 본문을 손으로 검증하는 자리 → 그 모델. 코드 대조 근거는 아래 테스트가 매번 확인한다
 # (라우트에 body_field가 없고 · 라우트 함수 소스가 그 모델의 model_validate를 부른다).
@@ -47,16 +56,9 @@ MANUAL_BODY_MODELS: dict[tuple[str, str], str] = {
     ("POST", "/api/v2/visual-artifacts/import-image"): "app.schemas.visual_artifact.ImportImageArtifactRequest",
 }
 
-# 백엔드 구현이 story #4329 PR B로 오는 자리(PO 확정: BE 구현). 줄이기만 한다 — PR B가 구현하면 여기서 지워야 초록
-# (실제 대조 결과와 정확히 같아야 하므로, 구현되고도 남아 있으면 RED).
-PENDING_BACKEND: set[tuple[str, str, str]] = {
-    ("sprintable_list_meetings", "query", "date_from"),
-    ("sprintable_list_meetings", "query", "date_to"),
-    ("sprintable_list_meetings", "query", "limit"),
-    ("sprintable_get_unassigned_stories", "query", "unassigned"),
-    ("sprintable_list_stories", "query", "priority"),
-    ("sprintable_check_notifications", "query", "type"),
-}
+# 백엔드 구현이 아직 안 온 자리(보냈는데 안 받음을 잠시 허용). 줄이기만 한다 — 구현되면 여기서 지워야 초록(실제 대조 결과와 정확히
+# 같아야 하므로, 구현되고도 남아 있으면 RED). story #4329 PR B가 여섯 줄을 모두 구현해 비었다.
+PENDING_BACKEND: set[tuple[str, str, str]] = set()
 
 
 @pytest.fixture
@@ -88,10 +90,12 @@ def dummy(name: str, ann: typing.Any) -> typing.Any:
         return {f: dummy(f, fi.annotation) for f, fi in ann.model_fields.items()}
     if isinstance(ann, type) and issubclass(ann, dict):
         return {"k": "v"}
-    if name.endswith("_id") or name == "id":
+    if name.endswith("_id") or name == "id" or name.endswith("_by"):
         return U
-    if "date" in name or name.endswith("_at") or name in ("since", "until", "before"):
+    if "date" in name or name.endswith(("_at", "_after", "_before")) or name in ("since", "until", "before"):
         return "2026-09-25T00:00:00Z"
+    if "url" in name:
+        return "https://example.com/hook"
     return "x"
 
 
@@ -102,6 +106,9 @@ class Sent:
     path: str
     query: set[str]
     body: set[str] | None
+    # story #4329(까디르 ①) — 이름뿐 아니라 값도 대조한다(필수 · 타입 · enum).
+    query_values: dict[str, typing.Any] = field(default_factory=dict)
+    body_values: dict[str, typing.Any] | None = None
 
 
 @dataclass
@@ -121,15 +128,31 @@ async def probe_tools(monkeypatch, tool_defs) -> Probe:
     out = Probe()
 
     async def record(method, path, *, json=None, params=None, unwrap=True, return_headers=False):
+        # 실 `client.request`가 쓰기 본문에 채우는 문맥 필드(api_client.py «context 필드 자동 주입»)를 그대로 — 안 채우면
+        # 백엔드 필수 org_id 등이 «안 보냄»으로 거짓 RED(까디르 ① 값 대조).
+        # 이름 대조(`body`)는 도구가 직접 실은 것만 — 채워 넣는 문맥 필드는 도구 계약이 아니라 클라이언트 전역 동작이다.
         body = set(json) if isinstance(json, dict) else None
-        out.sent.append(Sent(current[0], method.upper(), path.split("?")[0], set(params or {}), body))
+        if method.upper() in ("POST", "PUT", "PATCH") and json is not None:
+            for key, value in (("project_id", U), ("org_id", U), ("created_by", U)):
+                if not json.get(key):
+                    json = {**json, key: value}
+        out.sent.append(Sent(
+            current[0], method.upper(), path.split("?")[0], set(params or {}), body,
+            query_values=dict(params or {}), body_values=dict(json) if isinstance(json, dict) else None,
+        ))
         return ([], httpx.Headers()) if return_headers else {}
 
     monkeypatch.setattr(client, "request", record)
     for name, _doc, cls, fn in tool_defs:
         hints = typing.get_type_hints(cls)
         base = {f: dummy(f, hints.get(f, str)) for f in cls.model_fields}
-        for overrides in [INPUT_OVERRIDES.get(name, {}), *EXTRA_SCENARIOS.get(name, [])]:
+        # 까디르 ① — MCP가 허용하는 enum(Literal) 값마다 한 갈래 더: 백엔드가 받지 않는 값을 MCP가 허용하면 여기서 드러난다.
+        # 교차 규칙 때문에 손으로 적은 갈래(EXTRA_SCENARIOS)가 이미 그 필드를 다루면 자동 갈래는 건너뛴다.
+        covered = {f for extra in EXTRA_SCENARIOS.get(name, []) for f in extra}
+        literal_scenarios = [
+            {f: v} for f in cls.model_fields if f not in covered for v in _literal_values(hints.get(f, str))[1:]
+        ]
+        for overrides in [INPUT_OVERRIDES.get(name, {}), *EXTRA_SCENARIOS.get(name, []), *literal_scenarios]:
             current[0] = name
             before = len(out.sent)
             try:
@@ -141,6 +164,16 @@ async def probe_tools(monkeypatch, tool_defs) -> Probe:
             if len(out.sent) == before:
                 out.no_call.append(name)
     return out
+
+
+def _literal_values(ann: typing.Any) -> list[typing.Any]:
+    """`Literal[...]`(Optional 안쪽 포함)의 값들 — 아니면 빈 목록."""
+    origin, args = typing.get_origin(ann), typing.get_args(ann)
+    if origin in (typing.Union, types.UnionType):
+        return [v for a in args for v in _literal_values(a)]
+    if origin is typing.Literal:
+        return list(args)
+    return []
 
 
 def route_for(app, method: str, path: str):
@@ -192,6 +225,55 @@ def unread(app, sent: list[Sent]) -> tuple[set[tuple[str, str, str]], list[str]]
     return out, no_route
 
 
+def _body_model(route, method: str):
+    if route.body_field is not None:
+        return route.body_field.field_info.annotation
+    if (method, route.path) in MANUAL_BODY_MODELS:
+        return _import(MANUAL_BODY_MODELS[(method, route.path)])
+    return None
+
+
+def _as_sent_on_the_wire(value: typing.Any) -> typing.Any:
+    """httpx가 쿼리로 실어 보내는 모양(문자열 · 목록이면 문자열 목록) — 백엔드는 이것을 받는다."""
+    encoded = httpx.QueryParams({"v": value})
+    many = encoded.get_list("v")
+    return many if isinstance(value, (list, tuple)) else (many[0] if many else "")
+
+
+def contract_errors(app, sent: list[Sent]) -> set[tuple[str, str, str, str]]:
+    """story #4329(까디르 ①) — (도구, 'query'|'body', 이름, 사유): 백엔드가 **필수**인데 안 보냄 · 보낸 값이 백엔드 **타입/enum**을 통과 못 함.
+    이름 대조(`unread`)는 «안 받는 것»만 봤다 — 이쪽은 반대 방향(요구하는데 안 보냄)과 값."""
+    from fastapi.dependencies.utils import get_flat_dependant
+    from pydantic import TypeAdapter, ValidationError
+
+    out: set[tuple[str, str, str, str]] = set()
+    for s in sent:
+        route = route_for(app, s.method, s.path)
+        if route is None:
+            continue
+        for p in get_flat_dependant(route.dependant).query_params:
+            if p.alias not in s.query_values:
+                if p.field_info.is_required():
+                    out.add((s.tool, "query", p.alias, "required but not sent"))
+                continue
+            try:
+                TypeAdapter(p.field_info.annotation).validate_python(_as_sent_on_the_wire(s.query_values[p.alias]))
+            except ValidationError as exc:
+                out.add((s.tool, "query", p.alias, exc.errors()[0]["type"]))
+        model = _body_model(route, s.method)
+        if model is None or s.body_values is None:
+            continue
+        try:
+            model.model_validate(s.body_values)
+        except ValidationError as exc:
+            for err in exc.errors():
+                if err["type"] == "extra_forbidden":
+                    continue  # 안 받는 이름은 `unread`가 본다
+                loc = str(err["loc"][0]) if err["loc"] else "?"
+                out.add((s.tool, "body", loc, "required but not sent" if err["type"] == "missing" else err["type"]))
+    return out
+
+
 # ── 가드 ────────────────────────────────────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_every_parameter_an_mcp_tool_sends_is_read_by_its_backend_route(monkeypatch):
@@ -206,6 +288,18 @@ async def test_every_parameter_an_mcp_tool_sends_is_read_by_its_backend_route(mo
     assert no_route == [], "매칭되는 백엔드 라우트가 없는 요청"
     assert found - PENDING_BACKEND == set(), "MCP가 보내는데 백엔드가 안 받는 파라미터(조용히 버려짐)"
     assert PENDING_BACKEND - found == set(), "구현돼 더는 버려지지 않는 항목 — PENDING_BACKEND에서 지운다(줄이기만)"
+
+
+@pytest.mark.anyio
+async def test_backend_required_parameters_are_sent_and_every_sent_value_passes_backend_validation(monkeypatch):
+    """까디르 ①(4689) — 이름 대조는 한 방향(보냈는데 안 받음)만 봤다. 반대 방향과 값: 백엔드 필수인데 안 보냄 · 타입이 안 맞음 ·
+    MCP가 허용하는 enum 값을 백엔드가 거절(예: 회고 단계 group · discuss → 400). 각 enum 값은 한 갈래씩 따로 돈다."""
+    from app.main import app
+    from sprintable_mcp.server import _TOOL_DEFS
+
+    probe = await probe_tools(monkeypatch, _TOOL_DEFS)
+    assert probe.input_errors == []
+    assert contract_errors(app, probe.sent) == set()
 
 
 def test_manual_body_mappings_match_the_route_code():
@@ -260,6 +354,35 @@ async def test_controls_catch_unread_query_unread_body_and_unmapped_manual_parse
         MANUAL_BODY_MODELS.update(saved)
     assert {("import_image", "body", "title"), ("import_image", "body", "image_base64")} <= found_unmapped, "매핑 없으면 직접 파싱 라우트 본문은 안 받는 것으로 잡힌다"
 
+    # 까디르 ① 양성 대조 — 필수 안 보냄 · 타입 어긋남 · enum 밖 값(MCP Literal의 두 번째 값) 셋 다 잡힌다.
+    class _KindIn(BaseModel):
+        meeting_type: typing.Literal["standup", "planning"]
+
+    async def phase_without_required(args):  # 필수 본문 phase를 빼고 보냄
+        await client.request("PATCH", f"/api/v2/retros/{U}/phase", json={})
+
+    async def kind_enum(args):  # MCP가 planning까지 허용 — 백엔드 MeetingType(Literal)은 모름
+        await client.get("/api/v2/meetings", params={"project_id": U, "meeting_type": args.meeting_type})
+
+    async def by_work_item_without_required(args):  # 필수 쿼리 work_item_id를 빼고 보냄
+        await client.get("/api/v2/conversations/by-work-item", params={"work_item_type": "story"})
+
+    async def leaderboard_bad_type(args):  # limit에 숫자 아닌 값
+        await client.get("/api/v2/rewards/leaderboard", params={"project_id": U, "limit": "many"})
+
+    probe3 = await probe_tools(monkeypatch, [
+        ("phase_without_required", "", _ProbeIn, phase_without_required),
+        ("kind_enum", "", _KindIn, kind_enum),
+        ("leaderboard_bad_type", "", _ProbeIn, leaderboard_bad_type),
+        ("by_work_item_without_required", "", _ProbeIn, by_work_item_without_required),
+    ])
+    errors = contract_errors(app, probe3.sent)
+    assert ("phase_without_required", "body", "phase", "required but not sent") in errors
+    assert ("by_work_item_without_required", "query", "work_item_id", "required but not sent") in errors
+    assert any(e[:3] == ("kind_enum", "query", "meeting_type") for e in errors), errors
+    assert sum(1 for e in errors if e[0] == "kind_enum") == 1, "standup은 통과 · planning 갈래만 RED(값마다 한 갈래)"
+    assert any(e[:3] == ("leaderboard_bad_type", "query", "limit") for e in errors), errors
+
     async def silent(args):
         return None
 
@@ -312,3 +435,19 @@ async def test_an_unrelated_unknown_argument_gets_no_removed_arg_hint():
         await tool.run({"session_id": U, "item_id": U, "bogus": 1}, Context())
     msg = str(ei.value)
     assert "bogus" in msg and "accepted arguments" in msg and "다시 부르세요" not in msg, msg
+
+
+def test_mcp_enums_equal_the_backend_value_sets():
+    """까디르 ①(4689) — MCP가 str로 받던 값 중 백엔드가 고정 집합으로 거르는 자리는 MCP도 같은 Literal로. 한쪽만 바뀌면 RED."""
+    from app.models.evidence import _CLIENT_CREATABLE_TYPES
+    from app.routers.evidence import _WORK_ITEM_TYPES
+    from app.schemas.visual_artifact import _SPEC_PIN_ANCHOR_TYPES
+    from sprintable_mcp.tools.evidence import AddEvidenceInput
+    from sprintable_mcp.tools.visual_artifacts import CreateSpecPinInput
+
+    def values(model, field_name):
+        return set(_literal_values(typing.get_type_hints(model)[field_name]))
+
+    assert values(AddEvidenceInput, "work_item_type") == set(_WORK_ITEM_TYPES)
+    assert values(AddEvidenceInput, "type") == set(_CLIENT_CREATABLE_TYPES)
+    assert values(CreateSpecPinInput, "anchor_type") == set(_SPEC_PIN_ANCHOR_TYPES)

@@ -91,6 +91,10 @@ async def list_event_definitions(args: ListEventDefinitionsInput) -> list[TextCo
 
 class RegisterEventDefinitionInput(SprintableInput):
     key: str
+    # story #4329(까디르 ① 가드가 찾음) — 서버는 #3745부터 사람용 표시 이름을 필수로 받는다(비면 · key와 같으면 422). 예전엔
+    # 이 도구가 name을 안 보내 등록이 늘 422였다.
+    name: str
+    description: str | None = None
     payload_schema: dict
     routing: dict
 
@@ -117,9 +121,10 @@ async def register_event_definition(args: RegisterEventDefinitionInput) -> list[
     발행은 events 그룹입니다.
     """
     try:
-        return ok(await client.post("/api/v2/events/definitions", json={
-            "key": args.key, "payload_schema": args.payload_schema, "routing": args.routing,
-        }))
+        body: dict = {"key": args.key, "name": args.name, "payload_schema": args.payload_schema, "routing": args.routing}
+        if args.description is not None:
+            body["description"] = args.description
+        return ok(await client.post("/api/v2/events/definitions", json=body))
     except Exception as exc:
         return err(exc)
 
