@@ -247,6 +247,32 @@ describe('ScaleLadder', () => {
       act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
     });
+
+    // story #4342 — 안내 팝오버(w-56 · 한쪽 맞춤)가 좁은 화면 오른쪽 칸에서 뷰포트 밖으로 나가던 부류. compact(:161) · 전체(:263) 두 갈래 다
+    // 열릴 때 재서 안으로 민다. jsdom은 배치를 안 해서 팝오버 사각형을 값으로 둔다(오른쪽으로 108px 넘친 224px · 뷰포트 1024).
+    it.each([
+      ['전체', false, 'scale-ladder-info-full'],
+      ['compact', true, 'scale-ladder-info'],
+    ])('%s 갈래 팝오버: 열리면 오른쪽 넘침 → translateX(-108px) · 폭 상한 · 표지(story #4342)', (_label, compact, panel) => {
+      const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const hit = (this.getAttribute('data-dropdown-panel') ?? '').startsWith('scale-ladder-info');
+        const r = hit ? { left: 900, right: 1124, width: 224 } : { left: 0, right: 0, width: 0 };
+        return { ...r, top: 0, bottom: 0, height: hit ? 80 : 0, x: r.left, y: 0, toJSON: () => r } as DOMRect;
+      });
+      try {
+        act(() => { root.render(wrap(<ScaleLadder compact={compact} />)); });
+        const trigger = compact
+          ? Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.flow.ladderName_building))
+          : findRung(koMessages.flow.ladderName_building)?.querySelector('button');
+        act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+        const pop = container.querySelector<HTMLElement>(`[data-dropdown-panel="${panel}"]`);
+        expect(pop, panel).not.toBeNull();
+        expect(pop!.style.transform).toBe('translateX(-108px)');
+        expect(pop!.className).toContain('max-w-[calc(100vw-1rem)]');
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — <lg에서 이 카드열(이름+질문 5칸)이 「주」처럼
