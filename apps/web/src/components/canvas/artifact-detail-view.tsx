@@ -121,7 +121,9 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
       <Link href=".." className="mb-4 inline-block text-xs font-medium text-muted-foreground hover:text-foreground">
         {t('galleryBackAction')}
       </Link>
+      {/* story #4343(까디르) — 받은 버전 캐시가 버전 번호로만 키라, 산출물이 바뀌면 새로 마운트해 비운다(패널은 이미 key로 다시 마운트). */}
       <ArtifactViewer
+        key={artifact.id}
         artifact={artifact}
         versions={versions}
         loadVersion={(versionNumber) => loadArtifactVersion(artifactId, versionNumber)}
