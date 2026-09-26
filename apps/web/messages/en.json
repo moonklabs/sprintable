@@ -3534,6 +3534,7 @@
     "embedLinkBlocked": "This link can't be opened",
     "attachFileBlocked": "This file can't be opened",
     "newDocDefaultTitle": "Untitled",
+    "treeRowMenuAriaLabel": "Open menu — {title}",
     "mermaidRenderFailed": "Render failed",
     "mermaidRendering": "Rendering…",
     "mermaidEditingCode": "Editing code",

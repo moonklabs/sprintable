@@ -83,10 +83,12 @@ describe('DocTree 행 «⋮» · 끌기 손잡이([SID:4345])', () => {
 
   it('«⋮»에 Enter → 메뉴가 열린다(키보드로 닿는 조작 — 지금처럼)', () => {
     const { more } = renderTree();
-    const menu = more.nextElementSibling as HTMLElement;
-    expect(tokens(menu)).toContain('hidden');
+    // #4349(#4724) — 메뉴는 열릴 때만 body로 포털한다(목록 overflow 밖). 그래서 «⋮» 옆 형제의 hidden/block이 아니라 닫힘 = 없음 · 열림 = body 직속으로 본다.
+    const menu = () => document.querySelector<HTMLElement>('[data-dropdown-panel="doc-tree-menu"]');
+    expect(menu()).toBeNull();
     act(() => { more.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
-    expect(tokens(more.nextElementSibling as HTMLElement)).toContain('block');
+    expect(menu()).not.toBeNull();
+    expect(menu()!.parentElement).toBe(document.body);
   });
 
   it('끌기 손잡이 = 마우스 전용: 탭 순서 밖(tabIndex -1) · 화면 읽기 밖(aria-hidden) · 호버로만 보임(터치엔 안 보임 — 눌러도 안 끌림)', () => {

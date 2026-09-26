@@ -165,6 +165,7 @@ describe('ScaleLadder', () => {
   // story #3130(유나 SSOT doc 4f6cba9b) — 「작업」 dead(클릭 불가·«고장»으로 읽힘) →
   // reserved(클릭 가능·안내 팝오버) 전환. 선생님이 "왜 안 눌리는지" 재차 물은 실목격 정정.
   describe('작업 rung 예약 신호(story #3130)', () => {
+    // story #4349 — 안내 팝오버는 부모 overflow 밖 body로 포털된다 → 팝오버 글자 · 요소는 container가 아니라 document.body에서 찾는다(뜻은 그대로).
     function findRung(name: string): HTMLElement | undefined {
       return Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []).find(
         (d) => d.textContent?.includes(name),
@@ -191,10 +192,10 @@ describe('ScaleLadder', () => {
       const taskRung = findRung(koMessages.flow.ladderName_building);
       const trigger = taskRung?.querySelector('button');
       expect(trigger).toBeTruthy();
-      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
       act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(pushMock).not.toHaveBeenCalled();
-      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).toContain(koMessages.flow.ladderReservedInfo);
       // doc(4f6cba9b) MUST — «고장이 아니라» 절이 문구에 verbatim으로 있어야 한다.
       expect(koMessages.flow.ladderReservedInfo).toContain('고장이 아니라');
     });
@@ -207,7 +208,7 @@ describe('ScaleLadder', () => {
       act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       const describedBy = trigger.getAttribute('aria-describedby');
       expect(describedBy).toBeTruthy();
-      const info = container.querySelector(`#${describedBy}`);
+      const info = document.body.querySelector(`#${describedBy}`);
       expect(info?.textContent).toBe(koMessages.flow.ladderReservedInfo);
     });
 
@@ -215,27 +216,27 @@ describe('ScaleLadder', () => {
       act(() => { root.render(wrap(<ScaleLadder />)); });
       const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
       act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).toContain(koMessages.flow.ladderReservedInfo);
       act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
     });
 
     it('바깥을 클릭하면 팝오버가 닫힌다', () => {
       act(() => { root.render(wrap(<ScaleLadder />)); });
       const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
       act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).toContain(koMessages.flow.ladderReservedInfo);
       act(() => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
-      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
     });
 
     it('Escape 키로 팝오버가 닫힌다', () => {
       act(() => { root.render(wrap(<ScaleLadder />)); });
       const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
       act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).toContain(koMessages.flow.ladderReservedInfo);
       act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-      expect(container.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
     });
 
     it('compact 모드도 작업 칩 클릭 시 같은 안내 팝오버가 뜬다(터치는 hover가 없어 유일한 안내 경로)', () => {
@@ -245,7 +246,7 @@ describe('ScaleLadder', () => {
       );
       expect(trigger).toBeTruthy();
       act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      expect(container.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      expect(document.body.textContent).toContain(koMessages.flow.ladderReservedInfo);
     });
 
     // story #4342 — 안내 팝오버(w-56 · 한쪽 맞춤)가 좁은 화면 오른쪽 칸에서 뷰포트 밖으로 나가던 부류. compact(:161) · 전체(:263) 두 갈래 다
@@ -265,13 +266,83 @@ describe('ScaleLadder', () => {
           ? Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.flow.ladderName_building))
           : findRung(koMessages.flow.ladderName_building)?.querySelector('button');
         act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-        const pop = container.querySelector<HTMLElement>(`[data-dropdown-panel="${panel}"]`);
+        const pop = document.body.querySelector<HTMLElement>(`[data-dropdown-panel="${panel}"]`);
         expect(pop, panel).not.toBeNull();
         expect(pop!.style.transform).toBe('translateX(-108px)');
         expect(pop!.className).toContain('max-w-[calc(100vw-1rem)]');
       } finally {
         spy.mockRestore();
       }
+    });
+
+    // story #4349(유나 실측) — 두 갈래 팝오버가 **어떤 폭에서도 안 보였다**: 담는 블록이 짧은 띠(compact 칩 줄 `overflow-x-auto` · 전체판 `overflow-hidden`) 안이라
+    // 띠가 팝오버 90px를 통째로 잘랐다. 이제 body로 포털 → 부모 overflow 조상 0 · fixed · 트리거 사각형 바로 아래(전체판은 칸 왼쪽 + 12px).
+    // 되돌리면(absolute로 띠 안) RED — body 직속 · overflow 조상 0 · fixed가 모두 깨진다.
+    it.each([
+      ['전체', false, 'scale-ladder-info-full', 312],
+      ['compact', true, 'scale-ladder-info', 300],
+    ])('%s 갈래 팝오버: 부모 overflow 밖(body 직속) · fixed · 트리거 아래 8px(story #4349)', (_label, compact, panel, wantLeft) => {
+      const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        // 기준 트리거(열린 칸 wrapper) = 설명 연결된 버튼을 바로 품은 요소 · 팝오버는 뷰포트 안(밀지 않음).
+        const isAnchor = !!this.querySelector?.(':scope > button[aria-describedby]');
+        const isPop = (this.getAttribute('data-dropdown-panel') ?? '').startsWith('scale-ladder-info');
+        const r = isAnchor ? { left: 300, right: 420, top: 90, bottom: 120, width: 120, height: 30 }
+          : isPop ? { left: 312, right: 536, top: 128, bottom: 208, width: 224, height: 80 }
+            : { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+        return { ...r, x: r.left, y: r.top, toJSON: () => r } as DOMRect;
+      });
+      try {
+        act(() => { root.render(wrap(<ScaleLadder compact={compact} />)); });
+        const trigger = compact
+          ? Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.flow.ladderName_building))
+          : findRung(koMessages.flow.ladderName_building)?.querySelector('button');
+        act(() => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+        const pop = document.body.querySelector<HTMLElement>(`[data-dropdown-panel="${panel}"]`)!;
+        expect(pop, panel).not.toBeNull();
+        expect(pop.parentElement).toBe(document.body);
+        expect(container.contains(pop)).toBe(false);
+        expect(pop.closest('[class*="overflow-"]')).toBeNull();
+        expect(pop.style.position).toBe('fixed');
+        expect(pop.style.visibility).toBe(''); // 붙는 순간 숨겼다가 둔 뒤 드러낸다 — 못 두면 숨은 채(= 옛 결함과 같은 «안 보임»)
+        expect(pop.style.top).toBe('128px');
+        expect(pop.style.left).toBe(`${wantLeft}px`);
+        expect(pop.style.transform).toBe('');
+        expect(pop.className).not.toMatch(/(^|\s)(absolute|top-full)(\s|$)/);
+        // 트리거 버튼 aria-describedby가 포털된 팝오버를 가리킨다(id 연결은 DOM 위치와 무관).
+        expect(trigger!.getAttribute('aria-describedby')).toBe(pop.id);
+        // 열린 뒤 다시 그려져도(부모 props · 상태) body 직속 그대로 — 트리거 안으로 옮겨 가면 띠가 다시 자른다(뮤테이션 A1).
+        act(() => { root.render(wrap(<ScaleLadder compact={compact} activeLevel="city" />)); });
+        const again = document.body.querySelector<HTMLElement>(`[data-dropdown-panel="${panel}"]`)!;
+        expect(again.parentElement).toBe(document.body);
+        expect(container.contains(again)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('포털된 팝오버 안을 눌러도 닫히지 않는다 — 바깥 클릭 판정이 팝오버를 «안»으로 센다(story #4349)', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const trigger = findRung(koMessages.flow.ladderName_building)!.querySelector('button')!;
+      act(() => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const pop = document.body.querySelector<HTMLElement>('[data-dropdown-panel="scale-ladder-info-full"]')!;
+      act(() => { pop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+      expect(document.body.textContent).toContain(koMessages.flow.ladderReservedInfo);
+      act(() => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+      expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+    });
+
+    // story #4349 AC2 — 1440 바닥 칩(«◇ 스토리 안에 있음»)이 `absolute bottom-2`라 질문 줄을 덮었다(칸 아래 여백 24px < 칩 약 28px).
+    // 이제 흐름 안(버튼 flex-col · mt-auto · pt-2) + 칸 아래 여백 pb-2 — 겹칠 수 없는 구조. 실제 픽셀은 PR 본문 실브라우저 판 · 유나 실측.
+    it('전체판 작업 칸 바닥 칩 = 흐름 안(absolute 0) · 질문 줄과 pt-2 · 칸 pb-2(story #4349 AC2)', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      const rung = findRung(koMessages.flow.ladderName_building)!;
+      const chip = rung.querySelector<HTMLElement>('[data-ladder-reserved-chip]')!;
+      expect(chip.textContent).toBe(koMessages.flow.ladderReservedChip);
+      expect(chip.className.split(/\s+/)).toEqual(expect.arrayContaining(['mt-auto', 'pt-2']));
+      for (const el of [chip, ...chip.querySelectorAll<HTMLElement>('*')]) expect(el.className).not.toMatch(/(^|\s)absolute(\s|$)/);
+      expect(rung.querySelector('button')!.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-col']));
+      expect(rung.className.split(/\s+/)).toContain('pb-2');
+      expect(rung.className.split(/\s+/)).not.toContain('pb-6');
     });
   });
 
