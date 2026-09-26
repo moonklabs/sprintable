@@ -108,12 +108,14 @@ async def create_meeting(
         user_id=uuid.UUID(auth.user_id),
     )
     repo = MeetingRepository(session, body.project_id)
-    data = body.model_dump(exclude={"project_id"}, exclude_none=False)
+    # story #4337 — 생략한 필드는 싣지 않는다(서버 · ORM 기본값). 예전 `exclude_none=False`는 생략을 명시 None으로 바꿔 아래에서 다시
+    # 걸러야 했다(«생략 = 명시 None» 혼동). 명시 null은 스키마(NOT_NULL_FIELDS)가 422로 먼저 막는다.
+    data = body.model_dump(exclude={"project_id"}, exclude_unset=True)
     # AC3-2d(1b): created_by canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
     if data.get("created_by"):
         from app.services.member_resolver import canonicalize_member_id
         data["created_by"] = await canonicalize_member_id(data["created_by"], session)
-    meeting = await repo.create(**{k: v for k, v in data.items() if v is not None or k in ("participants", "decisions", "action_items")})
+    meeting = await repo.create(**data)
     return MeetingResponse.model_validate(meeting)
 
 

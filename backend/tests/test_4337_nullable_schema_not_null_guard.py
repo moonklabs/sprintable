@@ -32,11 +32,6 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     ("SprintUpdate", "status"): "무시 — routers/sprints.py가 dump에서 빼고 `is not None`일 때만 전이",
     ("TeamMemberUpdate", "role"): "뜻 있음 — clamp_project_role(None) → 'member'(services/project_auth.py · null이 강등이 되는 건 별건 보고)",
     ("ArtifactNodeIn", "id"): "뜻 있음 — routers/visual_artifacts.py가 `n.id or uuid4()`로 새 id",
-    # ⏳임시 — 미팅 스키마는 PR 4690(story #4329 · meeting_type ENUM 매핑 · MeetingType)이 같은 클래스를 고치는 중이라 그 병합 뒤 이 PR에서
-    # NOT_NULL_FIELDS를 달고 아래 일곱 줄을 지운다. 지금 develop에선 미팅 생성 자체가 meeting_type 매핑으로 500(4690이 고침).
-    **{("MeetingCreate", "date"): "⏳4690 병합 뒤(생성 경로가 None을 걸러 서버 기본값 · null 422는 그때)"},
-    **{("MeetingUpdate", f): "⏳4690 병합 뒤(update().values(x=None) → 500 · 422는 그때)"
-       for f in ("title", "meeting_type", "date", "participants", "decisions", "action_items")},
 }
 
 _SUFFIXES = ("Create", "Update", "Patch", "Request", "In", "Body")
