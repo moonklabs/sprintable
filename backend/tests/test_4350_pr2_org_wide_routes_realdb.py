@@ -111,7 +111,7 @@ async def _call(Session, seeded, path):
     from httpx import ASGITransport, AsyncClient
 
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db, get_read_db
+    from tests.conftest import override_db_and_read
     from app.main import app
 
     async def _db():
@@ -124,8 +124,7 @@ async def _call(Session, seeded, path):
             claims={"app_metadata": {"org_id": str(seeded["org"]), "project_id": str(seeded["pa"])}},
         )
 
-    app.dependency_overrides[get_db] = _db
-    app.dependency_overrides[get_read_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
