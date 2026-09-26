@@ -301,6 +301,26 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     expect(shown(A1)).toBe(true);
   });
 
+  it('줄에 선 삭제를 탭 숨김이 먼저 보냈으면 — 그 응답 전에 줄 차례가 와도 다시 안 보냄', async () => {
+    holdPatch = (n) => n === 1 || n === 2;
+    await render(<Harness initial={[A1, A2, A3]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast(); // PATCH 1(A1) 가는 중
+    await act(async () => { removeBtnOf(A2).click(); });
+    await closeToast(); // A2는 줄에 섬
+    expect(patches).toHaveLength(1);
+    await hideTab(); // 줄에 선 A2를 지금 보냄
+    expect(patches).toHaveLength(2);
+    expect(urlsOf(1)).toEqual([A3.url]);
+    await release(); // A1 응답 → 줄 차례가 A2에 옴(A2 응답은 아직) — 이미 보냈으니 건너뜀
+    await advance(20000);
+    expect(patches).toHaveLength(2);
+    await release();
+    expect(patches).toHaveLength(2);
+    expect([A1, A2].some(shown)).toBe(false);
+  });
+
   // 줄을 안 기다리는 단 한 길(탭 숨김 · pagehide = 페이지가 곧 멈출 수 있음)이 가는 PATCH와 겹칠 때.
   it('겹침(탭 숨김이 줄을 안 기다림) — 가는 중인 삭제를 빼고 보냄 · 늦게 온 옛 응답이 목록을 되돌리지 않음', async () => {
     holdPatch = (n) => n === 1;
