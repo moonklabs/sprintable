@@ -26,6 +26,8 @@ href(미르코 FE 라우트 실측 반영, 2026-07-02): loop→/loops/{id}·deci
 """
 from __future__ import annotations
 
+import asyncio
+
 import hashlib
 import json
 import logging
@@ -62,7 +64,8 @@ async def build_loop_context_pack(
         from app.services.embedding_enqueue import build_loop_embedding_text
 
         query_text = build_loop_embedding_text(loop.title, loop.goal_tags)
-        vector = embed_text(query_text)
+        # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+        vector = await asyncio.to_thread(embed_text, query_text)
     except Exception as exc:
         logger.warning("context-pack items: embed 실패(생략 처리): %s", exc)
         vector = None
@@ -98,9 +101,10 @@ async def build_loop_context_pack(
         recommendation = loop.context_pack_recommendation
         recommendation_confidence = loop.context_pack_recommendation_confidence
     else:
-        synthesis, synthesis_confidence = _synthesize_learnings(items)
-        recommendation, recommendation_confidence = _recommend_next_step(
-            loop.title, hyp_statement, synthesis, evidence_count,
+        # story #4322 — 동기 Vertex SDK 호출이라 이벤트 루프를 막지 않게 스레드로(embedding_backlog.py #2461 선례).
+        synthesis, synthesis_confidence = await asyncio.to_thread(_synthesize_learnings, items)
+        recommendation, recommendation_confidence = await asyncio.to_thread(
+            _recommend_next_step, loop.title, hyp_statement, synthesis, evidence_count,
         )
         if synthesis is not None and recommendation is not None:
             # 까심 QA RC(2026-07-02): synthesis만 검사하면 recommendation의 일시적 장애(quota/
