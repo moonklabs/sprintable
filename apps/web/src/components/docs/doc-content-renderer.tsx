@@ -153,6 +153,9 @@ export const docMarkdownSanitizeSchema = {
       'dataUrl',
       'dataLatex',
       'dataOpen',
+      // story #4339(유나 4708) — 두/세 열 수. 읽기 화면은 CSS([data-type="columnsBlock"][data-cols])로 칸을 나눈다 — 빠져 있어 마크다운 문서의
+      // 두 열이 한 열로 쌓였다.
+      'dataCols',
     ],
     // story #4313 — 마크다운 속 에디터 위키 링크 span(`data-type="wikiLink"`)이 렌더러 `span` 컴포넌트까지 닿게 필요한 셋만(XSS 경계:
     // data-* 글자뿐 · on* · style 등은 여전히 기본 스키마가 막음). 링크 여부는 렌더러가 실재 집합으로 판정.

@@ -4,33 +4,15 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
-import StarterKit from '@tiptap/starter-kit';
-import { CustomImageNode } from './extensions/image-node';
-import { ImageUploadExtension, registerDocIdProvider } from './extensions/image-upload';
-import Highlight from '@tiptap/extension-highlight';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import { Table } from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableCell from '@tiptap/extension-table-cell';
-import TableHeader from '@tiptap/extension-table-header';
-import Placeholder from '@tiptap/extension-placeholder';
+import { registerDocIdProvider } from './extensions/image-upload';
 import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft, Plus, ImageIcon, Paperclip } from 'lucide-react';
 import { pickAndUpload } from './extensions/slash-command';
-import { CalloutNode } from './extensions/callout-node';
-import { createSlashCommandExtension, type SlashMenuStrings } from './extensions/slash-command';
-import { PageEmbedExtension } from './extensions/page-embed-node';
-import { CodeBlockWithCopy } from './extensions/code-block-copy';
-import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-block';
-import { FileAttachmentNode } from './extensions/file-node';
-import { EmbedBlock } from './extensions/embed-node';
-import { MathBlockNode, MathInlineNode } from './extensions/math-node';
-import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
-import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
-import { StoryMentionExtension, EntityLinkExtension } from './extensions/story-mention';
+import { type SlashMenuStrings } from './extensions/slash-command';
 import { DocToc } from './doc-toc';
-import { type DocHeading, slugifyHeading } from './doc-heading-utils';
+import { type DocHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
+import { createDocEditorExtensions } from './doc-editor-extensions';
+import { computeHeadingAnchors } from './extensions/heading-ids';
 import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
 import { useTranslations } from 'next-intl';
 
@@ -180,50 +162,16 @@ export function DocEditor({
 
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ codeBlock: false }),
-      CodeBlockWithCopy,
-      // story #3866 — entity:story: 프로토콜 허용+isAllowedUri 검증+칩 스타일까지 포함한
-      // Link 확장(상세는 story-mention.tsx 주석). 재구현 0 — 그 파일 하나에 설정을 모은다.
-      EntityLinkExtension,
-      CustomImageNode,
-      ImageUploadExtension,
-      Highlight,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Table.configure({ resizable: true }),
-      TableRow,
-      TableCell,
-      TableHeader,
-      Placeholder.configure({
-        placeholder: labels.placeholder,
-        showOnlyCurrent: false,
-        includeChildren: true,
-      }),
-      CalloutNode,
-      ToggleBlock,
-      ToggleSummary,
-      ToggleContent,
-      FileAttachmentNode,
-      EmbedBlock,
-      MathBlockNode,
-      MathInlineNode,
-      ColumnsBlock,
-      ColumnBlock,
-      WikiLinkNode.configure({
-        projectId,
-        onNavigate,
-        suggestion: createWikiLinkSuggestion(projectId, tEditor('notFound')),
-      }),
-      // story #3866 — 문서에 스토리를 "붙이는" `#` 트리거(wikiLink의 `[[`와 동형 패턴).
-      // 새 Node가 아니라 위 Link mark로 진짜 앵커를 삽입(3858 파서 요구 형식).
-      StoryMentionExtension.configure({
-        projectId,
-        emptyLabel: tCanvas('storyPickerEmpty'),
-      }),
-      createSlashCommandExtension(slashMenuStrings),
-      PageEmbedExtension.configure({ currentDocId, onNavigate }),
-    ],
+    // story #4339 — 확장 목록은 한 곳(doc-editor-extensions.ts) — 왕복 테스트가 같은 목록으로 연다.
+    extensions: createDocEditorExtensions({
+      placeholder: labels.placeholder,
+      projectId,
+      currentDocId,
+      onNavigate,
+      wikiLinkNotFoundLabel: tEditor('notFound'),
+      storyPickerEmptyLabel: tCanvas('storyPickerEmpty'),
+      slashMenuStrings,
+    }),
     editable,
     content: contentFormat === 'markdown' ? markdownToHtml(value) : value,
     onUpdate: ({ editor: e }) => {
@@ -308,44 +256,13 @@ export function DocEditor({
     setIsDragging(false);
   }, [setIsDragging]);
 
-  // Extract TOC headings from editor + assign IDs to heading DOM elements
+  // Extract TOC headings from editor. 앵커 id는 HeadingIds 확장이 decoration으로 그린다 — story #4339: 예전엔 여기서 편집기 DOM의 h1~h3에
+  // `el.id`를 직접 써서 ProseMirror가 그 변경을 사용자 편집으로 다시 읽었고, 제목 바로 뒤 수식 글이 비워져 자동 저장됐다.
   useEffect(() => {
     if (!editor) return;
-
     const update = () => {
-      const counts = new Map<string, number>();
-      const headings: DocHeading[] = [];
-
-      editor.state.doc.descendants((node) => {
-        if (node.type.name === 'heading') {
-          const text = node.textContent.trim();
-          if (!text) return true;
-          const baseId = slugifyHeading(text);
-          const seen = counts.get(baseId) ?? 0;
-          counts.set(baseId, seen + 1);
-          headings.push({
-            level: node.attrs.level as 1 | 2 | 3,
-            text,
-            id: seen === 0 ? baseId : `${baseId}-${seen + 1}`,
-          });
-        }
-        return true;
-      });
-
-      setTocHeadings(headings);
-
-      // Assign IDs to heading DOM elements
-      const root = editorContentRef.current;
-      if (!root) return;
-      const idCounts = new Map<string, number>();
-      root.querySelectorAll<HTMLElement>('h1, h2, h3').forEach((el) => {
-        const baseId = slugifyHeading(el.textContent ?? '');
-        const seen2 = idCounts.get(baseId) ?? 0;
-        idCounts.set(baseId, seen2 + 1);
-        el.id = seen2 === 0 ? baseId : `${baseId}-${seen2 + 1}`;
-      });
+      setTocHeadings(computeHeadingAnchors(editor.state.doc).map(({ level, text, id }) => ({ level: level as DocHeading['level'], text, id })));
     };
-
     update();
     editor.on('update', update);
     return () => { editor.off('update', update); };

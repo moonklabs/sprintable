@@ -1,30 +1,87 @@
 import TurndownService from 'turndown';
 
+/** 속성 값 · 글 escape — 부품 직렬화는 이 함수를 거친 값만 싣는다(아래 partDiv). */
+const escapeAttr = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** 속성 하나: 값(escape됨) · `true` = 값 없는 표지(`data-page-embed`) · `null` = 싣지 않음. */
+type PartAttr = readonly [name: string, value: string | true | null];
+
+/**
+ * story #4339(까디르 4708 · PO) — 부품 div를 만드는 **유일한** 길. 속성 이름은 호출하는 직렬화가 정한 상수이고 값은 늘 escapeAttr를 지난다 —
+ * 직렬화가 속성 문자열을 직접 이어 붙일 길이 없다(예전 첨부의 data-file-data만 escape가 빠져, `"`가 든 값이 새 속성을 끼워 넣었다).
+ */
+/** raw HTML 블록 앞뒤 간격 — 빈 줄(CommonMark HTML 블록 종료 조건). 줄바꿈 하나로 줄이면 뒤 마크다운이 블록에 먹힌다. */
+const RAW_HTML_BLOCK_GAP = '\n\n';
+
+function partDiv(attrs: readonly PartAttr[], text = ''): string {
+  const rendered = attrs
+    .filter(([, value]) => value !== null)
+    .map(([name, value]) => (value === true ? ` ${name}` : ` ${name}="${escapeAttr(value as string)}"`))
+    .join('');
+  // story #4339(유나 4708) — 앞뒤 **빈 줄**. CommonMark의 HTML 블록은 빈 줄까지 이어져, 줄바꿈 하나면 바로 뒤 마크다운(이미지 등)이
+  // 블록에 먹혀 읽기 화면에 글자로 찍혔다(RAW_HTML_BLOCK_GAP · 아래 raw HTML 블록 규칙 전부 같은 간격).
+  return `${RAW_HTML_BLOCK_GAP}<div${rendered}>${escapeAttr(text)}</div>${RAW_HTML_BLOCK_GAP}`;
+}
+
 // fileAttachment 노드는 내용 없는 <div>(non-void) → turndown 의 blank 처리에 의해 drop 된다
-// (이미지는 <img> 가 void 라 살아남음). blankReplacement 에서 fileAttachment 만 특별 처리해 보존.
+// (이미지는 <img> 가 void 라 살아남음). blankReplacement 에서 EMPTY_PART_SERIALIZERS(아래)로 보존.
 function serializeFileAttachment(el: HTMLElement): string {
-  const safeAttr = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const filename = safeAttr(el.getAttribute('data-filename') ?? '');
-  const size = safeAttr(el.getAttribute('data-size') ?? '0');
-  const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
   const assetId = el.getAttribute('data-asset-id');
   // S4: ref(assetId) → data-asset-id(data-file-data 부재) · legacy → data-file-data. 상호배타(renderHTML 정합).
-  const tail = assetId
-    ? ` data-asset-id="${safeAttr(assetId)}"`
-    : ` data-file-data="${el.getAttribute('data-file-data') ?? ''}"`;
-  return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}"${tail}></div>\n`;
+  return partDiv([
+    ['data-type', 'fileAttachment'],
+    ['data-filename', el.getAttribute('data-filename') ?? ''],
+    ['data-size', el.getAttribute('data-size') ?? '0'],
+    ['data-mime-type', el.getAttribute('data-mime-type') ?? ''],
+    assetId ? ['data-asset-id', assetId] : ['data-file-data', el.getAttribute('data-file-data') ?? ''],
+  ]);
 }
+
+function serializeEmbedBlock(el: HTMLElement): string {
+  // 읽을 때 URL은 렌더러의 4324 안전 도우미(safeHttpUrl)를 그대로 지난다 — 새 싱크 0.
+  return partDiv([['data-type', 'embedBlock'], ['data-url', el.getAttribute('data-url') ?? '']]);
+}
+
+function serializeMathBlock(el: HTMLElement): string {
+  // 수식 원본 = 글 · 글이 없으면(MCP · 렌더러 형식의 속성만) data-latex(story #4339 — 빈 div라 blank로 버려지던 모양).
+  const latex = (el.textContent ?? '').trim() ? el.textContent ?? '' : el.getAttribute('data-latex') ?? '';
+  return partDiv([['data-type', 'mathBlock'], ['data-latex', latex]], latex);
+}
+
+function serializePageEmbed(el: HTMLElement): string {
+  // `data-page-embed`는 값 없는 표지로(markdownToHtml의 atom 보호가 이 모양을 찾는다 · 이미 저장된 md와 같은 모양).
+  return partDiv([
+    ['data-page-embed', true],
+    ['data-doc-id', el.getAttribute('data-doc-id') ?? ''],
+    ['data-title', el.getAttribute('data-title') ?? ''],
+    ['data-icon', el.getAttribute('data-icon') ?? ''],
+    ['data-slug', el.getAttribute('data-slug') ?? ''],
+  ]);
+}
+
+/**
+ * story #4339 — **내용 없는 부품 div** 한 곳. turndown은 규칙보다 먼저 «빈 노드»를 blankReplacement로 보내 버린다 — 여기 없는 빈 부품은
+ * 마크다운 문서를 저장할 때 조용히 사라졌다(링크 카드 · 문서 임베드 — pageEmbed 규칙이 있어도 빈 div라 규칙까지 못 갔다).
+ * 새 빈 부품은 여기에 더한다 — 가드(doc-editor-roundtrip.test)가 왕복 픽스처의 빈 부품 뿌리가 전부 여기 걸리는지 대조한다.
+ */
+export const EMPTY_PART_SERIALIZERS: ReadonlyArray<{ name: string; matches: (el: HTMLElement) => boolean; serialize: (el: HTMLElement) => string }> = [
+  { name: 'fileAttachment', matches: (el) => el.getAttribute('data-type') === 'fileAttachment', serialize: serializeFileAttachment },
+  { name: 'embedBlock', matches: (el) => el.getAttribute('data-type') === 'embedBlock', serialize: serializeEmbedBlock },
+  { name: 'pageEmbed', matches: (el) => el.hasAttribute('data-page-embed'), serialize: serializePageEmbed },
+  { name: 'mathBlock', matches: (el) => el.getAttribute('data-type') === 'mathBlock', serialize: serializeMathBlock },
+];
 
 const turndown = new TurndownService({
   headingStyle: 'atx',
   codeBlockStyle: 'fenced',
   bulletListMarker: '-',
-  // 내용-없는 fileAttachment <div> 가 blank 로 drop 되지 않도록 raw HTML 로 보존(legacy·ref 공통).
+  // 내용 없는 부품 <div>가 blank로 drop되지 않도록 raw HTML로 보존(EMPTY_PART_SERIALIZERS).
   blankReplacement: (_content: string, node: unknown) => {
     const el = node as HTMLElement & { isBlock?: boolean };
-    if (el && typeof el.getAttribute === 'function' && el.getAttribute('data-type') === 'fileAttachment') {
-      return serializeFileAttachment(el);
+    if (el && typeof el.getAttribute === 'function') {
+      const part = EMPTY_PART_SERIALIZERS.find((p) => p.matches(el));
+      if (part) return part.serialize(el);
     }
     return el?.isBlock ? '\n\n' : '';
   },
@@ -82,10 +139,12 @@ turndown.addRule('imageWithWidth', {
     node.nodeName === 'IMG' && !!(node as HTMLElement).style.width,
   replacement: (_content, node) => {
     const el = node as HTMLImageElement;
-    const src = el.getAttribute('src') ?? '';
-    const alt = el.getAttribute('alt') ?? '';
+    // story #4339(까디르 4708) — raw HTML로 남는 값은 전부 escapeAttr(예전 src · alt는 그대로라 `"`가 든 alt가 속성을 끼워 넣을 수 있었다).
+    // width는 브라우저가 CSS 길이로 해석한 값(style.width)이라 따옴표가 못 들어온다.
+    const src = escapeAttr(el.getAttribute('src') ?? '');
+    const alt = escapeAttr(el.getAttribute('alt') ?? '');
     const width = el.style.width;
-    return `\n<img src="${src}" alt="${alt}" style="width:${width};max-width:100%;height:auto">\n`;
+    return `${RAW_HTML_BLOCK_GAP}<img src="${src}" alt="${alt}" style="width:${width};max-width:100%;height:auto">${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -96,11 +155,9 @@ turndown.addRule('wikiLink', {
     (node as HTMLElement).getAttribute('data-type') === 'wikiLink',
   replacement: (_content, node) => {
     const el = node as HTMLElement;
-    const safeAttr = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const docId = safeAttr(el.getAttribute('data-doc-id') ?? '');
-    const title = safeAttr(el.getAttribute('data-title') ?? el.textContent ?? '');
-    const slug = safeAttr(el.getAttribute('data-slug') ?? '');
+    const docId = escapeAttr(el.getAttribute('data-doc-id') ?? '');
+    const title = escapeAttr(el.getAttribute('data-title') ?? el.textContent ?? '');
+    const slug = escapeAttr(el.getAttribute('data-slug') ?? '');
     return `<span data-type="wikiLink" data-doc-id="${docId}" data-title="${title}" data-slug="${slug}">${title}</span>`;
   },
 });
@@ -112,11 +169,11 @@ turndown.addRule('columnsBlock', {
     (node as HTMLElement).getAttribute('data-type') === 'columnsBlock',
   replacement: (_content, node) => {
     const el = node as HTMLElement;
-    const cols = el.getAttribute('data-cols') ?? '2';
+    const cols = escapeAttr(el.getAttribute('data-cols') ?? '2');
     const columnsHtml = Array.from(el.querySelectorAll('[data-type="columnBlock"]'))
       .map((col) => `<div data-type="columnBlock">${(col as HTMLElement).innerHTML}</div>`)
       .join('');
-    return `\n<div data-type="columnsBlock" data-cols="${cols}">${columnsHtml}</div>\n`;
+    return `${RAW_HTML_BLOCK_GAP}<div data-type="columnsBlock" data-cols="${cols}">${columnsHtml}</div>${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -125,13 +182,7 @@ turndown.addRule('mathBlock', {
   filter: (node) =>
     node.nodeName === 'DIV' &&
     (node as HTMLElement).getAttribute('data-type') === 'mathBlock',
-  replacement: (_content, node) => {
-    const el = node as HTMLElement;
-    const latex = el.textContent ?? '';
-    const safeAttr = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `\n<div data-type="mathBlock" data-latex="${safeAttr(latex)}">${safeAttr(latex)}</div>\n`;
-  },
+  replacement: (_content, node) => serializeMathBlock(node as HTMLElement),
 });
 
 // Preserve math inline nodes as raw HTML
@@ -142,9 +193,7 @@ turndown.addRule('mathInline', {
   replacement: (_content, node) => {
     const el = node as HTMLElement;
     const latex = el.textContent ?? '';
-    const safeAttr = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<span data-type="mathInline">${safeAttr(latex)}</span>`;
+    return `<span data-type="mathInline">${escapeAttr(latex)}</span>`;
   },
 });
 
@@ -153,13 +202,7 @@ turndown.addRule('embedBlock', {
   filter: (node) =>
     node.nodeName === 'DIV' &&
     (node as HTMLElement).getAttribute('data-type') === 'embedBlock',
-  replacement: (_content, node) => {
-    const el = node as HTMLElement;
-    const safeAttr = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const url = safeAttr(el.getAttribute('data-url') ?? '');
-    return `\n<div data-type="embedBlock" data-url="${url}"></div>\n`;
-  },
+  replacement: (_content, node) => serializeEmbedBlock(node as HTMLElement),
 });
 
 // Preserve file attachment blocks as raw HTML
@@ -178,10 +221,10 @@ turndown.addRule('imageWithAsset', {
     const el = node as HTMLElement;
     const a = (name: string) => {
       const v = el.getAttribute(name);
-      return v == null ? '' : ` ${name}="${v.replace(/"/g, '&quot;')}"`;
+      return v == null ? '' : ` ${name}="${escapeAttr(v)}"`;
     };
     const width = el.style.width ? ` style="width:${el.style.width};max-width:100%;height:auto"` : '';
-    return `\n<img${a('data-asset-id')}${a('data-filename')}${a('data-size')}${a('data-mime-type')}${a('alt')}${width}>\n`;
+    return `${RAW_HTML_BLOCK_GAP}<img${a('data-asset-id')}${a('data-filename')}${a('data-size')}${a('data-mime-type')}${a('alt')}${width}>${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -197,21 +240,14 @@ turndown.addRule('toggleBlock', {
     const contentEl = el.querySelector('[data-type="toggleContent"]');
     const summaryHtml = summaryEl ? summaryEl.innerHTML : '';
     const contentHtml = contentEl ? contentEl.innerHTML : '';
-    return `\n<div data-type="toggleBlock" data-open="${isOpen}"><div data-type="toggleSummary">${summaryHtml}</div><div data-type="toggleContent">${contentHtml}</div></div>\n`;
+    return `${RAW_HTML_BLOCK_GAP}<div data-type="toggleBlock" data-open="${isOpen}"><div data-type="toggleSummary">${summaryHtml}</div><div data-type="toggleContent">${contentHtml}</div></div>${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
 // Preserve page-embed atoms — must be before the generic block rule
 turndown.addRule('pageEmbed', {
   filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-page-embed'),
-  replacement: (_content, node) => {
-    const el = node as HTMLElement;
-    const docId = el.getAttribute('data-doc-id') ?? '';
-    const title = el.getAttribute('data-title') ?? '';
-    const icon = el.getAttribute('data-icon') ?? '';
-    const slug = el.getAttribute('data-slug') ?? '';
-    return `\n<div data-page-embed data-doc-id="${docId}" data-title="${title}" data-icon="${icon}" data-slug="${slug}"></div>\n`;
-  },
+  replacement: (_content, node) => serializePageEmbed(node as HTMLElement),
 });
 
 // Preserve callout divs
@@ -454,7 +490,9 @@ export function markdownToHtml(rawMd: string): string {
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
   // Images (before links — both use []() syntax)
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
+  // story #4339(유나 4708) — 속성 값의 따옴표를 escape(앞 escapeHtml은 & < >만) — 예전엔 alt에 `"`가 있으면 불러올 때 거기서 잘렸고
+  // src도 같은 자리라 속성 경계를 넘을 수 있었다(저장 쪽 escapeAttr의 읽기 짝).
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => `<img src="${quoteAttr(src)}" alt="${quoteAttr(alt)}">`);
 
   // Links — sanitize javascript: hrefs.
   //
@@ -558,6 +596,11 @@ export function markdownToHtml(rawMd: string): string {
   html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlockPlaceholders[Number(i)] ?? '');
 
   return html.trim();
+}
+
+/** 이미 escapeHtml(& < >)을 지난 글에 속성 따옴표만 더 escape. */
+function quoteAttr(str: string): string {
+  return str.replace(/"/g, '&quot;');
 }
 
 function escapeHtml(str: string): string {
