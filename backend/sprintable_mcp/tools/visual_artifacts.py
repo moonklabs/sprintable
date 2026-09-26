@@ -78,7 +78,7 @@ class AddArtifactCommentInput(SprintableInput):
 
 
 class ArtifactNodeOperationInput(SprintableInput):
-    op: str  # "add" | "update" | "delete"
+    op: Literal["add", "update", "delete"]  # 백엔드 ArtifactNodeOperation._validate_op와 같은 셋(story #4329 까디르 ①)
     id: str | None = None  # add: 선택 / update·delete: 필수(대상 node id)
     type: str | None = None  # add 필수
     props: dict | None = None  # add: 초기값 / update: 지정 시 전체 교체
@@ -108,7 +108,7 @@ class CreateSpecPinInput(SprintableInput):
     """편집 캔버스 핀 저작(story 7fe16274) — description pane 저작 입구. 항상 artifact의
     **최신 버전**에 붙는다(과거 버전 핀은 그때 스냅샷으로 불변)."""
     artifact_id: str
-    anchor_type: str  # "coord"(좌표 — v1 기본) | "node"(구조화 노드 참조 — reflow-safe)
+    anchor_type: Literal["coord", "node"]  # "coord"(좌표 — v1 기본) | "node"(구조화 노드 참조 — reflow-safe) · 백엔드 _SPEC_PIN_ANCHOR_TYPES와 같음
     anchor_x: float | None = None  # anchor_type="coord" 필수(canvas_bounds 좌표계, 0 이상)
     anchor_y: float | None = None  # anchor_type="coord" 필수
     node_id: str | None = None  # anchor_type="node" 필수(get_artifact의 node.id·최신 버전 소속)

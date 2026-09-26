@@ -960,7 +960,9 @@ _TOOL_DEFS: list[tuple] = [
      GetChatMessageInput, get_chat_message),
     # Meetings (6)
     ("sprintable_list_meetings",
-     "[일감] 프로젝트 미팅 목록 조회.",
+     "[일감] 프로젝트 미팅 목록 조회."
+     # story #4329 — 서버가 date_from · date_to를 읽게 되며 4294 오프셋 규칙이 붙었다.
+     + offset_required_note("date_from", "date_to"),
      ListMeetingsInput, list_meetings),
     ("sprintable_get_meeting",
      "[일감] 미팅 상세 조회.",
@@ -1089,7 +1091,8 @@ _TOOL_DEFS: list[tuple] = [
     # admin 그룹(등록=org 관리 행위, toolset.py 키워드 참조).
     ("sprintable_register_event_definition",
      "[조직] org 커스텀 이벤트 정의 등록(admin/owner 전용). key 네임스페이스·payload_schema "
-     "additionalProperties 게이트·routing(payload_field 또는 target=none만)을 강제한다.",
+     "additionalProperties 게이트·routing(payload_field 또는 target=none만)을 강제한다. "
+     "name(사람이 보는 이름 · 필수 · key와 달라야 함)과 description(선택)을 함께 보낸다.",
      RegisterEventDefinitionInput, register_event_definition),
     ("sprintable_update_event_definition",
      "[조직] org 커스텀 이벤트 정의 수정/비활성화(admin/owner 전용). enabled=false가 삭제 "

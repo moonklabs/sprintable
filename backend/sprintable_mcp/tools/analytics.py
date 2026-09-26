@@ -112,9 +112,12 @@ async def get_blocked_stories(args: SprintFilterInput) -> list[TextContent]:
 
 
 async def get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
-    """담당자 미지정 스토리 목록."""
+    """담당자 미지정 스토리 목록.
+
+    story #4329 — 예전엔 `unassigned=true`를 보냈는데 라우트가 모르는 이름이라 버려져 **스토리 전부**가 왔다. 라우트의 `no_assignee`
+    (담당 join 행 0 · assignee_id 비어 있음)로 보낸다 — `include_unassigned`(에픽 없음)와 헷갈리지 않게 이름을 갈랐다."""
     try:
-        params: dict = {"project_id": client.require_project_id(), "unassigned": "true"}
+        params: dict = {"project_id": client.require_project_id(), "no_assignee": "true"}
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
         if args.limit:

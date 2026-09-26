@@ -128,3 +128,36 @@ describe('ApiStoryRepository.list — exclude_status(story #3148/#3160) 파라�
     expect(requestedUrl).not.toContain('exclude_status=');
   });
 });
+
+describe('ApiStoryRepository.list — priority · no_assignee(story #4329)가 실제 요청 URL에 실린다', () => {
+  // `unassigned`(담당자 없음)는 이 query 객체에서 빠져 BE로 안 갔다(같은 클래스). BE 이름은 no_assignee.
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [] }),
+    })) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('sends priority and maps unassigned to no_assignee', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1', priority: 'high', unassigned: true });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).toContain('priority=high');
+    expect(requestedUrl).toContain('no_assignee=true');
+    expect(requestedUrl).not.toContain('unassigned=');
+  });
+
+  it('omits both when unset', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1' });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).not.toContain('priority=');
+    expect(requestedUrl).not.toContain('no_assignee=');
+  });
+});

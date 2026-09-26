@@ -97,6 +97,10 @@ async def list_notifications(
     is_read: bool | None = Query(default=None, description="직접 is_read 지정 (unread 우선)"),
     limit: int = Query(default=200, le=200),
     before: str | None = Query(default=None, description="ISO datetime cursor — 이 시각 이전 항목(내림차순 다음 페이지)"),
+    type_filter: str | None = Query(
+        default=None, alias="type",
+        description="Only notifications of this type (exact match).",
+    ),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: NotificationRepository = Depends(_notif_repo),
@@ -122,8 +126,11 @@ async def list_notifications(
     # 누락하면 파이썬 기본값인 Query(...) 센티넬 객체(truthy)가 그대로 들어온다.
     if isinstance(before, str) and before:
         before_dt, before_id = decode_cursor(before)
+    # story #4329 — 같은 센티넬 함정(직접 호출 테스트는 type을 안 넘긴다).
+    notif_type = type_filter if isinstance(type_filter, str) and type_filter else None
     rows = await repo.list(
         user_id=user_id, is_read=resolved_is_read, limit=limit + 1, before=before_dt, before_id=before_id,
+        notif_type=notif_type,
     )
     page, has_more, next_cursor = assemble_page(rows, limit, lambda n: (n.created_at, n.id))
     data = [NotificationListItem(**NotificationResponse.model_validate(n).model_dump()) for n in page]

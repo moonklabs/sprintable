@@ -159,3 +159,28 @@ describe('/api/stories GET — exclude_status 화이트리스트 전달(cursor �
     expect(calledWith.exclude_status).toBeUndefined();
   });
 });
+
+// story #4329 — BE가 priority · no_assignee를 받게 되며(MCP가 보내던 거름) 같은 클래스(프록시가 삼킴) 재발 방지.
+describe('/api/stories GET — priority · unassigned 화이트리스트 전달(story #4329)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+  });
+
+  it('priority · unassigned=true가 StoryService.list()에 전달된다', async () => {
+    h.list.mockResolvedValue([story('1')]);
+    await GET(new Request('http://localhost/api/stories?project_id=p&priority=high&unassigned=true'));
+    const calledWith = h.list.mock.calls[0]![0] as { priority?: string; unassigned?: boolean };
+    expect(calledWith.priority).toBe('high');
+    expect(calledWith.unassigned).toBe(true);
+  });
+
+  it('둘 다 미지정이면 undefined(지어내지 않음, 회귀 0)', async () => {
+    h.list.mockResolvedValue([story('1')]);
+    await GET(new Request('http://localhost/api/stories?project_id=p'));
+    const calledWith = h.list.mock.calls[0]![0] as { priority?: string; unassigned?: boolean };
+    expect(calledWith.priority).toBeUndefined();
+    expect(calledWith.unassigned).toBeUndefined();
+  });
+});

@@ -1,6 +1,8 @@
 """Evidence 자기증명 MCP 도구(1개) — E-VERIFY V0-S1(story 5a5ba27b)."""
 from __future__ import annotations
 
+from typing import Literal
+
 from mcp.types import TextContent
 
 from ..api_client import client
@@ -10,8 +12,10 @@ from ..schemas import SprintableInput
 
 class AddEvidenceInput(SprintableInput):
     work_item_id: str
-    work_item_type: str  # "story" | "task"
-    type: str  # url | file | pr | deploy | metric | report (gate_approval은 시스템 전용)
+    # 백엔드 `routers/evidence.py` _WORK_ITEM_TYPES · `models/evidence.py` _CLIENT_CREATABLE_TYPES와 같은 값(gate_approval은 시스템 전용)
+    # — 예전 str은 다른 값을 받아 놓고 서버가 422로 거절했다(story #4329 까디르 ① 가드). 동일성은 테스트가 고정한다.
+    work_item_type: Literal["story", "task"]
+    type: Literal["url", "file", "pr", "deploy", "metric", "report"]
     ref: str
     source: str | None = None
     note: str | None = None

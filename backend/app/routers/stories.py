@@ -152,6 +152,18 @@ async def list_stories(
             "2026-08-09 — 최초 구현이던 Python 후필터는 페이지 경계 밖 유실+헤더 거짓값 결함)."
         ),
     ),
+    priority: Literal["critical", "high", "medium", "low"] | None = Query(
+        # story #4329 — MCP `list_stories`가 보내던 거름(전엔 조용히 버려졌다).
+        default=None, description="Only stories with this priority.",
+    ),
+    no_assignee: bool = Query(
+        default=False,
+        # story #4329 — 담당 join 행 0 · assignee_id 비어 있음. include_unassigned(에픽 없음)와 다른 축.
+        description=(
+            "Only stories with no assignee (no story_assignees rows and no assignee_id). "
+            "Not the same as include_unassigned, which means stories without an epic."
+        ),
+    ),
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
     q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
@@ -206,6 +218,9 @@ async def list_stories(
     # 직접호출 테스트들은 이 kwarg를 아예 안 넘기므로 함수 기본값(Query 객체)이 그대로
     # 들어온다 — isinstance 가드 없으면 `.split(",")`가 Query 객체에서 AttributeError.
     exclude_status = exclude_status if isinstance(exclude_status, str) else None
+    # story #4329 — 동일 Query(...) 센티널 함정(직접호출 테스트는 새 kwarg를 안 넘긴다).
+    priority = priority if isinstance(priority, str) else None
+    no_assignee = no_assignee if isinstance(no_assignee, bool) else False
 
     parsed_epic_ids: list[uuid.UUID] | None = None
     if epic_ids is not None:
@@ -266,7 +281,7 @@ async def list_stories(
         stories, total = await repo.list_backlog(
             project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
             status=status_filter, story_number=story_number, q=q, unattached=unattached,
-            exclude_statuses=parsed_exclude_statuses,
+            exclude_statuses=parsed_exclude_statuses, priority=priority, no_assignee=no_assignee,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
@@ -294,6 +309,8 @@ async def list_stories(
             story_number=story_number,
             q_text=q,
             unattached=unattached,
+            priority=priority,
+            no_assignee=no_assignee,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
@@ -320,6 +337,8 @@ async def list_stories(
         filters["status"] = status_filter
     if story_number is not None:
         filters["story_number"] = story_number
+    if priority:
+        filters["priority"] = priority
     # story #2189: 이 분기도 board 분기(:131)와 동형으로 cursor를 파싱해 넘긴다 — 안 넘기면
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
@@ -327,7 +346,7 @@ async def list_stories(
     stories, total = await repo.list(
         limit=limit, q=q, cursor=cursor_dt, unattached=unattached,
         epic_ids=parsed_epic_ids, include_unassigned=include_unassigned,
-        done_within_days=done_within_days, **filters,
+        done_within_days=done_within_days, no_assignee=no_assignee, **filters,
     )
     if response is not None:
         response.headers["X-Total-Count"] = str(total)

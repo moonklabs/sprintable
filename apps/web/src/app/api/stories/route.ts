@@ -99,6 +99,8 @@ export const GET = withRouteTiming('stories', async (request: Request) => {
       project_id: searchParams.get('project_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       unassigned: searchParams.get('unassigned') === 'true' ? true : undefined,
+      // story #4329 — BE가 priority · no_assignee(= unassigned)를 받게 되며 같은 클래스 재발 방지로 신설과 동시에 포함.
+      priority: searchParams.get('priority') ?? undefined,
       // story #2534(E-FLOW-V4 S4) — 가설/목표 둘 다 미매달림(unassigned와 다른 축).
       unattached: searchParams.get('unattached') === 'true' ? true : undefined,
       story_number: storyNumberParam ? Number(storyNumberParam) : undefined,
