@@ -33,6 +33,7 @@ from .api_client import (
     set_tool_name_override,
 )
 from .config import settings
+from .datetime_params import offset_required_note
 from .response import ok
 from .schemas import SprintableInput
 from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
@@ -797,7 +798,9 @@ _TOOL_DEFS: list[tuple] = [
      "세션 시작 컨텍스트 — 내 stories/tasks + 거기 붙은 판단/정정 + (since를 주면) 그 뒤"
      " 최근 활동을 한 호출로 준다. since에 직전 세션 종료 시각(ISO 8601)을 주면 그 뒤"
      " 활동만 옴 — 안 주면 recent_activity는 null(모름, 빈 목록 아님). progress.txt 같은"
-     " 제품 밖 파일 대신 이 도구가 그 자리를 대신한다.",
+     " 제품 밖 파일 대신 이 도구가 그 자리를 대신한다."
+     # story #4294 AC3 — 서버 422 규칙을 에이전트가 보는 도구 목록에 싣는다(docstring · 필드 주석은 목록에 안 닿음).
+     + offset_required_note("since"),
      SessionContextInput, get_session_context),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
