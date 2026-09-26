@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
@@ -173,6 +173,9 @@ function TreeNode({
   // 포털이라 DOM 순서상 «⋮» 뒤가 아니다 → 열면 첫 항목으로 초점 · ↑↓ · Tab이 끝을 넘거나 Esc면 닫고 «⋮»로 돌려준다.
   const rowRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLDivElement>(null);
+  // 까디르(4724) — ↑↓ 키보드 길을 얹어 «메뉴»가 됐으니 보조기기에도 메뉴로 읽히게: 트리거 aria-haspopup · aria-expanded · aria-controls(열렸을 때 패널 id) ·
+  // 패널 role=menu · 항목 role=menuitem(버튼 넷이 아니라 메뉴 항목 넷).
+  const menuId = useId();
   // story #2416 — native confirm() 대체. 각 TreeNode가 자기 대상(doc)의 삭제-확認만 소유.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
@@ -339,6 +342,9 @@ function TreeNode({
           ref={menuTriggerRef}
           role="button"
           tabIndex={0}
+          aria-haspopup="menu"
+          aria-expanded={contextMenuOpen}
+          aria-controls={contextMenuOpen ? menuId : undefined}
           onClick={(e) => {
             e.stopPropagation();
             setContextMenuOpen(true);
@@ -354,14 +360,16 @@ function TreeNode({
             popoverRef={menuRef}
             align="end"
             gap={4}
+            id={menuId}
+            role="menu"
             data-dropdown-panel="doc-tree-menu"
             onKeyDown={handleMenuKeyDown}
             className="z-50 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1"
           >
-            <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
-            {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
-            {isFolder && <button onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
-            <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
+            <button type="button" role="menuitem" onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
+            {isFolder && <button type="button" role="menuitem" onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
+            {isFolder && <button type="button" role="menuitem" onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
+            <button type="button" role="menuitem" onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
           </AnchoredPopover>
         )}
       </div>
