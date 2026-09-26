@@ -891,9 +891,11 @@ def alerts(monkeypatch):
 
     seen: list[tuple[str, uuid.UUID]] = []
 
-    async def _record(event, attempt_id, detail):
-        seen.append((event, attempt_id))
-        return False  # 수신처 없음(PO 04:13Z) — 전달 안 됨
+    async def _record(event, attempt_id, detail, *, org_id, facts=None):
+        # story #4341 — 알림마다 대상 조직이 실린다(운영 대화에서 어느 조직인지 읽히게). 없으면 기록하지 않아 그 테스트가 RED.
+        if org_id is not None:
+            seen.append((event, attempt_id))
+        return False  # 전달 여부는 이 표의 관심 밖(운영 알림 서비스 자체는 test_4341_operator_alerts_realdb.py)
 
     monkeypatch.setattr(svc, "notify_operator", _record)
     return seen

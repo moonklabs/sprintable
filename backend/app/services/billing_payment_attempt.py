@@ -103,16 +103,37 @@ def _next_check(now: datetime, since: datetime | None) -> datetime:
     return now + min(max(age / 4, CHECK_INTERVAL_MIN), CHECK_INTERVAL_MAX)
 
 
-async def notify_operator(event: str, attempt_id: uuid.UUID, detail: str) -> bool:
-    """운영자 알림 한 자리(PO 04:13Z) — 사람이 받는 곳에 **전달됐으면** True. 지금은 수신처가 없어(PO가 따로 카드) 로그 + False.
-    결제 쪽 «운영자 몫» 알림은 전부 여기로 모은다: 늦은 청구 · 권리 못 줌(voided) · 결과 모름 지속 · 환불 실패/지연 · 재조회 종료."""
+# 결제 쪽 «운영자 몫» 알림 종류 전부 — `_alert` 호출이 쓰는 이름과 같아야 한다(tests/test_4341_billing_operator_alerts.py가 양쪽 대조).
+# 시도 응답의 `operator_notified_at`은 이 종류들의 운영 알림 중 가장 먼저 전달된 시각이다.
+BILLING_ALERT_EVENTS = (
+    "payment_voided", "late_charge", "refund_failed", "refund_unconfirmed", "outcome_unknown", "recheck_window_closed",
+)
+
+
+def billing_alert_dedupe_key(event: str, attempt_id: uuid.UUID) -> str:
+    """같은 시도의 같은 사건은 운영 알림 한 번(틱마다 다시 불려도 메시지 1)."""
+    return f"billing.{event}:{attempt_id}"
+
+
+async def notify_operator(
+    event: str, attempt_id: uuid.UUID, detail: str, *, org_id: uuid.UUID | None, facts: dict | None = None,
+) -> bool:
+    """운영자 알림 한 자리(PO 04:13Z) — 사람이 받는 곳(운영 대화, story #4341)에 **전달됐으면** True.
+    결제 쪽 «운영자 몫» 알림은 전부 여기로 모은다: 늦은 청구 · 권리 못 줌(voided) · 결과 모름 지속 · 환불 실패/지연 · 재조회 종료.
+    `detail`(주문 id · 예외 글 등)은 로그에만 — 운영 대화에는 거른 값(시도 id · 조직 · 코드 · 금액)만 간다."""
+    from app.services.operator_alerts import notify_operator as send_operator_alert
+
     logger.error("OPERATOR ALERT [%s] payment attempt %s — %s", event, attempt_id, detail)
-    return False
+    result = await send_operator_alert(
+        kind=f"billing.{event}", dedupe_key=billing_alert_dedupe_key(event, attempt_id), target_org_id=org_id,
+        target={"attempt_id": attempt_id}, facts={"code": event.upper(), **(facts or {})},
+    )
+    return result.delivered
 
 
-async def _alert(event: str, attempt_id: uuid.UUID, detail: str) -> None:
+async def _alert(event: str, attempt_id: uuid.UUID, detail: str, *, org_id: uuid.UUID, facts: dict | None = None) -> None:
     try:
-        await notify_operator(event, attempt_id, detail)
+        await notify_operator(event, attempt_id, detail, org_id=org_id, facts=facts)
     except Exception:
         logger.exception("payment attempt %s: operator alert %s failed", attempt_id, event)
 
@@ -557,7 +578,10 @@ async def _void_locked(session: AsyncSession, attempt: BillingPaymentAttempt, re
     if attempt.claim_value is not None:
         await checkout_svc.release_claim(session, org_id=attempt.org_id, claim_value=attempt.claim_value, commit=False)
     await session.commit()
-    await _alert("payment_voided", attempt.id, f"order {attempt.order_id} charged but not applied ({reason}) — refunding in full")
+    await _alert(
+        "payment_voided", attempt.id, f"order {attempt.order_id} charged but not applied ({reason}) — refunding in full",
+        org_id=attempt.org_id,
+    )
     if attempt.refund_status == "pending":
         await run_pending_refund(session, attempt.id)
 
@@ -584,7 +608,10 @@ async def _late_confirmed(session: AsyncSession, attempt_id: uuid.UUID) -> None:
     attempt = await get_attempt(session, attempt_id)
     if attempt.status not in ("failed", "declined"):
         return  # succeeded · voided = 이미 끝남 · processing = 모는 쪽이 조회로 확정한다.
-    await _alert("late_charge", attempt_id, f"Toss confirmed order {attempt.order_id} after the attempt ended {attempt.status}")
+    await _alert(
+        "late_charge", attempt_id, f"Toss confirmed order {attempt.order_id} after the attempt ended {attempt.status}",
+        org_id=attempt.org_id,
+    )
     now = _now()
     token = uuid.uuid4()
     reason = await _stale_intent(session, attempt)
@@ -702,9 +729,15 @@ async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> st
         await session.execute(update(BillingOrder).where(BillingOrder.id == order.id).values(refund_status=result))
     await session.commit()
     if result == "failed":
-        await _alert("refund_failed", attempt_id, f"refund of {target} ({amount}) failed: {detail}")
+        await _alert(
+            "refund_failed", attempt_id, f"refund of {target} ({amount}) failed: {detail}",
+            org_id=org_id, facts={"amount_minor": amount},
+        )
     elif result == "pending" and finished_at is not None and _now() - finished_at >= ESCALATE_AFTER:
-        await _alert("refund_unconfirmed", attempt_id, f"refund of {target} ({amount}) still unconfirmed: {detail}")
+        await _alert(
+            "refund_unconfirmed", attempt_id, f"refund of {target} ({amount}) still unconfirmed: {detail}",
+            org_id=org_id, facts={"amount_minor": amount},
+        )
     return result
 
 
@@ -839,7 +872,7 @@ async def _hand_back(session: AsyncSession, attempt: BillingPaymentAttempt, toke
     )
     await session.commit()
     if now - (attempt.created_at or now) >= ESCALATE_AFTER:
-        await _alert("outcome_unknown", attempt.id, f"order {attempt.order_id} outcome still unknown at Toss")
+        await _alert("outcome_unknown", attempt.id, f"order {attempt.order_id} outcome still unknown at Toss", org_id=attempt.org_id)
 
 
 async def recheck_ended_attempt(session: AsyncSession, attempt_id: uuid.UUID) -> str:
@@ -878,7 +911,10 @@ async def recheck_ended_attempt(session: AsyncSession, attempt_id: uuid.UUID) ->
         return "late"
     answered = not_found or (lookup is not None and lookup.get("status") in TOSS_ENDED_STATUSES)
     if closing and not answered:
-        await _alert("recheck_window_closed", attempt_id, f"order {attempt.order_id}: no definite Toss answer within {RECHECK_WINDOW}")
+        await _alert(
+            "recheck_window_closed", attempt_id, f"order {attempt.order_id}: no definite Toss answer within {RECHECK_WINDOW}",
+            org_id=attempt.org_id,
+        )
     return "still_ended"
 
 
