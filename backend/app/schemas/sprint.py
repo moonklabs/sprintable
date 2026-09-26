@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, computed_field, field_validator, mod
 from app.core.datetime_query import OffsetDatetime
 from app.schemas.story import _validate_metric_definition
 from app.schemas.validators import is_blank
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 # story #2413 AC3(PO 지시, 2026-08-02) — 제목이 빈 스프린트를 만들 수 없게 서버가 거부한다.
 # ⭐관측된 결함 수정이 아니라 방어다 — 실측(dev, MCP list_sprints): 16건 중 blank title 0건.
@@ -78,7 +79,10 @@ class SprintCreate(SprintBase):
     measure_after: OffsetDatetime | None = None
 
 
-class SprintUpdate(BaseModel):
+class SprintUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"title", "duration"})
+
     title: str | None = None
     start_date: date | None = None
     end_date: date | None = None

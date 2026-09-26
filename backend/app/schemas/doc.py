@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, computed_field
 from app.core.datetime_query import OffsetDatetime
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 
 class DocCreate(BaseModel):
@@ -26,7 +27,10 @@ class DocCreate(BaseModel):
     is_folder: bool = False
 
 
-class DocUpdate(BaseModel):
+class DocUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"content", "content_format", "doc_type", "sort_order", "tags", "title"})
+
     title: str | None = None
     slug: str | None = None
     # 4dd399c6: True=사용자 명시 고정(URL 다이얼로그). 명시 충돌→409, 자동파생(false/미설정)→무음 -N suffix.

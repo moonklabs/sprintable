@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.schemas.validators import is_blank
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 # story #2413 AC3(PO 지시, 2026-08-02) — "회고제목"처럼 이름이 비어 있는 회고를 만들 수 없게
 # 서버가 거부한다.
@@ -193,7 +194,10 @@ class CreateAction(BaseModel):
     assignee_id: uuid.UUID | None = None
 
 
-class UpdateAction(BaseModel):
+class UpdateAction(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"title", "status"})
+
     title: str | None = None
     assignee_id: uuid.UUID | None = None
     status: str | None = None
