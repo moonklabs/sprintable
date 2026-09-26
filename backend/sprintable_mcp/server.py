@@ -960,7 +960,9 @@ _TOOL_DEFS: list[tuple] = [
      GetChatMessageInput, get_chat_message),
     # Meetings (6)
     ("sprintable_list_meetings",
-     "[일감] 프로젝트 미팅 목록 조회.",
+     "[일감] 프로젝트 미팅 목록 조회."
+     # story #4329 — 서버가 date_from · date_to를 읽게 되며 4294 오프셋 규칙이 붙었다.
+     + offset_required_note("date_from", "date_to"),
      ListMeetingsInput, list_meetings),
     ("sprintable_get_meeting",
      "[일감] 미팅 상세 조회.",

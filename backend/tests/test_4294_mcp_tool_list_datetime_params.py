@@ -58,8 +58,8 @@ SNAPSHOT: dict[str, dict[str, str]] = {
     "sprintable_create_hypothesis": {"measure_after": OFFSET_REQUIRED},
     "sprintable_update_hypothesis": {"measure_after": OFFSET_REQUIRED},
     "sprintable_update_story": {"measure_after": OFFSET_REQUIRED},
-    # GET /api/v2/meetings는 date_from · date_to를 읽지 않는다(필터가 조용히 무시됨) — 4294 범위 밖, PO에 별도 보고.
-    "sprintable_list_meetings": {"date_from": NOT_APPLIED_BY_SERVER, "date_to": NOT_APPLIED_BY_SERVER},
+    # story #4329 — GET /api/v2/meetings가 date_from · date_to를 읽게 됐다(`aware_datetime_query`) → 오프셋 필수.
+    "sprintable_list_meetings": {"date_from": OFFSET_REQUIRED, "date_to": OFFSET_REQUIRED},
 }
 
 
@@ -104,14 +104,25 @@ def guarded_be_queries() -> dict[str, set[str]]:
     return out
 
 
+# 값 자리: `args.x` 그대로 또는 한 겹 감싼 것(`str(args.x)` · `args.x.isoformat()`).
+_ARG = r'(?:\w+\()?args\.(\w+)'
+# 쿼리 키 → MCP 인자를 잇는 모양(story #4329 까디르 P3 — 첨자 대입만 보던 것을 넓힘):
+_FORWARD_SHAPES = (
+    re.compile(r'\w+\[\s*["\'](\w+)["\']\s*\]\s*=\s*' + _ARG),  # params["k"] = args.x
+    re.compile(r'["\'](\w+)["\']\s*:\s*' + _ARG),  # {"k": args.x} — dict 리터럴 · update({...})
+    re.compile(r'[(,]\s*(\w+)\s*=\s*' + _ARG),  # update(k=args.x) · dict(k=args.x) · helper(k=args.x)
+    re.compile(r'["\'](\w+)["\']\s*,\s*' + _ARG),  # helper(params, "k", args.x)
+)
+
+
 def handler_forwards(src: str, guarded: dict[str, set[str]]) -> set[str]:
-    """핸들러 소스가 오프셋 요구 BE 쿼리로 넘기는 MCP 인자 이름(`params["k"] = args.x` → x)."""
+    """핸들러 소스가 오프셋 요구 BE 쿼리로 넘기는 MCP 인자 이름(쿼리 키 → args.x의 x)."""
     paths = [m.group(1).split("{")[0] for m in re.finditer(r'client\.(?:get|get_with_headers)\(\s*f?"([^"]+)"', src)]
-    forwarded = {k: a for k, a in re.findall(r'params\["(\w+)"\]\s*=\s*args\.(\w+)', src)}
+    forwarded = {(k, a) for shape in _FORWARD_SHAPES for k, a in shape.findall(src)}
     out: set[str] = set()
     for prefix, params in guarded.items():
         if any(p.startswith(prefix) for p in paths):
-            out |= {arg for key, arg in forwarded.items() if key in params}
+            out |= {arg for key, arg in forwarded if key in params}
     return out
 
 
@@ -175,15 +186,23 @@ async def test_tool_list_time_like_params_match_snapshot(monkeypatch):
 async def test_offset_required_params_are_named_in_the_tool_description(monkeypatch):
     tools = await _tool_list(monkeypatch)
     assert missing_notes(tools, SNAPSHOT) == []
-    desc = tools["sprintable_get_session_context"][0]
-    assert "`since`" in desc and "DATETIME_OFFSET_REQUIRED" in desc and "Z`" in desc and "+09:00" in desc
+    from app.core import datetime_query as be
+
+    for name, params in (("sprintable_get_session_context", ("since",)), ("sprintable_list_meetings", ("date_from", "date_to"))):
+        desc = tools[name][0]
+        # BE 문구를 직접 대조(까디르 P3) — BE 설명 · 힌트가 바뀌면 MCP 도구 목록이 옛 문구라 RED.
+        assert be.OFFSET_REQUIRED_DESCRIPTION in desc and be.OFFSET_HINT in desc and be.DATETIME_OFFSET_REQUIRED in desc, name
+        assert all(f"`{p}`" in desc for p in params), name
 
 
-def test_mcp_code_string_matches_backend():
-    from app.core.datetime_query import DATETIME_OFFSET_REQUIRED as BE_CODE
-    from sprintable_mcp.datetime_params import DATETIME_OFFSET_REQUIRED as MCP_CODE
+def test_mcp_copies_match_backend_verbatim():
+    """MCP는 `app.*`를 import 못 하는 별도 프로세스라 사본을 둔다 — 코드 · 설명 · 힌트 셋 다 BE와 글자 그대로."""
+    from app.core import datetime_query as be
+    from sprintable_mcp import datetime_params as mcp
 
-    assert MCP_CODE == BE_CODE
+    assert (mcp.DATETIME_OFFSET_REQUIRED, mcp.OFFSET_REQUIRED_DESCRIPTION, mcp.OFFSET_HINT) == (
+        be.DATETIME_OFFSET_REQUIRED, be.OFFSET_REQUIRED_DESCRIPTION, be.OFFSET_HINT,
+    )
 
 
 # ── 3. 층 대조 ─────────────────────────────────────────────────────────────
@@ -192,6 +211,7 @@ def test_every_mcp_arg_reaching_a_guarded_be_query_is_classified_offset_required
 
     guarded = guarded_be_queries()
     assert guarded.get("/api/v2/session-context") == {"since"}, guarded  # 스캔이 실제로 BE를 읽는지(공허 통과 방지)
+    assert guarded.get("/api/v2/meetings") == {"date_from", "date_to"}, guarded
     wrong = []
     for name, _doc, _cls, fn in _TOOL_DEFS:
         for arg in handler_forwards(inspect.getsource(fn), guarded):
@@ -238,3 +258,12 @@ def test_controls_catch_missing_note_new_param_and_misclassification():
     assert body_offset_args('return ok(await client.put(f"/api/v2/meetings/{args.meeting_id}", json=body))', {"date"}, bodies) == {"date"}
     assert body_offset_args('return ok(await client.patch(f"/api/v2/meetings/{args.meeting_id}", json=body))', {"date"}, bodies) == set()  # 메서드 다름
     assert body_offset_args('return ok(await client.post("/api/v2/stories", json=body))', {"date"}, bodies) == set()  # 경로 다름
+
+    # 넘김 모양 셋(까디르 P3) — 각각 잡혀야 한다.
+    call = '\n    return await client.get("/api/v2/activity-logs", params=params)'
+    assert handler_forwards('params = {"from": args.from_, "limit": args.limit}' + call, guarded) == {"from_"}  # dict 리터럴
+    assert handler_forwards('params = {}\n    params.update(to=str(args.until))' + call, guarded) == {"until"}  # update(k=…)
+    assert handler_forwards('params.update({"to": args.until})' + call, guarded) == {"until"}  # update({…})
+    assert handler_forwards('params = {}\n    _put(params, "from", args.since)' + call, guarded) == {"since"}  # 도우미 경유
+    # 음성: 보호 안 된 키로 넘기면 안 잡힌다.
+    assert handler_forwards('params = {"limit": args.limit}\n    params.update(q=args.q)' + call, guarded) == set()

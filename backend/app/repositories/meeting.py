@@ -42,7 +42,8 @@ class MeetingRepository:
             q = q.where(Meeting.date <= date_to)
         for attr, val in filters.items():
             q = q.where(getattr(Meeting, attr) == val)
-        q = q.order_by(Meeting.date.desc())
+        # story #4329(까디르) — 같은 시각 회의가 여럿이면 순서가 매번 달라 limit 경계가 흔들린다 → id로 끊는다.
+        q = q.order_by(Meeting.date.desc(), Meeting.id.desc())
         if limit is not None:
             q = q.limit(limit)
         result = await self.session.execute(q)

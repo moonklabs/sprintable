@@ -165,3 +165,42 @@ async def test_meeting_type_works_against_the_real_enum_column_on_create_and_fil
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+async def test_meetings_at_the_same_time_come_back_in_a_stable_order():
+    """까디르 — 같은 시각 회의가 여럿이면 `date`만으로는 순서가 정해지지 않아 `limit` 경계가 흔들린다 → `id` 내림차순으로 끊는다.
+    작은 id를 먼저 심어(물리 순서 = 작은 id 먼저) 끊개 없이는 작은 id가 앞에 오게 한다 — 뮤테이션: `Meeting.id.desc()`를 빼면 RED."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            w = await _seed(s)
+            same = datetime(2026, 9, 20, 3, 0, 0, tzinfo=UTC)
+            low, high = uuid.UUID(int=1), uuid.UUID(int=(1 << 128) - 1)
+            for mid, title in ((low, "same-low"), (high, "same-high")):
+                await s.execute(
+                    text(
+                        "INSERT INTO meetings (id, project_id, title, meeting_type, date, participants, decisions, action_items) "
+                        "VALUES (:id, :pid, :title, CAST('general' AS meeting_type), :date, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)"
+                    ),
+                    {"id": mid, "pid": w["project_id"], "title": title, "date": same},
+                )
+            await s.commit()
+        await _setup_app(app, Session, w["user_id"], w["org_id"])
+        client = _client_for(app)
+        try:
+            window = f"date_from={quote('2026-09-20T12:00:00+09:00')}&date_to={quote('2026-09-20T12:00:00+09:00')}"
+            base = f"/api/v2/meetings?project_id={w['project_id']}&{window}"
+            r = await client.get(base)
+            assert r.status_code == 200, r.text
+            assert [m["title"] for m in r.json()] == ["same-high", "same-low"]
+            r = await client.get(f"{base}&limit=1")
+            assert [m["title"] for m in r.json()] == ["same-high"], "limit 경계 — 같은 시각이면 큰 id"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
