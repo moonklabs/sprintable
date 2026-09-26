@@ -285,7 +285,10 @@ async def sweep_dunning_retries(session: AsyncSession, *, now: datetime | None =
     now = now or datetime.now(timezone.utc)
     grace_days = (await get_platform_settings(session)).dunning_grace_days
     failed_orders = (
-        await session.execute(select(BillingOrder).where(BillingOrder.status == "failed"))
+        # story #4335(까디르 P1) — 결제 시도가 주인인 주문은 시도 쓸기만 판정한다(다시 청구 · 무료 강등 0).
+        await session.execute(
+            select(BillingOrder).where(BillingOrder.status == "failed", BillingOrder.payment_attempt_id.is_(None))
+        )
     ).scalars().all()
 
     retried = downgraded = 0
@@ -358,7 +361,10 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
     cutoff = now - PENDING_STALE_AFTER
     stale_orders = (
         await session.execute(
-            select(BillingOrder).where(BillingOrder.status == "pending", BillingOrder.created_at < cutoff)
+            select(BillingOrder).where(
+                BillingOrder.status == "pending", BillingOrder.created_at < cutoff,
+                BillingOrder.payment_attempt_id.is_(None),  # story #4335 — 시도 주인 주문은 시도 쓸기만
+            )
         )
     ).scalars().all()
 

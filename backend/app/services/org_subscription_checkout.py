@@ -96,14 +96,14 @@ def _checkout_order_id(org_id: uuid.UUID, offering_version_id: uuid.UUID, today:
     return f"checkout:{org_id}:{offering_version_id}:{today.date().isoformat()}"
 
 
-async def checkout_subscription(
-    session: AsyncSession,
-    *,
-    org_id: uuid.UUID,
-    auth_key: str,
-    tier: str,
-    billing_cycle: str,
-) -> OrgSubscription:
+async def validate_checkout(
+    session: AsyncSession, *, org_id: uuid.UUID, tier: str, billing_cycle: str, allow_same_active: bool = True,
+) -> OfferingVersion:
+    """checkout 진입 가드 + 활성 offering 조회(Toss · 쓰기 0). `checkout_subscription` · 결제 시도(story #4335) 공용.
+
+    `allow_same_active=False`(결제 시도 경로) — 같은 tier · cycle로 이미 active여도 거부한다. 동기 경로는 같은 요청의
+    재제출(더블클릭 · 네트워크 재시도)을 날짜 결정적 order_id로 한 청구에 수렴시켰지만, 시도 경로의 재제출은 **같은 시도
+    id**로 오고(새 작업 0) 새 시도 id는 정말 새 결제라 — 이미 같은 플랜으로 active인 org에 두 번째 청구를 만들지 않는다."""
     if tier not in PAID_TIERS:
         raise CheckoutError(f"tier={tier!r}는 체크아웃 대상이 아님(free 제외, {sorted(PAID_TIERS)}만)")
     if billing_cycle not in BILLING_CYCLES:
@@ -130,7 +130,10 @@ async def checkout_subscription(
     if (
         existing_sub is not None and existing_sub.status == "active"
         and existing_sub.tier in PAID_TIERS
-        and (existing_sub.tier != tier or existing_sub.billing_cycle != billing_cycle)
+        and (
+            not allow_same_active
+            or existing_sub.tier != tier or existing_sub.billing_cycle != billing_cycle
+        )
     ):
         raise ActivePaidSubscriptionExists(
             f"org_id={org_id}는 이미 활성 유료 구독(tier={existing_sub.tier!r}, "
@@ -150,8 +153,16 @@ async def checkout_subscription(
     ).scalar_one_or_none()
     if offering is None:
         raise CheckoutError(f"tier={tier!r}의 활성 offering_version(krw)을 찾을 수 없음")
+    return offering
 
-    now = datetime.now(timezone.utc)
+
+async def claim_checkout_slot(
+    session: AsyncSession, *, org_id: uuid.UUID, tier: str, billing_cycle: str, offering: OfferingVersion,
+    now: datetime, commit: bool = True,
+) -> bool:
+    """org 결제 작업 슬롯(`checkout_claimed_at`) claim + 구독 pending 생성/전이 — 단일 원자 UPSERT. True = 이 호출이 쥠.
+
+    `commit=False`(결제 시도 경로) — 시도 행 INSERT와 같은 트랜잭션으로 묶으려고 호출자가 커밋한다."""
     period_start, period_end = new_subscription_period(now=now, billing_cycle=billing_cycle)
 
     # 카디르 결함사냥 TOCTOU-fix(#2898 3차 재QA, 2026-08-07) — org_subscriptions.org_id는
@@ -190,8 +201,60 @@ async def checkout_subscription(
         ),
     )
     claim_result = await session.execute(claim_stmt)
-    await session.commit()
-    if claim_result.rowcount == 0:
+    if commit:
+        await session.commit()
+    return claim_result.rowcount == 1
+
+
+async def activate_claimed_subscription(session: AsyncSession, *, org_id: uuid.UUID, claim_value: datetime) -> int:
+    """청구 confirmed 뒤 active 전이 — 이 호출이 쥔 claim 값 CAS(커밋은 호출자). 반환 = rowcount.
+
+    카디르 결함사냥(codex, #2896 리뷰, 2026-08-07) CRITICAL — 이 UPDATE가 org_id로만
+    매칭하면 이 호출의 claim이 STALE_CLAIM_WINDOW를 넘겨 이미 다른 요청에게 뺏긴
+    뒤(자기는 안 죽고 그냥 느렸을 뿐 — Toss charge 65초+issue 15초 정상 왕복만으로도
+    합이 STALE_CLAIM_WINDOW에 근접·초과할 수 있다, 이론이 아니라 실 타임아웃 스펙)
+    늦게 도착한 confirmed 결과가, 그 사이 새로 claim을 쥐고 아직 자기 charge를
+    confirm받지 못한(status='pending') 다른 요청의 tier 행을 소유권 재확認 없이
+    active로 밀어버릴 수 있었다 — release와 동일한 CAS(checkout_claimed_at==이
+    호출이 claim한 그 값)를 걸어, 이미 뺏긴 뒤라면(rowcount==0) active로 안 올린다
+    (이 호출 자신의 charge_org 청구 자체는 이미 confirmed로 남아 있다 — 그 청구를
+    취소하는 건 이 fix의 범위 밖, C4/화불 축)."""
+    result = await session.execute(
+        update(OrgSubscription)
+        .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == claim_value)
+        .values(status="active")
+    )
+    return result.rowcount
+
+
+async def release_claim(session: AsyncSession, *, org_id: uuid.UUID, claim_value: datetime, commit: bool = True) -> None:
+    """#2511 — claim 해제. checkout_claimed_at이 여전히 "우리가 세팅한 그 값"일 때만
+    지운다 — STALE_CLAIM_WINDOW를 넘겨 다른 요청이 이미 훔쳐간 claim을 우리가 뒤늦게
+    돌아와 실수로 지워버리는 것(그 다른 요청의 상호배제가 깨짐)을 막는다."""
+    await session.execute(
+        update(OrgSubscription)
+        .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == claim_value)
+        .values(checkout_claimed_at=None)
+    )
+    if commit:
+        await session.commit()
+
+
+async def checkout_subscription(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    auth_key: str,
+    tier: str,
+    billing_cycle: str,
+) -> OrgSubscription:
+    """동기 한 번에 끝까지(카드 인증 → 빌링키 → 청구 → active). 웹 요청 경로는 story #4335부터 결제 시도
+    (`billing_payment_attempt`)를 쓴다 — 이 함수는 같은 단계 함수를 한 호출 안에서 잇는 판(테스트 · 내부 호출)."""
+    offering = await validate_checkout(session, org_id=org_id, tier=tier, billing_cycle=billing_cycle)
+    now = datetime.now(timezone.utc)
+    if not await claim_checkout_slot(
+        session, org_id=org_id, tier=tier, billing_cycle=billing_cycle, offering=offering, now=now,
+    ):
         raise CheckoutInProgress(f"org_id={org_id}에 다른 checkout이 이미 진행 중 — 완료 후 재시도")
 
     try:
@@ -205,45 +268,26 @@ async def checkout_subscription(
         try:
             order = await charge_org(
                 session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
-                currency=currency, order_name=f"Sprintable {tier} 구독 시작",
+                currency=currency, order_name=checkout_order_name(tier),
             )
         except TossApiError as exc:
             # 카드 거절 등 비즈니스 사유 — 시스템 오류 아님. 구독은 pending인 채(재시도 가능).
             sub = await _refetch_subscription(session, org_id)
             raise CheckoutDeclined(str(exc), subscription=sub) from exc
 
-        # ④ 청구 성공 時에만 active — 그 외(pending=경쟁 중·failed 도달 안 함, 위에서 잡힘)는
-        # active로 안 올린다.
-        #
-        # 카디르 결함사냥(codex, #2896 리뷰, 2026-08-07) CRITICAL — 이 UPDATE가 org_id로만
-        # 매칭하면 이 호출의 claim이 STALE_CLAIM_WINDOW를 넘겨 이미 다른 요청에게 뺏긴
-        # 뒤(자기는 안 죽고 그냥 느렸을 뿐 — Toss charge 65초+issue 15초 정상 왕복만으로도
-        # 합이 STALE_CLAIM_WINDOW에 근접·초과할 수 있다, 이론이 아니라 실 타임아웃 스펙)
-        # 늦게 도착한 confirmed 결과가, 그 사이 새로 claim을 쥐고 아직 자기 charge를
-        # confirm받지 못한(status='pending') 다른 요청의 tier 행을 소유권 재확認 없이
-        # active로 밀어버릴 수 있었다 — release와 동일한 CAS(checkout_claimed_at==이
-        # 호출이 claim한 그 값)를 걸어, 이미 뺏긴 뒤라면(rowcount==0) active로 안 올린다
-        # (이 호출 자신의 charge_org 청구 자체는 이미 confirmed로 남아 있다 — 그 청구를
-        # 취소하는 건 이 fix의 범위 밖, C4/화불 축).
+        # ④ 청구 성공 時에만 active(claim 값 CAS — activate_claimed_subscription 참고).
         if order.status == "confirmed":
-            await session.execute(
-                update(OrgSubscription)
-                .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == now)
-                .values(status="active")
-            )
+            await activate_claimed_subscription(session, org_id=org_id, claim_value=now)
             await session.commit()
 
         return await _refetch_subscription(session, org_id)
     finally:
-        # #2511 — claim 해제. checkout_claimed_at이 여전히 "우리가 세팅한 그 값"일 때만
-        # 지운다 — STALE_CLAIM_WINDOW를 넘겨 다른 요청이 이미 훔쳐간 claim을 우리가 뒤늦게
-        # 돌아와 실수로 지워버리는 것(그 다른 요청의 상호배제가 깨짐)을 막는다.
-        await session.execute(
-            update(OrgSubscription)
-            .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == now)
-            .values(checkout_claimed_at=None)
-        )
-        await session.commit()
+        await release_claim(session, org_id=org_id, claim_value=now)
+
+
+def checkout_order_name(tier: str) -> str:
+    """Toss 주문명(영수증에 보임) — 동기 경로 · 결제 시도(story #4335) 공용."""
+    return f"Sprintable {tier} 구독 시작"
 
 
 async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:

@@ -21,8 +21,10 @@ PO 정밀 리뷰(#2882, 2026-08-07) — 「돈 움직이는」 스토리가 지�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -35,6 +37,10 @@ from app.services.billing_key_crypto import decrypt_billing_key, ensure_configur
 logger = logging.getLogger(__name__)
 from app.services.billing_ledger import record_ledger_entry
 from app.services.payment.toss_adapter import DUPLICATED_ORDER_ID, TossAdapter, TossApiError
+
+
+class ChargeSendDeadlinePassed(RuntimeError):
+    """story #4335 — 청구 호출 직전 시한을 넘겨 Toss를 부르지 않았다(청구 0 확정 · order는 failed)."""
 
 
 async def _mark_failed_if_not_confirmed(session: AsyncSession, order_id: str, reason: str) -> None:
@@ -75,7 +81,11 @@ async def _confirm_with_ledger(
     때만(rowcount==1) 결제 완료 메일을 발송한다. 이미 confirmed인 order에 재진입(멱등
     재시도 등)하면 WHERE 가드로 rowcount==0이라 자동으로 재발송을 안 한다 — 별도
     dedup 플래그 불요, claim/confirmed-update 자체가 이미 그 신호다. 발송 실패는
-    결제 확정 자체를 되돌리지 않는다(try/except, 로그만)."""
+    결제 확정 자체를 되돌리지 않는다(try/except, 로그만).
+
+    story #4335 AC2 — 메일은 이 함수(결제 확정 경로)가 **기다리지 않는다**: 자기 세션을 여는 떼어 낸 작업으로 보낸다
+    (`_dispatch_receipt_email`). 메일이 느려도(SMTP 대기) 결제 확정 · 시도 확정이 그만큼 늦지 않고, 메일 실패가
+    결과를 바꾸지 않는다."""
     await record_ledger_entry(
         session, org_id=org_id, entry_type=entry_type, amount_minor=amount_minor,
         currency=currency, direction="credit", provider="toss", provider_ref=payment_key,
@@ -88,17 +98,47 @@ async def _confirm_with_ledger(
     )
     await session.commit()
     if update_result.rowcount == 1:
+        _dispatch_receipt_email(
+            org_id=org_id, order_id=order_id, receipt_url=receipt_url, amount_minor=amount_minor, currency=currency,
+        )
+    return await _refetch(session, order_id)
+
+
+def _receipt_session_factory():
+    from app.core.database import async_session_factory
+
+    return async_session_factory
+
+
+def _dispatch_receipt_email(
+    *, org_id: uuid.UUID, order_id: str, receipt_url: str | None, amount_minor: int, currency: str,
+) -> None:
+    """결제 확정 경로 밖에서 영수 메일을 보낸다 — 자기 세션(호출자 세션은 곧 닫히거나 다음 쓰기를 한다) · 실패는 로그만."""
+
+    async def _send() -> None:
         try:
             from app.services.billing_receipt_email import send_payment_receipt_email
-            await send_payment_receipt_email(
-                session, org_id=org_id, receipt_url=receipt_url,
-                amount_minor=amount_minor, currency=currency,
-            )
+
+            async with _receipt_session_factory()() as email_session:
+                await send_payment_receipt_email(
+                    email_session, org_id=org_id, receipt_url=receipt_url,
+                    amount_minor=amount_minor, currency=currency,
+                )
         except Exception:
-            logger.exception(
-                "payment receipt email dispatch failed — order_id=%s org_id=%s", order_id, org_id,
-            )
-    return await _refetch(session, order_id)
+            logger.exception("payment receipt email dispatch failed — order_id=%s org_id=%s", order_id, org_id)
+
+    # 참조를 쥔 채 발사하는 공용 통로(끝나기 전 GC 방지 · #1970) — 결제 경로는 기다리지 않는다.
+    from app.services.pg_pubsub import fire_and_forget
+
+    fire_and_forget(_send())
+
+
+async def drain_receipt_emails() -> None:
+    """떼어 낸 작업(영수 메일 포함)이 다 끝날 때까지 기다린다(테스트용 — 결제 경로는 부르지 않는다)."""
+    from app.services.pg_pubsub import _background_tasks
+
+    while _background_tasks:
+        await asyncio.gather(*list(_background_tasks), return_exceptions=True)
 
 
 async def _reconcile_duplicated_order(
@@ -137,6 +177,8 @@ async def charge_org(
     order_name: str = "Sprintable 정기결제",
     entry_type: str = "charge",
     ledger_metadata: dict | None = None,
+    send_deadline: datetime | None = None,
+    payment_attempt_id: uuid.UUID | None = None,
 ) -> BillingOrder:
     """org의 활성 빌링키로 결제를 승인한다. 호출자(story C3 스케줄러·#2506 체크아웃·#2505
     팩 구매)가 amount/currency/order_id를 이미 계산해 넘긴다 — 여기는 그 값을 안전하게
@@ -144,7 +186,11 @@ async def charge_org(
 
     entry_type/ledger_metadata(#2505 확장): 원장에 남길 entry_type을 파라미터화 — 정기
     결제는 기본값 "charge" 그대로, 팩 구매 같은 별개 매출 종류는 호출자가 지정한다
-    (예: "pack_purchase" + metadata={"resource":..., "quantity":...})."""
+    (예: "pack_purchase" + metadata={"resource":..., "quantity":...}).
+
+    send_deadline(story #4335) — 결제 시도가 «청구 시작» 표식을 커밋한 시각 + 여유. Toss 청구 호출 **바로 앞**에서 이
+    시각을 넘겼으면 부르지 않는다(`ChargeSendDeadlinePassed`) — 오래 멈췄다 늦게 깨어난 작업이 조회 대사가 이미 결론 낸
+    뒤에 Toss를 부르는 경합을 좁힌다(대사 쪽은 이 시한 + Toss 한도보다 오래 지난 뒤에만 «청구 0»을 적는다)."""
     if amount_minor <= 0:
         raise ValueError(f"amount_minor must be positive: {amount_minor!r}")
 
@@ -157,6 +203,8 @@ async def charge_org(
         # 찍는다. ON CONFLICT DO NOTHING이라 재시도(같은 order_id 재호출)는 이 값을
         # 안 건드림 — 최초 생성이 유일한 진실 시점.
         purpose=entry_type,
+        # story #4335 — 결제 시도가 만든 주문이면 주인 표지(옛 dunning · stale 쓸기가 건너뛴다).
+        payment_attempt_id=payment_attempt_id,
     ).on_conflict_do_nothing(index_elements=["order_id"])
     claim_result = await session.execute(claim_stmt)
     await session.commit()
@@ -195,6 +243,9 @@ async def charge_org(
         raise RuntimeError(f"no active billing key for org {org_id}")
 
     billing_key_plaintext = decrypt_billing_key(billing_key_row.encrypted_billing_key)
+    if send_deadline is not None and datetime.now(timezone.utc) > send_deadline:
+        await _mark_failed_if_not_confirmed(session, order_id, "charge send deadline passed — not sent to Toss")
+        raise ChargeSendDeadlinePassed(f"order_id={order_id}: send deadline {send_deadline.isoformat()} passed — not sent")
     try:
         result = await TossAdapter().charge(
             billing_key=billing_key_plaintext,

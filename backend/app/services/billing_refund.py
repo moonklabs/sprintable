@@ -2,7 +2,7 @@
 payment_key로 Toss 취소 API를 부르고, 성공 응답을 record_ledger_entry(entry_type=
 "refund")로 원장(A2)에 남긴다.
 
-이중 멱등: TossAdapter.refund의 Idempotent-Key 헤더(order_id 결정적 파생 — 같은 order를
+이중 멱등: TossAdapter.refund의 Idempotency-Key 헤더(story #4335 — 예전 철자 «Idempotent-Key»는 Toss가 몰라 효과 0이었다 · 키는 호출자가 «이 환불 한 건»으로 정하거나 order_id 결정적 파생 — 같은 order를
 다시 부르면 Toss가 중복 취소를 안 만든다)가 1차, record_ledger_entry의 provider_ref
 UNIQUE(transactionKey 기반)가 2차."""
 from __future__ import annotations
@@ -22,6 +22,11 @@ class RefundError(Exception):
     """환불을 진행할 수 없는 상태 — 잘못된 대상에 조용히 진행하지 않고 명시 실패."""
 
 
+class RefundResponseMalformed(RefundError):
+    """story #4335(PO 04:08Z) — Toss가 200을 준 **뒤** 응답에 취소 내역이 비었다: 환불은 됐을 수 있다(결과 모름 = 비종결).
+    결제 시도 환불은 이걸 «실패»가 아니라 «대기»로 두고 같은 멱등키로 다시 보낸다. 다른 호출자에겐 예전처럼 RefundError."""
+
+
 async def refund_org(
     session: AsyncSession,
     *,
@@ -29,6 +34,7 @@ async def refund_org(
     order_id: str,
     cancel_reason: str,
     cancel_amount_minor: int | None = None,
+    idempotency_key: str | None = None,
 ) -> BillingLedgerEntry:
     """order_id가 가리키는 confirmed 결제를 환불(전액 또는 cancel_amount_minor만큼
     부분)하고 원장 엔트리를 반환한다."""
@@ -53,17 +59,18 @@ async def refund_org(
         payment_key=order.payment_key,
         cancel_reason=cancel_reason,
         cancel_amount_minor=cancel_amount_minor,
-        idempotency_key=f"refund:{order_id}",
+        # story #4335 — 호출자가 «이 환불 한 건»을 가리키는 키를 주면 그것(결제 시도의 환불: 시도 id). 없으면 예전 그대로.
+        idempotency_key=idempotency_key or f"refund:{order_id}",
     )
 
     cancels = result.get("cancels") or []
     if not cancels:
-        raise RefundError(f"Toss refund response missing cancels[] for order_id={order_id!r}")
+        raise RefundResponseMalformed(f"Toss refund response missing cancels[] for order_id={order_id!r}")
     latest_cancel = cancels[-1]
     transaction_key = latest_cancel.get("transactionKey")
     refunded_amount = latest_cancel.get("cancelAmount")
     if not transaction_key or refunded_amount is None:
-        raise RefundError(
+        raise RefundResponseMalformed(
             f"Toss refund response missing transactionKey/cancelAmount for order_id={order_id!r}"
         )
 

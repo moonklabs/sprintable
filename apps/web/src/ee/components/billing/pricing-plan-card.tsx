@@ -34,6 +34,7 @@ export function PricingPlanCard({
   onDowngrade,
   onCancel,
   onRevokePending,
+  paymentBusy = false,
 }: {
   tier: TierDefinition;
   isPricePublic: boolean;
@@ -52,6 +53,8 @@ export function PricingPlanCard({
   /** 구독 취소 예약(#2882, tier=free — 다음 갱신일 적용). */
   onCancel: () => void;
   onRevokePending: () => void;
+  /** story #4335(유나) — 결제 시도가 처리 중 · 확인 중이면 결제 · 변경 버튼을 잠근다(두 번째 결제가 열리지 않게). 이유는 위 배너가 말한다. */
+  paymentBusy?: boolean;
 }) {
   const t = useTranslations('pricingPlans');
   const { limits } = tier;
@@ -119,24 +122,24 @@ export function PricingPlanCard({
               ? t('pendingChangeBadge', { date: formatApplyDate(pendingChangeApplyAt) })
               : t('pendingChangeBadgeNoDate')}
           </Badge>
-          <Button variant="outline" size="sm" className="w-full" onClick={onRevokePending}>
+          <Button variant="outline" size="sm" className="w-full" onClick={onRevokePending} disabled={paymentBusy}>
             {t('revokePendingCta')}
           </Button>
         </div>
       ) : isPricePublic && tier.id !== 'free' ? (
         isUpgrade ? (
-          <Button variant="default" size="sm" className="mb-4 w-full bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onUpgrade(tier.id)}>
+          <Button variant="default" size="sm" className="mb-4 w-full bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onUpgrade(tier.id)} disabled={paymentBusy}>
             {t('upgradeCta')}
           </Button>
         ) : (
-          <Button variant="outline" size="sm" className="mb-4 w-full" onClick={() => onDowngrade(tier.id)}>
+          <Button variant="outline" size="sm" className="mb-4 w-full" onClick={() => onDowngrade(tier.id)} disabled={paymentBusy}>
             {t('downgradeCta')}
           </Button>
         )
       ) : isPricePublic && currentTier !== 'free' ? (
         // tier.id === 'free'이고 현재 유료 — 즉 이 카드는 «구독 취소»를 뜻한다(#2882,
         // tier=free로의 하향 예약과 동형).
-        <Button variant="outline" size="sm" className="mb-4 w-full" onClick={onCancel}>
+        <Button variant="outline" size="sm" className="mb-4 w-full" onClick={onCancel} disabled={paymentBusy}>
           {t('cancelSubscriptionCta')}
         </Button>
       ) : isPricePublic ? (
