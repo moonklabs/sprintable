@@ -81,9 +81,25 @@ def upgrade() -> None:
         _PROCESSING_INDEX, _TABLE, ["org_id", "lease_expires_at"], unique=False,
         postgresql_where=sa.text("status = 'processing'"),
     )
+    # 까디르 P1 · PO 05:05Z «돈 기록 하나에 주인 하나» — 결제 시도가 만든 주문의 주인 표지. 시도 쓸기만 이 주문을 판정하고, 옛
+    # dunning · stale-order 쓸기는 이 칸이 있는 주문을 건너뛴다(주문 id 접두 추측 금지). FK는 ON DELETE RESTRICT — SET NULL이면
+    # 시도가 지워질 때 주인 없는 주문으로 보여 dunning이 다시 청구하는 길이 생긴다. 지금 코드에 시도 · 주문 행을 지우는 길은 없다
+    # (org 삭제도 이 두 표를 안 건드림) — RESTRICT는 그 사실을 DB가 지키게 한다(생기면 조용히 주인이 사라지는 대신 실패).
+    op.add_column(
+        "billing_orders",
+        sa.Column(
+            "payment_attempt_id", postgresql.UUID(as_uuid=True),
+            sa.ForeignKey(f"{_TABLE}.id", name="fk_billing_orders_payment_attempt_id", ondelete="RESTRICT"),
+            nullable=True,
+        ),
+    )
+    op.create_index("ix_billing_orders_payment_attempt_id", "billing_orders", ["payment_attempt_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_billing_orders_payment_attempt_id", table_name="billing_orders")
+    op.drop_constraint("fk_billing_orders_payment_attempt_id", "billing_orders", type_="foreignkey")
+    op.drop_column("billing_orders", "payment_attempt_id")
     op.drop_index(_PROCESSING_INDEX, table_name=_TABLE)
     op.drop_index("ix_billing_payment_attempts_org_id", table_name=_TABLE)
     op.drop_table(_TABLE)

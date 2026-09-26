@@ -143,7 +143,19 @@ export function PaymentAttemptBanner({
 
   const tier = attempt?.tier ?? '';
   const billingCycle = attempt?.billing_cycle ?? null;
-  const reauth = state.missing ? state.kind === 'checkout' : attempt?.status === 'failed' && attempt.reauth_required;
+  // 유나 4704 — «카드 인증부터 다시»(연결이 끊겼어요)는 서버가 그렇게 끝낸 시도(failed · reauth_required)만. 조회 404(시도 없음 — 시작
+  // 요청이 400 · 422로 거절됐거나 서버에 닿지 않음)는 원인을 단정하지 않는 «결제가 시작되지 않았어요» 갈래.
+  const reauth = attempt?.status === 'failed' && attempt.reauth_required;
+
+  if (state.missing) {
+    return (
+      <Alert variant="warning" data-payment-attempt-state="not-started">
+        <AlertDescription className="break-keep">
+          {state.kind === 'checkout' ? t('paymentAttemptNotStarted') : t('paymentAttemptNotStartedNoCharge')}
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   if (reauth) {
     return (
@@ -160,7 +172,7 @@ export function PaymentAttemptBanner({
     );
   }
 
-  if (state.missing || attempt?.status === 'failed') {
+  if (attempt?.status === 'failed') {
     return (
       <Alert variant="warning" data-payment-attempt-state="failed">
         <AlertDescription className="space-y-2 break-keep">
@@ -205,12 +217,26 @@ export function PaymentAttemptBanner({
 
   if (attempt?.status === 'succeeded') {
     const tierName = t(`tierName_${tier}`);
+    // 까디르 P2(4704) — 요금제 변경은 성공했는데 옛 요금제 남은 기간 환불이 아직(대기)이거나 못 했으면(실패) 그 사실을 한 줄 더.
+    // 확정(confirmed)이면 덧붙이지 않는다. 키는 글자 그대로(죽은 키 가드).
+    // 유나 확정 — pending은 성공 배너 안 둘째 줄 · failed는 성공 배너 밖 바로 아래 별도 destructive 한 줄(초록 틀 안에 묻히지 않게).
+    const refund = state.kind === 'change_tier' ? attempt.refund_status : null;
     return (
-      <Alert variant="success" data-payment-attempt-state="succeeded">
-        <AlertDescription className="break-keep">
-          {state.kind === 'checkout' ? t('checkoutSuccessBanner', { tier: tierName }) : t('changeTierSuccessBanner', { tier: tierName })}
-        </AlertDescription>
-      </Alert>
+      <div className="space-y-2">
+        <Alert variant="success" data-payment-attempt-state="succeeded" data-refund-status={refund ?? 'none'}>
+          <AlertDescription className="space-y-1 break-keep">
+            <span className="block">
+              {state.kind === 'checkout' ? t('checkoutSuccessBanner', { tier: tierName }) : t('changeTierSuccessBanner', { tier: tierName })}
+            </span>
+            {refund === 'pending' ? <span className="block">{t('changeTierRefundPending')}</span> : null}
+          </AlertDescription>
+        </Alert>
+        {refund === 'failed' ? (
+          <Alert variant="destructive" data-payment-attempt-state="change-tier-refund-failed">
+            <AlertDescription className="break-keep">{t('changeTierRefundFailed')}</AlertDescription>
+          </Alert>
+        ) : null}
+      </div>
     );
   }
   return null;

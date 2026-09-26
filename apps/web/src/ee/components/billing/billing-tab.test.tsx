@@ -365,7 +365,7 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     }
   });
 
-  it('⭐등록 여부를 모르는 응답(409 · 5xx) 뒤 조회가 404 → 그때만 «시도 없음 = 청구 0»(checkout은 카드 인증부터 다시 · 까디르 ②)', async () => {
+  it('⭐등록 여부를 모르는 응답(400 · 409 · 5xx) 뒤 조회가 404 → 그때만 «시작되지 않음 · 청구 0»(checkout은 카드 인증부터 · 원인 단정 없음 · 유나 4704)', async () => {
     vi.useFakeTimers();
     try {
       searchParams = new URLSearchParams(RETURN);
@@ -375,7 +375,60 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
       expect(container.querySelector('[data-payment-attempt-state="checking"]')).not.toBeNull();
       expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-      expect(container.querySelector('[data-payment-attempt-state="reauth"]')?.textContent).toContain(koMessages.pricingPlans.paymentAttemptReauthRequired);
+      const alertEl = container.querySelector('[data-payment-attempt-state="not-started"]');
+      expect(alertEl?.textContent).toBe(koMessages.pricingPlans.paymentAttemptNotStarted);
+      // «연결이 끊겼어요»(ReauthRequired)는 서버가 그렇게 끝낸 시도만 — 404는 원인을 모른다.
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptReauthRequired);
+      expect(alertEl?.className).toContain('warning-tint');
+      expect(alertEl?.querySelector('button')).toBeNull();
+      expect(alertEl?.querySelector('.break-keep')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['pending', 'changeTierRefundPending'],
+    ['failed', 'changeTierRefundFailed'],
+    ['confirmed', null],
+    [null, null],
+  ] as const)('⭐change-tier 성공 + 옛 요금제 환불 %s → 환불 줄 %s(까디르 P2 4704)', async (refund, key) => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem('sprintable.billing.paymentAttempt', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
+      attemptResponses = [attemptResponse(attempt({ status: 'succeeded', kind: 'change_tier', refund_status: refund }))];
+      await mount(async () => statusResponse({ tier: 'starter' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      const alertEl = container.querySelector('[data-payment-attempt-state="succeeded"]');
+      expect(alertEl?.textContent).toContain(koMessages.pricingPlans.changeTierSuccessBanner.replace('{tier}', 'Team'));
+      expect(alertEl?.className).toContain('success');
+      // pending은 성공 배너 안 · failed는 밖 별도 destructive(유나 확정).
+      if (key === 'changeTierRefundPending') expect(alertEl?.textContent).toContain(koMessages.pricingPlans.changeTierRefundPending);
+      else expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.changeTierRefundPending);
+      expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.changeTierRefundFailed);
+      const failedEl = container.querySelector('[data-payment-attempt-state="change-tier-refund-failed"]');
+      if (key === 'changeTierRefundFailed') {
+        expect(failedEl?.textContent).toBe(koMessages.pricingPlans.changeTierRefundFailed);
+        expect(failedEl?.className).toContain('destructive-tint');
+      } else {
+        expect(failedEl).toBeNull();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐change-tier 조회 404 → «시작되지 않았어요 · 청구 0» 두 문장만(원인 단정 · 버튼 없음 · 유나 4704)', async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem('sprintable.billing.paymentAttempt', JSON.stringify({ id: 'att-9', kind: 'change_tier' }));
+      attemptResponses = [{ ok: false, status: 404, json: async () => ({}) }];
+      await mount(async () => statusResponse({ tier: 'starter' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      const alertEl = container.querySelector('[data-payment-attempt-state="not-started"]');
+      expect(alertEl?.textContent).toBe(koMessages.pricingPlans.paymentAttemptNotStartedNoCharge);
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptFailed);
+      expect(alertEl?.querySelector('button')).toBeNull();
     } finally {
       vi.useRealTimers();
     }

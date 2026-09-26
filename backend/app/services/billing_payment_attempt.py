@@ -325,6 +325,7 @@ async def drive_attempt(
         order = await charge_org(
             session, org_id=attempt.org_id, order_id=attempt.order_id, amount_minor=amount_minor, currency=currency,
             order_name=order_name, ledger_metadata=ledger_metadata, send_deadline=started + SEND_DEADLINE,
+            payment_attempt_id=attempt.id,
         )
     except ChargeSendDeadlinePassed:
         # 이 작업이 보내지 않았고, 대사는 청구를 부르지 않는다 — 이 order_id로 Toss를 부를 수 있는 쪽은 이제 없다.
@@ -651,7 +652,8 @@ async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> st
     target, amount, org_id, finished_at = (
         attempt.refund_target_order_id, attempt.refund_amount_minor, attempt.org_id, attempt.finished_at,
     )
-    attempt.refund_lease_until = now + REFUND_LEASE
+    my_lease = now + REFUND_LEASE
+    attempt.refund_lease_until = my_lease
     await session.commit()
 
     order = (
@@ -682,7 +684,11 @@ async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> st
     done = result != "pending"
     await session.execute(
         update(BillingPaymentAttempt)
-        .where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.refund_status == "pending")
+        # 까디르 P2 — 결과는 기한의 주인만 적는다(기한이 지나 다른 몰이꾼이 다시 집었으면 이 결과는 버린다 · 그쪽이 적는다).
+        .where(
+            BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.refund_status == "pending",
+            BillingPaymentAttempt.refund_lease_until == my_lease,
+        )
         .values(
             refund_status=result, refund_lease_until=None,
             next_check_at=None if done else _next_check(_now(), finished_at),
@@ -756,11 +762,21 @@ async def _lookup(attempt: BillingPaymentAttempt) -> tuple[dict | None, bool]:
 
 
 async def _record_done(session: AsyncSession, attempt: BillingPaymentAttempt, lookup: dict) -> bool:
-    """조회가 DONE — 청구 행을 confirmed + 원장으로. 청구 행이 없으면 False(답을 못 맞춤 · 다음 조회)."""
+    """조회가 DONE — 청구 행을 confirmed + 원장으로. 반환 = 로컬 청구 행이 **없었는지**(까디르 P2): 돈은 나갔는데 우리 기록이 없다 —
+    Toss 조회 값(금액 · paymentKey)으로 행을 만들어 확정한 뒤, 호출부가 권리를 주지 않고 환불 규칙(voided)으로 보낸다."""
     order = (await session.execute(select(BillingOrder).where(BillingOrder.order_id == attempt.order_id))).scalar_one_or_none()
-    if order is None:
-        logger.error("payment attempt %s: Toss DONE but no billing_orders row for %s", attempt.id, attempt.order_id)
-        return False
+    missing = order is None
+    if missing:
+        logger.error("payment attempt %s: Toss DONE but no billing_orders row for %s — recording it from Toss and refunding", attempt.id, attempt.order_id)
+        await session.execute(
+            pg_insert(BillingOrder).values(
+                id=uuid.uuid4(), org_id=attempt.org_id, order_id=attempt.order_id,
+                amount_minor=int(lookup.get("totalAmount") or 0), currency="krw", status="pending",
+                purpose="charge", payment_attempt_id=attempt.id,
+            ).on_conflict_do_nothing(index_elements=["order_id"])
+        )
+        await session.commit()
+        order = (await session.execute(select(BillingOrder).where(BillingOrder.order_id == attempt.order_id))).scalar_one()
     ledger_metadata = None
     if attempt.kind == "change_tier":
         sub = (await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == attempt.org_id))).scalar_one()
@@ -770,7 +786,7 @@ async def _record_done(session: AsyncSession, attempt: BillingPaymentAttempt, lo
         payment_key=lookup["paymentKey"], ledger_metadata=ledger_metadata,
         receipt_url=(lookup.get("receipt") or {}).get("url"),
     )
-    return True
+    return missing
 
 
 async def _reconcile_charge(session: AsyncSession, attempt: BillingPaymentAttempt, token: uuid.UUID, now: datetime) -> None:
@@ -788,8 +804,10 @@ async def _reconcile_charge(session: AsyncSession, attempt: BillingPaymentAttemp
         return
     status = lookup.get("status")
     if status == "DONE" and lookup.get("paymentKey"):
-        if not await _record_done(session, attempt, lookup):
-            await _hand_back(session, attempt, token)
+        if await _record_done(session, attempt, lookup):
+            locked = await _lock_owned(session, attempt.id, token)
+            if locked is not None:
+                await _void_locked(session, locked, "Toss DONE but no local order record")
             return
         await _finalize(session, attempt.id, token)
         return
@@ -850,8 +868,10 @@ async def recheck_ended_attempt(session: AsyncSession, attempt_id: uuid.UUID) ->
     lookup, not_found = await _lookup(attempt)
     if lookup is not None and lookup.get("status") == "DONE" and lookup.get("paymentKey"):
         if await _record_done(session, attempt, lookup):
+            await _void_ended(session, attempt_id, "Toss DONE but no local order record")
+        else:
             await _late_confirmed(session, attempt_id)
-            return "late"
+        return "late"
     answered = not_found or (lookup is not None and lookup.get("status") in TOSS_ENDED_STATUSES)
     if closing and not answered:
         await _alert("recheck_window_closed", attempt_id, f"order {attempt.order_id}: no definite Toss answer within {RECHECK_WINDOW}")

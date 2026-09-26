@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, CheckConstraint, Text
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -58,3 +58,10 @@ class BillingOrder(Base, TimestampMixin, OrgScopedMixin):
     # 문서 §Payment). confirmed 시점에만 채워짐(pending/failed는 NULL) — billing_charge.py의
     # _confirm_with_ledger 단일 지점에서만 쓴다(신규 발급 로직 없이 Toss URL 그대로 저장).
     receipt_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4335(까디르 P1 · PO 05:05Z «돈 기록 하나에 주인 하나») — 결제 시도(billing_payment_attempts)가 만든 주문이면 그 시도 id.
+    # 시도 쓸기만 판정하고 dunning · stale-order 쓸기는 건너뛴다(0410). ON DELETE RESTRICT — 주인이 조용히 사라지지 않게.
+    payment_attempt_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("billing_payment_attempts.id", name="fk_billing_orders_payment_attempt_id", ondelete="RESTRICT"),
+        nullable=True, index=True,
+    )

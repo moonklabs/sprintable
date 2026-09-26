@@ -87,6 +87,7 @@ class FakeToss:
         self.cancel_mode = "ok"
         self.cancel_keys: list[str | None] = []
         self.refunded: dict[str, dict] = {}  # 멱등키 → 첫 응답(Toss 멱등: 같은 키면 같은 응답 · 두 번째 환불 0)
+        self.amounts: dict[str, int] = {}  # orderId → 청구 금액(조회의 totalAmount)
 
     @property
     def approvals(self) -> int:
@@ -121,6 +122,7 @@ class FakeToss:
         # 청구 /v1/billing/{billingKey}
         order_id = json["orderId"]
         self.charge_calls.append(order_id)
+        self.amounts[order_id] = json.get("amount", 0)
         if self.charge_mode == "hang":
             assert self.hang_event is not None
             await self.hang_event.wait()
@@ -161,7 +163,7 @@ class FakeToss:
             return {"status": self.lookup_status, "orderId": order_id}
         if order_id not in self.charged:
             raise TossApiError("NOT_FOUND_PAYMENT", "Toss payment lookup failed", status_code=404)
-        return {"status": "DONE", "paymentKey": self.charged[order_id], "orderId": order_id, "receipt": {"url": "https://r.example/x"}}
+        return {"status": "DONE", "paymentKey": self.charged[order_id], "orderId": order_id, "totalAmount": self.amounts.get(order_id, 0), "receipt": {"url": "https://r.example/x"}}
 
     async def delete(self, _self, path, *, timeout, op_label):
         return None
@@ -1227,3 +1229,151 @@ async def test_sweep_skips_rows_not_yet_due_and_defers_when_the_tick_budget_runs
         assert deferred.get("deferred") == 1 and len(toss.lookup_calls) == before
         done = await svc.sweep_processing_attempts(s)
         assert done.get("succeeded") == 1
+
+
+
+# ── 까디르 4704 돈 렌즈(PO 05:05Z) — «돈 기록 하나에 주인 하나» · 환불 기한 주인 · 로컬 주문 없는 DONE ──────────────────────
+
+
+@pytest.mark.anyio
+async def test_attempt_owned_orders_are_left_to_the_attempt_sweep_by_dunning_and_stale_sweeps(Session, toss):
+    """P1 — 시도가 주인인 주문(`payment_attempt_id`)은 옛 dunning(매일 재청구 · 기한 뒤 무료 강등)과 stale-order 쓸기가 건너뛴다.
+    주인 없는 옛 갱신 실패 주문은 dunning이 그대로 재청구한다(회귀 0).
+    뮤테이션: 두 쓸기의 `payment_attempt_id.is_(None)` 걸러냄을 빼면 시도 주문이 재청구 · 조회되어 RED."""
+    from app.services import billing_payment_attempt as svc
+    from app.services.billing_scheduler import sweep_dunning_retries, sweep_stale_pending_orders
+
+    toss.charge_mode = "decline"
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    now = datetime.now(timezone.utc)
+    two_days_ago = now - timedelta(days=2)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        assert (await svc.get_attempt(s, attempt_id)).status == "declined"
+        owned = await _row(s, "SELECT order_id, status, payment_attempt_id FROM billing_orders WHERE org_id=:o", o=org_id)
+        assert (owned.status, owned.payment_attempt_id) == ("failed", attempt_id)
+        renewal_id = f"renewal:{uuid.uuid4().hex}"
+        await s.execute(
+            text(
+                "INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, purpose, created_at, updated_at) "
+                "VALUES (:id, :o, :oid, 29000, 'krw', 'failed', 'charge', :t, :t)"
+            ),
+            {"id": uuid.uuid4(), "o": org_id, "oid": renewal_id, "t": two_days_ago},
+        )
+        await s.execute(text("UPDATE billing_orders SET created_at=:t, updated_at=:t WHERE order_id=:oid"), {"t": two_days_ago, "oid": owned.order_id})
+        await s.commit()
+
+        toss.charge_mode = "ok"
+        toss.charge_calls.clear()
+        await sweep_dunning_retries(s, now=now)
+        assert toss.charge_calls == [renewal_id], "시도 주문을 dunning이 다시 청구했다"
+        # 갱신 재청구 성공이 구독을 active로 돌린다(옛 동작) — 그 뒤 상태가 기준.
+        sub_before = tuple(await _row(s, "SELECT tier, status FROM org_subscriptions WHERE org_id=:o", o=org_id))
+
+        month_ago = now - timedelta(days=30)
+        await s.execute(text("UPDATE billing_orders SET created_at=:t, updated_at=:t WHERE order_id=:oid"), {"t": month_ago, "oid": owned.order_id})
+        await s.commit()
+        await sweep_dunning_retries(s, now=now)
+        assert tuple(await _row(s, "SELECT tier, status FROM org_subscriptions WHERE org_id=:o", o=org_id)) == sub_before, "시도 주문 때문에 무료 강등"
+
+        await s.execute(text("UPDATE billing_orders SET status='pending', created_at=:t WHERE order_id=:oid"), {"t": now - timedelta(hours=1), "oid": owned.order_id})
+        await s.commit()
+        toss.lookup_calls.clear()
+        await sweep_stale_pending_orders(s, now=now)
+        assert owned.order_id not in toss.lookup_calls, "시도 주문을 stale 쓸기가 판정했다"
+
+
+@pytest.mark.anyio
+async def test_a_refund_driver_whose_lease_was_taken_over_does_not_write_its_result(Session, toss, alerts, monkeypatch):
+    """P2 — 환불 결과는 기한의 주인만 적는다: A가 호출 중 기한이 지나 B가 다시 집어 confirmed로 끝냈으면, 늦게 끝난 A의 «실패»는
+    버려진다. 뮤테이션: 최종 UPDATE의 `refund_lease_until == my_lease` 조건을 빼면 confirmed가 failed로 덮여 RED."""
+    from app.services import billing_payment_attempt as svc
+    from app.services.billing_refund import RefundError
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        attempt_id = uuid.uuid4()
+        _, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+    real = svc.run_pending_refund
+
+    async def _defer(*_a, **_k):
+        return "pending"
+
+    monkeypatch.setattr(svc, "run_pending_refund", _defer)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token)
+    monkeypatch.setattr(svc, "run_pending_refund", real)
+
+    a_inside, a_release = asyncio.Event(), asyncio.Event()
+    b_inside, b_release = asyncio.Event(), asyncio.Event()
+    real_refund_org = svc.refund_org
+    calls = {"n": 0}
+
+    async def _refund_org(session, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:  # A — 호출 안에서 멈췄다가(그새 기한이 지남) «확정 거절»로 끝남
+            a_inside.set()
+            await a_release.wait()
+            raise RefundError("pre-check failed late")
+        b_inside.set()  # B — 기한을 넘겨받아 호출 중 · A가 먼저 끝난 뒤 정상 환불로 끝남
+        await b_release.wait()
+        return await real_refund_org(session, **kw)
+
+    monkeypatch.setattr(svc, "refund_org", _refund_org)
+
+    async def _drive():
+        async with Session() as s:
+            return await svc.run_pending_refund(s, attempt_id)
+
+    task_a = asyncio.create_task(_drive())
+    await a_inside.wait()
+    async with Session() as s:
+        await _set(s, attempt_id, refund_lease_until=datetime.now(timezone.utc) - timedelta(seconds=1))  # A의 기한이 지났다
+    task_b = asyncio.create_task(_drive())
+    await b_inside.wait()
+    a_release.set()
+    await task_a  # A가 B보다 먼저 끝난다 — 주인이 아니니 «실패»를 적으면 안 된다
+    async with Session() as s:
+        assert (await svc.get_attempt(s, attempt_id)).refund_status == "pending"
+    b_release.set()
+    assert await task_b == "confirmed"
+    async with Session() as s:
+        assert (await svc.get_attempt(s, attempt_id)).refund_status == "confirmed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", ["reconcile", "recheck"])
+async def test_toss_done_without_a_local_order_is_voided_and_refunded(Session, toss, alerts, path):
+    """P2 — Toss는 DONE인데 우리 주문 기록이 없다: 돈이 나갔으니 되돌려 놓기만 하지 않는다 — Toss 값으로 주문을 적고 voided +
+    전액 환불(권리 0). 뮤테이션: `_record_done`이 없음을 알리지 않으면(예전처럼 False → 되돌려 놓기) 환불 0으로 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "network"
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        order_id = (await svc.get_attempt(s, attempt_id)).order_id
+        if path == "recheck":
+            saved = dict(toss.charged)
+            toss.charged.clear()
+            await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
+            assert (await svc.reconcile_attempt(s, attempt_id)).status == "failed"
+            toss.charged.update(saved)
+        await s.execute(text("DELETE FROM billing_orders WHERE order_id=:oid"), {"oid": order_id})
+        await s.commit()
+        if path == "reconcile":
+            await _expire_lease(s, attempt_id, charge_started_ago=timedelta(minutes=1))
+            await svc.reconcile_attempt(s, attempt_id)
+        else:
+            await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            await svc.recheck_ended_attempt(s, attempt_id)
+        done = await svc.get_attempt(s, attempt_id)
+        assert done.status == "voided" and "no local order" in done.reason
+        assert (done.refund_status, done.refund_target_order_id) == ("confirmed", order_id)
+        order = await _row(s, "SELECT status, payment_attempt_id, amount_minor FROM billing_orders WHERE order_id=:oid", oid=order_id)
+        assert (order.status, order.payment_attempt_id) == ("confirmed", attempt_id) and order.amount_minor > 0
+        assert (await _row(s, "SELECT status FROM org_subscriptions WHERE org_id=:o", o=org_id)).status != "active"
+    assert toss.cancel_keys == [f"attempt-void-refund-{attempt_id.hex}"]

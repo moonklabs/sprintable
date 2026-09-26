@@ -178,6 +178,7 @@ async def charge_org(
     entry_type: str = "charge",
     ledger_metadata: dict | None = None,
     send_deadline: datetime | None = None,
+    payment_attempt_id: uuid.UUID | None = None,
 ) -> BillingOrder:
     """org의 활성 빌링키로 결제를 승인한다. 호출자(story C3 스케줄러·#2506 체크아웃·#2505
     팩 구매)가 amount/currency/order_id를 이미 계산해 넘긴다 — 여기는 그 값을 안전하게
@@ -202,6 +203,8 @@ async def charge_org(
         # 찍는다. ON CONFLICT DO NOTHING이라 재시도(같은 order_id 재호출)는 이 값을
         # 안 건드림 — 최초 생성이 유일한 진실 시점.
         purpose=entry_type,
+        # story #4335 — 결제 시도가 만든 주문이면 주인 표지(옛 dunning · stale 쓸기가 건너뛴다).
+        payment_attempt_id=payment_attempt_id,
     ).on_conflict_do_nothing(index_elements=["order_id"])
     claim_result = await session.execute(claim_stmt)
     await session.commit()
