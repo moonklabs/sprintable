@@ -93,7 +93,7 @@ describe('ArtifactVersionRail — 작성자 동명이인([SID:4311 PR 3])', () =
 
 // [SID:4311 PR 3 · 유나 1440 실측] 판 줄 «이름 · 꼬리 · 요약» — 잘림 순서 요약 → 이름 · 꼬리는 안 잘림. 줄 전체 truncate 없음 · 요약은 큰 줄어듦 가중치.
 describe('ArtifactVersionRail — 판 줄 잘림 순서([SID:4311 PR 3])', () => {
-  it('긴 이름 + 꼬리 + 긴 요약: 줄은 flex(한 덩어리 truncate 아님) · 요약 min-w-0 truncate shrink-[999] · 이름만 truncate · 꼬리 shrink-0 온전', () => {
+  it('긴 이름 + 꼬리 + 긴 요약: 줄은 flex(한 덩어리 truncate 아님) · 요약 min-w-0 flex-1 truncate(바탕 0) · 이름만 truncate · 꼬리 shrink-0 온전', () => {
     const long = '아주긴이름의구성원님이름이더길어요';
     const members = { 'e75ca548-1': { id: 'e75ca548-1', name: long }, '2fd14616-2': { id: '2fd14616-2', name: long } };
     const v = MOCK_VERSIONS[0];
@@ -111,7 +111,10 @@ describe('ArtifactVersionRail — 판 줄 잘림 순서([SID:4311 PR 3])', () =>
     expect(line[2]).toMatch(/data-row-name-part="tail" class="shrink-0 whitespace-pre"> · e75ca548<\/span>/);
     const summary = /<span class="([^"]*)">\u00a0· 레이아웃/.exec(line[2]);
     expect(summary, '요약은 따로 잘리는 칸').not.toBeNull();
-    expect(summary![1].split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'shrink-[999]', 'truncate']));
+    expect(summary![1].split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'truncate']));
+    // 예전 shrink-[999](곁글 바탕 = 글자 폭)는 곁글이 보이는 동안에도 이름을 0.05~0.14px 줄여 말줄임이 글자 하나를 먹었다(유나 390).
+    expect(summary![1].split(' ').filter((c) => /^shrink-/.test(c))).toEqual([]);
+    expect(line[2]).toMatch(/data-row-name="" class="flex min-w-0 max-w-full items-baseline"/);
   });
 });
 

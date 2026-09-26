@@ -168,11 +168,16 @@ describe('TeamActivityView — 행위자 동명이인([SID:4311 PR 2])', () => {
     expect(rows).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나', koMessages.teamActivity.system]);
     const initials = [...container.querySelectorAll('li > span[aria-hidden]')].map((el) => el.textContent);
     expect(initials.slice(0, 2)).toEqual(['송', '송']);
-    // 잘림 순서(유나) — 동사 → 이름 · 꼬리는 안 잘림: 줄은 flex · 동사 칸 min-w-0 truncate shrink-[999] · 이름만 truncate · 꼬리 shrink-0.
+    // 잘림 순서(유나) — 동사 → 이름 · 꼬리는 안 잘림: 줄은 flex · 동사 칸 min-w-0 flex-1 truncate(바탕 0 — 이름이 자연 폭을 다 받음) · 이름만 truncate · 꼬리 shrink-0.
+    // 예전 shrink-[999]는 곁글 바탕이 글자 폭이라 곁글이 보이는 동안에도 이름이 0.05~0.14px 줄어 말줄임이 글자 하나를 먹었다(유나 390). 실제 폭은 PR 댓글 실브라우저 판.
     const line = container.querySelector('li p')!;
     expect(line.className.split(' ')).not.toContain('truncate');
     const verb = line.lastElementChild!;
-    expect(verb.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'shrink-[999]', 'truncate']));
+    expect(verb.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'truncate']));
+    expect(verb.className.split(' ').filter((c) => /^shrink-/.test(c))).toEqual([]);
+    // 이름 쪽(RowName)은 늘어나지도 · 줄어듦 가중치를 받지도 않는다 — 자연 폭(바탕 auto · grow 0).
+    const rowName = line.querySelector('[data-row-name]')!;
+    expect(rowName.className.split(' ').filter((c) => /^(flex-1|grow|flex-grow|shrink-)/.test(c))).toEqual([]);
     const tail = line.querySelector('[data-row-name-part="tail"]')!;
     expect(tail.textContent).toBe(' · e75ca548');
     expect(tail.closest('.truncate')).toBeNull();
