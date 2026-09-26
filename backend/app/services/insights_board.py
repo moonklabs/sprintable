@@ -699,6 +699,22 @@ async def _resolve_publication_work_item(
     return None
 
 
+async def caller_can_access_publication(
+    db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, user_id: uuid.UUID,
+) -> bool:
+    """story #4351 — 발행물(사이트 글 · 채널 발행)은 원 스토리의 프로젝트 소속. caller가 그 프로젝트에 접근할 수 있는가(발행물이 없으면
+    False — 호출부가 «없음»과 같은 응답으로 돌려 존재를 새지 않게)."""
+    from app.services.project_auth import has_project_access
+
+    resolved = await _resolve_publication_work_item(db, org_id=org_id, publication_id=publication_id)
+    if resolved is None:
+        return False
+    project_id = (await db.execute(
+        select(Story.project_id).where(Story.id == resolved[0], Story.org_id == org_id)
+    )).scalar_one_or_none()
+    return project_id is not None and await has_project_access(db, user_id, project_id, org_id)
+
+
 async def create_publication_follow_up(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, kind: str,
     title: str | None, note: str | None, requested_by_member_id: uuid.UUID, caller_user_id: uuid.UUID,

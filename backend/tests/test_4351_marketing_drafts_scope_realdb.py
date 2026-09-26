@@ -152,3 +152,83 @@ async def test_single_inaccessible_draft_is_404(path):
         assert "SECRET-B" not in resp.text
         own = await _get(Session, seeded, path.replace("_b}", "_a}"), seeded["member_user"])
         assert own.status_code == 200, own.text[:300]
+
+
+async def test_site_post_publication_of_inaccessible_draft_is_404():
+    """PO — 발행은 쓰기와 맞닿은 단건이라 테스트 하나: 접근 못 하는 프로젝트 초안의 발행 상태 = 404 · 자기 프로젝트 초안은 통과."""
+    async with _world() as (Session, seeded):
+        other = await _get(Session, seeded, "/api/v2/organizations/{org}/site-posts/drafts/{site_b}/publication", seeded["member_user"])
+        assert other.status_code == 404, other.text[:300]
+        own = await _get(Session, seeded, "/api/v2/organizations/{org}/site-posts/drafts/{site_a}/publication", seeded["member_user"])
+        assert own.status_code != 404, own.text[:300]
+
+
+async def test_reconcile_of_inaccessible_publication_writes_nothing(monkeypatch):
+    """story #4351(쓰기 IDOR · PO) — 접근 못 하는 프로젝트의 채널 발행물 대조는 «없는 발행물»과 같은 응답(409 NOT_FOUND) · 대조 행 0.
+    자기 프로젝트 발행물은 대조가 돈다(가짜 실측으로)."""
+    from sqlalchemy import func, select
+
+    import app.services.publication_reconciliation as recon_module
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+    from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
+
+    live = {"impressions": 1, "reach": 1, "views": 1, "engagements": 1, "clicks": 1, "spend": 0, "conversions": 0}
+
+    async def _fake_fetch(db, snapshot, **_kwargs):
+        return {"raw": live, "values": live}
+
+    monkeypatch.setattr(recon_module, "_fetch_for_snapshot", _fake_fetch)
+    async with _world() as (Session, seeded):
+        pubs = {}
+        async with Session() as s:
+            from app.models.channel_post_draft import ChannelPostDraft
+
+            for key in ("a", "b"):
+                draft = await s.get(ChannelPostDraft, uuid.UUID(seeded["channel"][key]))
+                gate = Gate(
+                    id=uuid.uuid4(), org_id=seeded["org"], work_item_id=draft.work_item_id, work_item_type="story",
+                    gate_type="external_publish", status="approved", neutral_facts={},
+                )
+                s.add(gate)
+                await s.flush()
+                pub = ChannelPublication(
+                    id=uuid.uuid4(), org_id=seeded["org"], gate_id=gate.id, version_id=uuid.uuid4(),
+                    connection_id=draft.connection_id, channel="threads", status="published", external_id=f"m-{key}",
+                )
+                s.add(pub)
+                pubs[key] = pub.id
+            await s.commit()
+
+        from httpx import ASGITransport, AsyncClient
+
+        from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+        from app.main import app
+
+        async def _db():
+            async with Session() as s:
+                yield s
+
+        async def _auth():
+            return AuthContext(
+                user_id=str(seeded["member_user"]), email="u@test",
+                claims={"app_metadata": {"org_id": str(seeded["org"]), "project_id": str(seeded["pa"])}},
+            )
+
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth
+        app.dependency_overrides[get_verified_org_id] = lambda: seeded["org"]
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                other = await c.post(f"/api/v2/organizations/{seeded['org']}/publications/{pubs['b']}/reconcile")
+                own = await c.post(f"/api/v2/organizations/{seeded['org']}/publications/{pubs['a']}/reconcile")
+        finally:
+            app.dependency_overrides.clear()
+        assert other.status_code == 409 and "INSIGHT_PUBLICATION_NOT_FOUND" in other.text, other.text[:300]
+        assert own.status_code == 201, own.text[:300]
+        async with Session() as s:
+            written = (await s.execute(
+                select(func.count()).select_from(ChannelPublicationReconciliation)
+                .where(ChannelPublicationReconciliation.publication_id == pubs["b"])
+            )).scalar_one()
+        assert written == 0, "접근 못 하는 프로젝트 발행물에 대조 행이 써졌다"
