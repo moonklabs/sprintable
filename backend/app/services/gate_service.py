@@ -333,6 +333,34 @@ _BATCH_PROJECT_MODELS: tuple[tuple[str, Any], ...] = (
 )
 
 
+def gate_in_inaccessible_project_clause(accessible_project_ids: Iterable[uuid.UUID]):
+    """story #4351 — «이 게이트가 caller가 접근 못 하는 프로젝트에 속한다»를 SQL 한 식으로(목록 · 인박스가 `~이 식`으로 거른다).
+
+    `resolve_gate_project_ids_batch`와 같은 규칙을 SQL로: 대상 work item의 프로젝트(과제는 소속 스토리 · 자기 참조 앵커는
+    neutral_facts.project_id)가 접근 가능 집합 **밖**이면 숨김. 어느 프로젝트로도 안 풀리는 게이트(모르는 종류 · 대상 행 없음 ·
+    project_id NULL인 org 수준 행)는 숨기지 않는다 — org 수준 게이트는 그대로 보인다(merge-gate 집계와 같은 규칙 · PO 2026-09-26).
+    `NOT (project_id IN (...))`은 project_id가 NULL이면 NULL(참 아님)이라 org 수준 행이 숨겨지지 않는다."""
+    acc = list(accessible_project_ids)
+    branches = [
+        and_(
+            Gate.work_item_type == wtype,
+            Gate.work_item_id.in_(select(model.id).where(~model.project_id.in_(acc))),
+        )
+        for wtype, model in _BATCH_PROJECT_MODELS
+    ]
+    branches.append(and_(
+        Gate.work_item_type == "task",
+        Gate.work_item_id.in_(select(Task.id).join(Story, Task.story_id == Story.id).where(~Story.project_id.in_(acc))),
+    ))
+    anchor_project = Gate.neutral_facts["project_id"].astext
+    branches.append(and_(
+        Gate.work_item_type.in_(("agent_decision", "support_escalation")),
+        anchor_project.isnot(None),
+        ~anchor_project.in_([str(p) for p in acc]),
+    ))
+    return or_(*branches)
+
+
 async def resolve_work_item_project_ids_batch(
     session: AsyncSession, org_id: uuid.UUID, items: Iterable[tuple[str, uuid.UUID]],
 ) -> dict[tuple[str, uuid.UUID], uuid.UUID | None]:
