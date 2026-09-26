@@ -30,7 +30,6 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     ("GoalUpdate", "status"): "422 — routers/goals.py가 현재 상태와 비교해 «/transition을 쓰라»로 거절",
     ("HypothesisCreate", "owner_member_id"): "뜻 있음 — None이면 휴먼 호출자가 주인 · 에이전트는 HUMAN_OWNER_REQUIRED(services/hypothesis.py)",
     ("SprintUpdate", "status"): "무시 — routers/sprints.py가 dump에서 빼고 `is not None`일 때만 전이",
-    ("TeamMemberUpdate", "role"): "뜻 있음 — clamp_project_role(None) → 'member'(services/project_auth.py · null이 강등이 되는 건 별건 보고)",
     ("ArtifactNodeIn", "id"): "뜻 있음 — routers/visual_artifacts.py가 `n.id or uuid4()`로 새 id",
 }
 

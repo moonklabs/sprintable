@@ -55,7 +55,8 @@ class OrgAgentCreate(BaseModel):
 
 class TeamMemberUpdate(RejectsExplicitNull):
     # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
-    NOT_NULL_FIELDS = frozenset({"is_active", "color", "can_manage_members"})
+    # story #4340 — role: null은 예전엔 clamp_project_role(None) → member로 조용한 강등(200). 이제 422 · 생략은 그대로.
+    NOT_NULL_FIELDS = frozenset({"is_active", "color", "can_manage_members", "role"})
 
     name: str | None = None
     role: str | None = None
