@@ -97,6 +97,14 @@ async def retry_billing_order(
             f"이미 처리됨 — 현재 상태: {order.status}(재시도 불필요)",
         )
 
+    if order.payment_attempt_id is not None:
+        # story #4335(까디르 P3 · «돈 기록 하나에 주인 하나») — 결제 시도가 주인인 주문은 시도 쓸기만 판정한다. 다시 청구가 필요하면
+        # 새 결제 시도로(같은 주문을 다른 길로 청구하면 시도 판정과 어긋난다).
+        raise AdminBillingError(
+            409, "ORDER_OWNED_BY_PAYMENT_ATTEMPT",
+            f"order {order_id} belongs to payment attempt {order.payment_attempt_id} — start a new attempt instead",
+        )
+
     status_before = order.status
     await charge_org(
         session, org_id=org_id, order_id=order.order_id,

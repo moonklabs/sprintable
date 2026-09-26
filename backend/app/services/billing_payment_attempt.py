@@ -682,7 +682,7 @@ async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> st
             result, detail = "pending", f"{type(exc).__name__}: {exc}"
 
     done = result != "pending"
-    await session.execute(
+    owned = await session.execute(
         update(BillingPaymentAttempt)
         # 까디르 P2 — 결과는 기한의 주인만 적는다(기한이 지나 다른 몰이꾼이 다시 집었으면 이 결과는 버린다 · 그쪽이 적는다).
         .where(
@@ -694,6 +694,10 @@ async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> st
             next_check_at=None if done else _next_check(_now(), finished_at),
         )
     )
+    # 까디르 P2(06:02Z) — 기한을 잃은 늦은 몰이꾼이면(시도 UPDATE 0행) 주문 쪽도 건드리지 않는다(새 주인이 확정한 값을 덮지 않게).
+    if owned.rowcount == 0:
+        await session.rollback()
+        return (await get_attempt(session, attempt_id)).refund_status
     if done and order is not None:
         await session.execute(update(BillingOrder).where(BillingOrder.id == order.id).values(refund_status=result))
     await session.commit()

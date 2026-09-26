@@ -1221,14 +1221,17 @@ async def test_sweep_skips_rows_not_yet_due_and_defers_when_the_tick_budget_runs
         await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
         await _set(s, attempt_id, lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
                    next_check_at=datetime.now(timezone.utc) + timedelta(minutes=5))
-        before = len(toss.lookup_calls)
+        # 같은 DB에 앞 테스트의 due 행이 남아 있을 수 있다 — 이 시도의 조회 여부만 본다.
+        order_id = (await svc.get_attempt(s, attempt_id)).order_id
+        toss.lookup_calls.clear()
         await svc.sweep_processing_attempts(s)
-        assert len(toss.lookup_calls) == before, "다음 조회 시각 전"
+        assert order_id not in toss.lookup_calls, "다음 조회 시각 전"
         await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        toss.lookup_calls.clear()
         deferred = await svc.sweep_processing_attempts(s, budget_seconds=svc.SWEEP_ITEM_WORST_SECONDS - 1)
-        assert deferred.get("deferred") == 1 and len(toss.lookup_calls) == before
-        done = await svc.sweep_processing_attempts(s)
-        assert done.get("succeeded") == 1
+        assert deferred.get("deferred", 0) >= 1 and toss.lookup_calls == []
+        await svc.sweep_processing_attempts(s)
+        assert (await svc.get_attempt(s, attempt_id)).status == "succeeded"
 
 
 
@@ -1335,13 +1338,19 @@ async def test_a_refund_driver_whose_lease_was_taken_over_does_not_write_its_res
     task_b = asyncio.create_task(_drive())
     await b_inside.wait()
     a_release.set()
-    await task_a  # A가 B보다 먼저 끝난다 — 주인이 아니니 «실패»를 적으면 안 된다
+    await task_a  # A가 B보다 먼저 끝난다 — 주인이 아니니 «실패»를 적으면 안 된다(시도 · 주문 둘 다)
     async with Session() as s:
-        assert (await svc.get_attempt(s, attempt_id)).refund_status == "pending"
+        attempt = await svc.get_attempt(s, attempt_id)
+        assert attempt.refund_status == "pending"
+        old = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=attempt.refund_target_order_id)
+        assert old.refund_status is None, "기한을 잃은 몰이꾼이 주문 쪽 환불 결과를 적었다"
     b_release.set()
     assert await task_b == "confirmed"
     async with Session() as s:
-        assert (await svc.get_attempt(s, attempt_id)).refund_status == "confirmed"
+        attempt = await svc.get_attempt(s, attempt_id)
+        assert attempt.refund_status == "confirmed"
+        old = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=attempt.refund_target_order_id)
+        assert old.refund_status == "confirmed"
 
 
 @pytest.mark.anyio
@@ -1377,3 +1386,25 @@ async def test_toss_done_without_a_local_order_is_voided_and_refunded(Session, t
         assert (order.status, order.payment_attempt_id) == ("confirmed", attempt_id) and order.amount_minor > 0
         assert (await _row(s, "SELECT status FROM org_subscriptions WHERE org_id=:o", o=org_id)).status != "active"
     assert toss.cancel_keys == [f"attempt-void-refund-{attempt_id.hex}"]
+
+
+
+@pytest.mark.anyio
+async def test_admin_retry_refuses_an_order_owned_by_a_payment_attempt(Session, toss):
+    """까디르 P3(06:02Z) — 관리자 재시도도 «주인 하나»를 지킨다: 결제 시도가 주인인 실패 주문은 409 `ORDER_OWNED_BY_PAYMENT_ATTEMPT`
+    · Toss 청구 0. 뮤테이션: 주인 확인을 빼면 `charge_org`가 다시 불려 청구 1로 RED."""
+    from app.services import billing_payment_attempt as svc
+    from app.services.admin_billing import AdminBillingError, retry_billing_order
+
+    toss.charge_mode = "decline"
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        order_id = (await svc.get_attempt(s, attempt_id)).order_id
+        assert (await _row(s, "SELECT status FROM billing_orders WHERE order_id=:oid", oid=order_id)).status == "failed"
+        toss.charge_mode = "ok"
+        toss.charge_calls.clear()
+        with pytest.raises(AdminBillingError) as exc_info:
+            await retry_billing_order(s, org_id=org_id, order_id=order_id, actor_email="ops@example.com")
+        assert (exc_info.value.status_code, exc_info.value.code) == (409, "ORDER_OWNED_BY_PAYMENT_ATTEMPT")
+    assert toss.charge_calls == []
