@@ -37,7 +37,7 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
-import { memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
+import { actorRowLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -1009,10 +1009,14 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     'in-review': t('workcellNextNeedInReview'),
     done: t('workcellNextNeedDone'),
   };
+  // [SID:4311 PR 2] 댓글 · 활동 줄의 작성자 — 목록마다 행위자 id 한 번 셈 · 같은 이름 둘이면 «· ID 앞 8자»(꼬리 규칙 한 곳).
+  const authorLabel = (id: string) => memberLookup(memberMap, id, tc, { loaded: memberNamesLoaded })?.label ?? '';
+  const commentAuthorLabels = actorRowLabels(comments.map((c) => ({ id: c.created_by, label: authorLabel(c.created_by) })));
+  const activityActorLabels = actorRowLabels(activities.map((a) => ({ id: a.created_by, label: authorLabel(a.created_by) })));
   const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
     // [SID:4286 · 까디르 P1] 작성자 id 통째를 이름 칸에 싣던 자리 — 이름 빔 = «이름 없는 구성원», 표에 없음 = «알 수 없는 구성원».
     // [SID:4300] 조직 표를 받는 동안은 빈 글자.
-    author: memberLookup(memberMap, c.created_by, tc, { loaded: memberNamesLoaded })?.label ?? '',
+    author: commentAuthorLabels.get(c.created_by) ?? authorLabel(c.created_by),
     body: c.content,
   }));
 
@@ -2348,7 +2352,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
-                            <span>{memberLookup(memberMap, comment.created_by, tc, { loaded: memberNamesLoaded })?.label ?? ''}</span>
+                            <span>{commentAuthorLabels.get(comment.created_by) ?? authorLabel(comment.created_by)}</span>
                             <span>·</span>
                             <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
@@ -2375,7 +2379,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-2">
                       {activities.map((activity) => {
-                        const actorName = memberLookup(memberMap, activity.created_by, tc, { loaded: memberNamesLoaded })?.label ?? '';
+                        const actorName = activityActorLabels.get(activity.created_by) ?? authorLabel(activity.created_by);
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (

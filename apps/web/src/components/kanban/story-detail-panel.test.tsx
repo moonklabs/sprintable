@@ -1496,3 +1496,55 @@ describe('StoryDetailPanel — 이름표 조직 범위 보충([SID:4300])', () =
     expect(container.textContent).not.toContain('알 수 없는 구성원');
   });
 });
+
+// [SID:4311 PR 2] 댓글 · 활동 줄의 작성자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(목록마다 작성자 id 한 번 셈 · 같은 사람 여러 줄은 겹침 아님).
+describe('StoryDetailPanel — 댓글 · 활동 작성자 동명이인([SID:4311 PR 2])', () => {
+  const SONG1 = 'e75ca548-1';
+  const SONG2 = '2fd14616-2';
+  const ANNA = 'm-anna';
+  const memberMap = {
+    [SONG1]: { id: SONG1, name: '송윤재', type: 'human' },
+    [SONG2]: { id: SONG2, name: '송윤재', type: 'human' },
+    [ANNA]: { id: ANNA, name: '안나', type: 'human' },
+  };
+  const comment = (id: string, by: string) => ({ id, story_id: 's1', content: `댓글 ${id}`, created_by: by, created_at: '2026-09-25T00:00:00Z' });
+  const activity = (id: string, by: string) => ({ id, activity_type: 'status_changed', old_value: 'todo', new_value: 'in-progress', created_by: by, created_at: '2026-09-25T00:00:00Z' });
+
+  beforeEach(() => {
+    resetOrgMembersCacheForTests();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        return { ok: true, json: async () => ({ data: [comment('c1', SONG1), comment('c2', SONG2), comment('c3', ANNA), comment('c4', ANNA)], meta: {} }) };
+      }
+      if (typeof url === 'string' && url.includes('/activities?limit=20')) {
+        return { ok: true, json: async () => ({ data: [activity('a1', SONG1), activity('a2', SONG2), activity('a3', ANNA), activity('a4', SONG1)], meta: {} }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+  });
+
+  async function openTab(match: (text: string) => boolean) {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory({})} tasks={[]} onClose={() => {}} memberMap={memberMap} memberMapLoaded />));
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((el) => match(el.textContent ?? '')) as HTMLElement;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.click(); });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+  }
+
+  it('댓글 줄: «송윤재» 둘 = 두 줄에 id 앞 8자 · 안나 두 줄 = 꼬리 없음', async () => {
+    await openTab((text) => text.startsWith('댓글'));
+    const authors = [...container.querySelectorAll('li div.mt-2 > span:first-child')].map((el) => el.textContent);
+    expect(authors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
+    // 워크셀 대화(같은 댓글 목록)도 같은 표.
+    const workcell = [...container.querySelectorAll('span.whitespace-nowrap.font-semibold.text-proof-ink')].map((el) => el.textContent);
+    expect(workcell).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
+  });
+
+  it('활동 줄: «송윤재» 둘 = id 앞 8자(같은 사람 두 줄은 같은 꼬리) · 안나 = 꼬리 없음', async () => {
+    await openTab((text) => text === koMessages.board.activityTab);
+    const actors = [...container.querySelectorAll('li div.mt-1 > span:first-child')].map((el) => el.textContent);
+    expect(actors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '송윤재 · e75ca548']);
+  });
+});

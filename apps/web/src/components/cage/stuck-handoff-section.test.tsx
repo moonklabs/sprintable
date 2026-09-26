@@ -194,3 +194,27 @@ describe('StuckHandoffSection — 승인자 이름 조직 범위 보충([SID:430
     expect(container.textContent).toContain('알 수 없는 구성원');
   });
 });
+
+// [SID:4311 PR 2] 승인자 줄 — 같은 이름 서로 다른 승인자 둘이면 «· ID 앞 8자»(GateLineContext가 줄 주인이라 거기서 · 꼬리 규칙 한 곳).
+describe('StuckHandoffSection — 승인자 동명이인([SID:4311 PR 2])', () => {
+  it('«송윤재» 둘 = 두 줄에 id 앞 8자 · 안나 = 꼬리 없음', async () => {
+    const approver = (member_id: string) => ({ member_id, member_type: 'human', kind: 'approver', blocking: false, status: 'pending', role_key: null, resolved_at: null });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/workflow-line/status')) {
+        return new Response(JSON.stringify({ active: { ...stuckStep(), approvers: [approver('e75ca548-1'), approver('2fd14616-2'), approver('om-a')] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    const memberMap = {
+      'e75ca548-1': { id: 'e75ca548-1', name: '송윤재', type: 'human' },
+      '2fd14616-2': { id: '2fd14616-2', name: '송윤재', type: 'human' },
+      'om-a': { id: 'om-a', name: '안나', type: 'human' },
+    };
+    await act(async () => {
+      root.render(withIntl(<StuckHandoffSection storyId="story-1" memberMap={memberMap} />));
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const names = [...container.querySelectorAll('span.truncate')].map((el) => el.textContent);
+    expect(names).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나']);
+  });
+});

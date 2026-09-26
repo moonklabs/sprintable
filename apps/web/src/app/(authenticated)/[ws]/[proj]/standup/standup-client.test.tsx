@@ -126,6 +126,26 @@ describe('StandupClient — 막힘 모음 작성자 이름([SID:4300])', () => {
     expect(text).not.toContain(koMessages.standup.unknown);
   });
 
+  it('[SID:4311 PR 2] 같은 이름 작성자 둘(«송윤재» · 서로 다른 구성원)은 «· ID 앞 8자»로 두 줄이 갈린다 · 다른 이름은 꼬리 없음', async () => {
+    stubFetch({
+      members: [
+        { id: 'e75ca548-1', name: '송윤재', type: 'human' },
+        { id: '2fd14616-2', name: '송윤재', type: 'human' },
+        { id: 'm-anna', name: '안나', type: 'human' },
+      ],
+      entries: [
+        { id: 'e1', author_id: 'e75ca548-1', date: '2026-09-25', done: '', plan: '', blockers: '빌드 막힘', plan_story_ids: [] },
+        { id: 'e2', author_id: '2fd14616-2', date: '2026-09-25', done: '', plan: '', blockers: '권한 막힘', plan_story_ids: [] },
+        { id: 'e3', author_id: 'm-anna', date: '2026-09-25', done: '', plan: '', blockers: '리뷰 대기', plan_story_ids: [] },
+      ],
+    });
+    await mount();
+    const lines = [...container.querySelectorAll('p')].map((p) => p.textContent ?? '');
+    expect(lines).toContain('송윤재 · e75ca548 · 빌드 막힘');
+    expect(lines).toContain('송윤재 · 2fd14616 · 권한 막힘');
+    expect(lines).toContain('안나 · 리뷰 대기');
+  });
+
   it('오늘 명단(활성만)에 없는 작성자(비활성 에이전트) → 비활성까지 싣는 조직 원천으로 이름', async () => {
     const { ORG_NAMES_URL } = await import('@/hooks/use-member-name-fallback');
     useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgId: 'org-1' });

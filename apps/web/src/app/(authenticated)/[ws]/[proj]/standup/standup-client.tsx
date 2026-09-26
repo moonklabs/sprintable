@@ -25,7 +25,7 @@ import {
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
 import { fetchWithAuth } from '@/lib/db/client';
-import { memberLookup } from '@/lib/member-display';
+import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
@@ -200,8 +200,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   const blockerNames = useMemberNameFallback(orgId, memberNameById, blockerAuthorIds, !loading);
 
   // A2(9f27af8f): 블로커 롤업 — 기존 entries에서 파생, 신규 fetch 0.
-  const blockerEntries = useMemo(() => (
-    entries
+  const blockerEntries = useMemo(() => {
+    const rows = entries
       .filter((entry) => Boolean(entry.blockers?.trim()))
       .map((entry) => ({
         authorId: entry.author_id,
@@ -209,8 +209,11 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         // 표에 없음 = «알 수 없는 구성원». 조직 보충을 받는 동안은 빈 글자.
         name: memberLookup(blockerNames.memberMap, entry.author_id, tc, { loaded: blockerNames.loaded })?.label ?? '',
         blockers: entry.blockers as string,
-      }))
-  ), [entries, blockerNames.memberMap, blockerNames.loaded, tc]);
+      }));
+    // [SID:4311 PR 2] 같은 이름 작성자 둘이 한 모음에 서면 갈리게(행위자 라벨 · 꼬리 규칙 한 곳).
+    const labels = actorRowLabels(rows.map((row) => ({ id: row.authorId, label: row.name })));
+    return rows.map((row) => ({ ...row, name: labels.get(row.authorId) ?? row.name }));
+  }, [entries, blockerNames.memberMap, blockerNames.loaded, tc]);
 
   const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
   const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);

@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { ArrowRight, CheckCircle, Circle, Clock, EyeOff, XCircle } from 'lucide-react';
 import type { WorkflowLineStepRun } from '@/components/kanban/types';
+import { actorRowLabels } from '@/lib/member-display';
 
 /**
  * E-DG S11 ② — GateInbox 라인 컨텍스트 미니블록(display-only).
@@ -64,6 +65,8 @@ interface GateLineContextProps {
 export function GateLineContext({ step, resolveName, className }: GateLineContextProps) {
   const t = useTranslations('cage');
   const sla = step.sla_due_at ? formatSlaCompact(step.sla_due_at) : null;
+  // [SID:4311 PR 2] 승인자 줄 — 같은 이름 둘이면 «· ID 앞 8자»(꼬리 규칙 한 곳 · 줄 주인이 이 목록이라 여기서).
+  const approverLabels = actorRowLabels(step.approvers.map((a) => ({ id: a.member_id, label: resolveName(a.member_id) })));
 
   return (
     <div className={`space-y-1.5 rounded-lg bg-muted/45 px-2.5 py-2 ${className ?? ''}`}>
@@ -103,7 +106,7 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
               key={a.member_id}
               status={a.status}
               blocking={a.blocking}
-              name={resolveName(a.member_id)}
+              name={approverLabels.get(a.member_id) ?? resolveName(a.member_id)}
             />
           ))}
         </div>

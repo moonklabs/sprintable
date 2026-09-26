@@ -151,6 +151,19 @@ export function disambiguateFallbackLabels(
   return tailSharedFallbacks(items);
 }
 
+/** [SID:4311 PR 2] 이벤트 · 배지 줄(활동 피드 · 댓글 · 이력 · 막힘 모음 · 승인자 줄 · 회고 담당 칩)의 행위자 라벨 — 꼬리 규칙은 tailSharedFallbacks 한 곳.
+ * 행이 아니라 **행위자 id마다 한 번** 센다(같은 사람이 여러 줄이어도 겹침 아님 · 유나). 행위자 없는 행(시스템 · id null)과 아직 라벨이 없는
+ * 행(표를 받는 중 · 빈 글자)은 뺀다 — 호출부는 그 행에 원래 글자를 그대로 쓴다. 겹침 판정은 **지금 불러온 줄들** 안에서만(페이지 밖 동명이인은 모름). */
+export function actorRowLabels(
+  actors: Iterable<{ id: string | null | undefined; label: string | null | undefined }>,
+): Map<string, string> {
+  const seen = new Map<string, string>();
+  for (const a of actors) {
+    if (a.id && a.label && !seen.has(a.id)) seen.set(a.id, a.label);
+  }
+  return tailSharedFallbacks([...seen].map(([id, label]) => ({ id, label })));
+}
+
 /** [SID:4286 · 유나 규칙 06:48Z] 타입 표식을 둘 수 없는 선택 목록(네이티브 `<option>` · 드롭다운 선택지)의 행 라벨 — 이름 빔이면 타입대로
  * (에이전트 «이름 없는 에이전트» · 사람 «이름 없는 구성원») · 같은 라벨이 서로 다른 행 둘 이상이면 그 행에만 «· ID 앞 8자»
  * (꼬리 규칙은 tailSharedFallbacks 한 곳). 표식이 하나라도 있는 목록(원 아이콘 · 칩 · `<optgroup>`)은 memberRowLabels 기본(«이름 없는 구성원»)을 쓴다. */

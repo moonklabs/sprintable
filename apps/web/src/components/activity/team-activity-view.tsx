@@ -12,7 +12,7 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notification-display';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
-import { memberLookup, memberOptionLabels } from '@/lib/member-display';
+import { actorRowLabels, memberLookup, memberOptionLabels } from '@/lib/member-display';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
@@ -124,12 +124,15 @@ function RowSkeleton() {
 function FeedRow({
   item,
   actorName,
+  actorLabel,
   verbCopy,
   locale,
   deliveredLabel,
 }: {
   item: ActivityStreamItem;
   actorName: string;
+  /** [SID:4311 PR 2] 읽는 글자(같은 이름 둘이면 «· ID 앞 8자» 꼬리) — 머리글자(actorName)는 그대로. */
+  actorLabel: string;
   verbCopy: string;
   locale: string;
   deliveredLabel: string | null;
@@ -145,7 +148,7 @@ function FeedRow({
       <ActorAvatar name={actorName} isSystem={item.actor_id === null} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-foreground">
-          <span className="font-medium">{actorName}</span>
+          <span className="font-medium">{actorLabel}</span>
           <span className="text-muted-foreground"> · {verbCopy}</span>
         </p>
         {item.object_type ? (
@@ -243,6 +246,11 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       return memberLookup(nameById, id, tc, { loaded: namesLoaded })?.label ?? '';
     },
     [nameById, namesLoaded, t, tc],
+  );
+  // [SID:4311 PR 2 · 유나] 피드 행의 행위자 — actor_id마다 한 번 · 시스템 행 제외 · 불러온 줄들 안에서만 겹침 판정.
+  const actorLabels = useMemo(
+    () => actorRowLabels((items ?? []).map((it) => ({ id: it.actor_id, label: it.actor_id ? memberName(it.actor_id) : null }))),
+    [items, memberName],
   );
 
   // story #4297 — 최신부터 한 쪽(order=desc) · 이전 쪽은 before_seq 커서. 예전엔 오름차순 LIMIT를 받아 뒤집어, 창 안 활동이 200건을 넘으면
@@ -445,6 +453,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                     key={item.activity_id}
                     item={item}
                     actorName={memberName(item.actor_id)}
+                    actorLabel={(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? memberName(item.actor_id)}
                     verbCopy={getEventTypeCopy(tInbox, item.verb)}
                     locale={locale}
                     deliveredLabel={delivered > 0 ? t('deliveredCount', { count: delivered }) : null}

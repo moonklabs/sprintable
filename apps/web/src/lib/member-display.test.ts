@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberNameById, memberOptionLabels, memberOrAgentLabel, memberRowLabels, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
+import { actorRowLabels, disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberNameById, memberOptionLabels, memberOrAgentLabel, memberRowLabels, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
   const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원', memberUnknown: '알 수 없는 구성원', agentUnnamed: '이름 없는 에이전트' };
@@ -270,5 +270,35 @@ describe('story #4311 — 보이는 라벨이 같은 행(동명이인)도 갈린
   it('같은 id가 두 번 들어와도(중복 행) 겹침이 아니다 — 서로 다른 구성원일 때만', () => {
     const m = memberRowLabels([A, { ...A }], tc, () => '');
     expect(m.get(A.id)).toBe('송윤재');
+  });
+});
+
+// [SID:4311 PR 2] 이벤트 · 배지 줄의 행위자 라벨 — 행이 아니라 행위자 id마다 한 번 · 행위자 없는 행 · 빈 라벨은 뺀다.
+describe('actorRowLabels([SID:4311 PR 2])', () => {
+  it('같은 이름 서로 다른 행위자 둘 → 둘 다 «이름 · ID 앞 8자»', () => {
+    const m = actorRowLabels([{ id: 'e75ca548-1', label: '송윤재' }, { id: '2fd14616-2', label: '송윤재' }]);
+    expect(m.get('e75ca548-1')).toBe('송윤재 · e75ca548');
+    expect(m.get('2fd14616-2')).toBe('송윤재 · 2fd14616');
+  });
+
+  it('같은 사람이 여러 줄이어도 겹침 아님(행위자 id마다 한 번) · 이름이 다르면 꼬리 없음', () => {
+    const m = actorRowLabels([{ id: 'm-anna', label: '안나' }, { id: 'm-anna', label: '안나' }, { id: 'm-bi', label: '비' }]);
+    expect(m.get('m-anna')).toBe('안나');
+    expect(m.get('m-bi')).toBe('비');
+  });
+
+  it('행위자 없는 행(시스템 · id null)과 빈 라벨(표를 받는 중)은 뺀다 — 남은 행끼리만 판정', () => {
+    const m = actorRowLabels([
+      { id: null, label: '시스템' },
+      { id: 'm-loading', label: '' },
+      { id: 'e75ca548-1', label: '송윤재' },
+    ]);
+    expect([...m.keys()]).toEqual(['e75ca548-1']);
+    expect(m.get('e75ca548-1')).toBe('송윤재');
+  });
+
+  it('같은 id의 라벨은 처음 본 것을 쓴다(뒤 줄이 덮지 않음)', () => {
+    const m = actorRowLabels([{ id: 'x-1', label: '처음' }, { id: 'x-1', label: '나중' }]);
+    expect(m.get('x-1')).toBe('처음');
   });
 });
