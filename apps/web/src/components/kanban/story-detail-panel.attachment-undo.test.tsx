@@ -53,10 +53,11 @@ function ToastRenderer() {
   return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
 }
 
-function Harness({ initial, show = true }: { initial: Att[]; show?: boolean }) {
+function Harness({ initial, show = true, noParentUpdate = false }: { initial: Att[]; show?: boolean; noParentUpdate?: boolean }) {
   const [story, setStory] = useState(() => makeStory(initial));
   useEffect(() => { exposeSetStory(setStory); }, []);
-  return show ? <StoryDetailPanel story={story} tasks={[]} onClose={() => {}} onStoryUpdate={(s) => { updates.push(s); setStory(s); }} /> : null;
+  // noParentUpdate: onStoryUpdate를 안 넘기는 호출부(선택 prop) — 부모 목록이 서버 목록을 안 따라온다.
+  return show ? <StoryDetailPanel story={story} tasks={[]} onClose={() => {}} onStoryUpdate={noParentUpdate ? undefined : (s) => { updates.push(s); setStory(s); }} /> : null;
 }
 
 function render(node: React.ReactNode) {
@@ -261,6 +262,22 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
     await settle();
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    await act(async () => { undoBtn()!.click(); });
+    await settle();
+    expect(patches).toHaveLength(2);
+    expect(container.textContent).toContain('첨부를 되돌리지 못했어요. 다시 시도해 주세요.');
+    expect(shown(A1)).toBe(false);
+  });
+
+  // 러너 d U8 — 부모가 새 목록을 안 내려주면(onStoryUpdate 없음) 서버에서 지워진 항목이 부모 목록엔 남아 있다.
+  // 그때 되넣기가 실패했는데 숨김을 풀면 «지워진 첨부가 다시 보이는» 거짓이다 — 숨긴 채 둔다.
+  it('부모가 목록을 안 따라와도 — flush 뒤 되넣기가 실패하면 숨긴 채(지워진 첨부가 다시 보이는 거짓 0)', async () => {
+    failPatch = (n) => n === 2;
+    await render(<Harness initial={[A1, A2]} noParentUpdate />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await hideTab();
+    expect(patches).toHaveLength(1);
     await act(async () => { undoBtn()!.click(); });
     await settle();
     expect(patches).toHaveLength(2);
