@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+from app.core.request_db_timing import engine_pool_kwargs, instrument_if_enabled
 
 
 def db_application_name(suffix: str = "") -> str:
@@ -54,10 +55,15 @@ def _build_engine_kwargs() -> dict:
         "pool_pre_ping": True,
         "echo": settings.debug,
         "connect_args": connect_args,
+        # story #4332 — 풀 체크아웃 대기를 요청 범위로 잰다(동작은 기본 AsyncAdaptedQueuePool과 같다). 까디르 4697 ①: 플래그가
+        # 켜진 경우에만(꺼져 있으면 기본 풀 · 비용 0).
+        **engine_pool_kwargs(),
     }
 
 
 engine = create_async_engine(settings.database_url, **_build_engine_kwargs())
+# story #4332 — 요청마다 SQL 수 · 합계 ms(app/core/request_db_timing.py) · 플래그가 켜진 경우에만(까디르 4697 ①).
+instrument_if_enabled(engine.sync_engine)
 
 async_session_factory = async_sessionmaker(
     engine,
@@ -73,6 +79,7 @@ read_engine = (
     if settings.database_url_read
     else engine
 )
+instrument_if_enabled(read_engine.sync_engine)
 read_session_factory = async_sessionmaker(
     read_engine,
     expire_on_commit=False,

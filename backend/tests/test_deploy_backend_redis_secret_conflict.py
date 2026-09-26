@@ -180,6 +180,12 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   (`app/main.py` 조건부 `include_router`) ③c/④/⑤ 라이브 QA가 통째로 못 돈다.
   `WEBHOOK_TEST_STUB_SECRET`은 여기 안 실음(yaml 평문 secret 금지 관례 — 스텁 파일
   기본값으로 동작, 런북 2bbafa37에 그 경로 명시).
+- **Apple OAuth 식별자(story #4332 압축 때 cloudbuild.yaml에서 옮김)**: `ENV_VARS`에 싣는 Apple OAuth 값은 식별자(비밀
+  아님)뿐이고, 개인키는 `SECRETS_FLAG`(--update-secrets)로만 싣는다.
+- **story #4332(PO 판정 2026-09-25)**: `DB_TIMING_LOG_ENABLED=true`는 **dev에서만**(리터럴) — 요청마다 «풀 체크아웃
+  대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(`app/core/request_db_timing.py`). 폴링 경로(designated-pending-count 등)
+  때문에 양이 커 다른 환경은 미설정 = 기본 끔. 응답 헤더엔 싣지 않는다(존재 여부 누출 · PR 4697 CI). 배포 설정도
+  코드라 PR로(PO) — 수동 env 주입 아님.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
@@ -369,7 +375,7 @@ def _apply_cloudbuild_escaping(script: str) -> str:
 
 
 def _run_env_vars_assembly(
-    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = ""
+    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
 ) -> str:
     """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
     script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
@@ -378,7 +384,7 @@ def _run_env_vars_assembly(
     # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
     marker = "gcloud run deploy sprintable-backend"
     idx = script.index(marker)
-    assembly_only = script[:idx] + '\necho "RESULT_ENV_VARS=${ENV_VARS}"\n'
+    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
 
     env = {
         **os.environ,
@@ -797,7 +803,29 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story 5b27b32f — GCS_CHANNEL_MEDIA_BUCKET 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "SANDBOX_CHANNEL_ENABLED=true,"
+        # story #4332 — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml 삽입 순서 그대로 · dev만).
+        "DB_TIMING_LOG_ENABLED=true,"
         # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
     )
+
+
+def test_deploy_backend_removes_db_timing_flag_outside_dev():
+    """까디르 4697 ④ — `--update-env-vars`는 추가형이라 dev 아닌 서비스에 손으로 넣은 DB_TIMING_LOG_ENABLED가 남을 수 있다 → 명시 제거.
+    dev는 켜고(제거 목록에 없음) · prod는 제거 목록에 있다 · 옛 REDIS_CONSUME_ENABLED 제거는 두 쪽 다 그대로. 같은 키를 켜면서 지우지 않는다."""
+    dev_remove = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="REMOVE_ENV_VARS").split(",")
+    prod_remove = _run_env_vars_assembly("prod", "", var="REMOVE_ENV_VARS").split(",")
+    assert dev_remove == ["REDIS_CONSUME_ENABLED"]
+    assert prod_remove == ["REDIS_CONSUME_ENABLED", "DB_TIMING_LOG_ENABLED"]
+    dev_env = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "DB_TIMING_LOG_ENABLED=true" in dev_env.split(",")
+    assert "DB_TIMING_LOG_ENABLED" not in _run_env_vars_assembly("prod", "")
+
+
+def test_deploy_backend_gcloud_uses_assembled_remove_list():
+    """제거 목록은 위에서 조립한 변수 하나로 넘긴다(고정 문자열로 되돌리면 dev 아닌 쪽 제거가 사라진다)."""
+    script = _extract_deploy_backend_script()
+    call = script[script.index("gcloud run deploy sprintable-backend"):]
+    call = call[: call.index("--quiet")]
+    assert "--remove-env-vars=$${REMOVE_ENV_VARS}" in call, call

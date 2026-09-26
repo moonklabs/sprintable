@@ -803,13 +803,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        # ⚠️--update-env-vars(additive) 필수·--set-env-vars(전체wipe) 금지. --allow-unauthenticated
-        # 필수(frontend가 NEXT_PUBLIC_FASTAPI_URL로 직접호출·미지정 시 기존IAM preserve로 403 위험,
-        # 2026-06-21 prod 사건). story #2005/#2442/#2078/#2123/#2135/#3118 — 타임아웃·DB풀(rollout
-        # 산식: 2×maxScale×(pool+overflow+1)≤db max_conn)·PG_LISTEN·EVENT_BROKER_REDIS_*·
-        # FANOUT_WAKE·Apple OAuth 식별자(비밀 아님, 개인키는 아래 SECRETS_FLAG로). 전체 배경(사건
-        # 경위·근거)은 story #3124(2026-08-26 외부화)로 test_deploy_backend_redis_secret_
-        # conflict.py 모듈 docstring 「deploy-backend 인라인 주석 아카이브」 절이 SSOT.
+        # ⚠️--update-env-vars(additive) 필수·--set-env-vars 금지 · --allow-unauthenticated 필수. 사유 · 이력(env 키별)은
+        # test_deploy_backend_redis_secret_conflict.py 「deploy-backend 인라인 주석 아카이브」(story #3124 · #4332 압축).
         ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},BACKEND_URL=${_BACKEND_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED},APPLE_SERVICES_ID=${_APPLE_SERVICES_ID},APPLE_KEY_ID=${_APPLE_KEY_ID},APPLE_TEAM_ID=${_APPLE_TEAM_ID},SUPPORT_CONTACT_SURFACE_WIDGET=${_SUPPORT_CONTACT_SURFACE_WIDGET},SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=${_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID},SUPPORT_ESCALATION_APPROVER_MEMBER_ID=${_SUPPORT_ESCALATION_APPROVER_MEMBER_ID},SUPPORT_ESCALATION_TARGET_ORG_SLUG=${_SUPPORT_ESCALATION_TARGET_ORG_SLUG},SUPPORT_ESCALATION_TARGET_PROJECT_SLUG=${_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG},PUBLIC_SITE_BASE_URL=${_PUBLIC_SITE_BASE_URL}"
         # story #2141/#2423/#3418 — REDIS_URL/RATE_LIMIT_BACKEND(dev만, 사유는 docstring 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
@@ -832,6 +827,13 @@ steps:
         # story 5b27b32f — SANDBOX_CHANNEL_ENABLED(dev만).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
+        fi
+        # story #4332 — DB_TIMING_LOG_ENABLED(dev만, 사유는 docstring 아카이브). dev 아니면 명시 제거(추가형 함정).
+        REMOVE_ENV_VARS="REDIS_CONSUME_ENABLED"
+        if [ "${_DEPLOY_ENV}" == "dev" ]; then
+          ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true"
+        else
+          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"
         fi
         # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만). 서사는
         # test_deploy_backend_redis_secret_conflict.py 아카이브(#3124/#3433 관례).
@@ -866,7 +868,7 @@ steps:
           --allow-unauthenticated \
           --update-env-vars="$${ENV_VARS}" \
           $${SECRETS_FLAG} \
-          --remove-env-vars=REDIS_CONSUME_ENABLED \
+          --remove-env-vars=$${REMOVE_ENV_VARS} \
           --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).

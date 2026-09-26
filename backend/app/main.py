@@ -436,6 +436,13 @@ from app.services.tool_call_recording import ToolCallRecordingMiddleware  # noqa
 
 app.add_middleware(ToolCallRecordingMiddleware)
 
+# story #4332 — 요청마다 풀 체크아웃 대기 · SQL 수 · SQL 합계 ms(로그 한 줄만 · 응답 헤더 0). 맨 바깥에 둬 모든 미들웨어의 SQL까지 센다.
+# 까디르 4697 ① — DB_TIMING_LOG_ENABLED가 켜진 경우에만 단다(꺼져 있으면 요청마다 드는 비용 0 · 엔진 쪽도 같은 판단 · database.py).
+from app.core.request_db_timing import RequestDbTimingMiddleware, timing_enabled  # noqa: E402
+
+if timing_enabled():
+    app.add_middleware(RequestDbTimingMiddleware)
+
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(activity_logs.router)

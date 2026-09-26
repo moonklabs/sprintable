@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     db_pgbouncer: bool = False
     db_pgbouncer_pool_size: int = 25   # ⭐앱 동시성 수용(크게). PgBouncer가 Cloud SQL 커넥션을 묶어 안전.
     db_pgbouncer_max_overflow: int = 10
+    # story #4332 — 요청마다 «풀 체크아웃 대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(app/core/request_db_timing.py). 폴링 경로 때문에
+    # 양이 커서 환경 값으로만 켠다(dev 켬 · PO). 응답 헤더엔 어떤 경우에도 싣지 않는다(존재 여부 누출 · test_2261_c3).
+    db_timing_log_enabled: bool = False
 
     # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_engine(app/core/database.py)
     # 전용 풀 크기 — 위 db_pool_size 산식 갱신 주석 참조(신규 budget line, prod 재검산 필요).
