@@ -78,6 +78,9 @@ class PaymentAttemptResponse(BaseModel):
     reauth_required: bool = False
     # voided(청구됐지만 권리를 못 줘 전액 환불) · change-tier 부분 환불의 상태 — pending / confirmed / failed를 구별해 내린다.
     refund_status: str | None = None
+    # story #4341 — 이 시도에 대한 운영 알림이 운영 대화에 **실제로 전달된** 가장 이른 시각(ISO). 없으면 None — 화면의 «담당자에게
+    # 알렸어요» · 환불 실패 연락 줄은 이 값이 있을 때만 켠다. 재시도가 늦게 전달해도 이 값이 따라온다(operator_alerts에서 읽음).
+    operator_notified_at: str | None = None
     subscription: CheckoutResponse | None = None
 
 
@@ -90,12 +93,29 @@ async def _attempt_response(session: AsyncSession, attempt: BillingPaymentAttemp
             )
         ).scalar_one_or_none()
         subscription = _to_response(sub) if sub is not None else None
+    notified_at = await _operator_notified_at(session, attempt.id)
     return PaymentAttemptResponse(
         attempt_id=attempt.id, kind=attempt.kind, status=attempt.status, tier=attempt.tier,
         billing_cycle=attempt.billing_cycle,
         declined_reason=attempt.reason if attempt.status == "declined" else None,
-        reauth_required=attempt.reauth_required, refund_status=attempt.refund_status, subscription=subscription,
+        reauth_required=attempt.reauth_required, refund_status=attempt.refund_status,
+        operator_notified_at=notified_at.isoformat() if notified_at else None, subscription=subscription,
     )
+
+
+async def _operator_notified_at(session: AsyncSession, attempt_id: uuid.UUID):
+    """story #4341 — 사실 칸 한 곳: 운영 알림 표의 전달 시각에서 읽는다(시도 행에 따로 적으면 재시도 전달 때 두 값이 어긋난다)."""
+    from sqlalchemy import func
+
+    from app.models.operator_alert import OperatorAlert
+    from app.services.billing_payment_attempt import BILLING_ALERT_EVENTS, billing_alert_dedupe_key
+
+    return (await session.execute(
+        select(func.min(OperatorAlert.delivered_at)).where(
+            OperatorAlert.dedupe_key.in_([billing_alert_dedupe_key(e, attempt_id) for e in BILLING_ALERT_EVENTS]),
+            OperatorAlert.status == "delivered",
+        )
+    )).scalar_one_or_none()
 
 
 async def _require_admin(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID) -> None:
