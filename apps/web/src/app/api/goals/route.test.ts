@@ -7,7 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), createGoalRepository: vi.fn(), list: vi.fn(), proxyToFastapi: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+// story #4346 — 목록 GET은 getOrgProjectAuthContext(`/me` 0)로 옮겼다 — 같은 스텁을 물려 이 파일의 인증 가정을 그대로 둔다.
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createGoalRepository: h.createGoalRepository }));
 vi.mock('@/services/goal', async (importActual) => ({
   ...(await importActual<typeof import('@/services/goal')>()),
