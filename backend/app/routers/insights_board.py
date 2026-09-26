@@ -357,14 +357,13 @@ async def reconcile_publication_endpoint(
     # 똑같이(409 INSIGHT_PUBLICATION_NOT_FOUND) — 다르게 돌려주면 그 발행물이 있다는 게 샌다.
     from app.services.insights_board import caller_can_access_publication
 
-    if not await caller_can_access_publication(
-        db, org_id=org_id, publication_id=publication_id, user_id=uuid.UUID(auth.user_id),
-    ):
-        raise HTTPException(status_code=409, detail={
-            "code": "INSIGHT_PUBLICATION_NOT_FOUND", "message": f"channel_publication을 찾을 수 없습니다: {publication_id}",
-        })
+    from app.services.publication_reconciliation import publication_not_found
 
     try:
+        if not await caller_can_access_publication(
+            db, org_id=org_id, publication_id=publication_id, user_id=uuid.UUID(auth.user_id),
+        ):
+            raise publication_not_found(publication_id)
         record = await reconcile_publication(
             db, org_id=org_id, publication_id=publication_id, requested_by_member_id=resolved.id,
         )
