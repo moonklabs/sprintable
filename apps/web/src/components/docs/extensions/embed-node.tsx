@@ -166,7 +166,12 @@ export const EmbedBlock = Node.create({
 
   addAttributes() {
     return {
-      url: { default: '' },
+      // story #4339 — 저장 형식은 `data-url`(아래 renderHTML · 렌더러 RENDERER_CONTENT_ATTRIBUTES)인데 여기 parseHTML이 없어 Tiptap 기본값이
+      // `url` 속성만 읽었다 → HTML 문서를 편집기로 열면 링크 카드가 빈 블록 · 그대로 저장하면 URL이 사라짐. `url`은 옛 모양 대비.
+      url: {
+        default: '',
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-url') ?? el.getAttribute('url') ?? '',
+      },
     };
   },
 

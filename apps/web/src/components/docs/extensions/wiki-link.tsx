@@ -99,9 +99,11 @@ export const WikiLinkNode = Node.create<WikiLinkOptions>({
 
   addAttributes() {
     return {
-      docId: { default: null },
-      title: { default: '' },
-      slug: { default: null },
+      // story #4339 — renderHTML이 쓰는 `data-*`를 그대로 읽는다(예전엔 parseHTML이 없어 HTML 문서를 편집기로 열면 위키 링크가 빈 칩 ·
+      // 저장하면 대상 · 제목이 사라졌다). 제목은 속성이 없으면 글(렌더러와 같은 규칙).
+      docId: { default: null, parseHTML: (el: HTMLElement) => el.getAttribute('data-doc-id') || null },
+      title: { default: '', parseHTML: (el: HTMLElement) => el.getAttribute('data-title') || el.textContent || '' },
+      slug: { default: null, parseHTML: (el: HTMLElement) => el.getAttribute('data-slug') || null },
     };
   },
 

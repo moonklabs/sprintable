@@ -80,7 +80,8 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         </button>
       </div>
 
-      {/* Grid wrapper — NodeViewContent renders columnBlock children directly */}
+      {/* Grid wrapper — NodeViewContent는 두 겹(`.contents` · Tiptap의 `[data-node-view-content-react]`)을 끼운다. 두 겹 모두 display: contents라
+          columnBlock이 격자 칸이 된다(뒤 겹은 globals.css · story #4339 — 예전 주석 «children directly»는 틀렸고 두 열이 첫 칸에 쌓였다). */}
       <div className={gridClass}>
         <NodeViewContent as="div" className="contents" />
       </div>

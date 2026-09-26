@@ -74,7 +74,15 @@ export const ToggleSummary = Node.create({
   content: 'inline*',
 
   parseHTML() {
-    return [{ tag: 'div[data-type="toggleSummary"]' }];
+    // story #4339 — 제목은 인라인만 담는다. 저장 HTML이 제목을 `<p>`로 감싸면(MCP · 다른 편집기) 문단이 제목에 못 들어가 본문으로 밀려났다
+    // (제목 빈 칸 · 본문 첫 줄이 제목 글) — 문단 하나로 감싼 모양이면 그 문단의 글을 제목으로 읽는다.
+    return [{
+      tag: 'div[data-type="toggleSummary"]',
+      contentElement: (el: HTMLElement) => {
+        const only = el.children.length === 1 ? el.children[0] : null;
+        return only && only.tagName === 'P' ? (only as HTMLElement) : el;
+      },
+    }];
   },
 
   renderHTML({ HTMLAttributes }) {
