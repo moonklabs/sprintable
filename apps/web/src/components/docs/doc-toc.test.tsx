@@ -73,3 +73,49 @@ describe('DocToc — 좁은 화면 뷰포트 안(story #4342)', () => {
     expect(left).toBe(1100);
   });
 });
+
+// 유나 4714 CHANGES(09:43Z) — 실 셸에선 목차가 **문서 에디터 카드 안**이다: 문서 본문 `overflow-hidden px-4`(docs/[slug]/page.tsx:427) →
+// 에디터 카드 `overflow-hidden rounded-xl border`(doc-editor.tsx:326 · 16px 안쪽 · 테두리 1px). 뷰포트 기준 8px 여백이면 카드 가장자리에서
+// 왼쪽 테두리 · 모서리가 잘렸다 → 보이는 상자 = 뷰포트 ∩ 카드 안쪽 상자, 그 안에서 8px. 조상 클립을 빼면(뷰포트만) RED.
+describe('DocToc — 에디터 카드 안(실 셸 부모 사슬 · 유나 4714 CHANGES)', () => {
+  beforeEach(() => {
+    (HTMLElement.prototype.getBoundingClientRect as unknown as ReturnType<typeof vi.fn>).mockImplementation(function (this: HTMLElement) {
+      const r = this.getAttribute('data-dropdown-panel') === 'doc-toc'
+        ? { left: panelLeft, width: PANEL_W }
+        : { left: Number(this.dataset.l ?? 0), width: Number(this.dataset.w ?? 0) };
+      return { left: r.left, right: r.left + r.width, width: r.width, top: 0, bottom: 0, height: 0, x: r.left, y: 0, toJSON() {} } as DOMRect;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientLeft', 'get').mockImplementation(function (this: HTMLElement) { return Number(this.dataset.cl ?? 0); });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return Number(this.dataset.cw ?? 0); });
+  });
+
+  async function openInCard(viewport: number, rawLeft: number) {
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(viewport);
+    panelLeft = rawLeft;
+    const cardW = viewport - 32; // px-4 양쪽
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <div style={{ overflow: 'hidden' }} data-l="0" data-w={viewport} data-cl="0" data-cw={viewport}>
+            <div style={{ overflow: 'hidden' }} data-l="16" data-w={cardW} data-cl="1" data-cw={cardW - 2}>
+              <DocToc headings={HEADINGS.map((h) => ({ ...h }))} onHeadingClick={() => {}} />
+            </div>
+          </div>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
+    const panel = container.querySelector('[data-dropdown-panel="doc-toc"]') as HTMLElement;
+    const shift = Number(/translateX\((-?[\d.]+)px\)/.exec(panel.style.transform)?.[1] ?? 0);
+    return { cardInnerLeft: 17, cardInnerRight: 17 + cardW - 2, left: rawLeft + shift, right: rawLeft + shift + PANEL_W };
+  }
+
+  it.each([
+    [390, -37],
+    [360, -67],
+  ] as const)('%ipx: 목록 경계가 [카드 안쪽 + 8, 카드 안쪽 − 8] 안 — 왼쪽 테두리 · 모서리 안 잘림', async (viewport, rawLeft) => {
+    const { cardInnerLeft, cardInnerRight, left, right } = await openInCard(viewport, rawLeft);
+    expect(left).toBe(cardInnerLeft + VIEWPORT_GUTTER_PX);
+    expect(right).toBeLessThanOrEqual(cardInnerRight - VIEWPORT_GUTTER_PX);
+  });
+});
