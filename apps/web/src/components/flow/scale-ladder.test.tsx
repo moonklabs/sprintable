@@ -310,6 +310,11 @@ describe('ScaleLadder', () => {
         expect(pop.className).not.toMatch(/(^|\s)(absolute|top-full)(\s|$)/);
         // 트리거 버튼 aria-describedby가 포털된 팝오버를 가리킨다(id 연결은 DOM 위치와 무관).
         expect(trigger!.getAttribute('aria-describedby')).toBe(pop.id);
+        // 열린 뒤 다시 그려져도(부모 props · 상태) body 직속 그대로 — 트리거 안으로 옮겨 가면 띠가 다시 자른다(뮤테이션 A1).
+        act(() => { root.render(wrap(<ScaleLadder compact={compact} activeLevel="city" />)); });
+        const again = document.body.querySelector<HTMLElement>(`[data-dropdown-panel="${panel}"]`)!;
+        expect(again.parentElement).toBe(document.body);
+        expect(container.contains(again)).toBe(false);
       } finally {
         spy.mockRestore();
       }
