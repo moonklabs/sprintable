@@ -1010,8 +1010,8 @@ _CATALOG: dict[str, dict[str, str]] = {
         "en": "Up to {max} continuation segments on this channel.",
     },
     "channel_posts.thread_segment_too_long": {
-        "ko": "{segment}번째 글이 {max}자 한도를 넘어요({current}자).",
-        "en": "Segment {segment} is over the {max}-character limit ({current}).",
+        "ko": "{segment}번째 이어쓰기가 {max}자 한도를 넘어요(지금 {current}자).",
+        "en": "Continuation {segment} is over the {max}-character limit (now {current}).",
     },
     # story #3821(customer-zero 실측, 페드루 PO 확定 2026-09-13, PR B) —
     # approval_delivery.py::dispatch_approval_request_cards의 스레드 답글 문구.

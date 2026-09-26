@@ -147,5 +147,8 @@ def test_thread_codes_are_not_sent_and_the_sentences_carry_the_numbers():
         assert pc.classify_failure_kind(preflight_error_facts(cases[key])["code"]) == "not_sent", key
     over = preflight_error_body(preflight_error_facts(cases["ChannelThreadSegmentLimitExceededError"]), "ko")
     assert over["message"] == "이 채널은 이어쓰기를 최대 10건까지 지원해요.", over
-    too_long = preflight_error_body(preflight_error_facts(cases["ChannelThreadSegmentTooLongError"]), "en")
-    assert "2" in too_long["message"] and "280" in too_long["message"] and "300" in too_long["message"], too_long
+    # 유나 판정(PO 10:06Z) — 편집 화면이 그 칸을 «이어쓰기»로 부른다(번호 규칙 같음).
+    too_long = preflight_error_body(preflight_error_facts(cases["ChannelThreadSegmentTooLongError"]), "ko")
+    assert too_long["message"] == "2번째 이어쓰기가 280자 한도를 넘어요(지금 300자).", too_long
+    too_long_en = preflight_error_body(preflight_error_facts(cases["ChannelThreadSegmentTooLongError"]), "en")
+    assert too_long_en["message"] == "Continuation 2 is over the 280-character limit (now 300).", too_long_en
