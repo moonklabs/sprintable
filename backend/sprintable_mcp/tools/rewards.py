@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
+
 from mcp.types import TextContent
 
 from ..api_client import client
@@ -25,13 +27,17 @@ class GiveRewardInput(SprintableInput):
 
 class GetLeaderboardInput(SprintableInput):
     period: Literal["all", "daily", "weekly", "monthly"] | None = None
-    limit: int | None = None
+    # 백엔드 `GET /api/v2/rewards/leaderboard`와 같은 범위(1~100) — 밖이면 도구 호출 전에 거절(story #4329 까디르).
+    limit: int | None = Field(default=None, ge=1, le=100)
 
 
 async def get_wallet(args: GetWalletInput) -> list[TextContent]:
-    """팀원 보상 잔액 조회."""
+    """팀원 보상 잔액 조회.
+
+    story #4329 — 예전엔 `GET /api/v2/rewards`(적립 목록)에 `balance=true`를 붙여 보냈는데 그 라우트는 `balance`를 모른다 → 잔액이 아니라
+    적립 목록이 왔다. 잔액은 `GET /api/v2/rewards/balance`(본인 또는 조직 관리자만)."""
     try:
-        return ok(await client.get("/api/v2/rewards", params={"project_id": client.require_project_id(), "member_id": args.member_id, "balance": "true"}))
+        return ok(await client.get("/api/v2/rewards/balance", params={"project_id": client.require_project_id(), "member_id": args.member_id}))
     except Exception as exc:
         return err(exc)
 
@@ -56,13 +62,16 @@ async def give_reward(args: GiveRewardInput) -> list[TextContent]:
 
 
 async def get_leaderboard_v2(args: GetLeaderboardInput) -> list[TextContent]:
-    """보상 리더보드 조회."""
+    """보상 리더보드 조회.
+
+    story #4329 — 예전엔 `GET /api/v2/rewards`(적립 목록)에 `type=leaderboard`를 붙여 보냈는데 그 라우트는 `type` · `period` · `limit`를
+    모른다 → 순위가 아니라 적립 목록이 왔다. 순위는 `GET /api/v2/rewards/leaderboard`(period · limit를 받는다)."""
     try:
-        params: dict = {"project_id": client.require_project_id(), "type": "leaderboard"}
+        params: dict = {"project_id": client.require_project_id()}
         if args.period:
             params["period"] = args.period
         if args.limit is not None:
             params["limit"] = str(args.limit)
-        return ok(await client.get("/api/v2/rewards", params=params))
+        return ok(await client.get("/api/v2/rewards/leaderboard", params=params))
     except Exception as exc:
         return err(exc)

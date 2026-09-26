@@ -148,9 +148,8 @@ class UpdateStoryStatusInput(SprintableInput):
 async def list_stories(args: ListStoriesInput) -> list[TextContent]:
     """프로젝트 스토리 목록 조회."""
     try:
+        # story #4329 — `org_id`는 싣지 않는다: 라우트가 받지 않고(조직은 인증 키에서 정한다) 조용히 버려졌다.
         params: dict = {"project_id": client.require_project_id()}
-        if client.org_id:
-            params["org_id"] = client.org_id
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
         if args.epic_id:

@@ -34,6 +34,7 @@ from .api_client import (
 )
 from .config import settings
 from .datetime_params import offset_required_note
+from .removed_args import removed_arg_hints
 from .response import ok
 from .schemas import SprintableInput
 from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
@@ -423,6 +424,8 @@ def _lock_down_extra_args(tool: _FastMCPTool) -> None:
             if unknown:
                 raise ValueError(
                     f"{tool_name}: unexpected argument(s) {unknown} — accepted arguments: {allowed}"
+                    # story #4329 — 뺀 인자면 이유와 대안까지(에이전트가 오류만 보고 스스로 고치게).
+                    + removed_arg_hints(tool_name, unknown)
                 )
         return data
 
@@ -1011,7 +1014,7 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] 레트로 세션 생성.",
      CreateRetroSessionInput, create_retro_session),
     ("sprintable_vote_retro_item",
-     "[일감] 레트로 아이템 투표.",
+     "[일감] 레트로 아이템 투표 — 투표자는 호출자 자신(서버가 인증에서 정한다 · 대리 투표 없음).",
      VoteRetroItemInput, vote_retro_item),
     ("sprintable_add_retro_action",
      "[일감] 레트로 액션 아이템 추가.",
@@ -1027,13 +1030,13 @@ _TOOL_DEFS: list[tuple] = [
      ExportRetroInput, export_retro),
     # Rewards (3)
     ("sprintable_get_wallet",
-     "[조직] 팀원 보상 잔액 조회.",
+     "[조직] 팀원 보상 잔액 조회 — member_id의 이 프로젝트 잔액(balance). 본인 또는 조직 관리자만.",
      GetWalletInput, get_wallet),
     ("sprintable_give_reward",
      "[조직] 팀원 보상/패널티 지급.",
      GiveRewardInput, give_reward),
     ("sprintable_get_leaderboard_v2",
-     "[조직] 보상 리더보드 조회.",
+     "[조직] 보상 리더보드 조회 — 이 프로젝트 순위. period(all · daily · weekly · monthly, 기본 all) · limit(1~100, 기본 50).",
      GetLeaderboardInput, get_leaderboard_v2),
     # Notifications (3)
     ("sprintable_check_notifications",
