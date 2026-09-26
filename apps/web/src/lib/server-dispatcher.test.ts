@@ -177,6 +177,24 @@ describe('협상 판(proto) — 계측 spans에 h2/h1', () => {
   });
 });
 
+// story #4320이 직접 fetch 43곳을 lib/backend-fetch로 모았다 — 그 함수도 전역 fetch라 이 풀을 타야 한다(안 타면 로그인 · 인증 ·
+// 첨부 서명 등 그 경로는 풀 밖). 백엔드 테스트 서버는 h2 전용 · 자체 서명이라, 이 풀이 아닌 디스패처로 가면 판이 '2.0'이 아니거나 연결 자체가 실패한다.
+describe('lib/backend-fetch(직접 fetch 공용 함수)도 이 풀을 탄다', () => {
+  it('따뜻한 풀에 backendFetch 동시 16건(원 요청 신호 · 시간 제한을 실어도) = 새 연결 0 · h2', async () => {
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = backend.url;
+    const { backendFetch } = await import('./backend-fetch');
+    swapDispatcher(testAgent());
+    await burst(backend, 4);
+    const before = backend.conns();
+    const request = new Request('https://app.test/api/x');
+    // 호출부 34곳의 FASTAPI_URL과 같은 모양(같은 환경 변수 · 같은 기본값) — fastapiBaseUrl()과 origin이 같다.
+    const base = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+    const versions = await Promise.all(Array.from({ length: 16 }, () =>
+      backendFetch(`${base}/x`, { request, timeoutMs: 5_000 }).then((r) => r.json() as Promise<{ v: string }>).then((j) => j.v)));
+    expect({ newConns: backend.conns() - before, versions: [...new Set(versions)] }).toEqual({ newConns: 0, versions: ['2.0'] });
+  });
+});
+
 // 운영 설치엔 연결 상한이 없어 풀 줄이 안 생기지만, 줄이 생기면(상한 · 앞으로의 설정) undici가 줄 선 요청을 남의 연결 콜백 문맥에서
 // 만든다 — 그래도 계측 범위가 맞는지를 테스트용 상한(backendConnections)으로 줄을 일부러 만들어 잰다.
 const QUEUE_CAP = 4;
