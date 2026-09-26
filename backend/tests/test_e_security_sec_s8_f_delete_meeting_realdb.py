@@ -44,7 +44,6 @@ async def _session_factory():
 
 
 async def _seed(session):
-    from sqlalchemy import text
     from app.models.member import Member
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
@@ -59,18 +58,8 @@ async def _seed(session):
     session.add(project_a)
     await session.commit()
 
-    # meetings.meeting_type은 실 PG ENUM 컬럼이라 ORM insert(VARCHAR 바인딩)가 캐스트 실패 —
-    # raw SQL로 명시 캐스트해 우회(delete_meeting 인가 실증이 목적이라 meeting 생성 경로 자체는
-    # 무관).
-    meeting_id = uuid.uuid4()
-    await session.execute(
-        text(
-            "INSERT INTO meetings (id, project_id, title, meeting_type, participants, decisions, action_items) "
-            "VALUES (:id, :pid, :title, 'general'::meeting_type, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)"
-        ),
-        {"id": meeting_id, "pid": project_a.id, "title": "Org A Meeting"},
-    )
-    await session.commit()
+    # story #4337 — 예전엔 «meeting_type이 PG ENUM이라 ORM insert가 캐스트 실패»를 raw SQL 캐스트로 비켜 갔다 — 그 실패가 곧 API 미팅
+    # 생성 전면 500이었는데 이 표본은 실패할 수 없었다. 이제 미팅은 실제 API(POST /api/v2/meetings)로 만든다(_seed_with_api_meeting).
 
     agent_b = Member(id=uuid.uuid4(), org_id=org_b.id, type="agent", name="Org B Agent", is_active=True)
     session.add(agent_b)
@@ -86,9 +75,25 @@ async def _seed(session):
 
     return {
         "org_a_id": org_a.id, "org_b_id": org_b.id, "project_a_id": project_a.id,
-        "meeting_id": meeting_id, "agent_b_id": agent_b.id,
+        "agent_b_id": agent_b.id,
         "human_user_id": human_user_id, "human_om_a_id": human_om_a.id,
     }
+
+
+async def _seed_with_api_meeting(app, Session):
+    """시드 + 같은 org 휴먼 A가 실제 API로 미팅을 만든다(생성 경로가 깨지면 여기서 RED)."""
+    async with Session() as s:
+        seeded = await _seed(s)
+    await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"], seeded["project_a_id"], is_agent=False)
+    client = _client_for(app)
+    try:
+        resp = await client.post("/api/v2/meetings", json={"project_id": str(seeded["project_a_id"]), "title": "Org A Meeting"})
+        assert resp.status_code == 201, resp.text
+        seeded["meeting_id"] = uuid.UUID(resp.json()["id"])
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+    return seeded
 
 
 def _client_for(app):
@@ -126,8 +131,7 @@ async def test_cross_org_agent_delete_meeting_blocked():
 
     engine, Session = await _session_factory()
     try:
-        async with Session() as s:
-            seeded = await _seed(s)
+        seeded = await _seed_with_api_meeting(app, Session)
 
         # Org B agent가 자기 org_id는 Org B로 인증하되, project_id는 Org A project를 지정
         # (cross-org 공격 시나리오 — JWT app_metadata.project_id를 임의로 가리킴).
@@ -160,8 +164,7 @@ async def test_same_org_human_delete_meeting_succeeds_and_audited():
 
     engine, Session = await _session_factory()
     try:
-        async with Session() as s:
-            seeded = await _seed(s)
+        seeded = await _seed_with_api_meeting(app, Session)
 
         await _setup_app(
             app, Session, seeded["human_user_id"], seeded["org_a_id"], seeded["project_a_id"], is_agent=False,
@@ -199,8 +202,8 @@ async def test_same_org_agent_delete_meeting_forbidden():
 
     engine, Session = await _session_factory()
     try:
+        seeded = await _seed_with_api_meeting(app, Session)
         async with Session() as s:
-            seeded = await _seed(s)
             from app.models.member import Member
             from app.models.project_access import ProjectAccess
             agent_a = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="Org A Agent", is_active=True)

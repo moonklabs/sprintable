@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, computed_field, field_validator, mod
 
 from app.core.datetime_query import OffsetDatetime
 from app.schemas.story import _METRIC_DIRECTIONS, _validate_metric_definition
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 # §2.5 상태 7종 (모델 HYPOTHESIS_STATUSES와 동기)
 HYPOTHESIS_STATUSES = (
@@ -67,8 +68,11 @@ class HypothesisGuidedCreate(BaseModel):
         return v
 
 
-class HypothesisUpdate(BaseModel):
+class HypothesisUpdate(RejectsExplicitNull):
     """§3.5 allowlist — status/outcome_result 직접 수정 금지(전이 endpoint 전용)."""
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"statement", "metric_definition", "measure_after", "owner_member_id", "human_accounting"})
+
     statement: str | None = None
     metric_definition: dict[str, Any] | None = None
     measure_after: OffsetDatetime | None = None

@@ -4,14 +4,20 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from app.core.datetime_query import OffsetDatetime
+from app.models.meeting import MEETING_TYPES
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 # story #4329 — DB enum `meeting_type`과 같은 값 넷. 그 밖의 값은 DB 오류(500)가 아니라 요청 검증(422)으로 거절한다.
-MeetingType = Literal["standup", "retro", "general", "review"]
+# story #4337 — 값은 모델의 MEETING_TYPES 한 곳에서(여기서 다시 적지 않는다).
+MeetingType = Literal[MEETING_TYPES]  # type: ignore[valid-type]
 
-MEETING_TYPES = ("standup", "retro", "general", "review")
+__all__ = ["MEETING_TYPES", "MeetingType", "MeetingCreate", "MeetingUpdate", "MeetingResponse"]
 
 
-class MeetingCreate(BaseModel):
+class MeetingCreate(RejectsExplicitNull):
+    # story #4337 — date는 생략하면 서버 기본값(now()) · 명시 null은 422(DB 칸 NOT NULL).
+    NOT_NULL_FIELDS = frozenset({"date"})
+
     project_id: uuid.UUID
     title: str
     meeting_type: MeetingType = "general"
@@ -25,7 +31,10 @@ class MeetingCreate(BaseModel):
     created_by: uuid.UUID | None = None
 
 
-class MeetingUpdate(BaseModel):
+class MeetingUpdate(RejectsExplicitNull):
+    # story #4337 — 생략 = 그대로 · 명시 null은 422(모두 DB 칸 NOT NULL — 예전엔 update().values(x=None)로 500).
+    NOT_NULL_FIELDS = frozenset({"title", "meeting_type", "date", "participants", "decisions", "action_items"})
+
     title: str | None = None
     meeting_type: MeetingType | None = None
     date: OffsetDatetime | None = None

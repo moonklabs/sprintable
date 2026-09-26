@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from app.core.datetime_query import OffsetDatetime
 from app.schemas.attachment import validate_attachment_url
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 _METRIC_SOURCES = frozenset({"internal_ops", "ga4", "manual"})
 _METRIC_DIRECTIONS = frozenset({"up", "down"})
@@ -147,7 +148,10 @@ class StoryCreate(BaseModel):
         return _limit_story_attachments(v)
 
 
-class StoryUpdate(BaseModel):
+class StoryUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"title", "priority", "is_excluded"})
+
     title: str | None = None
     epic_id: uuid.UUID | None = None
     sprint_id: uuid.UUID | None = None

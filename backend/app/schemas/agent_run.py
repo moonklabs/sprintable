@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from app.core.datetime_query import OffsetDatetime
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 
 class CreateAgentRun(BaseModel):
@@ -46,7 +47,10 @@ class CreateAgentRun(BaseModel):
     finished_at: OffsetDatetime | None = None
 
 
-class UpdateAgentRun(BaseModel):
+class UpdateAgentRun(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"started_at"})
+
     status: str
     result_summary: str | None = None
     # story #3707 — CreateAgentRun과 동형 갭(위 코멘트 참조).

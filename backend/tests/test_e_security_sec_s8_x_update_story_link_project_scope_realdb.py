@@ -47,7 +47,6 @@ async def _session_factory():
 async def _seed(session):
     """org(project_a, project_b) + story_a(project_a) + epic_a/sprint_a/meeting_a(project_a) +
     epic_b/sprint_b/meeting_b(project_b) + human_a(project_a에만 명시 grant)."""
-    from sqlalchemy import text
     from app.models.organization import Organization
     from app.models.pm import Goal, Sprint, Story
     from app.models.project import OrgMember, Project
@@ -76,14 +75,11 @@ async def _seed(session):
 
     meeting_a_id = uuid.uuid4()
     meeting_b_id = uuid.uuid4()
+    # story #4337 — raw SQL(`'general'::meeting_type` 캐스트)로 비켜 가면 모델 ↔ DB 타입 불일치(생성 전면 500)를 못 잡는 표본이었다 — ORM으로 만든다(repo.create와 같은 매핑).
+    from app.models.meeting import Meeting
     for mid, pid, title in ((meeting_a_id, project_a.id, "Meeting A"), (meeting_b_id, project_b.id, "Meeting B")):
-        await session.execute(
-            text(
-                "INSERT INTO meetings (id, project_id, title, meeting_type, participants, decisions, action_items) "
-                "VALUES (:id, :pid, :title, 'general'::meeting_type, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)"
-            ),
-            {"id": mid, "pid": pid, "title": title},
-        )
+        session.add(Meeting(id=mid, project_id=pid, title=title))
+    await session.flush()
     await session.commit()
 
     human_user_id = uuid.uuid4()

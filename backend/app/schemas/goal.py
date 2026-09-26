@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 from app.core.datetime_query import OffsetDatetime
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 # 계층 리네이밍 B1(story 1925): 구 epic.py — 클래스/필드명만 rename, DB 컬럼(stories.epic_id 등)은
 # B4 후속(스코프 밖). 구 이름(GoalXxx의 별칭)은 REST/MCP 레이어(routers/goals.py·sprintable_mcp)에서
@@ -42,7 +43,10 @@ class GoalCreate(BaseModel):
     measure_after: OffsetDatetime | None = None
 
 
-class GoalUpdate(BaseModel):
+class GoalUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"priority", "title"})
+
     title: str | None = None
     status: str | None = None
     priority: str | None = None

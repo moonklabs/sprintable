@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field
+from app.schemas.not_null_fields import RejectsExplicitNull
 
 _ONLINE_THRESHOLD = timedelta(minutes=5)
 _IDLE_THRESHOLD = timedelta(minutes=30)
@@ -52,7 +53,10 @@ class OrgAgentCreate(BaseModel):
     defer_key_issuance: bool = False
 
 
-class TeamMemberUpdate(BaseModel):
+class TeamMemberUpdate(RejectsExplicitNull):
+    # story #4337 — DB 칸이 NOT NULL인 필드: 생략 = 그대로 · 명시 null은 422(예전엔 저장에서 무결성 오류 500).
+    NOT_NULL_FIELDS = frozenset({"is_active", "color", "can_manage_members"})
+
     name: str | None = None
     role: str | None = None
     avatar_url: str | None = None
