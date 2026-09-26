@@ -67,11 +67,11 @@ function platformSettingsResponse(overrides: Partial<{ billing_price_public: boo
 let attemptResponses: Array<unknown> = [];
 const attemptFetchUrls: string[] = [];
 
-function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean }> = {}) {
+function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null }> = {}) {
   return {
     attempt_id: 'att-1', kind: overrides.kind ?? 'checkout', status: overrides.status ?? 'processing', tier: overrides.tier ?? 'team',
     billing_cycle: 'monthly', declined_reason: overrides.declined_reason ?? null, reauth_required: overrides.reauth_required ?? false,
-    subscription: null,
+    refund_status: overrides.refund_status ?? null, subscription: null,
   };
 }
 
@@ -296,15 +296,34 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     expect(alertEl?.querySelector('.break-keep')).not.toBeNull();
   });
 
-  it('결제 요청 자체가 확실히 거절(HTTP 400) → 경고색 · 오류 문장 + «청구된 금액은 없어요»(시도가 안 만들어짐 = 청구 0 · 유나)', async () => {
+  it('⭐결과를 모르는 응답(unreached) → «확인 중» · 안심 줄 없음(PO «결과 모름 = 비종결» · 유나)', async () => {
     searchParams = new URLSearchParams(RETURN);
-    completeCheckoutMock.mockResolvedValue({ kind: 'rejected', status: 400 });
+    completeCheckoutMock.mockResolvedValue({ kind: 'unreached' });
     await mount(async () => statusResponse());
-    const alertEl = container.querySelector('[data-payment-attempt-state="rejected"]');
-    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutErrorBanner);
-    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
-    expect(alertEl?.className).toContain('warning-tint');
-    expect(alertEl?.className).not.toContain('destructive-tint');
+    const alertEl = container.querySelector('[data-payment-attempt-state="checking"]');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptChecking);
+    expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+  });
+
+  it.each([
+    ['confirmed', 'paymentAttemptRefundDone', 'warning-tint'],
+    ['failed', 'paymentAttemptRefundFailed', 'destructive-tint'],
+    ['pending', 'paymentAttemptRefundPending', 'warning-tint'],
+    [null, 'paymentAttemptRefundPending', 'warning-tint'],
+  ] as const)('⭐voided + refund_status=%s → 취소 문장 + %s · %s · 안심 줄 · 버튼 없음(유나)', async (refund, key, tint) => {
+    searchParams = new URLSearchParams(RETURN);
+    completeCheckoutMock.mockResolvedValue({ kind: 'ok', attempt: attempt({ status: 'voided', refund_status: refund }) });
+    await mount(async () => statusResponse());
+    const alertEl = container.querySelector('[data-payment-attempt-state="voided"]');
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans.paymentAttemptVoided);
+    expect(alertEl?.textContent).toContain(koMessages.pricingPlans[key]);
+    for (const other of ['paymentAttemptRefundDone', 'paymentAttemptRefundFailed', 'paymentAttemptRefundPending'] as const) {
+      if (other !== key) expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans[other]);
+    }
+    expect(alertEl?.className).toContain(tint);
+    expect(alertEl?.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+    expect(alertEl?.querySelector('button')).toBeNull();
+    expect(alertEl?.querySelector('.break-keep')).not.toBeNull();
   });
 
   it('⭐결제 확인 중엔 요금제 카드의 결제 · 변경 버튼이 잠긴다 · 결과가 나오면 풀린다(유나 · 두 번째 결제 0)', async () => {

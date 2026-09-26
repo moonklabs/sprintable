@@ -9,7 +9,9 @@ import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 import { fetchWithAuth } from '@/lib/db/client';
 
 export type PaymentAttemptKind = 'checkout' | 'change_tier';
-export type PaymentAttemptStatus = 'processing' | 'succeeded' | 'declined' | 'failed';
+export type PaymentAttemptStatus = 'processing' | 'succeeded' | 'declined' | 'failed' | 'voided';
+/** 환불 상태 — voided(청구됐지만 적용 못 해 전액 환불)에서 쓴다. `confirmed`만 «환불했어요», `failed`만 «환불 못 함». */
+export type PaymentAttemptRefundStatus = 'pending' | 'confirmed' | 'failed';
 
 export interface PaymentAttemptSubscription {
   org_id: string;
@@ -26,14 +28,14 @@ export interface PaymentAttempt {
   billing_cycle: string | null;
   declined_reason: string | null;
   reauth_required: boolean;
+  refund_status?: PaymentAttemptRefundStatus | null;
   subscription: PaymentAttemptSubscription | null;
 }
 
-/** 서버 응답 결과 — `unreached`는 요청이 서버에 닿았는지 모르는 경우(네트워크 · 시간 초과)라 조회로 넘어간다. */
+/** 서버 응답 결과 — `unreached`는 결과를 모르는 응답(네트워크 · 시간 초과 · 404 밖 non-OK 전부)이라 조회로 넘어간다. */
 export type AttemptResult =
   | { kind: 'ok'; attempt: PaymentAttempt }
   | { kind: 'notFound' }
-  | { kind: 'rejected'; status: number }
   | { kind: 'unreached' };
 
 export function newAttemptId(): string {
@@ -42,10 +44,9 @@ export function newAttemptId(): string {
 
 async function readAttempt(res: Response): Promise<AttemptResult> {
   if (res.status === 404) return { kind: 'notFound' };
-  // 까디르 ② — 409 · 5xx(BFF 503 UPSTREAM_TIMEOUT 포함)는 시도가 등록됐는지 모르는 응답이다: «거절 · 청구 없음»이 아니라 조회로
-  // 넘긴다(조회가 404면 그때 «시도 없음 = 청구 0»). «거절»은 요청 자체가 받아들여지지 않았음이 확실한 4xx만.
-  if (res.status === 409 || res.status >= 500) return { kind: 'unreached' };
-  if (!res.ok) return { kind: 'rejected', status: res.status };
+  // PO 04:08Z «결과 모름 = 비종결» — 404 밖 non-OK(400 · 401 · 408 · 409 · 429 · 5xx 전부)는 «거절 · 청구 0»이 아니라 조회로 넘긴다.
+  // «청구 0» 안심 문구는 서버가 확정한 결과(Toss 거절 declined · 청구 0이 증명된 failed)나 조회가 «시도 없음(404)»일 때만.
+  if (!res.ok) return { kind: 'unreached' };
   const json = (await res.json()) as { data: PaymentAttempt };
   return { kind: 'ok', attempt: json.data };
 }

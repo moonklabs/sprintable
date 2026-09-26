@@ -16,7 +16,7 @@ from app.core.database import Base
 from app.models.base import OrgScopedMixin, TimestampMixin
 
 ATTEMPT_KINDS = ("checkout", "change_tier")
-ATTEMPT_STATUSES = ("processing", "succeeded", "declined", "failed")
+ATTEMPT_STATUSES = ("processing", "succeeded", "declined", "failed", "voided")
 ATTEMPT_STAGES = ("received", "key_issued", "charge_started", "charged")
 
 
@@ -25,7 +25,7 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
     __table_args__ = (
         CheckConstraint("kind IN ('checkout', 'change_tier')", name="ck_billing_payment_attempts_kind"),
         CheckConstraint(
-            "status IN ('processing', 'succeeded', 'declined', 'failed')", name="ck_billing_payment_attempts_status",
+            "status IN ('processing', 'succeeded', 'declined', 'failed', 'voided')", name="ck_billing_payment_attempts_status",
         ),
         CheckConstraint(
             "stage IN ('received', 'key_issued', 'charge_started', 'charged')", name="ck_billing_payment_attempts_stage",
@@ -56,3 +56,6 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     refund_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     refund_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    base_offering_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refund_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

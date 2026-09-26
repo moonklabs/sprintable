@@ -54,11 +54,18 @@ def upgrade() -> None:
         sa.Column("refund_status", sa.Text(), nullable=True),
         sa.Column("refund_amount_minor", sa.BigInteger(), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        # PO 04:08Z «Toss 결과 모름 = 비종결»:
+        # - 시작 때 구독의 요금제 판(늦은 성공이 지금 상태를 덮어쓰지 않게 — 그 사이 바뀌었으면 권리 대신 환불).
+        sa.Column("base_offering_version_id", postgresql.UUID(as_uuid=True), nullable=True),
+        # - 종결된 뒤에도 청구 시작 흔적이 있으면 이 시각까지 다시 조회(Toss가 뒤늦게 DONE이면 늦은 성공 길).
+        sa.Column("next_check_at", sa.DateTime(timezone=True), nullable=True),
+        # - 환불 한 건 한 몰이꾼: 쓸기가 행 잠금으로 집으면서 적는 기한(환불 호출 중 커밋이 있어 잠금만으로는 못 지킨다).
+        sa.Column("refund_lease_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.CheckConstraint("kind IN ('checkout', 'change_tier')", name="ck_billing_payment_attempts_kind"),
         sa.CheckConstraint(
-            "status IN ('processing', 'succeeded', 'declined', 'failed')", name="ck_billing_payment_attempts_status",
+            "status IN ('processing', 'succeeded', 'declined', 'failed', 'voided')", name="ck_billing_payment_attempts_status",
         ),
         sa.CheckConstraint(
             "stage IN ('received', 'key_issued', 'charge_started', 'charged')", name="ck_billing_payment_attempts_stage",

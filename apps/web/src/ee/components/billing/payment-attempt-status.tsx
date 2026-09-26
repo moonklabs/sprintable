@@ -7,8 +7,10 @@
  * 문장(유나 확정 표 · 스토리 본문): 처리 중 `paymentAttemptProcessing` · 확인 중 `paymentAttemptChecking`(+ 오래 걸리면
  * `paymentAttemptCheckingLong`) · 완료 `checkoutSuccessBanner`/`changeTierSuccessBanner` · 거절 `checkoutDeclinedBanner`
  * (+ `checkoutDeclinedReason` · `checkoutDeclinedReassurance`) · 실패 `paymentAttemptFailed`(+ 안심 줄 · 다시 시도) ·
- * 카드 인증부터 다시 `paymentAttemptReauthRequired`(+ `checkoutDialogConfirm`). 색: 처리/확인 = 정보 · 완료 = 성공 ·
- * 거절/실패/인증 다시 = 경고(빨강 아님).
+ * 카드 인증부터 다시 `paymentAttemptReauthRequired`(+ `checkoutDialogConfirm`) · 적용 못 해 취소(voided)
+ * `paymentAttemptVoided` + 환불 줄(`refund_status`: confirmed → `paymentAttemptRefundDone` · failed → `paymentAttemptRefundFailed` ·
+ * 그 밖 전부 `paymentAttemptRefundPending`). 색: 처리/확인 = 정보 · 완료 = 성공 · 거절/실패/인증 다시/취소 = 경고(빨강 아님) ·
+ * 환불 실패만 빨강(돈이 빠졌고 못 돌려받음 · 유나). 취소 갈래엔 안심 줄 · 버튼 없음.
  *
  * «청구된 금액은 없어요»(`checkoutDeclinedReassurance`)는 서버가 청구 0을 증명한 결과(declined · failed)이거나 시도가 서버에
  * 아예 없을 때(=만들어지지 않음)만 뜬다 — 확인 중엔 뜨지 않는다.
@@ -39,8 +41,6 @@ export interface PaymentAttemptState {
   attempt: PaymentAttempt | null;
   /** 서버에 이 시도가 없다(요청이 닿지 않음) — 청구 0. */
   missing: boolean;
-  /** 결제 요청 자체가 거절됨(400 · 409 · 500 등) — 시도가 만들어지지 않았다. */
-  rejectedStatus: number | null;
   long: boolean;
 }
 
@@ -72,13 +72,8 @@ export function usePaymentAttempt({ onSettled }: { onSettled?: (attempt: Payment
   /** 결제 요청을 보낸 직후. 응답이 끊기거나 늦으면 «확인 중»으로 넘어가 조회만 한다. */
   const start = useCallback((id: string, kind: PaymentAttemptKind, request: Promise<AttemptResult>) => {
     rememberAttempt({ id, kind });
-    setState({ id, kind, phase: 'processing', attempt: null, missing: false, rejectedStatus: null, long: false });
+    setState({ id, kind, phase: 'processing', attempt: null, missing: false, long: false });
     void request.then((result) => {
-      if (result.kind === 'rejected') {
-        forgetAttempt();
-        setState((s) => (s && s.id === id ? { ...s, phase: 'done', rejectedStatus: result.status } : s));
-        return;
-      }
       if (result.kind === 'unreached') {
         setState((s) => (s && s.id === id && s.phase === 'processing' ? { ...s, phase: 'checking' } : s));
         return;
@@ -89,7 +84,7 @@ export function usePaymentAttempt({ onSettled }: { onSettled?: (attempt: Payment
 
   /** 새로고침 · 재진입 — 요청은 이미 갔다. 조회만. */
   const resume = useCallback((id: string, kind: PaymentAttemptKind) => {
-    setState({ id, kind, phase: 'checking', attempt: null, missing: false, rejectedStatus: null, long: false });
+    setState({ id, kind, phase: 'checking', attempt: null, missing: false, long: false });
   }, []);
 
   const dismiss = useCallback(() => setState(null), []);
@@ -146,18 +141,6 @@ export function PaymentAttemptBanner({
     );
   }
 
-  if (state.rejectedStatus != null) {
-    // 시도가 만들어지지 않았다 = 청구 0이 참 — 거절 · 실패와 같은 규칙(돈 안 빠짐 = 경고, 빨강 아님 · 유나).
-    return (
-      <Alert variant="warning" data-payment-attempt-state="rejected">
-        <AlertDescription className="space-y-1 break-keep">
-          <span className="block">{t('checkoutErrorBanner')}</span>
-          <span className="block">{t('checkoutDeclinedReassurance')}</span>
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
   const tier = attempt?.tier ?? '';
   const billingCycle = attempt?.billing_cycle ?? null;
   const reauth = state.missing ? state.kind === 'checkout' : attempt?.status === 'failed' && attempt.reauth_required;
@@ -200,6 +183,21 @@ export function PaymentAttemptBanner({
           <span className="block">{t('checkoutDeclinedBanner')}</span>
           {attempt.declined_reason && <span className="block">{t('checkoutDeclinedReason', { reason: attempt.declined_reason })}</span>}
           <span className="block">{t('checkoutDeclinedReassurance')}</span>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (attempt?.status === 'voided') {
+    const refund = attempt.refund_status;
+    // 키는 글자 그대로 부른다(죽은 키 가드가 문자열 t( 호출로 소비를 센다).
+    const refundLine =
+      refund === 'confirmed' ? t('paymentAttemptRefundDone') : refund === 'failed' ? t('paymentAttemptRefundFailed') : t('paymentAttemptRefundPending');
+    return (
+      <Alert variant={refund === 'failed' ? 'destructive' : 'warning'} data-payment-attempt-state="voided" data-refund-status={refund ?? 'unknown'}>
+        <AlertDescription className="space-y-1 break-keep">
+          <span className="block">{t('paymentAttemptVoided')}</span>
+          <span className="block">{refundLine}</span>
         </AlertDescription>
       </Alert>
     );

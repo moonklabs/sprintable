@@ -22,6 +22,11 @@ class RefundError(Exception):
     """환불을 진행할 수 없는 상태 — 잘못된 대상에 조용히 진행하지 않고 명시 실패."""
 
 
+class RefundResponseMalformed(RefundError):
+    """story #4335(PO 04:08Z) — Toss가 200을 준 **뒤** 응답에 취소 내역이 비었다: 환불은 됐을 수 있다(결과 모름 = 비종결).
+    결제 시도 환불은 이걸 «실패»가 아니라 «대기»로 두고 같은 멱등키로 다시 보낸다. 다른 호출자에겐 예전처럼 RefundError."""
+
+
 async def refund_org(
     session: AsyncSession,
     *,
@@ -60,12 +65,12 @@ async def refund_org(
 
     cancels = result.get("cancels") or []
     if not cancels:
-        raise RefundError(f"Toss refund response missing cancels[] for order_id={order_id!r}")
+        raise RefundResponseMalformed(f"Toss refund response missing cancels[] for order_id={order_id!r}")
     latest_cancel = cancels[-1]
     transaction_key = latest_cancel.get("transactionKey")
     refunded_amount = latest_cancel.get("cancelAmount")
     if not transaction_key or refunded_amount is None:
-        raise RefundError(
+        raise RefundResponseMalformed(
             f"Toss refund response missing transactionKey/cancelAmount for order_id={order_id!r}"
         )
 

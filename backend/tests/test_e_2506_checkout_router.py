@@ -81,6 +81,7 @@ def _attempt(*, org_id, status="processing", kind="checkout", reason=None, reaut
     a.billing_cycle = "monthly"
     a.reason = reason
     a.reauth_required = reauth
+    a.refund_status = None
     return a
 
 

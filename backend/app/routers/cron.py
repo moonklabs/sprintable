@@ -1134,12 +1134,9 @@ async def toss_billing_maintenance(
             sweep_stale_pending_orders,
             trigger_due_charges,
         )
-        from app.services.billing_payment_attempt import sweep_processing_attempts
         from app.services.org_subscription_downgrade import sweep_pending_tier_downgrades
 
-        # story #4335 — 아무도 조회하지 않은 결제 시도(checkout · change-tier)를 먼저 대사해 권리 전이까지 끝낸다(그 order는
-        # 아래 pending 대사도 다시 볼 수 있지만, 시도 쪽이 구독 전이 · 슬롯 해제까지 한 번에 한다).
-        attempt_sweep_result = await sweep_processing_attempts(session)
+        # story #4335 — 결제 시도(checkout · change-tier) 쓸기는 하루 한 번인 이 잡이 아니라 5분 잡(`billing-payment-attempts`)이 한다.
         renewal_result = await trigger_due_charges(session)
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
@@ -1153,10 +1150,28 @@ async def toss_billing_maintenance(
         return _ok({
             "renewal": renewal_result, "dunning": dunning_result,
             "reconciliation": reconciliation_result, "grant_sweep": grant_sweep_result,
-            "downgrade_sweep": downgrade_sweep_result, "attempt_sweep": attempt_sweep_result,
+            "downgrade_sweep": downgrade_sweep_result,
         })
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/billing-payment-attempts ──────────────────────
+# story #4335(PO 04:08Z «Toss 결과 모름 = 비종결») — 결제 시도 쓸기 5분 잡: 진행 중 시도 대사 · 청구 시작 흔적이 있는 종결 시도
+# 재조회(24시간) · 환불 대기. 시도마다 `next_check_at`으로 간격을 늘려 가며 부르고, 한 틱은 예산(240초) 안에서 끝난다.
+@router.post("/billing-payment-attempts")
+async def billing_payment_attempts(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.billing_payment_attempt import sweep_processing_attempts
+
+        return _ok(await sweep_processing_attempts(session))
+    except Exception as exc:
+        logger.exception("billing-payment-attempts cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 

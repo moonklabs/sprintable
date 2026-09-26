@@ -81,6 +81,12 @@ class FakeToss:
         self.issue_mode = "ok"
         self.hang_event: asyncio.Event | None = None
         self.lookup_status: str | None = None  # 강제 조회 결과(ABORTED 등) · "error"면 Toss 5xx
+        # 4704(PO «결과 모름 = 비종결»): 청구 응답 코드 · 조회 4xx · 환불 모드(ok | 5xx | 5xx_done | decline | network | slow).
+        self.charge_code: tuple[str, int] | None = None
+        self.lookup_error: tuple[str, int] | None = None
+        self.cancel_mode = "ok"
+        self.cancel_keys: list[str | None] = []
+        self.refunded: dict[str, dict] = {}  # 멱등키 → 첫 응답(Toss 멱등: 같은 키면 같은 응답 · 두 번째 환불 0)
 
     @property
     def approvals(self) -> int:
@@ -96,7 +102,22 @@ class FakeToss:
             return {"billingKey": f"bk-{uuid.uuid4().hex[:8]}", "card": {}, "authenticatedAt": "2026-09-26T00:00:00+09:00"}
         if path.endswith("/cancel"):
             self.cancel_calls.append((path, json["cancelAmount"]))
-            return {"paymentKey": path.split("/")[3], "status": "PARTIAL_CANCELED", "cancels": [{"cancelAmount": json["cancelAmount"], "transactionKey": f"tx-{uuid.uuid4().hex[:6]}"}]}
+            self.cancel_keys.append(idempotency_key)
+            if self.cancel_mode == "slow":
+                await asyncio.sleep(0.3)
+            if idempotency_key in self.refunded:
+                return self.refunded[idempotency_key]
+            if self.cancel_mode == "decline":
+                raise TossApiError("NOT_CANCELABLE_AMOUNT", "Toss refund failed", status_code=400)
+            if self.cancel_mode == "network":
+                raise RuntimeError("Cannot reach Toss API")
+            response = {"paymentKey": path.split("/")[3], "status": "PARTIAL_CANCELED", "cancels": [{"cancelAmount": json["cancelAmount"], "transactionKey": f"tx-{uuid.uuid4().hex[:6]}"}]}
+            if self.cancel_mode in ("5xx", "5xx_done"):
+                if self.cancel_mode == "5xx_done":
+                    self.refunded[idempotency_key] = response  # Toss는 환불했는데 응답만 잃음
+                raise TossApiError("PROVIDER_ERROR", "Toss refund failed", status_code=500)
+            self.refunded[idempotency_key] = response
+            return response
         # 청구 /v1/billing/{billingKey}
         order_id = json["orderId"]
         self.charge_calls.append(order_id)
@@ -118,6 +139,9 @@ class FakeToss:
             raise RuntimeError("Cannot reach Toss API")
         if self.charge_mode == "decline":
             raise TossApiError("REJECT_CARD_COMPANY", "Toss charge failed", status_code=400)
+        if self.charge_mode == "code":  # 4704 — 임의 코드 · 상태
+            assert self.charge_code is not None
+            raise TossApiError(self.charge_code[0], "Toss charge failed", status_code=self.charge_code[1])
         if order_id in self.charged:
             raise TossApiError(DUPLICATED_ORDER_ID, "Toss charge failed", status_code=400)
         payment_key = f"pay-{uuid.uuid4().hex[:10]}"
@@ -131,6 +155,8 @@ class FakeToss:
         self.lookup_calls.append(order_id)
         if self.lookup_status == "error":
             raise TossApiError("PROVIDER_ERROR", "Toss payment lookup failed", status_code=500)
+        if self.lookup_error is not None:
+            raise TossApiError(self.lookup_error[0], "Toss payment lookup failed", status_code=self.lookup_error[1])
         if self.lookup_status is not None:
             return {"status": self.lookup_status, "orderId": order_id}
         if order_id not in self.charged:
@@ -178,7 +204,9 @@ async def _row(session, sql, **params):
 async def _expire_lease(session, attempt_id, *, charge_started_ago: timedelta | None = None):
     from app.models.billing_payment_attempt import BillingPaymentAttempt
 
-    values = {"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+    # 시간이 흐른 판 — 모는 쪽 기한도, 다음 조회 시각(`next_check_at`, 결과 모름의 간격)도 지났다.
+    values = {"lease_expires_at": datetime.now(timezone.utc) - timedelta(seconds=1),
+              "next_check_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
     if charge_started_ago is not None:
         values["charge_started_at"] = datetime.now(timezone.utc) - charge_started_ago
     await session.execute(update(BillingPaymentAttempt).where(BillingPaymentAttempt.id == attempt_id).values(**values))
@@ -494,7 +522,7 @@ async def test_sweep_reconciles_attempts_nobody_polled(Session, toss):
         await svc.start_checkout_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, tier="team", billing_cycle="monthly")
         await _expire_lease(s, attempt_id)
         result = await svc.sweep_processing_attempts(s)
-        assert result["seen"] >= 1 and (await svc.get_attempt(s, attempt_id)).status == "failed"
+        assert result.get("failed", 0) >= 1 and (await svc.get_attempt(s, attempt_id)).status == "failed"
 
 
 # ── AC2: 영수 메일은 결제 확정 경로 밖 ─────────────────────────────────────────────────────────────────
@@ -815,8 +843,15 @@ async def test_reconcile_lookup_error_keeps_checking(Session, toss):
         await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
         toss.lookup_status = "error"
         await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(minutes=1))
-        assert (await svc.reconcile_attempt(s, attempt_id)).status == "processing"
+        checking = await svc.reconcile_attempt(s, attempt_id)
+        assert checking.status == "processing"
+        # 결과 모름 = 비종결 · 다음 조회는 간격을 두고(곧바로 다시 부르지 않는다).
+        assert checking.next_check_at is not None and checking.next_check_at > datetime.now(timezone.utc)
         toss.lookup_status = None
+        lookups = len(toss.lookup_calls)
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "processing"
+        assert len(toss.lookup_calls) == lookups, "다음 조회 시각 전엔 Toss를 부르지 않는다"
+        await _expire_lease(s, attempt_id)
         assert (await svc.reconcile_attempt(s, attempt_id)).status == "succeeded", "다음 조회가 이어서 확정"
 
 
@@ -833,3 +868,362 @@ async def test_change_tier_other_id_same_org_while_one_is_processing_is_409(Sess
         with pytest.raises(TierChangeInProgress):
             await svc.start_change_tier_attempt(s, attempt_id=uuid.uuid4(), org_id=org_id, requested_by=None, new_tier="business")
     assert toss.charge_calls == []
+
+
+# ── 4704: «Toss 쪽 결과를 모르는 상태는 종결 상태가 아니다»(PO 04:08Z) — 상태 전이 표 ─────────────────────────────────
+#
+# | 비종결 → 종결 | Toss 확정 답(근거)                                    | 테스트                                                   |
+# |---------------|-------------------------------------------------------|----------------------------------------------------------|
+# | → declined    | 청구 4xx + 조회 NOT_FOUND · ABORTED/EXPIRED/CANCELED  | test_decline_needs_a_confirming_lookup                   |
+# | (없음)        | 5xx · 408/409/429 · ALREADY_PROCESSED · DUP+조회 실패 | test_unknown_charge_outcomes_stay_processing             |
+# | (없음)        | 거절 4xx인데 조회 오류 · 조회 DONE                    | test_decline_needs_a_confirming_lookup                   |
+# | → succeeded   | 늦은 DONE + 의도 유효 + CAS                           | test_failed_not_found_then_done_within_24h_grants_rights |
+# | → voided      | 늦은 DONE + 의도 무효 · 슬롯 바쁨 · CAS 잃음          | test_late_done_*_voids_and_refunds …                     |
+# | 환불 → failed | 확정 4xx만                                            | test_refund_definite_4xx_fails_and_alerts                |
+# | 환불 pending  | 5xx · 네트워크 · 200 뒤 응답 깨짐                     | test_refund_5xx_stays_pending_and_the_sweep_retries_same_key |
+
+
+@pytest.fixture
+def alerts(monkeypatch):
+    from app.services import billing_payment_attempt as svc
+
+    seen: list[tuple[str, uuid.UUID]] = []
+
+    async def _record(event, attempt_id, detail):
+        seen.append((event, attempt_id))
+        return False  # 수신처 없음(PO 04:13Z) — 전달 안 됨
+
+    monkeypatch.setattr(svc, "notify_operator", _record)
+    return seen
+
+
+async def _set(session, attempt_id, **values):
+    from app.models.billing_payment_attempt import BillingPaymentAttempt
+
+    await session.execute(update(BillingPaymentAttempt).where(BillingPaymentAttempt.id == attempt_id).values(**values))
+    await session.commit()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("mode, code", [
+    ("5xx", None),
+    ("code", ("ALREADY_PROCESSED_PAYMENT", 400)),
+    ("code", ("DUPLICATED_ORDER_ID", 400)),  # 중복 뒤 조회(가짜: NOT_FOUND → 4xx)도 결과 모름
+    ("code", ("REQUEST_TIMEOUT", 408)),
+    ("code", ("TOO_MANY_REQUESTS", 429)),
+    ("code", ("CONFLICT", 409)),
+    ("network", None),
+])
+async def test_unknown_charge_outcomes_stay_processing(Session, toss, mode, code):
+    """까디르 P2 · PO 규칙 — 청구 응답이 «처리됐는지 모름»이면 declined/failed를 적지 않는다: 진행 중 그대로 · 청구 슬롯 유지.
+    뮤테이션: `_outcome_unknown`에서 코드 · 상태 표를 빼면 ALREADY_PROCESSED · 408/409/429가 declined로 끝나 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode, toss.charge_code = mode, code
+    if code and code[0] == "DUPLICATED_ORDER_ID":
+        toss.lookup_error = ("FORBIDDEN_REQUEST", 403)
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        after = await svc.get_attempt(s, attempt_id)
+        assert (after.status, after.stage) == ("processing", "charge_started"), f"{mode} {code}"
+        assert (await _row(s, "SELECT checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)).checkout_claimed_at is not None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("lookup, expected", [
+    ("not_found", "declined"),
+    ("ABORTED", "declined"),
+    ("CANCELED", "declined"),
+    ("error", "processing"),
+    ("forbidden", "processing"),
+    ("DONE", "processing"),
+])
+async def test_decline_needs_a_confirming_lookup(Session, toss, lookup, expected):
+    """거절 4xx만으로는 끝내지 않는다 — Toss 조회가 «결제 없음» 또는 끝난 결제를 확정할 때만 declined. 조회가 오류 · DONE이면 진행 중.
+    뮤테이션: 확인 조회 없이 4xx → declined면 error/forbidden/DONE 칸이 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "decline"
+    if lookup == "error":
+        toss.lookup_status = "error"
+    elif lookup == "forbidden":
+        toss.lookup_error = ("FORBIDDEN_REQUEST", 403)
+    elif lookup != "not_found":
+        toss.lookup_status = lookup
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        assert (await svc.get_attempt(s, attempt_id)).status == expected
+
+
+async def _ended_not_found_checkout(Session, toss):
+    """청구는 Toss에 닿았는데(승인됨) 조회가 한동안 «없음» → 10분 뒤 failed(NOT_FOUND)로 끝난 checkout. Toss 승인 기록은 되돌려 둔다."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "network"  # 도달했고 응답만 잃음 — 가짜 Toss에 승인 기록
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+    saved = dict(toss.charged)
+    toss.charged.clear()
+    async with Session() as s:
+        await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
+        ended = await svc.reconcile_attempt(s, attempt_id)
+        assert (ended.status, ended.reason) == ("failed", svc.REASON_NOT_FOUND_AT_TOSS)
+        assert ended.next_check_at is not None, "청구 시작 흔적이 있으면 종결 뒤에도 재조회 예약"
+    toss.charged.update(saved)
+    return org_id, attempt_id
+
+
+@pytest.mark.anyio
+async def test_failed_not_found_then_done_within_24h_grants_rights(Session, toss, alerts):
+    """까디르 ① — 10분 창 뒤 failed가 된 시도가 Toss에서 DONE → 쓸기 재조회가 늦은 성공 길로: 권리 적용(succeeded · active) · 청구 1.
+    뮤테이션: 쓸기에서 종결 재조회(`recheck_ended_attempt`)를 빼면 failed 그대로 · 구독 pending → RED."""
+    from app.services import billing_payment_attempt as svc
+
+    org_id, attempt_id = await _ended_not_found_checkout(Session, toss)
+    async with Session() as s:
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        result = await svc.sweep_processing_attempts(s)
+        assert result.get("recheck_late") == 1
+        done = await svc.get_attempt(s, attempt_id)
+        assert (done.status, done.next_check_at) == ("succeeded", None)
+        assert (await _row(s, "SELECT status, tier FROM org_subscriptions WHERE org_id=:o", o=org_id)) == ("active", "team")
+        order = await _row(s, "SELECT status FROM billing_orders WHERE order_id=:oid", oid=done.order_id)
+        assert order.status == "confirmed"
+    assert toss.approvals == 1 and ("late_charge", attempt_id) in alerts
+
+
+@pytest.mark.anyio
+async def test_failed_not_found_then_done_after_a_later_success_voids_and_refunds(Session, toss, alerts):
+    """P1 — 그 사이 같은 org의 다른 결제가 성공했다 → 늦은 DONE은 지금 상태를 덮어쓰지 않는다: voided + 제 청구 전액 환불 + 알림.
+    뮤테이션: 의도 확인(`_stale_intent`)을 빼면 늦은 시도가 구독을 옛 시도 등급으로 덮어써 RED(tier · status 단언)."""
+    from app.services import billing_payment_attempt as svc
+
+    org_id, attempt_id = await _ended_not_found_checkout(Session, toss)
+    toss.charge_mode = "ok"
+    async with Session() as s:
+        later_id = uuid.uuid4()
+        _, later_token = await svc.start_checkout_attempt(
+            s, attempt_id=later_id, org_id=org_id, requested_by=None, tier="business", billing_cycle="annual",
+        )
+        await svc.drive_attempt(s, later_id, later_token, auth_key="auth-2")
+        assert (await svc.get_attempt(s, later_id)).status == "succeeded"
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        await svc.sweep_processing_attempts(s)
+        voided = await svc.get_attempt(s, attempt_id)
+        assert voided.status == "voided" and "later payment change" in voided.reason
+        assert (voided.refund_status, voided.refund_target_order_id) == ("confirmed", voided.order_id)
+        own = await _row(s, "SELECT amount_minor, refund_status FROM billing_orders WHERE order_id=:oid", oid=voided.order_id)
+        assert voided.refund_amount_minor == own.amount_minor and own.refund_status == "confirmed"
+        sub = await _row(s, "SELECT status, tier, billing_cycle FROM org_subscriptions WHERE org_id=:o", o=org_id)
+        assert tuple(sub) == ("active", "business", "annual"), "늦은 시도가 지금 상태를 덮어쓰지 않는다"
+    assert toss.cancel_keys == [f"attempt-void-refund-{attempt_id.hex}"]
+    assert ("payment_voided", attempt_id) in alerts
+
+
+@pytest.mark.anyio
+async def test_late_done_while_the_org_slot_is_busy_voids_and_refunds_instead_of_reason_only(Session, toss, alerts):
+    """P1 — 슬롯이 다른 작업에 쥐여 있으면 «이유만 남기고 권리 0 · 재시도 0»이 아니라 voided + 전액 환불.
+    뮤테이션: 슬롯 바쁨 갈래를 예전처럼 사유만 적고 return하면 status failed · 환불 0으로 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    org_id, attempt_id = await _ended_not_found_checkout(Session, toss)
+    async with Session() as s:
+        await _set_slot(s, org_id)
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        await svc.sweep_processing_attempts(s)
+        voided = await svc.get_attempt(s, attempt_id)
+        assert (voided.status, voided.refund_status) == ("voided", "confirmed") and "slot busy" in voided.reason
+    assert len(toss.cancel_calls) == 1
+
+
+async def _set_slot(session, org_id):
+    await session.execute(
+        text("UPDATE org_subscriptions SET checkout_claimed_at = now() WHERE org_id = :o"), {"o": org_id},
+    )
+    await session.commit()
+
+
+@pytest.mark.anyio
+async def test_cas_lost_at_finalize_does_not_write_succeeded(Session, toss, alerts, monkeypatch):
+    """P1 — 권리 전이 CAS를 잃은 쪽은 succeeded를 적지 않는다 → voided + 전액 환불.
+    뮤테이션: `changed == 0`에서 예전처럼 succeeded + 사유면 RED."""
+    from app.services import billing_payment_attempt as svc
+    from app.services import org_subscription_checkout as checkout_svc
+
+    async def _lost(*_a, **_k):
+        return 0
+
+    monkeypatch.setattr(checkout_svc, "activate_claimed_subscription", _lost)
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        done = await svc.get_attempt(s, attempt_id)
+        assert (done.status, done.refund_status) == ("voided", "confirmed") and "claim lost" in done.reason
+    assert toss.approvals == 1 and len(toss.cancel_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_change_tier_late_done_after_the_plan_changed_voids_without_the_old_partial_refund(Session, toss, alerts):
+    """P1 · change-tier — 시작 뒤 구독 요금제 판이 바뀌었다(다른 변경 · 등급은 그대로) → 늦은 DONE은 voided. 옛 결제 부분 환불은 버리고(권리가 안
+    바뀌었으니) 제 청구만 전액 환불. 뮤테이션: 요금제 판 비교를 빼면 옛 시도 등급으로 덮어써 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        attempt_id = uuid.uuid4()
+        attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+        old_target = attempt.refund_target_order_id
+    toss.charge_mode = "network"
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token)
+    saved = dict(toss.charged)
+    toss.charged.clear()
+    async with Session() as s:
+        await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "failed"
+        # 그 사이 다른 경로가 요금제 판만 바꿨다(등급은 starter 그대로 — 등급 검증은 통과해 판 비교만이 잡는 판).
+        other = (await s.execute(text("SELECT id FROM offering_versions WHERE id <> (SELECT offering_version_id FROM org_subscriptions WHERE org_id=:o) LIMIT 1"), {"o": org_id})).scalar_one()
+        await s.execute(text("UPDATE org_subscriptions SET offering_version_id=:v WHERE org_id=:o"), {"v": other, "o": org_id})
+        await s.commit()
+    toss.charged.update(saved)
+    async with Session() as s:
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        await svc.sweep_processing_attempts(s)
+        voided = await svc.get_attempt(s, attempt_id)
+        assert voided.status == "voided" and "plan changed" in voided.reason
+        assert voided.refund_target_order_id == voided.order_id != old_target
+        sub = await _row(s, "SELECT tier, offering_version_id FROM org_subscriptions WHERE org_id=:o", o=org_id)
+        assert (sub.tier, sub.offering_version_id) == ("starter", other), "늦은 시도가 지금 판을 덮어쓰지 않는다"
+        old = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=old_target)
+        assert old.refund_status is None, "옛 결제 부분 환불은 보내지 않는다"
+    assert toss.cancel_keys == [f"attempt-void-refund-{attempt_id.hex}"]
+
+
+@pytest.mark.anyio
+async def test_recheck_stops_after_24h_and_alerts_only_without_a_definite_answer(Session, toss, alerts):
+    """24시간 표 줄 — 창이 끝날 때까지 답이 없으면(조회 오류) 재조회를 멈추고(`next_check_at` 비움) 상태는 failed 그대로 + 운영자 알림.
+    답이 «없음»(NOT_FOUND)이면 조용히 멈춘다."""
+    from app.services import billing_payment_attempt as svc
+
+    org_id, attempt_id = await _ended_not_found_checkout(Session, toss)
+    toss.charged.clear()
+    past = datetime.now(timezone.utc) - svc.RECHECK_WINDOW - timedelta(minutes=1)
+    async with Session() as s:
+        await _set(s, attempt_id, finished_at=past, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        assert await svc.recheck_ended_attempt(s, attempt_id) == "still_ended"
+        ended = await svc.get_attempt(s, attempt_id)
+        assert (ended.status, ended.next_check_at) == ("failed", None)
+        assert ("recheck_window_closed", attempt_id) not in alerts, "NOT_FOUND = 확정 답"
+        toss.lookup_status = "error"
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        await svc.recheck_ended_attempt(s, attempt_id)
+    assert ("recheck_window_closed", attempt_id) in alerts
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("mode", ["5xx", "5xx_done", "network"])
+async def test_refund_5xx_stays_pending_and_the_sweep_retries_same_key(Session, toss, alerts, mode):
+    """까디르 ② — 환불 5xx · 네트워크(Toss는 환불했는데 응답만 잃은 경우 포함)는 failed가 아니라 pending · 다음 쓸기가 같은 멱등키로
+    다시 → confirmed · Toss 환불은 1. 뮤테이션: 예전 `_attempt_partial_refund`(모든 예외 → failed)로 되돌리면 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        attempt_id = uuid.uuid4()
+        _, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+        toss.cancel_mode = mode
+        await svc.drive_attempt(s, attempt_id, token)
+        first = await svc.get_attempt(s, attempt_id)
+        assert (first.status, first.refund_status) == ("succeeded", "pending")
+        assert first.next_check_at is not None
+        toss.cancel_mode = "ok"
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        await svc.sweep_processing_attempts(s)
+        assert (await svc.get_attempt(s, attempt_id)).refund_status == "confirmed"
+    key = f"tierchange-refund-{attempt_id.hex}"
+    assert set(toss.cancel_keys) == {key} and len(toss.cancel_keys) == 2 and len(toss.refunded) == 1
+
+
+@pytest.mark.anyio
+async def test_refund_definite_4xx_fails_and_alerts(Session, toss, alerts):
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        attempt_id = uuid.uuid4()
+        attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+        toss.cancel_mode = "decline"
+        await svc.drive_attempt(s, attempt_id, token)
+        done = await svc.get_attempt(s, attempt_id)
+        assert (done.refund_status, done.next_check_at) == ("failed", None)
+        old = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=attempt.refund_target_order_id)
+        assert old.refund_status == "failed"
+    assert ("refund_failed", attempt_id) in alerts
+
+
+@pytest.mark.anyio
+async def test_two_concurrent_refund_drivers_send_one_refund(Session, toss, alerts, monkeypatch):
+    """까디르 ② — 동시 쓸기 둘이 같은 환불 대기를 잡아도 Toss 호출은 1(행 잠금 SKIP LOCKED + 환불 기한).
+    뮤테이션: `with_for_update(skip_locked=True)` · `refund_lease_until`을 빼면 두 호출이 다 나가 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        attempt_id = uuid.uuid4()
+        _, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+    real = svc.run_pending_refund
+
+    async def _defer(*_a, **_k):
+        return "pending"
+
+    monkeypatch.setattr(svc, "run_pending_refund", _defer)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token)
+        assert (await svc.get_attempt(s, attempt_id)).refund_status == "pending"
+    monkeypatch.setattr(svc, "run_pending_refund", real)
+    toss.cancel_mode = "slow"
+
+    async def _drive():
+        async with Session() as s:
+            return await svc.run_pending_refund(s, attempt_id)
+
+    results = await asyncio.gather(_drive(), _drive())
+    assert sorted(results, key=str) == ["confirmed", "pending"] or results == ["confirmed", "confirmed"]
+    assert len(toss.cancel_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_sweep_skips_rows_not_yet_due_and_defers_when_the_tick_budget_runs_out(Session, toss):
+    """5분 틱이 전부를 매번 부르지 않는다: `next_check_at`이 안 된 행은 건드리지 않고, 남은 예산이 한 건 최악보다 작으면 새 건을 집지
+    않는다(다음 틱이 이어받음)."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "network"
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        await _set(s, attempt_id, lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+                   next_check_at=datetime.now(timezone.utc) + timedelta(minutes=5))
+        before = len(toss.lookup_calls)
+        await svc.sweep_processing_attempts(s)
+        assert len(toss.lookup_calls) == before, "다음 조회 시각 전"
+        await _set(s, attempt_id, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        deferred = await svc.sweep_processing_attempts(s, budget_seconds=svc.SWEEP_ITEM_WORST_SECONDS - 1)
+        assert deferred.get("deferred") == 1 and len(toss.lookup_calls) == before
+        done = await svc.sweep_processing_attempts(s)
+        assert done.get("succeeded") == 1

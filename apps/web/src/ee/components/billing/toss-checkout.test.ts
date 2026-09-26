@@ -122,15 +122,8 @@ describe('completeCheckout — 결제 시도 시작(story #2510 · #4335)', () =
     );
   });
 
-  it('확실한 거절 4xx(400 · 403 · 422) → {kind:"rejected", status} — 시도가 만들어지지 않음', async () => {
-    for (const status of [400, 403, 422]) {
-      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json: async () => ({}) })));
-      expect(await completeCheckout({ attemptId: 'a-1', authKey: 'ak', tier: 'team', billingCycle: 'monthly' })).toEqual({ kind: 'rejected', status });
-    }
-  });
-
-  it('⭐409 · 5xx(BFF 503 포함)는 등록됐는지 모름 → {kind:"unreached"} — «청구 없음»이 아니라 조회로(까디르 ②)', async () => {
-    for (const status of [409, 500, 502, 503]) {
+  it('⭐404 밖 non-OK 전부(400 · 401 · 403 · 408 · 409 · 422 · 429 · 5xx) → {kind:"unreached"} — «청구 없음»이 아니라 조회로(PO «결과 모름 = 비종결»)', async () => {
+    for (const status of [400, 401, 403, 408, 409, 422, 429, 500, 502, 503]) {
       vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json: async () => ({}) })));
       expect(await completeCheckout({ attemptId: 'a-1', authKey: 'ak', tier: 'team', billingCycle: 'monthly' }), String(status)).toEqual({ kind: 'unreached' });
     }

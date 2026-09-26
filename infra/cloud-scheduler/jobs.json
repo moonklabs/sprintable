@@ -150,6 +150,15 @@
       "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
     },
     {
+      "name": "billing-payment-attempts",
+      "route": "billing-payment-attempts",
+      "method": "POST",
+      "schedule": "*/5 * * * *",
+      "time_zone": "Asia/Seoul",
+      "attempt_deadline": "300s",
+      "basis": "story #4335(PO 04:13Z) — 결제 시도 «결과 모름 = 비종결»: 진행 중 시도 대사 · 종결 뒤 24시간 재조회 · 환불 대기를 next_check_at 간격으로. 한 틱 예산 240초(SWEEP_BUDGET_SECONDS) + 여유 = 300초"
+    },
+    {
       "name": "toss-billing-maintenance",
       "route": "toss-billing-maintenance",
       "method": "GET",

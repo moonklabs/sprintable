@@ -67,7 +67,7 @@ class CheckoutResponse(BaseModel):
 
 class PaymentAttemptResponse(BaseModel):
     """story #4335 — 결제 시도 상태. `status`: processing(결과 대기 — 조회로 확정) · succeeded · declined(카드사 거절 · 청구 0) ·
-    failed(청구 0이 행으로 증명된 실패). `reauth_required`면 카드 인증부터 다시(authKey 1회용). `subscription`은 끝난 뒤에만."""
+    failed(청구 0이 행으로 증명된 실패) · voided(청구됐지만 권리를 못 줘 전액 환불 — `refund_status`). `reauth_required`면 카드 인증부터 다시(authKey 1회용). `subscription`은 끝난 뒤에만."""
 
     attempt_id: uuid.UUID
     kind: str
@@ -76,6 +76,8 @@ class PaymentAttemptResponse(BaseModel):
     billing_cycle: str | None
     declined_reason: str | None = None
     reauth_required: bool = False
+    # voided(청구됐지만 권리를 못 줘 전액 환불) · change-tier 부분 환불의 상태 — pending / confirmed / failed를 구별해 내린다.
+    refund_status: str | None = None
     subscription: CheckoutResponse | None = None
 
 
@@ -92,7 +94,7 @@ async def _attempt_response(session: AsyncSession, attempt: BillingPaymentAttemp
         attempt_id=attempt.id, kind=attempt.kind, status=attempt.status, tier=attempt.tier,
         billing_cycle=attempt.billing_cycle,
         declined_reason=attempt.reason if attempt.status == "declined" else None,
-        reauth_required=attempt.reauth_required, subscription=subscription,
+        reauth_required=attempt.reauth_required, refund_status=attempt.refund_status, subscription=subscription,
     )
 
 
