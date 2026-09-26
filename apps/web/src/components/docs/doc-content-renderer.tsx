@@ -505,10 +505,10 @@ export function DocContentRenderer({
     const embedBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="embedBlock"]'));
     embedBlocks.forEach((block) => {
       block.setAttribute('data-doc-part', 'embed'); // story #4316 — 일반 링크 카드(`no-underline`)가 뿌리 밑줄에 지던 자리
-      const rawUrl = block.getAttribute('data-url') ?? '';
-      if (!rawUrl.trim()) return;
+      if (!(block.getAttribute('data-url') ?? '').trim()) return;
       // story #4324 — http/https만 링크 · 틀로. 그 밖(javascript: · data: · 상대 경로 등)은 주소를 글자로만 보인다(누를 수 있는 것 0).
-      const url = safeHttpUrl(rawUrl);
+      // story #4338 — URL 속성은 읽는 자리에서 곧바로 도우미로(중간 변수 없이) — 가드가 «도우미 밖 읽기»를 잡는다.
+      const url = safeHttpUrl(block.getAttribute('data-url') ?? '');
       block.innerHTML = '';
       if (!url) {
         // 유나 스티어 — 날 주소는 화면에 싣지 않는다(공격 글자 노출 · 복사 유도 0) · 한 줄 «이 링크는 열 수 없어요».
