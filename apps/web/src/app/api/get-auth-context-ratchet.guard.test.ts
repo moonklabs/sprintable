@@ -10,7 +10,7 @@
  * - 판정은 보수적: 컨텍스트 변수를 통째로 넘기거나 펼치면(함수 인자 · `...me`) 그 안에서 전용 칸을 읽을 수 있다고 보고 걸지 않는다.
  * - 못 보는 것: `getAuthContext` 결과를 변수에 담지 않고 바로 쓰는 모양 · 핸들러 밖 도우미 함수 안의 호출(지금 0곳 — 필요해지면 넓힌다).
  */
-import { globSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -41,12 +41,26 @@ export function scanRouteSource(source: string): FlaggedHandler[] {
 
 const API_DIR = path.resolve(__dirname);
 
+/** API_DIR 아래 모든 route.ts(상대 경로 · `/` 구분). */
+function routeFiles(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name === 'route.ts') out.push(path.relative(API_DIR, full).split(path.sep).join('/'));
+    }
+  };
+  walk(API_DIR);
+  return out.sort();
+}
+
 function scanRepo(): string[] {
   const out: string[] = [];
-  for (const rel of globSync('**/route.ts', { cwd: API_DIR }).sort()) {
+  for (const rel of routeFiles()) {
     const source = readFileSync(path.join(API_DIR, rel), 'utf8');
     if (!source.includes('getAuthContext(')) continue;
-    for (const h of scanRouteSource(source)) out.push(`${rel.split(path.sep).join('/')} ${h.method}`);
+    for (const h of scanRouteSource(source)) out.push(`${rel} ${h.method}`);
   }
   return out;
 }
@@ -155,7 +169,7 @@ describe('getAuthContext 톱니 가드(story #4346)', () => {
   });
 
   it('스캐너가 실제 라우트를 읽는다(헛돌지 않음)', () => {
-    const files = globSync('**/route.ts', { cwd: API_DIR });
+    const files = routeFiles();
     expect(files.length).toBeGreaterThan(300);
     expect(files.some((f) => readFileSync(path.join(API_DIR, f), 'utf8').includes('getAuthContext('))).toBe(true);
   });
