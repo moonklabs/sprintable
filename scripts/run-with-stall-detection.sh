@@ -61,6 +61,19 @@ if [ -n "${STALL_EVIDENCE_DIR:-}" ]; then
   # 명령이 먼저 끝났으면 아직 자는 수집기(와 그 sleep)를 거둔다 — 이미 수집 중이면 끝날 때까지 기다린다(덤프가 잘리지 않게).
   # (수집 중이면 수집기의 직계 자식은 sleep이 아니라 stall-evidence.sh라 건드리지 않는다.)
   pkill -P "$_collector_pid" -x sleep 2>/dev/null || true
+  # 까디르 ①(PR 4695) — 기다림에 상한: 수집기가 멈추면(DB 무응답 등) 잡 timeout이 먼저 쳐 STALL 판정(124)을 잃던 옛 모양으로
+  # 돌아간다. 상한을 넘으면 수집기 나무를 멈추고 «증거 수집 시한 초과»를 남긴 채 판정은 그대로.
+  _collect_max="${STALL_EVIDENCE_COLLECT_MAX_SEC:-45}"
+  _collect_deadline=$(awk "BEGIN { printf \"%.3f\", $(date +%s) + ${_collect_max} }")
+  while kill -0 "$_collector_pid" 2>/dev/null; do
+    if awk "BEGIN { exit !($(date +%s) >= ${_collect_deadline}) }"; then
+      echo "::warning::STALL 증거 수집 시한 초과(${_collect_max}s) — 수집기를 멈추고 판정은 그대로(story #4319)" >&2
+      _kill_tree() { local p="$1" c; for c in $(ps -eo pid=,ppid= | awk -v q="$p" '$2 == q { print $1 }'); do _kill_tree "$c"; done; kill -KILL "$p" 2>/dev/null || true; }
+      _kill_tree "$_collector_pid"
+      break
+    fi
+    sleep 0.2
+  done
   wait "$_collector_pid" 2>/dev/null || true
 else
   timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"

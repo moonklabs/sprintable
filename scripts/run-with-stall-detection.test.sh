@@ -157,6 +157,7 @@ mkdir -p "$EV_TMP/bin" "$EV_TMP/evidence"
 cat > "$EV_TMP/bin/psql" <<'STUB'
 #!/usr/bin/env bash
 echo "FAKE_PSQL $*" >> "${FAKE_PSQL_LOG:?}"
+[ -n "${FAKE_PSQL_HANG:-}" ] && exec sleep 1000  # DB 무응답(연결 포화 등) 흉내
 echo "fake psql row"
 STUB
 chmod +x "$EV_TMP/bin/psql"
@@ -200,6 +201,26 @@ if [ -n "$_ev_line" ] && [ -n "$_stall_line" ] && [ "$_ev_line" -lt "$_stall_lin
 else
   echo "  FAIL 증거가 STALL 뒤이거나 없음(ev=${_ev_line:-없음} stall=${_stall_line:-없음})"; FAIL=1
 fi
+
+# 까디르 ①(PR 4695) — DB가 응답하지 않아도 판정은 124 · 제한 시간 안에 끝난다(조회 시한 · 수집기 기다림 상한 둘 다).
+for _case in pg_timeout collect_cap; do
+  if [ "$_case" = pg_timeout ]; then _env=(STALL_EVIDENCE_PG_TIMEOUT_SEC=1 STALL_EVIDENCE_COLLECT_MAX_SEC=30); _want="조회 시한 초과"
+  else _env=(STALL_EVIDENCE_PG_TIMEOUT_SEC=60 STALL_EVIDENCE_COLLECT_MAX_SEC=2); _want="증거 수집 시한 초과"; fi
+  set +e
+  _t0=$(date +%s)
+  OUT="$(env "${_env[@]}" PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_HANG=1 FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDENCE_DIR="$EV_TMP/evidence" \
+    STALL_EVIDENCE_LEAD_SEC=2 STALL_EVIDENCE_DUMP_WAIT_SEC=1 STALL_KILL_AFTER=1s \
+    "$SCRIPT" 0.1 -- "$PYTHON_BIN" "$EV_TMP/fake_pytest.py" 60 pytest-marker 2>&1)"
+  CODE=$?
+  _took=$(( $(date +%s) - _t0 ))
+  set -e
+  if [ "$CODE" -eq 124 ] && [ "$_took" -le 15 ] && [[ "$OUT" == *"$_want"* ]]; then
+    echo "  ok   DB 무응답(${_case}) → 124 · ${_took}s · «${_want}»"
+  else
+    echo "  FAIL DB 무응답(${_case}) — exit=${CODE} took=${_took}s — 출력: $OUT"; FAIL=1
+  fi
+done
+pkill -f "sleep 1000" 2>/dev/null || true
 
 rm -f "$EV_TMP/psql.log"
 set +e

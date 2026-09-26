@@ -17,33 +17,47 @@ PG_HOST="${STALL_EVIDENCE_PGHOST:-localhost}"
 PG_USER="${STALL_EVIDENCE_PGUSER:-sprintable}"
 PG_DB="${STALL_EVIDENCE_PGDATABASE:-postgres}"
 DUMP_WAIT_SEC="${STALL_EVIDENCE_DUMP_WAIT_SEC:-5}"
+# 까디르 ①(PR 4695) — 잡으려는 상황(연결 포화 · DB 무응답)에서 조회 자체가 멈추면 안 된다: 연결 시한 · 문장 시한 · 호출 전체 상한.
+PG_CALL_MAX_SEC="${STALL_EVIDENCE_PG_TIMEOUT_SEC:-10}"
+
+pg_query() {  # <제목> <SQL> — 시한을 넘기면 한 줄 남기고 넘어간다(판정은 안 바꾼다).
+  local label="$1" sql="$2" rc
+  PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=5000" PGPASSWORD="${PGPASSWORD:-sprintable}" \
+    timeout -k 2 "$PG_CALL_MAX_SEC" psql -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" -X -P pager=off -c "$sql" >&2 2>&1
+  rc=$?
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "(${label} 조회 시한 초과 ${PG_CALL_MAX_SEC}s — DB가 응답하지 않음 · 그 자체가 증거)" >&2
+  elif [ "$rc" -ne 0 ]; then
+    echo "(${label} 조회 실패 — 위 오류 참고)" >&2
+  fi
+}
 
 echo "::group::STALL evidence(story #4319) — $(date -u +%FT%TZ) · root pid ${ROOT_PID}" >&2
 
 echo "── ① pg_stat_activity(클라이언트 연결 · 막는 pid 포함) ──" >&2
-PGPASSWORD="${PGPASSWORD:-sprintable}" psql -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" -X -P pager=off -c "
+pg_query pg_stat_activity "
 SELECT pid, datname, application_name AS app, state, wait_event_type AS wait_type, wait_event,
        pg_blocking_pids(pid) AS blocked_by,
        date_trunc('second', now() - xact_start) AS xact_age,
        date_trunc('second', now() - query_start) AS query_age,
-       left(regexp_replace(query, '\s+', ' ', 'g'), 300) AS query
+       left(regexp_replace(query, '\s+', ' ', 'g'), 60) AS query
 FROM pg_stat_activity
 WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()
-ORDER BY xact_start NULLS LAST, pid;" >&2 2>&1 || echo "(pg_stat_activity 조회 실패 — 위 오류 참고)" >&2
+ORDER BY xact_start NULLS LAST, pid;"
 
 echo "── ① pg_locks(못 받은 잠금 먼저) ──" >&2
-PGPASSWORD="${PGPASSWORD:-sprintable}" psql -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" -X -P pager=off -c "
+pg_query pg_locks "
 SELECT l.pid, l.granted, l.mode, l.locktype,
        d.datname,
        CASE WHEN l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
             THEN l.relation::regclass::text ELSE l.relation::text END AS relation,
        l.transactionid, l.virtualxid, a.state,
-       left(regexp_replace(a.query, '\s+', ' ', 'g'), 160) AS query
+       left(regexp_replace(a.query, '\s+', ' ', 'g'), 60) AS query
 FROM pg_locks l
 LEFT JOIN pg_stat_activity a ON a.pid = l.pid
 LEFT JOIN pg_database d ON d.oid = l.database
 WHERE l.pid IS DISTINCT FROM pg_backend_pid()
-ORDER BY l.granted, l.pid, l.locktype;" >&2 2>&1 || echo "(pg_locks 조회 실패 — 위 오류 참고)" >&2
+ORDER BY l.granted, l.pid, l.locktype;"
 
 # <root_pid>의 자손 중 pytest 프로세스(uv run → python -m pytest 등 층이 여럿).
 descendants() {
