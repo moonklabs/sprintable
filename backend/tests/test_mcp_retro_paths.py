@@ -70,8 +70,30 @@ async def test_change_retro_phase_calls_real_path_with_phase_suffix():
 async def test_add_retro_item_calls_real_path():
     client = _client(request={"id": "i1"})
     with patch.object(r, "client", client):
-        await r.add_retro_item(r.AddRetroItemInput(session_id="s1", category="good", text="t", author_id="u1"))
+        await r.add_retro_item(r.AddRetroItemInput(session_id="s1", category="good", text="t"))
     assert client.request.call_args.args[1] == "/api/v2/retros/s1/items"
+    # story #4329 — 작성자는 서버가 인증에서 정한다(본문 author_id는 버려졌다) — 보내지 않는다.
+    assert client.request.call_args.kwargs["json"] == {"category": "good", "text": "t"}
+
+
+def test_retro_phase_enum_matches_backend_phases():
+    """story #4329(까디르) — MCP 단계 목록 = 백엔드 RETRO_PHASES. 한쪽만 늘거나 줄면 RED(MCP가 보내면 400인 값 · 못 보내는 값 둘 다)."""
+    import typing
+
+    from app.models.retro import RETRO_PHASES
+
+    assert set(typing.get_args(r.RetroPhase)) == set(RETRO_PHASES)
+
+
+def test_leaderboard_limit_range_matches_backend():
+    import pydantic
+
+    from sprintable_mcp.tools.rewards import GetLeaderboardInput
+
+    assert GetLeaderboardInput(limit=1).limit == 1 and GetLeaderboardInput(limit=100).limit == 100
+    for bad in (0, 101):
+        with pytest.raises(pydantic.ValidationError):
+            GetLeaderboardInput(limit=bad)
 
 
 async def test_export_retro_calls_real_path():

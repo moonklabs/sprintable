@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
+
 from mcp.types import TextContent
 
 from ..api_client import client
@@ -25,7 +27,8 @@ class GiveRewardInput(SprintableInput):
 
 class GetLeaderboardInput(SprintableInput):
     period: Literal["all", "daily", "weekly", "monthly"] | None = None
-    limit: int | None = None
+    # 백엔드 `GET /api/v2/rewards/leaderboard`와 같은 범위(1~100) — 밖이면 도구 호출 전에 거절(story #4329 까디르).
+    limit: int | None = Field(default=None, ge=1, le=100)
 
 
 async def get_wallet(args: GetWalletInput) -> list[TextContent]:

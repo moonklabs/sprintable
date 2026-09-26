@@ -14,6 +14,9 @@ REMOVED_ARGS: dict[str, dict[str, str]] = {
     "sprintable_vote_retro_item": {
         "voter_id": "투표자는 부른 에이전트 자신으로 서버가 정해요(대리 투표 없음). voter_id를 빼고 다시 부르세요.",
     },
+    "sprintable_add_retro_item": {
+        "author_id": "작성자는 부른 에이전트 자신으로 서버가 정해요. author_id를 빼고 다시 부르세요.",
+    },
     "sprintable_send_chat_message": {
         "message_type": _CHAT_METADATA,
         "review_type": _CHAT_METADATA,

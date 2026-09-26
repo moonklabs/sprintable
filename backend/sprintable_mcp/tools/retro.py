@@ -13,7 +13,9 @@ from ..response import err, ok, ok_paginated
 from ..schemas import SprintableInput
 from .stories import _has_more_from_headers
 
-RetroPhase = Literal["collect", "group", "vote", "discuss", "action", "closed"]
+# 백엔드 `app/models/retro.py` RETRO_PHASES와 같은 넷 — 예전 여섯(group · discuss 포함)은 서버가 400으로 거절했다(story #4329 까디르).
+# 둘의 동일성은 tests/test_mcp_retro_paths.py가 고정한다(한쪽만 늘면 RED).
+RetroPhase = Literal["collect", "vote", "action", "closed"]
 RetroCategory = Literal["good", "bad", "improve"]
 
 
@@ -49,7 +51,7 @@ class AddRetroItemInput(SprintableInput):
     session_id: str
     category: RetroCategory
     text: str
-    author_id: str
+    # story #4329 — `author_id`는 뺐다: 서버는 작성자를 호출자 인증에서 정하고(P0 9f27af8f) 본문 값을 버렸다(voter_id와 같은 자리).
 
 
 class ExportRetroInput(SprintableInput):
@@ -131,7 +133,7 @@ async def add_retro_item(args: AddRetroItemInput) -> list[TextContent]:
         return ok(await client.request(
             "POST",
             f"/api/v2/retros/{args.session_id}/items",
-            json={"category": args.category, "text": args.text, "author_id": args.author_id},
+            json={"category": args.category, "text": args.text},
         ))
     except Exception as exc:
         return err(exc)
