@@ -360,7 +360,9 @@ function TreeNode({
             e.stopPropagation();
             setContextMenuOpen(true);
           }}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setContextMenuOpen(true); } }}
+          // 기본 동작을 막는다(#4724 실 키 판): 막지 않으면 Chromium이 Enter의 활성화(keypress → click)를 **이미 첫 항목으로 옮겨 간 초점**에 보내
+          // 메뉴가 열리자마자 «이름 변경»이 눌렸다(jsdom은 keypress를 안 만들어 단위 시험이 못 봄).
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setContextMenuOpen(true); } }}
           className={cn('absolute right-2 top-1/2 -translate-y-1/2 rounded-sm transition', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreVertical className="size-3.5 text-muted-foreground" />
