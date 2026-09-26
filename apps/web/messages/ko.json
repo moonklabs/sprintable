@@ -4016,7 +4016,7 @@
     "paymentAttemptProcessing": "결제를 처리하고 있어요. 잠시만 기다려 주세요.",
     "paymentAttemptChecking": "이미 보낸 결제의 결과를 확인하고 있어요. 다시 결제하지 않아도 돼요.",
     "paymentAttemptCheckingLong": "확인이 평소보다 오래 걸리고 있어요. 이 창을 닫아도 괜찮아요 — 결과는 이 결제 화면에서 다시 볼 수 있어요.",
-    "paymentAttemptCheckingEscalated": "결과 확인이 늦어져 담당자에게 알렸어요. 다시 결제하지 않아도 돼요 — 확인되면 이 화면에 결과가 떠요.",
+    "paymentAttemptCheckingEscalated": "결과 확인이 늦어져 담당자에게 알렸어요. 확인되면 이 화면에 결과가 떠요.",
     "paymentAttemptFailed": "저희 쪽 문제로 결제를 마치지 못했어요.",
     "paymentAttemptReauthRequired": "카드 등록이 끝나기 전에 연결이 끊겼어요. 카드 인증부터 다시 해 주세요.",
     "paymentAttemptNotStarted": "결제가 시작되지 않았어요. 청구된 금액은 없어요 — 카드 인증부터 다시 해 주세요.",

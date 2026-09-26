@@ -497,6 +497,9 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
       expect(container.textContent, '알림 전').not.toContain(koMessages.pricingPlans.paymentAttemptCheckingEscalated);
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
       expect(container.textContent).toContain(koMessages.pricingPlans.paymentAttemptCheckingEscalated);
+      // 유나 4720 — 배너가 «다시 결제하지 않아도 돼요»를 두 번 말하지 않는다(첫 줄 `paymentAttemptChecking`에만).
+      const banner = container.querySelector('[data-payment-attempt-state="checking"]')?.textContent ?? '';
+      expect(banner.split('다시 결제하지 않아도 돼요').length - 1).toBe(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
       expect(container.textContent, '두 줄이 같이 서지 않는다').not.toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
       expect(container.querySelector('[data-payment-attempt-state="checking"]')?.closest('[data-variant]')?.getAttribute('data-variant') ?? 'info').not.toBe('destructive');
