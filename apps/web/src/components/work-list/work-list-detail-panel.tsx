@@ -24,6 +24,7 @@ import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { pickEulReulJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
+import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
 import { STATE_TEXT } from './work-list-row';
 import type { WorkListRow } from './derive-work-list';
 import {
@@ -66,6 +67,8 @@ interface TaskChecklistItem {
 // +context).
 interface ActivityLogItem {
   id: string;
+  // [SID:4311 PR 2] 같은 응답에 이미 실려 온다(activity-log-view.tsx::ActivityLogItem) — 행위자 꼬리(id 앞 8자)의 기준.
+  actor_id: string | null;
   actor_name: string | null;
   action: string;
   created_at: string;
@@ -490,6 +493,12 @@ export function WorkListDetailPanel({
     );
   }
 
+  // [SID:4311 PR 2] 이력 행의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 이력 안에서만).
+  // 이름 있으면 이름 · 행위자 있는데 이름 빔 = «이름 없는 구성원»(#4284 계약 · 활동 로그와 같음) · 둘 다 없음(시스템) = «누군가» 그대로.
+  // 조사(이/가)는 이 최종 라벨(꼬리 포함)의 끝소리를 따른다(유나).
+  const historyActorLabel = (log: ActivityLogItem) => (log.actor_name || (log.actor_id ? memberDisplayLabel(null, tCommon) : t('historyUnknownActor')));
+  const historyActorLabels = actorRowLabels((activityLogs ?? []).map((log) => ({ id: log.actor_id, label: log.actor_id ? historyActorLabel(log) : null })));
+
   return (
     <div className={cn('flex h-full min-h-0 flex-col', className)} data-testid="work-list-detail-panel">
       <div className="flex items-start justify-between gap-2 border-b border-border p-4">
@@ -732,7 +741,7 @@ export function WorkListDetailPanel({
             ) : (
               <ul className="space-y-2" data-testid="panel-history-list">
                 {activityLogs.map((log) => {
-                  const actorName = log.actor_name ?? t('historyUnknownActor');
+                  const actorName = (log.actor_id ? historyActorLabels.get(log.actor_id) : undefined) ?? historyActorLabel(log);
                   return (
                     <li key={log.id} className="text-xs">
                       <span className="text-foreground">

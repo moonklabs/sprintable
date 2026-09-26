@@ -311,6 +311,34 @@ describe('WorkListDetailPanel — 탭→데이터 매핑', () => {
     expect(list?.textContent).not.toContain('priority');
   });
 
+  // [SID:4311 PR 2] 이력 행의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자» · 조사는 꼬리 붙은 최종 라벨의 끝소리(유나 ·
+  // 숫자 받침 «…3이» · 영문 «…d가») · 같은 사람 여러 줄은 겹침 아님 · 행위자 있는데 이름 빔 = «이름 없는 구성원» · 행위자 없음 = «누군가».
+  it('이력 탭 — 같은 이름 둘은 꼬리로 갈리고 조사는 꼬리 끝소리를 따른다([SID:4311 PR 2])', async () => {
+    const now = new Date().toISOString();
+    mockFetchRoutes({
+      activityLogItems: [
+        { id: 'h1', actor_id: 'aaaa1113-1', actor_name: '송윤재', action: 'story_created', created_at: now, context: {} },
+        { id: 'h2', actor_id: 'bbbbbbbd-2', actor_name: '송윤재', action: 'story_created', created_at: now, context: {} },
+        { id: 'h3', actor_id: 'm-yuna', actor_name: '유나', action: 'story_created', created_at: now, context: {} },
+        { id: 'h4', actor_id: 'm-yuna', actor_name: '유나', action: 'story_created', created_at: now, context: {} },
+        { id: 'h5', actor_id: 'm-unnamed', actor_name: null, action: 'story_created', created_at: now, context: {} },
+        { id: 'h6', actor_id: null, actor_name: null, action: 'story_created', created_at: now, context: {} },
+      ],
+    });
+    await mountPanel();
+    await act(async () => { (container.querySelector('[data-testid="panel-tab-history"]') as HTMLElement).click(); });
+    const rows = [...container.querySelectorAll('[data-testid="panel-history-list"] li > span:first-child')].map((el) => el.textContent);
+    const unnamed = koMessages.common.memberUnnamed;
+    expect(rows).toEqual([
+      '송윤재 · aaaa1113이 만들었어요',
+      '송윤재 · bbbbbbbd가 만들었어요',
+      '유나가 만들었어요',
+      '유나가 만들었어요',
+      `${unnamed}이 만들었어요`,
+      '누군가가 만들었어요',
+    ]);
+  });
+
   it('이력 탭 — 0건이면 「아직 이력이 없어요」', async () => {
     mockFetchRoutes({ activityLogItems: [] });
     await mountPanel();
