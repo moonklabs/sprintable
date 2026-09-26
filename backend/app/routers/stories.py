@@ -2941,6 +2941,9 @@ async def add_comment(
     story = await repo.get(id)
     if not story:
         raise HTTPException(status_code=404, detail="Story not found")
+    # story #4351 PR B(가드 첫 스캔 · SEC-S8) — 형제 GET /{id}/comments · GET /{id}와 같은 막이. 없으면 같은 org 다른 프로젝트 스토리에
+    # id만 알면 댓글을 쓸 수 있었다(쓰기 IDOR). 접근 불가 = 없는 스토리와 같은 404.
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     created_by = await _resolve_team_member_id(auth, repo.org_id, db)
     created_by = await canonicalize_member_id(created_by, db)  # AC3-2d(1b): canonical 정규화
     comment = StoryComment(

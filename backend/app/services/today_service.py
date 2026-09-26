@@ -426,7 +426,7 @@ async def _resolve_completed_today(
 
 
 async def resolve_published_since(
-    session: AsyncSession, org_id: uuid.UUID, since: datetime,
+    session: AsyncSession, org_id: uuid.UUID, since: datetime, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> dict[str, Any]:
     """story #3978 — `_resolve_published_today`(story #3821 AC6)에서 추출한 공용
     판정. PublicationCommand엔 완료 시각 컬럼이 없어(status만 'completed')
@@ -435,6 +435,9 @@ async def resolve_published_since(
     갱신축). 「오늘」(자정 경계)·「결과」(기간 경계) 둘 다 같은 이 함수로 세서
     두 화면 숫자가 다른 판정식이 되지 않게 한다(페드루 PO 確定 2026-09-17,
     3977 그라운딩 갭 #1 처방)."""
+    from app.models.gate import Gate
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+
     rows = (await session.execute(
         select(ChannelConnection.channel, func.count(PublicationCommand.id))
         .join(ChannelConnection, ChannelConnection.id == PublicationCommand.destination)
@@ -442,6 +445,13 @@ async def resolve_published_since(
             PublicationCommand.org_id == org_id,
             PublicationCommand.status == _PUBLISHED_STATUS,
             PublicationCommand.updated_at >= since,
+            # story #4351 PR B(수 · PO 2026-09-26) — 연결은 org 수준이어도 합산에 접근 불가 프로젝트 발행이 섞이면 안 된다. 발행 명령은
+            # 항상 게이트에 매인다(gate_id NOT NULL) → 게이트 목록과 같은 규칙(org 수준 게이트는 센다). None = 전체 접근.
+            *([] if restricted_project_ids is None else [
+                PublicationCommand.gate_id.in_(
+                    select(Gate.id).where(Gate.org_id == org_id, ~gate_in_inaccessible_project_clause(restricted_project_ids))
+                )
+            ]),
         )
         .group_by(ChannelConnection.channel)
     )).all()
@@ -451,7 +461,7 @@ async def resolve_published_since(
 
 
 async def resolve_published_in_window(
-    session: AsyncSession, org_id: uuid.UUID, since: datetime,
+    session: AsyncSession, org_id: uuid.UUID, since: datetime, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> dict[str, Any] | None:
     """story #3978(「결과」 §7 갭 #1 처방) — `resolve_published_since`에 "채널 연결
     자체가 0"이면 null을 내는 계약을 얹은 래퍼. org_cost_summary.py::
@@ -465,18 +475,18 @@ async def resolve_published_in_window(
     )).first()
     if has_connection is None:
         return None
-    return await resolve_published_since(session, org_id, since)
+    return await resolve_published_since(session, org_id, since, restricted_project_ids=restricted_project_ids)
 
 
 async def _resolve_published_today(
-    session: AsyncSession, org_id: uuid.UUID, tz: str,
+    session: AsyncSession, org_id: uuid.UUID, tz: str, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> dict[str, Any]:
     """story #3821 AC6 — org_time.py::org_midnight_utc 재사용(query param tz를
     그대로 「경계 시간대」로 사용 — org 설정이 아니라 요청 tz, 카드 규격 그대로).
     story #3978부터는 공용 `resolve_published_since`에 위임(판정식 자체는
     무변경, 응답 byte 무변 — 기존 today 테스트 그대로 GREEN이어야 한다)."""
     since = org_midnight_utc(tz)
-    return await resolve_published_since(session, org_id, since)
+    return await resolve_published_since(session, org_id, since, restricted_project_ids=restricted_project_ids)
 
 
 async def _resolve_usage(session: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
@@ -583,14 +593,13 @@ async def build_today_snapshot(
     needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth)
     agent_progress = await _resolve_agent_progress(session, org_id, auth)
     completed_today = await _resolve_completed_today(session, org_id, auth, tz)
-    published_today = await _resolve_published_today(session, org_id, tz)
-    usage = await _resolve_usage(session, org_id)
     from app.services.project_auth import restricted_accessible_project_ids
 
-    today_results = await _resolve_today_results(
-        session, org_id, tz,
-        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(str(auth.user_id)), org_id),
-    )
+    # story #4351 PR B — 접근이 제한된 caller면 접근 가능 프로젝트 목록(owner/admin = None = 옛 동작). 이 화면의 수 셋이 같은 값을 쓴다.
+    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(auth.user_id)), org_id)
+    published_today = await _resolve_published_today(session, org_id, tz, restricted_project_ids=restricted)
+    usage = await _resolve_usage(session, org_id)
+    today_results = await _resolve_today_results(session, org_id, tz, restricted_project_ids=restricted)
     return {
         "needs_me": needs_me,
         "needs_me_count": needs_me_count,
@@ -599,4 +608,5 @@ async def build_today_snapshot(
         "published_today": published_today,
         "usage": usage,
         **today_results,
+        "scope": "org" if restricted is None else "accessible_projects",
     }

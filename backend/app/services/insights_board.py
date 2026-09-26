@@ -29,7 +29,7 @@ from operator import gt as _gt
 from operator import lt as _lt
 from typing import Any
 
-from sqlalchemy import Integer, Text, cast, exists, func, literal, select, union_all
+from sqlalchemy import Integer, Text, cast, exists, func, literal, or_, select, union_all
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,7 +121,10 @@ def _blog_external_url_expr(base_url: str | None):
     return literal(base_url) + literal("/") + SitePost.lang + literal("/blog/") + SitePost.slug
 
 
-def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime, include_deleted: bool = False):
+def _build_union(
+    *, org_id: uuid.UUID, channel: str | None, since: datetime, include_deleted: bool = False,
+    project_ids: list[uuid.UUID] | None,
+):
     """story #3734 AC3 후속(PO 라이브 판정 2026-09-09 10:16Z) — 보관(soft-delete)은
     초안(`SitePostDraft`/`ChannelPostDraft`)의 `deleted_at`만 찍고 발행 기록
     (`SitePost`/`ChannelPublication`)은 무변(설계대로, #3291 승인 불변화와 정합) —
@@ -218,19 +221,27 @@ def _build_union(*, org_id: uuid.UUID, channel: str | None, since: datetime, inc
         else:
             channel_pub_arm = channel_pub_arm.where(ChannelPublication.channel == channel)
 
+    # story #4351 PR B(⑤ 읽기 · SEC-S8) — 접근이 제한된 caller(project_ids가 목록)는 접근 가능 프로젝트 스토리의 발행만. 사이트 글은
+    # source_story_id가 없으면(스토리에 안 매인 글) org 수준이라 그대로. 이 CTE 하나를 행 · 숨김 수 · 조회 합계가 같이 쓴다(한 규칙).
+    if project_ids is not None:
+        accessible_stories = select(Story.id).where(Story.project_id.in_(project_ids))
+        site_post_arm = site_post_arm.where(
+            or_(SitePost.source_story_id.is_(None), SitePost.source_story_id.in_(accessible_stories))
+        )
+        channel_pub_arm = channel_pub_arm.where(Story.project_id.in_(project_ids))
     return union_all(site_post_arm, channel_pub_arm).cte("insights_board_rows")
 
 
 async def _count_hidden_by_archive(
-    db: AsyncSession, *, org_id: uuid.UUID, channel: str | None, since: datetime,
+    db: AsyncSession, *, org_id: uuid.UUID, channel: str | None, since: datetime, project_ids: list[uuid.UUID] | None,
 ) -> int:
     """story #3746(3734 §4-C, 유나 실측) — `SitePost` 유니크는 `(org_id, lang, slug)`
     (work_item_id 없음, site_post.py:20)라 초안 하나가 여러 lang의 발행 행에 걸린다
     — 그 초안 하나를 보관하면 join을 타는 모든 lang 행이 한꺼번에 기본 목록에서
     빠진다(#4087). 화면이 "N건 숨김"을 못 말하던 자리 — 포함/제외 COUNT 차이로 낸다.
     상태(status) 필터와는 무관하다(보관 자체가 뜻이라 그 축을 안 섞는다)."""
-    excluded_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=False)
-    included_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=True)
+    excluded_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=False, project_ids=project_ids)
+    included_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=True, project_ids=project_ids)
     excluded_count = (await db.execute(select(func.count()).select_from(excluded_cte))).scalar_one()
     included_count = (await db.execute(select(func.count()).select_from(included_cte))).scalar_one()
     return max(0, included_count - excluded_count)
@@ -238,6 +249,7 @@ async def _count_hidden_by_archive(
 
 async def _resolve_views_in_window(
     db: AsyncSession, *, org_id: uuid.UUID, since: datetime, channel: str | None, include_deleted: bool,
+    project_ids: list[uuid.UUID] | None,
 ) -> dict[str, Any] | None:
     """story #3978 CHANGES(페드루 PO 추가 AC, 2026-09-17) — "조회" 요약 카드용
     페이지 무관 전체 집계. `rows[]`는 limit+cursor 페이지네이션이라 FE가 그 위에서
@@ -246,7 +258,7 @@ async def _resolve_views_in_window(
     D+7 organic views만 합산한다(`organic_snapshots_only` — paid와 안 섞음, story
     #3806/#3809 원칙 재사용. status="captured"만 — 미측정 스냅샷은 0으로 안 지어낸다).
     captured_rows==0(창 안에 D+7 organic 캡처가 하나도 없음)이면 null."""
-    rows_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=include_deleted)
+    rows_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=include_deleted, project_ids=project_ids)
     total_rows = (await db.execute(select(func.count()).select_from(rows_cte))).scalar_one()
 
     views_col = cast(InsightSnapshot.normalized["views"].astext, Integer)
@@ -271,13 +283,16 @@ async def list_insights_board(
     status: str | None = None, sort: str = "published_at", sort_dir: str = "desc",
     cursor: str | None = None, limit: int = 50, now: datetime | None = None,
     work_item_id: uuid.UUID | None = None, include_deleted: bool = False, viewer_is_human: bool,
+    project_ids: list[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
+    """`project_ids`(story #4351 PR B) — 접근이 제한된 caller의 접근 가능 프로젝트(None = 전체 접근). 라우터가 넘긴다 — 서비스 직접
+    호출(테스트 · 내부)은 전체 접근 뜻이라 기본 None."""
     if window not in _WINDOW_DAYS:
         raise InsightsBoardInvalidWindowError(window)
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=_WINDOW_DAYS[window])
 
-    rows_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=include_deleted)
+    rows_cte = _build_union(org_id=org_id, channel=channel, since=since, include_deleted=include_deleted, project_ids=project_ids)
     query = select(rows_cte)
 
     # story #bf290f69(Phase2·BE, 페드루 PO 確定 2026-09-08) — story별 성과 대조. 기존
@@ -631,7 +646,7 @@ async def list_insights_board(
     # story #3746(3734 §4-C) — 기본(제외) 뷰에서만 뜻이 있다. include_deleted=True
     # 뷰(「보관됨 보기」 켠 상태)에서는 이미 다 보이므로 항상 0/무의미(null) — 안 지어낸다.
     hidden_count = None if include_deleted else await _count_hidden_by_archive(
-        db, org_id=org_id, channel=channel, since=since,
+        db, org_id=org_id, channel=channel, since=since, project_ids=project_ids,
     )
 
     # story #3583 — org당 최대 1행(ga4_connection.py unique 제약)이라 행마다가 아니라
@@ -644,12 +659,13 @@ async def list_insights_board(
     # story #3978(「결과」 §7 갭 #1 처방) — 「오늘」과 같은 판정 함수(resolve_published_
     # since)를 이 화면의 window 경계(같은 `since`)로 호출. 채널 연결 0이면 null(자체가
     # 없음)·있으면 발행 0건도 실 0(미측정 아님).
-    published_in_window = await resolve_published_in_window(db, org_id, since)
+    published_in_window = await resolve_published_in_window(db, org_id, since, restricted_project_ids=project_ids)
     views_in_window = await _resolve_views_in_window(
-        db, org_id=org_id, since=since, channel=channel, include_deleted=include_deleted,
+        db, org_id=org_id, since=since, channel=channel, include_deleted=include_deleted, project_ids=project_ids,
     )
 
     return {
+        "scope": "org" if project_ids is None else "accessible_projects",
         "rows": rows_out, "has_more": has_more, "next_cursor": next_cursor, "hidden_count": hidden_count,
         "ga4_connection_status": ga4_connection_status, "published_in_window": published_in_window,
         "views_in_window": views_in_window,

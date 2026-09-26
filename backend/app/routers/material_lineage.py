@@ -5,6 +5,7 @@ evidence.py::list_evidence와 동형 권한 축(org 멤버 누구나 GET, write 
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -45,6 +46,8 @@ class MaterialLineageEdgeView(BaseModel):
 
 
 class HookPerformanceView(BaseModel):
+    # story #4351 PR B — 합산 범위(접근이 제한된 caller = "accessible_projects" · owner/admin = "org").
+    scope: Literal["org", "accessible_projects"] = "org"
     hook_key: str
     variant_count: int
     snapshot_count: int
@@ -145,8 +148,14 @@ async def get_hook_performance(
 ) -> HookPerformanceView:
     """유나 성과 화면이 소비할 축 — doc c7991109 §3③. 미등록 hook_key도 에러 없이
     빈 요약(전부 None/0)을 낸다(compute_hook_performance 자체 계약, 지어내지 않는다)."""
-    summary = await compute_hook_performance(session, org_id=org_id, hook_key=hook_key)
-    return HookPerformanceView.from_summary(summary)
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    # story #4351 PR B — 접근이 제한된 caller는 접근 가능 프로젝트 변주만 합산(owner/admin = None = 옛 동작).
+    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
+    summary = await compute_hook_performance(session, org_id=org_id, hook_key=hook_key, project_ids=restricted)
+    view = HookPerformanceView.from_summary(summary)
+    view.scope = "org" if restricted is None else "accessible_projects"
+    return view
 
 
 @router.get("/material-performance", response_model=list[InsightSnapshotView])

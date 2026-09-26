@@ -267,3 +267,96 @@ async def test_material_performance_of_inaccessible_publication_is_not_looked_up
         owner = await _get(Session, seeded, path.format(derived["b"]), seeded["owner_user"])
         assert own.status_code == 200 and owner.status_code == 200
         assert looked_up == [derived["a"], derived["b"]], "자기 프로젝트 · owner는 조회한다(회귀 0)"
+
+
+async def test_comment_on_inaccessible_story_is_404_and_writes_nothing():
+    """가드 첫 스캔(PO 2026-09-26) — `POST /stories/{id}/comments`가 형제 GET과 달리 프로젝트 접근을 안 봤다(쓰기 IDOR). 접근 불가 스토리 =
+    없는 스토리와 같은 404 · 댓글 행 0 · 자기 프로젝트 스토리는 201."""
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import func, select
+
+    from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+    from app.main import app
+    from app.models.pm import StoryComment
+
+    async with _world() as (Session, seeded):
+        async def _db():
+            async with Session() as s:
+                yield s
+
+        async def _auth():
+            return AuthContext(
+                user_id=str(seeded["member_user"]), email="u@test",
+                claims={"app_metadata": {"org_id": str(seeded["org"]), "project_id": str(seeded["pa"])}},
+            )
+
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth
+        app.dependency_overrides[get_verified_org_id] = lambda: seeded["org"]
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                other = await c.post(f"/api/v2/stories/{seeded['story_b']}/comments", json={"content": "SECRET-B-comment"})
+                missing = await c.post(f"/api/v2/stories/{uuid.uuid4()}/comments", json={"content": "x"})
+                own = await c.post(f"/api/v2/stories/{seeded['story_a']}/comments", json={"content": "VISIBLE-A-comment"})
+        finally:
+            app.dependency_overrides.clear()
+        assert other.status_code == 404 == missing.status_code, (other.text[:200], missing.text[:200])
+        assert own.status_code == 201, own.text[:300]
+        async with Session() as s:
+            written = (await s.execute(
+                select(func.count()).select_from(StoryComment).where(StoryComment.story_id == seeded["story_b"])
+            )).scalar_one()
+        assert written == 0, "접근 불가 스토리에 댓글이 써졌다"
+
+
+async def test_insights_board_published_today_and_hook_performance_count_only_accessible_projects():
+    """⑤ 읽기 · 수 둘(PO 2026-09-26) — 인사이트 보드 행 · published_today · hook-performance가 접근 가능 프로젝트 발행만(제한 구성원) ·
+    범위 표기 scope · owner는 org 전체 그대로."""
+    from datetime import UTC, datetime
+
+    from app.models.publication_command import PublicationCommand
+    from tests.test_3502_insights_board import _seed_channel_publication, _seed_gate
+    from tests.test_3978_published_in_window import _seed_connection
+
+    async with _world() as (Session, seeded):
+        now = datetime.now(UTC)
+        async with Session() as s:
+            connection_id = await _seed_connection(s, seeded["org"])
+            for key in ("a", "b"):
+                gate = await _seed_gate(s, org_id=seeded["org"], work_item_id=seeded[f"story_{key}"])
+                pub = await _seed_channel_publication(
+                    s, org_id=seeded["org"], gate_id=gate.id, channel="threads", published_at=now,
+                    permalink=f"https://example.com/{'VISIBLE-A' if key == 'a' else 'SECRET-B'}-post",
+                )
+                s.add(PublicationCommand(
+                    id=uuid.uuid4(), org_id=seeded["org"], gate_id=gate.id, destination=connection_id,
+                    approved_version=uuid.uuid4(), operation="publish", status="completed",
+                    requested_by_member_id=seeded["member_id"], updated_at=now,
+                ))
+                evidence_id = await _seed_master_evidence(s, org_id=seeded["org"], work_item_id=seeded[f"story_{key}"])
+                await _seed_lineage(
+                    s, org_id=seeded["org"], source_evidence_id=evidence_id, work_item_id=seeded[f"story_{key}"],
+                    derived_id=pub.id, hook_key="hk-4351",
+                )
+            await s.commit()
+        seen = {}
+        for who in ("member_user", "owner_user"):
+            board = await _get(Session, seeded, f"/api/v2/organizations/{seeded['org']}/insights-board?window=30d", seeded[who])
+            today = await _get(Session, seeded, "/api/v2/today?tz=UTC", seeded[who])
+            hook = await _get(Session, seeded, "/api/v2/material-lineage/hook-performance?hook_key=hk-4351", seeded[who])
+            assert board.status_code == 200 and today.status_code == 200 and hook.status_code == 200, (
+                board.text[:300], today.text[:300], hook.text[:300],
+            )
+            seen[who] = {
+                "rows": len(board.json()["rows"]), "board_scope": board.json()["scope"], "secret_in_board": "SECRET-B" in board.text,
+                "published_today": today.json()["published_today"]["count"], "today_scope": today.json()["scope"],
+                "hook_variants": hook.json()["variant_count"], "hook_scope": hook.json()["scope"],
+            }
+        assert seen["member_user"] == {
+            "rows": 1, "board_scope": "accessible_projects", "secret_in_board": False,
+            "published_today": 1, "today_scope": "accessible_projects", "hook_variants": 1, "hook_scope": "accessible_projects",
+        }, seen
+        assert seen["owner_user"] == {
+            "rows": 2, "board_scope": "org", "secret_in_board": True,
+            "published_today": 2, "today_scope": "org", "hook_variants": 2, "hook_scope": "org",
+        }, seen

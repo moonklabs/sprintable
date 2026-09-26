@@ -106,7 +106,7 @@ async def test_resolve_published_since_boundary_inclusive():
                 s, org_id, conn_id, updated_at=since - timedelta(seconds=1),
             )  # 경계 직전 — 제외
 
-            result = await resolve_published_since(s, org_id, since)
+            result = await resolve_published_since(s, org_id, since, restricted_project_ids=None)  # 전체 접근(story #4351)
             assert result["count"] == 1
             assert result["by_channel"] == [{"channel_kind": "threads", "count": 1}]
             assert result["since"] == since
@@ -124,7 +124,7 @@ async def test_resolve_published_in_window_null_when_no_connections():
         async with Session() as s:
             org_id, _project_id = await _seed_org_project(s)
             result = await resolve_published_in_window(
-                s, org_id, datetime.now(timezone.utc) - timedelta(days=7),
+                s, org_id, datetime.now(timezone.utc) - timedelta(days=7), restricted_project_ids=None,
             )
             assert result is None
     finally:
@@ -142,7 +142,7 @@ async def test_resolve_published_in_window_zero_when_connected_but_nothing_publi
             org_id, _project_id = await _seed_org_project(s)
             await _seed_connection(s, org_id)  # 발행 이력은 안 심음
             result = await resolve_published_in_window(
-                s, org_id, datetime.now(timezone.utc) - timedelta(days=7),
+                s, org_id, datetime.now(timezone.utc) - timedelta(days=7), restricted_project_ids=None,
             )
             assert result == {"count": 0, "by_channel": [], "since": result["since"]}
     finally:
