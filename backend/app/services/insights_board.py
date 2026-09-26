@@ -701,7 +701,7 @@ async def _resolve_publication_work_item(
 
 async def create_publication_follow_up(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, kind: str,
-    title: str | None, note: str | None, requested_by_member_id: uuid.UUID,
+    title: str | None, note: str | None, requested_by_member_id: uuid.UUID, caller_user_id: uuid.UUID,
 ) -> dict[str, Any]:
     """AC2 — 표의 행에서 "재발행/수정/중단" 후속 작업을 만든다. PO 確定 — 그 작업은
     기존 원장의 Story(신규 마케팅 전용 객체 발명 0)다. "중단(stop)"은 예약을
@@ -719,6 +719,12 @@ async def create_publication_follow_up(
         select(Story).where(Story.id == work_item_id, Story.org_id == org_id)
     )).scalar_one_or_none()
     if story is None:
+        raise FollowUpPublicationNotFoundError(publication_id)
+    # story #4351 — 원 스토리의 프로젝트에 caller가 접근할 수 있어야 그 프로젝트에 후속 스토리를 만든다(쓰기 IDOR 차단 · SEC-S8).
+    # 접근 불가면 «없는 발행물»과 같은 404(존재 비노출).
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(db, caller_user_id, story.project_id, org_id):
         raise FollowUpPublicationNotFoundError(publication_id)
 
     from app.services.insight_snapshots import get_latest_insight_snapshot

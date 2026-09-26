@@ -147,6 +147,54 @@ async def test_get_insights_board_endpoint_invalid_window_422():
         await engine.dispose()
 
 
+async def _grant_project(session, org_id, user_id, project_id):
+    from sqlalchemy import select
+
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+
+    om_id = (await session.execute(
+        select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )).scalar_one()
+    session.add(ProjectAccess(id=uuid.uuid4(), project_id=project_id, org_member_id=om_id, permission="granted", role="member"))
+    await session.commit()
+
+
+@pytest.mark.anyio
+async def test_create_follow_up_without_access_to_the_story_project_is_404_and_creates_nothing():
+    """story #4351(쓰기 IDOR) — 같은 org여도 원 스토리의 프로젝트에 접근 못 하는 구성원은 그 프로젝트에 후속 스토리를 못 만든다.
+    «없는 발행물»과 같은 404(존재 비노출) · 스토리 0건."""
+    from app.main import app
+    from app.models.pm import Story
+    from sqlalchemy import func, select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, role="member")  # grant 없음
+            story_id = await _seed_story(s, org_id, project_id, title="SECRET-원문")
+            sp = await _seed_site_post(
+                s, org_id=org_id, work_item_id=story_id, slug="post-noaccess", title="FU",
+                published_at=datetime.now(timezone.utc) - timedelta(days=2),
+            )
+            before = (await s.execute(select(func.count()).select_from(Story).where(Story.org_id == org_id))).scalar_one()
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{sp.id}/follow-ups", json={"kind": "republish"},
+            )
+        assert r.status_code == 404, r.text
+        assert "SECRET-원문" not in r.text
+        async with Session() as s:
+            after = (await s.execute(select(func.count()).select_from(Story).where(Story.org_id == org_id))).scalar_one()
+        assert after == before, "접근 못 하는 프로젝트에 스토리가 만들어졌다"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_create_follow_up_creates_story_with_number_and_evidence():
     from app.main import app
@@ -159,6 +207,8 @@ async def test_create_follow_up_creates_story_with_number_and_evidence():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             human_id = await _seed_human(s, org_id, role="member")
+            # story #4351 — 후속 스토리는 원 스토리의 프로젝트에 만들어지므로 그 프로젝트 접근이 있어야 한다.
+            await _grant_project(s, org_id, human_id, project_id)
             story_id = await _seed_story(s, org_id, project_id, title="원문")
             sp = await _seed_site_post(
                 s, org_id=org_id, work_item_id=story_id, slug="post-fu", title="FU",

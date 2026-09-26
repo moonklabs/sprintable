@@ -325,6 +325,7 @@ async def create_publication_follow_up_endpoint(
         result = await create_publication_follow_up(
             db, org_id=org_id, publication_id=publication_id, kind=body.kind,
             title=body.title, note=body.note, requested_by_member_id=resolved.id,
+            caller_user_id=uuid.UUID(auth.user_id),
         )
     except FollowUpPublicationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"publication을 찾을 수 없습니다: {exc}") from exc
