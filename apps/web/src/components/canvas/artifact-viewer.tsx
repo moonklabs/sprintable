@@ -84,6 +84,12 @@ export function ArtifactViewer({
   // 받는 중은 따로 적지 않는다(«실물이 필요한데 아직 없음»이 곧 받는 중) — 한 번만 부르게 부른 버전은 ref에 적는다.
   const [fetchedVersions, setFetchedVersions] = useState<Record<number, ArtifactVersion | 'failed'>>({});
   const requestedVersionsRef = useRef(new Set<number>());
+  // 까디르 · 유나(4723) — «다시 시도»를 누르면 그 버튼이 사라지며(받는 중으로 바뀜) 키보드 초점이 body로 떨어졌다 → 스테이지 칸(받는 중 · 실물이
+  // 번갈아 서는 늘 있는 자리 · tabIndex -1)으로 옮긴다. 실물이 서면 그 자리에 남고, **다시 실패하면 새 «다시 시도» 버튼으로** 돌려준다
+  // (그사이 사용자가 초점을 다른 데로 옮겼으면 건드리지 않는다).
+  const stageRegionRef = useRef<HTMLDivElement>(null);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const retryFocusRef = useRef<number | null>(null);
   const loadVersionRef = useRef(loadVersion);
   useEffect(() => { loadVersionRef.current = loadVersion; });
   const listedVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
@@ -102,8 +108,20 @@ export function ArtifactViewer({
   }, [needsContent, listedVersion, fetched]);
   const activeVersion = !needsContent ? listedVersion : typeof fetched === 'object' ? fetched : undefined;
   const versionLoadFailed = needsContent && (fetched === 'failed' || !loadVersion);
+  useEffect(() => {
+    const n = retryFocusRef.current;
+    if (n === null || listedVersion?.version !== n) return;
+    if (versionLoadFailed) {
+      retryFocusRef.current = null;
+      if (document.activeElement === stageRegionRef.current) retryButtonRef.current?.focus();
+    } else if (activeVersion) {
+      retryFocusRef.current = null; // 실물이 섰다 — 초점은 스테이지 칸에 그대로
+    }
+  }, [versionLoadFailed, activeVersion, listedVersion]);
   // 유나(4723) — 한 번 실패한 버전이 «부른 적 있음» 표시 때문에 다시 안 불려 늘 «못 했어요»였다 → 그 버전만 표시를 지우고 다시 부른다.
   const retryVersion = (n: number) => {
+    retryFocusRef.current = n;
+    stageRegionRef.current?.focus();
     requestedVersionsRef.current.delete(n);
     setFetchedVersions((cur) => {
       const next = { ...cur };
@@ -255,13 +273,13 @@ export function ArtifactViewer({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
-          <div className="relative min-w-0 bg-muted/20 p-4">
+          <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className="relative min-w-0 bg-muted/20 p-4 outline-none">
             {!activeVersion && needsContent ? (
               // story #4343 — 이전 버전 실물을 받는 중 · 못 받음(빈 캔버스로 «그 버전이 비었다»는 거짓을 그리지 않는다).
               <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className="flex h-[320px] w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
                 <p role={versionLoadFailed ? 'alert' : 'status'}>{versionLoadFailed ? t('versionLoadFailed') : tc('loading')}</p>
                 {versionLoadFailed && loadVersion && listedVersion ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
+                  <Button ref={retryButtonRef} type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
                     {tc('retry')}
                   </Button>
                 ) : null}

@@ -329,4 +329,63 @@ describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(sto
     expect(stageHtml()).toContain('v2 본문');
     expect(container.querySelector('[data-version-loading]')).toBeNull();
   });
+
+  // 까디르(4723) — «다시 시도»가 사라지며 초점이 body로 떨어지던 것 → 스테이지 칸으로 옮기고, 실물이 서도 그 자리에 남는다.
+  it('다시 시도 → 초점은 body가 아니라 스테이지 칸 · 받는 중에도 · 실물이 선 뒤에도 그대로', async () => {
+    stubVersions({ failOnce: 2, hold: 2 });
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await act(async () => { heldVersion!(); });
+    await flush();
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('[data-version-loading="failed"] button')][0];
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+    await act(async () => { retry.click(); });
+    await flush();
+    const region = container.querySelector<HTMLElement>('[data-stage-region]')!;
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(region);
+    expect(container.querySelector('[data-version-loading="loading"]')).not.toBeNull(); // 받는 중(둘째 응답은 붙잡힘)
+    await act(async () => { heldVersion!(); });
+    await flush();
+    expect(stageHtml()).toContain('v2 본문');
+    expect(document.activeElement).toBe(region);
+  });
+
+  // 유나(4723) — 다시 실패하면 초점은 새 «다시 시도» 버튼으로 돌아온다(키보드로 곧바로 한 번 더).
+  it('다시 시도 → 또 실패 → 초점이 새 «다시 시도» 버튼으로 돌아옴(받는 중엔 스테이지 칸)', async () => {
+    stubVersions({ failVersion: 2, hold: 2 });
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await act(async () => { heldVersion!(); });
+    await flush();
+    const retryBtn = () => [...container.querySelectorAll<HTMLButtonElement>('[data-version-loading="failed"] button')][0];
+    const first = retryBtn();
+    first.focus();
+    await act(async () => { first.click(); });
+    await flush();
+    const region = container.querySelector<HTMLElement>('[data-stage-region]')!;
+    expect(document.activeElement).toBe(region);
+    await act(async () => { heldVersion!(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([2, 2]);
+    expect(retryBtn()).toBeTruthy();
+    expect(document.activeElement).toBe(retryBtn());
+  });
+
+  it('받는 중에 사용자가 초점을 다른 데로 옮겼으면, 또 실패해도 초점을 빼앗지 않는다', async () => {
+    stubVersions({ failVersion: 2, hold: 2 });
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await act(async () => { heldVersion!(); });
+    await flush();
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('[data-version-loading="failed"] button')][0];
+    retry.focus();
+    await act(async () => { retry.click(); });
+    await flush();
+    rowOf(3).focus(); // 받는 중에 레일의 다른 판으로 옮김
+    await act(async () => { heldVersion!(); });
+    await flush();
+    expect(document.activeElement).toBe(rowOf(3));
+  });
 });
