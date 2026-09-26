@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import Text, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -46,12 +46,15 @@ async def derive_conversation_ids_for_tagged_work_items(
 
     wi_types = {t for t, _ in pairs}
     wi_ids = {str(i) for _, i in pairs}
+    # story #4332 — 식은 인덱스 `ix_conversation_messages_work_item_tag`(0412)와 **같은 식**이어야 인덱스를 탄다. 예전엔 이 조회가
+    # conversation_messages를 전부 훑었다(dev 98,776행 · 69~169ms · 게이트 목록 요청마다). JSON 키는 리터럴 SQL로 박는다 —
+    # `msg_metadata["work_item"]["type"]`은 `metadata[$1] ->> $2`(첨자 + 바인드 키)로 나가 인덱스 식(`->` 연산자 · 상수 키)과 다른 식이라
+    # 플래너가 절대 못 맞춘다(events.py `_find_existing_stage_publish` · 0384와 같은 함정 · 같은 처방). 키는 코드 상수라 주입 위험 없음 ·
+    # 비교 값만 바인드. work item마다 최신 1건만(DISTINCT ON — 인덱스 순서 (type, id, created_at DESC) 그대로).
+    tag_type = literal_column("(conversation_messages.metadata->'work_item'->>'type')", Text)
+    tag_id = literal_column("(conversation_messages.metadata->'work_item'->>'id')", Text)
     tag_rows = (await session.execute(
-        select(
-            ConversationMessage.msg_metadata["work_item"]["type"].astext,
-            ConversationMessage.msg_metadata["work_item"]["id"].astext,
-            ConversationMessage.conversation_id,
-        )
+        select(tag_type, tag_id, ConversationMessage.conversation_id)
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
         .join(
             ConversationParticipant,
@@ -60,15 +63,14 @@ async def derive_conversation_ids_for_tagged_work_items(
         .where(
             Conversation.org_id == org_id,
             ConversationParticipant.member_id == member_id,
-            ConversationMessage.msg_metadata["work_item"]["type"].astext.in_(wi_types),
-            ConversationMessage.msg_metadata["work_item"]["id"].astext.in_(wi_ids),
+            tag_type.in_(wi_types),
+            tag_id.in_(wi_ids),
         )
-        .order_by(ConversationMessage.created_at.desc())
+        .distinct(tag_type, tag_id)
+        .order_by(tag_type, tag_id, ConversationMessage.created_at.desc())
     )).all()
     for wi_type, wi_id, conv_id in tag_rows:
-        key = (wi_type, uuid.UUID(wi_id))
-        # DESC 순으로 도착하므로 setdefault의 첫 값이 곧 최신(가장 최근 태그).
-        conversation_by_work_item.setdefault(key, conv_id)
+        conversation_by_work_item[(wi_type, uuid.UUID(wi_id))] = conv_id
     return conversation_by_work_item
 
 
