@@ -8,25 +8,32 @@
 // 이 가드: vitest가 도는 테스트 파일 전수(설정의 exclude와 같은 제외)에서 5초 미만 시한을 센다 — `it/test(이름, fn, 숫자)` ·
 // `it/test(이름, fn, { timeout })` · `describe(이름, { timeout }, fn)` · `vi.setConfig({ testTimeout })` · 설정 객체의 `testTimeout`.
 // 허용 목록은 없다(0) — 새 벽시계 예산은 결정적 양으로 바꿀 것.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 export const MIN_TIMEOUT_MS = 5000;
-// vitest.config.ts exclude와 같은 축.
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'e2e', '.qa-worktrees', 'connectors', '.git', '.turbo', 'coverage']);
+// vitest.config.ts exclude와 같은 축 — `**/x/**`(어느 깊이든)와 `x/**`(저장소 루트만)을 가른다. 예전엔 `connectors`를 어느 깊이에서나
+// 빼서 apps/web의 connectors 라우트 테스트 3개를 놓쳤다(vitest list 대조로 적발).
+const SKIP_ANY_DEPTH = new Set(['node_modules', 'dist', '.next', 'e2e', '.git', '.turbo', 'coverage']);
+const SKIP_AT_ROOT = new Set(['.qa-worktrees', 'connectors']);
 const TEST_FILE = /\.(test|spec)\.(ts|tsx|mts|js|mjs)$/;
 const TEST_CALLS = new Set(['it', 'test']);
 
-function testFiles(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    if (SKIP_DIRS.has(name)) continue;
-    const full = path.join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) testFiles(full, out);
-    else if (TEST_FILE.test(name)) out.push(full);
+/**
+ * 저장소가 **실제로 가진** 테스트 파일 — 심볼릭 링크는 따라가지 않는다. `supabase/migrations`는 git에 심볼릭 링크(모드 120000)로 들어 있고
+ * 대상(개발 머신의 절대 경로)이 CI 체크아웃에는 없다 — statSync로 따라가면 CI에서 ENOENT로 죽었다(PR 4701 CI · 로컬은 대상이 있어 통과).
+ * 링크 너머는 저장소 밖이거나 같은 파일의 다른 경로라 vitest가 도는 테스트 집합과 같다(그 링크 대상엔 .sql뿐 — 테스트 0).
+ */
+export function testFiles(dir: string, out: string[] = [], root = dir): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP_ANY_DEPTH.has(entry.name) || entry.isSymbolicLink() || (dir === root && SKIP_AT_ROOT.has(entry.name))) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) testFiles(full, out, root);
+    else if (entry.isFile() && TEST_FILE.test(entry.name)) out.push(full);
   }
   return out;
 }
@@ -107,6 +114,20 @@ describe('테스트 시한으로 성능 예산을 걸지 않는다(story #4333 �
     expect(count("it('a', () => {}, { timeout: 60_000 });")).toBe(0);
     expect(count('setTimeout(() => {}, 100);')).toBe(0);
     expect(count("expect(x).toBe(500);")).toBe(0);
+  });
+
+  it('⭐대상 없는 심볼릭 링크가 든 트리에서도 죽지 않고 돈다(CI 체크아웃 · supabase/migrations 모양)', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'wallclock-symlink-'));
+    try {
+      mkdirSync(path.join(root, 'pkg'), { recursive: true });
+      writeFileSync(path.join(root, 'pkg', 'a.test.ts'), "it('a', () => {}, 500);\n");
+      symlinkSync(path.join(root, '__no_such_target__'), path.join(root, 'dangling'));
+      const files = testFiles(root);
+      expect(files.map((f) => path.relative(root, f))).toEqual([path.join('pkg', 'a.test.ts')]);
+      expect(files.flatMap((f) => findWallclockBudgets(f, readFileSync(f, 'utf8')))).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('⭐실 저장소 — 5초 미만 시한 0(허용 목록 없음)', () => {
