@@ -44,19 +44,20 @@ describe('뷰포트 밖 드롭다운 부류 가드(story #4342)', () => {
     expect(scan('<div className="absolute left-3 top-full z-20 mt-2 w-56 rounded-lg border">')).toEqual([{ line: 1, ok: false }]);
   });
 
-  it('src 전체 .tsx — 한쪽 맞춤 고정 폭 top-full 드롭다운은 모두 밀어 넣기 훅 + 폭 상한(제외는 이유와 함께)', () => {
+  it('src 전체 .tsx — 한쪽 맞춤 고정 폭 top-full 드롭다운은 모두 밀어 넣기 훅 + 폭 상한(제외는 이유와 함께) · 같은 길로 흘린 양성 대조 하나만 걸림', () => {
     const files = walk(SRC);
     expect(files.length, '스캔 재료가 비지 않았다').toBeGreaterThan(300);
+    // 조용한 0 방지(PO 11:52Z · #4349) — 숫자 바닥(본 자리 ≥ 7) 대신, 걸리는 모양 픽스처(옛 목차 · 훅 · 폭 상한 없음) 하나를 **실제 파일과 같은 길**로 흘린다.
+    // 스캐너가 망가져 아무것도 못 보면 픽스처가 안 걸려 RED · 픽스처를 고치면 RED. 기록만: 이 판 src에서 본 자리 6곳(#4349가 트리 행 메뉴를 포털로 옮겨 7 → 6).
+    const FIXTURE = '__positive-control__/old-toc.tsx';
+    const fixtureSrc = '<div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl">';
+    const inputs: Array<[string, string]> = [...files.map((f) => [path.relative(SRC, f), fs.readFileSync(f, 'utf8')] as [string, string]), [FIXTURE, fixtureSrc]];
     const bad: string[] = [];
-    let seen = 0;
-    for (const f of files) {
-      const rel = path.relative(SRC, f);
-      for (const hit of scan(fs.readFileSync(f, 'utf8'))) {
-        seen += 1;
+    for (const [rel, src] of inputs) {
+      for (const hit of scan(src)) {
         if (!hit.ok && !EXEMPT[rel]) bad.push(`${rel}:${hit.line}`);
       }
     }
-    expect(seen, '가드가 실제로 자리를 보고 있다(목차 · 문서 담당 · 트리 메뉴 등)').toBeGreaterThanOrEqual(7);
-    expect(bad).toEqual([]);
+    expect(bad).toEqual([`${FIXTURE}:1`]);
   });
 });
