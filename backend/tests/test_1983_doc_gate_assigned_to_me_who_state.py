@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import uuid
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from tests.test_1974_gate_assigned_to_me import (
@@ -36,6 +38,13 @@ from tests.test_1974_gate_assigned_to_me import (
 )
 
 # ══════════════════ 순수 로직: WHO-only(_reason) vs FSM-aware(can_approve) 값 갈림 ══════════════════
+
+
+@pytest.fixture(autouse=True)
+def _full_access_caller_4351():
+    """story #4351 — test_1974와 같은 고정(이 파일은 그 헬퍼만 import해 autouse fixture가 안 따라온다)."""
+    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)):
+        yield
 
 
 @pytest.mark.anyio

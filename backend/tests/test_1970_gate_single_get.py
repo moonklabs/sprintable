@@ -31,6 +31,14 @@ _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATAB
 pytestmark = pytest.mark.destructive_schema
 
 
+@pytest.fixture(autouse=True)
+def _full_access_caller_4351():
+    """story #4351 — list_gates · 결재함이 제한된 caller를 접근 가능 프로젝트로 좁힌다. 이 파일의 관심은 assigned_to_me · can_approve ·
+    정렬 · project_id 채움이라 caller를 «전체 접근(None)»으로 고정한다(범위 규칙 자체는 test_4351_gates_scope_realdb.py 실 PG)."""
+    with patch("app.services.project_auth.restricted_accessible_project_ids", AsyncMock(return_value=None)):
+        yield
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
