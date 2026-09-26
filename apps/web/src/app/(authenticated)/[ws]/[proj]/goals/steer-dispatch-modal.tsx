@@ -13,6 +13,7 @@ import { resolveRecipientPrefill } from '@/lib/epic-steer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { memberRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
 
 interface AgentMember {
   id: string;
@@ -162,7 +163,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
                       }`}>
                         {on ? <Check className="size-3" strokeWidth={3} aria-hidden="true" /> : null}
                       </span>
-                      <span className="truncate">{rowLabels.get(a.id)}</span>
+                      <RowName label={rowLabels.get(a.id)} id={a.id} />
                     </button>
                   </li>
                 );

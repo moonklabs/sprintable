@@ -18,6 +18,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { RowName } from '@/components/shared/row-name';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -147,9 +148,11 @@ function FeedRow({
     <li className="flex items-start gap-3 rounded-lg px-3 py-2.5 transition hover:bg-muted/50">
       <ActorAvatar name={actorName} isSystem={item.actor_id === null} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-foreground">
-          <span className="font-medium">{actorLabel}</span>
-          <span className="text-muted-foreground"> · {verbCopy}</span>
+        {/* [SID:4311 PR 3 · 유나 잘림 순서] 곁글(동사) → 이름 순으로 잘리고 꼬리는 늘 보인다 — 동사는 큰 줄어듦 가중치(shrink-[999]) ·
+            이름은 RowName(이름만 truncate · 꼬리 shrink-0). 동사 앞 « · »는 줄바꿈 없는 공백(nowrap 머리 공백이 사라지지 않게). */}
+        <p className="flex min-w-0 items-baseline text-sm text-foreground">
+          <RowName className="font-medium" label={actorLabel} id={item.actor_id} />
+          <span className="min-w-0 shrink-[999] truncate text-muted-foreground">{`\u00a0· ${verbCopy}`}</span>
         </p>
         {item.object_type ? (
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">

@@ -14,6 +14,7 @@ import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { RowName } from '@/components/shared/row-name';
 
 interface Member {
   id: string;
@@ -157,7 +158,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                       {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} className="h-3 w-3" aria-hidden />}
                     </div>
                     {/* [SID:4286 · 유나 12:06Z] 라벨은 «이름 없는 구성원»(타입은 원 아이콘 · 표식) — 이름 없는 행이 둘 이상이면 겹친 행에만 «· ID 앞 8자»(memberRowLabels · 꼬리 규칙 한 곳). */}
-                    <span className="flex-1 truncate">{rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)}</span>
+                    <RowName className="flex-1" label={rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)} id={m.id} />
                     {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
                         신호 dot) 채택, soft-fill 폐지. */}
                     {m.type === 'agent' && <AgentIdentity />}

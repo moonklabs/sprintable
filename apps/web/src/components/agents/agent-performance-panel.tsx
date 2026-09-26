@@ -10,6 +10,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { memberRowLabels } from '@/lib/member-display';
+import { RowName } from '@/components/shared/row-name';
 
 interface AgentMember {
   id: string;
@@ -193,7 +194,7 @@ export function AgentPerformancePanel() {
                   <div key={agent.id} className="space-y-2 bg-background p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-foreground">{rowLabels.get(agent.id)}</div>
+                        <RowName className="text-sm font-semibold text-foreground" label={rowLabels.get(agent.id)} id={agent.id} />
                         {agent.rank != null && (
                           <div className="mt-0.5 flex items-center gap-1">
                             <Trophy className="size-3 text-warning-strong" />
@@ -264,7 +265,7 @@ export function AgentPerformancePanel() {
                       <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning-strong' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning-strong' : 'text-muted-foreground'}`}>
                         {idx + 1}
                       </span>
-                      <span className="flex-1 truncate text-sm font-medium text-foreground">{rowLabels.get(agent.id)}</span>
+                      <RowName className="flex-1 text-sm font-medium text-foreground" label={rowLabels.get(agent.id)} id={agent.id} />
                       <Badge variant={idx === 0 ? 'success' : 'chip'} className="shrink-0 text-xs">
                         {agent.balance} TJSB
                       </Badge>

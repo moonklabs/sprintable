@@ -214,7 +214,7 @@ describe('StuckHandoffSection — 승인자 동명이인([SID:4311 PR 2])', () =
       root.render(withIntl(<StuckHandoffSection storyId="story-1" memberMap={memberMap} />));
     });
     for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    const names = [...container.querySelectorAll('span.truncate')].map((el) => el.textContent);
+    const names = [...container.querySelectorAll('[data-row-name]')].map((el) => el.textContent);
     expect(names).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나']);
   });
 });

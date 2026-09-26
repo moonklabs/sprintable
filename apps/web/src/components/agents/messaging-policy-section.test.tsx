@@ -103,7 +103,7 @@ describe('MessagingPolicySection — 고르기 목록 이름 없는 둘([SID:428
     const addBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('구성원 추가'));
     expect(addBtn).toBeTruthy();
     await act(async () => { addBtn!.click(); });
-    const rows = Array.from(container.querySelectorAll('span.flex-1.truncate')).map((x) => x.textContent);
+    const rows = Array.from(container.querySelectorAll('[data-row-name]')).map((x) => x.textContent);
     expect(rows).toContain('이름 없는 구성원 · a2000000');
     expect(rows).toContain('이름 없는 구성원 · b3000000');
   });

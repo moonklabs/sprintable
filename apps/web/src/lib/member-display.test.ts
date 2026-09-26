@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { actorRowLabels, disambiguateFallbackLabels, memberDisplayLabel, memberLookup, memberNameById, memberOptionLabels, memberOrAgentLabel, memberRowLabels, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
+import { actorRowLabels, disambiguateFallbackLabels, splitRowLabel, memberDisplayLabel, memberLookup, memberNameById, memberOptionLabels, memberOrAgentLabel, memberRowLabels, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
   const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원', memberUnknown: '알 수 없는 구성원', agentUnnamed: '이름 없는 에이전트' };
@@ -302,3 +302,25 @@ describe('actorRowLabels([SID:4311 PR 2])', () => {
     expect(m.get('x-1')).toBe('처음');
   });
 });
+
+// [SID:4311 PR 3 · 유나 잘림 순서] 꼬리 붙은 라벨을 이름 · 꼬리로 — 행 id로 끝자리를 맞춰 가른다.
+describe('splitRowLabel([SID:4311 PR 3])', () => {
+  it('꼬리 붙은 라벨 → 이름 · 꼬리 · 꼬리 없는 라벨 · id 없음 → 이름만', () => {
+    expect(splitRowLabel('송윤재 · e75ca548', 'e75ca548-aaaa')).toEqual({ name: '송윤재', tail: 'e75ca548' });
+    expect(splitRowLabel('송윤재', 'e75ca548-aaaa')).toEqual({ name: '송윤재', tail: null });
+    expect(splitRowLabel('송윤재 · e75ca548', null)).toEqual({ name: '송윤재 · e75ca548', tail: null });
+  });
+
+  it('이름 안의 « · »나 다른 id의 꼬리는 가르지 않는다(행 id 끝자리만)', () => {
+    expect(splitRowLabel('팀 · 운영', 'e75ca548-aaaa')).toEqual({ name: '팀 · 운영', tail: null });
+    expect(splitRowLabel('송윤재 · 2fd14616', 'e75ca548-aaaa')).toEqual({ name: '송윤재 · 2fd14616', tail: null });
+    expect(splitRowLabel('이름 없는 구성원 · e75ca548', 'e75ca548-aaaa')).toEqual({ name: '이름 없는 구성원', tail: 'e75ca548' });
+  });
+
+  it('이름 + « · » + 꼬리 = 원래 라벨(글자 무변)', () => {
+    const label = '아주긴이름의구성원님이름이더길어요 · e75ca548';
+    const { name, tail } = splitRowLabel(label, 'e75ca548-aaaa');
+    expect(`${name} · ${tail}`).toBe(label);
+  });
+});
+

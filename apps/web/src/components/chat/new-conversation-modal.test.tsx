@@ -109,7 +109,7 @@ describe('NewConversationModal — 이름 없는 사람 둘은 서로 다른 두
       root.render(wrap(<NewConversationModal projectId={PROJECT_ID} onClose={() => {}} onCreated={() => {}} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    const rows = Array.from(document.body.querySelectorAll('span.flex-1.truncate')).map((x) => x.textContent);
+    const rows = Array.from(document.body.querySelectorAll('[data-row-name]')).map((x) => x.textContent);
     expect(rows).toContain('이름 없는 구성원 · a2000000');
     expect(rows).toContain('이름 없는 구성원 · b3000000');
   });

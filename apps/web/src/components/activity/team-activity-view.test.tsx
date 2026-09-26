@@ -168,5 +168,13 @@ describe('TeamActivityView — 행위자 동명이인([SID:4311 PR 2])', () => {
     expect(rows).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나', koMessages.teamActivity.system]);
     const initials = [...container.querySelectorAll('li > span[aria-hidden]')].map((el) => el.textContent);
     expect(initials.slice(0, 2)).toEqual(['송', '송']);
+    // 잘림 순서(유나) — 동사 → 이름 · 꼬리는 안 잘림: 줄은 flex · 동사 칸 min-w-0 truncate shrink-[999] · 이름만 truncate · 꼬리 shrink-0.
+    const line = container.querySelector('li p')!;
+    expect(line.className.split(' ')).not.toContain('truncate');
+    const verb = line.lastElementChild!;
+    expect(verb.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'shrink-[999]', 'truncate']));
+    const tail = line.querySelector('[data-row-name-part="tail"]')!;
+    expect(tail.textContent).toBe(' · e75ca548');
+    expect(tail.closest('.truncate')).toBeNull();
   });
 });

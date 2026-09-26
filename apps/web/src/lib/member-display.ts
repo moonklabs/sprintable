@@ -151,6 +151,16 @@ export function disambiguateFallbackLabels(
   return tailSharedFallbacks(items);
 }
 
+/** [SID:4311 PR 3 · 유나 잘림 순서] 꼬리 붙은 행 라벨을 이름 · 꼬리로 나눈다 — 좁은 한 줄에서 이름만 먼저 잘리고 꼬리(«· ID 앞 8자»)는 늘 보이게
+ * (RowName). 꼬리는 tailSharedFallbacks가 붙인 모양 그대로 `' · ' + id 앞 8자`라 행 id로 끝자리를 맞춰 가른다(이름 안의 « · »와 헷갈리지 않음).
+ * 꼬리 없는 라벨 · id 없음 → 이름만. */
+export function splitRowLabel(label: string, id: string | null | undefined): { name: string; tail: string | null } {
+  const tail = id ? id.slice(0, 8) : '';
+  const suffix = ` · ${tail}`;
+  if (tail && label.length > suffix.length && label.endsWith(suffix)) return { name: label.slice(0, -suffix.length), tail };
+  return { name: label, tail: null };
+}
+
 /** [SID:4311 PR 2] 이벤트 · 배지 줄(활동 피드 · 댓글 · 이력 · 막힘 모음 · 승인자 줄 · 회고 담당 칩)의 행위자 라벨 — 꼬리 규칙은 tailSharedFallbacks 한 곳.
  * 행이 아니라 **행위자 id마다 한 번** 센다(같은 사람이 여러 줄이어도 겹침 아님 · 유나). 행위자 없는 행(시스템 · id null)과 아직 라벨이 없는
  * 행(표를 받는 중 · 빈 글자)은 뺀다 — 호출부는 그 행에 원래 글자를 그대로 쓴다. 겹침 판정은 **지금 불러온 줄들** 안에서만(페이지 밖 동명이인은 모름). */

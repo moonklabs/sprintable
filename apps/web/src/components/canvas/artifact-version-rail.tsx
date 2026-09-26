@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
+import { RowName } from '@/components/shared/row-name';
 
 interface ArtifactVersionRailProps {
   artifact: VisualArtifact;
@@ -69,8 +70,11 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                       <span className="rounded bg-success/10 px-1 py-0.5 text-[9px] font-bold text-foreground">{t('versionAnchorTag')}</span>
                     ) : null}
                   </p>
-                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                    {authorName}{v.summary ? ` · ${v.summary}` : ''}
+                  {/* [SID:4311 PR 3 · 유나 1440 실측] «이름 · 꼬리 · 요약» 한 줄 — 요약 → 이름 순으로 잘리고 꼬리는 늘 보인다(예전 한 덩어리 truncate는
+                      13자 이상 이름에서 꼬리가 말줄임에 먹혔다). 요약은 큰 줄어듦 가중치 · 앞 « · »는 줄바꿈 없는 공백. */}
+                  <p className="mt-0.5 flex min-w-0 items-baseline text-[11px] text-muted-foreground">
+                    <RowName label={authorName} id={v.created_by} />
+                    {v.summary ? <span className="min-w-0 shrink-[999] truncate">{`\u00a0· ${v.summary}`}</span> : null}
                   </p>
                 </div>
               </button>
