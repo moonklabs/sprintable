@@ -14,6 +14,9 @@ async function renderKatex(latex: string, displayMode: boolean, fallbackError: s
       displayMode,
       throwOnError: true,
       output: 'html',
+      // story #4338 — 문서 글쓴이 입력이라 링크 · 임의 HTML 명령(`\href` · `\url` · `\htmlClass` 등)을 믿지 않는다. 기본값이 false여도
+      // 기본값에 기대지 않고 적는다(라이브러리 기본이 바뀌어도 이 자리는 그대로).
+      trust: false,
     });
     return { html };
   } catch (err) {

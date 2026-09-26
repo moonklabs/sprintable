@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import koMessages from '../../../messages/ko.json';
 
 vi.mock('next/navigation', async (importOriginal) => ({
@@ -107,17 +108,109 @@ describe('URL 속성 스킴 거름(XSS 표)', () => {
 });
 
 // ─── 가드 ───
-const SRC = readFileSync(path.resolve(__dirname, 'doc-content-renderer.tsx'), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+const SRC = readFileSync(path.resolve(__dirname, 'doc-content-renderer.tsx'), 'utf8');
 
-/** 렌더러가 «읽는» data-* 이름: getAttribute · 선택자(querySelector/All · closest) · props/rest 색인. 붙이는 쪽(setAttribute · 문자열 조립)은 뺀다. */
-function readDataAttributes(src: string): Set<string> {
-  const out = new Set<string>();
-  for (const m of src.matchAll(/getAttribute\('(data-[a-z-]+)'\)/g)) out.add(m[1]!);
-  for (const m of src.matchAll(/(?:querySelectorAll|querySelector|closest)(?:<[^>]*>)?\('([^']*)'\)/g)) for (const a of m[1]!.matchAll(/\[(data-[a-z-]+)/g)) out.add(a[1]!);
-  for (const m of src.matchAll(/(?:rest|props|p)\['(data-[a-z-]+)'\]/g)) out.add(m[1]!);
+// story #4338(까디르 4698 기록) — 정규식으로 홑따옴표 getAttribute · 선택자 · 대괄호 모양만 보던 것을 AST로: 겹따옴표 · 템플릿 ·
+// `dataset.fooBar` · hast `properties.dataFoo`/`properties['dataFoo']` · 구조분해까지 «읽기»로 센다. 붙이는 쪽(setAttribute ·
+// 문자열 조립)은 읽기가 아니다.
+interface AttrRead {
+  attr: string;
+  node: ts.Node;
+  /** 선택자에서 온 읽기면 그 선택자가 붙인 태그(`img[data-asset-id]` → img · 없으면 null). */
+  tag: string | null;
+}
+
+const kebab = (camelName: string) => camelName.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+const literalText = (n: ts.Node | undefined): string | null =>
+  n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) ? n.text : null;
+
+function contentAttributeReads(src: string): AttrRead[] {
+  const file = ts.createSourceFile('x.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const out: AttrRead[] = [];
+  const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+      const method = n.expression.name.text;
+      const arg = literalText(n.arguments[0]);
+      if (arg !== null && (method === 'getAttribute' || method === 'hasAttribute') && arg.startsWith('data-')) {
+        out.push({ attr: arg, node: n, tag: null });
+      }
+      if (arg !== null && ['querySelector', 'querySelectorAll', 'closest', 'matches'].includes(method)) {
+        for (const m of arg.matchAll(/(?:^|[\s>+~,(])([a-z][a-z0-9]*)?\[(data-[a-z-]+)/g)) out.push({ attr: m[2]!, node: n, tag: m[1] ?? null });
+      }
+    }
+    // x['data-foo'] · dataset['fooBar'] · properties['dataFoo']
+    if (ts.isElementAccessExpression(n)) {
+      const key = literalText(n.argumentExpression);
+      const owner = ts.isPropertyAccessExpression(n.expression) ? n.expression.name.text : ts.isIdentifier(n.expression) ? n.expression.text : '';
+      if (key?.startsWith('data-')) out.push({ attr: key, node: n, tag: null });
+      else if (key && owner === 'dataset') out.push({ attr: `data-${kebab(key)}`, node: n, tag: null });
+      else if (key && owner === 'properties' && /^data[A-Z]/.test(key)) out.push({ attr: kebab(key), node: n, tag: null });
+    }
+    // el.dataset.fooBar · node.properties.dataFoo
+    if (ts.isPropertyAccessExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+      const owner = n.expression.name.text;
+      const key = n.name.text;
+      if (owner === 'dataset') out.push({ attr: `data-${kebab(key)}`, node: n, tag: null });
+      if (owner === 'properties' && /^data[A-Z]/.test(key)) out.push({ attr: kebab(key), node: n, tag: null });
+    }
+    // const { 'data-foo': x } = props
+    if (ts.isBindingElement(n) && n.propertyName && ts.isStringLiteral(n.propertyName) && n.propertyName.text.startsWith('data-')) {
+      out.push({ attr: n.propertyName.text, node: n, tag: null });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(file);
   return out;
 }
+
+function readDataAttributes(src: string): Set<string> {
+  return new Set(contentAttributeReads(src).map((r) => r.attr));
+}
+
+const SAFE_HELPER: Record<'http' | 'data', string> = { http: 'safeHttpUrl', data: 'safeAttachmentDataUrl' };
+
+/** URL 속성 읽기 중 제 도우미를 안 거치는 것 — 허용: ① 도우미의 첫 인자(`?? ''` · 괄호 · `!` 사이만) ② if 조건 안의 참거짓 확인
+ * (`(… ?? '').trim()` 따위 — 값이 싱크로 가지 않음). 그 밖(변수에 담기 · href/src에 넣기 · 다른 함수로 넘기기)은 전부 위반. */
+function urlReadsOutsideHelper(src: string): string[] {
+  const urlKind = new Map(RENDERER_CONTENT_ATTRIBUTES.filter((e) => e.url).map((e) => [e.attr, e.url!] as const));
+  const bad: string[] = [];
+  for (const read of contentAttributeReads(src)) {
+    const kind = urlKind.get(read.attr);
+    if (!kind || read.tag !== null) continue; // 선택자는 값이 아니라 «이 속성이 있는 요소»를 고른다
+    let cur: ts.Node = read.node;
+    let parent = cur.parent;
+    while (parent && (ts.isParenthesizedExpression(parent) || ts.isNonNullExpression(parent) || ts.isAsExpression(parent)
+      || (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken && parent.left === cur))) {
+      cur = parent;
+      parent = cur.parent;
+    }
+    const viaHelper = parent && ts.isCallExpression(parent) && parent.arguments[0] === cur
+      && ts.isIdentifier(parent.expression) && parent.expression.text === SAFE_HELPER[kind];
+    let inCondition = false;
+    for (let a: ts.Node | undefined = read.node; a; a = a.parent) {
+      if (ts.isIfStatement(a)) {
+        inCondition = a.expression.pos <= read.node.pos && read.node.end <= a.expression.end;
+        break;
+      }
+      if (ts.isVariableDeclaration(a) || ts.isBinaryExpression(a) && a.operatorToken.kind === ts.SyntaxKind.EqualsToken || ts.isJsxAttribute(a)) break;
+      if (ts.isCallExpression(a) && a !== read.node && !(ts.isPropertyAccessExpression(a.expression) && a.expression.name.text === 'trim')) break;
+    }
+    if (!viaHelper && !inCondition) {
+      const { line } = read.node.getSourceFile().getLineAndCharacterOfPosition(read.node.getStart());
+      bad.push(`${read.attr}@${line + 1}`);
+    }
+  }
+  return bad;
+}
+
+/** 선택자에 태그를 붙여 콘텐츠 속성을 읽으면 그 태그가 목록의 요소여야 한다(`img[data-url]` 같은 목록 밖 요소 읽기 → 위반). */
+function readsOnUnlistedElement(src: string): string[] {
+  const elements = new Map(RENDERER_CONTENT_ATTRIBUTES.map((e) => [e.attr, e.elements] as const));
+  return contentAttributeReads(src)
+    .filter((r) => r.tag !== null && elements.has(r.attr) && !elements.get(r.attr)!.includes(r.tag))
+    .map((r) => `${r.tag}[${r.attr}]`);
+}
+
 const camel = (attr: string) => attr.replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase());
 function schemaMissing(schema: { attributes?: Record<string, readonly unknown[]> }): string[] {
   const missing: string[] = [];
@@ -140,6 +233,40 @@ describe('가드 — 렌더러가 읽는 속성 ↔ 두 목록 · 스키마', ()
 
   it('⭐마크다운 스키마가 콘텐츠 속성을 요소별로 통과시킨다(HTML 전용 제외)', () => {
     expect(schemaMissing(docMarkdownSanitizeSchema as unknown as { attributes?: Record<string, readonly unknown[]> })).toEqual([]);
+  });
+
+  it('⭐URL 속성(data-url · data-file-data)은 제 도우미를 거쳐서만 읽힌다 · 목록 밖 요소에서 안 읽힌다(story #4338)', () => {
+    expect(urlReadsOutsideHelper(SRC), '도우미 밖 URL 속성 읽기').toEqual([]);
+    expect(readsOnUnlistedElement(SRC), '목록 밖 요소에서 콘텐츠 속성 읽기').toEqual([]);
+  });
+
+  it('⭐양성 대조(story #4338): 읽는 모양마다 — 겹따옴표 · 템플릿 · dataset · properties · 대괄호 · 구조분해 — 싱크로 가면 RED', () => {
+    const sinks: Array<[string, string]> = [
+      ['겹따옴표 getAttribute', 'a.href = block.getAttribute("data-url") ?? "";'],
+      ['템플릿 getAttribute', 'a.href = block.getAttribute(`data-url`) ?? "";'],
+      ['dataset', 'a.href = block.dataset.url ?? "";'],
+      ['dataset 대괄호', "iframe.src = block.dataset['url'] ?? '';"],
+      ['hast properties', 'return <a href={String(node.properties.dataUrl)} />;'],
+      ['hast properties 대괄호', "const u = node.properties['dataFileData']; a.href = String(u);"],
+      ['props 대괄호', "return <iframe src={props['data-url']} />;"],
+      ['구조분해', "const { 'data-url': u } = props; a.href = u;"],
+      ['변수에 담았다가', "const raw = block.getAttribute('data-url') ?? ''; a.href = safeHttpUrl(raw) ?? '';"],
+      ['다른 도우미', "a.href = safeAttachmentDataUrl(block.getAttribute('data-url') ?? '') ?? '';"],
+    ];
+    for (const [label, snippet] of sinks) {
+      expect(urlReadsOutsideHelper(`function f(block, node, props, a, iframe) { ${snippet} }`), label).not.toEqual([]);
+    }
+    // 음성: 제 도우미의 첫 인자 · if 조건 안의 참거짓 확인은 통과.
+    expect(urlReadsOutsideHelper("function f(block, a) { if (!(block.getAttribute(\"data-url\") ?? '').trim()) return; a.href = safeHttpUrl(block.getAttribute('data-url') ?? '') ?? ''; }")).toEqual([]);
+    expect(urlReadsOutsideHelper("function f(block) { return safeAttachmentDataUrl(block.dataset['fileData'] ?? ''); }")).toEqual([]);
+    // 새 속성을 다른 모양으로 읽어도 «목록 밖에서 읽는 속성»에 잡힌다.
+    for (const src of ['el.getAttribute("data-new-a")', 'el.dataset.newB', "node.properties['dataNewC']", 'node.properties.dataNewD']) {
+      expect(readDataAttributes(src).size, src).toBe(1);
+    }
+    expect([...readDataAttributes('el.getAttribute("data-new-a"); el.dataset.newB; node.properties.dataNewD')].sort()).toEqual(['data-new-a', 'data-new-b', 'data-new-d']);
+    // 목록 밖 요소: data-url은 div에만 — span에서 고르면 RED.
+    expect(readsOnUnlistedElement("root.querySelectorAll('span[data-url]')")).toEqual(['span[data-url]']);
+    expect(readsOnUnlistedElement("root.querySelectorAll('div[data-url]')")).toEqual([]);
   });
 
   it('양성 대조: 새로 읽는 속성 · 스키마에서 빠진 속성을 가드가 잡는다', () => {
