@@ -178,4 +178,29 @@ describe('RetroSessionPage — 액션 담당 칩 동명이인([SID:4311 PR 2])',
     expect(chip('로그 보기')).toBe('송윤재 · e75ca548');
     expect(chip('표 정리')).toBe(koMessages.retro.actionUnassigned);
   });
+  // 유나 390 실측 — 꼬리 붙은 칩(nowrap)이 제목을 한두 글자 폭으로 짓눌렀다. 줄 넘김 틀: 행 flex-wrap · 제목 min-w-0 flex-1 basis-[12rem] break-keep ·
+  // 칩은 nowrap 그대로. jsdom은 배치를 계산하지 않아 틀(클래스)만 핀으로 박는다 — 390 폭에서 칩이 제목 아래로 내려가는지는 실브라우저 몫(PR 댓글 · 유나).
+  it('액션 행 줄 넘김 틀 — 행 flex-wrap · 제목 12rem 바탕 · 칩 nowrap(꼬리 온전)', async () => {
+    const { resetOrgMembersCacheForTests } = await import('@/hooks/use-member-name-fallback');
+    resetOrgMembersCacheForTests();
+    const session = { ...SESSION, actions: [
+      { id: 'act1', session_id: SESSION.id, title: '배포 체크리스트 정리', assignee_id: 'e75ca548-1', status: 'open', created_at: '2026-09-25T00:00:00Z' },
+      { id: 'act2', session_id: SESSION.id, title: '회고 공유', assignee_id: '2fd14616-2', status: 'open', created_at: '2026-09-25T00:00:00Z' },
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/api/retro-sessions/${SESSION.id}?project_id=`)) return { ok: true, json: async () => ({ data: session }) };
+      if (url === '/api/team-members') return { ok: true, json: async () => ({ data: [{ id: 'e75ca548-1', name: '송윤재', type: 'human' }, { id: '2fd14616-2', name: '송윤재', type: 'human' }] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const row = container.querySelectorAll('[data-testid="retro-action-row"]')[0]!;
+    const cls = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/);
+    expect(cls(row)).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'items-start', 'gap-x-2', 'gap-y-1']));
+    const title = [...row.querySelectorAll('p')].find((p) => p.textContent === '배포 체크리스트 정리');
+    expect(cls(title)).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'basis-[12rem]', 'break-keep']));
+    const chip = title?.nextElementSibling;
+    expect(chip?.textContent).toBe('송윤재 · e75ca548');
+    expect(cls(chip)).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
+  });
 });

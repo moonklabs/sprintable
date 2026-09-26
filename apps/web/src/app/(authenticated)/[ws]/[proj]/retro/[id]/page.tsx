@@ -875,7 +875,9 @@ export default function RetroSessionPage() {
                       {actions.map((action) => {
                         const isDone = action.status === 'done';
                         return (
-                          <div key={action.id} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background px-3 py-2">
+                          // [SID:4311 PR 2 · 유나 390 실측] 담당 칩(nowrap)에 꼬리가 붙으면 폭이 커져 제목이 한두 글자씩 여러 줄로 깨졌다 → 줄 넘김 허용:
+                          // 제목이 12rem보다 좁아지면 칩이 제목 아래 줄로 내려간다(칩은 nowrap 그대로 · 꼬리 온전) · 넓은 화면은 한 줄 그대로.
+                          <div key={action.id} data-testid="retro-action-row" className="flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg border border-border/60 bg-background px-3 py-2">
                             <button
                               type="button"
                               role="checkbox"
@@ -889,7 +891,7 @@ export default function RetroSessionPage() {
                             >
                               {isDone ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
                             </button>
-                            <p className={cn('flex-1 text-sm', isDone ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                            <p className={cn('min-w-0 flex-1 basis-[12rem] break-keep text-sm', isDone ? 'text-muted-foreground line-through' : 'text-foreground')}>
                               {action.title}
                             </p>
                             <Badge variant="chip">
