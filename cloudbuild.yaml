@@ -828,9 +828,12 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
         fi
-        # story #4332 — DB_TIMING_LOG_ENABLED(dev만, 사유는 docstring 아카이브).
+        # story #4332 — DB_TIMING_LOG_ENABLED(dev만, 사유는 docstring 아카이브). dev 아니면 명시 제거(추가형 함정).
+        REMOVE_ENV_VARS="REDIS_CONSUME_ENABLED"
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true"
+        else
+          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"
         fi
         # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만). 서사는
         # test_deploy_backend_redis_secret_conflict.py 아카이브(#3124/#3433 관례).
@@ -865,7 +868,7 @@ steps:
           --allow-unauthenticated \
           --update-env-vars="$${ENV_VARS}" \
           $${SECRETS_FLAG} \
-          --remove-env-vars=REDIS_CONSUME_ENABLED \
+          --remove-env-vars=$${REMOVE_ENV_VARS} \
           --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
