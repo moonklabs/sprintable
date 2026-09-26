@@ -140,7 +140,7 @@
     "components/docs/doc-gate-section.tsx::mb-4 max-h-[40vh] space-y-2 overflow-y-auto rounded-xl border border-border bg-muted/20 p-3",
     "components/docs/doc-gate-section.tsx::w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary",
     "components/docs/doc-toc.tsx::absolute right-0 top-full z-50 mt-1.5 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-background",
-    "components/docs/doc-tree.tsx::absolute right-0 top-full z-50 mt-1 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1",
+    "components/docs/doc-tree.tsx::z-50 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1",
     "components/docs/doc-tree.tsx::rounded-xl border border-border bg-background p-3",
     "components/docs/extensions/code-block-copy.tsx::focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-border bg-popover py-1",
     "components/docs/extensions/code-block-copy.tsx::rounded-xl border border-border bg-muted",

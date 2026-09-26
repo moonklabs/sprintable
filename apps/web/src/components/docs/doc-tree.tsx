@@ -14,7 +14,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
-import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { AnchoredPopover } from '@/components/shared/anchored-popover';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -168,8 +168,11 @@ function TreeNode({
   const isFolder = Boolean(doc.is_folder || hasChildren);
   const expanded = isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
-  // story #4342 — 늘 붙어 있고 클래스로만 숨는 메뉴라 열림 상태를 넘겨 열릴 때 다시 잰다(좁은 화면 뷰포트 안으로).
-  const menuClampRef = useViewportClampRef<HTMLDivElement>(contextMenuOpen);
+  // story #4349 AC5(유나 실측) — 행 메뉴(82px)가 목록(서랍 `overflow-y-auto` · 데스크톱 사이드바 `overflow-y-auto`) 아래 끝에서 세로로 잘려
+  // «이름 변경»만 보였다. 이제 열릴 때만 body로 포털(`AnchoredPopover`) → 행 오른쪽 끝에 맞춰 아래 · 모자라면 위로 · 가로는 4342 클램프.
+  // 포털이라 DOM 순서상 «⋮» 뒤가 아니다 → 열면 첫 항목으로 초점 · ↑↓ · Tab이 끝을 넘거나 Esc면 닫고 «⋮»로 돌려준다.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLDivElement>(null);
   // story #2416 — native confirm() 대체. 각 TreeNode가 자기 대상(doc)의 삭제-확認만 소유.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
@@ -211,6 +214,29 @@ function TreeNode({
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
+
+  useEffect(() => {
+    if (contextMenuOpen) menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [contextMenuOpen]);
+
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    const closeToTrigger = () => { setContextMenuOpen(false); menuTriggerRef.current?.focus(); };
+    if (e.key === 'Escape') {
+      // 서랍의 초점 트랩(document keydown · Esc = 서랍 닫기)까지 가지 않게 — 메뉴만 닫는다.
+      e.preventDefault();
+      e.stopPropagation();
+      closeToTrigger();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = items.length;
+      items[e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n]?.focus();
+    } else if (e.key === 'Tab' && (e.shiftKey ? i <= 0 : i === items.length - 1)) {
+      e.preventDefault();
+      closeToTrigger();
+    }
+  }, []);
 
   useEffect(() => {
     if (!contextMenuOpen) return;
@@ -267,7 +293,7 @@ function TreeNode({
 
   return (
     <div ref={setNodeRef} style={style}>
-      <div className="group relative">
+      <div ref={rowRef} className="group relative">
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
         {/* Drag handle — listeners isolated here to avoid blocking click */}
         <div
@@ -310,6 +336,7 @@ function TreeNode({
           </span>
         </button>
         <div
+          ref={menuTriggerRef}
           role="button"
           tabIndex={0}
           onClick={(e) => {
@@ -321,19 +348,22 @@ function TreeNode({
         >
           <MoreVertical className="size-3.5 text-muted-foreground" />
         </div>
-        <div
-          ref={(el) => { menuRef.current = el; menuClampRef(el); }}
-          data-dropdown-panel="doc-tree-menu"
-          className={cn(
-            'absolute right-0 top-full z-50 mt-1 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1',
-            contextMenuOpen ? 'block' : 'hidden',
-          )}
-        >
-          <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
-          {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
-          {isFolder && <button onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
-          <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
-        </div>
+        {contextMenuOpen && (
+          <AnchoredPopover
+            anchorRef={rowRef}
+            popoverRef={menuRef}
+            align="end"
+            gap={4}
+            data-dropdown-panel="doc-tree-menu"
+            onKeyDown={handleMenuKeyDown}
+            className="z-50 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1"
+          >
+            <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
+            {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
+            {isFolder && <button onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
+            <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
+          </AnchoredPopover>
+        )}
       </div>
 
       <ConfirmDialog

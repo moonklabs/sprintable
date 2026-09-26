@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AnchoredPopover } from './anchored-popover';
+import { AnchoredPopover, placeVertical } from './anchored-popover';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -36,14 +36,14 @@ afterEach(async () => {
 });
 
 // 트리거 wrapper의 ref가 **열릴 때만** 붙는 호출부 모양(축척 사다리와 같음) — 자식 ref가 먼저 붙는 순서를 그대로 재현한다.
-function Harness({ offsetX, initiallyOpen = false }: { offsetX?: number; initiallyOpen?: boolean; tick?: number }) {
+function Harness({ offsetX, initiallyOpen = false, align }: { offsetX?: number; initiallyOpen?: boolean; tick?: number; align?: 'start' | 'end' }) {
   const [open, setOpen] = useState(initiallyOpen);
   const anchorRef = useRef<HTMLDivElement>(null);
   return (
     <div className="flex overflow-x-auto">
       <div id="anchor" ref={open ? anchorRef : undefined} className="relative">
         <button type="button" id="trigger" onClick={() => setOpen((v) => !v)}>열기</button>
-        {open && <AnchoredPopover anchorRef={anchorRef} offsetX={offsetX} id="pop" role="tooltip" className="w-56">안내</AnchoredPopover>}
+        {open && <AnchoredPopover anchorRef={anchorRef} offsetX={offsetX} align={align} id="pop" role="tooltip" className="w-56">안내</AnchoredPopover>}
       </div>
     </div>
   );
@@ -106,5 +106,38 @@ describe('AnchoredPopover(story #4349)', () => {
     act(() => { root.render(<Harness initiallyOpen />); });
     expect(pop().style.visibility).toBe('');
     expect(pop().style.top).toBe('68px');
+  });
+
+  // story #4349 AC5(유나 실측) — 모바일 서랍 문서 트리 행 메뉴가 목록 아래 끝에서 세로로 잘렸다: 아래가 모자라면 위로 뒤집는다.
+  it('아래가 모자라고 위가 넓으면 위로 뒤집는다(트리거 위 8px · data-side=top) · 넉넉하면 아래(data-side=bottom)', () => {
+    act(() => { root.render(<Harness />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().dataset.side).toBe('bottom');
+    anchorRect = { left: 100, right: 180, top: 700, bottom: 720 }; // 뷰포트 768 · 팝오버 80 → 아래 32 · 위 684
+    act(() => { window.dispatchEvent(new Event('resize')); });
+    expect(pop().style.top).toBe('612px');
+    expect(pop().dataset.side).toBe('top');
+  });
+
+  it('align="end" — 팝오버 오른쪽 끝을 트리거 오른쪽 끝에(예전 right-0)', () => {
+    act(() => { root.render(<Harness align="end" />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().style.left).toBe('-44px'); // 180 − 224
+  });
+});
+
+describe('placeVertical — 세로 자리(뷰포트 768 · 여백 8)', () => {
+  it('아래에 다 들어가면 아래', () => {
+    expect(placeVertical({ top: 40, bottom: 60 }, 80, 768, 4)).toEqual({ top: 64, side: 'bottom' });
+  });
+  it('아래가 모자라고 위가 넓으면 위(트리거 위 틈)', () => {
+    expect(placeVertical({ top: 700, bottom: 720 }, 82, 768, 4)).toEqual({ top: 614, side: 'top' });
+  });
+  it('딱 맞으면 아래(경계: 아래 남는 칸 = 높이)', () => {
+    expect(placeVertical({ top: 600, bottom: 676 }, 80, 768, 4)).toEqual({ top: 680, side: 'bottom' }); // 768 − 8 − 680 = 80
+  });
+  it('어느 쪽도 다 못 담으면 넓은 쪽에 두고 [8, 768 − 8] 안으로 민다', () => {
+    expect(placeVertical({ top: 300, bottom: 320 }, 700, 768, 4)).toEqual({ top: 60, side: 'bottom' }); // 아래 436 ≥ 위 288 → 아래 · 324 → 760 − 700
+    expect(placeVertical({ top: 500, bottom: 520 }, 700, 768, 4)).toEqual({ top: 8, side: 'top' }); // 위 488 > 아래 236 → 위 · −204 → 8
   });
 });
