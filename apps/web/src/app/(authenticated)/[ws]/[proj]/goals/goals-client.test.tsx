@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -122,6 +123,20 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
     await mount();
     expect(container.querySelector('button[aria-label="목표 삭제"]')).toBeNull();
+  });
+
+  // [SID:4345] 목표 삭제는 `hidden group-hover:flex`였다 — display:none이라 터치에선 늘 없고 키보드 탭 순서에서도 빠졌다.
+  // 이제 HOVER_REVEAL(호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점) + 초점 링. jsdom은 CSS를 안 입혀서 클래스 모양으로 핀한다.
+  it('human 삭제 트리거 = HOVER_REVEAL · 초점 링 · hidden 0 · 탭 순서 안([SID:4345])', async () => {
+    stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
+    await mount();
+    const del = container.querySelector<HTMLButtonElement>('button[aria-label="목표 삭제"]')!;
+    const tokens = del.className.split(/\s+/);
+    for (const t of [...HOVER_REVEAL.split(' '), ...HOVER_REVEAL_FOCUS_RING.split(' ')]) expect(tokens, t).toContain(t);
+    expect(tokens).not.toContain('hidden');
+    expect(tokens).not.toContain('group-hover:flex');
+    expect(del.tabIndex).toBe(0);
+    expect(del.closest('.group')).not.toBeNull();
   });
 });
 

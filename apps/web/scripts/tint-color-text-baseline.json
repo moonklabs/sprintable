@@ -79,7 +79,8 @@
     "리터럴 키는 develop에 더는 없어 stale로 남고, 새 리터럴을 grandfather로 추가 등재한다",
     "(카디르 QA가 merge-base 대조로 \"신규 위반 아님, exact-string 미스매치\"로 판독 —",
     "PO 지시: 색 자체를 고치지 말 것, 그건 이 스토리의 \"변경 0\" 원칙 밖·별도 기존 채무).",
-    "story #2420 AC4/AC7(destructive 파일럿, 2026-09-01 유나) — destructive subtle 알파(bg-destructive/{5,8,10,20})+bg-destructive-tint 사용처를 불투명 토큰 bg-destructive-tint로 통일하며 이 baseline의 destructive 항목 11건을 알파→tint 스니펫으로 재키잉(순수 rename·신규 사이트 0·info/success/warning 무변경, PR diff로 검증). text-<X> on tint 잔존분(계열색 글자)은 이 파일럿 범위 밖(다음 판)이라 grandfather 유지 — 「더 늘지 않는다」만 보장."
+    "story #2420 AC4/AC7(destructive 파일럿, 2026-09-01 유나) — destructive subtle 알파(bg-destructive/{5,8,10,20})+bg-destructive-tint 사용처를 불투명 토큰 bg-destructive-tint로 통일하며 이 baseline의 destructive 항목 11건을 알파→tint 스니펫으로 재키잉(순수 rename·신규 사이트 0·info/success/warning 무변경, PR diff로 검증). text-<X> on tint 잔존분(계열색 글자)은 이 파일럿 범위 밖(다음 판)이라 grandfather 유지 — 「더 늘지 않는다」만 보장.",
+    "story #4345(2026-09-26) — story-detail-panel.tsx 첨부 삭제 ✕의 숨김 방식만 바꿨다(`hidden … group-hover:block` → HOVER_REVEAL · 호버 없는 기기에선 늘 · 탭 순서 안). 색(bg-destructive-tint text-destructive)은 그대로라 같은 행의 키를 새 리터럴로 바꿔 끼운다(키 수 무변 · 신규 사이트 0)."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::success::border-success bg-success-tint text-success",
@@ -98,7 +99,7 @@
     "components/docs/extensions/file-node.tsx::destructive::flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-destructive-tint text-destructive",
     "components/hypotheses/hypothesis-gate-badge.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-success",
     "components/inbox/approvals-queue.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground",
-    "components/kanban/story-detail-panel.tsx::destructive::h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95",
+    "components/kanban/story-detail-panel.tsx::destructive::h-auto min-h-0 min-w-0 absolute right-1 top-1 rounded bg-destructive-tint p-0.5 text-destructive hover:brightness-95",
     "components/nav/profile-menu.tsx::destructive::flex items-center gap-2 text-destructive focus:bg-destructive-tint focus:text-destructive",
     "components/settings/workflow-line-editor-section.tsx::success::gap-1 text-success hover:bg-success-tint hover:text-foreground",
     "components/storage/storage-delete-dialog.tsx::destructive::grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive-tint text-destructive",

@@ -9,6 +9,7 @@ import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
@@ -266,10 +267,17 @@ function TreeNode({
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
-        {/* Drag handle — listeners isolated here to avoid blocking click */}
+        {/* Drag handle — listeners isolated here to avoid blocking click.
+            story #4345(PO 08:45Z) — 마우스 전용 조작이다: 센서가 터치를 받지 않고(#1988 터치 스크롤 하이재킹 방지 · useTouchSafePointerSensor)
+            키보드 센서도 없다. 그래서 호버로만 보이게 두고(터치에 늘 보이면 안 끌리는 손잡이 · 펼침 화살표를 가림),
+            dnd-kit 속성이 주는 tabIndex 0 · «스페이스로 집기» 안내는 걷는다 — 초점이 가도 할 일이 0인 투명 칸이었다.
+            키보드로 순서 바꾸기는 따로 카드(«⋮» 메뉴엔 이동 항목이 없다). 가드 EXEMPT: hover-reveal.guard.test.ts. */}
         <div
           {...attributes}
           {...listeners}
+          tabIndex={-1}
+          aria-hidden="true"
+          data-drag-handle="mouse-only"
           className="absolute top-1/2 z-10 -translate-y-1/2 cursor-grab touch-none opacity-0 transition group-hover:opacity-100"
           style={{ left: `${Math.min(depth * 14 + 4, 68)}px` }}
         >
@@ -314,7 +322,7 @@ function TreeNode({
             setContextMenuOpen(true);
           }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setContextMenuOpen(true); } }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition group-hover:opacity-100"
+          className={cn('absolute right-2 top-1/2 -translate-y-1/2 rounded-sm transition', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreVertical className="size-3.5 text-muted-foreground" />
         </div>

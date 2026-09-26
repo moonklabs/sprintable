@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { Columns2, Columns3 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 
 // ─── Columns Block View ───────────────────────────────────────────────────────
 
@@ -50,16 +52,16 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
 
   return (
     <NodeViewWrapper as="div" className="not-prose my-4 group">
-      {/* Column switcher — visible on hover */}
+      {/* Column switcher — visible on hover · story #4345: 호버 없는 기기에선 늘 · 마우스는 호버 · 초점에서(HOVER_REVEAL) */}
       <div
         contentEditable={false}
-        className="mb-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+        className={cn('mb-1.5 flex items-center gap-1 transition-opacity', HOVER_REVEAL)}
       >
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground mr-1">{t('columnsLabel')}</span>
         <button
           type="button"
           onClick={() => switchTo(2)}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 2
               ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
@@ -70,7 +72,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         <button
           type="button"
           onClick={() => switchTo(3)}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 3
               ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'

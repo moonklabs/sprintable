@@ -16,6 +16,7 @@ import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
 import { MaterialChip } from '@/components/ui/material-chip';
 import { cn } from '@/lib/utils';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
@@ -592,8 +593,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 {story.story_points != null ? (
                   <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
                 ) : null}
-                {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
-                <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존).
+                    story #4345 — 기준을 폭(sm:)에서 «호버가 되는가»(pointer-fine)로: 640 이상 태블릿(터치)에서 늘 투명하던 것을 닫는다. */}
+                <span className={cn('flex items-center gap-1.5 transition', HOVER_REVEAL)}>
                   {lastExecution ? (
                     <span
                       title={[
@@ -615,7 +617,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       onClick={(e) => void handleKickoff(e)}
                       disabled={triggering}
                       title={t('kickoff')}
-                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+                      className={cn('flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition', HOVER_REVEAL_FOCUS_RING)}
                     >
                       {triggering ? (
                         <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />

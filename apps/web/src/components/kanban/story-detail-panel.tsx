@@ -37,6 +37,8 @@ import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsulePr
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
+import { cn } from '@/lib/utils';
+import { HOVER_REVEAL } from '@/lib/hover-reveal';
 import { actorRowLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
@@ -1879,7 +1881,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           type="button"
                           variant="ghost"
                           onClick={() => void handleRemoveAttachment(att.url)}
-                          className="h-auto min-h-0 min-w-0 absolute right-1 top-1 hidden rounded bg-destructive-tint p-0.5 text-destructive group-hover:block hover:brightness-95"
+                          className={cn('h-auto min-h-0 min-w-0 absolute right-1 top-1 rounded bg-destructive-tint p-0.5 text-destructive hover:brightness-95', HOVER_REVEAL)}
                           aria-label={t('attachmentDelete')}
                         >
                           <X className="size-3" />
@@ -1943,7 +1945,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                             // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는
                             // 이 테마에 매핑이 없는 no-op. trust-seal.tsx 선례로 hover 상태도
                             // 테마별 반전(dark:hover:).
-                            className="h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 hidden items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-white dark:hover:text-proof-bg group-hover:flex"
+                            className={cn('h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-white dark:hover:text-proof-bg', HOVER_REVEAL)}
                             aria-label={t('removeItemAction', { item: label.name })}
                           >
                             <X className="size-2" />
@@ -2077,10 +2079,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-warning/20', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-warning/20', HOVER_REVEAL)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2098,10 +2100,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2119,10 +2121,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2140,10 +2142,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className="h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>

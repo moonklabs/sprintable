@@ -51,6 +51,7 @@ import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { GoalsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -678,7 +679,8 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 type="button"
                 aria-label={t('deleteGoal')}
                 onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
-                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors"
+                // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점에서(HOVER_REVEAL).
+                className={`flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

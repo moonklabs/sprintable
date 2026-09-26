@@ -1,6 +1,8 @@
 'use client';
 
 import { Pencil, AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { HOVER_REVEAL } from '@/lib/hover-reveal';
 import { isUntitledSlug } from './lib/doc-slug';
 
 interface DocUrlChipProps {
@@ -47,7 +49,8 @@ export function DocUrlChip({ slug, onEdit, onDeriveFromTitle, labels }: DocUrlCh
           onClick={onEdit}
           aria-label={labels.editUrl}
           title={labels.editUrl}
-          className="rounded opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border group-hover:opacity-100"
+          // story #4345 — 호버 없는 기기에선 늘 보인다(예전엔 초점에서만 · 터치는 늘 투명).
+          className={cn('rounded transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border', HOVER_REVEAL)}
         >
           <Pencil className="size-3" />
         </button>
