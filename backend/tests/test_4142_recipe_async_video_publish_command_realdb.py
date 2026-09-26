@@ -32,6 +32,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import run_worker_tick
+
 from tests.recipe_reviewed_draft import reviewed_draft_body_via, reviewed_draft_for
 from fastapi import BackgroundTasks
 
@@ -475,11 +477,23 @@ async def test_ac1_video_approval_creates_pending_command_not_false_published():
             await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
             await s.commit()
 
+        # story #4336 — 승인 전이는 공급자를 부르지 않고 명령을 «지금 due»로만 둔다(게이트 publishing · 이벤트 0).
+        async with Session() as s:
+            queued = (await s.execute(
+                select(PublicationCommand).where(PublicationCommand.gate_id == scoped_gate_id)
+            )).scalar_one()
+            assert (queued.status, queued.next_attempt_at) == ("pending", None)
+            assert (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.gate_id == scoped_gate_id)
+            )).scalar_one_or_none() is None, "승인 전이가 공급자를 불렀다"
+            assert (await s.get(Gate, gate_d_id)).publish_outcome == "publishing"
+        await run_worker_tick(Session)  # 워커 첫 틱 — 컨테이너 생성(비동기 미디어는 여기서 container_created)
+
         async with Session() as s:
             publication = (await s.execute(
                 select(ChannelPublication).where(ChannelPublication.gate_id == scoped_gate_id)
             )).scalar_one_or_none()
-            assert publication is not None, "승인 즉시 컨테이너 생성 자체가 안 일어났다"
+            assert publication is not None, "워커 첫 틱에서 컨테이너 생성 자체가 안 일어났다"
             assert publication.status == "container_created", (
                 f"REELS는 첫 호출에서 container_created여야 한다: {publication.status!r}"
             )
@@ -551,10 +565,11 @@ async def test_ac2_worker_tick_completes_video_publish_and_emits_stage_event_onc
             await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
             await s.commit()
 
+        await run_worker_tick(Session)  # story #4336 — 승인은 대기열만 · 첫 틱이 컨테이너를 만든다
         async with Session() as s:
             # due 시각 경과 후 워커 tick(instagram_sandbox get_container_status는
             # 항상 즉시 FINISHED — 실측: instagram_sandbox_publish.py:135-139).
-            counts = await process_due_publication_commands(s, now=datetime.now(timezone.utc) + timedelta(minutes=10))
+            counts = await process_due_publication_commands(s, now=datetime.now(timezone.utc) + timedelta(minutes=10), tick_budget_seconds=1740)
             assert counts["completed"] == 1, f"워커가 완료로 안 셈: {counts}"
 
         async with Session() as s:
@@ -701,6 +716,7 @@ async def test_ac4d_text_only_draft_still_completes_synchronously_with_completed
                 json={"status": "approved", "note": "ⓓ 발행 승인", "evidence_viewed": True, **(await reviewed_draft_body_via(Session, org_id=org_id, work_item_id=story_id))},
             )
             assert r.status_code == 200, r.text
+        await run_worker_tick(Session)  # story #4336 — 승인은 대기열만, 발행은 워커 한 틱
 
         async with Session() as s:
             publication = (await s.execute(

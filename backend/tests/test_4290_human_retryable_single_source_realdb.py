@@ -15,6 +15,8 @@ import os
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_0e960006_command_id_exposure import (
     _client_for,
     _create_draft_submit_approve,
@@ -106,7 +108,7 @@ async def _world(Session):
     ):
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
         async with _client_for(app) as client:
-            r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r_pub.status_code == 200, r_pub.text
             command_id = (r_pub.json().get("data") or r_pub.json())["command_id"]
     return app, org_id, draft_id, command_id, human_id, agent_id

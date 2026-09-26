@@ -256,6 +256,11 @@ function stubFetch(opts: {
   // 재사용, threadMaxSegments>0일 때만 발동)가 반영할 서버 값 — draftAfterRetry와
   // 동형 관례. thread_segments 배열의 실측 갱신을 재현하는 용도.
   draftAfterPublish?: Record<string, unknown>;
+  // story #4336 — 발행이 «발행 중»으로 답한 뒤 초안 다시 읽기마다 차례로 덮을 서버 값(워커가 끝낸 상태 재현).
+  detailAfterPublishSequence?: Record<string, unknown>[];
+  // story #4336 — 발행 취소(워커 예산 밖) 응답 · 성공 뒤 서버 값.
+  onCancelPublish?: () => { status: number; body: unknown };
+  draftAfterCancelPublish?: Record<string, unknown>;
   // story #3815(Phase3·3-5 PR4, 페드루 PO 確定 2026-09-12) — YouTube 능력 플래그 3종
   // (thread_max_segments와 동형 관례, 기본값은 기존 시나리오 전부 회귀 0이 되도록
   // false/미지원).
@@ -267,6 +272,8 @@ function stubFetch(opts: {
   const draftDetail: Record<string, unknown> = { ...DRAFT_DETAIL, ...opts.draftDetail };
   if (opts.omitGateStatusKey) delete draftDetail.gate_status;
   let currentDraftDetail = draftDetail;
+  let published = false;
+  const detailSequence = [...(opts.detailAfterPublishSequence ?? [])];
   let rejectNextDraftRefetch = false;
   let commentReplyRetried = false;
   let currentImages = opts.initialImages ?? [];
@@ -280,6 +287,7 @@ function stubFetch(opts: {
         // 「다음」 이 URL 호출(=재조회)만 네트워크단 reject한다(최초 페이지 로드
         // 호출은 그대로 성공).
         if (rejectNextDraftRefetch) { rejectNextDraftRefetch = false; throw new Error('network down'); }
+        if (published && detailSequence.length) currentDraftDetail = { ...currentDraftDetail, ...detailSequence.shift() };
         // story #4290 — 서버처럼 command_retryable을 싣는다(사람이 볼 때 `viewer_can_retry`: dead_letter · blocked(일시정지 제외) → 참).
         // 테스트가 값을 직접 주면 그 값.
         const served = 'command_retryable' in currentDraftDetail ? currentDraftDetail
@@ -492,6 +500,13 @@ function stubFetch(opts: {
         };
         const ok = result.status < 400;
         if (opts.draftAfterPublish) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterPublish };
+        published = true;
+        return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-publish` && init?.method === 'POST') {
+        const result = opts.onCancelPublish?.() ?? { status: 200, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: 'CANCELLED_BY_HUMAN' } };
+        const ok = result.status < 400;
+        if (ok || result.status === 409) currentDraftDetail = { ...currentDraftDetail, ...opts.draftAfterCancelPublish };
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
       }
       if (url === `/api/organizations/${ORG_ID}/channel-posts/drafts/${DRAFT_ID}/cancel-scheduled` && init?.method === 'POST') {
@@ -2053,7 +2068,94 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     expect(container.querySelector('[data-testid="channel-post-publish-result"]')).toBeNull();
     expect(container.textContent).not.toContain(koMessages.content.publishFailed);
-    expect(container.querySelector('[data-testid="channel-post-awaiting-container-notice"]')).not.toBeNull();
+    // story #4336 — 즉시 발행은 이제 워커가 돌린다: processing 응답은 «발행하고 있어요»(유나) 한 줄.
+    expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')?.textContent).toBe(koMessages.content.channelPostsPublishingNotice);
+  });
+
+  it('⭐#4336 — «발행 중»이면 초안을 다시 읽어(5초) 워커가 끝낸 결과로 넘어간다', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      stubFetch({
+        draftDetail: { gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1' },
+        onPublish: () => ({ status: 200, body: { version_id: 'v1', scheduled: false, processing: true } }),
+        detailAfterPublishSequence: [
+          { processing_kind: 'publishing', command_status: 'pending' },
+          { processing_kind: null, command_status: 'completed', publication_status: 'published', published_at: '2026-09-26T00:00:00Z', external_id: 'media-1', permalink: 'https://threads.net/@x/1', publication_id: 'pub-1' },
+        ],
+      });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).not.toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      await flush();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐#4336 — 워커 예산 밖(WORKER_TICK_BUDGET_TOO_SMALL)이면 «발행 중» 대신 사유 줄(경고) + 발행 취소 · 발행 버튼 잠김', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL', processing_kind: null,
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-worker-budget-notice"]');
+    expect(notice?.textContent).toContain(koMessages.content.channelPostsPublishStuckNotice);
+    expect(notice?.className).toContain('warning');
+    expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).toBeNull();
+    expect(notice?.querySelector('[data-testid="channel-post-cancel-publish-button"]')?.textContent).toBe(koMessages.content.channelPostsCancelPublishCta);
+    expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    [200, 'success', 'channelPostsCancelPublishSuccess'],
+    [409, 'too_late', 'channelPostsCancelPublishTooLate'],
+  ] as const)('⭐#4336 — 발행 취소 %s → %s 줄(정보) · 경고 줄 대신', async (status, result, key) => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL',
+      },
+      onCancelPublish: () => (status === 200
+        ? { status, body: { command_id: 'cmd-1', status: 'cancelled', reason_code: 'CANCELLED_BY_HUMAN' } }
+        : { status, body: { detail: { code: 'PUBLICATION_ALREADY_STARTED', current_status: 'in_progress' } } }),
+      draftAfterCancelPublish: status === 200
+        ? { command_status: 'cancelled', command_reason_code: 'CANCELLED_BY_HUMAN' }
+        : { command_status: 'in_progress', command_reason_code: null, processing_kind: 'publishing' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-cancel-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const line = container.querySelector('[data-testid="channel-post-cancel-publish-result"]');
+    expect(line?.getAttribute('data-result')).toBe(result);
+    expect(line?.textContent).toBe(koMessages.content[key]);
+    expect(container.querySelector('[data-testid="channel-post-worker-budget-notice"]')).toBeNull();
+  });
+
+  it('⭐#4336 — 발행 취소가 그 밖 실패면 경고 줄은 그대로 · «취소를 하지 못했어요» 한 줄 더', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL',
+      },
+      onCancelPublish: () => ({ status: 500, body: { detail: 'boom' } }),
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    await act(async () => { (container.querySelector('[data-testid="channel-post-cancel-publish-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const notice = container.querySelector('[data-testid="channel-post-worker-budget-notice"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.querySelector('[data-testid="channel-post-cancel-publish-failed"]')?.textContent).toBe(koMessages.content.channelPostsCancelPublishFailed);
   });
 
   it('⭐#3539 — processing:true 뒤 발행 버튼이 비활성으로 바뀐다(오버레이 규칙대로·다시 눌러 CHANNEL_PUBLISH_IN_PROGRESS로 꼬이는 것 방지)', async () => {
@@ -5318,6 +5420,38 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     await flush();
 
     expect((submittedBody as { estimated_cost_minor?: number } | null)?.estimated_cost_minor).toBe(500);
+  });
+
+  it('⭐#4336 조건 2 — 워커가 남긴 오류 본문(command_failure_detail)이면 즉시 발행 422와 같은 예산 배너(4값)가 선다', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'blocked_unapproved', command_reason_code: 'GENERATION_BUDGET_EXCEEDED',
+        command_failure_detail: { code: 'GENERATION_BUDGET_EXCEEDED', limit_minor: 100000, spent_minor: 90000, estimated_cost_minor: 20000, remaining_minor: 10000 },
+      },
+      genBudgetOk: { limit_minor: 100000, spent_minor: 90000, remaining_minor: 10000, currency: 'KRW', period: 'month' },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const banner = container.querySelector('[data-testid="generation-budget-exceeded-banner"]');
+    expect(banner?.textContent).toContain(koMessages.content.generationBudgetExceededFact);
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-limit"]')?.textContent).toBe('100,000원');
+    expect(container.querySelector('[data-testid="generation-budget-exceeded-remaining"]')?.textContent).toBe('10,000원');
+  });
+
+  it('⭐#4336 조건 2 — 워커가 남긴 글자 수 초과 본문도 422와 같은 보간 문장', async () => {
+    stubFetch({
+      draftDetail: {
+        gate_status: 'approved', sealed_content_sha256: 'h1', body_sha256: 'h1',
+        command_status: 'dead_letter', failure_kind: 'needs_check', command_reason_code: 'CHANNEL_TEXT_TOO_LONG',
+        command_failure_detail: { code: 'CHANNEL_TEXT_TOO_LONG', message: 'too long', max_length: 500, current_length: 517 },
+      },
+    });
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    expect(container.textContent).toContain(
+      koMessages.content.channelPostsTextTooLong.replace('{max}', '500').replace('{current}', '517'),
+    );
   });
 
   it('⭐422 GENERATION_BUDGET_EXCEEDED — 전역 배너에 4값이 보간되고 입력값은 지워지지 않는다', async () => {

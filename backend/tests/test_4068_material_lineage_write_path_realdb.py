@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -225,9 +227,10 @@ async def _submit_and_publish(
 
     _setup_org_scoped_app(app, Session, org_id, user_id=human_user_id, agent=False)
     async with _client_for(app) as client:
-        r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish", json={})
+        r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish", json={})
         assert r_publish.status_code == 200, r_publish.text
-        return uuid.UUID(r_publish.json()["publication_id"])
+        # story #4336 — 요청은 «발행 중», 발행은 워커 한 틱 뒤 초안 상세에 남는다.
+        return uuid.UUID((await draft_detail(client, org_id, draft_id))["publication_id"])
 
 
 @pytest.mark.anyio

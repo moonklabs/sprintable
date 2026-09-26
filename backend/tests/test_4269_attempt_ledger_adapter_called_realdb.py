@@ -14,6 +14,8 @@ import uuid
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_4264_failure_classification_realdb import (  # noqa: F401 — 픽스처(파일 단위 autouse)를 그대로 쓴다
     _configure_secrets,
     _dispose_global_engine_after_test,
@@ -65,7 +67,7 @@ async def _publish_once(monkeypatch, *, exc_factory, wrote: bool, stale_mark: bo
 
     from app.models.publication_attempt import PublicationAttempt
     from app.models.publication_command import PublicationCommand
-    from app.routers import channel_posts as router_module
+    import app.services.channel_posts as channel_posts_module
     from app.services.provider_call_mark import mark_provider_call
     from tests.test_620beefc_channel_post_image_upload import (
         _approve_gate_directly,
@@ -79,7 +81,8 @@ async def _publish_once(monkeypatch, *, exc_factory, wrote: bool, stale_mark: bo
             mark_provider_call()  # `provider_client`의 쓰기 요청 훅이 하는 일과 같다
         raise exc_factory()
 
-    monkeypatch.setattr(router_module, "publish_channel_post_draft", _fake_publish)
+    # story #4336 — 공급자 호출은 워커가 한다(요청은 preflight · 대기열). 워커가 부르는 서비스 함수를 바꿔 끼운다.
+    monkeypatch.setattr(channel_posts_module, "publish_channel_post_draft", _fake_publish)
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
@@ -101,10 +104,10 @@ async def _publish_once(monkeypatch, *, exc_factory, wrote: bool, stale_mark: bo
                     await _approve_gate_directly(s, uuid.UUID(r_submit.json()["gate_id"]))
                 if stale_mark:
                     mark_provider_call()  # 같은 컨텍스트에서 앞 일이 켜 둔 표시 — 라우터가 발행 전에 지워야 한다
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         finally:
             app.dependency_overrides.clear()
-        assert r.status_code >= 400, r.text
+        assert r.status_code == 200 and r.json()["processing"] is True, r.text
         async with Session() as s:
             rows = (await s.execute(
                 select(PublicationAttempt.adapter_called, PublicationAttempt.result_code).where(
@@ -121,8 +124,8 @@ async def _publish_once(monkeypatch, *, exc_factory, wrote: bool, stale_mark: bo
 @pytest.mark.parametrize(("case", "exc_factory", "wrote", "expected"), [
     ("게시 한도 GET 뒤 초과 — 쓰기 0", _rate_limited, False, (False, "CHANNEL_RATE_LIMITED")),
     ("동시 요청 진 쪽 — 이긴 쪽 실패 재알림 · 이 요청 호출 0", _token_expired, False, (False, "CHANNEL_TOKEN_EXPIRED")),
-    # 라우터 장부는 공급자 코드 대신 `CHANNEL_PUBLISH_PROVIDER_ERROR`로 적는다(워커는 공급자 코드) — 4269 범위 밖, PR 본문에 기록.
-    ("쓰기 요청 뒤 공급자 오류", _provider_error, True, (True, "CHANNEL_PUBLISH_PROVIDER_ERROR")),
+    # story #4336 — 공급자 호출은 이제 워커만 해서 장부는 공급자 코드를 적는다(예전 라우터 장부의 `CHANNEL_PUBLISH_PROVIDER_ERROR` 뭉뚱그림 사라짐).
+    ("쓰기 요청 뒤 공급자 오류", _provider_error, True, (True, "X_POST_TWEET_MISSING_ID")),
     ("쓰기 요청 뒤 토큰 만료 응답", _token_expired, True, (True, "CHANNEL_TOKEN_EXPIRED")),
 ])
 async def test_the_immediate_publish_ledger_says_whether_this_request_wrote_to_the_provider(monkeypatch, case, exc_factory, wrote, expected):
@@ -137,15 +140,16 @@ async def test_a_mark_left_by_earlier_work_does_not_leak_into_this_attempt(monke
 
 
 def test_every_failure_ledger_write_in_the_router_reads_the_one_mark():
-    """AC2 — 판정 사본 0: 즉시 발행 라우터의 발행 호출 뒤 실패 기록은 전부 `provider_call_marked()`를 읽고(코드별로 True/False를
-    손으로 박지 않는다), 성공(published) 하나만 True. 워커 쪽은 #4272가 같은 표시를 읽는다."""
+    """AC2 — 판정 사본 0: 즉시 발행 라우터의 검사(preflight) 실패 기록은 전부 `provider_call_marked()`를 읽는다(코드별로 True/False를
+    손으로 박지 않는다). story #4336 — 라우터는 이제 공급자를 부르지 않는다(성공 기록은 워커 몫 · #4272가 같은 표시를 읽는다)."""
     import re
     from pathlib import Path
 
     src = (Path(__file__).resolve().parents[1] / "app/routers/channel_posts.py").read_text()
-    start = src.index("reset_provider_call_mark()\n    try:\n        row = await publish_channel_post_draft(")
-    end = src.index('await _record_this_attempt(approval_check="ok", adapter_called=True, result_code="published")', start)
+    start = src.index("reset_provider_call_mark()\n    try:\n")
+    end = src.index("# 공급자 호출 전 검사를 통과했다", start)
+    assert "publish_channel_post_draft(" not in src[start:end], "라우터가 요청 안에서 공급자 호출 함수를 부른다"
     chain = src[start:end]
     writes = re.findall(r"_record_this_attempt\(approval_check=\"[a-z_]+\", adapter_called=([^,]+),", chain)
-    assert len(writes) >= 15, writes  # 스캔이 실제 갈래들을 읽는지(공허 통과 방지)
+    assert len(writes) >= 10, writes  # 스캔이 실제 갈래들을 읽는지(공허 통과 방지)
     assert set(writes) == {"provider_call_marked()"}, writes

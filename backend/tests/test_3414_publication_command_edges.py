@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_3414_publication_command_core import (
     _client_for,
     _create_draft_submit_approve,
@@ -64,7 +66,7 @@ def _configure_secrets(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_publish_immediate_rate_limited_returns_retry_after_header_and_command_state():
+async def test_publish_immediate_rate_limited_leaves_the_command_pending_with_its_retry_time():
     """페드루 리뷰 블로커E·F — 즉시 발행이 429(quota)로 실패하면 응답에 Retry-After
     헤더(실값)가 실리고, body(error 객체)에도 command_status·next_attempt_at이 함께
     나가 사람이 "언제 자동 재시도되는지" 알 수 있는지."""
@@ -92,14 +94,18 @@ async def test_publish_immediate_rate_limited_returns_retry_after_header_and_com
         with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 300))):
             _setup_org_scoped_app(_app, Session, org_id, user_id=human_id)
             async with _client_for(_app) as client:
-                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                detail = await draft_detail(client, org_id, draft_id)
 
-        assert r_pub.status_code == 429, r_pub.text
-        assert r_pub.headers.get("retry-after") == "300", dict(r_pub.headers)
-        body = r_pub.json()
-        error = body.get("error") or body
-        assert error["command_status"] == "pending"
-        assert error["next_attempt_at"] is not None
+        # story #4336 — 게시 한도 조회는 공급자 호출이라 워커가 만난다: 요청은 «발행 중», 명령은 pending + 다음 자동 재시도 시각
+        # (예전 즉시 응답의 429 · Retry-After 대신 — 사람은 초안 상세에서 «언제 다시 되는지»를 본다).
+        assert r_pub.status_code == 200 and r_pub.json()["processing"] is True, r_pub.text
+        assert detail["command_status"] == "pending"
+        assert detail["command_reason_code"] == "CHANNEL_RATE_LIMITED"
+        from datetime import UTC, datetime
+
+        retry_at = datetime.fromisoformat(detail["next_retry_at"])
+        assert 200 < (retry_at - datetime.now(UTC)).total_seconds() <= 300, detail["next_retry_at"]
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

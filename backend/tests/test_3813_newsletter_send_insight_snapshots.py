@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_e4fc29fa_site_post_orchestration import _seed_org, _session_factory, _seed_default_role, _seed_agent
 from tests.test_3475_publishing_metrics import _seed_human, _client_for, _setup_org_scoped_app
 from tests.test_3806_ads_boost_gate import _approve_gate, _seed_publication
@@ -142,7 +144,7 @@ async def test_publishing_stibee_campaign_does_not_schedule_insight_snapshot():
             async with Session() as s:
                 await _approve_gate_directly(s, gate_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r_publish.status_code == 200, r_publish.text
             return uuid.UUID(r_publish.json()["version_id"])
 
@@ -206,7 +208,7 @@ async def test_send_completion_schedules_insight_snapshots_1d_7d():
             await _approve_gate_directly(s, gate_id)
 
         async with _client_for(app) as client:
-            r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         version_id = uuid.UUID(r_publish.json()["version_id"])
 
         async with Session() as s:
@@ -288,7 +290,7 @@ async def test_captured_stibee_sandbox_snapshot_has_fixed_opens_delivered_clicks
         async with Session() as s:
             await _approve_gate_directly(s, gate_id)
         async with _client_for(app) as client:
-            r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         version_id = uuid.UUID(r_publish.json()["version_id"])
 
         async with Session() as s:

@@ -1695,6 +1695,92 @@ async def _maybe_record_material_lineage_for_publication(
     ))
 
 
+async def preflight_channel_post_publish(db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID) -> None:
+    """story #4336(PO 05:24Z) — 즉시 발행 요청 안에서 하는 **공급자 호출 전 검사**(DB 읽기뿐 · 네트워크 호출 0). 통과하면 라우터가
+    명령을 대기열에 두고, 워커가 `publish_channel_post_draft`로 같은 검사를 다시 한 뒤 공급자를 부른다(그 사이 예산 · 할당량 · 연결이
+    바뀌었을 수 있다). 예외는 `publish_channel_post_draft`와 **같은 타입 · 같은 값**이라 라우터의 응답 계약(422 예산 숫자 · YouTube
+    풀리는 시각 · 409 봉인 · 423 일시정지 …)이 그대로다. 같은 도우미를 부르므로 검사 내용도 같다(순서만 요청 앞으로).
+
+    여기 없는 것: 공급자 게시 한도 조회(`get_publishing_limit` — 네트워크) → 429는 워커가 명령 상태(백오프)로 남긴다."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+
+    from app.services.external_publish_pause import ExternalPublishPausedError, is_external_publish_paused
+
+    paused, pause_reason = await is_external_publish_paused(db, org_id=org_id)
+    if paused:
+        raise ExternalPublishPausedError(reason=pause_reason)
+
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    gate = await find_gate_slot_with_pr_fallback(
+        db, org_id=org_id, work_item_id=draft.work_item_id, work_item_type="story",
+        gate_type=_EXTERNAL_PUBLISH_GATE_TYPE, pr_number=None, repo_full_name=None,
+        scope_key=str(draft.connection_id),
+    )
+    if gate is None or gate.status != "approved":
+        raise ExternalPublishGateNotApprovedError(
+            gate_id=gate.id if gate is not None else None,
+            status=gate.status if gate is not None else None,
+        )
+    versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
+    if not versions:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    latest = versions[-1]
+    if gate.sealed_content_sha256 is None:
+        raise ChannelPostSealMissingError(gate_id=gate.id)
+    if gate.sealed_content_sha256 != latest.body_sha256:
+        raise ChannelPostReapprovalRequiredError(gate_id=gate.id)
+
+    from app.services.generation_budget import check_generation_budget_or_raise
+
+    await check_generation_budget_or_raise(db, org_id=org_id, estimated_cost_minor=gate.sealed_estimated_cost_minor)
+
+    rows = list((await db.execute(
+        select(ChannelPublication).where(ChannelPublication.gate_id == gate.id, ChannelPublication.version_id == latest.id)
+    )).scalars().all())
+    published = sum(1 for r in rows if r.status == "published")
+    is_x = draft.channel in ("x", "x_sandbox")
+    thread_segments = list((latest.channel_payload or {}).get("thread") or []) if is_x else []
+    total_segments = 1 + len(thread_segments)
+    if published >= total_segments:
+        return  # 이미 전부 나갔다 — 워커가 공급자 호출 없이 기존 행을 돌려준다(멱등).
+
+    content_rules_row = await get_org_content_rules(db, org_id=org_id)
+    if is_x:
+        from app.services.x_publish_budget import check_api_usage_budget_or_raise, get_api_usage_unit_cost_minor
+
+        unit = get_api_usage_unit_cost_minor(content_rules_row.rules if content_rules_row else None)
+        # 단일 글은 한 건 · 스레드는 이번에 실제로 보낼 남은 조각 수만큼(`_publish_x_thread_draft`와 같은 셈).
+        await check_api_usage_budget_or_raise(db, org_id=org_id, estimated_cost_minor=unit * (total_segments - published))
+    if thread_segments:
+        _validate_thread_segments(channel=draft.channel, thread=thread_segments)
+
+    connection = await _get_active_connection(db, org_id=org_id, connection_id=draft.connection_id)
+    if decrypt_for_use(connection) is None:
+        raise ChannelConnectionNotActiveError(connection_id=connection.id)
+
+    utm_rules = (content_rules_row.rules or {}).get("utm_rules") if content_rules_row else None
+    tagged_link = (
+        build_tagged_link(channel=draft.channel, link_url=latest.link_url, draft_id=draft.id, utm_rules=utm_rules)
+        if latest.link_url else None
+    )
+    _validate_text_length(channel=draft.channel, text=f"{latest.text}\n\n{tagged_link}" if tagged_link else latest.text)
+    _validate_youtube_metadata(channel=draft.channel, channel_payload=latest.channel_payload or {})
+
+    if draft.channel in ("youtube", "youtube_sandbox"):
+        from app.services.channel_post_videos import get_channel_post_video_for_version
+
+        if await get_channel_post_video_for_version(db, version_id=latest.id) is not None:
+            from app.core.config import settings as _settings
+            from app.services.youtube_quota import check_youtube_quota_or_raise
+
+            await check_youtube_quota_or_raise(
+                db, channel=draft.channel, estimated_units=_settings.youtube_quota_cost_insert_units,
+            )
+
+
 async def publish_channel_post_draft(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, published_by_member_id: uuid.UUID,
 ) -> ChannelPublication:
@@ -2647,43 +2733,15 @@ async def publish_recipe_approved_draft(
             await db.commit()
             return
 
-        publication = await publish_channel_post_draft(
-            db, org_id=gate.org_id, draft_id=target_draft.id, published_by_member_id=publisher_member_id,
-        )
+        # story #4336(PO 03:58Z (b)) — 승인 전이 안에서 공급자를 부르지 않는다(영상 · 스레드면 이 승인 요청이 수 분을 넘겼다).
+        # 명령을 «지금 due»로 두면 cron 워커가 1분 안에 집어 발행하고, 완료 순간 레시피 published stage 이벤트도 워커가 낸다
+        # (#4093 경로 — 예전 컨테이너 대기 갈래가 이미 그렇게 끝났다). 게이트 결과는 비최종값 «publishing»까지만.
+        from app.services.publication_command import requeue_for_human_publish
 
-        if publication.status != "published":
-            # story #4142 AC1 — 비동기 컨테이너(container_created)가 아직 안 끝났다.
-            # 즉시-발행 라우터(channel_posts.py:2303-2316)와 동형: command를 pending
-            # (다음 tick +30s)으로 남기고, gate.publish_outcome은 닫힌 어휘의 비최종값
-            # ("publishing")으로 — «발행됨»이라고 아직 말하지 않는다. published stage
-            # 이벤트도 여기선 안 낸다 — 실제 완료는 워커(#4093 경로,
-            # resolve_recipe_context_for_scheduled_publication이 이 command가 어느
-            # 레시피에 속하는지 draft.connection_id로 다시 찾아 그 시점에 낸다).
-            _now = datetime.now(timezone.utc)
-            command.status = "pending"
-            command.next_attempt_at = _now + timedelta(seconds=30)
-            command.last_error = None
-            command.failure_kind = None
+        if not requeue_for_human_publish(command) and command.status == "completed":
+            gate.publish_outcome = "published"
+        else:
             gate.publish_outcome = "publishing"
-            await db.commit()
-            return
-
-        command.status = "completed"
-        command.last_error = None
-        command.failure_kind = None
-        gate.publish_outcome = "published"
-
-        from app.services.activity_log import ActivityLogService
-
-        await ActivityLogService(db).record(
-            org_id=gate.org_id, action="channel_post.recipe_auto_published", actor_type="human",
-            actor_id=publisher_member_id, entity_type="channel_publication", entity_id=publication.id,
-            context={
-                "recipe_auto_publish": True, "recipe_definition_key": definition.key, "stage": next_stage,
-                "work_item_id": str(gate.work_item_id), "draft_id": str(target_draft.id),
-                "triggering_gate_id": str(gate.id),
-            },
-        )
         await db.commit()
     except Exception as exc:
         logger.warning(
@@ -2695,12 +2753,6 @@ async def publish_recipe_approved_draft(
         gate.publish_outcome = f"publish_failed:{classify_publish_failure_outcome(exc)}"
         await db.commit()
         return
-
-    await emit_recipe_published_stage_event(
-        db, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
-        definition_key=definition.key, next_stage=next_stage, publication_id=publication.id,
-        trigger_gate_id=gate.id,
-    )
 
 
 async def resolve_recipe_context_for_scheduled_publication(
@@ -3095,6 +3147,62 @@ async def _publish_x_thread_draft(
 # command는 여전히 사람이 명시 취소할 대상이다).
 
 _CANCELLABLE_COMMAND_STATUSES = frozenset({"pending", "blocked", "dead_letter"})
+
+
+class PublicationAlreadyStartedError(Exception):
+    """story #4336 — 발행 취소 요청 시점에 명령이 이미 집혔거나 공급자 호출이 시작됐다(결과 확인이 먼저 — 라우터 409)."""
+
+    def __init__(self, *, command_id: uuid.UUID, current_status: str):
+        self.command_id = command_id
+        self.current_status = current_status
+        super().__init__(f"publication command {command_id} already started (status={current_status})")
+
+
+async def cancel_unstarted_publication(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, cancelled_by_member_id: uuid.UUID,
+) -> PublicationCommand:
+    """story #4336(PO 05:00Z) — 사용자가 멈춘 발행에서 나가는 길. 이 게이트의 가장 최근 명령이 **대기(pending) · 한 번도 안 집힘
+    (claimed_at 없음) · 공급자 호출 표식 없음**일 때만 cancelled로 끝낸다 — 공급자에 아무것도 안 갔다는 것이 행으로 증명되는
+    경우만이라 취소 뒤 다시 발행해도 중복 0(워커 예산 밖 명령은 늘 이 조건). 그 밖(집힘 · 호출 시작 · 이미 끝남)은
+    `PublicationAlreadyStartedError`(409 — 결과 확인이 먼저).
+
+    동시성: 행을 `FOR UPDATE`로 잡는다. 워커 집기는 `FOR UPDATE SKIP LOCKED`라 둘이 겹치면 한쪽만 이긴다 — 취소가 먼저면 워커는
+    이 행을 건너뛰고 커밋 뒤엔 pending이 아니라 못 집는다 · 워커가 먼저 in_progress를 커밋했으면 여기서 409."""
+    draft, gate = await _resolve_gate_for_draft(db, org_id=org_id, draft_id=draft_id)
+    command = (await db.execute(
+        select(PublicationCommand)
+        .where(PublicationCommand.gate_id == gate.id)
+        .order_by(PublicationCommand.created_at.desc())
+        .limit(1)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if command is None:
+        raise PublicationCommandNotFoundError(draft_id)
+    if command.status != "pending" or command.claimed_at is not None or command.provider_call_started_at is not None:
+        command_id, current_status = command.id, command.status  # rollback 뒤엔 객체가 만료된다 — 먼저 읽는다
+        await db.rollback()
+        raise PublicationAlreadyStartedError(command_id=command_id, current_status=current_status)
+
+    command.status = "cancelled"
+    command.reason_code = "CANCELLED_BY_HUMAN"
+    command.last_error = None
+    command.next_attempt_at = None
+    await db.commit()
+    await db.refresh(command)
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(db).record(
+        org_id=org_id, action="publication_command_cancelled", actor_type="platform", actor_id=None,
+        entity_type="publication_command", entity_id=command.id,
+        context={
+            "gate_id": str(gate.id), "draft_id": str(draft_id),
+            "cancelled_by_member_id": str(cancelled_by_member_id), "unstarted": True,
+        },
+    )
+    await db.commit()
+    return command
 
 
 async def _resolve_gate_for_draft(db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID) -> tuple[ChannelPostDraft, Gate]:

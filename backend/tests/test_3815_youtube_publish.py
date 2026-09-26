@@ -21,6 +21,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_3471_org_content_rules_lint import _seed_org, _seed_story, _session_factory
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
@@ -564,7 +566,7 @@ async def test_youtube_sandbox_container_beyond_5min_stays_in_progress_no_reuplo
             create_reels_container_spy = AsyncMock(wraps=ysp.create_reels_container)
             with patch.object(ysp, "create_reels_container", create_reels_container_spy):
                 async with _client_for(app) as client:
-                    r_pub1 = await client.post(
+                    r_pub1 = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
                 assert r_pub1.status_code == 200, r_pub1.text
@@ -592,7 +594,7 @@ async def test_youtube_sandbox_container_beyond_5min_stays_in_progress_no_reuplo
                 patch.object(ysp, "get_container_status", AsyncMock(return_value=("IN_PROGRESS", None))),
             ):
                 async with _client_for(app) as client:
-                    r_pub2 = await client.post(
+                    r_pub2 = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
                 assert r_pub2.status_code == 200, (
@@ -693,7 +695,7 @@ async def test_youtube_sandbox_beyond_24h_timeout_fails_but_preserves_container_
             create_reels_container_spy = AsyncMock(wraps=ysp.create_reels_container)
             with patch.object(ysp, "create_reels_container", create_reels_container_spy):
                 async with _client_for(app) as client:
-                    r_pub1 = await client.post(
+                    r_pub1 = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
                 assert r_pub1.status_code == 200, r_pub1.text
@@ -716,10 +718,11 @@ async def test_youtube_sandbox_beyond_24h_timeout_fails_but_preserves_container_
                 patch.object(ysp, "get_container_status", AsyncMock(return_value=("IN_PROGRESS", None))),
             ):
                 async with _client_for(app) as client:
-                    r_pub2 = await client.post(
+                    r_pub2 = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
-                assert r_pub2.status_code == 503, r_pub2.text  # TIMEOUT → dead_letter(Meta와 동형).
+                # story #4336 — 요청은 «발행 중», TIMEOUT → dead_letter(Meta와 동형)는 워커가 발행 행에 남긴다(아래 단언).
+                assert r_pub2.status_code == 200, r_pub2.text
 
             async with Session() as s:
                 pub = (await s.execute(
@@ -751,11 +754,12 @@ async def test_youtube_sandbox_beyond_24h_timeout_fails_but_preserves_container_
                 patch.object(ysp, "get_container_status", AsyncMock(return_value=("FINISHED", None))),
             ):
                 async with _client_for(app) as client:
-                    r_pub3 = await client.post(
+                    r_pub3 = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
                 assert r_pub3.status_code == 200, r_pub3.text
-                assert r_pub3.json()["processing"] is False
+                # story #4336 — 결과는 워커 한 틱 뒤 발행 행에.
+                assert (await publication_body(Session, draft_id))["processing"] is False
 
             assert create_reels_container_spy.await_count == 1, (
                 "재시도 뒤에도 insert가 또 불렸다면 quota 이중 차감 — 24h 상한 id-보존이 안 먹힌 것"
@@ -873,7 +877,7 @@ async def test_youtube_metadata_invalid_maps_to_422_not_500_at_publish_time():
                 await s.commit()
 
             async with _client_for(app) as client:
-                r_pub = await client.post(
+                r_pub = await publish_and_run_worker(client, Session,
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
             assert r_pub.status_code == 422, r_pub.text
@@ -948,18 +952,21 @@ async def test_privacy_locked_exposed_true_on_publish_response_and_draft_list(mo
                 # 첫 호출은 컨테이너 생성만(비동기 관례 — 막 만든 컨테이너를 곧바로
                 # poll하지 않는다, processing=true) — 두 번째 호출이 실제 "published"
                 # 로 마무리한다(sandbox는 결정적으로 즉시 FINISHED).
-                r_pub1 = await client.post(
+                r_pub1 = await publish_and_run_worker(client, Session,
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
                 assert r_pub1.status_code == 200, r_pub1.text
                 assert r_pub1.json()["processing"] is True
 
-                r_pub2 = await client.post(
+                r_pub2 = await publish_and_run_worker(client, Session,
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
                 assert r_pub2.status_code == 200, r_pub2.text
-                assert r_pub2.json()["processing"] is False
-                assert r_pub2.json()["privacy_locked"] is True, "publish 완료 응답에 privacy_locked이 안 실림"
+                # story #4336 — 요청은 «발행 중», 워커가 끝낸 뒤 같은 요청(끝난 명령)이 발행 결과를 privacy_locked까지 실어 돌려준다.
+                assert (await publication_body(Session, draft_id))["processing"] is False
+                r_done = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                assert r_done.json()["processing"] is False
+                assert r_done.json()["privacy_locked"] is True, "publish 완료 응답에 privacy_locked이 안 실림"
 
                 r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
                 assert r_list.status_code == 200, r_list.text
@@ -1014,7 +1021,7 @@ async def test_privacy_locked_false_for_non_youtube_channel():
                 patch.object(tp, "get_permalink", AsyncMock(return_value="https://threads.net/p/1")),
             ):
                 async with _client_for(app) as client:
-                    r_pub = await client.post(
+                    r_pub = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
             assert r_pub.status_code == 200, r_pub.text
@@ -1094,12 +1101,12 @@ async def test_youtube_quota_exceeded_publish_persists_reason_code_and_reset_at_
                 await _approve_gate_directly(s, gate_id)
 
             async with _client_for(app) as client:
-                r_pub = await client.post(
+                r_pub = await publish_and_run_worker(client, Session,
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
-                assert r_pub.status_code == 422, r_pub.text
-                pub_body = r_pub.json()
-                assert pub_body["error"]["code"] == "YOUTUBE_QUOTA_EXCEEDED", pub_body
+                # story #4336 — 이 할당량 초과는 sandbox 공급자 표식(공급자 쪽)이라 요청 안 검사(DB 할당량)를 지나고 워커가 만난다:
+                # 요청은 «발행 중», 워커가 명령에 사유 · 풀리는 시각을 남긴다(아래 목록 단언).
+                assert r_pub.status_code == 200 and r_pub.json()["processing"] is True, r_pub.text
 
                 r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
                 assert r_list.status_code == 200, r_list.text
@@ -1164,7 +1171,7 @@ async def test_non_quota_failure_leaves_reason_code_and_reset_at_null_no_regress
                 patch.object(tp, "get_permalink", AsyncMock(return_value="https://threads.net/p/1")),
             ):
                 async with _client_for(app) as client:
-                    r_pub = await client.post(
+                    r_pub = await publish_and_run_worker(client, Session,
                         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                     )
             assert r_pub.status_code == 200, r_pub.text
@@ -1234,7 +1241,7 @@ async def test_apply_command_failure_persists_reason_code_for_arbitrary_mapped_o
                 await _approve_gate_directly(s, gate_id)
 
             async with _client_for(app) as client:
-                r_pub = await client.post(
+                r_pub = await publish_and_run_worker(client, Session,
                     f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
                 assert r_pub.status_code == 422, r_pub.text
@@ -1335,7 +1342,7 @@ async def test_scheduled_youtube_quota_exceeded_via_cron_worker_matches_immediat
                 await s.commit()
 
             async with Session() as s:
-                await process_due_publication_commands(s)
+                await process_due_publication_commands(s, tick_budget_seconds=1740)  # story #4336 — 운영 예산(영상 최악 980초가 들어감)
 
             async with _client_for(app) as client:
                 r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")

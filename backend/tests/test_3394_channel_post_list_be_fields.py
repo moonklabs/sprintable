@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -352,7 +354,7 @@ async def test_list_states_published_full_fields():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_publish.status_code == 200, r_publish.text
 
                 _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -407,8 +409,9 @@ async def test_list_states_partial_success_failed_status_with_container_preserve
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-                assert r_publish.status_code == 503, r_publish.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
+                r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                # story #4336 — 요청은 «발행 중», 공급자 실패는 워커가 발행 행 · 명령에 남긴다(아래 목록 단언이 그 결과를 본다).
+                assert r_publish.status_code == 200, r_publish.text
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
@@ -516,7 +519,7 @@ async def test_reapproval_after_publish_keeps_old_publish_info_but_new_version_s
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_publish.status_code == 200, r_publish.text
 
         # 발행된 뒤 편집(새 버전) — approved 게이트를 pending+reapproval_required로 되돌린다.
