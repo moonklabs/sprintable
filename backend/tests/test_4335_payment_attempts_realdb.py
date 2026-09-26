@@ -324,6 +324,18 @@ async def test_change_tier_attempt_charges_once_moves_tier_and_refunds_the_captu
         await _seed_active_paid_subscription(s, org_id, tier="starter")
         await _seed_active_billing_key(s, org_id)
         await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        # story #4344(까디르 · PO 10:24Z) — 걷은 test_2880이 재던 금액 · 원장 · 기간을 결제 시도 경로에서. 기대값은 같은 산식 함수로.
+        from datetime import UTC as _UTC, datetime as _dt
+
+        from app.services import org_subscription_tier_change as tier_svc
+        from app.services.billing_charge_amount import compute_full_charge_for_new_offering
+
+        before, old_offering, new_offering = await tier_svc.validate_change_tier(s, org_id=org_id, new_tier="team")
+        old_start, old_end = before.current_period_start, before.current_period_end
+        expected_charge, _cur = await compute_full_charge_for_new_offering(s, org_id=org_id, new_offering=new_offering)
+        expected_refund = await tier_svc.prorated_refund_amount(
+            s, old_offering=old_offering, old_period_start=old_start, old_period_end=old_end, now=_dt.now(_UTC),
+        )
         attempt_id = uuid.uuid4()
         attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
         assert attempt.refund_target_order_id is not None
@@ -336,6 +348,21 @@ async def test_change_tier_attempt_charges_once_moves_tier_and_refunds_the_captu
         assert (sub.tier, sub.checkout_claimed_at) == ("team", None)
         refunded = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=attempt.refund_target_order_id)
         assert refunded.refund_status == "confirmed"
+        done = await svc.get_attempt(s, attempt_id)
+        # 금액: 새 등급 전액(좌석 · VAT 포함 산식) 한 번 · 옛 결제 비례 환불(잔여일 산식) 한 번.
+        assert toss.amounts[done.order_id] == expected_charge > 0
+        assert expected_refund > 0 and done.refund_amount_minor == expected_refund
+        assert toss.cancel_calls[0][1] == expected_refund
+        # 원장: 청구 행 = 새 등급 금액, 환불 행 = 비례 환불액.
+        ledger = [(r.entry_type, r.amount_minor) for r in (await s.execute(
+            text("SELECT entry_type, amount_minor FROM billing_ledger_entries WHERE org_id=:o ORDER BY ts"), {"o": org_id},
+        )).all()]
+        assert ("charge", expected_charge) in ledger, ledger
+        assert any(amount == expected_refund and kind != "charge" for kind, amount in ledger), ledger
+        # 새 구독 기간: 옛 기간과 다르고, 시작 = 변경 시점 근처 · 끝 = 월납 한 달 뒤.
+        period = await _row(s, "SELECT current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:o", o=org_id)
+        assert period.current_period_start > old_start and period.current_period_end > old_end
+        assert 27 <= (period.current_period_end - period.current_period_start).days <= 31
     assert toss.approvals == 1 and len(toss.cancel_calls) == 1
 
 
