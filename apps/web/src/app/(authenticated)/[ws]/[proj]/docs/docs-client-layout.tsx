@@ -24,6 +24,7 @@ import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
+import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
 // 낼 때 실제 서버 cap과 어긋나지 않게 한 곳에서만 선언한다.
@@ -358,10 +359,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // 겹쳐 한 페이지에 h1이 2개가 됐다(헤딩 위계 위반). 이 라벨은 상단바 크롬(현재
   // 위치 표시)이지 페이지 본문의 제목이 아니라 비-헤딩(<p>)으로 낮춘다 — 시각(className)
   // 무변, 실제 페이지 h1은 아래 두 소비처가 그대로 유지한다.
-  const topBarTitle = useMemo(
-    () => <p className="text-sm font-medium">{t('title')}</p>,
-    [t]
-  );
+  const topBarTitle = useMemo(() => <DocsTopBarTitle />, []);
   const topBarActions = useMemo(
     () => (
       // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로

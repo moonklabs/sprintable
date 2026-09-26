@@ -9,6 +9,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { describe, expect, it, vi } from 'vitest';
 import koMessages from '../../../../../messages/ko.json';
 import { WORKSPACE_FRAME_TABS } from '@/components/workspace/workspace-frame-tabs';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
 
 const nav = vi.hoisted(() => ({ pathname: '/' }));
 vi.mock('next/navigation', () => ({
@@ -45,7 +46,8 @@ const toPath = (rel: string) => `/ws-1/proj-1/${rel.split(sep).map((seg) => (/^\
 
 function render(node: React.ReactNode): string {
   return renderToStaticMarkup(
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>,
+    // story #4326 — 상단바 폴백을 쥐는 조각은 공급자가 필요하다(그리는 마크업은 없어 대조에 안 섞인다).
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><TopBarProvider>{node}</TopBarProvider></NextIntlClientProvider>,
   );
 }
 

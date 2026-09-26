@@ -14,6 +14,7 @@ import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { RewardsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 interface LedgerEntry { id: string; member_id: string; amount: number; reason: string; created_at: string }
 interface LeaderboardEntry { member_id: string; balance: number }
@@ -101,7 +102,7 @@ export default function RewardsPage() {
   if (!projectId) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+        <TopBarSlot title={<RewardsTopBarTitle />} showContextChip />
         <div className="flex h-64 items-center justify-center p-6">
           <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
         </div>
@@ -111,7 +112,7 @@ export default function RewardsPage() {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      <TopBarSlot title={<RewardsTopBarTitle />} showContextChip />
 
       {/* story #4130 — 고정 툴바 없음(TopBarSlot은 포털) — 로컬 스크롤 경계를 걷어내고
           셸의 단일 스크롤러(:199)가 스크롤하게 둔다. */}

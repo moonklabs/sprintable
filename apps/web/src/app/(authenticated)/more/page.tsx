@@ -13,6 +13,7 @@ import { DEFAULT_NAV_V3_FLAGS, scopedResourceHref } from '@/lib/nav-v3-destinati
 import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { MoreTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
 // #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
@@ -100,7 +101,7 @@ export default function MorePage() {
           금지(유나양) — 슬롯을 명시적으로 쓰게 해서 켠다.
           story #fddd0e6b(B) — 「전체」(mobileTabBar.more, 탭 이름)와 「전체 메뉴」(페이지
           제목, 새 키)는 다른 값이다 — 재사용 아님. */}
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('moreMenuTitle')}</h1>} showContextChip />
+      <TopBarSlot title={<MoreTopBarTitle />} showContextChip />
       {/* story #4222(유나 design) — space-y는 display:none 형제도 세어, 숨은 탭 문장(lg:hidden)이 마지막 자식이 되면 부제에
           margin 4px가 남아 데스크톱 검색창이 104→108px로 밀렸다. flex+gap은 숨은 자식에 간격을 안 준다. */}
       <div className="mb-4 flex flex-col gap-1">

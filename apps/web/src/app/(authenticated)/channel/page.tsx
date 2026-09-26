@@ -11,6 +11,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { toPlainPreview } from '@/components/chat/entity-ref';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { ChannelTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 interface ChannelMsg {
   id: string;
@@ -170,12 +171,7 @@ export default function ChannelPage() {
   return (
     <>
       <TopBarSlot
-        title={
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">{t('title')}</span>
-            <span className={`h-2 w-2 rounded-full ${statusDot}`} title={wsStatus} />
-          </div>
-        }
+        title={<ChannelTopBarTitle statusDot={{ className: statusDot, label: wsStatus }} />}
         showContextChip
       />
 
