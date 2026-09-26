@@ -32,7 +32,7 @@ for (const proto of [Range.prototype, Element.prototype] as unknown as { getClie
   proto.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] });
   proto.getBoundingClientRect = () => EMPTY_RECT;
 }
-if (!document.elementFromPoint) (document as { elementFromPoint: () => null }).elementFromPoint = () => null;
+if (!document.elementFromPoint) (document as unknown as { elementFromPoint: () => null }).elementFromPoint = () => null;
 
 /** 유나 A(프로덕션 빌드 GET 본문 그대로) — 제목 바로 뒤 단독 수식 블록. */
 const DOC_A = '### 소제목\n\n<div data-type="mathBlock" data-latex="E = mc^2">E = mc^2</div>\n\n끝 문단.';
