@@ -36,7 +36,7 @@ afterEach(async () => {
 });
 
 // 트리거 wrapper의 ref가 **열릴 때만** 붙는 호출부 모양(축척 사다리와 같음) — 자식 ref가 먼저 붙는 순서를 그대로 재현한다.
-function Harness({ offsetX, initiallyOpen = false }: { offsetX?: number; initiallyOpen?: boolean }) {
+function Harness({ offsetX, initiallyOpen = false }: { offsetX?: number; initiallyOpen?: boolean; tick?: number }) {
   const [open, setOpen] = useState(initiallyOpen);
   const anchorRef = useRef<HTMLDivElement>(null);
   return (
@@ -89,6 +89,17 @@ describe('AnchoredPopover(story #4349)', () => {
     act(() => { document.getElementById('trigger')!.click(); });
     expect(document.getElementById('pop')).toBeNull();
     expect(removeSpy.mock.calls.some(([type, , capture]) => type === 'scroll' && capture === true)).toBe(true);
+  });
+
+  // 뮤테이션 A1(포털 대상을 «트리거 ?? body»로)이 첫 판에서 살아남았다 — 첫 렌더엔 트리거 ref가 아직 없어 body로 떨어지기 때문.
+  // 열린 뒤 **다시 그려도**(부모 상태 · props 바뀜) 늘 body 직속이어야 한다(그때 트리거 안으로 옮겨 가면 부모 띠가 다시 자른다).
+  it('열린 뒤 다시 그려져도 늘 body 직속(부모 안으로 옮겨 가지 않음)', () => {
+    act(() => { root.render(<Harness />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    act(() => { root.render(<Harness tick={1} />); });
+    act(() => { root.render(<Harness tick={2} />); });
+    expect(pop().parentElement).toBe(document.body);
+    expect(container.contains(pop())).toBe(false);
   });
 
   it('처음부터 열린 채 붙어도(트리거 ref가 자식보다 늦게 붙는 순서) 제자리에 드러난다', () => {
