@@ -134,7 +134,13 @@ export function PaymentAttemptBanner({
           <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
           <span className="space-y-1">
             <span className="block">{t(state.phase === 'processing' ? 'paymentAttemptProcessing' : 'paymentAttemptChecking')}</span>
-            {state.long && <span className="block">{t('paymentAttemptCheckingLong')}</span>}
+            {/* story #4341 AC3(유나 확정) — 운영자 알림이 실제로 전달된 뒤에만(시도 응답의 operator_notified_at) «담당자에게 알렸어요»로
+                20초 줄을 **대신**한다. 시간으로 추측해 띄우지 않는다. */}
+            {attempt?.operator_notified_at ? (
+              <span className="block" data-payment-attempt-escalated="">{t('paymentAttemptCheckingEscalated')}</span>
+            ) : (
+              state.long && <span className="block">{t('paymentAttemptCheckingLong')}</span>
+            )}
           </span>
         </AlertDescription>
       </Alert>

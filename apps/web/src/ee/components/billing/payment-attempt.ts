@@ -29,6 +29,8 @@ export interface PaymentAttempt {
   declined_reason: string | null;
   reauth_required: boolean;
   refund_status?: PaymentAttemptRefundStatus | null;
+  /** story #4341 — 이 시도에 대한 운영 알림이 운영 대화에 **실제로 전달된** 시각(ISO). 없으면 아직 아무에게도 안 갔다. */
+  operator_notified_at?: string | null;
   subscription: PaymentAttemptSubscription | null;
 }
 

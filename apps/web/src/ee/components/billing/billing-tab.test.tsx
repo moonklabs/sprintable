@@ -67,11 +67,11 @@ function platformSettingsResponse(overrides: Partial<{ billing_price_public: boo
 let attemptResponses: Array<unknown> = [];
 const attemptFetchUrls: string[] = [];
 
-function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null }> = {}) {
+function attempt(overrides: Partial<{ status: string; kind: string; tier: string; declined_reason: string | null; reauth_required: boolean; refund_status: string | null; operator_notified_at: string | null }> = {}) {
   return {
     attempt_id: 'att-1', kind: overrides.kind ?? 'checkout', status: overrides.status ?? 'processing', tier: overrides.tier ?? 'team',
     billing_cycle: 'monthly', declined_reason: overrides.declined_reason ?? null, reauth_required: overrides.reauth_required ?? false,
-    refund_status: overrides.refund_status ?? null, subscription: null,
+    refund_status: overrides.refund_status ?? null, operator_notified_at: overrides.operator_notified_at ?? null, subscription: null,
   };
 }
 
@@ -480,6 +480,42 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
       expect(container.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
       await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
       expect(container.textContent).toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐운영자 알림이 실제로 전달된 뒤에만 «담당자에게 알렸어요» — 20초 줄을 대신한다(story #4341 AC3 · 유나)', async () => {
+    vi.useFakeTimers();
+    try {
+      const notified = attempt({ status: 'processing', operator_notified_at: '2026-09-26T09:00:00+00:00' });
+      // 알림 전 한 번 → 그 뒤 조회는 전부 알림 사실을 실은 응답(배너는 가장 최근 조회를 따른다).
+      attemptResponses = [attemptResponse(attempt({ status: 'processing' })), ...Array.from({ length: 30 }, () => attemptResponse(notified))];
+      searchParams = new URLSearchParams({ tab: 'billing', attempt: 'att-1' });
+      await mount(async () => statusResponse());
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(container.textContent, '알림 전').not.toContain(koMessages.pricingPlans.paymentAttemptCheckingEscalated);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(container.textContent).toContain(koMessages.pricingPlans.paymentAttemptCheckingEscalated);
+      // 유나 4720 — 배너가 «다시 결제하지 않아도 돼요»를 두 번 말하지 않는다(첫 줄 `paymentAttemptChecking`에만).
+      const banner = container.querySelector('[data-payment-attempt-state="checking"]')?.textContent ?? '';
+      expect(banner.split('다시 결제하지 않아도 돼요').length - 1).toBe(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      expect(container.textContent, '두 줄이 같이 서지 않는다').not.toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
+      expect(container.querySelector('[data-payment-attempt-state="checking"]')?.closest('[data-variant]')?.getAttribute('data-variant') ?? 'info').not.toBe('destructive');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('알림 사실이 없으면 시간이 아무리 지나도 «담당자에게 알렸어요»를 띄우지 않는다(시간으로 추측 금지)', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams({ tab: 'billing', attempt: 'att-1' });
+      await mount(async () => statusResponse());
+      await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60 * 1000); });
+      expect(container.textContent).toContain(koMessages.pricingPlans.paymentAttemptCheckingLong);
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.paymentAttemptCheckingEscalated);
     } finally {
       vi.useRealTimers();
     }
