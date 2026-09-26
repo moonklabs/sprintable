@@ -177,7 +177,8 @@ function readDataAttributes(src: string): Set<string> {
 }
 
 const SAFE_HELPER: Record<'http' | 'data', string> = { http: 'safeHttpUrl', data: 'safeAttachmentDataUrl' };
-const SAFE_HELPER_MODULE = /(^|\/)safe-content-url$/;
+// 렌더러(`components/docs/`) 기준 정확한 두 표기만 — `…/safe-content-url`로 끝나는 아무 경로(가짜 모듈)는 안 된다(까디르 4705 ③ 후속).
+const SAFE_HELPER_MODULES = new Set(['./lib/safe-content-url', '@/components/docs/lib/safe-content-url']);
 
 /** 도우미 이름이 진짜 도우미를 가리키는지(까디르 4705 ③): `lib/safe-content-url`에서 이름 그대로 import했고, 파일 어디에서도 같은
  * 이름을 다시 선언(변수 · 함수 · 매개변수 · 다른 import)하지 않았다. 이름만 보면 `const safeHttpUrl = (x) => x`가 통과한다. */
@@ -189,7 +190,7 @@ function genuineHelpers(file: ts.SourceFile): Set<string> {
     if (ts.isImportSpecifier(n)) {
       bump(n.name.text);
       const decl = n.parent.parent.parent;
-      if (!n.propertyName && ts.isStringLiteral(decl.moduleSpecifier) && SAFE_HELPER_MODULE.test(decl.moduleSpecifier.text)) imported.add(n.name.text);
+      if (!n.propertyName && ts.isStringLiteral(decl.moduleSpecifier) && SAFE_HELPER_MODULES.has(decl.moduleSpecifier.text)) imported.add(n.name.text);
     } else if (ts.isImportClause(n) && n.name) bump(n.name.text);
     else if (ts.isNamespaceImport(n)) bump(n.name.text);
     else if ((ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n)) && ts.isIdentifier(n.name)) bump(n.name.text);
@@ -329,6 +330,12 @@ describe('가드 — 렌더러가 읽는 속성 ↔ 두 목록 · 스키마', ()
       expect(urlReadsOutsideHelper(wrap("const safeHttpUrl = (v) => v; a.href = safeHttpUrl(block.getAttribute('data-url') ?? '') ?? '';")), '로컬 가림').not.toEqual([]);
       expect(urlReadsOutsideHelper("function f(block, a) { a.href = safeHttpUrl(block.getAttribute('data-url') ?? '') ?? ''; }"), 'import 없음').not.toEqual([]);
       expect(urlReadsOutsideHelper(wrap("a.href = safeHttpUrl(block.getAttribute('data-url') ?? '') ?? '';")), '진짜 도우미는 통과').toEqual([]);
+      const viaModule = (spec: string) =>
+        urlReadsOutsideHelper(`import { safeHttpUrl } from '${spec}';\nfunction f(block, a) { a.href = safeHttpUrl(block.getAttribute('data-url') ?? '') ?? ''; }`);
+      for (const fake of ['./x/safe-content-url', '../lib/safe-content-url', 'evil/safe-content-url', './lib/safe-content-url.fake']) {
+        expect(viaModule(fake), `가짜 모듈 ${fake}`).not.toEqual([]);
+      }
+      expect(viaModule('@/components/docs/lib/safe-content-url'), '별칭 경로는 통과').toEqual([]);
     });
     it('④ 선택자: 클래스 · id가 붙은 태그 · 대문자 태그도 태그로 읽는다', () => {
       expect(readsOnUnlistedElement("root.querySelectorAll('span.card[data-url]')")).toEqual(['span[data-url]']);
