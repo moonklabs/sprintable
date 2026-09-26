@@ -152,6 +152,7 @@ async def _world():
     ("/api/v2/standups", "VISIBLE-A-standup"),
     ("/api/v2/command-center/my-actions", "VISIBLE-A-hypothesis"),
     ("/api/v2/team-members?type=agent", "VISIBLE-A-story"),
+    ("/api/v2/team-presence", "VISIBLE-A-story"),
     ("/api/v2/dashboard?member_id={agent_a}", "VISIBLE-A-task"),
     ("/api/v2/session-context?member_id={agent_a}", "VISIBLE-A-task"),
 ])

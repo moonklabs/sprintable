@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.team_member import TeamMemberRepository
 from app.routers.team_members import _inject_active_stories
@@ -48,6 +48,7 @@ class TeamPresenceItem(BaseModel):
 async def get_team_presence(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[TeamPresenceItem]:
     """org 전 에이전트의 presence_status(연결) + global working(작업) 집계."""
     repo = TeamMemberRepository(session, org_id)
@@ -63,7 +64,11 @@ async def get_team_presence(
         unique.append(a)
 
     # presence_status(computed) + active_story 주입은 team_members 경로 재사용(로직 중복 방지).
-    responses = await _inject_active_stories(unique, session)
+    # story #4350(4351 전수에서 발견) — 에이전트의 «지금 하는 스토리»는 caller가 접근 가능한 프로젝트의 것만(SEC-S8).
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    accessible = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
+    responses = await _inject_active_stories(unique, session, accessible_project_ids=accessible)
     working_ids = await chat_presence.working_member_ids()
 
     return [

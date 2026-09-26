@@ -98,7 +98,7 @@ async def _org_max_plugin_version(org_id: uuid.UUID, session: AsyncSession) -> s
 
 
 async def _inject_active_stories(
-    members: list, session: AsyncSession, *, accessible_project_ids: Collection[uuid.UUID] | None = None,
+    members: list, session: AsyncSession, *, accessible_project_ids: Collection[uuid.UUID],
 ) -> list[TeamMemberResponse]:
     """AC6: active_story_id → stories batch 조회 후 inject.
 
@@ -113,9 +113,9 @@ async def _inject_active_stories(
     if ids:
         q = select(Story).where(Story.id.in_(ids))
         # story #4350 — caller가 접근 가능한 프로젝트의 스토리만 싣는다(SEC-S8). 에이전트 행 자체는 그대로 나오고
-        # 접근 불가 프로젝트의 «지금 하는 스토리» 제목만 빠진다(None = 거르지 않음 · 지금 두 호출부 모두 넘김).
-        if accessible_project_ids is not None:
-            q = q.where(Story.project_id.in_(list(accessible_project_ids)))
+        # 접근 불가 프로젝트의 «지금 하는 스토리» 제목만 빠진다. 인자는 필수(기본값 없음) — 호출부 셋(team_members 두 자리 ·
+        # team_presence)이 모두 넘긴다 · 새 호출부가 빠뜨리면 TypeError로 드러난다.
+        q = q.where(Story.project_id.in_(list(accessible_project_ids)))
         result = await session.execute(q)
         for s in result.scalars().all():
             stories[s.id] = s
