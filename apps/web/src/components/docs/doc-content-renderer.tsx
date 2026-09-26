@@ -27,6 +27,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { docUrl } from './lib/doc-project-url';
 import { remarkWikiLinks } from './lib/remark-wiki-links';
 import { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
+import { formatFileSize } from './extensions/file-node';
 
 interface DocContentRendererProps {
   content: string;
@@ -295,6 +296,8 @@ export function DocContentRenderer({
   const docHrefRef = useRef(docHref);
   const routerRef = useRef(router);
   useEffect(() => { docHrefRef.current = docHref; routerRef.current = router; }, [docHref, router]);
+  // story #4331 — 토글 요약의 aria-controls가 가리킬 내용 id 앞자리(한 화면에 렌더러가 여럿이어도 겹치지 않게).
+  const toggleIdPrefix = useId();
   // story #4313 — 실재 문서 slug 집합(없으면 빈 집합 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 배열 모양이 매 렌더 새것이어도 값이 같으면 같은 집합.
   // story #4313 — 적힌 slug → 지금 slug 대응(없으면 빈 대응 = 어떤 위키 링크 · 임베드도 링크가 안 됨). 객체가 매 렌더 새것이어도 값이 같으면 같은 대응.
   const wikiLinkTargetKey = wikiLinkTargets ? JSON.stringify(Object.entries(wikiLinkTargets).sort(([a], [b]) => a.localeCompare(b))) : '[]';
@@ -547,7 +550,8 @@ export function DocContentRenderer({
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         // story #4316(유나 결정) — 날 URL 한 줄 · 새 탭 외부 링크라 «누르는 것» 단서로 brand 글자색을 명시(밑줄은 없음 · 뿌리 본문 링크 규칙 밖이라 선언이 닿는다).
-        a.className = 'flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-brand-text transition-colors hover:bg-muted/40 no-underline';
+        // story #4331 — 면은 첨부 카드 · 문서 임베드 카드와 같은 공용 subtle 카드(4684 결정 · 예전 손코딩 `rounded-xl border border-border bg-muted/20`).
+        a.className = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm text-brand-text transition-colors hover:bg-muted/40 no-underline');
         a.textContent = url;
         block.appendChild(a);
       }
@@ -561,10 +565,9 @@ export function DocContentRenderer({
       // story #4324 — 옛 첨부 본문은 data: URL이면서 문서로 실행되지 않는 MIME일 때만 내려받기 링크로(javascript: 값을 a.href → a.click()으로 실행하지 않게).
       const data = safeAttachmentDataUrl(block.getAttribute('data-file-data') ?? '') ?? '';
       const refAssetId = block.getAttribute('data-asset-id') ?? '';
-      const size = Number(block.getAttribute('data-size') ?? 0);
-      const sizeLabel = size < 1024 * 1024
-        ? `${(size / 1024).toFixed(1)} KB`
-        : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+      // story #4331(유나 17:38Z) — 크기 속성이 없거나 숫자가 아니면 크기 줄 없음(«0 B»는 «빈 파일»이라는 거짓 단정) · 있고 0이면 진짜 빈 파일 «0 B» ·
+      // 나머지는 공용 formatFileSize(1KB 미만 = 바이트 · 예전 인라인 계산은 12바이트를 «0.0 KB»로 뭉갰다).
+      const sizeLabel = attachmentSizeLabel(block.getAttribute('data-size'));
 
       // Public share viewer: attachments are auth-gated (private bucket + signed URL),
       // so they'd 401 here — render an inert placeholder (no leak, no broken render).
@@ -579,15 +582,19 @@ export function DocContentRenderer({
         return () => {};
       }
 
+      // story #4331 — 누르는 자리는 진짜 `<button>`(Tab 초점 · Enter/Space · 예전엔 click만 건 div라 키보드로 못 받았다). `<a download>`가 아닌 까닭:
+      // 링크는 Space로 안 눌리고, 자산 참조는 누른 뒤에야 서명 주소가 생긴다. 접근 가능한 이름 = 파일 이름 + 크기(DOM으로 설정 · 글자는 이스케이프).
       block.innerHTML = `
-        <div class="${cn(ATTACHMENT_CARD_SURFACE, 'cursor-pointer hover:bg-muted/40 transition-colors')}">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium">${escapeHtmlText(filename)}</p>
-            <p class="text-xs opacity-60">${escapeHtmlText(sizeLabel)}</p>
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        </div>`;
+        <button type="button" class="${cn(ATTACHMENT_CARD_SURFACE, 'w-full cursor-pointer text-left hover:bg-muted/40 transition-colors')}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="block min-w-0 flex-1">
+            <span class="block truncate text-sm font-medium">${escapeHtmlText(filename)}</span>
+            ${sizeLabel ? `<span class="block text-xs opacity-60">${escapeHtmlText(sizeLabel)}</span>` : ''}
+          </span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>`;
+      const button = block.querySelector('button')!;
+      button.setAttribute('aria-label', sizeLabel ? `${filename} ${sizeLabel}` : filename);
 
       const handleClick = () => {
         // legacy(base64 data-url) — blob href 직접 다운로드(현 동작 유지).
@@ -612,8 +619,8 @@ export function DocContentRenderer({
           } catch { /* 서명 실패 — 무시(no leak). */ }
         })();
       };
-      block.addEventListener('click', handleClick);
-      return () => block.removeEventListener('click', handleClick);
+      button.addEventListener('click', handleClick);
+      return () => button.removeEventListener('click', handleClick);
     });
 
     // Public share viewer: images may point to auth-gated resources (401) — replace
@@ -679,16 +686,38 @@ export function DocContentRenderer({
     }
 
     // Toggle block click handlers (viewer)
+    // story #4331 — 요약은 글자 · 링크를 품은 블록이라 `<button>`으로 못 바꾼다 → 버튼 의미(role · Tab 초점 · Enter/Space) + 펼침 상태(aria-expanded) ·
+    // 가리키는 내용(aria-controls). 예전엔 click만 건 div라 키보드로 못 열고, 열림 · 닫힘을 읽어 주지도 않았다.
     const toggleSummaries = Array.from(root.querySelectorAll<HTMLElement>('[data-type="toggleSummary"]'));
-    const toggleCleanup = toggleSummaries.map((summary) => {
+    const toggleCleanup = toggleSummaries.map((summary, index) => {
+      const block = summary.closest<HTMLElement>('[data-type="toggleBlock"]');
+      if (!block) return () => {};
+      const contentEl = Array.from(block.children).find((el) => el.getAttribute('data-type') === 'toggleContent');
+      if (contentEl) {
+        if (!contentEl.id) contentEl.id = `${toggleIdPrefix}-toggle-${index}`;
+        summary.setAttribute('aria-controls', contentEl.id);
+      }
+      summary.setAttribute('role', 'button');
+      summary.tabIndex = 0;
+      const syncExpanded = () => summary.setAttribute('aria-expanded', String(block.getAttribute('data-open') === 'true'));
+      syncExpanded();
       const handleClick = () => {
-        const block = summary.closest<HTMLElement>('[data-type="toggleBlock"]');
-        if (!block) return;
         const isOpen = block.getAttribute('data-open') === 'true';
         block.setAttribute('data-open', String(!isOpen));
+        syncExpanded();
+      };
+      // 요약 자체에 초점이 있을 때만 — 안의 링크에서 누른 Enter는 링크 몫.
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.target !== summary || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        handleClick();
       };
       summary.addEventListener('click', handleClick);
-      return () => summary.removeEventListener('click', handleClick);
+      summary.addEventListener('keydown', handleKeyDown);
+      return () => {
+        summary.removeEventListener('click', handleClick);
+        summary.removeEventListener('keydown', handleKeyDown);
+      };
     });
 
     return () => {
@@ -699,7 +728,7 @@ export function DocContentRenderer({
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, unsafeLinkLabel, unsafeFileLabel, mathRenderFailedLabel, wikiLinkTargetMap]);
+  }, [codeCopiedLabel, codeCopyLabel, codeCopyFailedLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel, untitledEmbedLabel, embedNotFoundLabel, unsafeLinkLabel, unsafeFileLabel, mathRenderFailedLabel, wikiLinkTargetMap, toggleIdPrefix]);
 
   // story #4309 — 목적지(ws/proj · 프로젝트)가 바뀌면 이미 만든 본문 문서 링크의 href만 새로 쓴다(위 조립 효과는 다시 돌지 않는다).
   useEffect(() => {
@@ -1067,6 +1096,14 @@ export const RENDERER_INTERNAL_MARKERS = [
 // 첨부 카드 면(정상 · 공개 보기 · 열 수 없음 공통) — 공용 cardVariants(손코딩 카드 가드 · 링크 카드와 같은 subtle 면). 예전 `hsl(var(--border))`는
 // 토큰이 hex라 무효 색이었다(테두리가 글자색 · 배경 투명 — 유나 짚음 · 4324).
 const ATTACHMENT_CARD_SURFACE = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3');
+
+/** story #4331(유나 결정) — 첨부 카드 크기 줄. 속성 없음 · 빈 글자 · 숫자 아님 · 음수 → '' (줄 없음) · 0 → «0 B» · 나머지 공용 formatFileSize. */
+export function attachmentSizeLabel(attr: string | null): string {
+  if (attr === null || attr.trim() === '') return '';
+  const bytes = Number(attr);
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  return formatFileSize(bytes);
+}
 
 // story #4324(유나 스티어) — 열 수 없는 콘텐츠의 비활성 카드: 공개 보기 첨부 자리와 같은 틀(같은 카드 면 + 아이콘 + 흐린 글자 · 링크 · 호버 · 초점 0).
 const INERT_FILE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';

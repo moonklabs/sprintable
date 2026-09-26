@@ -93,7 +93,8 @@ describe('URL 속성 스킴 거름(XSS 표)', () => {
     const clicked: string[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this.getAttribute('href') ?? ''); });
     await render('<div data-type="fileAttachment" data-filename="a.txt" data-size="3" data-file-data="data:text/plain;base64,YWJj"></div>', 'html');
-    act(() => { (container.querySelector('[data-type="fileAttachment"]') as HTMLElement).click(); });
+    // story #4331 — 누르는 자리는 카드를 채운 `<button>`.
+    act(() => { (container.querySelector('[data-type="fileAttachment"] button') as HTMLElement).click(); });
     expect(clicked).toEqual(['data:text/plain;base64,YWJj']);
   });
 

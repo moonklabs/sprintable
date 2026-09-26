@@ -88,7 +88,8 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
 
     // clicking the ref file resolves via the signed route with attachment disposition → new tab.
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — 이 클릭 경로는 fetchWithAuth로 전환됨(마운트시 img 경로는 미전환·1인자
@@ -138,7 +139,9 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock?.innerHTML).toContain('cursor-pointer');
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      expect(fileBlock?.querySelector('button')).not.toBeNull();
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -168,7 +171,8 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     expect(fileBlock).not.toBeNull();
     expect(fileBlock?.innerHTML).toContain('cursor-pointer');
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — fetchWithAuth 전환(위와 동일 사유).

@@ -78,7 +78,7 @@ describe.each([['html', HTML], ['markdown', MD]] as const)('뿌리 본문 규칙
   it('⭐부품 문단 줄 높이 = 선언(text-sm/xs 줄 높이) · 본문 문단은 여전히 leading-7', async () => {
     const c = await render(content, format);
     // 표지가 아니라 부품 자기 정체로 고른다(표지를 빠뜨리면 이 목록에서 빠져 통과해 버리는 것을 막음).
-    const parts = [...container.querySelectorAll('[data-page-embed] p, [data-type="fileAttachment"] p, [data-type="embedBlock"] p')];
+    const parts = [...container.querySelectorAll('[data-page-embed] p, [data-type="fileAttachment"] button > span > span, [data-type="embedBlock"] p')];
     expect(parts.length).toBeGreaterThan(0);
     for (const el of parts) expect(c.computed(el, 'line-height', 'light'), el.textContent ?? '').toBe(c.declared(el, 'line-height', 'light'));
     expect(c.computed(q('.doc-renderer > p'), 'line-height', 'light')).toMatch(/1\.75rem|calc\(var\(--spacing\) \* 7\)|calc\(.*7\)/);
@@ -97,7 +97,7 @@ describe.each([['html', HTML], ['markdown', MD]] as const)('뿌리 본문 규칙
     it('⭐일반 embedBlock 링크 카드 · 첨부 카드: 밑줄 0 · 선언 크기 그대로', async () => {
       const c = await render(content, format);
       const link = q('[data-type="embedBlock"] a');
-      const fileP = q('[data-type="fileAttachment"] p');
+      const fileP = q('[data-type="fileAttachment"] button > span > span'); // story #4331 — 파일 이름 줄(button 안이라 p 대신 span.block)
       for (const t of THEMES) {
         // 유나 결정: 일반 링크 카드는 brand 글자색(명시 선언이 닿음) · 밑줄 0.
         expect(c.computed(link, 'color', t), `${t} 일반 링크 카드 글자색`).toBe(ref(c, 'brand', t));
@@ -107,7 +107,7 @@ describe.each([['html', HTML], ['markdown', MD]] as const)('뿌리 본문 규칙
         expect(c.computed(fileP, 'font-size', t), t).toBe(c.declared(fileP, 'font-size', t));
       }
       // 부품을 표지가 아니라 자기 정체(data-type)로 골라 잰다 — 표지를 빠뜨린 부품도 이 칸에서 걸린다.
-      for (const el of container.querySelectorAll('[data-type="fileAttachment"] p, [data-page-embed] p')) {
+      for (const el of container.querySelectorAll('[data-type="fileAttachment"] button > span > span, [data-page-embed] p')) {
         expect(c.computed(el, 'line-height', 'light'), el.textContent ?? '').toBe(c.declared(el, 'line-height', 'light'));
       }
     });
