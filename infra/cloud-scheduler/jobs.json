@@ -107,8 +107,8 @@
       "method": "POST",
       "schedule": "* * * * *",
       "time_zone": "Etc/UTC",
-      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김",
-      "attempt_deadline": "120s",
+      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김 · story #4336(PO 03:58Z) 즉시 발행도 워커가 돌려 한 틱에 영상 업로드 · 긴 스레드가 들어오므로 시한 120→1800초(틱 예산 = 시한 − 60초 · 남은 예산보다 긴 명령은 다음 틱)",
+      "attempt_deadline": "1800s",
       "headers": {
         "Content-Type": "application/json"
       }

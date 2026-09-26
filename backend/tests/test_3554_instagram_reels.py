@@ -22,6 +22,8 @@ import uuid
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _approve_gate_directly,
     _client_for,
@@ -583,7 +585,7 @@ async def test_publish_dispatches_to_reels_container_for_video_instagram_sandbox
             await _approve_gate_directly(s, uuid.UUID(gate_id))
 
         async with _client_for(app) as client:
-            r_publish_1 = await client.post(
+            r_publish_1 = await publish_and_run_worker(client, Session,
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
             assert r_publish_1.status_code == 200, r_publish_1.text
@@ -598,11 +600,12 @@ async def test_publish_dispatches_to_reels_container_for_video_instagram_sandbox
         )
 
         async with _client_for(app) as client:
-            r_publish_2 = await client.post(
+            r_publish_2 = await publish_and_run_worker(client, Session,
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
             )
         assert r_publish_2.status_code == 200, r_publish_2.text
-        body = r_publish_2.json()
+        # story #4336 — 요청은 «발행 중»(대기열), 결과는 워커 한 틱 뒤 발행 행에.
+        body = await publication_body(Session, draft_id)
         assert body["processing"] is False
         assert body["external_id"] is not None and body["external_id"].startswith("sandbox-ig-media-")
     finally:

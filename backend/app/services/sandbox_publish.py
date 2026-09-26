@@ -80,6 +80,10 @@
   `publish_container`를 거쳐 media_id 문자열 자체에 싣는다(서버 메모리 0, 위 stateless
   계약 그대로) — 지연은 댓글 재수집 5분 rate-limit보다 짧게 잡혀 있어(60초) 처음 refresh
   뒤 rate-limit이 풀리는 시점(5분 뒤)엔 이미 댓글이 사라져 있다.
+- `[sandbox:publish-slow]`(story #4336 AC5, 라이브 런북용) — `create_container`가 `_PUBLISH_SLOW_SECONDS`(90초) 기다린 뒤
+  평소대로 진행한다(실 HTTP 0 · 상태 없음 — 기다림은 이 호출 안에서만). 즉시 발행이 요청 안에서 공급자를 기다리지 않고
+  워커가 돈다는 것(요청은 «발행 중»으로 곧바로 답하고, 90초짜리 호출은 워커 틱 안에서 끝난다)을 dev에서 재는 유일한 긴 발행 대상.
+  BFF 상한(55초)보다 길게 잡았다. 90초는 dev 틱 예산(min(스케줄러 시한 1800, 요청 시한 3600) − 60 = 1740초) 안이다.
 - `[sandbox:insight-drift]`(story #3620 AC5, 라이브 런북용) — ⚠️이 파일이 읽는 마커가
   아니다(카탈로그 완전성을 위해 여기 등재만 함). 실제 소비처는
   `insight_snapshots.py::_fetch_sandbox` — `create_container`의 `text` 인자가 아니라
@@ -117,6 +121,7 @@
 이미지 첨부 초안에서만 의미 있음, 위 참고)."""
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 import uuid
@@ -138,6 +143,9 @@ _MARKER_APP_INACTIVE = "[sandbox:app-inactive]"
 _MARKER_PERMISSION_ERROR = "[sandbox:permission-error]"
 _MARKER_CONTAINER_ERROR = "[sandbox:container-error]"
 _MARKER_CONTAINER_SLOW = "[sandbox:container-slow]"
+# story #4336 AC5 — 공급자 호출이 오래 걸리는 발행(요청 안이면 BFF 55초가 먼저 끊던 모양)을 dev에서 재현.
+_MARKER_PUBLISH_SLOW = "[sandbox:publish-slow]"
+_PUBLISH_SLOW_SECONDS = 90
 # story #3516 AC8(페드루 PO 確定 2026-09-05) — 라이브 런북 재료. 댓글 수집 리컨실
 # (조각①)을 사람이 dev에서 눈으로 재현하려면 "처음엔 2건, 잠시 뒤엔 1건"이 필요한데
 # sandbox_publish.fetch_replies는 media_id만 받아 完全 무상태로 결정적이라(story
@@ -191,6 +199,8 @@ async def create_container(
     client: httpx.AsyncClient, *, access_token: str, threads_user_id: str, text: str,
     image_url: str | None = None,
 ) -> str:
+    if _MARKER_PUBLISH_SLOW in text:
+        await asyncio.sleep(_PUBLISH_SLOW_SECONDS)
     if _MARKER_429 in text:
         raise ThreadsPublishError("SANDBOX_RATE_LIMITED", "sandbox: [sandbox:429] 마커 시뮬레이션", status_code=429)
     if _MARKER_PROVIDER_ERROR in text:

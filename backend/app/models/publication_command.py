@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Text, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -107,6 +107,9 @@ class PublicationCommand(Base):
     # 사유만 — 그 외 reason_code는 계속 null, 지어내지 않는다). apply_command_failure()
     # 참고.
     reason_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4336(PO 05:24Z 조건 2 · 0411) — 워커의 공급자 호출 전 검사가 걸렸을 때 요청이 돌려줬을 오류 본문(코드 · 숫자 · 풀리는
+    # 시각) 그대로. 화면이 즉시 발행 응답과 같은 배너를 그린다. 다시 대기열에 오르거나 끝나면 비운다.
+    failure_detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # 'connection'|'needs_check'|'transient' — 유나 design §11-5.
     failure_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
     dead_letter_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

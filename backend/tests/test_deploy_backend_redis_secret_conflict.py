@@ -274,6 +274,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -444,6 +445,8 @@ def _run_env_vars_assembly(
         # 동일 이유). 값은 cloudbuild.yaml substitutions 기본값과 정합(dev/prod 동일,
         # 시크릿 아님).
         "_PUBLIC_SITE_BASE_URL": "https://sprintable.ai",
+        # story #4336 — deploy-backend ENV_VARS가 `--timeout`과 같은 값을 BACKEND_REQUEST_TIMEOUT_SECONDS로 싣는다(set -u).
+        "_BACKEND_TIMEOUT": "1800" if deploy_env == "prod" else "3600",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -799,6 +802,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "PUBLIC_SITE_BASE_URL=https://sprintable.ai,"
         # story #4341 — 베이스 문자열 맨 끝(PUBLIC_SITE_BASE_URL 다음). 빈 값 = 운영 알림 미설정(not_configured).
         "OPS_ALERT_CONVERSATION_ID=,"
+        "BACKEND_REQUEST_TIMEOUT_SECONDS=3600,"  # story #4336 — `--timeout`과 같은 값(워커 틱 예산)
         "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
@@ -835,3 +839,12 @@ def test_deploy_backend_gcloud_uses_assembled_remove_list():
     call = script[script.index("gcloud run deploy sprintable-backend"):]
     call = call[: call.index("--quiet")]
     assert "--remove-env-vars=$${REMOVE_ENV_VARS}" in call, call
+
+
+
+@pytest.mark.parametrize("deploy_env, timeout", [("dev", "3600"), ("prod", "1800")])
+def test_deploy_backend_passes_its_own_request_timeout_to_the_app(deploy_env, timeout):
+    """story #4336 — 발행 워커의 틱 예산이 이 서비스의 Cloud Run 요청 시한을 넘지 않게, 배포가 `--timeout`과 같은 `_BACKEND_TIMEOUT`을
+    `BACKEND_REQUEST_TIMEOUT_SECONDS`로 싣는다(dev · prod 둘 다)."""
+    env_vars = _run_env_vars_assembly(deploy_env, redis_url="redis://example:6379")
+    assert f"BACKEND_REQUEST_TIMEOUT_SECONDS={timeout}" in env_vars.split(",")

@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
@@ -497,13 +499,14 @@ async def test_publish_endpoint_dispatches_to_carousel_for_facebook_sandbox():
             await _approve_gate_directly(s, uuid.UUID(gate_id))
 
         async with _client_for(app) as client:
-            r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r1 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r1.status_code == 200, r1.text
             assert r1.json()["processing"] is True
 
-            r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r2 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r2.status_code == 200, r2.text
-        body = r2.json()
+        # story #4336 — 요청은 «발행 중»(대기열), 결과는 워커 한 틱 뒤 발행 행에.
+        body = await publication_body(Session, draft_id)
         assert body["processing"] is False
         # facebook_sandbox_publish.py::publish_container는 그대로 통과(no-op) —
         # create_carousel_container가 반환한 id 그대로가 최종 external_id.
@@ -547,8 +550,12 @@ async def test_sandbox_carousel_child_failure_marker_blocks_publish():
             await _approve_gate_directly(s, uuid.UUID(gate_id))
 
         async with _client_for(app) as client:
-            r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-        assert r_publish.status_code >= 400, r_publish.text
+            r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            detail = await draft_detail(client, org_id, draft_id)
+        # story #4336 — 공급자(자식 컨테이너) 실패는 워커가 만난다: 요청은 «발행 중», 발행은 막히고 명령에 실패가 남는다.
+        assert r_publish.status_code == 200, r_publish.text
+        assert (await publication_body(Session, draft_id))["status"] != "published"
+        assert detail["failure_kind"] is not None and detail["command_status"] != "completed", detail
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -586,13 +593,14 @@ async def test_publish_endpoint_dispatches_to_reels_for_facebook_sandbox():
             await _approve_gate_directly(s, uuid.UUID(gate_id))
 
         async with _client_for(app) as client:
-            r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r1 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r1.status_code == 200, r1.text
             assert r1.json()["processing"] is True
 
-            r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r2 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r2.status_code == 200, r2.text
-        body = r2.json()
+        # story #4336 — 요청은 «발행 중»(대기열), 결과는 워커 한 틱 뒤 발행 행에.
+        body = await publication_body(Session, draft_id)
         assert body["processing"] is False
         assert body["external_id"] is not None and body["external_id"].startswith("sandbox-fb-reels-")
     finally:

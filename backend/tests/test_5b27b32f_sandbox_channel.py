@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -855,10 +857,11 @@ async def test_publish_via_sandbox_expired_token_marker_via_http():
                 client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
                 text="토큰 만료 테스트 [sandbox:expired-token]",
             )
-            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-        assert r.status_code == 409, r.text
-        error = r.json().get("error") or r.json()
-        assert error["code"] == "CHANNEL_TOKEN_EXPIRED"
+            r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            detail = await draft_detail(client, org_id, draft_id)
+        # story #4336 — 토큰 만료는 공급자 응답이라 워커가 만난다: 요청은 «발행 중», 명령은 연결 사유로 멈춘다(같은 코드).
+        assert r.status_code == 200, r.text
+        assert (detail["command_status"], detail["command_reason_code"]) == ("blocked", "CHANNEL_TOKEN_EXPIRED")
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_3403_channel_post_draft_detail import (
     _approve_gate_directly, _client_for, _seed_agent, _seed_connection, _seed_default_role,
     _seed_human, _seed_org, _seed_story, _seed_submit_approve, _session_factory, _setup_org_scoped_app,
@@ -86,12 +88,17 @@ async def test_new_version_after_publish_keeps_publication_id_pointing_at_last_p
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_publish.status_code == 200, r_publish.text
                 # story #3525 REQUIRED(PO 確定 ③) — publish 응답 자체가 이미
                 # publication_id를 실어야 FE handlePublish의 로컬 병합(재로드 없이
                 # 발행됨 카드가 즉시 열리는 흐름)이 서버 값 없이도 성립한다.
-                publish_publication_id = r_publish.json()["publication_id"]
+                # story #4336 — 즉시 발행은 이제 «발행 중»(워커가 발행)이라 첫 응답엔 없다. 워커가 끝낸 뒤 같은 요청(이미 끝난
+                # 명령)은 그 발행 결과를 publication_id까지 실어 돌려준다(FE는 «발행 중» 동안 초안 상세를 다시 읽는다).
+                assert r_publish.json()["processing"] is True
+                r_again = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                assert r_again.status_code == 200, r_again.text
+                publish_publication_id = r_again.json()["publication_id"]
                 assert publish_publication_id is not None
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

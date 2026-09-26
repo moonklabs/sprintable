@@ -393,3 +393,107 @@ async def test_x_sandbox_api_budget_exceeded_marker_is_deterministic():
     assert exc_info.value.code == "SANDBOX_X_API_BUDGET_EXCEEDED"
     assert exc_info.value.status_code == 402
     assert "[sandbox:api-budget-exceeded]" in exc_info.value.message
+
+
+# ─── story #4336(PO 05:24Z 조건 2 · 3) — 요청 때 통과 · 워커에서 걸림 ────────────────────────────────
+
+
+async def _x_org_with_budget(Session, *, limit_minor: int, drafts: int):
+    from app.services.channel_connection import upsert_channel_connection
+
+    async with Session() as s:
+        org_id, project_id = await _seed_org(s)
+        await _seed_default_role(s, org_id)
+        human_id = await _seed_human(s, org_id)
+        connection = await upsert_channel_connection(
+            s, org_id=org_id, channel="x_sandbox", account_id=f"x-sandbox-4336-{uuid.uuid4().hex[:8]}",
+            account_label="sandbox_x_user", credential_kind="oauth",
+            access_token="sandbox-x-access:app-4336", refresh_token="sandbox-x-refresh:app-4336:g0",
+            token_expires_at=datetime.now(timezone.utc), refresh_mode="refresh_token",
+            scopes=["tweet.read", "tweet.write", "offline.access"], connected_by=human_id,
+        )
+        await _put_rules(s, org_id=org_id, rules={
+            "api_usage_budget": {"limit_minor": limit_minor, "currency": "KRW", "period": "month"},
+        })
+        draft_ids = [
+            await _seed_and_approve_x_draft(s, org_id=org_id, project_id=project_id, human_id=human_id, connection_id=connection.id)
+            for _ in range(drafts)
+        ]
+    return org_id, human_id, draft_ids
+
+
+_BUDGET_FIELDS = ("code", "limit_minor", "spent_minor", "estimated_cost_minor", "remaining_minor")
+
+
+@pytest.mark.anyio
+async def test_worker_budget_stop_stores_the_same_body_as_the_publish_now_422():
+    """PO 조건 2 — 요청 때 예산이 남아 대기열에 들어갔는데 워커 차례 전에 다른 지출로 모자라졌다: 명령을 멈추고, 즉시 발행 422와
+    **같은 본문**(코드 · 한도 · 사용 · 이번 추정 · 남은 금액)을 명령에 남겨 초안 상세가 그대로 내보낸다(화면이 같은 배너).
+    뮤테이션: 워커가 `failure_detail`을 적지 않으면 상세의 `command_failure_detail`이 None으로 RED."""
+    from app.main import app
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, (queued, probe) = await _x_org_with_budget(Session, limit_minor=30, drafts=2)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                assert r.status_code == 200 and r.json()["processing"] is True, r.text
+                async with Session() as s:  # 그 사이 다른 지출(20) — 남은 10 < 단가 20
+                    story_id = uuid.uuid4()
+                    from app.services.x_publish_budget import API_USAGE_COST_KIND
+
+                    await _seed_cost_evidence(s, org_id=org_id, work_item_id=story_id, kind=API_USAGE_COST_KIND, cost_minor=20)
+                counts = await run_worker_tick(Session)
+                assert counts["blocked_unapproved"] == 1, counts
+                detail = await draft_detail(client, org_id, queued)
+                r_now = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{probe}/publish")
+        finally:
+            app.dependency_overrides.clear()
+        assert r_now.status_code == 422, r_now.text
+        expected = {k: r_now.json()["error"][k] for k in _BUDGET_FIELDS}
+        assert expected["code"] == "API_USAGE_BUDGET_EXCEEDED"
+        assert detail["command_failure_detail"] == expected
+        assert (detail["command_status"], detail["command_reason_code"]) == ("blocked_unapproved", "API_USAGE_BUDGET_EXCEEDED")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_two_queued_posts_cannot_both_spend_past_the_budget():
+    """PO 조건 3 — 한도(30)가 한 건(20)만 허용하는데 둘이 동시에 요청 검사를 통과해 대기열에 들어갔다: 워커의 재검사가 실제 한도를
+    지킨다 — 공급자 게시 1 · 나머지 하나는 조건 2 모양(같은 본문)으로 멈춤.
+    뮤테이션: 워커 쪽 예산 재검사(`publish_channel_post_draft`의 check_api_usage_budget_or_raise)를 빼면 게시 2로 RED."""
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.channel_publication import ChannelPublication
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, drafts = await _x_org_with_budget(Session, limit_minor=30, drafts=2)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                for draft_id in drafts:
+                    r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                    assert r.status_code == 200 and r.json()["processing"] is True, r.text
+                await run_worker_tick(Session)
+                details = [await draft_detail(client, org_id, d) for d in drafts]
+        finally:
+            app.dependency_overrides.clear()
+        async with Session() as s:
+            published = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.org_id == org_id, ChannelPublication.status == "published")
+            )).scalars().all()
+        assert len(published) == 1, f"한도 30 · 단가 20인데 게시 {len(published)}건"
+        stopped = [d for d in details if d["command_status"] == "blocked_unapproved"]
+        assert len(stopped) == 1
+        body = stopped[0]["command_failure_detail"]
+        assert body["code"] == "API_USAGE_BUDGET_EXCEEDED"
+        assert (body["limit_minor"], body["spent_minor"], body["remaining_minor"]) == (30, 20, 10)
+    finally:
+        await engine.dispose()

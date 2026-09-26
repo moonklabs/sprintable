@@ -480,7 +480,8 @@ def test_publish_path_modules_create_http_clients_only_through_provider_client(p
 
 
 _BATCH_LOOPS = [
-    ("app/services/publication_command.py", "process_due_publication_commands", "command_ids"),
+    # story #4336 — 발행 명령 워커는 한 번에 하나씩 집는 while 루프(틱 예산 대조) — 집은 뒤 원시 id(`command_id`)로 다시 읽는다.
+    ("app/services/publication_command.py", "process_due_publication_commands", "command_id"),
     ("app/services/insight_snapshots.py", "process_due_insight_snapshots", "snapshot_ids"),
     ("app/services/ads_spend_snapshots.py", "process_due_ads_spend_snapshots", "snapshot_ids"),
     ("app/services/channel_post_comments.py", "process_due_comment_collections", "row_ids"),
@@ -500,13 +501,20 @@ def test_worker_batch_loops_iterate_ids_and_reload_each_row(path, function, ids_
     def calls(node, attr):
         return [c for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == attr]
 
-    loops = [n for n in ast.walk(fn) if isinstance(n, ast.For) and calls(n, "rollback")]
+    loops = [n for n in ast.walk(fn) if isinstance(n, (ast.For, ast.While)) and calls(n, "rollback")]
     assert loops, f"{function}: rollback을 품은 배치 루프를 못 찾음"
     for loop in loops:
-        assert isinstance(loop.iter, ast.Name) and loop.iter.id == ids_name, (
-            f"{function}:{loop.lineno} — 배치 루프가 `{ids_name}`이 아니라 `{ast.unparse(loop.iter)}`을 돈다"
-        )
-        assert calls(loop, "get"), f"{function}:{loop.lineno} — 루프 안에서 행을 다시 읽지 않는다"
+        if isinstance(loop, ast.For):
+            assert isinstance(loop.iter, ast.Name) and loop.iter.id == ids_name, (
+                f"{function}:{loop.lineno} — 배치 루프가 `{ids_name}`이 아니라 `{ast.unparse(loop.iter)}`을 돈다"
+            )
+        gets = calls(loop, "get")
+        assert gets, f"{function}:{loop.lineno} — 루프 안에서 행을 다시 읽지 않는다"
+        if isinstance(loop, ast.While):
+            # 한 건씩 집는 루프 — 다시 읽기가 ORM 행이 아니라 원시 id(`ids_name`)로 해야 한다.
+            assert any(any(isinstance(a, ast.Name) and a.id == ids_name for a in g.args) for g in gets), (
+                f"{function}:{loop.lineno} — 루프 안 다시 읽기가 원시 id `{ids_name}`을 쓰지 않는다"
+            )
 
 
 def test_comment_collection_reloads_the_row_inside_the_per_row_try():
