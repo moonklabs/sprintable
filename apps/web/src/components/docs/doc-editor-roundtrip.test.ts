@@ -17,7 +17,7 @@ import { RENDERER_CONTENT_ATTRIBUTES } from './doc-content-renderer';
 const EDITOR_ONLY_ATTRIBUTES: Record<string, string> = {
   'data-doc-id': '문서 임베드 · 위키 링크의 대상 id — 편집기가 미리보기 · 이동에 쓰고, 렌더러는 slug로 연다',
   'data-mime-type': '첨부 형식 — 편집기 카드 아이콘 · 다운로드 형식 판정',
-  'data-cols': '두/세 열 수 — 편집기 NodeView 전환 버튼 · 읽기 화면은 CSS([data-cols])로 그린다',
+  'data-cols': '두/세 열 수 — 렌더러 TS는 안 읽고 CSS([data-type="columnsBlock"][data-cols])가 읽는다(마크다운 sanitize 스키마가 dataCols를 통과 · story #4339)',
 };
 
 /** 픽스처의 모든 요소에서 `태그|data-속성` 짝. */

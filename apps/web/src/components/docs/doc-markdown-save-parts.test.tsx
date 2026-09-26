@@ -134,11 +134,58 @@ describe('주입 가드 — raw HTML로 남는 부품 속성은 값이 무엇이
   });
 });
 
+describe('이미지 alt의 따옴표 — 불러오기에서 안 잘린다(저장 쪽 escapeAttr의 읽기 짝 · 유나 4708)', () => {
+  it('⭐md `![a "b" c](…)` → markdownToHtml → 편집기 → alt 그대로', () => {
+    const html = markdownToHtml('![작은 "따옴표" 그림](https://example.com/q.png)');
+    const probe = document.createElement('div');
+    probe.innerHTML = html;
+    expect(probe.querySelector('img')?.getAttribute('alt')).toBe('작은 "따옴표" 그림');
+    expect(probe.querySelector('img')?.getAttribute('src')).toBe('https://example.com/q.png');
+    const editor = makeDocEditor(html);
+    try {
+      const reopened = document.createElement('div');
+      reopened.innerHTML = editor.getHTML();
+      expect(reopened.querySelector('img')?.getAttribute('alt')).toBe('작은 "따옴표" 그림');
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
 describe('보안 — 마크다운에 raw HTML로 남는 data-url은 읽을 때 4324 안전 도우미를 그대로 지난다(새 싱크 0)', () => {
   let container: HTMLDivElement;
   let root: Root;
   beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
   afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
+
+  async function renderMarkdown(md: string) {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DocContentRenderer content={`${md}\n`} contentFormat="markdown" untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel={koMessages.docs.embedLinkBlocked} unsafeFileLabel={koMessages.docs.attachFileBlocked} wikiLinkTargets={{}} />
+        </NextIntlClientProvider>,
+      );
+    });
+  }
+
+  const IMAGE_AFTER = '<img src="https://example.com/after.png" alt="뒤 그림">';
+  const RAW_HTML_BLOCKS: Record<string, string> = {
+    ...Object.fromEntries(partRoots(PARTS_FIXTURE).map((el, i) => [`${keyOf(el)}#${i}`, el.outerHTML])),
+    imageWithWidth: '<img src="https://example.com/w.png" alt="너비" style="width: 50%;">',
+  };
+
+  it.each(Object.entries(RAW_HTML_BLOCKS))('⭐%s 바로 뒤 마크다운 이미지가 읽기 화면에서 이미지로 선다(유나 4708 · 예전: HTML 블록에 먹혀 «![…](…)» 글자)', async (_name, block) => {
+    const md = htmlToMarkdown(`${block}${IMAGE_AFTER}`);
+    await renderMarkdown(md);
+    expect(container.querySelector('img[alt="뒤 그림"]'), md).not.toBeNull();
+    expect(container.textContent ?? '').not.toContain('![');
+  });
+
+  it('⭐마크다운 문서의 두 열이 읽기 화면에서 열 수(data-cols)를 가진다(sanitize가 dataCols를 통과 · 예전: 걷혀서 한 열로 쌓임)', async () => {
+    const md = htmlToMarkdown('<div data-type="columnsBlock" data-cols="2"><div data-type="columnBlock"><p>왼쪽</p></div><div data-type="columnBlock"><p>오른쪽</p></div></div>');
+    await renderMarkdown(md);
+    expect(container.querySelector('[data-type="columnsBlock"]')?.getAttribute('data-cols')).toBe('2');
+  });
 
   it('⭐javascript: 링크 카드를 저장(md) → 읽기 화면으로 그리면 그 주소로 가는 링크 · 틀이 없다', async () => {
     const md = htmlToMarkdown('<div data-type="embedBlock" data-url="javascript:alert(1)"></div>');

@@ -11,12 +11,17 @@ type PartAttr = readonly [name: string, value: string | true | null];
  * story #4339(까디르 4708 · PO) — 부품 div를 만드는 **유일한** 길. 속성 이름은 호출하는 직렬화가 정한 상수이고 값은 늘 escapeAttr를 지난다 —
  * 직렬화가 속성 문자열을 직접 이어 붙일 길이 없다(예전 첨부의 data-file-data만 escape가 빠져, `"`가 든 값이 새 속성을 끼워 넣었다).
  */
+/** raw HTML 블록 앞뒤 간격 — 빈 줄(CommonMark HTML 블록 종료 조건). 줄바꿈 하나로 줄이면 뒤 마크다운이 블록에 먹힌다. */
+const RAW_HTML_BLOCK_GAP = '\n\n';
+
 function partDiv(attrs: readonly PartAttr[], text = ''): string {
   const rendered = attrs
     .filter(([, value]) => value !== null)
     .map(([name, value]) => (value === true ? ` ${name}` : ` ${name}="${escapeAttr(value as string)}"`))
     .join('');
-  return `\n<div${rendered}>${escapeAttr(text)}</div>\n`;
+  // story #4339(유나 4708) — 앞뒤 **빈 줄**. CommonMark의 HTML 블록은 빈 줄까지 이어져, 줄바꿈 하나면 바로 뒤 마크다운(이미지 등)이
+  // 블록에 먹혀 읽기 화면에 글자로 찍혔다(RAW_HTML_BLOCK_GAP · 아래 raw HTML 블록 규칙 전부 같은 간격).
+  return `${RAW_HTML_BLOCK_GAP}<div${rendered}>${escapeAttr(text)}</div>${RAW_HTML_BLOCK_GAP}`;
 }
 
 // fileAttachment 노드는 내용 없는 <div>(non-void) → turndown 의 blank 처리에 의해 drop 된다
@@ -139,7 +144,7 @@ turndown.addRule('imageWithWidth', {
     const src = escapeAttr(el.getAttribute('src') ?? '');
     const alt = escapeAttr(el.getAttribute('alt') ?? '');
     const width = el.style.width;
-    return `\n<img src="${src}" alt="${alt}" style="width:${width};max-width:100%;height:auto">\n`;
+    return `${RAW_HTML_BLOCK_GAP}<img src="${src}" alt="${alt}" style="width:${width};max-width:100%;height:auto">${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -168,7 +173,7 @@ turndown.addRule('columnsBlock', {
     const columnsHtml = Array.from(el.querySelectorAll('[data-type="columnBlock"]'))
       .map((col) => `<div data-type="columnBlock">${(col as HTMLElement).innerHTML}</div>`)
       .join('');
-    return `\n<div data-type="columnsBlock" data-cols="${cols}">${columnsHtml}</div>\n`;
+    return `${RAW_HTML_BLOCK_GAP}<div data-type="columnsBlock" data-cols="${cols}">${columnsHtml}</div>${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -219,7 +224,7 @@ turndown.addRule('imageWithAsset', {
       return v == null ? '' : ` ${name}="${escapeAttr(v)}"`;
     };
     const width = el.style.width ? ` style="width:${el.style.width};max-width:100%;height:auto"` : '';
-    return `\n<img${a('data-asset-id')}${a('data-filename')}${a('data-size')}${a('data-mime-type')}${a('alt')}${width}>\n`;
+    return `${RAW_HTML_BLOCK_GAP}<img${a('data-asset-id')}${a('data-filename')}${a('data-size')}${a('data-mime-type')}${a('alt')}${width}>${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -235,7 +240,7 @@ turndown.addRule('toggleBlock', {
     const contentEl = el.querySelector('[data-type="toggleContent"]');
     const summaryHtml = summaryEl ? summaryEl.innerHTML : '';
     const contentHtml = contentEl ? contentEl.innerHTML : '';
-    return `\n<div data-type="toggleBlock" data-open="${isOpen}"><div data-type="toggleSummary">${summaryHtml}</div><div data-type="toggleContent">${contentHtml}</div></div>\n`;
+    return `${RAW_HTML_BLOCK_GAP}<div data-type="toggleBlock" data-open="${isOpen}"><div data-type="toggleSummary">${summaryHtml}</div><div data-type="toggleContent">${contentHtml}</div></div>${RAW_HTML_BLOCK_GAP}`;
   },
 });
 
@@ -485,7 +490,9 @@ export function markdownToHtml(rawMd: string): string {
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
   // Images (before links — both use []() syntax)
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
+  // story #4339(유나 4708) — 속성 값의 따옴표를 escape(앞 escapeHtml은 & < >만) — 예전엔 alt에 `"`가 있으면 불러올 때 거기서 잘렸고
+  // src도 같은 자리라 속성 경계를 넘을 수 있었다(저장 쪽 escapeAttr의 읽기 짝).
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => `<img src="${quoteAttr(src)}" alt="${quoteAttr(alt)}">`);
 
   // Links — sanitize javascript: hrefs.
   //
@@ -589,6 +596,11 @@ export function markdownToHtml(rawMd: string): string {
   html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlockPlaceholders[Number(i)] ?? '');
 
   return html.trim();
+}
+
+/** 이미 escapeHtml(& < >)을 지난 글에 속성 따옴표만 더 escape. */
+function quoteAttr(str: string): string {
+  return str.replace(/"/g, '&quot;');
 }
 
 function escapeHtml(str: string): string {
