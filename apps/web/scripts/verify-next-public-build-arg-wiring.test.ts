@@ -7,7 +7,7 @@
 // 그래서 AC2①(ARG 부재 재현)은 실 레포가 아니라 «합성 미니 레포 픽스처»로 고정하고,
 // 실 레포 통합 테스트는 `missing.length === 0`을 단언한다(#3947 착지 前엔 이 테스트가
 // 실패하는 게 «정답» — 착지 순서로 푸는 것이지 가드를 느슨하게 푸는 게 아니다).
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -450,28 +450,34 @@ describe('checkWiring — 실 develop HEAD 통합(1회 계산 공유, story #434
     expect(sharedResult.cloudbuildStepMissing).toBe(false);
   });
 
-  // AC2② — 실 레포 경로에 프로브 키를 실제로 심어(임시 픽스처, listScanFiles가 도는
-  // 실경로) RED로 잡히는지, 원복하면 다시 사라지는지 — 이 케이스만 파일시스템을
-  // 건드리므로 beforeAll 공유 결과와 별도로 자기만의 checkWiring() 호출을 쓴다.
-  describe('AC2② — 실 레포 경로 프로브 주입(원복 시 no-op)', () => {
-    const fixturePath = path.resolve(__dirname, '../src/__3948-probe-fixture.ts');
+  // AC2② — 실 레포의 스캔 목록(listScanFiles) + 프로브 키 파일 하나를 넘겨 RED로 잡히는지, 빼면 다시 사라지는지.
+  // story #4333 — 예전엔 프로브 파일을 실 src 트리에 심었다 → 같은 전체 판의 다른 실 트리 스캐너가 그 임시 파일을 세어 까닭 없이 RED.
+  // 이제 프로브는 os.tmpdir() 아래 격리 루트에 쓰고 목록에 더한다. «실 경로를 도는지»는 목록이 apps/web/src를 덮는지로 따로 고정한다.
+  describe('AC2② — 실 스캔 목록 + 격리 프로브(빼면 no-op)', () => {
+    let dir = '';
+    let fixturePath = '';
 
-    afterEach(() => {
-      if (existsSync(fixturePath)) unlinkSync(fixturePath);
+    beforeAll(() => {
+      dir = mkdtempSync(path.join(tmpdir(), 'next-public-probe-'));
+      fixturePath = path.join(dir, '__3948-probe-fixture.ts');
+      writeFileSync(fixturePath, 'export const probe = process.env.NEXT_PUBLIC_ZZZ_PROBE;\n');
+    });
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+    it('실 스캔 목록이 apps/web/src를 덮는다(프로브를 거기 두던 까닭 — 실 경로 배선)', () => {
+      const files = listScanFiles();
+      expect(files.some((f) => f.split(path.sep).join('/').includes('apps/web/src/'))).toBe(true);
     });
 
-    it('process.env.NEXT_PUBLIC_ZZZ_PROBE 참조를 심으면 missing에 즉시 뜬다', () => {
-      writeFileSync(fixturePath, 'export const probe = process.env.NEXT_PUBLIC_ZZZ_PROBE;\n');
-      const result = checkWiring();
+    it('process.env.NEXT_PUBLIC_ZZZ_PROBE 참조를 넣으면 missing에 즉시 뜬다', () => {
+      const result = checkWiring({ files: [...listScanFiles(), fixturePath] });
       const probe = result.missing.find((m) => m.key === 'NEXT_PUBLIC_ZZZ_PROBE');
       expect(probe).toBeDefined();
       expect(probe?.refs.some((r) => r.file.endsWith('__3948-probe-fixture.ts'))).toBe(true);
     }, 3000);
 
-    it('픽스처를 지우면(원복) 더 이상 안 뜬다 — 무관 PR no-op', () => {
-      writeFileSync(fixturePath, 'export const probe = process.env.NEXT_PUBLIC_ZZZ_PROBE;\n');
-      unlinkSync(fixturePath);
-      const result = checkWiring();
+    it('프로브를 빼면(원복) 더 이상 안 뜬다 — 무관 PR no-op', () => {
+      const result = checkWiring({ files: listScanFiles() });
       expect(result.missing.some((m) => m.key === 'NEXT_PUBLIC_ZZZ_PROBE')).toBe(false);
     }, 3000);
   });

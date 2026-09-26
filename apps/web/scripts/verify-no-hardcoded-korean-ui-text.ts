@@ -368,10 +368,14 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-export function scanRepo(srcRoot: string): Violation[] {
+/**
+ * `minExpectedFiles`는 **격리 루트 테스트 전용**(story #4333) — 운영 호출은 기본값(MIN_EXPECTED_FILES)으로 «잘못된 srcRoot»를 막는다.
+ * 테스트는 os.tmpdir() 아래 합성 루트(파일 1개)를 넘겨 실 src 트리에 쓰지 않는다(전체 판 스캐너끼리 실 트리 임시 파일로 흔들던 결함).
+ */
+export function scanRepo(srcRoot: string, { minExpectedFiles = MIN_EXPECTED_FILES }: { minExpectedFiles?: number } = {}): Violation[] {
   const files: string[] = [];
   walk(srcRoot, files);
-  if (files.length < MIN_EXPECTED_FILES) {
+  if (files.length < minExpectedFiles) {
     throw new Error(`FAIL: 검사 대상 파일이 ${files.length}개뿐(srcRoot=${srcRoot}) — 가드가 헛돌고 있다.`);
   }
   const violations: Violation[] = [];

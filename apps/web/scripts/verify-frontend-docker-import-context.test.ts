@@ -8,7 +8,8 @@
 //   ② dst를 그대로 접두로 쓰면 안 된다 — `COPY package.json ./`의 dst가 이미지 루트(/app)라
 //     레포 전체가 허용으로 열려 실 위반이 조용히 통과한다(가드가 아무것도 안 잡는 최악 형).
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   parseCopiedPrefixes,
@@ -147,26 +148,23 @@ describe('AC㉤ — 주석 속 import 문자열은 위반으로 안 잡힌다(st
     expect(specs).toEqual(['../lib/real.js']);
   });
 
-  // scanRepository() 자신이 실제로 stripComments를 거치는지(단순 유틸 정확성이 아니라
-  // «배선»)까지 재는 통합 테스트 — apps/web 안에 실 스캔 대상이 되는 임시 픽스처를
-  // 만들어(walk()가 스캔하는 실경로) 확認한다. mutation-kill: scanRepository 안
-  // stripComments 호출을 지우면 이 테스트가 RED로 걸린다(별도로 확認 완료).
-  describe('scanRepository 통합 — 배선 확認(실 임시 픽스처)', () => {
-    const fixturePath = path.resolve(__dirname, '__ac40-fixture.ts');
+  // scanRepository() 자신이 실제로 stripComments를 거치는지(단순 유틸 정확성이 아니라 «배선»)까지 재는 통합 테스트. mutation-kill:
+  // scanRepository 안 stripComments 호출을 지우면 RED(주석 속 `../../../` import가 격리 루트 밖 = 저장소 밖으로 풀려 위반).
+  // story #4333 — 예전엔 픽스처를 apps/web 실 트리에 썼다 → 같은 전체 판의 다른 실 트리 스캐너가 그 임시 파일을 세어 까닭 없이 RED.
+  // 이제 os.tmpdir() 아래 격리 루트에 쓰고 scanRepository에 그 파일만 넘긴다.
+  describe('scanRepository 통합 — 배선 확認(격리 루트 픽스처)', () => {
+    let dir = '';
+    afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-    afterEach(() => {
-      if (existsSync(fixturePath)) unlinkSync(fixturePath);
-    });
-
-    // story #3902 — 부하 시 vitest 기본 5000ms를 넘길 수 있는 실 전수 스캔(측정: 동시부하
-    // 재현 5회 = 285·288·386·265·254ms 중 최댓값 386ms → ×3 ≈ 1158ms → 1500ms로 반올림).
-    it('apps/web 실경로에 주석 속 컨텍스트 밖 import를 심어도 위반으로 안 잡힌다', () => {
-      writeFileSync(
-        fixturePath,
-        "// import { x } from '../../../outside-context-in-a-comment.js';\nexport const noop = 1;\n",
-      );
-      const { violations } = scanRepository();
+    it('주석 속 컨텍스트 밖 import는 위반으로 안 잡힌다 · 주석 밖이면 잡힌다(대조)', () => {
+      dir = mkdtempSync(path.join(tmpdir(), 'docker-ctx-'));
+      const inComment = path.join(dir, '__ac40-fixture.ts');
+      const live = path.join(dir, '__ac40-live.ts');
+      writeFileSync(inComment, "// import { x } from '../../../outside-context-in-a-comment.js';\nexport const noop = 1;\n");
+      writeFileSync(live, "import { x } from '../../../outside-context-live.js';\nexport const y = x;\n");
+      const { violations } = scanRepository({ files: [inComment, live] });
       expect(violations.some((v) => v.file.endsWith('__ac40-fixture.ts'))).toBe(false);
-    }, 1500);
+      expect(violations.some((v) => v.file.endsWith('__ac40-live.ts')), '주석 밖 import는 잡혀야 대조가 선다').toBe(true);
+    });
   });
 });
