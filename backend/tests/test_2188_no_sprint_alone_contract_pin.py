@@ -78,7 +78,15 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
     stories_module._attach_assignee_ids = _noop
     stories_module._attach_has_evidence = _noop
     try:
-        auth = AuthContext(user_id="agent-1", email=None, claims={"app_metadata": {}})
+        import uuid
+        from unittest.mock import patch
+
+        # story #4350 — project 필터 없는 목록은 caller의 접근 가능 프로젝트를 먼저 푼다(uuid 필요 · 이 목 세션은 그 조회를 못 한다).
+        auth = AuthContext(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {}})
+        import app.main  # noqa: F401 — 패치 전에 라우터를 다 불러 둔다(모듈 머리 이름 import가 목을 쥐지 않게)
+
+        accessible_patch = patch("app.services.project_auth.accessible_project_ids_in_org", AsyncMock(return_value=[uuid.uuid4()]))
+        accessible_patch.start()
         result = await list_stories(
             project_id=None, epic_id=None, sprint_id=None, assignee_id=None,
             status_filter=None, no_sprint=True, ids=None, story_number=None, q=None,
@@ -98,5 +106,6 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
         repo.list.assert_awaited_once()
         repo.list_backlog.assert_not_awaited()
     finally:
+        patch.stopall()
         stories_module._attach_assignee_ids = orig_assignee
         stories_module._attach_has_evidence = orig_evidence
