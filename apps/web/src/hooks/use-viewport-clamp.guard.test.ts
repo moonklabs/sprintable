@@ -1,4 +1,4 @@
-// story #4342 AC2 — 부류 가드: «한쪽 맞춤(left-0 · right-0) + 고정/최소 폭(w-N · w-[…] · min-w-[…]) + top-full absolute» 드롭다운은 좁은 화면에서
+// story #4342 AC2 — 부류 가드: «한쪽 맞춤(left-N · right-N · left-[…] — 0만이 아니라 띄운 맞춤도 · PO가 짚은 scale-ladder left-3) + 고정/최소 폭(w-N · w-[…] · min-w-[…]) + top-full absolute» 드롭다운은 좁은 화면에서
 // 뷰포트 밖으로 나갈 수 있다 → 그 패널은 useViewportClampRef(표지 data-dropdown-panel)와 폭 상한 max-w-[calc(100vw-1rem)]를 함께 단다.
 // 원천 글자 스캔이라 한계가 있다: top-full 없이 흐름 아래 붙는 목록(엔티티 후보 등)과 여러 줄로 쪼갠 className은 못 본다 — 그 자리는 PR 본문 전수 표.
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ const SRC = path.resolve(__dirname, '..');
 const EXEMPT: Record<string, string> = {
   'components/nav/notification-bell.tsx': '`hidden … lg:flex` — lg(1024px) 미만에선 패널 자체가 안 뜬다(모바일은 다른 진입)',
 };
-const ANCHORED = /(?=[^"'`]*\babsolute\b)(?=[^"'`]*\btop-full\b)(?=[^"'`]*\b(?:left|right)-0\b)(?=[^"'`]*(?:\bmin-w-\[|\bw-\[|\bw-\d))[^"'`]*/;
+const ANCHORED = /(?=[^"'`]*\babsolute\b)(?=[^"'`]*\btop-full\b)(?=[^"'`]*(?:^|[\s"'`])-?(?:left|right)-(?:\d|\[))(?=[^"'`]*(?:\bmin-w-\[|\bw-\[|\bw-\d))[^"'`]*/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -40,6 +40,8 @@ describe('뷰포트 밖 드롭다운 부류 가드(story #4342)', () => {
     expect(scan(old)).toEqual([{ line: 1, ok: false }]);
     expect(scan(fixed)).toEqual([{ line: 1, ok: true }]);
     expect(scan('<span className="absolute inset-y-0 left-0 w-1 bg-x" />')).toEqual([]);
+    // 띄운 맞춤(left-3)도 같은 부류 — PO가 짚은 scale-ladder:263 옛 모양.
+    expect(scan('<div className="absolute left-3 top-full z-20 mt-2 w-56 rounded-lg border">')).toEqual([{ line: 1, ok: false }]);
   });
 
   it('src 전체 .tsx — 한쪽 맞춤 고정 폭 top-full 드롭다운은 모두 밀어 넣기 훅 + 폭 상한(제외는 이유와 함께)', () => {

@@ -170,7 +170,7 @@
     "components/flow/hypothesis-earth-layer.tsx::flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-[var(--elev-card)]",
     "components/flow/next-actions-strip.tsx::mt-1.5 rounded-lg border border-border bg-muted/20 p-2.5",
     "components/flow/scale-ladder.tsx::absolute left-0 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]",
-    "components/flow/scale-ladder.tsx::absolute left-3 top-full z-20 mt-2 w-56 rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]",
+    "components/flow/scale-ladder.tsx::absolute left-3 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]",
     "components/flow/scale-ladder.tsx::flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card px-1.5 py-1",
     "components/flow/scale-ladder.tsx::flex overflow-hidden rounded-xl border border-border bg-card",
     "components/flow/unattached-bucket.tsx::rounded-lg border border-border bg-card p-2.5",
