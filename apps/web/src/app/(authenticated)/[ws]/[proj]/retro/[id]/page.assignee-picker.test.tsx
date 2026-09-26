@@ -145,3 +145,37 @@ describe('RetroSessionPage — 액션 담당 칩 이름([SID:4300])', () => {
     expect([...select!.querySelectorAll('option')].map((o) => o.textContent)).not.toContain('쉬는봇');
   });
 });
+
+// [SID:4311 PR 2] 액션 담당 칩 줄 — 같은 이름 서로 다른 담당자 둘이면 «· ID 앞 8자»(담당자 id마다 한 번 · 같은 사람 두 칩은 같은 꼬리).
+describe('RetroSessionPage — 액션 담당 칩 동명이인([SID:4311 PR 2])', () => {
+  it('«송윤재» 둘 = 칩에 id 앞 8자 · 유나 = 꼬리 없음 · 담당 없음 = «미배정»', async () => {
+    const { resetOrgMembersCacheForTests } = await import('@/hooks/use-member-name-fallback');
+    resetOrgMembersCacheForTests();
+    const action = (id: string, title: string, assignee_id: string | null) => ({ id, session_id: SESSION.id, title, assignee_id, status: 'open', created_at: '2026-09-25T00:00:00Z' });
+    const session = {
+      ...SESSION,
+      actions: [
+        action('act1', '배포 점검', 'e75ca548-1'),
+        action('act2', '문서 정리', '2fd14616-2'),
+        action('act3', '회고 공유', 'm1'),
+        action('act4', '로그 보기', 'e75ca548-1'),
+        action('act5', '표 정리', null),
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/api/retro-sessions/${SESSION.id}?project_id=`)) return { ok: true, json: async () => ({ data: session }) };
+      if (url === '/api/team-members') {
+        return { ok: true, json: async () => ({ data: [{ id: 'm1', name: '유나', type: 'human' }, { id: 'e75ca548-1', name: '송윤재', type: 'human' }, { id: '2fd14616-2', name: '송윤재', type: 'human' }] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const chip = (title: string) => [...container.querySelectorAll('p')].find((p) => p.textContent === title)?.nextElementSibling?.textContent ?? '';
+    expect(chip('배포 점검')).toBe('송윤재 · e75ca548');
+    expect(chip('문서 정리')).toBe('송윤재 · 2fd14616');
+    expect(chip('회고 공유')).toBe('유나');
+    expect(chip('로그 보기')).toBe('송윤재 · e75ca548');
+    expect(chip('표 정리')).toBe(koMessages.retro.actionUnassigned);
+  });
+});

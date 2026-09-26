@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { memberLookup, memberOptionLabels } from '@/lib/member-display';
+import { actorRowLabels, memberLookup, memberOptionLabels } from '@/lib/member-display';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -333,6 +333,9 @@ export default function RetroSessionPage() {
   const memberTable = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members]);
   const actionAssigneeIds = useMemo(() => actions.map((action) => action.assignee_id), [actions]);
   const actionNames = useMemberNameFallback(orgId, memberTable, actionAssigneeIds, membersLoaded);
+  // [SID:4311 PR 2] 액션 담당 칩 줄 — 같은 이름 담당자 둘이면 «· ID 앞 8자»(담당자 id마다 한 번 · 꼬리 규칙 한 곳).
+  const actionAssigneeLabel = (id: string) => memberLookup(actionNames.memberMap, id, tc, { loaded: actionNames.loaded })?.label ?? '';
+  const actionAssigneeLabels = actorRowLabels(actions.map((action) => ({ id: action.assignee_id, label: action.assignee_id ? actionAssigneeLabel(action.assignee_id) : null })));
 
   useEffect(() => {
     let cancelled = false;
@@ -893,7 +896,7 @@ export default function RetroSessionPage() {
                               {/* [SID:4300] 배정됐는데 목록(활성만 · 배정 선택지)에 없던 담당자가 «미배정»으로 보이던 거짓 — 표에 있으면 이름(빔 =
                                   «이름 없는 구성원»), 없으면 조직 범위(비활성 포함)로 보충, 그래도 없으면 «알 수 없는 구성원». 받는 동안 빈 칩. */}
                               {action.assignee_id
-                                ? (memberLookup(actionNames.memberMap, action.assignee_id, tc, { loaded: actionNames.loaded })?.label ?? '')
+                                ? (actionAssigneeLabels.get(action.assignee_id) ?? actionAssigneeLabel(action.assignee_id))
                                 : t('actionUnassigned')}
                             </Badge>
                           </div>

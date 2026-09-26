@@ -11,7 +11,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
-import { memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
+import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
@@ -216,6 +216,8 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     { value: ALL, label: t('filterAll') },
     ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
+  // [SID:4311 PR 2 · 유나] 피드 행의 행위자 — actor_id마다 한 번 · 시스템 행 제외 · 불러온 줄들 안에서만 겹침 판정.
+  const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? memberDisplayLabel(item.actor_name, tc) : null })));
 
   const entityTypeOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
@@ -313,7 +315,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
           ) : (
             <div className="space-y-1.5">
               {items.map((item) => (
-                <ActivityRow key={item.id} item={item} />
+                <ActivityRow key={item.id} item={item} rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined} />
               ))}
               {offset + PAGE_SIZE < total && (
                 <div className="pt-3 text-center">
@@ -358,18 +360,21 @@ export function auditContextTooltip(item: ActivityLogItem): string | undefined {
 // 구분한다.
 // [SID:4286 · 까디르 P2] #4284 name/label 계약(ProofCapsule · shared/avatar) — 머리글자 · 아바타는 name 그대로(null → 아이콘), 읽는 글자는
 // label. 예전엔 null 이름을 «이름 없는 구성원» 글자로 바꿔 name에 넣어, 아바타가 그 글자의 앞 두 자(«이름»)를 머리글자로 그렸다(가짜 머리글자).
-export function auditActorProps(item: ActivityLogItem, t: (key: string) => string): {
+// [SID:4311 PR 2] rowLabel = 목록이 actorRowLabels로 지은 행위자 라벨(같은 이름 둘이면 «· ID 앞 8자» 꼬리) — 읽는 글자(label)에만 싣고
+// 머리글자(name)는 그대로(유나).
+export function auditActorProps(item: ActivityLogItem, t: (key: string) => string, rowLabel?: string): {
   human?: { name: string | null; label?: string; role: string };
   agent?: { name: string | null; label?: string };
 } {
   if (!item.actor_id) return {}; // 진짜 액터 없음(시스템 액션) — 빈 슬롯 유지.
   const name = item.actor_name || null;
-  const label = name ? {} : { label: memberDisplayLabel(null, t) };
+  const text = rowLabel || memberDisplayLabel(name, t);
+  const label = text === name ? {} : { label: text };
   if (item.actor_type === 'agent') return { agent: { name, ...label } };
   return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
-function ActivityRow({ item }: { item: ActivityLogItem }) {
+function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: string }) {
   // story #3493 — 감사로그 created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
@@ -379,7 +384,7 @@ function ActivityRow({ item }: { item: ActivityLogItem }) {
   const displayTimezone = resolveDisplayTimezone(orgTimezone).tz;
   const time = formatRelativeTime(item.created_at, locale, displayTimezone);
   const tc = useTranslations('common');
-  const { human, agent } = auditActorProps(item, tc);
+  const { human, agent } = auditActorProps(item, tc, rowLabel);
   return (
     <div title={auditContextTooltip(item)}>
       <ProofCapsule

@@ -9,7 +9,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
-import { memberDisplayLabel } from '@/lib/member-display';
+import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 interface ActivityLogItem {
@@ -43,13 +43,15 @@ function getInitials(name: string | null): string {
 // story #3755(BE·표시명·결함 클래스) — actor_id 있는데(실존 구성원) actor_name null(display_name
 // 없음)인 경우와 actor_id 자체가 null(진짜 시스템 액션)인 경우가 예전엔 같은 `unknownActor`
 // (「시스템」)로 뭉뚱그려졌다 — activity-log-view.tsx의 auditActorProps와 동형 처방.
+// [SID:4311 PR 2] rowLabels = 목록이 actorRowLabels로 지은 행위자 라벨(같은 이름 둘이면 «· ID 앞 8자» 꼬리) — 머리글자는 그대로.
 export function activityActorLabel(
   item: Pick<ActivityLogItem, 'actor_id' | 'actor_name'>,
   t: (key: string) => string,
   tc: (key: string) => string,
+  rowLabels?: ReadonlyMap<string, string>,
 ): string {
   if (!item.actor_id) return t('unknownActor'); // 진짜 액터 없음(시스템 액션).
-  return memberDisplayLabel(item.actor_name, tc); // 실존 구성원 — 이름 있으면 그대로, 없으면 「이름 없는 구성원」.
+  return rowLabels?.get(item.actor_id) ?? memberDisplayLabel(item.actor_name, tc); // 실존 구성원 — 이름 있으면 그대로, 없으면 「이름 없는 구성원」.
 }
 
 function avatarClass(type: 'human' | 'agent' | null): string {
@@ -138,6 +140,9 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
     };
   }, [fetchItems]);
 
+  // [SID:4311 PR 2 · 유나] actor_id마다 한 번 · 시스템 행 제외 · 불러온 10줄 안에서만 겹침 판정.
+  const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? memberDisplayLabel(item.actor_name, tc) : null })));
+
   return (
     <SectionCard className="xl:col-span-2">
       <SectionCardHeader>
@@ -179,7 +184,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
               </span>
               <div className="min-w-0 flex-1">
                 <span className="text-xs font-medium text-foreground">
-                  {activityActorLabel(item, t, tc)}
+                  {activityActorLabel(item, t, tc, actorLabels)}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {' — '}
