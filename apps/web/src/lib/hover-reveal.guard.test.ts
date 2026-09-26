@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 
 const SRC = path.resolve(__dirname, '..');
 const PIECE = /"[^"\n]*"|'[^'\n]*'|`[^`\n]*`/g;
@@ -28,6 +29,57 @@ export function hoverRevealProblem(piece: string): string | null {
   if (hides.some((m) => !m[1].split(':').includes('pointer-fine'))) return '호버 없는 기기에서 숨는다(pointer-fine 아닌 숨김)';
   if (!FOCUS.test(piece)) return '키보드 초점에서 안 보인다(초점 드러냄 없음)';
   return null;
+}
+
+// [PO 09:16Z · 까디르 P3] 둘째 규칙 — HOVER_REVEAL로 드러나는 조작 요소는 초점 링도 규약 링(HOVER_REVEAL_FOCUS_RING · citron)이어야 한다.
+// 예전 주소 칩의 `focus-visible:ring-border`처럼 배경 대비가 거의 없는 링이면 «초점에서 보인다»가 거짓이 된다.
+// AST로 JSX 요소를 본다: className이 HOVER_REVEAL을 부르면
+//   - 그 요소가 조작 요소(button · a · role=button · tabIndex)면 → 디자인 Button이거나 규약 링을 부르고 · 규약 밖 ring 토큰 0
+//   - 감싸는 요소(span · div)면 → 안의 조작 요소마다 같은 검사
+const OFF_RING = /(?:^|[\s"'`])focus-visible:ring-(?!3(?=[\s"'`]|$)|proof-citron(?=[\s"'`]|$)|offset-)[\w/.[\]-]+/;
+const DESIGN_CONTROL = /^(Button|DropdownMenuTrigger)$/; // 링을 스스로 입는 디자인 부품
+
+export function hoverRevealRingProblems(src: string, file = 'sample.tsx'): { problems: string[]; checked: number } {
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const problems: string[] = [];
+  let checked = 0;
+  const openingOf = (n: ts.JsxElement | ts.JsxSelfClosingElement) => (ts.isJsxElement(n) ? n.openingElement : n);
+  const attr = (o: ts.JsxOpeningElement | ts.JsxSelfClosingElement, name: string) => {
+    const a = o.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === name);
+    return a ? a.getText(sf) : null;
+  };
+  const uses = (text: string | null, id: string) => new RegExp(`\\b${id}\\b`).test(text ?? '');
+  const isControl = (o: ts.JsxOpeningElement | ts.JsxSelfClosingElement) => {
+    const tag = o.tagName.getText(sf);
+    return tag === 'button' || tag === 'a' || DESIGN_CONTROL.test(tag) || /button/.test(attr(o, 'role') ?? '') || attr(o, 'tabIndex') !== null;
+  };
+  const check = (o: ts.JsxOpeningElement | ts.JsxSelfClosingElement) => {
+    checked += 1;
+    const tag = o.tagName.getText(sf);
+    if (DESIGN_CONTROL.test(tag)) return;
+    const cls = attr(o, 'className');
+    const at = `${file}:${sf.getLineAndCharacterOfPosition(o.getStart()).line + 1} <${tag}>`;
+    if (!uses(cls, 'HOVER_REVEAL_FOCUS_RING')) problems.push(`${at} 규약 링(HOVER_REVEAL_FOCUS_RING) 없음`);
+    else if (OFF_RING.test(cls ?? '')) problems.push(`${at} 규약 밖 ring 토큰`);
+  };
+  const visit = (n: ts.Node): void => {
+    if (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n)) {
+      const o = openingOf(n);
+      if (uses(attr(o, 'className'), 'HOVER_REVEAL')) {
+        if (isControl(o)) check(o);
+        else if (ts.isJsxElement(n)) {
+          const inner = (c: ts.Node): void => {
+            if ((ts.isJsxElement(c) || ts.isJsxSelfClosingElement(c)) && isControl(openingOf(c))) check(openingOf(c));
+            ts.forEachChild(c, inner);
+          };
+          n.children.forEach(inner);
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return { problems, checked };
 }
 
 // 이유가 있는 제외 — 자리마다 조각 안 글자(needle)로 짚고, 짚은 자리가 사라지면(낡음) RED.
@@ -106,5 +158,39 @@ describe('호버 전용 조작 요소 부류 가드([SID:4345])', () => {
     }
     expect(hits).toEqual([]);
     expect(EXEMPT.filter((_, i) => !used.has(i)).map((x) => `${x.file} «${x.needle}» 낡은 제외`)).toEqual([]);
+  });
+
+  it('둘째 규칙 양성 대조 — HOVER_REVEAL 조작 요소에 규약 링이 없거나 규약 밖 링이면 RED', () => {
+    const bad = [
+      // 예전 주소 칩(4718 첫 head) — 테두리 토큰 링
+      `<button className={cn('rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border', HOVER_REVEAL)} />`,
+      `<button className={cn('p-1', HOVER_REVEAL)} />`,
+      `<button className={cn('focus-visible:ring-border', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)} />`,
+      `<div role="button" tabIndex={0} className={cn('p-1', HOVER_REVEAL)} />`,
+      `<span className={cn('flex', HOVER_REVEAL)}><button className="p-1">x</button></span>`,
+    ];
+    for (const s of bad) expect(hoverRevealRingProblems(s).problems, s).toHaveLength(1);
+    const ok = [
+      `<Button className={cn('p-1', HOVER_REVEAL)} />`,
+      `<button className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)} />`,
+      `<div role="button" tabIndex={0} className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)} />`,
+      `<span className={cn('flex', HOVER_REVEAL)}><span title="x" /><button className={cn('p-1', HOVER_REVEAL_FOCUS_RING)}>x</button></span>`,
+      `<div className={\`flex \${HOVER_REVEAL}\`}><button className={\`p-1 \${HOVER_REVEAL_FOCUS_RING} x\`} /></div>`,
+    ];
+    for (const s of ok) expect(hoverRevealRingProblems(s).problems, s).toEqual([]);
+  });
+
+  it('둘째 규칙 — src 전체에서 HOVER_REVEAL 조작 요소는 모두 규약 링(또는 디자인 Button)', () => {
+    let checked = 0;
+    const problems: string[] = [];
+    for (const f of walk(SRC).filter((p) => p.endsWith('.tsx'))) {
+      const src = fs.readFileSync(f, 'utf8');
+      if (!/\bHOVER_REVEAL\b/.test(src)) continue;
+      const r = hoverRevealRingProblems(src, path.relative(SRC, f));
+      checked += r.checked;
+      problems.push(...r.problems);
+    }
+    expect(checked, '조작 요소를 실제로 봤다(조용한 0 방지)').toBeGreaterThanOrEqual(15);
+    expect(problems).toEqual([]);
   });
 });

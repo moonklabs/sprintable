@@ -5,7 +5,7 @@
 // jsdom은 CSS를 안 입혀서 보임 여부는 클래스 모양으로 핀한다.
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { HOVER_REVEAL } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 import { DocUrlChip } from './doc-url-chip';
 
 function editButton() {
@@ -17,12 +17,20 @@ function editButton() {
 }
 
 describe('DocUrlChip «주소 바꾸기» — 호버 전용 아님([SID:4345])', () => {
-  it('HOVER_REVEAL 모양 · 맨 opacity-0 없음 · 초점 링은 그대로 · 부모에 group', () => {
+  it('HOVER_REVEAL 모양 · 맨 opacity-0 없음 · 부모에 group', () => {
     const { wrapper, button } = editButton();
     const tokens = button.className.split(/\s+/);
     for (const t of HOVER_REVEAL.split(' ')) expect(tokens, t).toContain(t);
     expect(tokens).not.toContain('opacity-0');
-    expect(tokens).toContain('focus-visible:ring-1');
     expect(wrapper.className.split(/\s+/)).toContain('group');
+  });
+
+  // 까디르 P3 · 유나 — 예전 `focus-visible:ring-border`(테두리 토큰)는 배경 대비가 거의 없어 초점이 사실상 안 보였다 → 규약 링(citron).
+  it('초점 링 = 규약 링(citron · ring-3) · 테두리 토큰 링 0', () => {
+    const { button } = editButton();
+    const tokens = button.className.split(/\s+/);
+    for (const t of HOVER_REVEAL_FOCUS_RING.split(' ')) expect(tokens, t).toContain(t);
+    expect(tokens).toEqual(expect.arrayContaining(['focus-visible:ring-3', 'focus-visible:ring-proof-citron']));
+    expect(tokens.filter((t) => /^focus-visible:ring-(border|1)$/.test(t))).toEqual([]);
   });
 });
