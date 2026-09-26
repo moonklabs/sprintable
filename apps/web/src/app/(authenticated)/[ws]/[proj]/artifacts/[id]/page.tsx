@@ -15,5 +15,6 @@ export default async function ArtifactDetailPage({ params }: { params: Promise<{
   if (!projectId) notFound();
   const { id } = await params;
 
-  return <ArtifactDetailView artifactId={id} />;
+  // story #4343 — 작성자 이름표(프로젝트 범위)를 받게 URL이 가리키는 프로젝트를 넘긴다(갤러리와 같은 원천).
+  return <ArtifactDetailView artifactId={id} projectId={projectId} />;
 }
