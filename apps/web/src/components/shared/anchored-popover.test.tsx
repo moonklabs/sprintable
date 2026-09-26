@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AnchoredPopover, placeVertical } from './anchored-popover';
+import { AnchoredPopover, placeVertical, usePortalMenuKeys } from './anchored-popover';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -139,5 +139,81 @@ describe('placeVertical — 세로 자리(뷰포트 768 · 여백 8)', () => {
   it('어느 쪽도 다 못 담으면 넓은 쪽에 두고 [8, 768 − 8] 안으로 민다', () => {
     expect(placeVertical({ top: 300, bottom: 320 }, 700, 768, 4)).toEqual({ top: 60, side: 'bottom' }); // 아래 436 ≥ 위 288 → 아래 · 324 → 760 − 700
     expect(placeVertical({ top: 500, bottom: 520 }, 700, 768, 4)).toEqual({ top: 8, side: 'top' }); // 위 488 > 아래 236 → 위 · −204 → 8
+  });
+});
+
+// story #4349 PR 2 — 공용 키보드 훅: 포털이면 DOM 순서상 트리거 뒤가 아니라 예전 Tab 길이 끊긴다 → 그 빈틈만 메운다.
+function KeysHarness({ kind, hidden = false }: { kind: 'menu' | 'panel'; hidden?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const keys = usePortalMenuKeys({ open, onClose: () => setOpen(false), popoverRef: popRef, triggerRef, kind });
+  return (
+    <div id="anchor" ref={anchorRef}>
+      <button type="button" id="trig" ref={triggerRef} onClick={() => setOpen((v) => !v)} onKeyDown={keys.onTriggerKeyDown}>열기</button>
+      {open && (
+        <AnchoredPopover anchorRef={anchorRef} popoverRef={popRef} onKeyDown={keys.onPopoverKeyDown} id="pop" style={hidden ? { display: 'none' } : undefined}>
+          <button type="button" id="i1">하나</button><button type="button" id="i2">둘</button>
+        </AnchoredPopover>
+      )}
+    </div>
+  );
+}
+const byId = (id: string) => document.getElementById(id)!;
+const press = (el: Element, key: string, shiftKey = false) => {
+  const e = new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true });
+  act(() => { el.dispatchEvent(e); });
+  return e;
+};
+
+describe('usePortalMenuKeys(story #4349 PR 2)', () => {
+  it('menu: 열면 첫 항목 · ↓↑ 돌아감 · 마지막에서 Tab이면 닫고 트리거', () => {
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    act(() => { byId('trig').click(); });
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'ArrowDown');
+    expect(document.activeElement).toBe(byId('i2'));
+    press(byId('i2'), 'ArrowDown');
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'ArrowUp');
+    expect(document.activeElement).toBe(byId('i2'));
+    press(byId('i2'), 'Tab');
+    expect(document.getElementById('pop')).toBeNull();
+    expect(document.activeElement).toBe(byId('trig'));
+  });
+
+  it('panel: 열어도 초점은 트리거 · 트리거에서 Tab → 첫 조작 · Shift+Tab → 트리거(열린 채) · ↓는 안 옮김', () => {
+    act(() => { root.render(<KeysHarness kind="panel" />); });
+    byId('trig').focus();
+    act(() => { byId('trig').click(); });
+    expect(document.activeElement).toBe(byId('trig'));
+    expect(press(byId('trig'), 'Tab').defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'ArrowDown');
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'Tab', true);
+    expect(document.activeElement).toBe(byId('trig'));
+    expect(document.getElementById('pop')).not.toBeNull();
+  });
+
+  it('안 보이는 패널(display:none — 좁은 화면 벨)로는 트리거 Tab을 안 가로챈다', () => {
+    act(() => { root.render(<KeysHarness kind="panel" hidden />); });
+    byId('trig').focus();
+    act(() => { byId('trig').click(); });
+    expect(press(byId('trig'), 'Tab').defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(byId('trig'));
+  });
+
+  it('Esc: 닫고 트리거 · 전파 멈춤(document keydown 트랩 0)', () => {
+    const trap = vi.fn();
+    document.addEventListener('keydown', trap);
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    act(() => { byId('trig').click(); });
+    press(byId('i2'), 'Escape');
+    document.removeEventListener('keydown', trap);
+    expect(document.getElementById('pop')).toBeNull();
+    expect(document.activeElement).toBe(byId('trig'));
+    expect(trap).not.toHaveBeenCalled();
   });
 });
