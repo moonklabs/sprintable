@@ -113,7 +113,8 @@ describe('data-file-data(옛 첨부 본문) — data: + 실행되지 않는 MIME
 
   it.each(FORMATS)('정상 data: 첨부는 그대로 내려받기(회귀 0) · %s', async (format) => {
     await render('<div data-type="fileAttachment" data-filename="a.txt" data-size="3" data-file-data="data:text/plain;base64,YWJj"></div>', format);
-    act(() => { (container.querySelector('[data-type="fileAttachment"]') as HTMLElement).click(); });
+    // story #4331 — 누르는 자리는 카드를 채운 `<button>`.
+    act(() => { (container.querySelector('[data-type="fileAttachment"] button') as HTMLElement).click(); });
     expect(clicked).toEqual(['data:text/plain;base64,YWJj']);
     expect(container.textContent).not.toContain(FILE_BLOCKED);
   });
@@ -134,7 +135,8 @@ describe('첨부 카드 틀 — hsl()로 감싼 hex 토큰 0', () => {
         </NextIntlClientProvider>,
       );
     });
-    const frame = container.querySelector('[data-type="fileAttachment"] > div') as HTMLElement;
+    // story #4331 — 정상 카드의 틀은 `<button>` · 공개 보기 · 열 수 없음은 `<div>`.
+    const frame = container.querySelector('[data-type="fileAttachment"] > div, [data-type="fileAttachment"] > button') as HTMLElement;
     expect(frame.className).not.toMatch(/hsl\(var\(--/);
     // PO 결정(1) — 공용 subtle 면(링크 카드와 같은 면): 그 클래스 전부가 붙는다.
     for (const cls of cardVariants({ surface: 'subtle', radius: 'compact' }).split(/\s+/)) expect(frame.classList.contains(cls), `${cls} · ${frame.className}`).toBe(true);

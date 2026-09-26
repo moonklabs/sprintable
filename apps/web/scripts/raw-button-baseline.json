@@ -110,7 +110,7 @@
     "components/docs/doc-assignee-control.tsx": 1,
     "components/docs/doc-auto-groups.tsx": 3,
     "components/docs/doc-breadcrumb.tsx": 1,
-    "components/docs/doc-content-renderer.tsx": 2,
+    "components/docs/doc-content-renderer.tsx": 3,
     "components/docs/doc-editor.tsx": 9,
     "components/docs/doc-gate-section.tsx": 1,
     "components/docs/doc-mini-toc.tsx": 1,

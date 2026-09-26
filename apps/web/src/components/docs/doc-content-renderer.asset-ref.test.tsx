@@ -84,11 +84,13 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     // file: NOT the inert public placeholder — it carries an interactive (cursor-pointer) card.
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock).not.toBeNull();
-    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    // story #4331 — 누를 수 있는 카드의 표지는 이제 진짜 button 요소(디자인 Button 토큰 · cursor-pointer 클래스 없음).
+    expect(fileBlock?.querySelector('button')).not.toBeNull();
 
     // clicking the ref file resolves via the signed route with attachment disposition → new tab.
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — 이 클릭 경로는 fetchWithAuth로 전환됨(마운트시 img 경로는 미전환·1인자
@@ -122,7 +124,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock?.innerHTML).toContain('opacity-70');
     expect(fileBlock?.innerHTML).toContain('Attachment unavailable in public view');
-    expect(fileBlock?.innerHTML).not.toContain('cursor-pointer');
+    expect(fileBlock?.querySelector('button')).toBeNull(); // story #4331 — 비활성 카드엔 누를 button이 없다.
   });
 
   it('authed (html): legacy base64 image + file render directly and unchanged (regression 0)', async () => {
@@ -136,9 +138,12 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
 
     // legacy file → interactive card; clicking triggers the blob download (no signed fetch).
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
-    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    // story #4331 — 누를 수 있는 카드의 표지는 이제 진짜 button 요소(디자인 Button 토큰 · cursor-pointer 클래스 없음).
+    expect(fileBlock?.querySelector('button')).not.toBeNull();
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      expect(fileBlock?.querySelector('button')).not.toBeNull();
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -166,9 +171,11 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
 
     const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
     expect(fileBlock).not.toBeNull();
-    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    // story #4331 — 누를 수 있는 카드의 표지는 이제 진짜 button 요소(디자인 Button 토큰 · cursor-pointer 클래스 없음).
+    expect(fileBlock?.querySelector('button')).not.toBeNull();
     await act(async () => {
-      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // story #4331 — 누르는 자리는 카드를 채운 `<button>`(예전 div click).
+      fileBlock?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
     // story #2691 — fetchWithAuth 전환(위와 동일 사유).
