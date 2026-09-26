@@ -5456,7 +5456,7 @@ describe('ChannelPostEditPage — 생성 비용 한도(story #3500, doc a0da40c9
     [422, { code: 'YOUTUBE_METADATA_INVALID', message: 'YouTube 제목·태그·카테고리·공개 범위 값을 확인해 주세요.', field: 'title', reason: 'empty' }, 'not_sent'],
     [422, { code: 'CHANNEL_THREAD_UNSUPPORTED', message: '이 채널은 이어쓰기를 지원하지 않아요.', channel: 'threads' }, 'not_sent'],
     [422, { code: 'CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED', message: '이 채널은 이어쓰기를 최대 10건까지 지원해요.', max_segments: 10, current_count: 11 }, 'not_sent'],
-    [422, { code: 'CHANNEL_THREAD_SEGMENT_TOO_LONG', message: '2번째 글이 280자 한도를 넘어요(300자).', segment_number: 2, max_length: 280, current_length: 300 }, 'not_sent'],
+    [422, { code: 'CHANNEL_THREAD_SEGMENT_TOO_LONG', message: '2번째 이어쓰기가 280자 한도를 넘어요(지금 300자).', segment_number: 2, max_length: 280, current_length: 300 }, 'not_sent'],
     [404, { code: 'CHANNEL_POST_DRAFT_NOT_FOUND', message: 'draft missing' }, 'not_sent'],
   ];
   it.each(P2_BODIES)('⭐#4336 P2 — 저장본 %#(%s) = 즉시 발행 4xx와 같은 줄', async (status, body, impact) => {
