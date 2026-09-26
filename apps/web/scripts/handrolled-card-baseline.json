@@ -16,7 +16,8 @@
     "story #3743 그라운딩 前 잔존(2026-09-09, 페드루 PO 지적·배포 60 실픽셀) — org-briefing-shell.tsx(FaceSkeletonPanel)·workforce-face.tsx 2건이 loop-face.tsx와 같은 카드인데 Card primitive 이관에서 빠져 있었다(#3736 ⑪ 「원인 3파일」 당시 이 둘은 안 걸렸던 것으로 보임) — 이번에 마저 이관, 여기서 뺀다. 270키 → 268키.",
     "story #3748(잔여②, 페드루 PO 確定 2026-09-09) — org-briefing-shell.tsx:65 안내 배너는 손코딩 카드가 아니라 Card도 아닌 안내 패널이었다(판정: 집안 Alert role=\"status\"로 이관, default variant 값이 이 리터럴과 동일). 이관 뒤 이 키 소멸 — 새 부품·새 키 0. 268키 → 267키.",
     "story #4309(2026-09-25) — doc-content-renderer.tsx 페이지 임베드 카드(링크 카드 · 공개 보기 비활성 카드) 2건을 cardVariants(surface subtle · radius compact)로 이관해 여기서 뺐다. 263키 → 261키.",
-    "story #4316(2026-09-25) — 유나 결정 · doc-content-renderer.tsx 일반 embedBlock 링크 카드에 글자색 토큰 `text-brand-text` 추가 · 같은 카드(키 문자열만 바꿔 치기 · 1 빼고 1 넣음 · 개수 무변) · PO 승인."
+    "story #4316(2026-09-25) — 유나 결정 · doc-content-renderer.tsx 일반 embedBlock 링크 카드에 글자색 토큰 `text-brand-text` 추가 · 같은 카드(키 문자열만 바꿔 치기 · 1 빼고 1 넣음 · 개수 무변) · PO 승인.",
+    "story #4349(2026-09-26) — scale-ladder.tsx 안내 팝오버 두 갈래(compact · 전체판)를 부모 overflow 밖 body로 포털(AnchoredPopover)하며 `absolute left-* top-full z-20 mt-2`를 걷고 `z-50`만 남겼다. 같은 두 자리 · 면 무변 — 두 키가 같은 문자열 한 키로 합쳐져 2 빼고 1 넣음(261 → 260) · PO 승인 대기."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2",
@@ -169,10 +170,9 @@
     "components/flow/guided-hypothesis-form.tsx::w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-24",
     "components/flow/hypothesis-earth-layer.tsx::flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-[var(--elev-card)]",
     "components/flow/next-actions-strip.tsx::mt-1.5 rounded-lg border border-border bg-muted/20 p-2.5",
-    "components/flow/scale-ladder.tsx::absolute left-0 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]",
-    "components/flow/scale-ladder.tsx::absolute left-3 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]",
     "components/flow/scale-ladder.tsx::flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card px-1.5 py-1",
     "components/flow/scale-ladder.tsx::flex overflow-hidden rounded-xl border border-border bg-card",
+    "components/flow/scale-ladder.tsx::z-50 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]",
     "components/flow/unattached-bucket.tsx::rounded-lg border border-border bg-card p-2.5",
     "components/goals/goal-outcome-dialog.tsx::max-h-[30vh] min-h-0 shrink-0 overflow-y-auto rounded-lg border border-border/60 bg-muted/20 px-3 py-2",
     "components/goals/goal-outcome-dialog.tsx::w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary",

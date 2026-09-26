@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { AnchoredPopover } from '@/components/shared/anchored-popover';
 
 /**
  * story #2531(E-FLOW-V4 S1)에서 지구층 전용으로 태어났다가, story #2535(S5)에서 다른 층
@@ -83,13 +83,16 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
   // 오인돼 즉시 재닫히는 것을 막는다(sender-profile-popover.tsx와 동형 관행).
   const [openReservedLevel, setOpenReservedLevel] = useState<LadderLevel | null>(null);
   const reservedWrapperRef = useRef<HTMLDivElement>(null);
-  // story #4342 — 좁은 화면 뷰포트 안으로. compact · 전체 두 갈래의 안내 팝오버가 같이 쓴다(한 번에 한 갈래 · 한 칸만 열림).
-  const infoClampRef = useViewportClampRef<HTMLDivElement>();
+  // story #4349 — 안내 팝오버는 부모(칩 줄 overflow-x-auto · 사다리 overflow-hidden) 밖 body로 포털된다(AnchoredPopover).
+  // 그래서 트리거 wrapper의 자손이 아니다 → 바깥 클릭 판정에서 팝오버 요소도 «안»으로 센다.
+  const infoPopoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (openReservedLevel === null) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (reservedWrapperRef.current && !reservedWrapperRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (infoPopoverRef.current?.contains(target)) return;
+      if (reservedWrapperRef.current && !reservedWrapperRef.current.contains(target)) {
         setOpenReservedLevel(null);
       }
     };
@@ -157,16 +160,18 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
                   {t(`ladderName_${level}`)}
                   <Info aria-hidden="true" className="size-3" />
                 </button>
+                {/* story #4349 — 칩 줄(overflow-x-auto · 세로도 auto)이 absolute 팝오버를 통째로 잘랐다 → body로 포털(칩 줄 가로 스크롤은 그대로). */}
                 {open && (
-                  <div
+                  <AnchoredPopover
+                    anchorRef={reservedWrapperRef}
+                    popoverRef={infoPopoverRef}
                     id={infoId}
                     role="tooltip"
-                    ref={infoClampRef}
                     data-dropdown-panel="scale-ladder-info"
-                    className="absolute left-0 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                    className="z-50 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
                   >
                     {t('ladderReservedInfo')}
-                  </div>
+                  </AnchoredPopover>
                 )}
               </div>
             );
@@ -239,13 +244,15 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
           // 라벨(9.5px uppercase 캡션) 대신 칩(«◇ 스토리 안에 있음»). 클릭 → 팝오버 토글.
           const open = openReservedLevel === level;
           const infoId = `ladder-reserved-info-${level}`;
+          // story #4349 AC2 — 바닥 칩(«◇ 스토리 안에 있음»)이 `absolute bottom-2`라 칸 아래 여백(pb-6 = 24px)보다 키가 커서(약 28px) 질문 줄을 덮었다.
+          // → 칩을 흐름 안(버튼 flex-col · mt-auto)으로: 질문 줄과 최소 8px(pt-2) 떨어지고, 칸 바닥에서 8px(pb-2) — 다른 칸의 바닥 라벨(bottom-2)과 같은 선.
           return (
-            <div key={level} ref={open ? reservedWrapperRef : undefined} className={rungClassName}>
+            <div key={level} ref={open ? reservedWrapperRef : undefined} className={cn(rungClassName, 'pb-2')}>
               <button
                 type="button"
                 aria-describedby={open ? infoId : undefined}
                 onClick={() => setOpenReservedLevel(open ? null : level)}
-                className="block h-full w-full text-left"
+                className="flex h-full w-full flex-col text-left"
               >
                 <div className="text-sm font-semibold text-muted-foreground">{t(`ladderName_${level}`)}</div>
                 <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
@@ -253,20 +260,25 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
                   <Info className="size-3 text-muted-foreground" />
                   <span className="size-2 rounded-full border border-dashed border-border" />
                 </span>
-                <span className="absolute bottom-2 left-3 inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                  {t('ladderReservedChip')}
+                <span data-ladder-reserved-chip="" className="mt-auto pt-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                    {t('ladderReservedChip')}
+                  </span>
                 </span>
               </button>
+              {/* story #4349 — 사다리(`overflow-hidden rounded-xl`)가 absolute 팝오버를 통째로 잘랐다 → body로 포털(칸 왼쪽 + 12px · 아래 8px). */}
               {open && (
-                <div
-                  ref={infoClampRef}
+                <AnchoredPopover
+                  anchorRef={reservedWrapperRef}
+                  popoverRef={infoPopoverRef}
+                  offsetX={12}
                   data-dropdown-panel="scale-ladder-info-full"
                   id={infoId}
                   role="tooltip"
-                  className="absolute left-3 top-full z-20 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                  className="z-50 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
                 >
                   {t('ladderReservedInfo')}
-                </div>
+                </AnchoredPopover>
               )}
             </div>
           );
