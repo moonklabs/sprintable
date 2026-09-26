@@ -61,10 +61,13 @@ def _app_client():
     override_db_and_read(app, _override_get_db)
     app.dependency_overrides[get_current_user] = lambda: _auth_ctx(user_id)
     app.dependency_overrides[get_verified_org_id_no_project_gate] = lambda: org_id
-    try:
-        yield TestClient(app), org_id
-    finally:
-        app.dependency_overrides.clear()
+    # story #4341 AC2 — 시도 응답이 운영 알림 표에서 `operator_notified_at`을 읽는다. 이 파일의 세션은 목(AsyncMock · 아무 execute에나
+    # 구독 행을 돌려주는 MagicMock)이라 그 조회는 여기서 «알림 없음»으로 고정한다(조회 자체는 test_4341_billing_operator_alerts.py 실 PG).
+    with patch("app.routers.org_subscription_checkout._operator_notified_at", new=AsyncMock(return_value=None)):
+        try:
+            yield TestClient(app), org_id
+        finally:
+            app.dependency_overrides.clear()
 
 
 ATTEMPT_ID = "11111111-1111-4111-8111-111111111111"
