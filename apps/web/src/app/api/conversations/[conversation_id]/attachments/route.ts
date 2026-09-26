@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
+import { backendFetch } from '@/lib/backend-fetch';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (conversations.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
@@ -31,7 +32,8 @@ export async function POST(
 
   // 03fe1663: project_id를 conversation에서 server-side 도출(클라이언트/쿠키 의존·'unknown' 폴백 제거).
   // #1299 GET /api/v2/conversations/{id} → conversation.project_id. 인가도 BE가 강제(403/404).
-  const convRes = await fetch(new URL(`/api/v2/conversations/${conversation_id}`, FASTAPI_URL()).toString(), {
+  const convRes = await backendFetch(new URL(`/api/v2/conversations/${conversation_id}`, FASTAPI_URL()).toString(), {
+    request,
     headers: { Authorization: `Bearer ${session.access_token}` },
     cache: 'no-store',
   });

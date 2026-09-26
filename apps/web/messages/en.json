@@ -6426,5 +6426,11 @@
     "workflowActionSubmit": "Submit",
     "headerTemplate": "{name} workflow",
     "stageMovedBody": "Moved to **{stage}**"
+  },
+  "bffEnvelope": {
+    "upstreamTimeout": "The server didn't respond in time. Please try again in a moment.",
+    "upstreamUnreachable": "Couldn't reach the server. Please try again in a moment.",
+    "clientClosedRequest": "The request was canceled.",
+    "upstreamNonJson": "Couldn't process the server's response. Please try again in a moment."
   }
 }

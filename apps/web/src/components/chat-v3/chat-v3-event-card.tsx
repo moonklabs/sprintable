@@ -11,6 +11,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { ChatV3ReasonDialog } from './chat-v3-reason-dialog';
 import { toPlainPreview } from '@/components/chat/entity-ref';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * story #3972 AC1 그라운딩(페드루 PO 확認 2026-09-16 17:07Z) — 이 카드는 옛
@@ -52,7 +53,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
   const submit = async (reason: string) => {
     setBusy(true);
     setError(null);
-    const res = await fetchWithAuth(`/api/gates/${approvalTarget.gate_id}/transition`, {
+    const res = await fetchWithAuth(`/api/gates/${approvalTarget.gate_id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildGateTransitionBody({ status: 'rejected', note: reason })),

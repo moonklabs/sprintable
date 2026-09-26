@@ -38,6 +38,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -286,7 +287,7 @@ export default function RetroSessionPage() {
   const handleGenerateSynthesis = useCallback(async (): Promise<boolean> => {
     if (!projectId) return false;
     try {
-      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { timeoutMs: LONG_ROUTES.retroSynthesis.browserMs, method: 'POST' });
       if (!res.ok) return false;
       const json = await res.json() as { data?: { synthesis?: RetroSynthesis; next_hypotheses?: RetroNextHypothesis[] } };
       if (!json.data?.synthesis) return false;

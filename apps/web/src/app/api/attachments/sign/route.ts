@@ -4,6 +4,7 @@ import { canonicalObjectPath as _canonicalObjectPath } from '@/lib/storage/canon
 import { createStorageService } from '@/lib/storage/factory';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
+import { backendFetch } from '@/lib/backend-fetch';
 
 // a54ddc16: 첨부 auth-gated 서빙. public 버킷 직링크 → 이 라우트가 BE authorize(접근권+path
 // 소속 2겹 방어) 통과 시에만 단기 만료 V4 서명 URL을 반환한다.
@@ -42,7 +43,8 @@ export async function GET(request: Request) {
     if (assetId) {
       const authUrl = new URL('/api/v2/attachments/authorize', FASTAPI_URL());
       authUrl.searchParams.set('asset_id', assetId);
-      const authRes = await fetch(authUrl.toString(), {
+      const authRes = await backendFetch(authUrl.toString(), {
+        request,
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: 'no-store',
       });
@@ -65,7 +67,8 @@ export async function GET(request: Request) {
     if (conversationId) authUrl.searchParams.set('conversation_id', conversationId);
     if (storyId) authUrl.searchParams.set('story_id', storyId);
 
-    const authRes = await fetch(authUrl.toString(), {
+    const authRes = await backendFetch(authUrl.toString(), {
+      request,
       headers: { Authorization: `Bearer ${session.access_token}` },
       cache: 'no-store',
     });

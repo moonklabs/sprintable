@@ -17,6 +17,7 @@ import {
   removeVaultEntry,
 } from '@/lib/auth/account-vault';
 import { clearSuperseded, markSuperseded } from '@/lib/auth/switch-epoch';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -34,7 +35,9 @@ const GRACE_MS = 5_000;
 
 async function rotate(targetRt: string): Promise<SwitchResult | null> {
   try {
-    const r = await fetch(`${FASTAPI_URL()}/api/v2/auth/switch-account`, {
+    const r = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/switch-account`, {
+      // story #4320 — 한 번 쓰는 리프레시 토큰 회전 · 탭 여럿이 한 회전을 나눠 기다린다(single-flight) — 한 탭의 취소로 끊으면 안 된다. 시간 제한만.
+      timeLimitOnly: true,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: targetRt }),

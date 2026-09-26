@@ -31,6 +31,7 @@ import {
   type WorkListGate,
 } from './work-list-detail-actions';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 interface StoryDetail {
   self_reported: boolean | null;
@@ -388,7 +389,7 @@ export function WorkListDetailPanel({
     setTransitioning(true);
     setTransitionError(null);
     try {
-      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // 픽셀 커밋 ②(페드루 PO 판정 2026-09-14 09:11Z, 정정) — evidence_viewed를 여기서

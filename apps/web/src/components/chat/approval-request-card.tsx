@@ -32,6 +32,7 @@ import { useToast } from '@/components/ui/toast';
 import { TossSheet } from '@/components/chat/toss-sheet';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -214,7 +215,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명

@@ -6,7 +6,9 @@
 import { getServerSession } from '@/lib/db/server';
 import { apiError, apiSuccess, ApiErrors } from '@/lib/api-response';
 import { getLocale } from '@/i18n/request';
+import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/lib/backend-signal';
 import { formatRouteTiming, isServerTimingEnabled, logRouteTiming, routeKindForPath, startRouteTimer, withServerTiming, type RouteTimer } from '@/lib/server-timing';
+import { bffEnvelopeError } from '@/lib/bff-envelope-error';
 
 // story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
 // fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
@@ -50,6 +52,12 @@ interface ProxyOptions {
   // 보여주는 언어를 항상 Accept-Language로 실어 보낸다 — 이 옵션은 그 값을 라우트별로
   // override하고 싶을 때만 쓴다(대부분 안 써도 된다).
   extraHeaders?: Record<string, string>;
+  /** story #4320 — 백엔드 응답 **본문까지** 기다릴 최대 시간(기본 30초 · 4310과 같은 수). 긴 라우트는 `bff-route-timeouts`의 이름 붙은
+   * 값(근거 백엔드 파일:줄이 그 옆에)을 넘긴다. */
+  timeoutMs?: number;
+  /** story #4320(까디르 QA ③) — 한 번 쓰는 값을 소비하거나 새 토큰 · 자격을 내는 호출(결제 · API 키 · 공유 토큰 …): 브라우저가 끊어도
+   * 백엔드 호출은 끝까지 간다(끊으면 값은 소비됐는데 결과를 못 받는다 · 결제는 다시 누르면 이중 결제). 시간 제한만. */
+  timeLimitOnly?: boolean;
 }
 
 /**
@@ -126,8 +134,19 @@ async function proxyToFastapiImpl(
       method: request.method,
       headers,
       body,
+      // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
+      signal: backendSignal(options.timeLimitOnly ? null : request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
     });
-  } catch {
+  } catch (err) {
+    // story #4320 — 시간 초과는 «연결 못 함»과 다른 코드(같은 503 계열 · 사용자 문장은 «응답이 늦다»).
+    const kind = classifyBackendAbort(err);
+    if (kind === 'timeout') {
+      return bffEnvelopeError('UPSTREAM_TIMEOUT');
+    }
+    if (kind === 'client-abort') {
+      // 브라우저가 이미 떠났다 — 이 응답을 받을 쪽이 없다(로그 · 계측에서만 구분되게 499).
+      return bffEnvelopeError('CLIENT_CLOSED_REQUEST');
+    }
     // story #3644(3632 후속, «봉투가 사라지는» 자리 전수) — DNS 실패·connection refused·
     // abort 등 fetch() 자체가 던지면 이 아래 코드가 전혀 안 돈다 — 어떤 라우트도 자기
     // 몫의 오류 처리를 못 받는다. grep 실측: `if (!_r.ok) return _r` 형이 244개 라우트
@@ -138,11 +157,20 @@ async function proxyToFastapiImpl(
     // status=503(502 아님) — PO 決(2026-09-07): CF가 origin 502/504를 자기 HTML로
     // 바꿔치는 자리라(story #3632 그라운딩과 같은 결정) "우리 상태"의 502가 아니라
     // "진짜 상류 실패"의 503 계열로 분류한다.
-    return apiError('UPSTREAM_UNREACHABLE', '서버에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    return bffEnvelopeError('UPSTREAM_UNREACHABLE');
   }
   timer?.mark('be_ttfb');
 
-  const resBody = await res.text();
+  // story #4320(까디르 QA ④) — 시간 제한은 본문 읽기까지 덮는다: 머리를 받은 뒤 본문을 읽다 시간이 다 되면 fetch 때와 같은 봉투로.
+  let resBody: string;
+  try {
+    resBody = await res.text();
+  } catch (err) {
+    const kind = classifyBackendAbort(err);
+    if (kind === 'timeout') return bffEnvelopeError('UPSTREAM_TIMEOUT');
+    if (kind === 'client-abort') return bffEnvelopeError('CLIENT_CLOSED_REQUEST');
+    return bffEnvelopeError('UPSTREAM_UNREACHABLE');
+  }
   timer?.mark('be_body');
   const resHeaders: Record<string, string> = { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' };
   // story #2190 — board 분기(list_stories status+project_id 조합)가 커서 페이지네이션 신호를
@@ -193,10 +221,8 @@ async function proxyToFastapiImpl(
       // resHeaders['Content-Type']은 상류의 원래 타입(HTML이면 text/html)이라 새로
       // 감싸는 JSON 봉투와 안 맞는다(apiError가 스스로 application/json을 낸다).
       const retryAfter = resHeaders['retry-after'];
-      return apiError(
-        'UPSTREAM_NON_JSON', '서버 응답을 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', res.status,
-        undefined, retryAfter ? { 'Retry-After': retryAfter } : undefined,
-      );
+      // story #4320(유나 판정) — BFF가 지은 문장이라 앱 로케일로(bffEnvelopeError).
+      return bffEnvelopeError('UPSTREAM_NON_JSON', { status: res.status, headers: retryAfter ? { 'Retry-After': retryAfter } : undefined });
     }
   }
   return new Response(resBody, {

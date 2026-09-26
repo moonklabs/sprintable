@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { SP_AT_COOKIE } from '@/lib/db/server';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -30,9 +31,10 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login?next=${encodeURIComponent('/organization/channels')}`);
   }
 
-  const res = await fetch(
+  const res = await backendFetch(
     `${FASTAPI_BASE}/api/v2/organizations/${orgId}/channel-connections/${channel}/authorize`,
     {
+      request,
       method: 'POST',
       headers: { Authorization: `Bearer ${spAt}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ target_connection_id: connectionId ?? undefined }),

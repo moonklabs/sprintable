@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
 import { SP_AT_COOKIE } from '@/lib/db/server';
+import { backendSignal, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -56,9 +58,11 @@ export async function GET(request: Request, { params }: RouteParams) {
     return NextResponse.redirect(`${origin}/organization/channels?connect_error=SESSION_EXPIRED`);
   }
 
-  const res = await fetch(
+  const res = await backendFetch(
     `${FASTAPI_BASE}/api/v2/organizations/${orgId}/channel-connections/${channel}/callback`,
     {
+      // story #4320 — 채널 OAuth 코드 교환(한 번 쓰는 값) — 끝까지. 시간 제한만(외부 API 연쇄라 60초).
+      timeLimitOnly: true, timeoutMs: BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${spAt}` },
       body: JSON.stringify({ code, state }),
