@@ -446,7 +446,7 @@ export function DocContentRenderer({
         ${iconMarkup}
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium">${escapeHtmlText(displayTitle)}</p>
-          ${shownSlug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(shownSlug)}</p>` : ''}
+          ${shownSlug ? `<p class="truncate text-xs font-normal text-muted-foreground">/${escapeHtmlText(shownSlug)}</p>` : ''}
         </div>`;
       // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
       // 유지하되 링크(이동)만 뺀다.
@@ -590,7 +590,7 @@ export function DocContentRenderer({
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground" aria-hidden="true"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           <span class="block min-w-0 flex-1">
             <span class="block truncate text-sm font-medium">${escapeHtmlText(filename)}</span>
-            ${sizeLabel ? `<span class="block text-xs opacity-60">${escapeHtmlText(sizeLabel)}</span>` : ''}
+            ${sizeLabel ? `<span class="block text-xs font-normal text-muted-foreground">${escapeHtmlText(sizeLabel)}</span>` : ''}
           </span>
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 opacity-50" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>`;

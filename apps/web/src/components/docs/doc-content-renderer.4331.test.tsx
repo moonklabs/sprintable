@@ -238,3 +238,30 @@ describe('일반 링크 카드 면 = 첨부 카드와 같은 subtle 면([SID:433
     expect(surface.every((cls) => button.classList.contains(cls)), '첨부 카드도 같은 면').toBe(true);
   });
 });
+
+// 유나 production 빌드 대비(4712 CHANGES) — 첨부 크기 줄 `text-xs opacity-60`은 라이트 4.37:1(12px라 4.5 미달)이고 ghost Button의 font-medium을
+// 물려받았다 → `text-xs font-normal text-muted-foreground`(«문서를 찾을 수 없어요» 둘째 줄과 같은 모양). 같은 카드 면의 페이지 임베드 slug 줄도 같은 처방.
+describe('첨부 크기 줄 · 임베드 slug 줄 대비([SID:4331] 유나 CHANGES)', () => {
+  const lineClass = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/);
+  it('첨부 크기 줄 = text-xs font-normal text-muted-foreground · opacity 0', async () => {
+    await render('<div data-type="fileAttachment" data-filename="report.pdf" data-size="12" data-asset-id="as-1"></div>');
+    const sizeLine = [...container.querySelectorAll('[data-type="fileAttachment"] button span span')].find((el) => el.textContent === '12 B');
+    expect(lineClass(sizeLine)).toEqual(expect.arrayContaining(['text-xs', 'font-normal', 'text-muted-foreground']));
+    expect(lineClass(sizeLine).some((c) => c.startsWith('opacity-'))).toBe(false);
+  });
+
+  it('페이지 임베드 slug 줄도 같은 처방', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DocContentRenderer content='<div data-page-embed data-title="살아 있는 문서" data-slug="design-doc"></div>' contentFormat="html" untitledEmbedLabel="제목 없음" embedNotFoundLabel="문서를 찾을 수 없어요" unsafeLinkLabel={koMessages.docs.embedLinkBlocked} unsafeFileLabel={koMessages.docs.attachFileBlocked} wikiLinkTargets={{ 'design-doc': 'design-doc' }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const slugLine = [...container.querySelectorAll('[data-page-embed] p')].find((p) => p.textContent === '/design-doc');
+    expect(slugLine, 'slug 줄').toBeTruthy();
+    expect(lineClass(slugLine)).toEqual(expect.arrayContaining(['text-xs', 'font-normal', 'text-muted-foreground']));
+    expect(lineClass(slugLine).some((c) => c.startsWith('opacity-'))).toBe(false);
+  });
+});
+
