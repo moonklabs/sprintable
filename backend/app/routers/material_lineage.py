@@ -58,6 +58,20 @@ class HookPerformanceView(BaseModel):
         )
 
 
+async def _caller_can_access_story_project(session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, auth) -> bool:
+    """story #4351 PR B — 계보의 마스터(항상 story)가 caller가 접근 못 하는 프로젝트면 False. 스토리가 없으면(지워짐) True —
+    그땐 org 스코프만 남는 옛 동작(가릴 프로젝트가 없다)."""
+    from app.models.pm import Story
+    from app.services.project_auth import has_project_access
+
+    story_project_id = (await session.execute(
+        select(Story.project_id).where(Story.id == story_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story_project_id is None:
+        return True
+    return await has_project_access(session, uuid.UUID(str(auth.user_id)), story_project_id, org_id)
+
+
 @router.get("", response_model=list[MaterialLineageEdgeView])
 async def list_material_lineage(
     work_item_id: uuid.UUID = Query(...),
@@ -70,6 +84,11 @@ async def list_material_lineage(
     org_id 스코프만 건다(evidence.py의 project-단위 has_project_access와 달리, 이
     edge 자체는 project 소속 콘텐츠가 아니라 org 내부 계보 그래프라 org 스코프면
     충분 — 노출 위험 낮음, read-only)."""
+    # story #4351 PR B(⑧ · SEC-S8) — 위 «org 스코프면 충분»은 계보 edge만 볼 때 얘기다: 응답이 마스터 스토리 제목(master_title)을
+    # 싣는다 → work_item_id만 알면 접근 권한 없는 프로젝트의 스토리 제목이 보였다. 그 스토리 프로젝트에 접근 못 하면 없는 id와 같은 `[]`.
+    if not await _caller_can_access_story_project(session, org_id, work_item_id, _auth):
+        return []
+
     rows = (await session.execute(
         select(MaterialLineage).where(
             MaterialLineage.org_id == org_id,
@@ -149,13 +168,16 @@ async def get_material_performance(
     404가 아니라 목록이라 "그 소재는 아직 성과가 없다"와 "org 밖 id"를 굳이 안 갈라도
     지어내는 값이 없다 — 둘 다 정직하게 빈 배열)."""
     owns = (await session.execute(
-        select(MaterialLineage.id).where(
+        select(MaterialLineage.work_item_id).where(
             MaterialLineage.org_id == org_id,
             MaterialLineage.derived_id == derived_id,
             MaterialLineage.derived_kind == "channel_publication",
         ).limit(1)
     )).scalar_one_or_none()
     if owns is None:
+        return []
+    # story #4351 PR B(⑧ 형제 · 가드 첫 스캔이 잡음) — 발행물 성과도 마스터 스토리 프로젝트 소속이다. 접근 못 하면 org 밖 id와 같은 `[]`.
+    if not await _caller_can_access_story_project(session, org_id, owns, _auth):
         return []
 
     publication_id = await resolve_head_publication_id(session, publication_id=derived_id)

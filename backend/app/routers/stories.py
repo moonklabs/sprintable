@@ -980,18 +980,20 @@ async def get_workflow_line_status_batch(
 
 
 # E-DG S15(P1-6): line metric 집계(org-scoped·read-only·default-off org=no-op). ⚠️ /{id} 보다 먼저.
-# story #2245 경계 기록(스냅샷·판정 아님, 2026-07-28) — 개별 story 식별·내용 없이 org 전체
-# COUNT/SUM뿐이라 이번 병(항목별 project 접근권 누락)의 대상이 아니라고 보고 이 스토리 스코프
-# 밖에 남긴다. ⛔완전히 무해하다는 뜻은 아니다 — 집계는 "내가 못 보는 프로젝트의 일이 몇
-# 건인가"를 알려 준다. 개별 식별은 불가하고 org 내부라 지금은 열어 두지만, project 격리를
-# 엄히 요구하는 고객이 생기면 다음에 손댈 자리가 여기다.
+# story #2245 경계 기록(2026-07-28)은 이 집계를 «org 전체 COUNT/SUM이라 지금은 열어 두되, project 격리를 엄히 요구하면 다음에
+# 손댈 자리»로 남겼다 — SEC-S8(선생님 확정 «org-level = 갭»)이 그 요구라 story #4351 PR B에서 닫는다: 접근이 제한된 caller는
+# 접근 가능 프로젝트의 step run만 센다(수로 «못 보는 프로젝트의 일이 몇 건»이 새지 않게). owner/admin(전체 접근)은 옛 동작 그대로.
 @router.get("/workflow-line/metrics")
 async def get_workflow_line_metrics(
     window_days: int = Query(default=14, ge=1, le=90),
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    from app.services.project_auth import restricted_accessible_project_ids
     from app.services.workflow_line_metrics import compute_line_metrics
-    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days)
+
+    restricted = await restricted_accessible_project_ids(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days, project_ids=restricted)
 
 
 @router.get("/{id}", response_model=StoryResponse)

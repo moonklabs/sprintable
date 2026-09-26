@@ -107,6 +107,9 @@ async def list_judgments_endpoint(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> Any:
+    from app.services.project_auth import restricted_accessible_project_ids
+
     return await list_judgments(
         session, org_id=org_id, work_item_id=work_item_id, method=method, scope=scope, limit=limit,
+        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id),
     )

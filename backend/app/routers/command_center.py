@@ -662,6 +662,15 @@ async def overview(
 ) -> JSONResponse:
     """② 프로젝트 현황 + 헤더 함대. scope=org/team. 비용·기여는 org aggregate only(개인 노출 0)."""
     now = _now()
+    # story #4351 PR B(④ · SEC-S8 · PO 2026-09-26) — 접근이 제한된 caller에겐 프로젝트 소속 집계(에픽 · 가설 · 최근 변화 · 기여 ·
+    # 사이클타임 · 비용 · 위험)를 접근 가능 프로젝트로 좁힌다(owner/admin = None = 옛 동작). 헤더 함대(에이전트 수 · 상태)는 org 수준
+    # 그대로. «aggregate only»는 개인별 노출 0이라는 뜻(CC-BE.2)이지 프로젝트 범위 결정이 아니다. 좁혀진 판은 scope로 그 범위를 말한다.
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(_auth.user_id)), org_id)
+
+    def _in_scope(col) -> list:
+        return [] if restricted is None else [col.in_(restricted)]
     # 헤더 — 함대: 총 에이전트(실).
     total_agents = (
         await session.execute(
@@ -683,13 +692,14 @@ async def overview(
             .where(
                 Story.org_id == org_id, Story.deleted_at.is_(None),
                 Story.epic_id.isnot(None), Story.is_excluded.is_(False),
+                *_in_scope(Story.project_id),
             )
             .group_by(Story.epic_id)
         )
     ).all()
     counts = {epic_id: (total, done) for epic_id, total, done in rows}
     epics_q = (
-        await session.execute(select(Goal).where(Goal.org_id == org_id))
+        await session.execute(select(Goal).where(Goal.org_id == org_id, *_in_scope(Goal.project_id)))
     ).scalars().all()
     epics = []
     for e in epics_q:
@@ -709,7 +719,7 @@ async def overview(
             select(
                 func.count(Hypothesis.id),
                 func.count(Hypothesis.id).filter(Hypothesis.status == "verified"),
-            ).where(Hypothesis.org_id == org_id)
+            ).where(Hypothesis.org_id == org_id, *_in_scope(Hypothesis.project_id))
         )
     ).one()
 
@@ -717,7 +727,7 @@ async def overview(
     events = (
         await session.execute(
             select(ActivityEvent)
-            .where(ActivityEvent.org_id == org_id)
+            .where(ActivityEvent.org_id == org_id, *_in_scope(ActivityEvent.project_id))
             .order_by(ActivityEvent.occurred_at.desc())
             .limit(40)
         )
@@ -759,6 +769,7 @@ async def overview(
             .where(
                 Story.org_id == org_id, Story.status == "done",
                 Story.deleted_at.is_(None), Story.is_excluded.is_(False),
+                *_in_scope(Story.project_id),
             )
             .group_by(effective_type)
         )
@@ -787,6 +798,7 @@ async def overview(
                 StoryActivity.new_value == "done",
                 StoryActivity.created_at > now - timedelta(days=30),
                 Story.deleted_at.is_(None), Story.is_excluded.is_(False),
+                *_in_scope(Story.project_id),
             )
         )
     ).one()
@@ -808,7 +820,7 @@ async def overview(
                 func.sum(AgentRun.cost_usd),
                 func.sum(func.coalesce(AgentRun.input_tokens, 0) + func.coalesce(AgentRun.output_tokens, 0)),
             )
-            .where(AgentRun.org_id == org_id, AgentRun.started_at > now - timedelta(days=14))
+            .where(AgentRun.org_id == org_id, AgentRun.started_at > now - timedelta(days=14), *_in_scope(AgentRun.project_id))
             .group_by(cost_day)
             .order_by(cost_day)
         )
@@ -837,6 +849,7 @@ async def overview(
                 _BlockedR.org_id == org_id,               # defense-in-depth: 조인 story 도 org-scope.
                 _BlockedR.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedR.deleted_at.is_(None),
+                *_in_scope(_BlockedR.project_id),
             )
         )
     ).scalar_one()
@@ -845,6 +858,7 @@ async def overview(
             select(func.count(AgentRun.id)).where(
                 AgentRun.org_id == org_id, AgentRun.status == "failed",
                 AgentRun.started_at > now - timedelta(days=7),
+                *_in_scope(AgentRun.project_id),
             )
         )
     ).scalar_one()
@@ -879,7 +893,8 @@ async def overview(
         # status NULL(미접속) 등은 online/offline 어디에도 안 셈(보수적).
 
     return JSONResponse(content={
-        "scope": "org",
+        # 좁혀진 판(제한된 caller) = "accessible_projects" — 화면 라벨이 «조직 전체»라고 단정하지 않게(유나 판정 대상).
+        "scope": "org" if restricted is None else "accessible_projects",
         "fleet": {
             "total_agents": total_agents,
             "status_breakdown": fleet_breakdown,  # CC-BE.2 실데이터.

@@ -22,5 +22,22 @@ async def list_verdicts(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
 ) -> list[VerdictResponse]:
+    # story #4351 PR B(⑨ · SEC-S8) — participation은 스토리 소속이다. 그 스토리 프로젝트에 접근 못 하면 없는 id와 같은 `[]`
+    # (participation_id만 알면 접근 권한 없는 프로젝트의 판정 내용이 보였다).
+    from sqlalchemy import select
+
+    from app.models.participation import Participation
+    from app.models.pm import Story
+    from app.services.project_auth import has_project_access
+
+    story_project_id = (await session.execute(
+        select(Story.project_id)
+        .join(Participation, Participation.story_id == Story.id)
+        .where(Participation.id == participation_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story_project_id is not None and not await has_project_access(
+        session, uuid.UUID(str(_auth.user_id)), story_project_id, org_id,
+    ):
+        return []
     verdicts = await get_verdicts_by_participation(session, org_id, participation_id)
     return [VerdictResponse.model_validate(v) for v in verdicts]

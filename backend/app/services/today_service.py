@@ -515,7 +515,7 @@ async def _resolve_usage(session: AsyncSession, org_id: uuid.UUID) -> dict[str, 
 
 
 async def _resolve_today_results(
-    session: AsyncSession, org_id: uuid.UUID, tz: str,
+    session: AsyncSession, org_id: uuid.UUID, tz: str, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> dict[str, Any]:
     """story #3959(3954 그라운딩 doc 처방 그대로) — 「오늘 결과」 집계 3(4번째
     read-model). 전부 org_midnight_utc(tz) 경계·집계 쿼리 1개씩(루프 0, N+1 0).
@@ -538,9 +538,17 @@ async def _resolve_today_results(
     measured=False 고정·count=None(usage.ad_spend와 동일 관례, 가짜 0 금지).
     """
     from app.models.gate import Gate
-    from app.models.pm import StoryActivity
+    from app.models.pm import Story, StoryActivity
+    from app.services.gate_service import gate_in_inaccessible_project_clause
 
     since = org_midnight_utc(tz)
+
+    # story #4351 PR B(수 · SEC-S8) — 제한된 caller(restricted_project_ids가 목록)는 접근 가능 프로젝트의 것만 센다(수로 존재가 새지
+    # 않게). 게이트는 목록 · 인박스와 같은 규칙(org 수준 게이트는 센다). None = 전체 접근 = 옛 동작.
+    landed_scope = [] if restricted_project_ids is None else [
+        StoryActivity.story_id.in_(select(Story.id).where(Story.project_id.in_(restricted_project_ids)))
+    ]
+    gate_scope = [] if restricted_project_ids is None else [~gate_in_inaccessible_project_clause(restricted_project_ids)]
 
     landed_today_count = await session.scalar(
         select(func.count(StoryActivity.id)).where(
@@ -548,6 +556,7 @@ async def _resolve_today_results(
             StoryActivity.activity_type == "status_changed",
             StoryActivity.new_value == "done",
             StoryActivity.created_at >= since,
+            *landed_scope,
         )
     )
 
@@ -557,6 +566,7 @@ async def _resolve_today_results(
             Gate.status == "approved",
             Gate.resolved_at.isnot(None),
             Gate.resolved_at >= since,
+            *gate_scope,
         )
     )
 
@@ -575,7 +585,12 @@ async def build_today_snapshot(
     completed_today = await _resolve_completed_today(session, org_id, auth, tz)
     published_today = await _resolve_published_today(session, org_id, tz)
     usage = await _resolve_usage(session, org_id)
-    today_results = await _resolve_today_results(session, org_id, tz)
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    today_results = await _resolve_today_results(
+        session, org_id, tz,
+        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(str(auth.user_id)), org_id),
+    )
     return {
         "needs_me": needs_me,
         "needs_me_count": needs_me_count,

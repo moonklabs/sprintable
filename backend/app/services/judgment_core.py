@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import any_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.judgment import JUDGMENT_KINDS, JUDGMENT_SCOPES, TARGET_LINKABLE_KINDS, Judgment
@@ -103,6 +103,20 @@ async def create_judgment(
     return judgment
 
 
+def _judgment_touches_inaccessible_project(accessible_project_ids: list[uuid.UUID]):
+    """«이 판정의 work_item_ids 중 하나라도 접근 불가 프로젝트의 스토리(또는 그 스토리의 과제)»를 SQL 한 식으로."""
+    from app.models.pm import Story, Task
+
+    story_hit = exists(
+        select(Story.id).where(Story.id == any_(Judgment.work_item_ids), ~Story.project_id.in_(accessible_project_ids))
+    )
+    task_hit = exists(
+        select(Task.id).join(Story, Story.id == Task.story_id)
+        .where(Task.id == any_(Judgment.work_item_ids), ~Story.project_id.in_(accessible_project_ids))
+    )
+    return or_(story_hit, task_hit)
+
+
 async def list_judgments(
     session: AsyncSession,
     *,
@@ -110,11 +124,19 @@ async def list_judgments(
     work_item_id: uuid.UUID | None,
     method: str | None,
     scope: str | None,
+    restricted_project_ids: list[uuid.UUID] | None,
     limit: int = DEFAULT_ACTIVE_LIMIT,
 ) -> dict:
     """pull 진입점 코어. 세 축(work_item_id/method/scope)은 AND로 결합 — 필요한 것만
-    좁혀 묻는다는 전제(#2268 AC ②의 "다음 발에 필요한 것만"과 짝)."""
+    좁혀 묻는다는 전제(#2268 AC ②의 "다음 발에 필요한 것만"과 짝).
+
+    story #4351 PR B(③ · SEC-S8 · PO 2026-09-26) — `restricted_project_ids`(접근이 제한된 caller의 접근 가능 프로젝트 · None = 전체
+    접근)가 목록이면, 걸린 스토리(과제는 소속 스토리) 중 **하나라도** 접근 불가 프로젝트에 있는 판정은 뺀다 — statement가 그 스토리를
+    말할 수 있어서(최소 권한). `scope=general`(어디에도 안 붙음) · 어느 스토리로도 안 풀리는 id만 걸린 판정은 org 수준이라 그대로.
+    호출부마다 범위를 정하게 기본값이 없다(키워드 필수)."""
     filters = [Judgment.org_id == org_id]
+    if restricted_project_ids is not None:
+        filters.append(~_judgment_touches_inaccessible_project(restricted_project_ids))
     if work_item_id is not None:
         filters.append(Judgment.work_item_ids.any(work_item_id))
     if method is not None:
