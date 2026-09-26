@@ -6,6 +6,7 @@ import { ENTITY_ICONS } from '@/components/chat/embed-card';
 import { entityTypeLabel, getEntityQuery, type EntityResult } from '@/components/chat/chat-input-entity-tokens';
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 interface EntityAwareTextareaProps {
   value: string;
@@ -36,6 +37,7 @@ interface EntityAwareTextareaProps {
  */
 export function EntityAwareTextarea({ value, onChange, projectId, placeholder, className, autoFocus, onPaste, getEntityTypeLabel, 'data-testid': dataTestId, entityCandidatesLabel = 'Entity candidates' }: EntityAwareTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const listClampRef = useViewportClampRef<HTMLUListElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
   const entityPicker = useEntityPicker(projectId);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -87,7 +89,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       {/* story #2263(C-5) ㉠㉡㉢ 그대로 재사용 — chat-input.tsx 엔티티 dropdown과 동형 렌더. */}
       {entityPicker.entityResults.length > 0 && (
         // story #3007(로드맵 P2·PR-E, L1) — 자동완성 리스트박스는 floating이라 --elev-overlay.
-        <ul role="listbox" aria-label={entityCandidatesLabel} className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+        <ul ref={listClampRef} data-dropdown-panel="entity-candidates" role="listbox" aria-label={entityCandidatesLabel} className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;

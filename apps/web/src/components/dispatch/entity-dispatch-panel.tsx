@@ -10,6 +10,7 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { memberRowLabels } from '@/lib/member-display';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 interface TeamMember {
   id: string;
@@ -47,6 +48,7 @@ export function EntityDispatchPanel({
   const [dispatching, setDispatching] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const moreMenuClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
   const { addToast } = useToast();
   const t = useTranslations('board');
   // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
@@ -179,7 +181,7 @@ export function EntityDispatchPanel({
           </button>
           {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
           {moreOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
+            <div ref={moreMenuClampRef} data-dropdown-panel="dispatch-more" className="absolute right-0 top-full z-10 mt-1 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
               <button
                 type="button"
                 disabled={!assigneeId || dispatching}

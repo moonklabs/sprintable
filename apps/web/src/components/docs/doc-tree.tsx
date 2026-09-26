@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
+import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -167,6 +168,8 @@ function TreeNode({
   const isFolder = Boolean(doc.is_folder || hasChildren);
   const expanded = isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  // story #4342 — 늘 붙어 있고 클래스로만 숨는 메뉴라 열림 상태를 넘겨 열릴 때 다시 잰다(좁은 화면 뷰포트 안으로).
+  const menuClampRef = useViewportClampRef<HTMLDivElement>(contextMenuOpen);
   // story #2416 — native confirm() 대체. 각 TreeNode가 자기 대상(doc)의 삭제-확認만 소유.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
@@ -319,9 +322,10 @@ function TreeNode({
           <MoreVertical className="size-3.5 text-muted-foreground" />
         </div>
         <div
-          ref={menuRef}
+          ref={(el) => { menuRef.current = el; menuClampRef(el); }}
+          data-dropdown-panel="doc-tree-menu"
           className={cn(
-            'absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover p-1',
+            'absolute right-0 top-full z-50 mt-1 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1',
             contextMenuOpen ? 'block' : 'hidden',
           )}
         >
