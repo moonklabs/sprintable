@@ -210,3 +210,38 @@ describe('ArtifactSection — 새 좌표 코멘트 생성(story #2725, story-lin
     expect(body.parent_id).toBeUndefined();
   });
 });
+
+// story #4343 — 스토리 패널(스토리에 붙은 산출물)의 «버전 계보» 레일도 버전 목록 전부. 상세 표면과 같은 로더(`loadArtifactThreadsAndVersions` →
+// `mergeVersionSummaries`)를 쓰고, 버전 목록 GET은 코멘트와 함께 한 번만 받는다(같은 GET 두 번 0).
+describe('ArtifactSection — 버전 계보 레일 = 버전 목록 전부(story #4343, story-linked 표면)', () => {
+  it('버전 셋 → 레일 셋 줄 · 기준(v1) 표시 · v2를 고르면 그 실물 · 버전 목록 GET 한 번', async () => {
+    const calls: string[] = [];
+    const detailOf = (n: number) => ({
+      id: 'art-1', title: 'T', story_id: 'story-1', epic_id: null, doc_id: null, source: 'created', latest_version_number: 3, anchor_version: 1,
+      created_by: null, created_at: `2026-09-0${n}T00:00:00Z`, version_number: n, version_summary: `판 ${n}`,
+      nodes: [{ id: `n${n}`, type: 'html_blob', parent_id: null, order: 0, props: { html: `<p>v${n} 본문</p>` }, description: null }],
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('?story_id=')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'art-1', title: 'T', story_id: 'story-1', epic_id: null, doc_id: null, source: 'created', latest_version_number: 3, anchor_version: 1, created_by: null, created_at: '2026-09-03T00:00:00Z' }] }) };
+      const one = /\/versions\/(\d+)$/.exec(url);
+      if (one) return { ok: true, status: 200, json: async () => ({ data: detailOf(Number(one[1])) }) };
+      if (url.endsWith('/versions')) return { ok: true, status: 200, json: async () => ({ data: [3, 2, 1].map((n) => ({ id: `r${n}`, version_number: n, summary: `판 ${n}`, created_by: null, created_at: `2026-09-0${n}T00:00:00Z`, source_comment_id: null })) }) };
+      if (url === '/api/visual-artifacts/art-1') return { ok: true, status: 200, json: async () => ({ data: detailOf(3) }) };
+      if (url.includes('/api/gates')) return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }) as unknown as ReturnType<typeof vi.fn>);
+    await mount();
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    const rail = [...container.querySelectorAll('p')].find((p) => p.textContent === (koMessages.canvas as LooseMessages).versionLineage)!.parentElement!;
+    const rows = [...rail.querySelectorAll('li > button')] as HTMLButtonElement[];
+    expect(rows).toHaveLength(3);
+    expect(rows.find((b) => (b.textContent ?? '').includes('v1'))!.textContent).toContain((koMessages.canvas as LooseMessages).versionAnchorTag as string);
+    expect(calls.filter((u) => u.endsWith('/art-1/versions'))).toHaveLength(1);
+    await act(async () => { rows.find((b) => (b.textContent ?? '').includes('v2'))!.click(); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(calls.filter((u) => u.endsWith('/art-1/versions/2'))).toHaveLength(1);
+    expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('v2 본문');
+  });
+});

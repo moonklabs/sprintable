@@ -5928,6 +5928,7 @@
     "versionLineage": "Version lineage",
     "versionCurrentTag": "current",
     "versionAnchorTag": "anchor",
+    "versionLoadFailed": "Couldn't load this version.",
     "anchorBadge": "Anchor v{version}",
     "descriptionPaneToggle": "description pane",
     "descriptionPaneComingSoon": "Per-element spec (description pane) arrives in C2",

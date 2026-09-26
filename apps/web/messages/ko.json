@@ -5928,6 +5928,7 @@
     "versionLineage": "버전 계보",
     "versionCurrentTag": "지금",
     "versionAnchorTag": "정본",
+    "versionLoadFailed": "이 버전을 불러오지 못했어요.",
     "anchorBadge": "정본 v{version}",
     "descriptionPaneToggle": "설명 패널",
     "descriptionPaneComingSoon": "요소별 스펙(설명 패널)은 C2에서 제공 예정",
