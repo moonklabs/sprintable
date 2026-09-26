@@ -1001,3 +1001,52 @@ async def test_unpublish_via_sandbox():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_90_second_provider_publish_answers_in_seconds_and_the_worker_completes_it(monkeypatch):
+    """story #4336 AC2 — 공급자 호출이 90초 걸리는 발행(`[sandbox:publish-slow]` — AC5 라이브와 같은 대상): 즉시 발행 요청은 공급자를
+    기다리지 않고 수 초 안에 «발행 중»으로 답하고(90초 기다림 0), 워커 한 틱이 그 90초 호출을 끝까지 돌려 발행이 끝난다(초안 상세
+    published). 기다림은 기록만 한다(실제로 90초를 재우지 않음 — 값만 단언).
+    뮤테이션: 라우터가 예전처럼 요청 안에서 발행하면 요청 중 기다림 90 기록으로 RED."""
+    import time
+
+    from app.main import app
+    from app.services import sandbox_publish
+
+    sleeps: list[float] = []
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(sandbox_publish.asyncio, "sleep", _sleep)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            connection_id = await _create_sandbox_connection(client, org_id)
+            draft_id, _gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                text="긴 발행 [sandbox:publish-slow]",
+            )
+            started = time.monotonic()
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            elapsed = time.monotonic() - started
+            assert r.status_code == 200 and r.json()["processing"] is True, r.text
+            assert sleeps == [], "요청이 공급자(90초)를 기다렸다"
+            assert elapsed < 5, f"요청이 {elapsed:.1f}초 걸렸다"
+
+            counts = await run_worker_tick(Session)
+            detail = await draft_detail(client, org_id, draft_id)
+        assert sleeps == [90], "워커가 90초짜리 공급자 호출을 돌리지 않았다"
+        assert counts["completed"] == 1, counts
+        assert detail["publication_status"] == "published" and detail["published_at"], detail
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
