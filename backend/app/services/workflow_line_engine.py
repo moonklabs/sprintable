@@ -16,6 +16,7 @@ S3 범위 = fail-open 코어 + shadow 모드. 모드:
 
 policy block(``blocked_by_policy``)은 정상 decision이므로 fail-open(예외 처리)과 섞지 않는다.
 """
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,8 @@ from app.models.workflow_line import (
     WorkflowLineStepRun,
 )
 from app.services.workflow_line_resolver import resolve_routing_context
+
+logger = logging.getLogger(__name__)
 
 _TERMINAL_PROCEED_MODES = frozenset({"plain_transition", "advisory_only", "engine_failed"})
 
@@ -290,8 +293,19 @@ async def _record_step_run(
     처리(decision 의 mode/routing 은 sr 와 무관하게 호출부서 계산되므로 preview 정확성 유지)."""
     if dry_run:
         return None
+    # story #4270(PO 15:46Z) — project_id는 필수: 예전엔 None이면 NOT NULL 자리를 org id로 조용히 채웠다(`project_id or org_id` · «org-level 라인은
+    # org_id로 대체 표기»). 실제 호출처 일곱(stories · workflow_report · doc · hypothesis · goal · sprint · 라인 설정 미리보기=dry_run)은 전부 엔터티
+    # 자기 project_id를 넘기고 dev 실측도 org id 행 0이라, 폴백은 닿지 않는 자리 채움이었다 — 읽는 쪽(수신자 필터 · 역할 해소 · 링크)이 이 값을
+    # 늘 엔터티 프로젝트로 믿을 수 있게 불변식으로 못 박는다. None이면 채우지 않고 바로 드러낸다(로그 + 예외 → 호출자의 best-effort 감싸기가 전이는
+    # 비차단으로 유지).
+    if project_id is None:
+        logger.error(
+            "workflow_line_engine: step_run project_id 없음(entity_type=%s entity_id=%s) — 호출처가 엔터티 project_id를 넘겨야 한다",
+            entity_type, entity_id,
+        )
+        raise ValueError("step_run project_id is required")
     sr = WorkflowLineStepRun(
-        org_id=org_id, project_id=project_id or org_id,  # project_id NN — org-level 라인은 org_id로 대체 표기
+        org_id=org_id, project_id=project_id,
         line_definition_id=definition.id if definition is not None else None,
         entity_type=entity_type, entity_id=entity_id, from_status=from_status, to_status=to_status,
         status=status, mode=run_mode, routing_decision=routing_decision, routing_reason=routing_reason,

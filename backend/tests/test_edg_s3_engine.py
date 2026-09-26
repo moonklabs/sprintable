@@ -14,6 +14,8 @@ import pytest
 from app.services.workflow_line_engine import LineDecision
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+# story #4270 — step run project_id는 필수(폴백 제거). 실제 호출처처럼 엔터티 project_id를 넘긴다(라인 정의는 org 수준 그대로).
+_ENTITY_PROJECT = uuid.uuid4()
 
 # story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
 # DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
@@ -130,12 +132,14 @@ async def test_shadow_mode_records_step_run_but_proceeds(monkeypatch):
             "rollout_mode": "shadow",
             "steps": [{"from_status": "in-review", "to_status": "done", "step_type": "merge-gate"}]})
         d = await evaluate_line_for_transition(
-            session, org_id=org, project_id=None, entity_type="story", entity_id=eid,
+            session, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=eid,
             from_status="in-review", to_status="done")
         assert d.mode == "advisory_only" and d.proceeds  # shadow는 전이 비차단
         sr = (await session.execute(
             select(WorkflowLineStepRun).where(WorkflowLineStepRun.entity_id == eid))).scalar_one()
         assert sr.mode == "advisory_only" and sr.to_status == "done"
+        # story #4270 — org 수준 라인(정의 project_id 없음)이어도 step run project 자리 = 호출처가 넘긴 엔터티 프로젝트(org id 대체 표기 아님).
+        assert sr.project_id == _ENTITY_PROJECT and sr.project_id != org
     await engine.dispose()
 
 
@@ -153,7 +157,7 @@ async def test_enforcing_static_block_blocked_by_policy(monkeypatch):
             "rollout_mode": "enforcing",
             "steps": [{"from_status": "in-review", "to_status": "done", "enforcement": "block"}]})
         d = await evaluate_line_for_transition(
-            session, org_id=org, project_id=None, entity_type="story", entity_id=eid,
+            session, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=eid,
             from_status="in-review", to_status="done")
         # 정상 차단 decision — 예외(engine_failed)와 구분.
         assert d.mode == "blocked_by_policy" and not d.proceeds
@@ -178,7 +182,7 @@ async def test_fault_injection_engine_failure_degrades_to_plain(monkeypatch):
         # _published_config 가 터지도록 강제 주입(resolver/config 예외 시뮬레이션).
         with patch.object(eng, "_published_config", side_effect=RuntimeError("boom")):
             d = await eng.evaluate_line_for_transition(
-                session, org_id=org, project_id=None, entity_type="story", entity_id=eid,
+                session, org_id=org, project_id=_ENTITY_PROJECT, entity_type="story", entity_id=eid,
                 from_status="in-review", to_status="done")
         assert d.mode == "engine_failed"
         assert d.degraded_to_plain is True
@@ -210,7 +214,7 @@ async def test_step_run_flush_failure_savepoint_does_not_poison_session(monkeypa
         await _seed_active_line(session, org, "story", {
             "rollout_mode": "shadow",
             "steps": [{"from_status": "in-review", "to_status": "done", "step_type": "merge-gate"}]})
-        kw = dict(org_id=org, project_id=None, entity_type="story",
+        kw = dict(org_id=org, project_id=_ENTITY_PROJECT, entity_type="story",
                   from_status="in-review", to_status="done")
         d1 = await evaluate_line_for_transition(session, entity_id=eid, **kw)
         assert d1.mode == "advisory_only" and d1.step_run_id is not None
@@ -223,3 +227,25 @@ async def test_step_run_flush_failure_savepoint_does_not_poison_session(monkeypa
         assert d3.mode == "advisory_only" and d3.step_run_id is not None
         await session.commit()  # commit 성공 = outer tx 살아있음
     await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_record_step_run_requires_project_id_no_org_fallback(caplog):
+    """story #4270(PO 15:46Z) — project_id 없음 → org id로 조용히 채우지 않고 로그 + 예외로 드러낸다(행 추가 0).
+    뮤테이션: 예전 `project_id or org_id`로 되돌리면 예외 없이 org id 행을 쓰려 한다 → RED."""
+    import logging
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.services.workflow_line_engine import _record_step_run
+
+    session = MagicMock()
+    with caplog.at_level(logging.ERROR, logger="app.services.workflow_line_engine"):
+        with pytest.raises(ValueError):
+            await _record_step_run(
+                session, org_id=uuid.uuid4(), project_id=None, definition=SimpleNamespace(id=uuid.uuid4()), step=None,
+                entity_type="story", entity_id=uuid.uuid4(), from_status="in-review", to_status="done",
+                status="routing_resolved", run_mode="advisory_only", transition_id="t", correlation_id=uuid.uuid4(),
+            )
+    session.add.assert_not_called()
+    assert any("project_id 없음" in r.getMessage() for r in caplog.records)
