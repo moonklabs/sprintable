@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { DocTree } from './doc-tree';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -170,5 +171,17 @@ describe('DocTree 행 메뉴 — 목록 밖(body)에 · 모자라면 위로 · �
     root = createRoot(container);
     mount(DOC, 'en');
     expect(trigger().getAttribute('aria-label')).toBe('Open menu — 회의록');
+  });
+
+  // PO 23:16Z — 4718(#4345)과 겹친 자리. 이 PR의 키보드 메뉴 길 첫 발이 «⋮»이라, develop의 보임 규칙을 그대로 입었는지 못박는다:
+  // 쉴 때 터치 불투명도 1(HOVER_REVEAL) · Tab으로 닿으면 보임 + 초점 링(HOVER_REVEAL · _FOCUS_RING) · 누르는 자리 24(HOVER_REVEAL_HIT).
+  // 계산된 값(불투명도 · 링 · 24×24)은 jsdom이 못 재서 실브라우저 판으로 따로 쟀다(PR 댓글).
+  it('«⋮»는 develop 보임 규칙 그대로 — 터치 쉴 때 보임 · 초점 때 보임 + 링 · 24 누르는 자리(맨 opacity-0 · group-hover만 0)', () => {
+    mount();
+    const cls = trigger().className.split(/\s+/);
+    for (const token of `${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING} ${HOVER_REVEAL_HIT}`.split(' ')) expect(cls).toContain(token);
+    expect(cls).not.toContain('opacity-0');
+    expect(cls).not.toContain('group-hover:opacity-100');
+    expect(trigger().tabIndex).toBe(0);
   });
 });
