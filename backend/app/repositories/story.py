@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, case, exists, func, or_, select, true
@@ -114,7 +115,8 @@ class StoryRepository(BaseRepository[Story]):
     async def list(
         self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
         unattached: bool = False, epic_ids: list[uuid.UUID] | None = None,
-        include_unassigned: bool = False, done_within_days: int | None = None, no_assignee: bool = False, **filters,
+        include_unassigned: bool = False, done_within_days: int | None = None, no_assignee: bool = False,
+        project_ids: Collection[uuid.UUID] | None = None, **filters,
     ) -> tuple[list[Story], int]:
         """story #2537(카디르 QA #2932 실측, 2026-08-09) — `list_board()`와 동형으로
         `(stories, total)` 튜플을 반환한다. 이전엔 `list[Story]`만 반환해 이 분기(status
@@ -171,6 +173,11 @@ class StoryRepository(BaseRepository[Story]):
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
+        # story #4350 — project 필터 없는 목록은 caller가 접근 가능한 프로젝트로만(SQL IN · base.list_paginated와 같은 규칙).
+        if project_ids is not None:
+            if not project_ids:
+                return [], 0
+            query = query.where(Story.project_id.in_(list(project_ids)))
         if q:
             query = query.where(_title_search_filter(q))
         if cursor:

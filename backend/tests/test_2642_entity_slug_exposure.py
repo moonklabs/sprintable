@@ -209,6 +209,11 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
             await s.commit()
             agent_id = await _seed_agent(s, org.id, project1.id)
             await _seed_agent(s, org.id, project2.id)
+            # story #4350 — project 필터 없는 목록은 caller가 접근 가능한 프로젝트만 싣는다. 이 테스트는 slug 조회 수(N+1)를 보는
+            # 것이라 caller가 두 프로젝트 다 보게 grant를 하나 더 준다(예전엔 org 전체가 새어 나와 grant 없이도 5건이었다).
+            from app.models.project_access import ProjectAccess
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=project2.id, member_id=agent_id, permission="granted"))
+            await s.commit()
             for i in range(5):
                 s.add(Story(
                     id=uuid.uuid4(), org_id=org.id,
