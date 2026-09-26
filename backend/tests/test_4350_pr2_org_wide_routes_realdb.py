@@ -192,3 +192,34 @@ async def test_exclusion_counts_only_accessible_projects():
         body = resp.json()
         assert body["total_stories"] == 1, body
         assert sum(d["count"] for d in body["assignee_distribution"]) == 1, body
+
+
+async def test_merge_gate_org_totals_drop_only_inaccessible_project_gates():
+    """PO 판정(2026-09-26) — 무필터 집계: 전체 접근(owner)은 옛 수 그대로 · 제한 구성원은 B 몫만 빠짐 · 어느 프로젝트에도 안 걸린
+    org 수준 게이트는 둘 다 센다(수로 접근 불가 프로젝트의 존재가 새지 않게)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.pm import Story
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            stories = {st.project_id: st.id for st in (await s.execute(select(Story).where(Story.org_id == seeded["org"]))).scalars()}
+            for wtype, wid in (("story", stories[seeded["pa"]]), ("story", stories[seeded["pb"]]), ("wf_line_version", uuid.uuid4())):
+                s.add(Gate(
+                    id=uuid.uuid4(), org_id=seeded["org"], work_item_id=wid, work_item_type=wtype,
+                    gate_type="merge", status="auto_passed", neutral_facts={},
+                ))
+            owner_uid = uuid.uuid4()
+            s.add(User(id=owner_uid, email=f"o-{owner_uid.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            s.add(OrgMember(id=uuid.uuid4(), org_id=seeded["org"], user_id=owner_uid, role="owner"))
+            await s.commit()
+
+        restricted = await _call(Session, seeded, "/api/v2/merge-gate/metrics")
+        full = await _call(Session, {**seeded, "user": owner_uid}, "/api/v2/merge-gate/metrics")
+        assert restricted.status_code == 200 and full.status_code == 200, (restricted.text, full.text)
+        assert full.json()["trustworthy_merge_throughput"] == 3, "전체 접근은 옛 수 그대로(A + B + org 수준)"
+        assert restricted.json()["trustworthy_merge_throughput"] == 2, "제한 구성원은 B 몫만 빠진다(A + org 수준)"
