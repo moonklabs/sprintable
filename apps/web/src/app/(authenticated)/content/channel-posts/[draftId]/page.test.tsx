@@ -133,7 +133,7 @@ function stubFetch(opts: {
   // story #3808(Phase3·3-3 PR5a) — genBudgetOk와 동형(별도 지갑, x/x_sandbox
   // 채널 draft에서만 실제로 호출됨).
   apiUsageBudgetOk?: { limit_minor: number | null; spent_minor: number; remaining_minor: number | null; currency: 'KRW' | 'USD' | null; period: 'month' } | false;
-  draftDetail?: Partial<typeof DRAFT_DETAIL> & { command_retryable?: boolean };
+  draftDetail?: Partial<typeof DRAFT_DETAIL> & { command_retryable?: boolean; command_failure_detail?: Record<string, unknown> | null };
   onSave?: (body: unknown) => { status: number; body: unknown };
   onSubmit?: (body: unknown) => { status: number; body: unknown };
   onPublish?: () => { status: number; body: unknown };
@@ -2088,6 +2088,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
       await act(async () => { (container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).click(); });
       await flush();
       expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull(); // #4336 AC4 — 알림 하나(배지 중복 0)
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
       await flush();
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
@@ -2113,6 +2114,8 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-publishing-notice"]')).toBeNull();
     expect(notice?.querySelector('[data-testid="channel-post-cancel-publish-button"]')?.textContent).toBe(koMessages.content.channelPostsCancelPublishCta);
     expect((container.querySelector('[data-testid="channel-post-publish-button"]') as HTMLButtonElement).disabled).toBe(true);
+    // #4336 AC4 — 목록용 배지(같은 문장)는 여기서 또 그리지 않는다(알림 하나).
+    expect(container.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
   });
 
   it.each([

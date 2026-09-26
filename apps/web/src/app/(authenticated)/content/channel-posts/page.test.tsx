@@ -349,6 +349,25 @@ describe('ChannelPostListPage (story #3402)', () => {
       expect(badge?.textContent).toBe(koMessages.content.channelPostsFailureProcessing);
     });
 
+    it('⭐#4336 AC4 — 목록도 상세와 같은 두 상태: 워커 대기면 «발행하고 있어요», 예산 밖이면 사유 문장(«실패» 아님)', async () => {
+      stubFetch([
+        { ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'pending', processing_kind: 'publishing' },
+      ]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsPublishingNotice);
+
+      stubFetch([
+        { ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', command_status: 'pending', command_reason_code: 'WORKER_TICK_BUDGET_TOO_SMALL' },
+      ]);
+      await act(async () => { root.unmount(); root = createRoot(container); });
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="channel-post-failure-badge"]')?.textContent)
+        .toBe(koMessages.content.channelPostsPublishStuckNotice);
+    });
+
     it('command_status 계약 필드 자체가 없음(구 계약) — 배지를 안 그린다(지어내지 않음)', async () => {
       stubFetch([{ ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1', publication_status: 'failed' }]);
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
