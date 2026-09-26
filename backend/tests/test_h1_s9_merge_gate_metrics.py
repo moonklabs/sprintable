@@ -141,10 +141,11 @@ async def test_metrics_endpoint_routes_and_shape():
         yield AsyncMock()
 
     app.dependency_overrides[get_db] = _db
-    app.dependency_overrides[get_current_user] = lambda: MagicMock()
+    app.dependency_overrides[get_current_user] = lambda: MagicMock(user_id=str(uuid.uuid4()))  # story #4350 — 범위 조회가 user_id를 UUID로 읽는다
     app.dependency_overrides[get_verified_org_id] = lambda: org
     try:
-        with patch("app.routers.merge_gate.compute_merge_gate_metrics", new=AsyncMock(return_value=fake)):
+        with patch("app.routers.merge_gate.compute_merge_gate_metrics", new=AsyncMock(return_value=fake)), \
+             patch("app.routers.merge_gate._restricted_scope", new=AsyncMock(return_value=(None, None))):  # 전체 접근(목 세션)
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
                 resp = await c.get("/api/v2/merge-gate/metrics")
         assert resp.status_code == 200

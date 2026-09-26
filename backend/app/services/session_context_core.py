@@ -33,6 +33,7 @@ recent_activity_by_work_item도 동일 원칙 적용 — 각 work_item의 값 �
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -76,12 +77,15 @@ async def _recent_activity_for_one(
 async def get_session_context(
     session: AsyncSession, *, org_id: uuid.UUID, member_id: uuid.UUID, project_id: uuid.UUID | None,
     since: datetime | None, activity_limit: int = DEFAULT_RECENT_ACTIVITY_LIMIT,
+    accessible_project_ids: Collection[uuid.UUID],
 ) -> dict:
     """세션 시작 컨텍스트 「한 호출」 진입점. `dashboard_core.get_my_work`/`judgment_core.
     list_judgments`를 그대로 재사용(신규 테이블 0) — 이 함수 자체는 그 둘 + activity_logs를
     work_item 교집합으로 좁혀 묶는 것뿐이다."""
+    # story #4350 — caller가 접근 가능한 프로젝트의 일만 — 판단 · 최근 활동도 이 항목들에서만 나오므로 함께 좁혀진다.
     my_stories, my_tasks = await get_my_work(
         session, org_id=org_id, member_id=member_id, project_id=project_id,
+        accessible_project_ids=accessible_project_ids,
     )
 
     judgments_by_work_item: dict[str, dict] = {}

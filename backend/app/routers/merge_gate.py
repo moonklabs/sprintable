@@ -35,6 +35,31 @@ class MergeGateMetricsResponse(BaseModel):
     window: dict
 
 
+async def _restricted_scope(session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID):
+    """story #4350(PO 2026-09-26) — 무필터 집계의 caller 범위. 전체 접근(org의 모든 프로젝트)이면 (None, None) — 옛 수 그대로.
+    제한된 caller면 (접근 가능 프로젝트, 접근 불가 프로젝트에 속한 게이트 id) — 어느 프로젝트에도 안 걸린 org 수준 게이트는 빼지 않는다
+    (수로 접근 불가 프로젝트의 존재가 새는 것만 막는다)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.project import Project
+    from app.services.gate_service import resolve_work_item_project_ids_batch
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    accessible = set(await accessible_project_ids_in_org(session, user_id, org_id))
+    all_projects = set((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+    if all_projects <= accessible:
+        return None, None
+    gates = (await session.execute(
+        select(Gate.id, Gate.work_item_type, Gate.work_item_id).where(Gate.org_id == org_id)
+    )).all()
+    owner = await resolve_work_item_project_ids_batch(session, org_id, [(t, w) for _, t, w in gates])
+    hidden = [gid for gid, t, w in gates if (p := owner.get((t, w))) is not None and p not in accessible]
+    return list(accessible), hidden
+
+
 @router.get("/metrics", response_model=MergeGateMetricsResponse)
 async def get_merge_gate_metrics(
     project_id: uuid.UUID | None = Query(default=None),
@@ -46,7 +71,16 @@ async def get_merge_gate_metrics(
     _auth: AuthContext = Depends(get_current_user),
 ) -> MergeGateMetricsResponse:
     """merge verdict gate 6지표 on-the-fly 집계. denom 0이면 ratio=null, 데이터 있고 0이면 0."""
+    # story #4350 — 명시 project_id는 caller 접근 확인(없으면 404 · 존재 비노출). 예전엔 접근 불가 프로젝트의 집계를 그대로 읽었다.
+    if project_id is not None:
+        from app.services.project_auth import require_project_access
+
+        await require_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id, not_found_detail="Project not found")
+    story_project_ids = hidden_gate_ids = None
+    if project_id is None:
+        story_project_ids, hidden_gate_ids = await _restricted_scope(session, uuid.UUID(_auth.user_id), org_id)
     data = await compute_merge_gate_metrics(
-        session, org_id, project_id=project_id, start=start, end=end
+        session, org_id, project_id=project_id, start=start, end=end,
+        story_project_ids=story_project_ids, hidden_gate_ids=hidden_gate_ids,
     )
     return MergeGateMetricsResponse(**data)

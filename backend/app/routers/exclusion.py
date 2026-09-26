@@ -4,7 +4,7 @@ GET 전용 — 마킹/변경 없음. 실제 마킹은 PATCH /stories/{id} is_exc
 """
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_verified_org_id
@@ -21,4 +21,10 @@ async def exclusion_dry_run(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
 ) -> dict:
-    return await generate_exclusion_report(session, org_id, project_id)
+    # story #4350 — caller가 접근 가능한 프로젝트만(SEC-S8). 명시 project_id도 접근 확인(없으면 404 · 존재 비노출).
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    accessible = await accessible_project_ids_in_org(session, uuid.UUID(_auth.user_id), org_id)
+    if project_id is not None and project_id not in accessible:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return await generate_exclusion_report(session, org_id, project_id, project_ids=accessible)

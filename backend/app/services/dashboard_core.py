@@ -7,6 +7,7 @@ member 존재/활성 검증·project_id 해석 로직을 두 번째로 다시 �
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,9 +23,14 @@ class MemberNotFoundError(ValueError):
 
 async def get_my_work(
     session: AsyncSession, *, org_id: uuid.UUID, member_id: uuid.UUID, project_id: uuid.UUID | None,
+    accessible_project_ids: Collection[uuid.UUID],
 ) -> tuple[list[StoryItem], list[TaskItem]]:
     """dashboard.get_dashboard와 동일 쿼리(cross-org 차단 검증 포함). project_id=None이면
-    member의 소속 project로 해석한다(dashboard.py 원 로직 그대로)."""
+    member의 소속 project로 해석한다(dashboard.py 원 로직 그대로).
+
+    story #4350 — `accessible_project_ids`는 **부르는 사람**(caller)이 접근 가능한 프로젝트. 다른 구성원(member_id)의 일을 볼 수는
+    있지만(PO 확인 — 프로젝트 협업 시야) caller가 접근 못 하는 프로젝트의 스토리 · 과제는 싣지 않는다(SEC-S8 선생님 확정). 과제는
+    project_id가 없어 소속 스토리의 project로 거른다."""
     member_check = await session.execute(
         select(TeamMember.project_id).where(
             TeamMember.id == member_id, TeamMember.org_id == org_id, TeamMember.is_active.is_(True)
@@ -36,9 +42,11 @@ async def get_my_work(
     if project_id is None:
         project_id = member_project_id
 
+    allowed = list(accessible_project_ids)
     stories_r = await session.execute(
         select(Story.id, Story.title, Story.status, Story.story_points).where(
             Story.project_id == project_id,
+            Story.project_id.in_(allowed),
             Story.assignee_id == member_id,
             Story.status != "done",
             Story.deleted_at.is_(None),
@@ -47,7 +55,10 @@ async def get_my_work(
     story_rows = stories_r.all()
 
     tasks_r = await session.execute(
-        select(Task.id, Task.title, Task.status).where(
+        select(Task.id, Task.title, Task.status)
+        .join(Story, Story.id == Task.story_id)
+        .where(
+            Story.project_id.in_(allowed),
             Task.assignee_id == member_id,
             Task.status != "done",
             Task.deleted_at.is_(None),
