@@ -11,11 +11,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
+from app.services.project_auth import require_project_access, restricted_accessible_project_ids
 from app.routers.insight_snapshots import InsightSnapshotView
 from app.services.generation_budget import GenerationBudgetExceededError
 from app.services.external_publish_pause import ExternalPublishPausedError
@@ -472,6 +474,28 @@ async def patch_site_post_draft_campaign(
     )
 
 
+async def _require_site_post_draft_project_access(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, user_id: uuid.UUID,
+):
+    """story #4351 — 사이트 글 초안은 프로젝트 소속(work_item_id → Story.project_id). 채널 초안의
+    `_require_channel_post_draft_project_access`와 같은 축 · 접근 불가 = 404(존재 비노출). 반환값 = 초안."""
+    from app.models.pm import Story
+
+    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    story = (await db.execute(
+        select(Story).where(Story.id == draft.work_item_id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story is None:
+        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    await require_project_access(
+        db, user_id=user_id, project_id=story.project_id, org_id=org_id,
+        not_found_detail=f"draft를 찾을 수 없습니다: {draft_id}",
+    )
+    return draft
+
+
 @router.get("/{org_id}/site-posts/drafts", response_model=list[SitePostDraftListItem])
 async def list_site_post_drafts_endpoint(
     org_id: uuid.UUID,
@@ -503,11 +527,15 @@ async def list_site_post_drafts_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     requester_member_id, is_org_admin = await _resolve_member_best_effort(db, auth, org_id)
+    # story #4351 — 제한된 caller는 접근 가능 프로젝트의 초안만(목록 · 총계 같은 범위 — 총계가 새면 존재가 샌다).
+    restricted = await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id)
     rows = await list_site_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset, include_deleted=include_deleted,
-        work_item_id=work_item_id,
+        work_item_id=work_item_id, project_ids=restricted,
     )
-    total = await count_site_post_drafts(db, org_id=org_id, include_deleted=include_deleted, work_item_id=work_item_id)
+    total = await count_site_post_drafts(
+        db, org_id=org_id, include_deleted=include_deleted, work_item_id=work_item_id, project_ids=restricted,
+    )
     response.headers["X-Total-Count"] = str(total)
     return [
         _to_site_post_draft_list_item(
@@ -542,7 +570,10 @@ async def get_site_post_draft_detail_endpoint(
 
     # story #3734 — 단건 조회는 보관 여부와 무관하게 항상 보인다(목록 기본 필터가
     # 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다, withdraw #3614와 동형 관례).
-    rows = await list_site_post_drafts(db, org_id=org_id, draft_id=draft_id, limit=1, include_deleted=True)
+    rows = await list_site_post_drafts(
+        db, org_id=org_id, draft_id=draft_id, limit=1, include_deleted=True,
+        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+    )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
     draft, latest, origin, gate, post = rows[0]
@@ -642,7 +673,7 @@ async def list_site_post_draft_version_history(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+    draft = await _require_site_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, user_id=uuid.UUID(auth.user_id))
     if draft is None:
         raise HTTPException(status_code=404, detail="draft not found")
 
@@ -976,6 +1007,8 @@ async def get_site_post_publication_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
+    # story #4351 — 초안 소속 프로젝트 접근 확인(접근 불가 = 404 · 존재 비노출).
+    await _require_site_post_draft_project_access(db, org_id=org_id, draft_id=draft_id, user_id=uuid.UUID(auth.user_id))
     try:
         info = await get_site_post_publication_info(db, org_id=org_id, draft_id=draft_id)
         destination, publication, command = await get_site_post_external_publication_state(

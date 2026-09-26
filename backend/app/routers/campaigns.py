@@ -140,13 +140,27 @@ async def get_campaign_detail_endpoint(
         raise HTTPException(status_code=404, detail=f"campaign을 찾을 수 없습니다: {campaign_id}")
 
     content_item_rows = await list_content_items_for_campaign(db, org_id=org_id, campaign_id=campaign_id)
+    # story #4351 — 캠페인 자체(이름)는 org 수준이지만 안의 글 · 채널 변형은 프로젝트 소속 초안(work_item → Story.project_id) —
+    # 제한된 caller면 접근 가능 프로젝트의 것만(쓰기 가드와 같은 축 · PO 2026-09-26).
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    restricted = await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id)
+    if restricted is not None:
+        from sqlalchemy import select
+
+        from app.models.pm import Story
+
+        allowed_story_ids = set((await db.execute(
+            select(Story.id).where(Story.org_id == org_id, Story.project_id.in_(restricted))
+        )).scalars())
+        content_item_rows = [(d, v) for d, v in content_item_rows if d.work_item_id in allowed_story_ids]
     # story #4290(까디르 델타 ①) — 변형들의 command_retryable도 보는 사람 기준(재시도는 사람만).
     viewer_is_human = (await resolve_member(auth, org_id, db)).type == "human"
 
     content_items: list[CampaignContentItemItem] = []
     for draft, latest_version in content_item_rows:
         variant_rows = await list_channel_post_drafts(
-            db, org_id=org_id, source_content_item_id=draft.id, limit=200,
+            db, org_id=org_id, source_content_item_id=draft.id, limit=200, project_ids=restricted,
         )
         # story #3437(후속 묶음) — 이 루프의 draft/latest_version이 이미 이 content_item의
         # 원문+latest version이라 배치 쿼리 불요 — 그대로 조립.

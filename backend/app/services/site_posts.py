@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -749,6 +750,7 @@ async def list_site_post_drafts(
     draft_id: uuid.UUID | None = None,
     include_deleted: bool = False,
     work_item_id: uuid.UUID | None = None,
+    project_ids: Collection[uuid.UUID] | None = None,
 ) -> list[tuple[SitePostDraft, SitePostVersion, SitePostVersion, Gate | None, SitePost | None]]:
     """story #3365 후속(S4 계약 갭, 페드루 PO 확定 2026-09-03) — 조직 스코프 초안 목록. S4
     화면이 열릴 때 draft_id를 미리 알 방법이 없어 만든 자리 — 항목마다 최신 버전(title·lang·
@@ -813,6 +815,13 @@ async def list_site_post_drafts(
         .limit(limit)
         .offset(offset)
     )
+    # story #4351 — 초안은 프로젝트 소속(work_item_id → Story.project_id · 채널 초안과 같은 축). 제한된 caller면 접근 가능 프로젝트 것만.
+    if project_ids is not None:
+        from app.models.pm import Story
+
+        stmt = stmt.where(SitePostDraft.work_item_id.in_(
+            select(Story.id).where(Story.org_id == org_id, Story.project_id.in_(list(project_ids)))
+        ))
     if not include_deleted:
         stmt = stmt.where(SitePostDraft.deleted_at.is_(None))
     if draft_id is not None:
@@ -866,7 +875,7 @@ async def list_site_post_drafts(
 
 async def count_site_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, include_deleted: bool = False,
-    work_item_id: uuid.UUID | None = None,
+    work_item_id: uuid.UUID | None = None, project_ids: Collection[uuid.UUID] | None = None,
 ) -> int:
     """story #3744 — list_site_post_drafts와 같은 org_id/include_deleted 필터의 전체
     개수(limit/offset 무관). goals.py::list_epics_endpoint의 X-Total-Count 관례와
@@ -877,6 +886,13 @@ async def count_site_post_drafts(
         stmt = stmt.where(SitePostDraft.deleted_at.is_(None))
     if work_item_id is not None:
         stmt = stmt.where(SitePostDraft.work_item_id == work_item_id)
+    # story #4351 — 초안은 프로젝트 소속(work_item_id → Story.project_id · 채널 초안과 같은 축). 제한된 caller면 접근 가능 프로젝트 것만.
+    if project_ids is not None:
+        from app.models.pm import Story
+
+        stmt = stmt.where(SitePostDraft.work_item_id.in_(
+            select(Story.id).where(Story.org_id == org_id, Story.project_id.in_(list(project_ids)))
+        ))
     return (await db.execute(stmt)).scalar_one()
 
 
