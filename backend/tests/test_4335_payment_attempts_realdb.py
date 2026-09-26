@@ -1134,7 +1134,7 @@ async def test_recheck_stops_after_24h_and_alerts_only_without_a_definite_answer
 @pytest.mark.parametrize("mode", ["5xx", "5xx_done", "network"])
 async def test_refund_5xx_stays_pending_and_the_sweep_retries_same_key(Session, toss, alerts, mode):
     """까디르 ② — 환불 5xx · 네트워크(Toss는 환불했는데 응답만 잃은 경우 포함)는 failed가 아니라 pending · 다음 쓸기가 같은 멱등키로
-    다시 → confirmed · Toss 환불은 1. 뮤테이션: 예전 `_attempt_partial_refund`(모든 예외 → failed)로 되돌리면 RED."""
+    다시 → confirmed · Toss 환불은 1. 뮤테이션: 모든 예외를 failed로 접으면(옛 동기 경로의 부분취소 방식 — story #4344에서 걷힘) RED."""
     from app.services import billing_payment_attempt as svc
 
     async with Session() as s:
