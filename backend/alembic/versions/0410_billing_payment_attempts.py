@@ -49,6 +49,10 @@ def upgrade() -> None:
         sa.Column("refund_target_order_id", sa.Text(), nullable=True),
         sa.Column("reason", sa.Text(), nullable=True),
         sa.Column("reauth_required", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        # change-tier 옛 결제 부분 환불 — 확정 커밋 **전에** 의도를 적는다(pending · 금액). 확정 뒤 환불 전에 죽어도 쓸기가 이어서
+        # 같은 멱등키(시도 id)로 보낸다(까디르 ⑤).
+        sa.Column("refund_status", sa.Text(), nullable=True),
+        sa.Column("refund_amount_minor", sa.BigInteger(), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
@@ -58,6 +62,10 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "stage IN ('received', 'key_issued', 'charge_started', 'charged')", name="ck_billing_payment_attempts_stage",
+        ),
+        sa.CheckConstraint(
+            "refund_status IS NULL OR refund_status IN ('pending', 'confirmed', 'failed')",
+            name="ck_billing_payment_attempts_refund_status",
         ),
         sa.UniqueConstraint("order_id", name="uq_billing_payment_attempts_order_id"),
     )

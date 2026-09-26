@@ -2,7 +2,7 @@
 payment_key로 Toss 취소 API를 부르고, 성공 응답을 record_ledger_entry(entry_type=
 "refund")로 원장(A2)에 남긴다.
 
-이중 멱등: TossAdapter.refund의 Idempotent-Key 헤더(order_id 결정적 파생 — 같은 order를
+이중 멱등: TossAdapter.refund의 Idempotency-Key 헤더(story #4335 — 예전 철자 «Idempotent-Key»는 Toss가 몰라 효과 0이었다 · 키는 호출자가 «이 환불 한 건»으로 정하거나 order_id 결정적 파생 — 같은 order를
 다시 부르면 Toss가 중복 취소를 안 만든다)가 1차, record_ledger_entry의 provider_ref
 UNIQUE(transactionKey 기반)가 2차."""
 from __future__ import annotations
@@ -29,6 +29,7 @@ async def refund_org(
     order_id: str,
     cancel_reason: str,
     cancel_amount_minor: int | None = None,
+    idempotency_key: str | None = None,
 ) -> BillingLedgerEntry:
     """order_id가 가리키는 confirmed 결제를 환불(전액 또는 cancel_amount_minor만큼
     부분)하고 원장 엔트리를 반환한다."""
@@ -53,7 +54,8 @@ async def refund_org(
         payment_key=order.payment_key,
         cancel_reason=cancel_reason,
         cancel_amount_minor=cancel_amount_minor,
-        idempotency_key=f"refund:{order_id}",
+        # story #4335 — 호출자가 «이 환불 한 건»을 가리키는 키를 주면 그것(결제 시도의 환불: 시도 id). 없으면 예전 그대로.
+        idempotency_key=idempotency_key or f"refund:{order_id}",
     )
 
     cancels = result.get("cancels") or []

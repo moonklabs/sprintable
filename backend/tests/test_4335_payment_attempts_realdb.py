@@ -80,6 +80,7 @@ class FakeToss:
         self.charge_mode = "ok"
         self.issue_mode = "ok"
         self.hang_event: asyncio.Event | None = None
+        self.lookup_status: str | None = None  # 강제 조회 결과(ABORTED 등) · "error"면 Toss 5xx
 
     @property
     def approvals(self) -> int:
@@ -102,7 +103,16 @@ class FakeToss:
         if self.charge_mode == "hang":
             assert self.hang_event is not None
             await self.hang_event.wait()
-            raise RuntimeError("Cannot reach Toss API")  # 응답 전에 끊긴 판 — 그러나 Toss 쪽에선 승인됨(아래)
+            raise RuntimeError("Cannot reach Toss API")  # 응답 전에 끊긴 판
+        if self.charge_mode == "hang_then_ok":  # Toss는 승인했는데 응답이 늦게 돌아오는 판(작업이 오래 멈췄다 깨어남)
+            assert self.hang_event is not None
+            self.charged.setdefault(order_id, f"pay-{uuid.uuid4().hex[:10]}")
+            await self.hang_event.wait()
+            return {"paymentKey": self.charged[order_id], "orderId": order_id, "receipt": {"url": "https://r.example/late"}}
+        if self.charge_mode in ("5xx", "5xx_charged"):  # 까디르 ① — Toss 5xx: 승인됐을 수도(5xx_charged) · 안 됐을 수도
+            if self.charge_mode == "5xx_charged":
+                self.charged.setdefault(order_id, f"pay-{uuid.uuid4().hex[:10]}")
+            raise TossApiError("PROVIDER_ERROR", "Toss charge failed", status_code=500)
         if self.charge_mode == "network":
             self.charged.setdefault(order_id, f"pay-{uuid.uuid4().hex[:10]}")  # 도달은 했고 응답만 잃음
             raise RuntimeError("Cannot reach Toss API")
@@ -119,6 +129,10 @@ class FakeToss:
 
         order_id = path.rsplit("/", 1)[-1]
         self.lookup_calls.append(order_id)
+        if self.lookup_status == "error":
+            raise TossApiError("PROVIDER_ERROR", "Toss payment lookup failed", status_code=500)
+        if self.lookup_status is not None:
+            return {"status": self.lookup_status, "orderId": order_id}
         if order_id not in self.charged:
             raise TossApiError("NOT_FOUND_PAYMENT", "Toss payment lookup failed", status_code=404)
         return {"status": "DONE", "paymentKey": self.charged[order_id], "orderId": order_id, "receipt": {"url": "https://r.example/x"}}
@@ -545,3 +559,277 @@ async def test_charge_response_delay_is_injected_only_outside_prod(monkeypatch, 
     )
     assert result["paymentKey"] == "pay-x"
     assert slept == ([30.0] if expect_slept else [])
+
+
+# ── 까디르 돈 렌즈(4704) — ① 5xx · ③ 멱등 헤더 · ④ 늦은 확정 · ⑤ 환불 대기 · 표 공백 ─────────────────────────────
+
+async def _checkout_attempt(Session):
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s)
+        attempt_id = uuid.uuid4()
+        _, token = await svc.start_checkout_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, tier="team", billing_cycle="monthly")
+    return org_id, attempt_id, token
+
+
+async def _worker_until_charge_called(Session, toss, attempt_id, token, *, auth_key="auth-1"):
+    from app.services import billing_payment_attempt as svc
+
+    async def _run():
+        async with Session() as ws:
+            await svc.drive_attempt(ws, attempt_id, token, auth_key=auth_key)
+
+    task = asyncio.create_task(_run())
+    for _ in range(200):
+        if toss.charge_calls:
+            break
+        await asyncio.sleep(0.05)
+    return task
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("mode", ["5xx", "5xx_charged"])
+async def test_toss_5xx_on_charge_is_not_a_decline_and_reconcile_decides(Session, toss, mode):
+    """① — Toss 5xx는 «거절 · 청구 0»이 아니라 결과 불명: 시도는 진행 중 그대로 · 대사가 order_id 조회로 가린다.
+    승인됐으면(5xx_charged) 완료 · 안 됐으면 10분 창 뒤 실패. 뮤테이션: 5xx를 declined로 끝내면 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = mode
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        mid = await svc.get_attempt(s, attempt_id)
+        assert (mid.status, mid.stage) == ("processing", "charge_started")
+        await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
+        done = await svc.reconcile_attempt(s, attempt_id)
+    assert done.status == ("succeeded" if mode == "5xx_charged" else "failed")
+    assert toss.approvals == (1 if mode == "5xx_charged" else 0)
+
+
+@pytest.mark.anyio
+async def test_toss_5xx_on_billing_key_issue_leaves_the_attempt_for_reconcile(Session, toss):
+    from app.services import billing_payment_attempt as svc
+    from app.services.payment.toss_adapter import TossApiError
+
+    async def _issue_500(self, path, **kw):
+        raise TossApiError("PROVIDER_ERROR", "Toss issue failed", status_code=500)
+
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    with patch("app.services.payment.toss_adapter.TossAdapter._post", new=_issue_500):
+        async with Session() as s:
+            await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+            assert (await svc.get_attempt(s, attempt_id)).status == "processing"
+    async with Session() as s:
+        await _expire_lease(s, attempt_id)
+        done = await svc.reconcile_attempt(s, attempt_id)
+        assert (done.status, done.stage, done.reauth_required) == ("failed", "received", True)
+    assert toss.charge_calls == []
+
+
+@pytest.mark.anyio
+async def test_idempotency_key_header_is_what_goes_on_the_wire(monkeypatch):
+    """③ — 파이썬 인자가 아니라 실제로 나가는 HTTP 헤더 이름: `Idempotency-Key`(Toss 공식 문서). 예전 `Idempotent-Key`면 RED."""
+    import httpx
+
+    import app.core.config as config_module
+    from app.services.payment import toss_adapter
+
+    monkeypatch.setattr(config_module.settings, "toss_payments_secret_key", "test_sk")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"cancels": [{"transactionKey": "tx", "cancelAmount": 100}]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(toss_adapter.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw))
+    await toss_adapter.TossAdapter().refund(payment_key="pk", cancel_reason="r", cancel_amount_minor=100, idempotency_key="tierchange-refund-abc")
+    assert seen[0].headers.get("Idempotency-Key") == "tierchange-refund-abc"
+    assert "Idempotent-Key" not in seen[0].headers
+
+
+@pytest.mark.anyio
+async def test_late_worker_charge_after_reconcile_failed_revives_and_grants_rights(Session, toss):
+    """④ — 대사가 «Toss가 모름 · 10분»으로 failed를 적은 뒤, 오래 멈췄던 작업의 청구가 Toss DONE으로 돌아옴 → 돈을 받았으니 서비스를
+    준다: 시도 succeeded · 구독 active · 청구 1. 뮤테이션: 늦은 확정 경로를 빼면 시도 failed · 구독 pending으로 남아 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "hang_then_ok"
+    toss.hang_event = asyncio.Event()
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    worker = await _worker_until_charge_called(Session, toss, attempt_id, token)
+    saved = dict(toss.charged)
+    toss.charged.clear()  # 조회 시점엔 Toss가 아직 모른다(NOT_FOUND)
+    async with Session() as s:
+        await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(seconds=1))
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "failed"
+    toss.charged.update(saved)
+    toss.hang_event.set()
+    await worker
+    async with Session() as s:
+        done = await svc.get_attempt(s, attempt_id)
+        assert done.status == "succeeded" and "late charge" in (done.reason or "")
+        assert (await _row(s, "SELECT status FROM org_subscriptions WHERE org_id=:o", o=org_id)).status == "active"
+    assert toss.approvals == 1
+
+
+@pytest.mark.anyio
+async def test_late_worker_after_reconcile_succeeded_changes_nothing(Session, toss):
+    """표: 대사 성공 뒤 늦은 워커 — 대사가 order_id 조회로 확정한 뒤 늦은 응답이 와도 두 번째 확정 · 원장 · 청구 0."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "hang_then_ok"
+    toss.hang_event = asyncio.Event()
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    worker = await _worker_until_charge_called(Session, toss, attempt_id, token)
+    async with Session() as s:
+        await _expire_lease(s, attempt_id, charge_started_ago=timedelta(minutes=1))
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "succeeded"
+    toss.hang_event.set()
+    await worker
+    async with Session() as s:
+        assert (await svc.get_attempt(s, attempt_id)).status == "succeeded"
+        ledger = (await s.execute(text("SELECT count(*) FROM billing_ledger_entries WHERE org_id=:o"), {"o": org_id})).scalar_one()
+        assert ledger == 1
+    assert toss.approvals == 1 and len(toss.charge_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_change_tier_refund_intent_survives_a_crash_and_the_sweep_sends_it_once(Session, toss, monkeypatch):
+    """⑤ — 확정 커밋 전에 환불 의도(pending · 금액)를 적는다. 확정 뒤 환불 전에 죽으면 쓸기가 이어서 보내고, 다시 돌아도 취소는 1.
+    뮤테이션: 의도를 커밋 뒤에 적으면(또는 안 적으면) 쓸기가 보낼 게 없어 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+        attempt_id = uuid.uuid4()
+        _, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+
+    real_run = svc.run_pending_refund
+
+    async def _crash(*_a, **_k):
+        raise RuntimeError("instance vanished before the refund")
+
+    monkeypatch.setattr(svc, "run_pending_refund", _crash)
+    async with Session() as s:
+        with pytest.raises(RuntimeError):
+            await svc.drive_attempt(s, attempt_id, token)
+        crashed = await svc.get_attempt(s, attempt_id)
+        assert (crashed.status, crashed.refund_status) == ("succeeded", "pending") and crashed.refund_amount_minor > 0
+    assert toss.cancel_calls == []
+
+    monkeypatch.setattr(svc, "run_pending_refund", real_run)
+    async with Session() as s:
+        await svc.sweep_processing_attempts(s)
+        await svc.sweep_processing_attempts(s)
+        assert (await svc.get_attempt(s, attempt_id)).refund_status == "confirmed"
+    assert len(toss.cancel_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_stage_advances_to_key_issued_before_the_charge(Session, toss, monkeypatch):
+    """표: 키 발급 뒤 단계 전진 — 청구 금액을 셀 때 이미 key_issued(울타리는 key_issued에서만 checkout 청구를 연다)."""
+    from app.services import billing_payment_attempt as svc
+
+    stages: list[str] = []
+    real_inputs = svc._charge_inputs
+
+    async def _spy(session, attempt):
+        stages.append((await svc.get_attempt(session, attempt.id)).stage)
+        return await real_inputs(session, attempt)
+
+    monkeypatch.setattr(svc, "_charge_inputs", _spy)
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+    assert stages == ["key_issued"] and toss.issue_calls == 1 and toss.approvals == 1
+
+
+@pytest.mark.anyio
+async def test_key_issued_attempt_that_expires_fails_without_reauth_and_no_charge(Session, toss, monkeypatch):
+    """표: key_issued 만료 — 빌링키는 발급됐지만 청구 전(행으로 증명)이라 failed · 청구 0 · 카드 인증부터 다시는 아님."""
+    from app.services import billing_payment_attempt as svc
+
+    async def _stop(*_a, **_k):
+        raise RuntimeError("worker stops right after the billing key")
+
+    monkeypatch.setattr(svc, "_charge_inputs", _stop)
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        with pytest.raises(RuntimeError):
+            await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        assert (await svc.get_attempt(s, attempt_id)).stage == "key_issued"
+        await _expire_lease(s, attempt_id)
+        done = await svc.reconcile_attempt(s, attempt_id)
+        assert (done.status, done.stage, done.reauth_required) == ("failed", "key_issued", False)
+    assert toss.charge_calls == []
+
+
+@pytest.mark.anyio
+async def test_lease_lost_after_the_fence_the_reconciler_finishes_and_the_charge_stays_one(Session, toss):
+    """표: 울타리 뒤 리스 상실 — 작업이 울타리를 넘어 청구 중인데 기한이 지나 대사가 가져감(조회 DONE → 확정) · 작업의 늦은 응답은
+    확정을 두 번 하지 않는다."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "hang_then_ok"
+    toss.hang_event = asyncio.Event()
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    worker = await _worker_until_charge_called(Session, toss, attempt_id, token)
+    async with Session() as s:
+        assert (await svc.get_attempt(s, attempt_id)).stage == "charge_started"
+        await _expire_lease(s, attempt_id)
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "succeeded"
+    toss.hang_event.set()
+    await worker
+    assert toss.approvals == 1 and len(toss.charge_calls) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("toss_status", ["ABORTED", "EXPIRED", "CANCELED"])
+async def test_reconcile_non_done_toss_status_fails_the_attempt(Session, toss, toss_status):
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "network"
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        toss.lookup_status = toss_status
+        await _expire_lease(s, attempt_id)
+        done = await svc.reconcile_attempt(s, attempt_id)
+        assert (done.status, done.reason) == ("failed", f"toss status={toss_status}")
+        assert (await _row(s, "SELECT status FROM billing_orders WHERE order_id=:x", x=done.order_id)).status == "failed"
+
+
+@pytest.mark.anyio
+async def test_reconcile_lookup_error_keeps_checking(Session, toss):
+    """표: 조회 오류(Toss 5xx) — 결론 없이 «확인 중» 그대로 · 다음 조회가 다시 본다(기한을 지금으로 당김)."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "network"
+    org_id, attempt_id, token = await _checkout_attempt(Session)
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        toss.lookup_status = "error"
+        await _expire_lease(s, attempt_id, charge_started_ago=svc.NOT_FOUND_FAIL_AFTER + timedelta(minutes=1))
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "processing"
+        toss.lookup_status = None
+        assert (await svc.reconcile_attempt(s, attempt_id)).status == "succeeded", "다음 조회가 이어서 확정"
+
+
+@pytest.mark.anyio
+async def test_change_tier_other_id_same_org_while_one_is_processing_is_409(Session, toss):
+    from app.services import billing_payment_attempt as svc
+    from app.services.org_subscription_tier_change import TierChangeInProgress
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await svc.start_change_tier_attempt(s, attempt_id=uuid.uuid4(), org_id=org_id, requested_by=None, new_tier="team")
+        with pytest.raises(TierChangeInProgress):
+            await svc.start_change_tier_attempt(s, attempt_id=uuid.uuid4(), org_id=org_id, requested_by=None, new_tier="business")
+    assert toss.charge_calls == []

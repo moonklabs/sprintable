@@ -223,22 +223,28 @@ async def refund_old_remainder(
             org_id,
         )
         return
-    # story #3097(선생님 결정 2026-08-26) — refund_target.amount_minor는
-    # 원래 청구 시점에 이미 VAT 가산된 값이다(compute_full_charge_for_new_offering
-    # 경로가 이 fix로 그렇게 청구한다) — 부분취소도 그 실제로 걷은 금액 기준으로
-    # 일할해야 한다. raw monthly_price_minor(공급가)로 그대로 일할하면 환불액이
-    # VAT분만큼 과소산정된다(실 청구액보다 덜 돌려줌).
-    settings = await get_platform_settings(session)
-    taxed_old_monthly = apply_vat_minor(old_offering.monthly_price_minor, settings.vat_rate_bp)
-    refund_amount = prorate_minor(
-        taxed_old_monthly, now=now,
-        period_start=old_period_start, period_end=old_period_end,
+    refund_amount = await prorated_refund_amount(
+        session, old_offering=old_offering, old_period_start=old_period_start, old_period_end=old_period_end, now=now,
     )
     if refund_amount > 0:
         await _attempt_partial_refund(
             session, org_id=org_id, order=refund_target, refund_amount=refund_amount,
             from_tier=from_tier, to_tier=to_tier,
         )
+
+
+async def prorated_refund_amount(
+    session: AsyncSession, *, old_offering: OfferingVersion, old_period_start: datetime, old_period_end: datetime,
+    now: datetime,
+) -> int:
+    """옛 tier 잔여기간 일할 환불액(VAT 포함 실 청구액 기준).
+
+    story #3097(선생님 결정 2026-08-26) — 옛 청구액은 원래 청구 시점에 이미 VAT 가산된 값이다(compute_full_charge_for_new_offering
+    경로가 그렇게 청구한다) — 부분취소도 그 실제로 걷은 금액 기준으로 일할해야 한다. raw monthly_price_minor(공급가)로
+    그대로 일할하면 환불액이 VAT분만큼 과소산정된다(실 청구액보다 덜 돌려줌)."""
+    settings = await get_platform_settings(session)
+    taxed_old_monthly = apply_vat_minor(old_offering.monthly_price_minor, settings.vat_rate_bp)
+    return prorate_minor(taxed_old_monthly, now=now, period_start=old_period_start, period_end=old_period_end)
 
 
 async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str) -> OrgSubscription:
@@ -317,8 +323,8 @@ def tier_change_ledger_metadata(from_tier: str, to_tier: str) -> dict:
 
 async def _attempt_partial_refund(
     session: AsyncSession, *, org_id: uuid.UUID, order: BillingOrder, refund_amount: int,
-    from_tier: str, to_tier: str,
-) -> None:
+    from_tier: str, to_tier: str, idempotency_key: str | None = None,
+) -> str:
     """구 결제 건에 잔여기간 일할 부분취소 — 실패해도 예외를 전파하지 않는다(④, 선생님
     지시: 이미 confirmed된 신규 charge를 되돌리지 않는다). 결과는 billing_orders.
     refund_status에 명시 기록(0267) — 향후 재시도/스윕이 이 필드로 찾는다(이 스토리는
@@ -327,7 +333,7 @@ async def _attempt_partial_refund(
         await refund_org(
             session, org_id=org_id, order_id=order.order_id,
             cancel_reason=f"tier change {from_tier}->{to_tier} — prorated remainder",
-            cancel_amount_minor=refund_amount,
+            cancel_amount_minor=refund_amount, idempotency_key=idempotency_key,
         )
         refund_status = "confirmed"
     except Exception as exc:
@@ -347,3 +353,4 @@ async def _attempt_partial_refund(
         update(BillingOrder).where(BillingOrder.id == order.id).values(refund_status=refund_status)
     )
     await session.commit()
+    return refund_status

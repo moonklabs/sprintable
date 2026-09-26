@@ -61,11 +61,13 @@ class TossAdapter(PaymentProvider):
         """공용 POST 왕복 — create_billing_key/charge/refund가 공유하는 에러 처리(⛔응답
         바디를 그대로 로깅하지 않는다 — Toss 에러 응답이 요청 파라미터를 echo하는 경우가
         있어 customerKey 등 민감정보 유출 표면을 늘릴 수 있다. code/status만 남긴다).
-        idempotency_key가 있으면 `Idempotent-Key` 헤더로 전송(공식 문서 확認, 2026-08-07 —
-        재시도가 같은 취소/승인을 중복 처리하지 않게 하는 Toss 측 멱등키)."""
+        idempotency_key가 있으면 `Idempotency-Key` 헤더로 전송 — Toss 측 멱등키(재시도가 같은 취소/승인을 중복 처리하지 않게).
+        story #4335(까디르 ③ · PO가 공식 문서 docs.tosspayments.com 인증 페이지에서 확인: «요청 헤더에 Idempotency-Key를 추가하면
+        멱등한 요청을 보낼 수 있습니다») — 예전 `Idempotent-Key`(철자 틀림 · «2026-08-07 공식 문서 확認»은 틀린 기록)는 Toss가
+        모르는 헤더라 멱등이 실제로는 한 번도 걸린 적이 없다. 테스트는 실제로 나가는 HTTP 헤더 이름을 전송층에서 단언한다."""
         headers = self._auth_header()
         if idempotency_key is not None:
-            headers["Idempotent-Key"] = idempotency_key
+            headers["Idempotency-Key"] = idempotency_key
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(f"{_API_BASE}{path}", headers=headers, json=json)

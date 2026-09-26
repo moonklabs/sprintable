@@ -292,11 +292,13 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
     // 유나 design 가디언(2026-08-07) — declined는 502 등 시스템오류(destructive)와 색으로 구분 — warning.
     expect(alertEl?.className).toContain('warning-tint');
     expect(alertEl?.className).not.toContain('destructive-tint');
+    // 유나(4704 · 390 ko) — 한국어 문장이 낱말 중간에서 끊기지 않게 배너 글에 break-keep.
+    expect(alertEl?.querySelector('.break-keep')).not.toBeNull();
   });
 
-  it('결제 요청 자체가 거절(HTTP 409 · 502) → 경고색 · 오류 문장 + «청구된 금액은 없어요»(시도가 안 만들어짐 = 청구 0 · 유나)', async () => {
+  it('결제 요청 자체가 확실히 거절(HTTP 400) → 경고색 · 오류 문장 + «청구된 금액은 없어요»(시도가 안 만들어짐 = 청구 0 · 유나)', async () => {
     searchParams = new URLSearchParams(RETURN);
-    completeCheckoutMock.mockResolvedValue({ kind: 'rejected', status: 502 });
+    completeCheckoutMock.mockResolvedValue({ kind: 'rejected', status: 400 });
     await mount(async () => statusResponse());
     const alertEl = container.querySelector('[data-payment-attempt-state="rejected"]');
     expect(alertEl?.textContent).toContain(koMessages.pricingPlans.checkoutErrorBanner);
@@ -339,6 +341,22 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510 ·
       expect(attemptFetchUrls).toEqual(['/api/billing/attempts/att-1', '/api/billing/attempts/att-1']);
       expect(completeCheckoutMock).toHaveBeenCalledTimes(1);
       expect(container.textContent).toContain(koMessages.pricingPlans.checkoutSuccessBanner.replace('{tier}', 'Team'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐등록 여부를 모르는 응답(409 · 5xx) 뒤 조회가 404 → 그때만 «시도 없음 = 청구 0»(checkout은 카드 인증부터 다시 · 까디르 ②)', async () => {
+    vi.useFakeTimers();
+    try {
+      searchParams = new URLSearchParams(RETURN);
+      completeCheckoutMock.mockResolvedValue({ kind: 'unreached' });
+      attemptResponses = [{ ok: false, status: 404, json: async () => ({}) }];
+      await mount(async () => statusResponse());
+      expect(container.querySelector('[data-payment-attempt-state="checking"]')).not.toBeNull();
+      expect(container.textContent).not.toContain(koMessages.pricingPlans.checkoutDeclinedReassurance);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(container.querySelector('[data-payment-attempt-state="reauth"]')?.textContent).toContain(koMessages.pricingPlans.paymentAttemptReauthRequired);
     } finally {
       vi.useRealTimers();
     }

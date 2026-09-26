@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,10 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
         CheckConstraint(
             "stage IN ('received', 'key_issued', 'charge_started', 'charged')", name="ck_billing_payment_attempts_stage",
         ),
+        CheckConstraint(
+            "refund_status IS NULL OR refund_status IN ('pending', 'confirmed', 'failed')",
+            name="ck_billing_payment_attempts_refund_status",
+        ),
         UniqueConstraint("order_id", name="uq_billing_payment_attempts_order_id"),
     )
 
@@ -50,3 +54,5 @@ class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     reauth_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refund_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refund_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

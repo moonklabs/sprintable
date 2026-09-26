@@ -42,6 +42,9 @@ export function newAttemptId(): string {
 
 async function readAttempt(res: Response): Promise<AttemptResult> {
   if (res.status === 404) return { kind: 'notFound' };
+  // 까디르 ② — 409 · 5xx(BFF 503 UPSTREAM_TIMEOUT 포함)는 시도가 등록됐는지 모르는 응답이다: «거절 · 청구 없음»이 아니라 조회로
+  // 넘긴다(조회가 404면 그때 «시도 없음 = 청구 0»). «거절»은 요청 자체가 받아들여지지 않았음이 확실한 4xx만.
+  if (res.status === 409 || res.status >= 500) return { kind: 'unreached' };
   if (!res.ok) return { kind: 'rejected', status: res.status };
   const json = (await res.json()) as { data: PaymentAttempt };
   return { kind: 'ok', attempt: json.data };

@@ -135,7 +135,7 @@ export function PaymentAttemptBanner({
   if (state.phase !== 'done') {
     return (
       <Alert variant="info" data-payment-attempt-state={state.phase}>
-        <AlertDescription className="flex items-start gap-2">
+        <AlertDescription className="flex items-start gap-2 break-keep">
           <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
           <span className="space-y-1">
             <span className="block">{t(state.phase === 'processing' ? 'paymentAttemptProcessing' : 'paymentAttemptChecking')}</span>
@@ -150,7 +150,7 @@ export function PaymentAttemptBanner({
     // 시도가 만들어지지 않았다 = 청구 0이 참 — 거절 · 실패와 같은 규칙(돈 안 빠짐 = 경고, 빨강 아님 · 유나).
     return (
       <Alert variant="warning" data-payment-attempt-state="rejected">
-        <AlertDescription className="space-y-1">
+        <AlertDescription className="space-y-1 break-keep">
           <span className="block">{t('checkoutErrorBanner')}</span>
           <span className="block">{t('checkoutDeclinedReassurance')}</span>
         </AlertDescription>
@@ -165,7 +165,7 @@ export function PaymentAttemptBanner({
   if (reauth) {
     return (
       <Alert variant="warning" data-payment-attempt-state="reauth">
-        <AlertDescription className="space-y-2">
+        <AlertDescription className="space-y-2 break-keep">
           <span className="block">{t('paymentAttemptReauthRequired')}</span>
           {attempt && (
             <Button size="sm" variant="outline" onClick={() => onReauth({ tier, billingCycle })}>
@@ -180,7 +180,7 @@ export function PaymentAttemptBanner({
   if (state.missing || attempt?.status === 'failed') {
     return (
       <Alert variant="warning" data-payment-attempt-state="failed">
-        <AlertDescription className="space-y-2">
+        <AlertDescription className="space-y-2 break-keep">
           <span className="block">{t('paymentAttemptFailed')}</span>
           <span className="block">{t('checkoutDeclinedReassurance')}</span>
           {attempt && (
@@ -196,7 +196,7 @@ export function PaymentAttemptBanner({
   if (attempt?.status === 'declined') {
     return (
       <Alert variant="warning" data-payment-attempt-state="declined">
-        <AlertDescription className="space-y-1">
+        <AlertDescription className="space-y-1 break-keep">
           <span className="block">{t('checkoutDeclinedBanner')}</span>
           {attempt.declined_reason && <span className="block">{t('checkoutDeclinedReason', { reason: attempt.declined_reason })}</span>}
           <span className="block">{t('checkoutDeclinedReassurance')}</span>
@@ -209,7 +209,7 @@ export function PaymentAttemptBanner({
     const tierName = t(`tierName_${tier}`);
     return (
       <Alert variant="success" data-payment-attempt-state="succeeded">
-        <AlertDescription>
+        <AlertDescription className="break-keep">
           {state.kind === 'checkout' ? t('checkoutSuccessBanner', { tier: tierName }) : t('changeTierSuccessBanner', { tier: tierName })}
         </AlertDescription>
       </Alert>

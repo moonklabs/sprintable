@@ -240,7 +240,11 @@ async def drive_attempt(
         try:
             await issue_billing_key(session, org_id=attempt.org_id, auth_key=auth_key)
         except TossApiError as exc:
-            # 카드 인증 자체가 거절 — 청구 단계 전(행: stage=received)이라 청구 0.
+            if exc.status_code >= 500:
+                # 까디르 ① — Toss 쪽 오류(5xx)는 거절이 아니라 결과 불명. 청구 단계 전이라 청구 0은 행이 이미 증명 — 대사가 기한 뒤 끝낸다.
+                logger.warning("payment attempt %s: billing key issue got Toss %s — leaving for reconcile", attempt_id, exc.status_code)
+                return
+            # 카드 인증 자체가 거절(4xx) — 청구 단계 전(행: stage=received)이라 청구 0.
             await _finish(session, attempt_id, lease_token, status="failed", reason=f"card auth failed: {exc}", reauth=True)
             return
         if not await _advance_stage(session, attempt_id, lease_token, from_stage="received", to_stage="key_issued"):
@@ -266,6 +270,11 @@ async def drive_attempt(
         await _finish(session, attempt_id, lease_token, status="failed", reason=REASON_SEND_DEADLINE)
         return
     except TossApiError as exc:
+        if exc.status_code >= 500:
+            # 까디르 ① — Toss 5xx는 «거절»이 아니라 결과 불명(승인됐을 수도). 시도는 진행 중 그대로 · 대사가 order_id 조회로 가린다.
+            logger.warning("payment attempt %s: charge got Toss %s — outcome unknown, leaving for reconcile", attempt_id, exc.status_code)
+            return
+        # Toss가 거절 코드를 준 4xx만 «거절 · 청구 0».
         await _finish(session, attempt_id, lease_token, status="declined", reason=str(exc))
         return
     except RuntimeError:
@@ -274,7 +283,9 @@ async def drive_attempt(
         return
 
     if order.status == "confirmed":
-        await _finalize(session, attempt_id, lease_token)
+        if not await _finalize(session, attempt_id, lease_token):
+            # 늦게 돌아온 작업: 그 사이 대사가 이 시도를 가져가 끝냈다. Toss DONE이 진실 — 돈을 받았으면 서비스를 준다(까디르 ④).
+            await _late_confirmed(session, attempt_id)
 
 
 async def _charge_inputs(session: AsyncSession, attempt: BillingPaymentAttempt) -> tuple[int, str, str, dict | None]:
@@ -362,7 +373,6 @@ async def _finalize(session: AsyncSession, attempt_id: uuid.UUID, token: uuid.UU
     attempt = await _lock_owned(session, attempt_id, token)
     if attempt is None:
         return False
-    refund_inputs = None
     if attempt.kind == "checkout":
         changed = await checkout_svc.activate_claimed_subscription(session, org_id=attempt.org_id, claim_value=attempt.claim_value)
     else:
@@ -372,7 +382,18 @@ async def _finalize(session: AsyncSession, attempt_id: uuid.UUID, token: uuid.UU
             )
         ).scalar_one()
         old_offering = await session.get(OfferingVersion, sub.offering_version_id) if sub.offering_version_id else None
-        refund_inputs = (old_offering, sub.current_period_start, sub.current_period_end, sub.tier)
+        # 까디르 ⑤ — 환불 의도(금액)를 **확정 커밋 전에** 행으로: 확정 뒤 환불 전에 죽어도 쓸기가 같은 멱등키로 이어 보낸다.
+        if (
+            attempt.refund_target_order_id and old_offering is not None
+            and sub.current_period_start is not None and sub.current_period_end is not None
+        ):
+            amount = await tier_svc.prorated_refund_amount(
+                session, old_offering=old_offering, old_period_start=sub.current_period_start,
+                old_period_end=sub.current_period_end, now=attempt.claim_value,
+            )
+            if amount > 0:
+                attempt.refund_status = "pending"
+                attempt.refund_amount_minor = amount
         changed = await tier_svc.apply_tier_change(
             session, org_id=attempt.org_id, claim_value=attempt.claim_value, new_tier=attempt.tier,
             new_offering_id=attempt.new_offering_id,
@@ -381,6 +402,8 @@ async def _finalize(session: AsyncSession, attempt_id: uuid.UUID, token: uuid.UU
         # 슬롯을 다른 작업에 뺏김 — 청구는 확정됐는데 권리 전이를 못 했다. 시도는 succeeded로 두되 사유로 남기고 크게 알린다.
         logger.error("payment attempt %s: charge confirmed but subscription claim lost — rights NOT applied", attempt_id)
         attempt.reason = "charge confirmed; subscription claim lost — rights not applied (needs operator)"
+        attempt.refund_status = None
+        attempt.refund_amount_minor = None
     attempt.status = "succeeded"
     attempt.stage = "charged"
     attempt.finished_at = _now()
@@ -389,20 +412,66 @@ async def _finalize(session: AsyncSession, attempt_id: uuid.UUID, token: uuid.UU
         await checkout_svc.release_claim(session, org_id=attempt.org_id, claim_value=attempt.claim_value, commit=False)
     await session.commit()
 
-    if attempt.kind == "change_tier" and changed and refund_inputs is not None:
-        old_offering, old_start, old_end, from_tier = refund_inputs
-        refund_target = None
-        if attempt.refund_target_order_id:
-            refund_target = (
-                await session.execute(select(BillingOrder).where(BillingOrder.order_id == attempt.refund_target_order_id))
-            ).scalar_one_or_none()
-        if old_offering is not None and old_start is not None and old_end is not None:
-            await tier_svc.refund_old_remainder(
-                session, org_id=attempt.org_id, old_offering=old_offering, old_period_start=old_start,
-                old_period_end=old_end, refund_target=refund_target, from_tier=from_tier, to_tier=attempt.tier,
-                now=attempt.claim_value,
-            )
+    if attempt.refund_status == "pending":
+        await run_pending_refund(session, attempt_id)
     return True
+
+
+async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> str | None:
+    """change-tier 옛 결제 부분 환불 — 확정 때 적은 의도(pending · 금액)를 보낸다. 멱등키 = 시도 id(Toss `Idempotency-Key`)라 확정 직후
+    작업 · 쓸기가 둘 다 보내도 환불은 1. 결과(confirmed/failed)를 시도 행과 옛 주문(refund_status)에 남긴다."""
+    attempt = await get_attempt(session, attempt_id)
+    if attempt.refund_status != "pending" or not attempt.refund_target_order_id or not attempt.refund_amount_minor:
+        return attempt.refund_status
+    order = (
+        await session.execute(select(BillingOrder).where(BillingOrder.order_id == attempt.refund_target_order_id))
+    ).scalar_one_or_none()
+    if order is None:
+        logger.error("payment attempt %s: refund target %s not found", attempt_id, attempt.refund_target_order_id)
+        return attempt.refund_status
+    result = await tier_svc._attempt_partial_refund(
+        session, org_id=attempt.org_id, order=order, refund_amount=attempt.refund_amount_minor,
+        from_tier="previous plan", to_tier=attempt.tier, idempotency_key=f"tierchange-refund-{attempt.id.hex}",
+    )
+    await session.execute(
+        update(BillingPaymentAttempt)
+        .where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.refund_status == "pending")
+        .values(refund_status=result)
+    )
+    await session.commit()
+    return result
+
+
+async def _late_confirmed(session: AsyncSession, attempt_id: uuid.UUID) -> None:
+    """까디르 ④ — 늦게 돌아온 작업의 청구가 Toss에서 DONE인데 시도는 이미 대사가 끝냄. succeeded면 할 일 없음(대사가 확정).
+    failed/declined로 끝났다면 돈은 받았는데 서비스가 없다 → 시도를 succeeded로 뒤집고 권리를 준다(org 슬롯을 새로 쥐고 확정).
+    슬롯이 다른 결제 작업에 쥐여 있으면 권리는 못 주고 크게 알린다(운영자 몫)."""
+    attempt = await get_attempt(session, attempt_id)
+    if attempt.status == "succeeded":
+        return
+    logger.error(
+        "payment attempt %s: LATE CHARGE — Toss confirmed order %s after the attempt ended %s; reviving to grant rights",
+        attempt_id, attempt.order_id, attempt.status,
+    )
+    now = _now()
+    token = uuid.uuid4()
+    if not await tier_svc.claim_tier_change_slot(session, org_id=attempt.org_id, now=now, commit=False):
+        await session.rollback()
+        logger.error("payment attempt %s: LATE CHARGE — org payment slot busy, rights NOT applied (needs operator)", attempt_id)
+        await session.execute(
+            update(BillingPaymentAttempt).where(BillingPaymentAttempt.id == attempt_id)
+            .values(reason="late charge confirmed; org slot busy — rights not applied (needs operator)")
+        )
+        await session.commit()
+        return
+    await session.execute(
+        update(BillingPaymentAttempt)
+        .where(BillingPaymentAttempt.id == attempt_id, BillingPaymentAttempt.status.in_(("failed", "declined")))
+        .values(status="processing", lease_token=token, lease_expires_at=now + RECONCILE_LEASE, claim_value=now,
+                reason="late charge confirmed after the attempt ended", reauth_required=False, finished_at=None)
+    )
+    await session.commit()
+    await _finalize(session, attempt_id, token)
 
 
 # ── 조회 대사 ───────────────────────────────────────────────────────────────────────────────────────
@@ -526,4 +595,19 @@ async def sweep_processing_attempts(session: AsyncSession) -> dict:
             outcome["error"] = outcome.get("error", 0) + 1
             continue
         outcome[attempt.status] = outcome.get(attempt.status, 0) + 1
+    # 까디르 ⑤ — 확정은 됐는데 환불을 못 보낸 채 멈춘 시도(환불 대기)를 이어서 보낸다(멱등키 = 시도 id).
+    pending = (
+        await session.execute(
+            select(BillingPaymentAttempt.id).where(
+                BillingPaymentAttempt.refund_status == "pending", BillingPaymentAttempt.status == "succeeded",
+            )
+        )
+    ).scalars().all()
+    for attempt_id in pending:
+        try:
+            result = await run_pending_refund(session, attempt_id)
+        except Exception:
+            logger.exception("payment attempt %s: sweep refund failed", attempt_id)
+            result = "error"
+        outcome[f"refund_{result}"] = outcome.get(f"refund_{result}", 0) + 1
     return outcome
