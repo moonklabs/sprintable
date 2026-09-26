@@ -1003,7 +1003,8 @@
 [data-type="columnsBlock"] > [data-type="columnBlock"],
 .tiptap [data-type="columnsBlock"] > .contents > [data-type="columnBlock"] { min-width: 0; }
 [data-type="columnBlock"] { min-width: 0; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid transparent; }
-[data-type="columnBlock"]:focus-within { border-color: hsl(var(--border)); }
+/* story #4325 — --border는 완성된 색(var(--proof-line))이라 hsl()로 감싸면 선언 전체가 무효였다(테두리가 글자색으로). */
+[data-type="columnBlock"]:focus-within { border-color: var(--border); }
 /* Viewer grid (no NodeViewContent wrapper) */
 [data-type="columnsBlock"] { display: grid; gap: 1rem; }
 [data-type="columnsBlock"][data-cols="2"] { grid-template-columns: repeat(2, 1fr); }
@@ -1014,7 +1015,7 @@
 [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"],
 .tiptap [data-type="toggleBlock"][data-open="false"] > [data-type="toggleContent"] { display: none; }
 [data-type="toggleContent"],
-.tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid hsl(var(--border)); margin-top: 0.25rem; }
+.tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid var(--border); margin-top: 0.25rem; } /* story #4325 — hsl() 감쌈 제거(무효 선언) */
 [data-type="toggleSummary"],
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
 
