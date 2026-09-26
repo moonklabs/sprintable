@@ -92,4 +92,20 @@ describe('NotificationBell 넓은 화면 드롭다운 — 셸 스크롤 면 밖(
     await act(async () => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
     expect(panel()).toBeNull();
   });
+
+  it('패널 ARIA — 넓은 화면에선 벨 aria-controls가 포털 패널 id를 가리킨다(메뉴 역할 아님)', async () => {
+    const bell = await openBell();
+    expect(bell.getAttribute('aria-expanded')).toBe('true');
+    expect(bell.getAttribute('aria-controls')).toBe(panel()!.id);
+    expect(panel()!.hasAttribute('role')).toBe(false);
+    expect(bell.hasAttribute('aria-haspopup')).toBe(false);
+  });
+
+  it('좁은 화면(lg 미만) — 벨 aria-controls는 실제로 뜨는 풀스크린 오버레이(role=dialog)를 가리킨다', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const bell = await openBell();
+    const overlay = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(overlay.id).not.toBe('');
+    expect(bell.getAttribute('aria-controls')).toBe(overlay.id);
+  });
 });

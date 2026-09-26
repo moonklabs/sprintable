@@ -51,6 +51,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
     <div ref={panelRef} className={cn('relative', className)}>
       <button
         ref={buttonRef}
+        {...keys.triggerProps}
         type="button"
         onClick={() => setOpen((v) => !v)}
         onKeyDown={keys.onTriggerKeyDown}
@@ -66,7 +67,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
       </button>
 
       {open && (
-        <AnchoredPopover anchorRef={panelRef} popoverRef={listRef} align="end" gap={6} onKeyDown={keys.onPopoverKeyDown} data-dropdown-panel="doc-toc" className="z-50 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-background">
+        <AnchoredPopover anchorRef={panelRef} popoverRef={listRef} align="end" gap={6} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-dropdown-panel="doc-toc" className="z-50 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-background">
           <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
             <span className="text-xs font-semibold text-foreground">{t('tocSection')}</span>
             <button

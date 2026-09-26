@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useRef, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { clampIntoViewX, VIEWPORT_GUTTER_PX } from '@/hooks/use-viewport-clamp';
 
@@ -116,9 +116,13 @@ export interface PortalMenuKeysOptions {
  * - panel: 초점은 트리거에 그대로 두고, 트리거에서 Tab이면 패널 첫 조작으로(예전 DOM 순서 그대로).
  * - 공통: 첫 조작에서 Shift+Tab이면 트리거로(panel은 열린 채 · menu는 닫고) · 마지막에서 Tab이거나 Esc면 닫고 트리거로.
  *   Esc는 전파를 멈춘다(서랍 · 셸의 초점 트랩이 document keydown에서 Esc로 자기까지 닫지 않게).
- * 돌려주는 것: 팝오버 · 트리거에 붙일 onKeyDown 둘.
+ * 돌려주는 것: 팝오버 · 트리거에 붙일 onKeyDown 둘 + **ARIA props 둘**(까디르 4724 · 부류):
+ * - menu: 트리거 `aria-haspopup="menu"` · `aria-expanded` · `aria-controls`(열렸을 때 패널 id) / 팝오버 `id` · `role="menu"` — 항목 `role="menuitem"`은 호출부가 단다.
+ * - panel: 트리거 `aria-expanded` · `aria-controls` / 팝오버 `id`(메뉴 역할 아님).
+ * `id`도 돌려준다(패널이 둘인 자리 — 벨의 좁은 화면 오버레이 — 가 aria-controls를 제 것으로 바꿀 때).
  */
 export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind }: PortalMenuKeysOptions) {
+  const id = useId();
   useEffect(() => {
     if (open && kind === 'menu') popoverRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
   }, [open, kind, popoverRef]);
@@ -156,5 +160,9 @@ export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind 
     first.focus();
   }, [open, popoverRef]);
 
-  return { onPopoverKeyDown, onTriggerKeyDown };
+  const triggerProps = kind === 'menu'
+    ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open, 'aria-controls': open ? id : undefined }
+    : { 'aria-expanded': open, 'aria-controls': open ? id : undefined };
+  const popoverProps = kind === 'menu' ? { id, role: 'menu' as const } : { id };
+  return { onPopoverKeyDown, onTriggerKeyDown, triggerProps, popoverProps, id };
 }

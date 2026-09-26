@@ -180,6 +180,7 @@ export function EntityDispatchPanel({
         <div ref={moreRef} className="relative md:hidden">
           <button
             ref={moreBtnRef}
+            {...moreKeys.triggerProps}
             type="button"
             onClick={() => setMoreOpen((o) => !o)}
             className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
@@ -189,9 +190,10 @@ export function EntityDispatchPanel({
           </button>
           {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
           {moreOpen && (
-            <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
+            <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
               <button
                 type="button"
+                role="menuitem"
                 disabled={!assigneeId || dispatching}
                 onClick={() => { void handleDispatch(); setMoreOpen(false); }}
                 title={dispatchTitle}

@@ -112,4 +112,15 @@ describe('DocToc — 카드 밖(body)에 · 모자라면 위로 · 키보드(sto
     act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     expect(panel()).toBeNull();
   });
+
+  it('패널 ARIA(공용 훅) — 버튼 aria-expanded · aria-controls = 패널 id · 메뉴 역할 아님(haspopup · role=menu 없음)', () => {
+    mount();
+    expect(btn().getAttribute('aria-expanded')).toBe('false');
+    expect(btn().hasAttribute('aria-controls')).toBe(false);
+    act(() => { btn().click(); });
+    expect(btn().getAttribute('aria-expanded')).toBe('true');
+    expect(btn().getAttribute('aria-controls')).toBe(panel()!.id);
+    expect(btn().hasAttribute('aria-haspopup')).toBe(false);
+    expect(panel()!.hasAttribute('role')).toBe(false);
+  });
 });

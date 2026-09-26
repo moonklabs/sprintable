@@ -679,6 +679,8 @@ export function NotificationBell() {
             : t('panelTitle')
         }
         aria-expanded={open}
+        // 패널형 ARIA(까디르 4724 · 공용 훅): 열렸을 때 실제로 보이는 면을 가리킨다 — lg 이상은 포털 패널, 그 밑은 풀스크린 오버레이.
+        aria-controls={open ? (isDesktopViewport ? panelKeys.id : `${panelKeys.id}-overlay`) : undefined}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >
         <Bell className="size-4" />
@@ -693,7 +695,7 @@ export function NotificationBell() {
       {/* 데스크톱 드롭다운 (lg+) */}
       {open && (
         // story #3007(로드맵 P2·PR-E, L1) — 드롭다운 패널은 floating이라 --elev-overlay.
-        <AnchoredPopover anchorRef={containerRef} popoverRef={desktopPanelRef} align="end" gap={4} onKeyDown={panelKeys.onPopoverKeyDown} data-dropdown-panel="notification-bell" className="z-50 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
+        <AnchoredPopover anchorRef={containerRef} popoverRef={desktopPanelRef} align="end" gap={4} onKeyDown={panelKeys.onPopoverKeyDown} {...panelKeys.popoverProps} data-dropdown-panel="notification-bell" className="z-50 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}
@@ -711,6 +713,7 @@ export function NotificationBell() {
       {open && (
         <div
           ref={mobileOverlayRef}
+          id={`${panelKeys.id}-overlay`}
           tabIndex={-1}
           role="dialog"
           aria-modal="true"

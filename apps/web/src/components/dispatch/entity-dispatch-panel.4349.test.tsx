@@ -111,4 +111,15 @@ describe('EntityDispatchPanel «더 보기» — 스크롤 면 밖(body)에 · �
     expect(document.activeElement).toBe(moreBtn());
     expect(trap.mock.calls.filter(([e]) => (e as KeyboardEvent).key === 'Escape')).toHaveLength(0);
   });
+
+  it('메뉴 ARIA(공용 훅) — «더 보기» aria-haspopup=menu · aria-expanded · aria-controls = 메뉴 id · 메뉴 role=menu · 항목 role=menuitem', async () => {
+    await mount();
+    expect(moreBtn().getAttribute('aria-haspopup')).toBe('menu');
+    expect(moreBtn().getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { moreBtn().click(); });
+    expect(moreBtn().getAttribute('aria-expanded')).toBe('true');
+    expect(menu()!.getAttribute('role')).toBe('menu');
+    expect(moreBtn().getAttribute('aria-controls')).toBe(menu()!.id);
+    expect(menu()!.querySelector('button')!.getAttribute('role')).toBe('menuitem');
+  });
 });

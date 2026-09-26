@@ -151,9 +151,9 @@ function KeysHarness({ kind, hidden = false }: { kind: 'menu' | 'panel'; hidden?
   const keys = usePortalMenuKeys({ open, onClose: () => setOpen(false), popoverRef: popRef, triggerRef, kind });
   return (
     <div id="anchor" ref={anchorRef}>
-      <button type="button" id="trig" ref={triggerRef} onClick={() => setOpen((v) => !v)} onKeyDown={keys.onTriggerKeyDown}>열기</button>
+      <button type="button" id="trig" ref={triggerRef} onClick={() => setOpen((v) => !v)} onKeyDown={keys.onTriggerKeyDown} {...keys.triggerProps}>열기</button>
       {open && (
-        <AnchoredPopover anchorRef={anchorRef} popoverRef={popRef} onKeyDown={keys.onPopoverKeyDown} id="pop" style={hidden ? { display: 'none' } : undefined}>
+        <AnchoredPopover anchorRef={anchorRef} popoverRef={popRef} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-testid="pop" style={hidden ? { display: 'none' } : undefined}>
           <button type="button" id="i1">하나</button><button type="button" id="i2">둘</button>
         </AnchoredPopover>
       )}
@@ -179,7 +179,7 @@ describe('usePortalMenuKeys(story #4349 PR 2)', () => {
     press(byId('i1'), 'ArrowUp');
     expect(document.activeElement).toBe(byId('i2'));
     press(byId('i2'), 'Tab');
-    expect(document.getElementById('pop')).toBeNull();
+    expect(document.querySelector('[data-testid="pop"]')).toBeNull();
     expect(document.activeElement).toBe(byId('trig'));
   });
 
@@ -194,7 +194,7 @@ describe('usePortalMenuKeys(story #4349 PR 2)', () => {
     expect(document.activeElement).toBe(byId('i1'));
     press(byId('i1'), 'Tab', true);
     expect(document.activeElement).toBe(byId('trig'));
-    expect(document.getElementById('pop')).not.toBeNull();
+    expect(document.querySelector('[data-testid="pop"]')).not.toBeNull();
   });
 
   it('안 보이는 패널(display:none — 좁은 화면 벨)로는 트리거 Tab을 안 가로챈다', () => {
@@ -212,8 +212,32 @@ describe('usePortalMenuKeys(story #4349 PR 2)', () => {
     act(() => { byId('trig').click(); });
     press(byId('i2'), 'Escape');
     document.removeEventListener('keydown', trap);
-    expect(document.getElementById('pop')).toBeNull();
+    expect(document.querySelector('[data-testid="pop"]')).toBeNull();
     expect(document.activeElement).toBe(byId('trig'));
     expect(trap).not.toHaveBeenCalled();
+  });
+
+  // 까디르(4724 · 부류) — 훅이 ARIA props도 준다: menu는 메뉴 역할까지, panel은 펼침 · 가리킴만.
+  it('ARIA props — menu: aria-haspopup=menu · aria-expanded · aria-controls(열렸을 때 팝오버 id) · 팝오버 role=menu / panel: haspopup · role 없음', () => {
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    const trig = byId('trig');
+    expect(trig.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trig.getAttribute('aria-expanded')).toBe('false');
+    expect(trig.hasAttribute('aria-controls')).toBe(false);
+    act(() => { trig.click(); });
+    const pop = document.querySelector<HTMLElement>('[data-testid="pop"]')!;
+    expect(trig.getAttribute('aria-expanded')).toBe('true');
+    expect(pop.getAttribute('role')).toBe('menu');
+    expect(trig.getAttribute('aria-controls')).toBe(pop.id);
+    act(() => { root.unmount(); }); // 같은 root에서 kind만 바꾸면 훅 상태(열림)가 남는다 — 새 root로
+    root = createRoot(container);
+    act(() => { root.render(<KeysHarness kind="panel" />); });
+    const t2 = byId('trig');
+    expect(t2.hasAttribute('aria-haspopup')).toBe(false);
+    act(() => { t2.click(); });
+    const p2 = document.querySelector<HTMLElement>('[data-testid="pop"]')!;
+    expect(p2.hasAttribute('role')).toBe(false);
+    expect(t2.getAttribute('aria-expanded')).toBe('true');
+    expect(t2.getAttribute('aria-controls')).toBe(p2.id);
   });
 });
