@@ -75,6 +75,9 @@ export function useDocSync<TDoc = { updated_at: string }>({
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [lastSavedSnapshot, setLastSavedSnapshot] = useState(currentSnapshot);
   const [baselineUpdatedAt, setBaselineUpdatedAt] = useState(serverUpdatedAt);
+  // story #4339(AC7) — 기준선이 어느 문서의 것인지. 문서가 바뀐 뒤 기준선이 잡히기 전(아래 setTimeout 0 한 틱)엔 새 내용을 옛 기준선과
+  // 비교해 dirty가 됐다 → 'unsaved' 예약 · 자동 저장 예약(기준선 없이 부르면 FIX-2가 거절해 'error'). 그 틱은 dirty가 아니다.
+  const [baselineDocId, setBaselineDocId] = useState(docId);
 
   const previousDocIdRef = useRef(docId);
   const previousServerUpdatedAtRef = useRef(serverUpdatedAt);
@@ -109,6 +112,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
     const timer = window.setTimeout(() => {
       setLastSavedSnapshot(currentSnapshotRef.current);
       setBaselineUpdatedAt(serverUpdatedAt);
+      setBaselineDocId(docId);
       setStatus('idle');
     }, 0);
 
@@ -131,7 +135,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
     return () => window.clearTimeout(timer);
   }, [editing, serverUpdatedAt]);
 
-  const isDirty = editing && currentSnapshot !== lastSavedSnapshot;
+  const isDirty = editing && baselineDocId === docId && currentSnapshot !== lastSavedSnapshot;
 
   useEffect(() => {
     if (!editing || savingRef.current || conflictRef.current || remoteChangedRef.current || !isDirty) return;
@@ -142,6 +146,14 @@ export function useDocSync<TDoc = { updated_at: string }>({
 
     return () => window.clearTimeout(timer);
   }, [editing, isDirty]);
+
+  // story #4339(AC7) — 'unsaved'는 dirty일 때만 참이다. 위 타이머는 dirty가 풀려도(기준선이 같은 틱에 잡힘 · 입력했다가 되돌림)
+  // 이미 예약된 채 실행돼 «저장 표시 변경사항 있음 + 저장 버튼 바뀐 것 없음»을 남겼다 → dirty가 아니면 dirty 직전 상태로 되돌린다.
+  const settledStatusRef = useRef<SaveStatus>('idle');
+  useEffect(() => {
+    if (status === 'idle' || status === 'saved') settledStatusRef.current = status;
+    if (status === 'unsaved' && !isDirty) setStatus(settledStatusRef.current);
+  }, [isDirty, status]);
 
   const save = useCallback(async (options?: { force?: boolean; payloadOverride?: Record<string, unknown> }) => {
     if (!docId || savingRef.current) return false;

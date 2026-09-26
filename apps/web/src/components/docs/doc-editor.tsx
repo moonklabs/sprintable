@@ -174,8 +174,12 @@ export function DocEditor({
     }),
     editable,
     content: contentFormat === 'markdown' ? markdownToHtml(value) : value,
-    onUpdate: ({ editor: e }) => {
+    onUpdate: ({ editor: e, transaction }) => {
       if (suppressUpdateRef.current) return;
+      // story #4339(AC7) — 편집 없이 연 문서는 onChange를 내지 않는다. tiptap은 문서를 바꾸지 않은 거래에도 update를 낸다:
+      // `setEditable`(빈 거래) · BubbleMenu의 옵션 갱신(meta만)에 플러그인 appendTransaction(끝 빈 문단 · 표 보정)이 붙어 정규화된 값이
+      // 사용자 편집처럼 나갔다 → 저장 표시 «변경사항 있음» · 자동 저장. 실제 편집(입력 · 붙여넣기 · 업로드 교체)은 뿌리 거래가 문서를 바꾼다.
+      if (!transaction.docChanged) return;
       const html = e.getHTML();
       if (contentFormat === 'markdown') {
         onChange(htmlToMarkdown(html));
