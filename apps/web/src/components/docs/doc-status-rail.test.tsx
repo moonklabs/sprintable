@@ -260,6 +260,24 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     expect(text).not.toContain('윤도선 · ');
   });
 
+  // [SID:4311 PR 3] 2건 이하 컴팩트 스트립도 같은 표(렌더 갈래가 둘 — 타임라인만 재면 스트립 쪽이 빈다).
+  it('[SID:4311 PR 3] 컴팩트 스트립(2건): 검토 요청 · 다시 요청 «송윤재» 둘(서로 다른 사람) = 줄마다 id 앞 8자', async () => {
+    stubFetch({
+      revisions: [
+        { id: 'r1', created_by: 'e75ca548-1', created_at: '2026-08-18T00:00:00Z' },
+        { id: 'r2', created_by: '2fd14616-2', created_at: '2026-08-19T00:00:00Z' },
+      ],
+      members: [{ id: 'e75ca548-1', name: '송윤재' }, { id: '2fd14616-2', name: '송윤재' }],
+    });
+    const { DocEvidenceRail } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="pending" />)); });
+    await flush();
+    expect(container.querySelector('ol')).toBeNull();
+    const text = container.textContent ?? '';
+    expect(text).toContain('송윤재 · e75ca548');
+    expect(text).toContain('송윤재 · 2fd14616');
+  });
+
   it('이력이 전혀 없으면(draft, gate/revision 0건) 아무것도 렌더하지 않는다(노이즈 0)', async () => {
     stubFetch({});
     const { DocEvidenceRail } = await import('./doc-status-rail');
