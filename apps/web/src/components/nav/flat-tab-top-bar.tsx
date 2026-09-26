@@ -114,6 +114,12 @@ export function AgentsTopBarTitle() {
   return <h1 className="text-sm font-medium">{tAgents('title')}</h1>;
 }
 
+/** «에이전트 실행»(/organization/workforce/runs) 상단바 제목(agent-runs-list). */
+export function AgentRunsTopBarTitle() {
+  const tAgentRuns = useTranslations('agentRuns');
+  return <h1 className="text-sm font-medium">{tAgentRuns('title')}</h1>;
+}
+
 /**
  * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름은 고정, «N개 자산 · 용량» 알약은 데이터라 화면만 넘긴다(폴백은 알약 없이 ·
  * PO 규칙: 폴백은 도착 화면과 글자가 똑같은 부분만). 폰은 브레드크럼을 숨기고 알약이 먼저 양보해 말줄임(story #4277).
@@ -167,6 +173,8 @@ export const FLAT_ROUTE_TOP_BAR = {
   '[ws]/[proj]/storage': { Title: () => <StorageTopBarTitle />, showContextChip: true },
   activity: { Title: ActivityTopBarTitle, showContextChip: true },
   'organization/workforce': { Title: AgentsTopBarTitle, showContextChip: true },
+  // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(마지막 조각 runs ≠ workforce라 «상세»로 봐서 빈 채였다) · 자기 loading.tsx로 쥔다.
+  'organization/workforce/runs': { Title: AgentRunsTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
 
 export type FlatRoute = keyof typeof FLAT_ROUTE_TOP_BAR;

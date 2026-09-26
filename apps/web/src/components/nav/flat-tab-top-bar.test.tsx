@@ -105,14 +105,16 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     expect(probe().dataset.chip).toBe('true');
   });
 
-  const FIVE: ReadonlyArray<{ name: string; load: () => Promise<{ default: React.ComponentType }>; path: string; title: string }> = [
+  const FIXED_TITLE_ROUTES: ReadonlyArray<{ name: string; load: () => Promise<{ default: React.ComponentType }>; path: string; title: string }> = [
     { name: '실행', load: () => import('@/app/(authenticated)/[ws]/[proj]/loops/loading'), path: '/my-ws/my-proj/loops', title: koMessages.loops.title },
     { name: '문서', load: () => import('@/app/(authenticated)/[ws]/[proj]/docs/loading'), path: '/my-ws/my-proj/docs', title: koMessages.docs.title },
     { name: '스토리지', load: () => import('@/app/(authenticated)/[ws]/[proj]/storage/loading'), path: '/my-ws/my-proj/storage', title: `${koMessages.storage.breadcrumb}/${koMessages.storage.title}` },
     { name: '활동 로그', load: () => import('@/app/(authenticated)/activity/loading'), path: '/activity', title: koMessages.activityLog.title },
     { name: '에이전트', load: () => import('@/app/(authenticated)/organization/workforce/loading'), path: '/organization/workforce', title: koMessages.agents.title },
+    // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(전엔 «상세»로 봐서 빈 채).
+    { name: '에이전트 실행', load: () => import('@/app/(authenticated)/organization/workforce/runs/loading'), path: '/organization/workforce/runs', title: koMessages.agentRuns.title },
   ];
-  for (const r of FIVE) {
+  for (const r of FIXED_TITLE_ROUTES) {
     it(`⭐«${r.name}» 로딩 — 고정 이름 + 칩(PO 4688 · 첫 방문 36프레임 빔)`, async () => {
       const { default: Loading } = await r.load();
       nav.pathname = r.path;
