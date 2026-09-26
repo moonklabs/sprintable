@@ -33,11 +33,11 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-async function mount(artifactId: string) {
+async function mount(artifactId: string, projectId?: string) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <ArtifactDetailView artifactId={artifactId} />
+        <ArtifactDetailView artifactId={artifactId} projectId={projectId} />
       </NextIntlClientProvider>,
     );
   });
@@ -176,14 +176,18 @@ describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(sto
 
   // 본문에 산출물 id를 싣는다(`artifact-1 v2 본문`) — 산출물이 바뀌었는데 옛 산출물의 버전이 보이면 잡히게.
   // `hold`: 그 번호의 버전 실물 응답을 `heldVersion()`이 부를 때까지 붙잡는다(받는 중 상태를 실제로 본다).
-  function stubVersions({ failVersion, failOnce, hold }: { failVersion?: number; failOnce?: number; hold?: number } = {}) {
+  let memberCalls: string[];
+  function stubVersions({ failVersion, failOnce, hold, members, authors }: { failVersion?: number; failOnce?: number; hold?: number; members?: { id: string; name: string | null }[]; authors?: Record<number, string> } = {}) {
     versionDetailCalls = [];
+    memberCalls = [];
     versionDetailIds = [];
     heldVersion = null;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/pins') || url.includes('/backlinks') || url.includes('/comments')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
       if (url.includes('/api/gates')) return { ok: true, status: 200, json: async () => [] };
+      if (url.startsWith('/api/members')) { memberCalls.push(url); return { ok: true, status: 200, json: async () => ({ data: members ?? [] }) }; }
+      if (url.startsWith('/api/team-members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
       const id = /\/visual-artifacts\/([^/?]+)/.exec(url)?.[1] ?? 'artifact-1';
       const one = /\/versions\/(\d+)$/.exec(url);
       if (one) {
@@ -195,8 +199,8 @@ describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(sto
         if (n === failOnce && versionDetailCalls.filter((x) => x === n).length === 1) return { ok: false, status: 503, json: async () => ({}) };
         return { ok: true, status: 200, json: async () => ({ data: detailOf(n, `<p>${id} v${n} 본문</p>`, id) }) };
       }
-      if (url.endsWith('/versions')) return { ok: true, status: 200, json: async () => ({ data: summaries }) };
-      return { ok: true, status: 200, json: async () => ({ data: detailOf(3, `<p>${id} v3 본문</p>`, id) }) };
+      if (url.endsWith('/versions')) return { ok: true, status: 200, json: async () => ({ data: summaries.map((sm) => ({ ...sm, created_by: authors?.[sm.version_number] ?? sm.created_by })) }) };
+      return { ok: true, status: 200, json: async () => ({ data: { ...detailOf(3, `<p>${id} v3 본문</p>`, id), created_by: authors?.[3] ?? null } }) };
     }) as unknown as ReturnType<typeof vi.fn>);
   }
   const rail = () => [...container.querySelectorAll('p')].find((p) => p.textContent === (koMessages.canvas as LooseMessages).versionLineage)!.parentElement!;
@@ -241,6 +245,29 @@ describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(sto
     await flush();
     expect(versionDetailCalls).toEqual([2]);
     expect(stageHtml()).toContain('v2 본문');
+  });
+
+  // 유나(4723) — 이 화면만 memberMap을 안 넘겨 판 줄 작성자가 전부 «알 수 없는 구성원»이었다 → 프로젝트 범위 이름표(스토리 패널과 같은 원천).
+  it('판 줄 작성자 = 프로젝트 구성원 이름 · 같은 이름 둘은 4311 꼬리(id 앞 8자) · 프로젝트 id로 한 번 받음', async () => {
+    stubVersions({
+      members: [{ id: 'e75ca548-1', name: '송윤재' }, { id: '2fd14616-2', name: '송윤재' }, { id: 'm-anna', name: '안나' }],
+      authors: { 3: 'e75ca548-1', 2: '2fd14616-2', 1: 'm-anna' },
+    });
+    await mount('artifact-1', 'p-1');
+    const unknown = (koMessages.common as LooseMessages).memberUnknown as string;
+    const author = (n: number) => [...rowOf(n).querySelectorAll('[data-row-name-part]')].map((e) => e.textContent).join('');
+    expect(author(3)).toBe('송윤재 · e75ca548');
+    expect(author(2)).toBe('송윤재 · 2fd14616');
+    expect(author(1)).toBe('안나');
+    expect(rail().textContent).not.toContain(unknown);
+    expect(memberCalls).toEqual(['/api/members?project_id=p-1']);
+  });
+
+  it('프로젝트 id가 없으면 구성원 GET 0(옛 호출부 무변)', async () => {
+    stubVersions();
+    await mount('artifact-1');
+    expect(memberCalls).toEqual([]);
+    expect(rows()).toHaveLength(3);
   });
 
   // 까디르(4723) — 예전 테스트는 곧바로 풀리는 fetch라 받는 중 상태를 한 번도 안 봤다 → 응답을 붙잡고 본다.

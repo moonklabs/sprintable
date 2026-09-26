@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArtifactViewer } from './artifact-viewer';
 import { fetchJson, loadArtifactThreads, loadArtifactThreadsAndVersions, loadPendingCanonicalizeVersion } from './artifact-section';
 import {
-  adaptArtifactDetail, loadArtifactVersion, mergeVersionSummaries, type ArtifactVersion, type VisualArtifact, type BeVisualArtifactDetail,
+  adaptArtifactDetail, loadArtifactVersion, mergeVersionSummaries, type ArtifactVersion, type MemberRef, type VisualArtifact, type BeVisualArtifactDetail,
 } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
 import type { ArtifactNode } from '@/services/canvas-nodes';
 import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
+import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface DetailItem {
   artifact: VisualArtifact;
@@ -20,9 +22,13 @@ interface DetailItem {
   nodes: ArtifactNode[];
   pendingCanonicalizeVersion: number | null;
   specPins: SpecPin[];
+  /** story #4343(유나) — 프로젝트 범위 이름표(`/api/members?project_id=` · 보드 · 스토리 패널과 같은 원천). 받지 못했으면 빈 표. */
+  projectMembers: Record<string, MemberRef>;
 }
 
 type DetailState = DetailItem | null | 'not_found';
+
+const NO_MEMBERS: Record<string, MemberRef> = {};
 
 /**
  * story #2713(결함·발견성·가치) — standalone(story/doc/epic 미연결) 아티팩트의 상세 진입점.
@@ -37,14 +43,25 @@ type DetailState = DetailItem | null | 'not_found';
  * `onCreateThread`(핀 추가 모드→캔버스 픽→작성)로 착지 — standalone 표면에서도 동형(아래
  * `handleCreateThread`).
  */
-export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
+export function ArtifactDetailView({ artifactId, projectId }: { artifactId: string; projectId?: string }) {
   const t = useTranslations('canvas');
   useSyntheticParentTabHistory('/more');
   const [state, setState] = useState<DetailState>(null);
+  // story #4343(유나 · PO 11:22Z) — 이 화면만 memberMap을 안 넘겨 레일 · 코멘트 작성자가 전부 «알 수 없는 구성원»이었다(develop의 한 줄이
+  // 이 PR로 버전 수만큼 늘며 드러남). 이름표 = 프로젝트 범위(스토리 패널과 같은 원천) + 거기 없는 작성자만 조직 범위(#4300 useMemberNameFallback).
+  // 프로젝트 표는 상세와 함께 받아 한 번에 그린다(«알 수 없음»이 먼저 떴다가 이름으로 바뀌는 깜빡임 0).
+  const { orgId } = useDashboardContext();
+  const loaded = state && state !== 'not_found' ? state : null;
+  const authorIds = useMemo(() => (loaded ? [
+    ...loaded.versions.map((v) => v.created_by),
+    ...loaded.threads.flatMap((th) => th.comments.map((c) => c.author_id)),
+  ] : []), [loaded]);
+  const names = useMemberNameFallback(orgId, loaded?.projectMembers ?? NO_MEMBERS, authorIds, !!loaded);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const membersPromise = projectId ? fetchJson<MemberRef[]>(`/api/members?project_id=${encodeURIComponent(projectId)}`) : Promise.resolve(null);
       const detail = await fetchJson<BeVisualArtifactDetail>(`/api/visual-artifacts/${artifactId}`);
       if (!detail) { if (!cancelled) setState('not_found'); return; }
       // story #4343 — 레일 · 버전 고르개 = 버전 목록 API 전부(예전엔 상세의 현재 버전 하나뿐이라 늘 한 줄).
@@ -55,12 +72,14 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
         listSpecPins(artifactId),
       ]);
       const versions = mergeVersionSummaries(current, versionSummaries);
+      const members = await membersPromise;
+      const projectMembers: Record<string, MemberRef> = Object.fromEntries((Array.isArray(members) ? members : []).map((m) => [m.id, m]));
       if (!cancelled) {
-        setState({ artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins });
+        setState({ artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins, projectMembers });
       }
     })();
     return () => { cancelled = true; };
-  }, [artifactId]);
+  }, [artifactId, projectId]);
 
   async function refreshThreads(nodes: ArtifactNode[]) {
     const threads = await loadArtifactThreads(artifactId, nodes);
@@ -126,6 +145,7 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
         key={artifact.id}
         artifact={artifact}
         versions={versions}
+        memberMap={names.memberMap as Record<string, MemberRef>}
         loadVersion={(versionNumber) => loadArtifactVersion(artifactId, versionNumber)}
         threads={threads}
         nodes={nodes}
