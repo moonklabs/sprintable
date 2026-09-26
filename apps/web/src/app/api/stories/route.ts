@@ -4,7 +4,7 @@ import { createStorySchema } from '@sprintable/shared';
 import { StoryService, type CreateStoryInput } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getAuthContext, getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createStoryRepository } from '@/lib/storage/factory';
@@ -41,7 +41,8 @@ const IDS_BATCH_CAP = 200;
 // story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
 export const GET = withRouteTiming('stories', async (request: Request) => {
   try {
-    const me = await getAuthContext(request);
+    // story #4346 — 목록 GET은 org/project 판단조차 BE에 맡긴다(rate-limit 칸만 읽음) → JWT claim으로 충분, `/me` 왕복 0.
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
