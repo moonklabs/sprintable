@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // [SID:4311 PR 3] 게이트 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만) ·
-// 행위자 있는데 이름 빔 = «이름 없는 구성원»(#4284) · 행위자 없음 = 기존 폴백 그대로.
+// 이름 빔은 기존 폴백 그대로(story #2975 — 응답이 떠난 사람과 이름 없는 사람을 가르지 않음) · 폴백 둘도 서로 다른 id면 꼬리.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -28,7 +28,7 @@ const item = (id: string, actor_id: string | null, actor_name: string | null) =>
 });
 
 describe('GateActivityHistory — 행위자 동명이인([SID:4311 PR 3])', () => {
-  it('«송윤재» 둘 = 줄마다 id 앞 8자 · 같은 사람 두 줄 = 같은 꼬리 · 이름 빔 = «이름 없는 구성원» · 행위자 없음 = 기존 폴백', async () => {
+  it('«송윤재» 둘 = 줄마다 id 앞 8자 · 같은 사람 두 줄 = 같은 꼬리 · 이름 빔 = 기존 폴백 · 행위자 없음 = 기존 폴백(꼬리 없음)', async () => {
     fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => [
       item('a1', 'e75ca548-1', '송윤재'),
       item('a2', '2fd14616-2', '송윤재'),
@@ -44,7 +44,7 @@ describe('GateActivityHistory — 행위자 동명이인([SID:4311 PR 3])', () =
     const actors = [...container.querySelectorAll('li > span.font-medium')].map((el) => el.textContent);
     expect(actors).toEqual([
       '송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '송윤재 · e75ca548',
-      koMessages.common.memberUnnamed, koMessages.cage.gateActivityActorFallback,
+      koMessages.cage.gateActivityActorFallback, koMessages.cage.gateActivityActorFallback,
     ]);
   });
 });

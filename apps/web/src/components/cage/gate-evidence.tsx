@@ -20,7 +20,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/services/verify';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
-import { actorRowLabels, memberDisplayLabel } from '@/lib/member-display';
+import { actorRowLabels } from '@/lib/member-display';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -592,7 +592,6 @@ function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof u
  */
 export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; refreshKey?: number }) {
   const t = useTranslations('cage');
-  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = resolveDisplayTimezone().tz;
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
@@ -621,8 +620,8 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
 
   if (items === null) return null;
   // [SID:4311 PR 3] 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만).
-  // 이름 있으면 이름 · 행위자 있는데 이름 빔 = «이름 없는 구성원»(#4284) · 행위자 없음 = 기존 폴백 그대로.
-  const actorLabel = (item: GateActivityLogItem) => item.actor_name || (item.actor_id ? memberDisplayLabel(null, tc) : t('gateActivityActorFallback'));
+  // 이름 빔은 기존 폴백 그대로(story #2975) — 이 응답은 떠난 사람과 이름 없는 사람을 둘 다 null로 싣어(gates.py actor_name_map) 가를 수 없다.
+  const actorLabel = (item: GateActivityLogItem) => item.actor_name || t('gateActivityActorFallback');
   const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? actorLabel(item) : null })));
 
   return (
