@@ -1,10 +1,12 @@
 // story #4299 AC2 — BFF 서버 fetch 공유 연결 풀. 실 로컬 TLS 서버(자체 서명 인증서 · openssl로 테스트마다 새로) + **실 전역 fetch**로
-// «Node 내장 fetch가 npm undici 디스패처를 실제로 쓴다» · «백엔드 origin만 h2 · 한 연결에 동시 요청 · 빈 풀 첫 폭발도 연결 상한 4» ·
-// «외부 h1 origin은 파이프라인 · 상한 없음» · «keep-alive가 기본 4초를 넘어 산다» · «계측 spans에 협상 판(h2/h1)» ·
+// «Node 내장 fetch가 npm undici 디스패처를 실제로 쓴다» · «백엔드 origin만 h2 · h2에서만 한 연결에 동시 요청» ·
+// «h1 백엔드는 파이프라인 없음 — 끝나지 않는 응답(SSE)이 열려 있어도 다른 요청이 끝난다» ·
+// «외부 h1 origin은 파이프라인 없음» · «keep-alive가 기본 4초를 넘어 산다» · «계측 spans에 협상 판(h2/h1)» ·
 // «설치는 한 번 · 백엔드 origin은 fastapiBaseUrl()»을 새 연결 수로 잰다.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import http2 from 'node:http2';
 import https from 'node:https';
 import type { AddressInfo } from 'node:net';
@@ -13,7 +15,7 @@ import path from 'node:path';
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import type { Dispatcher } from 'undici';
 
-import { BACKEND_CONNECTIONS, BFF_KEEPALIVE_MS, createBffDispatcher, installBffDispatcher, installedBackendOrigin } from './server-dispatcher';
+import { BFF_KEEPALIVE_MS, createBffDispatcher, installBffDispatcher, installedBackendOrigin } from './server-dispatcher';
 import { withServerTiming } from './server-timing';
 
 let cert: Buffer;
@@ -117,19 +119,14 @@ describe('전역 fetch ↔ npm undici 디스패처', () => {
   });
 });
 
-describe('백엔드 origin — h2 · 한 연결에 동시 요청 · 연결 상한', () => {
-  it(`빈 풀 첫 폭발 16건도 새 연결은 상한 ${BACKEND_CONNECTIONS}까지 · h2`, async () => {
-    swapDispatcher(testAgent());
-    expect(await burst(backend, 16)).toEqual({ newConns: BACKEND_CONNECTIONS, versions: ['2.0'] });
-  });
-
-  it('이미 열린 연결에 동시 32건을 싣는다(새 연결 0)', async () => {
+describe('백엔드 origin — h2에서만 한 연결에 동시 요청', () => {
+  it('따뜻한 풀: 이미 열린 연결에 동시 32건을 싣는다(새 연결 0 · h2)', async () => {
     swapDispatcher(testAgent());
     await burst(backend, 16);
     expect(await burst(backend, 32)).toEqual({ newConns: 0, versions: ['2.0'] });
   });
 
-  it(`연결 ${BACKEND_CONNECTIONS}개에 동시 32건이 한꺼번에 실린다(백엔드가 동시에 처리 중인 수 = 32 · 파이프라인 없으면 ${BACKEND_CONNECTIONS})`, async () => {
+  it('따뜻한 풀에서 동시 32건이 한꺼번에 처리된다(백엔드가 동시에 처리 중인 수 = 32 — h2 스트림)', async () => {
     swapDispatcher(testAgent());
     await burst(backend, 16);
     maxInflight = 0;
@@ -139,7 +136,7 @@ describe('백엔드 origin — h2 · 한 연결에 동시 요청 · 연결 상�
 });
 
 describe('외부 origin — keep-alive만(h2 · 파이프라인 없음)', () => {
-  it(`외부 h1 origin은 파이프라인 · 연결 상한 없음: 동시 6건 = 연결 6(백엔드 상한 ${BACKEND_CONNECTIONS}보다 많게)`, async () => {
+  it('외부 h1 origin은 파이프라인 없음: 동시 6건 = 연결 6', async () => {
     swapDispatcher(testAgent());
     const r = await burst(extH1, 6);
     expect(r).toEqual({ newConns: 6, versions: ['1.1'] });
@@ -180,16 +177,21 @@ describe('협상 판(proto) — 계측 spans에 h2/h1', () => {
   });
 });
 
-describe('연결 상한으로 줄 선 요청도 제 계측 범위에 적힌다', () => {
-  it(`범위 16개가 동시에 부르면(연결 ${BACKEND_CONNECTIONS}개) 범위마다 자기 호출 1건 — 줄 선 요청이 첫 요청 범위에 몰리지 않는다`, async () => {
+// 운영 설치엔 연결 상한이 없어 풀 줄이 안 생기지만, 줄이 생기면(상한 · 앞으로의 설정) undici가 줄 선 요청을 남의 연결 콜백 문맥에서
+// 만든다 — 그래도 계측 범위가 맞는지를 테스트용 상한(backendConnections)으로 줄을 일부러 만들어 잰다.
+const QUEUE_CAP = 4;
+const queueingAgent = () => createBffDispatcher(backend.url, { connect: { ca: cert }, backendConnections: QUEUE_CAP });
+
+describe('풀 줄에 선 요청도 제 계측 범위에 적힌다', () => {
+  it(`범위 16개가 동시에 부르면(테스트용 상한 ${QUEUE_CAP}) 범위마다 자기 호출 1건 — 줄 선 요청이 첫 요청 범위에 몰리지 않는다`, async () => {
     process.env['SERVER_TIMING_MARKERS'] = 'true';
     try {
-      swapDispatcher(testAgent());
+      swapDispatcher(queueingAgent());
       const results = await Promise.all(Array.from({ length: 16 }, () =>
         withServerTiming(async () => { await fetch(`${backend.url}/api/v2/labels`).then((r) => r.text()); })));
       expect(results.map((r) => r.spans.length)).toEqual(Array(16).fill(1));
-      expect(results.filter((r) => r.spans[0]!.newConnection === true)).toHaveLength(BACKEND_CONNECTIONS);
-      // 줄 선 요청은 연결을 기다린 시간이 대기(wait)에 든다(연결 4개가 열릴 때까지).
+      expect(results.filter((r) => r.spans[0]!.newConnection === true)).toHaveLength(QUEUE_CAP); // 줄이 실제로 생겼다(양성 대조)
+      // 줄 선 요청은 연결을 기다린 시간이 대기(wait)에 든다(연결이 열릴 때까지).
       expect(Math.max(...results.map((r) => r.spans[0]!.waitMs ?? 0))).toBeGreaterThan(0);
     } finally {
       delete process.env['SERVER_TIMING_MARKERS'];
@@ -205,12 +207,40 @@ describe('번들 사본이 여러 벌이어도 계측 상태는 하나', () => {
     try {
       vi.resetModules();
       const other = await import('./server-dispatcher'); // 새 server-timing 사본을 끌고 온다
-      swapDispatcher(other.createBffDispatcher(backend.url, { connect: { ca: cert } }));
+      swapDispatcher(other.createBffDispatcher(backend.url, { connect: { ca: cert }, backendConnections: QUEUE_CAP }));
       const results = await Promise.all(Array.from({ length: 16 }, () =>
         withServerTiming(async () => { await fetch(`${backend.url}/api/v2/labels`).then((r) => r.text()); })));
       expect(results.map((r) => r.spans.length)).toEqual(Array(16).fill(1));
     } finally {
       delete process.env['SERVER_TIMING_MARKERS'];
+    }
+  });
+});
+
+describe('h1 백엔드(평문 CI · 로컬 · 자체 호스트)는 파이프라인 없음', () => {
+  // REALTIME_URL이 비면 SSE(/api/event-stream)도 백엔드 origin으로 간다. h1에서 파이프라인을 걸면 끝나지 않는 응답 뒤에 다른 요청이
+  // 줄 서서 영영 안 끝난다(4699 CI Contrast guard가 prod next start에서 14분 멈춤).
+  it('끝나지 않는 응답(SSE) 5개가 열려 있어도 같은 origin의 다른 16건은 끝난다(파이프라인 · 연결 상한이 있으면 막힘)', async () => {
+    const plain = http.createServer((req, res) => {
+      if (req.url === '/sse') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open\n\n'); return; } // 안 끝냄
+      setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); }, 20);
+    });
+    await new Promise<void>((r) => plain.listen(0, '127.0.0.1', () => r()));
+    const origin = `http://127.0.0.1:${(plain.address() as AddressInfo).port}`;
+    const socks = new Set<{ destroy: () => void }>();
+    plain.on('connection', (sk) => { socks.add(sk); sk.once('close', () => socks.delete(sk)); });
+    const ctrl = new AbortController();
+    try {
+      swapDispatcher(createBffDispatcher(origin)); // 백엔드 origin = 평문 h1 · 운영 설치와 같은 옵션(상한 없음)
+      const sses = await Promise.all(Array.from({ length: 5 }, () => fetch(`${origin}/sse`, { signal: ctrl.signal }))); // 헤더만 · 본문은 열린 채
+      expect(sses.map((x) => x.status)).toEqual(Array(5).fill(200));
+      const done = Promise.all(Array.from({ length: 16 }, () => fetch(`${origin}/x`).then((r) => r.text())));
+      const r = await Promise.race([done.then(() => 'done'), sleep(3_000).then(() => 'stuck')]);
+      expect(r).toBe('done');
+    } finally {
+      ctrl.abort();
+      for (const sk of socks) sk.destroy();
+      await new Promise<void>((r) => plain.close(() => r()));
     }
   });
 });

@@ -8,15 +8,17 @@
  *
  * 무엇:
  * - 모든 origin: keep-alive 60초(최대 10분 — GFE 유휴 끊김 약 10분보다 짧게). 파이프라인 없음(pipelining 1 · h1).
- * - 백엔드 origin(`fastapiBaseUrl()`)만: `allowH2` + 동시 스트림 `pipelining: 100` + 연결 상한 4 — 한 연결에 동시 요청을 싣는다.
- *   undici는 pipelining 기본값 1이면 h2여도 연결을 «바쁨»으로 보고 요청마다 새 연결을 연다(실측 · client.js getPipelining).
- *   외부 origin(Firebase · Google API · OAuth 공급자 등)은 h1일 수 있어 파이프라인을 걸면 한 연결에 줄을 세워 막힐 수 있다 —
- *   그래서 백엔드에만.
+ * - 백엔드 origin(`fastapiBaseUrl()`)만: `allowH2` + **h2에서만** 한 연결에 동시 요청(연결 수 상한은 없음 — 아래 PO 판단).
+ *   undici는 pipelining 옵션을 안 주면 1로 고정해 h2여도 연결을 «바쁨»으로 보고 요청마다 새 연결을 연다(실측 · client.js
+ *   getPipelining). 그래서 Client를 만든 뒤 pipelining을 비워 **협상 판 기본값**을 쓰게 한다: h2 = 한 연결에 여러 요청 · h1 = 한 번에
+ *   하나. h1에서 파이프라인을 걸면 끝나지 않는 응답(SSE — REALTIME_URL이 비면 /api/event-stream도 백엔드 origin) 뒤에 다른 요청이
+ *   줄 서서 영영 안 끝난다(CI 평문 백엔드에서 실제로 걸림 · 4699 Contrast guard).
+ *   외부 origin(Firebase · Google API · OAuth 공급자 등)은 기본 그대로(keep-alive만).
  *
  * 판(실측 2026-09-25): 배포 런타임 node:20-alpine = Node 20.20.2 · 내장 undici 6.24.1. npm undici 7은 Node 20 · 22 · 26의
  * 전역 fetch가 이 디스패처를 실제로 쓴다(npm undici 6은 Node 26에서 안 쓰임). 테스트: server-dispatcher.test.ts(실 로컬 서버).
  */
-import { Agent, Pool, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { Agent, Client, Pool, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import type { Dispatcher } from 'undici';
 
 import { fastapiBaseUrl } from './fastapi-url';
@@ -24,16 +26,9 @@ import { noteDispatch } from './server-timing';
 
 export const BFF_KEEPALIVE_MS = 60_000;
 export const BFF_KEEPALIVE_MAX_MS = 600_000;
-/** 백엔드 h2 연결 하나에 싣는 동시 요청 수(GFE · undici 기본 동시 스트림 100). */
-export const BACKEND_H2_STREAMS = 100;
-/**
- * 백엔드 origin 연결 수 상한. 빈 풀에 동시 요청이 몰리면(기기 콜드 기동) undici는 연결 중인 수만큼 새로 연다 — 상한이 없으면
- * 16건 폭발 = 새 연결 16 · 221ms, 상한 4 = 새 연결 4 · 89ms(node:20 실측 · PO 22:40Z 결정). TLS 손 악수가 1 vCPU 프런트
- * 인스턴스의 CPU를 먹는 몫도 준다. 한 연결에 다 몰지 않는 것(TCP 막힘 · GFE 스트림 100)은 넷으로 나눠 피한다.
- * 주의: 백엔드가 h1으로 내려가면 소켓 4개에 파이프라인으로 줄이 선다 — run.app은 ALPN h2라 없다고 보고, 협상 판은
- * Server-Timing desc `proto=`와 로그 spans에 실어 드러나게 한다(server-timing.ts).
- */
-export const BACKEND_CONNECTIONS = 4;
+// 연결 수 상한은 두지 않는다(PO 2026-09-26 00:48Z). 상한은 «빈 풀 첫 폭발» 손 악수만 줄이는데(16 → 4), h1 백엔드(평문 CI · 로컬 ·
+// 자체 호스트)에서는 끝나지 않는 SSE 몇 개가 연결을 다 잡아 나머지가 막히는 새 실패 부류를 만든다. keep-alive가 긴 운영에서는 폴링이
+// 풀을 데워 두어 빈 풀이 드물다. 첫 폭발 비용이 재측에서 크면 다른 방법(기동 때 연결 예열 등)으로 가른다.
 
 const INSTALLED = Symbol.for('sprintable.bffDispatcher');
 
@@ -45,16 +40,23 @@ function originOf(u: string | URL): string | null {
   }
 }
 
-/** `connect`는 테스트(자체 서명 인증서)용 — 운영 설치는 넘기지 않는다. */
-export function createBffDispatcher(backendUrl: string, extra: { connect?: Agent.Options['connect'] } = {}): Agent {
+/**
+ * `connect` · `backendConnections`는 테스트용 — 운영 설치(installBffDispatcher)는 넘기지 않는다.
+ * `backendConnections`는 백엔드 풀에 연결 상한을 걸어 **요청이 풀 줄에 서는 판**을 일부러 만든다(줄 선 요청의 계측 범위 테스트).
+ */
+export function createBffDispatcher(
+  backendUrl: string,
+  extra: { connect?: Agent.Options['connect']; backendConnections?: number } = {},
+): Agent {
   const backend = originOf(backendUrl);
+  const { backendConnections, ...agentExtra } = extra;
   const agent = new Agent({
     keepAliveTimeout: BFF_KEEPALIVE_MS,
     keepAliveMaxTimeout: BFF_KEEPALIVE_MAX_MS,
-    ...extra,
+    ...agentExtra,
     factory: (origin: string | URL, opts: object) =>
       backend !== null && originOf(origin) === backend
-        ? new Pool(origin, { ...(opts as Pool.Options), allowH2: true, pipelining: BACKEND_H2_STREAMS, connections: BACKEND_CONNECTIONS })
+        ? new Pool(origin, { ...(opts as Pool.Options), allowH2: true, connections: backendConnections, factory: protocolPipeliningClient })
         : new Pool(origin, opts as Pool.Options),
   });
   // 계측(dev 전용): 디스패치 순간의 계측 범위를 적어 둔다 — 연결 상한으로 풀 줄에 선 요청이 나중에 남의 문맥에서 만들어져도
@@ -91,6 +93,16 @@ function cancelOnError(handler: Dispatcher.DispatchHandler, cancel: () => void):
       return (value as (...a: unknown[]) => unknown).bind(target);
     },
   });
+}
+
+/**
+ * pipelining을 비운 Client — undici가 협상 판 기본값(h2 = 한 연결에 여러 요청 · h1 = 한 번에 하나 · 연결 전 = 하나)을 쓴다.
+ * h1에서는 절대 파이프라인하지 않는다(끝나지 않는 응답 뒤 줄 섬 방지).
+ */
+function protocolPipeliningClient(origin: string | URL, opts: object): Client {
+  const client = new Client(origin, opts as Client.Options);
+  (client as unknown as { pipelining: number | undefined }).pipelining = undefined;
+  return client;
 }
 
 /** 전역 디스패처를 한 번만 바꾼다(이미 우리 것이면 그대로). 반환 = 지금 전역 디스패처. */
