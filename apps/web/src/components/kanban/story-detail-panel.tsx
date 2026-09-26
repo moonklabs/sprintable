@@ -1210,11 +1210,19 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // - 누르면 목록에서만 곧바로 숨기고 «첨부를 삭제했어요» + 파일 이름 + «되돌리기» 토스트를 띄운다(확인 창 없음).
   // - 서버에 지우는 요청은 **토스트가 닫힐 때**(시간 끝 · ✕ · 새 토스트에 밀려남) 한 번 — 포인터/초점이 토스트 안이면 안 닫혀서,
   //   «되돌리기»가 보이는 동안엔 요청이 안 나간다. 보낼 때는 **그때의 최신 목록**에서 그 url만 뺀다(묵은 목록으로 남의 새 첨부를 지우지 않게).
-  // - 되돌리기: 아직 안 보냈으면 요청 취소(실패 없음). 이미 보냈으면(화면 떠남 · 탭 숨김 flush) 지금 목록에 그 한 항목만 되넣기(있으면 무변).
+  // - 되돌리기: 아직 안 보냈으면 요청 취소(실패 없음). 이미 보냈으면(화면 떠남 · 탭 숨김 flush) 지금 목록에 그 한 항목만 되넣기(이미 있으면 요청 0).
+  // - 요청이 겹쳐도 서로를 되돌리지 않게(까디르 4718): 보내는 목록 = 최신 서버 목록에서 **가는 중인 삭제는 빼고 · 가는 중인 되넣기는 넣은** 것
+  //   (안 빼면 응답 전 목록에 남은 A를 B가 되살린다). 응답은 **더 늦게 보낸 요청의 응답이 이미 반영됐으면 버린다**(늦게 온 옛 응답이 목록을 되돌리지 않게).
+  // - 부모 갱신(`onStoryUpdate`)은 마운트 중에만 — 닫은 뒤 응답이 오면 칸반이 그 스토리를 다시 골라 닫힌 패널이 다시 열린다(kanban-board onStoryUpdate).
   // - 화면을 떠나거나(언마운트) `pagehide` · `visibilitychange(hidden)`이면 대기 중인 삭제를 keepalive로 즉시 한 번 보낸다(의도가 조용히 버려지지 않게).
   // - 보낸 삭제가 실패하면 항목이 다시 보이고 «첨부를 삭제하지 못했어요» 토스트 · 되넣기가 실패하면 «첨부를 되돌리지 못했어요».
-  type PendingRemoval = { attachment: SendAttachment; index: number; state: 'pending' | 'sent'; inflight: Promise<KanbanStory | null> | null };
+  type SendResult = { updated: KanbanStory | null; seq: number };
+  // state: pending = 토스트 열림(안 보냄) · sent = 요청이 가는 중 · done = 응답 옴(토스트가 닫힐 때까지 되돌리기용으로 남김).
+  type PendingRemoval = { attachment: SendAttachment; index: number; state: 'pending' | 'sent' | 'done'; inflight: Promise<SendResult> | null };
   const pendingRemovalsRef = useRef(new Map<string, PendingRemoval>());
+  const restoringRef = useRef(new Map<string, { attachment: SendAttachment; index: number }>());
+  const sendSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
   const [hiddenAttachmentUrls, setHiddenAttachmentUrls] = useState<string[]>([]);
   const latestRef = useRef({ story, onStoryUpdate, addToast, t });
   useEffect(() => { latestRef.current = { story, onStoryUpdate, addToast, t }; });
@@ -1223,7 +1231,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     if (mountedRef.current) setHiddenAttachmentUrls((cur) => cur.filter((u) => u !== url));
   }, []);
 
-  const sendAttachments = useCallback(async (attachments: SendAttachment[], keepalive: boolean): Promise<KanbanStory | null> => {
+  const sendAttachments = useCallback(async (attachments: SendAttachment[], keepalive: boolean): Promise<SendResult> => {
+    sendSeqRef.current += 1;
+    const seq = sendSeqRef.current;
     try {
       const res = await fetch(`/api/stories/${latestRef.current.story.id}`, {
         method: 'PATCH',
@@ -1231,12 +1241,32 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         body: JSON.stringify({ attachments }),
         keepalive,
       });
-      if (!res.ok) return null;
+      if (!res.ok) return { updated: null, seq };
       const json = await res.json();
-      return (json.data as KanbanStory) ?? null;
+      return { updated: (json.data as KanbanStory) ?? null, seq };
     } catch {
-      return null;
+      return { updated: null, seq };
     }
+  }, []);
+
+  /** 보낼 목록 — 최신 서버 목록에서 `drop` · 가는 중인 삭제를 빼고, 가는 중인 되넣기는 제자리에 넣는다. */
+  const outgoingAttachments = useCallback((drop: Set<string>): SendAttachment[] => {
+    const gone = new Set(drop);
+    for (const [url, p] of pendingRemovalsRef.current) if (p.state === 'sent') gone.add(url);
+    const next: SendAttachment[] = (latestRef.current.story.attachments ?? []).filter((a) => !gone.has(a.url));
+    for (const [url, r] of restoringRef.current) {
+      if (!gone.has(url) && !next.some((a) => a.url === url)) next.splice(Math.min(r.index, next.length), 0, r.attachment);
+    }
+    return next;
+  }, []);
+
+  /** 성공 응답 반영 — 더 늦게 보낸 요청의 응답이 이미 반영됐으면 버린다. 부모 갱신은 마운트 중에만. */
+  const applySent = useCallback((result: SendResult, sent: SendAttachment[]) => {
+    if (!result.updated || result.seq < appliedSeqRef.current) return;
+    appliedSeqRef.current = result.seq;
+    const merged = { ...latestRef.current.story, attachments: result.updated.attachments ?? sent };
+    latestRef.current = { ...latestRef.current, story: merged }; // 화면을 떠난 뒤의 되돌리기도 서버 목록 기준으로
+    if (mountedRef.current) latestRef.current.onStoryUpdate?.(merged);
   }, []);
 
   /** 대기 중인 삭제(들)를 한 PATCH로 — 최신 목록에서 그 url들만 뺀다. 이미 보낸 것은 다시 안 보낸다. */
@@ -1244,48 +1274,49 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     const targets = urls.map((url) => [url, pendingRemovalsRef.current.get(url)] as const)
       .filter((e): e is readonly [string, PendingRemoval] => !!e[1] && e[1].state === 'pending');
     if (targets.length === 0) return;
-    const drop = new Set(targets.map(([url]) => url));
-    const next = (latestRef.current.story.attachments ?? []).filter((a) => !drop.has(a.url));
+    const next = outgoingAttachments(new Set(targets.map(([url]) => url)));
     const inflight = sendAttachments(next, keepalive);
     for (const [, p] of targets) { p.state = 'sent'; p.inflight = inflight; }
-    void inflight.then((updated) => {
-      const { story: latest, onStoryUpdate: push, addToast: toast, t: tr } = latestRef.current;
-      if (!updated) {
+    void inflight.then((result) => {
+      for (const [, p] of targets) if (p.state === 'sent') p.state = 'done';
+      if (!result.updated) {
         for (const [url] of targets) {
           pendingRemovalsRef.current.delete(url);
           unhideAttachment(url);
         }
-        if (mountedRef.current) toast({ type: 'error', title: tr('attachmentRemoveFailed') });
+        if (mountedRef.current) latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRemoveFailed') });
         return;
       }
-      const merged = { ...latest, attachments: updated.attachments ?? next };
-      latestRef.current = { ...latestRef.current, story: merged }; // 화면을 떠난 뒤의 되돌리기도 서버 목록 기준으로
-      push?.(merged);
+      applySent(result, next);
     });
-  }, [sendAttachments, unhideAttachment]);
+  }, [sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
 
   const undoRemoveAttachment = useCallback(async (url: string) => {
     const p = pendingRemovalsRef.current.get(url);
     if (!p) return;
     pendingRemovalsRef.current.delete(url);
     if (p.state === 'pending') { unhideAttachment(url); return; } // 요청 취소 — 실패 없음
-    // 보낸 삭제가 끝난 뒤에(그 사이 되넣기가 삭제보다 먼저 닿지 않게). 보낸 삭제가 실패했으면 이미 다시 보이고 서버에도 그대로다 → 할 일 0.
-    const sent = await p.inflight;
-    if (!sent) { unhideAttachment(url); return; }
-    // 서버에선 이미 빠졌다 — 지금 목록(그 사이 더해진 첨부 포함)에서 그 한 항목만 제자리에 되넣는다.
-    const next = (latestRef.current.story.attachments ?? []).filter((a) => a.url !== url);
-    next.splice(Math.min(p.index, next.length), 0, p.attachment);
-    const updated = await sendAttachments(next, false);
-    if (!updated) {
-      // 되넣기 실패 — 서버엔 지워진 채라 숨긴 채 둔다(보이면 거짓). 이 길에서만 뜨는 문구.
-      latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRestoreFailed') });
-      return;
+    // 누른 순간부터 «되넣는 중» — 그 사이 닫히는 다른 삭제의 목록에도 이 항목이 들어간다(되돌린 것을 다시 지우지 않게).
+    restoringRef.current.set(url, { attachment: p.attachment, index: p.index });
+    try {
+      // 보낸 삭제가 끝난 뒤에(그 사이 되넣기가 삭제보다 먼저 닿지 않게). 보낸 삭제가 실패했으면 이미 다시 보이고 서버에도 그대로다 → 할 일 0.
+      const sent = await p.inflight;
+      if (!sent?.updated) { unhideAttachment(url); return; }
+      // 서버에선 이미 빠졌다 — 지금 목록(그 사이 더해진 첨부 포함)에 그 한 항목만 제자리에 되넣는다. 이미 있으면 변경 없음(요청 0).
+      if ((latestRef.current.story.attachments ?? []).some((a) => a.url === url)) { unhideAttachment(url); return; }
+      const next = outgoingAttachments(new Set());
+      const result = await sendAttachments(next, false);
+      if (!result.updated) {
+        // 되넣기 실패 — 서버엔 지워진 채라 숨긴 채 둔다(보이면 거짓). 이 길에서만 뜨는 문구.
+        latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRestoreFailed') });
+        return;
+      }
+      applySent(result, next);
+      unhideAttachment(url);
+    } finally {
+      restoringRef.current.delete(url);
     }
-    const merged = { ...latestRef.current.story, attachments: updated.attachments ?? next };
-    latestRef.current = { ...latestRef.current, story: merged };
-    latestRef.current.onStoryUpdate?.(merged);
-    unhideAttachment(url);
-  }, [sendAttachments, unhideAttachment]);
+  }, [sendAttachments, outgoingAttachments, applySent, unhideAttachment]);
 
   const handleRemoveAttachment = (url: string) => {
     const list = story.attachments ?? [];

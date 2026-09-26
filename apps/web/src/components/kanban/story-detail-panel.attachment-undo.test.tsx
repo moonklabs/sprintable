@@ -36,6 +36,10 @@ let container: HTMLDivElement;
 let root: Root;
 let patches: { attachments: Att[]; keepalive: boolean }[];
 let failPatch: (n: number) => boolean;
+// 응답을 붙잡을 PATCH 번호(1부터) — 붙잡힌 응답은 `release()`로 푼다(요청이 겹치는 순서를 테스트가 정한다).
+let holdPatch: (n: number) => boolean;
+let held: Array<() => void>;
+let updates: KanbanStory[];
 let setStoryOutside: ((s: KanbanStory) => void) | null;
 
 let addToastOutside: ((t: { title: string }) => void) | null = null;
@@ -52,7 +56,7 @@ function ToastRenderer() {
 function Harness({ initial, show = true }: { initial: Att[]; show?: boolean }) {
   const [story, setStory] = useState(() => makeStory(initial));
   useEffect(() => { exposeSetStory(setStory); }, []);
-  return show ? <StoryDetailPanel story={story} tasks={[]} onClose={() => {}} onStoryUpdate={setStory} /> : null;
+  return show ? <StoryDetailPanel story={story} tasks={[]} onClose={() => {}} onStoryUpdate={(s) => { updates.push(s); setStory(s); }} /> : null;
 }
 
 function render(node: React.ReactNode) {
@@ -72,12 +76,17 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   patches = [];
   failPatch = () => false;
+  holdPatch = () => false;
+  held = [];
+  updates = [];
   setStoryOutside = null;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/stories/s1' && init?.method === 'PATCH') {
       const body = JSON.parse(String(init.body)) as { attachments: Att[] };
       patches.push({ attachments: body.attachments, keepalive: init.keepalive === true });
-      if (failPatch(patches.length)) return { ok: false, json: async () => null };
+      const n = patches.length;
+      if (holdPatch(n)) await new Promise<void>((resolve) => { held.push(resolve); });
+      if (failPatch(n)) return { ok: false, json: async () => null };
       return { ok: true, json: async () => ({ data: makeStory(body.attachments) }) };
     }
     return { ok: false, json: async () => null };
@@ -100,6 +109,15 @@ const removeBtnOf = (a: Att) => [...container.querySelectorAll<HTMLButtonElement
 const toastEl = () => container.querySelector<HTMLElement>('[role="status"], [role="alert"]');
 const undoBtn = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '되돌리기');
 const settle = () => act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+const urlsOf = (n: number) => patches[n].attachments.map((a) => a.url);
+const release = async () => { await act(async () => { held.shift()!(); }); await settle(); };
+const closeToast = async () => { await act(async () => { toastEl()!.querySelector<HTMLButtonElement>('button[aria-label]')!.click(); }); await settle(); };
+const hideTab = async () => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  await settle();
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+};
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
 async function removeA1() {
@@ -248,5 +266,88 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     expect(patches).toHaveLength(2);
     expect(container.textContent).toContain('첨부를 되돌리지 못했어요. 다시 시도해 주세요.');
     expect(shown(A1)).toBe(false);
+  });
+
+  // 까디르 4718 ① — 삭제 둘이 겹치면(A 가는 중 → B 닫힘) 응답 전 목록에 남은 A를 B가 되살렸다.
+  it('겹친 삭제 — A가 가는 중에 B가 닫히면 B 본문에 A 없음 · 늦게 온 A 응답이 B를 되살리지 않음', async () => {
+    holdPatch = (n) => n === 1;
+    await render(<Harness initial={[A1, A2, A3]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast();
+    expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+    await act(async () => { removeBtnOf(A2).click(); });
+    await closeToast();
+    expect(urlsOf(1)).toEqual([A3.url]);
+    await release(); // A 응답([A2, A3])이 B 응답보다 늦게 온다
+    await act(async () => { removeBtnOf(A3).click(); });
+    await closeToast();
+    expect(urlsOf(2)).toEqual([]);
+    expect([A1, A2, A3].some(shown)).toBe(false);
+  });
+
+  it('되넣기가 가는 중에 다른 삭제가 닫혀도 — 그 본문에 되넣는 항목이 제자리에 있다(되돌린 것을 다시 지우지 않게)', async () => {
+    holdPatch = (n) => n === 2;
+    await render(<Harness initial={[A1, A2, A3]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await hideTab();
+    expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+    await act(async () => { undoBtn()!.click(); });
+    await settle();
+    expect(urlsOf(1)).toEqual([A1.url, A2.url, A3.url]);
+    await act(async () => { removeBtnOf(A2).click(); });
+    await closeToast();
+    expect(urlsOf(2)).toEqual([A1.url, A3.url]);
+    await release();
+    expect(shown(A1)).toBe(true);
+    expect(shown(A2)).toBe(false);
+  });
+
+  it('응답이 온 삭제는 더는 빼지 않는다 — 토스트가 열린 사이 같은 첨부가 다시 더해지면 다른 삭제가 그것을 지우지 않음', async () => {
+    await render(<Harness initial={[A1, A2, A3]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await hideTab();
+    expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+    await act(async () => { setStoryOutside!(makeStory([A1, A2, A3])); }); // 다른 곳에서 다시 올림(토스트는 아직 열림)
+    await act(async () => { removeBtnOf(A2).click(); });
+    expect(toastEl()!.textContent).toContain(A2.name); // 새 토스트가 DOM 첫째(ToastContainer 규약)
+    await closeToast();
+    expect(urlsOf(1)).toEqual([A1.url, A3.url]);
+  });
+
+  // 까디르 4718 ② — 닫은 뒤 온 응답으로 부모를 갱신하면 칸반이 그 스토리를 다시 골라 닫힌 패널이 다시 열렸다.
+  it('떠난 뒤 온 응답(flush · 되넣기)은 부모를 갱신하지 않는다 · 마운트 중엔 갱신한다', async () => {
+    holdPatch = (n) => n === 1;
+    await removeA1();
+    await render(<Harness initial={[A1, A2]} show={false} />);
+    await settle();
+    expect(patches).toEqual([{ attachments: [A2], keepalive: true }]);
+    await release();
+    expect(updates).toHaveLength(0);
+    await act(async () => { undoBtn()!.click(); });
+    await settle();
+    expect(patches).toHaveLength(2);
+    expect(updates).toHaveLength(0);
+  });
+
+  it('마운트 중 보낸 삭제의 응답은 부모를 갱신한다(대조)', async () => {
+    await removeA1();
+    await advance(8001);
+    await settle();
+    expect(updates.map((s) => (s.attachments ?? []).map((a) => a.url))).toEqual([[A2.url]]);
+  });
+
+  // 까디르 4718 ③ — 합의 설계 «이미 있으면 변경 없음».
+  it('보낸 뒤 되돌리기 — 그 항목이 이미 목록에 있으면 PATCH 0 · 다시 보임', async () => {
+    await removeA1();
+    await hideTab();
+    expect(patches).toHaveLength(1);
+    await act(async () => { setStoryOutside!(makeStory([A1, A2])); });
+    await act(async () => { undoBtn()!.click(); });
+    await settle();
+    expect(patches).toHaveLength(1);
+    expect(shown(A1)).toBe(true);
   });
 });

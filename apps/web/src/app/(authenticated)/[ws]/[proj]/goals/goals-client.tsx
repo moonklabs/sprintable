@@ -680,7 +680,8 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 aria-label={t('deleteGoal')}
                 onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
                 // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점에서(HOVER_REVEAL).
-                className={`rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
+                // 누르는 자리 24(HIT)는 `-my-1`로 줄 높이에 안 얹는다(전엔 숨김이라 줄 높이 0 기여 · 까디르 4718).
+                className={`-my-1 rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

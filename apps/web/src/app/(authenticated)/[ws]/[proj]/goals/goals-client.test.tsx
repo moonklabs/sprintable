@@ -136,6 +136,7 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     expect(tokens).not.toContain('hidden');
     expect(tokens).not.toContain('group-hover:flex');
     expect(tokens).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6'])); // 누르는 자리 24×24(PO · 유나 10:01Z)
+    expect(tokens).toContain('-my-1'); // 24는 줄 높이에 안 얹는다 — 전엔 숨김이라 0 기여(까디르 4718)
     expect(del.tabIndex).toBe(0);
     expect(del.closest('.group')).not.toBeNull();
   });
