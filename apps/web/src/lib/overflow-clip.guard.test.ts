@@ -102,19 +102,20 @@ describe('overflow 조상 × absolute 팝오버 부류 가드([SID:4349])', () =
     expect(clippedPopovers(portaled)).toEqual({ clipped: [], seen: 0 });
   });
 
-  it('src 전체 .tsx에 «overflow 조상이 담는 블록을 품은» absolute 팝오버 0곳', () => {
+  it('src 전체 .tsx에 «overflow 조상이 담는 블록을 품은» absolute 팝오버 0곳 — 같은 길로 흘린 양성 대조 픽스처 하나만 잡힌다', () => {
     const files = walk(SRC);
     expect(files.length, '스캔 재료가 비지 않았다(조용한 0 방지)').toBeGreaterThan(300);
-    let seen = 0;
+    // 조용한 0 방지(PO 11:52Z) — 숫자 바닥 대신, 잘리는 모양 픽스처 하나를 **실제 파일과 같은 길**(같은 거르개 · 같은 스캐너)로 흘린다.
+    // 스캐너가 망가져 아무것도 못 보면 픽스처가 안 잡혀 RED · 픽스처를 고치면(포털 · overflow 걷기) RED. 기록만: 이 판 src에서 본 팝오버 12곳.
+    const FIXTURE = '__positive-control__/list-row-menu.tsx';
+    const fixtureSrc = `<div className="flex-1 overflow-y-auto p-2"><div className="relative"><button>행</button>
+      {open && <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border bg-popover p-1">메뉴</div>}</div></div>`;
+    const inputs: Array<[string, string]> = [...files.map((f) => [path.relative(SRC, f), fs.readFileSync(f, 'utf8')] as [string, string]), [FIXTURE, fixtureSrc]];
     const clipped: string[] = [];
-    for (const f of files) {
-      const src = fs.readFileSync(f, 'utf8');
+    for (const [rel, src] of inputs) {
       if (!/absolute/.test(src)) continue;
-      const r = clippedPopovers(src, path.relative(SRC, f));
-      seen += r.seen;
-      clipped.push(...r.clipped);
+      clipped.push(...clippedPopovers(src, rel).clipped);
     }
-    expect(seen, '팝오버를 실제로 봤다(조용한 0 방지)').toBeGreaterThanOrEqual(10);
-    expect(clipped).toEqual([]);
+    expect(clipped).toEqual([expect.stringMatching(new RegExp(`^${FIXTURE}:2 <div> ← div:1`))]);
   });
 });
