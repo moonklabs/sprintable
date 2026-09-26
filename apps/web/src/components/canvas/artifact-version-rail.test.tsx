@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+// (story #4343 — 레일 모양 테스트가 DOMParser를 쓴다 · 나머지는 renderToStaticMarkup 그대로)
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
@@ -118,3 +120,31 @@ describe('ArtifactVersionRail — 판 줄 잘림 순서([SID:4311 PR 3])', () =>
   });
 });
 
+// story #4343(유나 실측 · PO 11:22Z) — 레일 줄이 버전 수만큼 서자 sm 이상에서 레일(8버전 517px)이 카드 줄 높이를 정해 스테이지(375px) 아래가 ~140px 비었다.
+// 이제 sm 이상은 스테이지가 줄 높이를 정하고 버전 목록만 안에서 스크롤 · 머리글 · 설명 패널은 목록 밖 고정 · 390(쌓임)은 상한 없음.
+// jsdom은 배치를 안 해서 모양(클래스)만 못박는다 — 실제 높이 · 스크롤은 실브라우저 판(PR 댓글)이 긴 목록 양성 대조로 잰다.
+describe('ArtifactVersionRail — sm 이상은 스테이지가 줄 높이 · 목록만 스크롤(story #4343)', () => {
+  it('레일 = sm:h-0 sm:min-h-full 세로 flex · 목록 = sm에서만 min-h-0 flex-1 overflow-y-auto + scrollbar-visible · 머리글 · 설명 토글은 목록 밖 · 모바일 상한 0', () => {
+    const v = MOCK_VERSIONS[0];
+    const versions = Array.from({ length: 9 }, (_, i) => ({ ...v, id: `v-${9 - i}`, version: 9 - i }));
+    const markup = renderToStaticMarkup(wrap(
+      <ArtifactVersionRail artifact={{ ...MOCK_ARTIFACT, current_version: 9, anchor_version: 1 }} versions={versions} selectedVersion={9} onSelectVersion={vi.fn()} memberMap={MOCK_MEMBERS} />,
+    ));
+    const doc = new DOMParser().parseFromString(markup, 'text/html');
+    const rail = doc.body.firstElementChild as HTMLElement;
+    expect(rail.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'flex-col', 'sm:h-0', 'sm:min-h-full']));
+    const list = rail.querySelector('ul[data-version-list]') as HTMLElement;
+    const cls = list.className.split(' ');
+    expect(cls).toEqual(expect.arrayContaining(['sm:min-h-0', 'sm:flex-1', 'sm:overflow-y-auto', 'scrollbar-visible', 'focus-inset'])); // focus-inset: 스크롤 상자가 초점 링을 자르지 않게(#2062)
+    // 390(쌓임) 상한 없음 — 모바일(접두어 없는) 높이 상한 · 스크롤 0
+    expect(cls.filter((c) => /^(max-h-|h-|overflow-)/.test(c))).toEqual([]);
+    expect(list.querySelectorAll(':scope > li')).toHaveLength(9);
+    // 머리글 · 설명 토글은 목록 밖(레일 직속) · 줄어들지 않음
+    const header = rail.firstElementChild as HTMLElement;
+    expect(header.tagName).toBe('P');
+    expect(header.className.split(' ')).toContain('shrink-0');
+    const toggle = rail.querySelector(':scope > button') as HTMLElement;
+    expect(toggle.className.split(' ')).toContain('shrink-0');
+    expect(list.contains(toggle)).toBe(false);
+  });
+});

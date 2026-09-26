@@ -5927,8 +5927,9 @@
   },
   "canvas": {
     "versionLineage": "Version lineage",
-    "versionCurrentTag": "current",
-    "versionAnchorTag": "anchor",
+    "versionCurrentTag": "Current",
+    "versionAnchorTag": "Anchor",
+    "versionLoadFailed": "Couldn't load this version.",
     "anchorBadge": "Anchor v{version}",
     "descriptionPaneToggle": "description pane",
     "descriptionPaneComingSoon": "Per-element spec (description pane) arrives in C2",

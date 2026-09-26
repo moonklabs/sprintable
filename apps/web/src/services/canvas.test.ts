@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adaptArtifactDetail, deriveFormat, type BeVisualArtifactDetail } from './canvas';
+import { adaptArtifactDetail, deriveFormat, mergeVersionSummaries, type ArtifactVersion, type BeArtifactVersionSummary, type BeVisualArtifactDetail } from './canvas';
 
 const BASE_DETAIL = {
   id: 'a1', title: 'Test', story_id: 's1', epic_id: null, doc_id: null,
@@ -82,5 +82,36 @@ describe('adaptArtifactDetail (AC2 attachment point — real BE schema, flat env
     expect(artifact.story_id).toBe('s1');
     expect(artifact.epic_id).toBeNull();
     expect(artifact.doc_id).toBeNull();
+  });
+});
+
+// story #4343 — 레일 · 버전 고르개가 버전 목록 API 전부를 보이게. 현재 버전(상세 · 실물)에 목록 요약을 합친다.
+describe('mergeVersionSummaries(story #4343)', () => {
+  const current: ArtifactVersion = {
+    id: 'a1-v3', artifact_id: 'a1', version: 3, content: '<p>v3</p>', created_by: 'm3', summary: '셋째', created_at: '2026-09-03T00:00:00Z', canvasBounds: { w: 800, h: 600 },
+  };
+  const sum = (n: number): BeArtifactVersionSummary => ({ id: `row-${n}`, version_number: n, summary: `판 ${n}`, created_by: `m${n}`, created_at: `2026-09-0${n}T00:00:00Z`, source_comment_id: null });
+
+  it('목록 셋 → 셋(현재는 실물 그대로 · 나머지는 요약 + contentLoaded false)', () => {
+    const out = mergeVersionSummaries(current, [sum(3), sum(2), sum(1)]);
+    expect(out.map((v) => v.version)).toEqual([3, 2, 1]);
+    expect(out[0]).toBe(current);
+    expect(out[1]).toMatchObject({ id: 'a1-v2', artifact_id: 'a1', version: 2, content: '', created_by: 'm2', summary: '판 2', contentLoaded: false });
+    expect(out[2].contentLoaded).toBe(false);
+  });
+
+  it('목록이 없거나(실패) 비면 현재 하나 — 정직한 폴백', () => {
+    expect(mergeVersionSummaries(current, null)).toEqual([current]);
+    expect(mergeVersionSummaries(current, [])).toEqual([current]);
+  });
+
+  it('목록이 아직 현재 버전을 못 따라왔으면 현재를 덧붙인다(레일에서 «지금»이 빠지지 않게)', () => {
+    const out = mergeVersionSummaries(current, [sum(2), sum(1)]);
+    expect(out.map((v) => v.version).sort()).toEqual([1, 2, 3]);
+    expect(out.find((v) => v.version === 3)).toBe(current);
+  });
+
+  it('작성자 없음(null)은 빈 문자열(레일 RowName이 «알 수 없는 구성원»으로)', () => {
+    expect(mergeVersionSummaries(current, [{ ...sum(1), created_by: null }, sum(3)])[0].created_by).toBe('');
   });
 });
