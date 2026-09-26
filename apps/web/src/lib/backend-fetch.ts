@@ -12,8 +12,8 @@
  *   시간 제한만 건다. 호출 자리에 이유 주석(`시간 제한만`)을 단다(가드).
  * - 그 밖의 오류(연결 실패 등)는 예전처럼 던진다 — 라우트마다의 처리 그대로.
  */
-import { apiError } from '@/lib/api-response';
 import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/lib/backend-signal';
+import { bffEnvelopeError } from '@/lib/bff-envelope-error';
 
 export interface BackendFetchInit extends Omit<RequestInit, 'signal'> {
   /** 원 요청 — 브라우저가 끊으면 백엔드 호출도 끊는다(`timeLimitOnly`면 안 넘긴다). 요청 스코프가 없으면 null. */
@@ -40,10 +40,10 @@ export async function backendFetch(url: string, init: BackendFetchInit = {}): Pr
   } catch (err) {
     const kind = classifyBackendAbort(err);
     if (kind === 'timeout') {
-      return apiError('UPSTREAM_TIMEOUT', '서버 응답이 늦어지고 있습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+      return bffEnvelopeError('UPSTREAM_TIMEOUT');
     }
     if (kind === 'client-abort') {
-      return apiError('CLIENT_CLOSED_REQUEST', '요청이 취소되었습니다.', 499);
+      return bffEnvelopeError('CLIENT_CLOSED_REQUEST');
     }
     throw err;
   }

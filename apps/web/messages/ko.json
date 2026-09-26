@@ -6426,5 +6426,11 @@
     "workflowActionSubmit": "제출",
     "headerTemplate": "{name} 워크플로우",
     "stageMovedBody": "**{stage}** 단계로 넘어갔어요"
+  },
+  "bffEnvelope": {
+    "upstreamTimeout": "서버가 제시간에 응답하지 않았어요. 잠시 뒤 다시 시도해 주세요.",
+    "upstreamUnreachable": "서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.",
+    "clientClosedRequest": "요청이 취소됐어요.",
+    "upstreamNonJson": "서버 응답을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요."
   }
 }
