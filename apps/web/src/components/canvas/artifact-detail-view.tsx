@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ArtifactViewer } from './artifact-viewer';
-import { fetchJson, loadArtifactThreads, loadPendingCanonicalizeVersion } from './artifact-section';
+import { fetchJson, loadArtifactThreads, loadArtifactThreadsAndVersions, loadPendingCanonicalizeVersion } from './artifact-section';
 import {
-  adaptArtifactDetail, type ArtifactVersion, type VisualArtifact, type BeVisualArtifactDetail,
+  adaptArtifactDetail, loadArtifactVersion, mergeVersionSummaries, type ArtifactVersion, type VisualArtifact, type BeVisualArtifactDetail,
 } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
 import type { ArtifactNode } from '@/services/canvas-nodes';
@@ -47,12 +47,14 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
     void (async () => {
       const detail = await fetchJson<BeVisualArtifactDetail>(`/api/visual-artifacts/${artifactId}`);
       if (!detail) { if (!cancelled) setState('not_found'); return; }
-      const { artifact, versions } = adaptArtifactDetail(detail);
-      const [threads, pendingCanonicalizeVersion, specPins] = await Promise.all([
-        loadArtifactThreads(artifactId, detail.nodes),
+      // story #4343 — 레일 · 버전 고르개 = 버전 목록 API 전부(예전엔 상세의 현재 버전 하나뿐이라 늘 한 줄).
+      const { artifact, versions: [current] } = adaptArtifactDetail(detail);
+      const [{ threads, versionSummaries }, pendingCanonicalizeVersion, specPins] = await Promise.all([
+        loadArtifactThreadsAndVersions(artifactId, detail.nodes),
         loadPendingCanonicalizeVersion(artifactId),
         listSpecPins(artifactId),
       ]);
+      const versions = mergeVersionSummaries(current, versionSummaries);
       if (!cancelled) {
         setState({ artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins });
       }
@@ -122,6 +124,7 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
       <ArtifactViewer
         artifact={artifact}
         versions={versions}
+        loadVersion={(versionNumber) => loadArtifactVersion(artifactId, versionNumber)}
         threads={threads}
         nodes={nodes}
         specPins={specPins}

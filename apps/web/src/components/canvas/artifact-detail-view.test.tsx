@@ -157,3 +157,89 @@ describe('ArtifactDetailView — 새 좌표 코멘트 생성(story #2725, standa
     expect(body.parent_id).toBeUndefined();
   });
 });
+
+// story #4343 — «버전 계보» 레일이 버전이 몇 개든 늘 한 줄(현재)만 보였다: 상세 응답은 현재 버전 하나뿐이고(`adaptArtifactDetail` → [version]),
+// 같은 화면이 이미 받는 버전 목록(`GET /{id}/versions`)은 코멘트에만 썼다(dev 60e7e6cf 실측: 목록 8 · 레일 1).
+// 이제 레일 줄 = 목록 수 · 현재/기준/선택 표시 · 이전 버전을 고르면 그 버전 실물(`GET /{id}/versions/{n}`)이 뷰어에 뜬다.
+// `versions: [version]`로 되돌리면(목록 안 합침) 레일이 한 줄이 되어 RED.
+describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(story #4343)', () => {
+  const detailOf = (n: number, html: string) => ({
+    id: 'artifact-1', title: '흐름판 재설계 시안', story_id: null, epic_id: null, doc_id: null,
+    source: 'created', latest_version_number: 3, anchor_version: 1, created_by: null,
+    created_at: `2026-09-0${n}T00:00:00Z`, version_number: n, version_summary: `판 ${n}`,
+    nodes: [{ id: `n${n}`, type: 'html_blob', parent_id: null, order: 0, props: { html }, description: null }],
+  });
+  const summaries = [3, 2, 1].map((n) => ({ id: `row-${n}`, version_number: n, summary: `판 ${n}`, created_by: null, created_at: `2026-09-0${n}T00:00:00Z`, source_comment_id: null }));
+  let versionDetailCalls: number[];
+
+  function stubVersions({ failVersion }: { failVersion?: number } = {}) {
+    versionDetailCalls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/pins') || url.includes('/backlinks') || url.includes('/comments')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/gates')) return { ok: true, status: 200, json: async () => [] };
+      const one = /\/versions\/(\d+)$/.exec(url);
+      if (one) {
+        const n = Number(one[1]);
+        versionDetailCalls.push(n);
+        if (n === failVersion) return { ok: false, status: 404, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ data: detailOf(n, `<p>v${n} 본문</p>`) }) };
+      }
+      if (url.endsWith('/versions')) return { ok: true, status: 200, json: async () => ({ data: summaries }) };
+      return { ok: true, status: 200, json: async () => ({ data: detailOf(3, '<p>v3 본문</p>') }) };
+    }) as unknown as ReturnType<typeof vi.fn>);
+  }
+  const rail = () => [...container.querySelectorAll('p')].find((p) => p.textContent === (koMessages.canvas as LooseMessages).versionLineage)!.parentElement!;
+  const rows = () => [...rail().querySelectorAll('li > button')] as HTMLButtonElement[];
+  const rowOf = (n: number) => rows().find((b) => (b.textContent ?? '').includes(`v${n}`))!;
+  const stageHtml = () => container.querySelector('iframe')?.getAttribute('srcdoc') ?? '';
+  const flush = () => act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+
+  it('버전 셋 → 레일 셋 줄 · 고르개 셋 · 현재(v3) · 기준(v1 — 이전 버전이어도) 표시', async () => {
+    stubVersions();
+    await mount('artifact-1');
+    expect(rows()).toHaveLength(3);
+    expect(rows().map((b) => /v(\d)/.exec(b.textContent ?? '')?.[1])).toEqual(['3', '2', '1']);
+    expect(rowOf(3).textContent).toContain((koMessages.canvas as LooseMessages).versionCurrentTag as string);
+    expect(rowOf(1).textContent).toContain((koMessages.canvas as LooseMessages).versionAnchorTag as string);
+    expect([...container.querySelectorAll('select option')].map((o) => o.textContent)).toEqual(['v3', 'v2', 'v1']);
+    expect(stageHtml()).toContain('v3 본문');
+    expect(versionDetailCalls).toEqual([]);
+  });
+
+  it('레일에서 v1을 고르면 그 버전 실물을 한 번 받아 뷰어에 — 다시 v3 · v1로 오가도 더 안 받음', async () => {
+    stubVersions();
+    await mount('artifact-1');
+    await act(async () => { rowOf(1).click(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([1]);
+    expect(stageHtml()).toContain('v1 본문');
+    expect(rowOf(1).className).toContain('bg-muted/60');
+    await act(async () => { rowOf(3).click(); });
+    expect(stageHtml()).toContain('v3 본문');
+    await act(async () => { rowOf(1).click(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([1]);
+    expect(stageHtml()).toContain('v1 본문');
+  });
+
+  it('고르개(select)로 골라도 같다', async () => {
+    stubVersions();
+    await mount('artifact-1');
+    const select = container.querySelector('select')!;
+    await act(async () => { select.value = '2'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(versionDetailCalls).toEqual([2]);
+    expect(stageHtml()).toContain('v2 본문');
+  });
+
+  it('받는 중엔 «불러오는 중…» · 못 받으면 «이 버전을 불러오지 못했어요.»(빈 캔버스로 «비었다»는 거짓 0)', async () => {
+    stubVersions({ failVersion: 2 });
+    await mount('artifact-1');
+    await act(async () => { rowOf(2).click(); });
+    await flush();
+    expect(versionDetailCalls).toEqual([2]);
+    expect(container.querySelector('[data-version-loading="failed"]')?.textContent).toBe((koMessages.canvas as LooseMessages).versionLoadFailed);
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+});

@@ -29,6 +29,9 @@ export interface ArtifactVersion {
   /** story 1948d19d §4(BE #2135) — 그 버전의 불변 스냅샷 아트보드 크기. nullable(레거시/미선언) —
    * ArtifactStage가 null이면 포맷별 기본 아트보드로 폴백(가짜 추정 0, 측정 아니라 선언). */
   canvasBounds?: { w: number; h: number } | null;
+  /** story #4343 — `false`면 버전 목록(요약)에서 온 항목이라 실물(content · canvasBounds)을 아직 안 받았다.
+   * 뷰어가 이 버전을 고르는 순간 `GET /{id}/versions/{n}`(`loadArtifactVersion`)으로 받는다. 없으면(상세에서 온 현재 버전) 실물이다. */
+  contentLoaded?: boolean;
 }
 
 /**
@@ -212,6 +215,35 @@ export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact:
     canvasBounds: detail.canvas_bounds,
   };
   return { artifact, versions: [version] };
+}
+
+/**
+ * story #4343 — 산출물 상세 · 스토리 패널의 «버전 계보» 레일이 버전이 몇 개든 늘 한 줄(현재)만 보였다: 상세 응답
+ * (`adaptArtifactDetail`)은 현재 버전 하나뿐이라서다(dev 60e7e6cf 실측: 목록 API 8건 · 레일 1줄).
+ * 현재 버전(실물)에 버전 목록 API 요약을 합쳐 **목록 수만큼** 돌려준다 — 나머지는 `contentLoaded: false`(고를 때 받음).
+ * 목록이 없거나(실패) 비면 현재 하나 그대로(«첨부 없음»과 같은 정직한 폴백). 목록이 아직 현재 버전을 못 따라왔으면 현재를 덧붙인다.
+ */
+export function mergeVersionSummaries(current: ArtifactVersion, summaries: BeArtifactVersionSummary[] | null | undefined): ArtifactVersion[] {
+  if (!summaries || summaries.length === 0) return [current];
+  const merged: ArtifactVersion[] = summaries.map((s) => (s.version_number === current.version ? current : {
+    id: `${current.artifact_id}-v${s.version_number}`,
+    artifact_id: current.artifact_id,
+    version: s.version_number,
+    content: '',
+    created_by: s.created_by ?? '',
+    summary: s.summary,
+    created_at: s.created_at,
+    canvasBounds: null,
+    contentLoaded: false,
+  }));
+  if (!merged.some((v) => v.version === current.version)) merged.push(current);
+  return merged;
+}
+
+/** story #4343 — 레일 · 고르개에서 고른 이전 버전의 실물 — `GET /{id}/versions/{n}`을 `adaptArtifactDetail`로 풀어 그 버전 하나. 실패면 null. */
+export async function loadArtifactVersion(artifactId: string, versionNumber: number): Promise<ArtifactVersion | null> {
+  const detail = await getArtifactVersionDetail(artifactId, versionNumber);
+  return detail ? adaptArtifactDetail(detail).versions[0] ?? null : null;
 }
 
 /**
