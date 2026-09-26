@@ -1167,44 +1167,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     else addToast({ type: 'error', title: t('acSaveFailed') });
   };
 
-  // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
-  const handleAttachFiles = async (files: File[]) => {
-    if (files.length === 0 || uploadingAttachment) return;
-    const current = story.attachments ?? [];
-    const room = STORY_ATTACHMENT_LIMIT - current.length;
-    if (room <= 0) return;
-    setUploadingAttachment(true);
-    setAttachError(false);
-    try {
-      const uploaded: SendAttachment[] = [];
-      for (const file of files.slice(0, room)) {
-        const fd = new FormData();
-        fd.append('file', file);
-        // 03fe1663: project_id는 업로드 라우트가 story에서 server-side 도출(클라이언트 전달 불요).
-        const res = await fetch(`/api/stories/${story.id}/attachments`, { method: 'POST', body: fd });
-        if (!res.ok) throw new Error('upload failed');
-        uploaded.push(await res.json() as SendAttachment);
-      }
-      const next = [...current, ...uploaded]; // 전체 교체: 기존 보존 + 신규 누적
-      const { story: updated } = await patchStory({ attachments: next });
-      onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
-    } catch {
-      setAttachError(true);
-    } finally {
-      setUploadingAttachment(false);
-    }
-  };
-
-  // S3: paste an image while editing a story → upload as an attachment (same path as the
-  // file picker). Non-image pastes fall through to normal textarea paste.
-  const handlePasteAttach = (e: ClipboardEvent) => {
-    const images = imageFilesFromClipboard(e);
-    if (images.length > 0) {
-      e.preventDefault();
-      void handleAttachFiles(images);
-    }
-  };
-
   // story #4345(유나 규격 · PO 10:02~10:03Z) — 터치에서 늘 보이게 된 첨부 삭제 ✕가 첨부(열기 대상) 위에 있어, 오탭 한 번이면
   // 확인 · 되돌리기 없이 지워졌다. 이제:
   // - 누르면 목록에서만 곧바로 숨기고 «첨부를 삭제했어요» + 파일 이름 + «되돌리기» 토스트를 띄운다(확인 창 없음).
@@ -1229,7 +1191,15 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const appliedSeqRef = useRef(0);
   const [hiddenAttachmentUrls, setHiddenAttachmentUrls] = useState<string[]>([]);
   const latestRef = useRef({ story, onStoryUpdate, addToast, t });
-  useEffect(() => { latestRef.current = { story, onStoryUpdate, addToast, t }; });
+  // 보내는 목록의 원천 = 마지막 서버 목록(까디르 4718 ②). 매 렌더 props로 덮으면, 부모가 갱신을 안 돌려주는 자리(flow 노드 패널 —
+  // onStoryUpdate 없음)에서 첫 삭제 성공 뒤의 서버 목록이 다음 렌더에 옛 props 목록(지운 항목 포함)으로 돌아가 둘째 삭제가 그걸 되살렸다.
+  // 부모가 **다른 story 객체**를 넘길 때만(부모가 새로 받거나 우리 갱신을 받아 넘김) 받아들인다 — 같은 객체면 새 소식이 없다.
+  const adoptedStoryRef = useRef(story);
+  useEffect(() => {
+    const fromParent = adoptedStoryRef.current !== story;
+    adoptedStoryRef.current = story;
+    latestRef.current = { story: fromParent ? story : latestRef.current.story, onStoryUpdate, addToast, t };
+  });
   const mountedRef = useRef(true);
   const unhideAttachment = useCallback((url: string) => {
     if (mountedRef.current) setHiddenAttachmentUrls((cur) => cur.filter((u) => u !== url));
@@ -1253,9 +1223,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     }
   }, []);
 
-  /** 줄에 세운다 — 앞 일이 끝난(응답이 반영된) 뒤에 돈다. */
-  const enqueue = useCallback((job: () => Promise<void>) => {
-    chainRef.current = chainRef.current.then(job, job);
+  /** 줄에 세운다 — 앞 일이 끝난(응답이 반영된) 뒤에 돈다. 그 일의 약속을 돌려준다(업로드가 제 PATCH를 기다린다). */
+  const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
+    const run = chainRef.current.then(job, job);
+    chainRef.current = run;
+    return run;
   }, []);
 
   /** 보낼 목록 — 최신 서버 목록에서 `drop` · 가는 중인 삭제를 빼고, 가는 중인 되넣기는 제자리에 넣는다. */
@@ -1367,6 +1339,51 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         queueRemovals([url], false);
       },
     });
+  };
+
+  // E-FILE S4: 스토리 첨부 — GCS 업로드 후 PATCH {attachments} (전체 교체이므로 기존+신규 머지 필수).
+  // story #4345(까디르 4718 ③) — 업로드의 PATCH도 **같은 줄**에 선다. 예전엔 올리기 시작할 때의 목록 스냅숏으로 PATCH해서, 삭제가 가는 중에
+  // 업로드가 끝나면 지운 항목을 되넣었다(이 PR이 삭제를 늦추며 생긴 창). 이제 보내는 순간의 최신 서버 목록(가는 중 삭제 빼고 · 되넣는 중 넣고)에 새 파일을 붙인다.
+  const handleAttachFiles = async (files: File[]) => {
+    if (files.length === 0 || uploadingAttachment) return;
+    const current = story.attachments ?? [];
+    const room = STORY_ATTACHMENT_LIMIT - current.length;
+    if (room <= 0) return;
+    setUploadingAttachment(true);
+    setAttachError(false);
+    try {
+      const uploaded: SendAttachment[] = [];
+      for (const file of files.slice(0, room)) {
+        const fd = new FormData();
+        fd.append('file', file);
+        // 03fe1663: project_id는 업로드 라우트가 story에서 server-side 도출(클라이언트 전달 불요).
+        const res = await fetch(`/api/stories/${story.id}/attachments`, { method: 'POST', body: fd });
+        if (!res.ok) throw new Error('upload failed');
+        uploaded.push(await res.json() as SendAttachment);
+      }
+      const ok = await enqueue(async () => {
+        const base = outgoingAttachments(new Set());
+        const next = [...base, ...uploaded.filter((u) => !base.some((a) => a.url === u.url))]; // 전체 교체: 최신 목록 보존 + 신규 누적
+        const result = await sendAttachments(next, false);
+        applySent(result, next);
+        return !!result.updated;
+      });
+      if (!ok) setAttachError(true);
+    } catch {
+      setAttachError(true);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  // S3: paste an image while editing a story → upload as an attachment (same path as the
+  // file picker). Non-image pastes fall through to normal textarea paste.
+  const handlePasteAttach = (e: ClipboardEvent) => {
+    const images = imageFilesFromClipboard(e);
+    if (images.length > 0) {
+      e.preventDefault();
+      void handleAttachFiles(images);
+    }
   };
 
   const visibleAttachments = (story.attachments ?? []).filter((a) => !hiddenAttachmentUrls.includes(a.url));

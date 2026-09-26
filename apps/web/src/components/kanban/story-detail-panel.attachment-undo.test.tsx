@@ -35,6 +35,7 @@ function makeStory(attachments: Att[]): KanbanStory {
 let container: HTMLDivElement;
 let root: Root;
 let patches: { attachments: Att[]; keepalive: boolean }[];
+let uploads: string[];
 let failPatch: (n: number) => boolean;
 // 응답을 붙잡을 PATCH 번호(1부터) — 붙잡힌 응답은 `release()`로 푼다(요청이 겹치는 순서를 테스트가 정한다).
 let holdPatch: (n: number) => boolean;
@@ -80,6 +81,7 @@ beforeEach(() => {
   holdPatch = () => false;
   held = [];
   updates = [];
+  uploads = [];
   setStoryOutside = null;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/stories/s1' && init?.method === 'PATCH') {
@@ -89,6 +91,11 @@ beforeEach(() => {
       if (holdPatch(n)) await new Promise<void>((resolve) => { held.push(resolve); });
       if (failPatch(n)) return { ok: false, json: async () => null };
       return { ok: true, json: async () => ({ data: makeStory(body.attachments) }) };
+    }
+    if (url === '/api/stories/s1/attachments' && init?.method === 'POST') {
+      const name = ((init.body as FormData).get('file') as File).name;
+      uploads.push(name);
+      return { ok: true, json: async () => ({ url: `gs://b/${name}`, name, content_type: 'application/pdf' }) };
     }
     return { ok: false, json: async () => null };
   }));
@@ -267,6 +274,60 @@ describe('StoryDetailPanel 첨부 삭제 되돌리기([SID:4345])', () => {
     expect(patches).toHaveLength(2);
     expect(container.textContent).toContain('첨부를 되돌리지 못했어요. 다시 시도해 주세요.');
     expect(shown(A1)).toBe(false);
+  });
+
+  // 까디르 4718 ②(P1 · 실제 도달) — 부모가 갱신을 안 돌려주는 자리(flow 노드 패널: onStoryUpdate 없음). 보내는 목록 원천을 매 렌더 props로
+  // 덮으면 첫 삭제 성공 뒤의 서버 목록이 옛 props(첫 항목 포함)로 돌아가 둘째 삭제가 첫 항목을 되살렸다.
+  it('flow 패널 모양(콜백 없음) — 삭제 둘이면 둘째 PATCH 본문에 첫 항목 0', async () => {
+    await render(<Harness initial={[A1, A2, A3]} noParentUpdate />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast();
+    expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+    await act(async () => { removeBtnOf(A2).click(); });
+    await closeToast();
+    expect(urlsOf(1)).toEqual([A3.url]);
+  });
+
+  it('부모가 다른 story 객체를 넘기면(부모가 새로 받음) 그 목록을 받아들인다(대조)', async () => {
+    await render(<Harness initial={[A1, A2]} noParentUpdate />);
+    await settle();
+    await act(async () => { setStoryOutside!(makeStory([A1, A2, A3])); });
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast();
+    expect(urlsOf(0)).toEqual([A2.url, A3.url]);
+  });
+
+  // 까디르 4718 ③ — 업로드가 줄을 안 타고 올리기 시작할 때의 목록 스냅숏으로 PATCH해서, 삭제가 가는 중에 업로드가 끝나면 지운 항목을 되넣었다.
+  it('업로드도 같은 줄 — 삭제가 가는 중이면 그 응답 뒤에, 그때의 최신 목록(지운 항목 0)에 새 파일을 붙여 보낸다', async () => {
+    holdPatch = (n) => n === 1;
+    await render(<Harness initial={[A1, A2]} />);
+    await settle();
+    await act(async () => { removeBtnOf(A1).click(); });
+    await closeToast(); // PATCH 1(A1 삭제) 가는 중
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['x'], 'new.pdf', { type: 'application/pdf' })] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settle();
+    expect(uploads).toEqual(['new.pdf']);
+    expect(patches).toHaveLength(1); // 업로드 PATCH는 삭제 응답을 기다린다
+    await release();
+    await settle();
+    expect(patches).toHaveLength(2);
+    expect(urlsOf(1)).toEqual([A2.url, 'gs://b/new.pdf']);
+  });
+
+  it('업로드의 PATCH가 실패하면 업로드 오류를 알린다(예전엔 실패해도 새 목록을 부모에 넘겨 성공처럼 보였다) · 부모 갱신 0', async () => {
+    failPatch = () => true;
+    await render(<Harness initial={[A1]} />);
+    await settle();
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['x'], 'new.pdf', { type: 'application/pdf' })] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settle();
+    expect(patches).toHaveLength(1);
+    expect(container.textContent).toContain('첨부 업로드에 실패했어요. 다시 시도해 주세요.');
+    expect(updates).toHaveLength(0);
   });
 
   // 러너 d U8 — 부모가 새 목록을 안 내려주면(onStoryUpdate 없음) 서버에서 지워진 항목이 부모 목록엔 남아 있다.
