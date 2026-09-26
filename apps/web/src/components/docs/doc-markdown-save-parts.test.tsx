@@ -80,6 +80,60 @@ describe('마크다운 문서 저장 왕복 — 바뀐 부품마다(story #4339 
   });
 });
 
+/** 속성 값 주입 탐침 — 따옴표 · 작은따옴표 · 꺾쇠 · 새 속성 모양. */
+const PROBE = `x" data-url="javascript:alert(1)" y='z'><img src=x onerror=alert(1)>`;
+
+function partRoots(html: string): HTMLElement[] {
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  return [...root.querySelectorAll<HTMLElement>('[data-type], [data-page-embed]')].filter(
+    (el) => !el.parentElement?.closest('[data-type], [data-page-embed]'),
+  );
+}
+const keyOf = (el: HTMLElement) => el.getAttribute('data-type') ?? 'pageEmbed';
+const namesOf = (el: HTMLElement | undefined) => (el ? [...el.attributes].map((a) => a.name).sort() : []);
+/** 저장(md) → 다시 읽기 → 같은 종류의 첫 부품 뿌리. */
+function reparse(el: HTMLElement): HTMLElement | undefined {
+  return partRoots(markdownToHtml(htmlToMarkdown(el.outerHTML))).find((p) => keyOf(p) === keyOf(el));
+}
+
+describe('주입 가드 — raw HTML로 남는 부품 속성은 값이 무엇이든 속성 경계를 못 넘는다(까디르 4708 · PO)', () => {
+  it('⭐목록(EMPTY_PART_SERIALIZERS)의 부품마다 왕복 픽스처에 표본이 있다(새 부품이 탐침에서 빠지지 않게)', () => {
+    const roots = partRoots(PARTS_FIXTURE);
+    for (const part of EMPTY_PART_SERIALIZERS) expect(roots.some((el) => part.matches(el)), part.name).toBe(true);
+  });
+
+  it('⭐모든 부품 × 모든 속성에 같은 탐침 → 저장 → 다시 읽기: 속성 이름 집합이 깨끗한 저장과 같고 · 목록 부품은 값도 그대로', () => {
+    const broken: string[] = [];
+    for (const original of partRoots(PARTS_FIXTURE)) {
+      const clean = namesOf(reparse(original));
+      const isListed = EMPTY_PART_SERIALIZERS.some((p) => p.matches(original));
+      for (const attr of [...original.attributes].map((a) => a.name)) {
+        if (attr === 'data-type' || attr === 'data-page-embed') continue;
+        const probed = original.cloneNode(true) as HTMLElement;
+        probed.setAttribute(attr, PROBE);
+        const back = reparse(probed);
+        if (JSON.stringify(namesOf(back)) !== JSON.stringify(clean)) broken.push(`${keyOf(original)}.${attr}: ${JSON.stringify(namesOf(back))}`);
+        else if (isListed && back?.getAttribute(attr) !== PROBE) broken.push(`${keyOf(original)}.${attr} value: ${JSON.stringify(back?.getAttribute(attr))}`);
+      }
+    }
+    expect(broken, broken.join('\n')).toEqual([]);
+  });
+
+  it('너비 있는 이미지의 src · alt도 같은 규칙(raw HTML img)', () => {
+    const img = document.createElement('img');
+    img.setAttribute('src', 'https://example.com/a.png');
+    img.setAttribute('alt', PROBE);
+    img.style.width = '50%';
+    const md = htmlToMarkdown(img.outerHTML);
+    const back = document.createElement('div');
+    back.innerHTML = markdownToHtml(md);
+    const parsed = back.querySelector('img');
+    expect(namesOf(parsed ?? undefined)).toEqual(['alt', 'src', 'style']);
+    expect(parsed?.getAttribute('alt')).toBe(PROBE);
+  });
+});
+
 describe('보안 — 마크다운에 raw HTML로 남는 data-url은 읽을 때 4324 안전 도우미를 그대로 지난다(새 싱크 0)', () => {
   let container: HTMLDivElement;
   let root: Root;
