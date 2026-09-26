@@ -9,9 +9,10 @@ import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, Pa
 import { pickAndUpload } from './extensions/slash-command';
 import { type SlashMenuStrings } from './extensions/slash-command';
 import { DocToc } from './doc-toc';
-import { type DocHeading, slugifyHeading } from './doc-heading-utils';
+import { type DocHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 import { createDocEditorExtensions } from './doc-editor-extensions';
+import { computeHeadingAnchors } from './extensions/heading-ids';
 import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
 import { useTranslations } from 'next-intl';
 
@@ -255,44 +256,13 @@ export function DocEditor({
     setIsDragging(false);
   }, [setIsDragging]);
 
-  // Extract TOC headings from editor + assign IDs to heading DOM elements
+  // Extract TOC headings from editor. 앵커 id는 HeadingIds 확장이 decoration으로 그린다 — story #4339: 예전엔 여기서 편집기 DOM의 h1~h3에
+  // `el.id`를 직접 써서 ProseMirror가 그 변경을 사용자 편집으로 다시 읽었고, 제목 바로 뒤 수식 글이 비워져 자동 저장됐다.
   useEffect(() => {
     if (!editor) return;
-
     const update = () => {
-      const counts = new Map<string, number>();
-      const headings: DocHeading[] = [];
-
-      editor.state.doc.descendants((node) => {
-        if (node.type.name === 'heading') {
-          const text = node.textContent.trim();
-          if (!text) return true;
-          const baseId = slugifyHeading(text);
-          const seen = counts.get(baseId) ?? 0;
-          counts.set(baseId, seen + 1);
-          headings.push({
-            level: node.attrs.level as 1 | 2 | 3,
-            text,
-            id: seen === 0 ? baseId : `${baseId}-${seen + 1}`,
-          });
-        }
-        return true;
-      });
-
-      setTocHeadings(headings);
-
-      // Assign IDs to heading DOM elements
-      const root = editorContentRef.current;
-      if (!root) return;
-      const idCounts = new Map<string, number>();
-      root.querySelectorAll<HTMLElement>('h1, h2, h3').forEach((el) => {
-        const baseId = slugifyHeading(el.textContent ?? '');
-        const seen2 = idCounts.get(baseId) ?? 0;
-        idCounts.set(baseId, seen2 + 1);
-        el.id = seen2 === 0 ? baseId : `${baseId}-${seen2 + 1}`;
-      });
+      setTocHeadings(computeHeadingAnchors(editor.state.doc).map(({ level, text, id }) => ({ level: level as DocHeading['level'], text, id })));
     };
-
     update();
     editor.on('update', update);
     return () => { editor.off('update', update); };

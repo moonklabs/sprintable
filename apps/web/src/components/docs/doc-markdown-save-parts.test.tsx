@@ -8,6 +8,7 @@
  * 보존하고, 아래 가드가 왕복 픽스처의 빈 부품 뿌리가 전부 거기 걸리는지 대조한다(새 빈 부품이 조용히 버려지지 않게).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { JSONContent } from '@tiptap/core';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -142,7 +143,8 @@ describe('수식 — 마크다운 저장 → 다시 열기 → 수식 값이 선
     first.destroy();
     const second = makeDocEditor(markdownToHtml(saved));
     try {
-      return (second.getJSON().content ?? []).filter((n) => n.type === 'mathBlock').map((n) => (n.content ?? []).map((c) => c.text ?? '').join(''));
+      const doc = second.getJSON() as JSONContent;
+      return (doc.content ?? []).filter((n) => n.type === 'mathBlock').map((n) => (n.content ?? []).map((c) => c.text ?? '').join(''));
     } finally {
       second.destroy();
     }

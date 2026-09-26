@@ -27,6 +27,7 @@ import { MathBlockNode, MathInlineNode } from './extensions/math-node';
 import { ColumnsBlock, ColumnBlock } from './extensions/column-layout';
 import { WikiLinkNode, createWikiLinkSuggestion } from './extensions/wiki-link';
 import { StoryMentionExtension, EntityLinkExtension } from './extensions/story-mention';
+import { HeadingIds } from './extensions/heading-ids';
 
 export interface DocEditorExtensionOptions {
   placeholder: string;
@@ -82,5 +83,7 @@ export function createDocEditorExtensions(opts: DocEditorExtensionOptions): AnyE
     }),
     createSlashCommandExtension(opts.slashMenuStrings),
     PageEmbedExtension.configure({ currentDocId: opts.currentDocId, onNavigate: opts.onNavigate }),
+    // story #4339 — 제목 앵커 id(목차 이동)는 decoration으로 — 편집기 DOM을 직접 고치면 ProseMirror가 사용자 편집으로 다시 읽는다.
+    HeadingIds,
   ];
 }
