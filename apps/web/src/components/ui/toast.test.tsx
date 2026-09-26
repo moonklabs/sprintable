@@ -267,3 +267,54 @@ describe('useToast() Provider 계약(story #3759)', () => {
     expect(container.querySelector('[data-testid="probe-ok"]')).toBeNull();
   });
 });
+
+// story #4345(유나 규격) — 포인터나 초점이 토스트 안에 있으면 안 닫힌다(«되돌리기»를 누르는 중에 사라지지 않게) · 떠나면 시간을 처음부터.
+// onClose는 토스트마다 딱 한 번, 까닭과 함께(timeout · dismiss · action) — 늦춘 쓰기(첨부 삭제)가 «되돌리기가 사라지는 순간»을 안다.
+describe('Toast 붙잡기 · onClose(story #4345)', () => {
+  it('초점이 안에 있으면 8초가 지나도 안 닫힘 → 초점이 나가면 다시 8초 뒤 timeout 한 번', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const onClose = vi.fn();
+      const onDismiss = vi.fn();
+      await act(async () => {
+        root.render(wrap(<ToastContainer toasts={[toast({ action: { label: '되돌리기', onClick: () => {} }, onClose })]} onDismiss={onDismiss} />));
+      });
+      const undo = [...container.querySelectorAll('button')].find((b) => b.textContent === '되돌리기')!;
+      await act(async () => { undo.focus(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+      expect(onClose).not.toHaveBeenCalled();
+      await act(async () => { undo.blur(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(8001); });
+      expect(onClose.mock.calls).toEqual([['timeout']]);
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('동작(되돌리기)을 누르면 onClose("action") 한 번 · ✕는 onClose("dismiss") 한 번', async () => {
+    const onUndo = vi.fn();
+    const onCloseA = vi.fn();
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({ action: { label: '되돌리기', onClick: onUndo }, onClose: onCloseA })]} onDismiss={() => {}} />));
+    });
+    await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === '되돌리기')!.click(); });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(onCloseA.mock.calls).toEqual([['action']]);
+    const onCloseB = vi.fn();
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({ id: 't2', onClose: onCloseB })]} onDismiss={() => {}} />));
+    });
+    await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label]')!.click(); });
+    expect(onCloseB.mock.calls).toEqual([['dismiss']]);
+  });
+
+  it('bodySingleLine이면 둘째 줄을 한 줄 말줄임으로(파일 이름)', async () => {
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({ body: '아주-긴-파일-이름.pdf', bodySingleLine: true })]} onDismiss={() => {}} />));
+    });
+    const body = [...container.querySelectorAll('p')].find((p) => p.textContent === '아주-긴-파일-이름.pdf')!;
+    expect(body.className).toContain('truncate');
+    expect(body.className).not.toContain('[overflow-wrap:anywhere]');
+  });
+});

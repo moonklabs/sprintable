@@ -12,6 +12,7 @@ import { toPlainPreview } from '@/components/chat/entity-ref';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { ChannelTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
 interface ChannelMsg {
   id: string;
@@ -221,7 +222,8 @@ export default function ChannelPage() {
                     <button
                       type="button"
                       onClick={() => setReplyTo(msg.id)}
-                      className={`absolute ${isOwn ? '-left-6' : '-right-6'} top-1 hidden text-muted-foreground group-hover:block`}
+                      // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 호버 · 초점에서(HOVER_REVEAL).
+                      className={`absolute ${isOwn ? '-left-6' : '-right-6'} top-0 rounded-sm text-muted-foreground ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
                       title={t('reply')}
                     >
                       ↩

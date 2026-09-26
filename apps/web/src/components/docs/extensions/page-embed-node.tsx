@@ -7,6 +7,8 @@ import { useTranslations } from 'next-intl';
 import { FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { cn } from '@/lib/utils';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
 // ---------------------------------------------------------------------------
 // Pure helpers — exported for unit tests
@@ -242,7 +244,8 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
               e.stopPropagation();
               handleReset();
             }}
-            className="text-xs text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-foreground"
+            // story #4345 — 호버 없는 기기에선 늘 · 마우스는 카드 호버 · 초점에서(HOVER_REVEAL).
+            className={cn('rounded-sm px-1 text-xs text-muted-foreground transition hover:text-foreground', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
           >
             {tDocs('pageEmbedChangeAction')}
           </button>
