@@ -51,7 +51,7 @@ export const LONG_ROUTES = {
   /** 요금제 변경 시작(story #4335) — checkout과 같다(청구 · 부분 환불은 응답 뒤 작업). */
   billingChangeTier: route(15_000, 'billing_payment_attempt.py start_change_tier_attempt → _settle_other_processing → toss_adapter.py:213(조회 15) · 청구는 run_attempt(응답 뒤)'),
   /** 결제 시도 조회(story #4335) — 멈춘 시도면 이어받아 결론: Toss 조회 15 + change-tier 확정이면 옛 결제 부분 환불 15. */
-  billingAttemptStatus: route(30_000, 'billing_payment_attempt.py reconcile_attempt → toss_adapter.py:213(조회 15) · _finalize → refund_old_remainder → :258(환불 15)'),
+  billingAttemptStatus: route(30_000, 'billing_payment_attempt.py reconcile_attempt → toss_adapter.py:213(조회 15) · _finalize → run_pending_refund → refund_org → :258(환불 15)'),
   /** 채널 즉시 발행 — 텍스트 4 × 20 = 80초 · X 스레드 최대 10조각 × 2 × 20 ≈ 400초 · YouTube 큰 영상 상한 없음. */
   channelPublishNow: route(null, 'channel_posts.py:1887(provider_client 20 · 4단계 = 80) · :2998 · channel_adapters.py:564(X 스레드 ≤10) · youtube_publish.py ~:143-158(상한 없음)'),
   /** 초안 제출 — 레시피 게이트가 자동 충족되면 그 자리에서 발행(channelPublishNow와 같은 경로). */
