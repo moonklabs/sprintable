@@ -4016,6 +4016,7 @@
     "paymentAttemptProcessing": "Processing your payment. Please wait.",
     "paymentAttemptChecking": "We're checking the result of the payment you already sent. You don't need to pay again.",
     "paymentAttemptCheckingLong": "This is taking longer than usual. You can close this window — you'll see the result on this billing page when you come back.",
+    "paymentAttemptCheckingEscalated": "Confirming the result is taking a while, so we've notified our team. You don't need to pay again — the result will appear here once it's confirmed.",
     "paymentAttemptFailed": "We couldn't complete the payment on our side.",
     "paymentAttemptReauthRequired": "The connection dropped before your card was registered. Please start again from card authentication.",
     "paymentAttemptNotStarted": "The payment didn't start, and you haven't been charged. Please start again from card authentication.",
