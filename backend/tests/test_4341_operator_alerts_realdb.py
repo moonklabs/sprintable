@@ -240,6 +240,29 @@ def test_sanitize_keeps_ids_amounts_codes_times_only():
     assert sorted(dropped) == ["Bad-Name", "access_token", "billing_key", "memo"]
 
 
+@pytest.mark.parametrize("name", ["cardnumber", "apikey", "emailaddress", "secretvalue", "card_no", "customer_email", "access_token"])
+def test_sensitive_names_dropped_by_fragment_not_just_whole_part(name):
+    """까디르 4713 ② — 밑줄 조각 일치만 보면 `cardnumber` · `apikey`가 빠져나갔다. 값이 무해한 코드여도 이름으로 버린다."""
+    kept, dropped = sanitize_alert_fields({name: "OK"})
+    assert (kept, dropped) == ({}, [name])
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["4111-1111-1111-1111", "4111_1111_1111_1111", "4111.1111.1111.1111", "4111:1111:1111:1111", "4111 1111 1111 1111", "4111111111111111"],
+)
+def test_card_shaped_values_dropped_whatever_the_separator(value):
+    """까디르 4713 ① — 구분자가 끼면 연속 숫자 검사를 빠져나가 «코드»로 실렸다. 구분자를 걷고 센다."""
+    kept, dropped = sanitize_alert_fields({"reference": value})
+    assert (kept, dropped) == ({}, ["reference"])
+
+
+def test_uuid_and_iso_time_still_kept_after_separator_stripping():
+    """구분자를 걷으면 숫자 줄이 길어지는 모양(uuid · 소수초 ISO 시각)은 모양으로 먼저 받는다 — 걸러 없애지 않는다."""
+    values = {"attempt_id": str(uuid.UUID(int=7)), "at": "2026-09-26T08:22:45.123456+00:00", "code": "HTTP_409"}
+    assert sanitize_alert_fields(values) == (values, [])
+
+
 async def test_bad_kind_or_key_is_a_caller_bug():
     with pytest.raises(ValueError):
         await notify_operator(kind="Billing Late", dedupe_key="k")

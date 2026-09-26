@@ -47,12 +47,15 @@ _FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9_.:\-]{0,63}$")
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _ISO_TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})?)?$")
-# 카드 번호(13~19자리)처럼 보이는 숫자 줄 — 이름이 무엇이든 싣지 않는다.
+# 카드 번호(13~19자리)처럼 보이는 숫자 줄 — 이름이 무엇이든 싣지 않는다. 구분자(공백 · - _ . : /)를 걷은 뒤 센다(까디르 4713:
+# `4111-1111-1111-1111`이 «코드» 모양으로 통과했다). uuid · ISO 시각은 이 검사 전에 모양으로 먼저 받는다(걷으면 숫자 줄이 길어진다).
 _LONG_DIGIT_RUN_RE = re.compile(r"\d{13,}")
-# 이름 조각(snake_case를 _로 쪼갠 토큰)에 하나라도 있으면 값과 무관하게 버린다.
-_SENSITIVE_NAME_PARTS = frozenset({
-    "card", "pan", "cvc", "cvv", "key", "token", "secret", "password", "passwd", "auth", "email", "phone", "account", "iban",
-})
+_DIGIT_SEPARATORS_RE = re.compile(r"[\s\-_.:/]")
+# 이름에 부분 문자열로 들어 있으면 값과 무관하게 버린다 — 소문자 · 밑줄을 걷은 이름에서 찾는다(까디르 4713: `cardnumber` · `apikey`
+# · `emailaddress`가 조각 일치를 빠져나갔다). 넓게 걸려 무해한 이름을 버리는 쪽이 새는 쪽보다 낫다(fail-closed).
+_SENSITIVE_NAME_FRAGMENTS = (
+    "card", "cvc", "cvv", "key", "token", "secret", "passw", "auth", "mail", "phone", "account", "iban",
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,15 @@ class OperatorAlertResult:
     # delivered · already_delivered · not_configured · send_failed · busy(다른 틱이 같은 건을 보내는 중) · error(표에도 못 적음)
     reason: str
     alert_id: uuid.UUID | None
+
+
+def _looks_like_card_number(text: str) -> bool:
+    return bool(_LONG_DIGIT_RUN_RE.search(_DIGIT_SEPARATORS_RE.sub("", text)))
+
+
+def _is_sensitive_name(name: str) -> bool:
+    folded = name.lower().replace("_", "")
+    return any(fragment in folded for fragment in _SENSITIVE_NAME_FRAGMENTS)
 
 
 def _safe_value(value: Any) -> Any:
@@ -72,17 +84,19 @@ def _safe_value(value: Any) -> Any:
     if isinstance(value, int):
         return value if not _LONG_DIGIT_RUN_RE.search(str(abs(value))) else None
     if isinstance(value, Decimal):
-        return str(value) if not _LONG_DIGIT_RUN_RE.search(str(value)) else None
+        return str(value) if not _looks_like_card_number(str(value)) else None
     if isinstance(value, float):
-        return value if not _LONG_DIGIT_RUN_RE.search(repr(value)) else None
+        return value if not _looks_like_card_number(repr(value)) else None
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, str):
-        if _LONG_DIGIT_RUN_RE.search(value):
+        if _UUID_RE.match(value) or _ISO_TIME_RE.match(value):
+            return value
+        if _looks_like_card_number(value):
             return None
-        if _CODE_RE.match(value) or _UUID_RE.match(value) or _ISO_TIME_RE.match(value):
+        if _CODE_RE.match(value):
             return value
     return None
 
@@ -93,7 +107,7 @@ def sanitize_alert_fields(fields: dict[str, Any] | None) -> tuple[dict[str, Any]
     dropped: list[str] = []
     for name, value in (fields or {}).items():
         name_s = str(name)
-        if not _FIELD_NAME_RE.match(name_s) or _SENSITIVE_NAME_PARTS.intersection(name_s.split("_")):
+        if not _FIELD_NAME_RE.match(name_s) or _is_sensitive_name(name_s):
             dropped.append(name_s[:64])
             continue
         safe = _safe_value(value)
