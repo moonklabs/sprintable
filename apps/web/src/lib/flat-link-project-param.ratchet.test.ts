@@ -4,7 +4,7 @@
 // story #4231 3차(PO 02:02Z) — 예전 셈법은 «이동 자리 모양»(JSX href · router.push/replace · `href:`/`path:`)만 봐서, href 헬퍼의 `return` ·
 //   `window.location.href/assign` · 다른 이름 prop(`targetRoute`·`conversationHref`·`secondaryHref`) · 상수로 만든 목적지를 못 셌다(≈30곳).
 //   이제는 **flat 리터럴이 어디에 있든 센다**(템플릿은 머리 글자 · 조건식은 갈래마다). 세지 않는 것은 셋뿐이다:
-//   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)`·`withProject(…)`·`useConnectRulesHref(…)` 호출 안(아래 WRAPPERS).
+//   ① 감싼 자리 — `flatHref(…)`·`withProjectParam(…)`·`withProject(…)`·`useConnectRulesHref(…)` 호출 안 — 이름이 아니라 **선언 출처**로 판정(아래 TRUSTED_EXPORTS).
 //   ①' 리터럴이 스스로 프로젝트를 싣는 자리 — 해시(#) 앞 쿼리에 `p` **키**가 있음(예: 결재 자기 프로젝트로 가는 `/gates/${id}?p=${projectId}` · #4241).
 //       글자가 아니라 키로 본다 — `?q=?p=x`(q의 값) · `#?p=x`(해시 안)는 런타임이 p를 붙이는 자리라 그대로 센다(까디르 QA P3).
 //   ② 이동이 아닌 자리 — 구조로 판정(비교 연산 · `case` · `startsWith`류 판정 · 탭 정체성 인자 · 정적 파일 fetch)하거나,
@@ -21,15 +21,11 @@ const BASELINE = 0;
 
 const SRC = path.resolve(__dirname, '..');
 const AUTH = path.join(SRC, 'app/(authenticated)');
-// 프로젝트를 싣는 함수 — flatHref(useFlatHref) · withProjectParam(lib) · withProject(헬퍼가 **필수 인자**로 받는 «프로젝트를 싣는 함수» —
-// 프로젝트 단위 소비처는 useFlatHref를, 조직 전체 목록은 «항목 자신의 프로젝트를 싣는 함수»를 넘긴다 · #4231 3차 PO 02:34Z) ·
-// useConnectRulesHref(결과에 현재 프로젝트를 싣는 훅) · projectHref(#4231 4차 — slug를 알면 scoped 경로 · 모르면 항목 project_id를 `?p=`로).
-const WRAPPERS = new Set(['flatHref', 'withProjectParam', 'withProject', 'useConnectRulesHref', 'projectHref']);
 // 이동이 아닌 호출의 인자(구조 판정) — 탭 정체성(useSyntheticParentTabHistory: 어느 탭 소속인지 표시 · 이동 아님) · 정적 파일 fetch.
 const NON_NAV_CALLEES = new Set(['useSyntheticParentTabHistory', 'fetch']);
 const PREDICATE_METHODS = new Set(['startsWith', 'endsWith', 'includes', 'indexOf', 'match', 'test']);
 // story #4231 다음 조각(래칫 맹점 ③ · 까디르 4614 codex P2) — 옛 자원 · flat 경로를 **조립하는 헬퍼**. 리터럴이 헬퍼 안(`/${resource}`)에
-// 있어 머리 글자로는 못 셌다. 이 헬퍼 호출 = flat 목적지로 센다 — 인자에 프로젝트를 싣는 함수(WRAPPERS)가 있을 때만 세지 않는다.
+// 있어 머리 글자로는 못 셌다. 이 헬퍼 호출 = flat 목적지로 센다 — 인자에 프로젝트를 싣는 함수(선언 출처로 판정)가 있을 때만 세지 않는다.
 const ASSEMBLERS = new Set(['scopedResourceHref', 'destHref', 'resolveTabHref']);
 // story #4231 마지막 조각 — 폴백 경로를 **받아서 감싸는** 헬퍼(계약상 감싸는 함수가 필수 인자). 리터럴은 호출 자리에선 bare로 보이지만
 // 헬퍼가 그 함수로 감싸 내보낸다(`resolveScopedEntityHref(slugs, '/board?story=…', build, withProject)` — #4253 «폴백은 bare로 못 나간다» ·
@@ -83,13 +79,147 @@ function literalText(node: ts.Node): string | null {
   return null;
 }
 
-/** 리터럴이 해시(#) 앞 쿼리에 `p` 키를 스스로 싣는지(템플릿은 머리 + 각 조각 꼬리 · 치환 자리는 \u0000). 키 판정은 withProjectParam과 같은 뜻. */
-/** 파일에서 `name`을 이 모듈에서 가져왔나(`import { name } from module`). */
-function importedFrom(sf: ts.SourceFile, name: string, module: string): boolean {
-  return sf.statements.some((st) => ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier) && st.moduleSpecifier.text === module
-    && !!st.importClause?.namedBindings && ts.isNamedImports(st.importClause.namedBindings)
-    && st.importClause.namedBindings.elements.some((e) => e.name.text === name && (!e.propertyName || e.propertyName.text === name)));
+// ── 심볼 해석(까디르 QA 4679 CHANGES) ─────────────────────────────────────────────────────────────────────────────
+// 예전엔 «프로젝트를 싣는 함수»를 **이름**으로 믿었다: ① 파일 안 가짜 `const flatHref = (h) => h`도 감싼 것으로 통과 ② 팩토리를 파일의 **첫**
+// 선언으로 찾아 가려진(shadowed) 안쪽 `mk()`를 못 봄 ③ 감싸는 헬퍼의 import를 **파일 단위**로 봐 같은 파일 안 중첩 로컬 같은 이름도 통과.
+// 이제 호출 자리의 식별자가 **실제로 가리키는 선언**(가장 가까운 스코프부터 바깥으로)을 찾고, 그 선언의 출처로 판정한다.
+//
+// 믿는 출처(소스 전수 조사 · 이 밖은 전부 못 믿음):
+//  · withProjectParam — `lib/with-project-param`에서 import(또는 그 재수출 `hooks/use-flat-href`) · 그 파일 안 선언 자체.
+//  · projectHref — `components/org-briefing/derive-attention-clusters`에서 import · 그 파일 안 선언.
+//  · useConnectRulesHref — `app/dashboard/dashboard-shell`에서 import · 그 파일 안 선언.
+//  · flatHref(이름 무관) — `const x = useFlatHref()`(useFlatHref가 `hooks/use-flat-href`에서 import) · 그 값의 `useRef(x).current` · `const y = x` 별칭.
+//  · withProject — 헬퍼의 **매개변수**(계약: 호출자가 프로젝트를 싣는 함수를 필수로 넘긴다). 스스로 못 잡는 것(자인): 그 헬퍼의 호출자가
+//    실제로 무엇을 넘기는지는 이 가드가 따라가지 않는다 — 호출자 쪽 인자 자리는 위 판정으로 따로 센다(ASSEMBLERS · 감싸는 헬퍼).
+const TRUSTED_EXPORTS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['withProjectParam', ['lib/with-project-param', 'hooks/use-flat-href']],
+  ['projectHref', ['components/org-briefing/derive-attention-clusters']],
+  ['useConnectRulesHref', ['app/dashboard/dashboard-shell']],
+  ['useFlatHref', ['hooks/use-flat-href']],
+]);
+const TRUSTED_PARAMS = new Set(['withProject']);
+
+function bindingIds(name: ts.BindingName): ts.Identifier[] {
+  if (ts.isIdentifier(name)) return [name];
+  return name.elements.flatMap((el) => (ts.isOmittedExpression(el) ? [] : bindingIds(el.name)));
 }
+
+/** 이 스코프 노드가 **직접** 선언한 `name`(없으면 undefined). var 끌어올림은 근사(같은 블록만). */
+function declaredIn(scope: ts.Node, name: string): ts.Node | undefined {
+  const inStatements = (statements: readonly ts.Statement[]): ts.Node | undefined => {
+    for (const st of statements) {
+      if (ts.isImportDeclaration(st) && st.importClause) {
+        const c = st.importClause;
+        if (c.name?.text === name) return c;
+        if (c.namedBindings && ts.isNamespaceImport(c.namedBindings) && c.namedBindings.name.text === name) return c.namedBindings;
+        if (c.namedBindings && ts.isNamedImports(c.namedBindings)) {
+          const el = c.namedBindings.elements.find((e) => e.name.text === name);
+          if (el) return el;
+        }
+      }
+      if (ts.isVariableStatement(st)) {
+        for (const d of st.declarationList.declarations) {
+          const hit = bindingIds(d.name).find((i) => i.text === name);
+          if (hit) return ts.isIdentifier(d.name) ? d : hit.parent;
+        }
+      }
+      if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isEnumDeclaration(st)) && st.name?.text === name) return st;
+    }
+    return undefined;
+  };
+  if (ts.isSourceFile(scope) || ts.isBlock(scope) || ts.isModuleBlock(scope) || ts.isCaseClause(scope) || ts.isDefaultClause(scope)) {
+    return inStatements(scope.statements);
+  }
+  if (ts.isFunctionLike(scope)) {
+    for (const prm of scope.parameters) {
+      const hit = bindingIds(prm.name).find((i) => i.text === name);
+      if (hit) return ts.isIdentifier(prm.name) ? prm : hit.parent;
+    }
+    if (ts.isFunctionExpression(scope) && scope.name?.text === name) return scope;
+  }
+  if ((ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope))
+    && scope.initializer && ts.isVariableDeclarationList(scope.initializer)) {
+    for (const d of scope.initializer.declarations) if (bindingIds(d.name).some((i) => i.text === name)) return d;
+  }
+  if (ts.isCatchClause(scope) && scope.variableDeclaration && bindingIds(scope.variableDeclaration.name).some((i) => i.text === name)) {
+    return scope.variableDeclaration;
+  }
+  return undefined;
+}
+
+/** 식별자가 실제로 가리키는 선언 — 가장 가까운 스코프부터 바깥으로(가려진 이름은 안쪽이 이긴다). 못 찾으면(전역 등) undefined. */
+export function resolveBinding(id: ts.Identifier): ts.Node | undefined {
+  for (let n: ts.Node | undefined = id.parent; n; n = n.parent) {
+    const d = declaredIn(n, id.text);
+    if (d) return d;
+  }
+  return undefined;
+}
+
+/** 모듈 지정자 → SRC 기준 경로(확장자 없음). `@/x` · 상대 경로만(패키지는 null). */
+function moduleKey(sf: ts.SourceFile, spec: string): string | null {
+  const noExt = (p: string) => p.replace(/\.(tsx?|jsx?)$/, '').replace(/\/index$/, '');
+  if (spec.startsWith('@/')) return noExt(spec.slice(2));
+  if (spec.startsWith('.')) return noExt(path.relative(SRC, path.resolve(path.dirname(path.resolve(SRC, sf.fileName)), spec)).split(path.sep).join('/'));
+  return null;
+}
+
+function fileKey(sf: ts.SourceFile): string {
+  return path.relative(SRC, path.resolve(SRC, sf.fileName)).split(path.sep).join('/').replace(/\.(tsx?)$/, '');
+}
+
+/** 선언이 믿는 내보내기(이름 · 모듈)인가 — import(이름 바꿔 가져와도 원래 이름으로) 또는 그 모듈 안 선언 자체. */
+function isTrustedExport(decl: ts.Node | undefined, exportName: string): boolean {
+  const modules = TRUSTED_EXPORTS.get(exportName);
+  if (!decl || !modules) return false;
+  if (ts.isImportSpecifier(decl)) {
+    const imported = (decl.propertyName ?? decl.name).text;
+    const spec = decl.parent.parent.parent.moduleSpecifier;
+    const key = ts.isStringLiteral(spec) ? moduleKey(decl.getSourceFile(), spec.text) : null;
+    return imported === exportName && key !== null && modules.includes(key);
+  }
+  if ((ts.isFunctionDeclaration(decl) || ts.isVariableDeclaration(decl)) && decl.name && ts.isIdentifier(decl.name)
+    && decl.name.text === exportName) {
+    return modules.includes(fileKey(decl.getSourceFile()));
+  }
+  return false;
+}
+
+/** 식별자가 «프로젝트를 싣는 함수»를 가리키나 — 이름이 아니라 선언의 출처로(위 표). */
+function isTrustedWrapperId(id: ts.Identifier, depth = 0): boolean {
+  if (depth > 4) return false;
+  const decl = resolveBinding(id);
+  if (!decl) return false;
+  for (const name of ['withProjectParam', 'projectHref', 'useConnectRulesHref']) if (isTrustedExport(decl, name)) return true;
+  if (ts.isParameter(decl) && ts.isIdentifier(decl.name) && TRUSTED_PARAMS.has(decl.name.text)) return true;
+  if (ts.isVariableDeclaration(decl) && decl.initializer) {
+    const init = decl.initializer;
+    // const flatHref = useFlatHref()
+    if (ts.isCallExpression(init) && ts.isIdentifier(init.expression) && isTrustedExport(resolveBinding(init.expression), 'useFlatHref')) return true;
+    // const y = flatHref(별칭)
+    if (ts.isIdentifier(init)) return isTrustedWrapperId(init, depth + 1);
+    // const f = ref.current — ref = useRef(flatHref)
+    if (ts.isPropertyAccessExpression(init) && init.name.text === 'current' && ts.isIdentifier(init.expression)) {
+      const refDecl = resolveBinding(init.expression);
+      const refInit = refDecl && ts.isVariableDeclaration(refDecl) ? refDecl.initializer : undefined;
+      if (refInit && ts.isCallExpression(refInit) && ts.isIdentifier(refInit.expression) && refInit.expression.text === 'useRef'
+        && refInit.arguments[0] && ts.isIdentifier(refInit.arguments[0])) {
+        return isTrustedWrapperId(refInit.arguments[0], depth + 1);
+      }
+    }
+  }
+  return false;
+}
+
+/** `name`이 호출 자리에서 이 모듈에서 가져온 그 이름을 가리키나(가려진 로컬 · 파일 안 다른 선언은 아니다). */
+function resolvesToImport(id: ts.Identifier, module: string): boolean {
+  const decl = resolveBinding(id);
+  if (!decl || !ts.isImportSpecifier(decl)) return false;
+  const spec = decl.parent.parent.parent.moduleSpecifier;
+  return (decl.propertyName ?? decl.name).text === id.text && ts.isStringLiteral(spec) && spec.text === module;
+}
+
+/** 리터럴이 해시(#) 앞 쿼리에 `p` 키를 스스로 싣는지(템플릿은 머리 + 각 조각 꼬리 · 치환 자리는 \u0000). 키 판정은 withProjectParam과 같은 뜻. */
 
 /** 함수가 돌려주는 식(화살표 식 본문 · return 문)들. */
 function returnedExpressions(fn: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration): ts.Expression[] {
@@ -105,22 +235,17 @@ function returnedExpressions(fn: ts.ArrowFunction | ts.FunctionExpression | ts.F
   return out;
 }
 
-/** 파일 안 `name` 선언(`const name = (…) => …` · `function name(…)`)을 찾는다. */
-function localFunctionDecl(sf: ts.SourceFile, name: string): ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | null {
-  let found: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | null = null;
-  const visit = (n: ts.Node) => {
-    if (found) return;
-    if (ts.isFunctionDeclaration(n) && n.name?.text === name) { found = n; return; }
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && n.initializer
-      && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))) { found = n.initializer; return; }
-    ts.forEachChild(n, visit);
-  };
-  visit(sf);
-  return found;
+/** 호출 자리에서 보이는 `callee` 선언(스코프 따라 · 가려진 안쪽이 이긴다)이 함수면 그 함수. 까디르 QA ②: 예전엔 파일의 **첫** 선언. */
+function visibleFunctionDecl(callee: ts.Identifier): ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | null {
+  const d = resolveBinding(callee);
+  if (!d) return null;
+  if (ts.isFunctionDeclaration(d)) return d;
+  if (ts.isVariableDeclaration(d) && d.initializer && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))) return d.initializer;
+  return null;
 }
 
 /**
- * 인자가 «프로젝트를 싣는 함수»인가 — ① WRAPPERS 이름 ② 본문에서 WRAPPERS를 부르는 화살표 ③ 파일 안에 선언된 **팩토리 호출**로,
+ * 인자가 «프로젝트를 싣는 함수»인가 — ① 선언 출처가 믿는 함수인 식별자 ② 본문이 그런 함수를 부르는 화살표 ③ 호출 자리에서 보이는 **팩토리 호출**로,
  * 그 팩토리가 돌려주는 모든 갈래(조건식 양쪽)가 ①·② 중 하나일 때(embed-card `ownProjectHref`: 항목 p를 싣는 화살표 · 없으면 flatHref).
  * 항등 `(h) => h` · 모르는 이름 · 항등을 돌려주는 팩토리는 아니다.
  */
@@ -128,13 +253,13 @@ function isProjectCarryingFn(arg: ts.Expression | undefined, depth = 0): boolean
   if (!arg || depth > 3) return false;
   if (ts.isParenthesizedExpression(arg)) return isProjectCarryingFn(arg.expression, depth);
   if (ts.isConditionalExpression(arg)) return isProjectCarryingFn(arg.whenTrue, depth) && isProjectCarryingFn(arg.whenFalse, depth);
-  if (ts.isIdentifier(arg)) return WRAPPERS.has(arg.text);
+  if (ts.isIdentifier(arg)) return isTrustedWrapperId(arg);
   if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
     const results = returnedExpressions(arg);
     return results.length > 0 && results.every((r) => isWrapperCall(r));
   }
   if (ts.isCallExpression(arg) && ts.isIdentifier(arg.expression)) {
-    const decl = localFunctionDecl(arg.getSourceFile(), arg.expression.text);
+    const decl = visibleFunctionDecl(arg.expression);
     if (!decl) return false;
     const results = returnedExpressions(decl);
     return results.length > 0 && results.every((r) => isProjectCarryingFn(r, depth + 1));
@@ -148,7 +273,8 @@ function isWrappedFallback(node: ts.Node): boolean {
   if (!parent || !ts.isCallExpression(parent) || !ts.isIdentifier(parent.expression)) return false;
   const spec = WRAPPING_HELPERS.get(parent.expression.text);
   if (!spec || parent.arguments[spec.fallbackArg] !== child) return false;
-  if (!importedFrom(parent.getSourceFile(), parent.expression.text, spec.module)) return false;
+  // 까디르 QA ③ — 파일에 import가 있어도, 호출 자리의 이름이 가려진 로컬(중첩 선언)이면 그 헬퍼가 아니다.
+  if (!resolvesToImport(parent.expression, spec.module)) return false;
   return isProjectCarryingFn(parent.arguments[spec.wrapperArg]);
 }
 
@@ -177,7 +303,7 @@ function isDataPathTemplate(node: ts.Node): boolean {
 }
 
 function isWrapperCall(node: ts.Node): boolean {
-  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && WRAPPERS.has(node.expression.text);
+  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && isTrustedWrapperId(node.expression);
 }
 
 /** 조건식 갈래·괄호·`??`·`||`를 거슬러 올라간 뒤의 부모(리터럴이 실제로 쓰이는 자리). */
@@ -233,7 +359,7 @@ export function countBareFlatLinksInSource(fileName: string, text: string, route
   const visit = (node: ts.Node) => {
     if (isWrapperCall(node)) return;
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ASSEMBLERS.has(node.expression.text)) {
-      const wrapped = node.arguments.some((a) => ts.isIdentifier(a) && WRAPPERS.has(a.text));
+      const wrapped = node.arguments.some((a) => ts.isIdentifier(a) && isProjectCarryingFn(a));
       if (!wrapped && !isExempt(rel, node.expression.text, enclosingPropName(node))) n += 1;
     }
     const literal = literalText(node);
@@ -262,7 +388,11 @@ function countBareFlatLinks(): { total: number; byFile: Record<string, number> }
 
 describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈법)', () => {
   const routes = ['inbox', 'chats', 'gates', 'more', 'organization', 'docs', 'settings'];
-  const count = (src: string, rel = 'x.tsx') => countBareFlatLinksInSource('x.tsx', src, routes, rel);
+  // 까디르 QA 4679 — 감싸기 함수는 이제 **선언 출처**로 판정한다. 표본은 실제 소스처럼 진짜 import · `useFlatHref()`에서 받은 flatHref를
+  // 앞에 둔다(countRaw는 이 머리 없이 — 가짜 선언 · 가려진 이름 표본용).
+  const PRELUDE = "import { useFlatHref } from '@/hooks/use-flat-href';\nimport { withProjectParam } from '@/lib/with-project-param';\nconst flatHref = useFlatHref();\n";
+  const count = (src: string, rel = 'x.tsx') => countBareFlatLinksInSource('x.tsx', PRELUDE + src, routes, rel);
+  const countRaw = (src: string) => countBareFlatLinksInSource('x.tsx', src, routes, 'x.tsx');
 
   it('양성대조 — 이동 자리 모양(JSX href · router · href:/path:) · 조건식 갈래마다', () => {
     expect(count('const a = <Link href="/inbox?tab=gates" />;')).toBe(1);
@@ -321,7 +451,7 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count("const h = scopedResourceHref('flow', org, proj, keepHref);")).toBe(1);
     expect(count('const h = destHref(dest, scope, flatHref);')).toBe(0);
     expect(count('const h = destHref(dest, scope, (h) => h);')).toBe(1);
-    expect(count('const h = resolveTabHref(tab, dest, scope, withProject);')).toBe(0);
+    expect(count('function f(withProject) { return resolveTabHref(tab, dest, scope, withProject); }')).toBe(0);
     expect(count("const TABS = [{ href: destHref(D.work, {}, keepHref) }];", 'components/nav/mobile-tab-bar.tsx')).toBe(0);
     expect(count("const x = destHref(D.work, {}, keepHref);", 'components/nav/mobile-tab-bar.tsx')).toBe(1);
   });
@@ -332,7 +462,7 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     expect(count('const h = `/${resource}`;')).toBe(1);
     expect(count('router.push(`/${dest.resourcePath}?tab=x`);')).toBe(1);
     // 음성: 감싼 자리 · 스스로 p를 싣는 자리 · scoped 조립(첫 치환이 조직 · 프로젝트) · path가 아닌 치환 · 비교.
-    expect(count('const h = withProject(`/${resource}`);')).toBe(0);
+    expect(count('function f(withProject) { return withProject(`/${resource}`); }')).toBe(0);
     expect(count('const h = `/${item.path}?p=${pid}`;')).toBe(0);
     expect(count('const h = `/${orgSlug}/${projectSlug}/${resource}`;')).toBe(0);
     expect(count('const h = `/${slug}`;')).toBe(0);
@@ -369,6 +499,31 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
     for (const e of EXEMPT) expect(e.reason.length, e.file).toBeGreaterThan(10);
   });
 
+  it('⭐까디르 QA 4679 ① — 감싸기 함수는 이름이 아니라 선언 출처로: 파일 안 가짜 · 가져오지 않은 같은 이름은 감싼 게 아니다', () => {
+    expect(countRaw("const flatHref = (h) => h;\nconst a = <Link href={flatHref('/inbox')} />;"), '로컬 가짜 flatHref').toBe(1);
+    expect(countRaw("function withProjectParam(h) { return h; }\nconst a = withProjectParam('/inbox', p);"), '로컬 가짜 withProjectParam').toBe(1);
+    expect(countRaw("import { withProjectParam } from '@/lib/not-the-real-one';\nconst a = withProjectParam('/inbox', p);"), '다른 모듈의 같은 이름').toBe(1);
+    expect(countRaw("function f(flatHref) { return flatHref('/inbox'); }"), '믿지 않는 이름의 매개변수').toBe(1);
+    // 음성 — 진짜 출처는 이름을 바꿔도 · 재수출로 가져와도 · ref로 옮겨도 감싼 것.
+    expect(countRaw("import { withProjectParam as wp } from '@/lib/with-project-param';\nconst a = wp('/inbox', p);"), '이름 바꿔 가져옴').toBe(0);
+    expect(countRaw("import { withProjectParam } from '@/hooks/use-flat-href';\nconst a = withProjectParam('/inbox', p);"), '재수출').toBe(0);
+    expect(countRaw("import { useFlatHref } from '@/hooks/use-flat-href';\nconst go = useFlatHref();\nconst a = <Link href={go('/inbox')} />;"), '다른 이름의 flatHref').toBe(0);
+    expect(countRaw("import { useFlatHref } from '@/hooks/use-flat-href';\nfunction P() { const flatHref = useFlatHref(); const r = useRef(flatHref); const f = r.current; return f('/inbox'); }"), 'ref.current').toBe(0);
+    expect(countRaw("function helper(withProject) { return withProject('/inbox'); }"), '계약 매개변수 withProject').toBe(0);
+  });
+
+  it('⭐까디르 QA 4679 ② — 팩토리는 호출 자리에서 보이는 선언으로(가려진 안쪽 mk가 이긴다)', () => {
+    const head = "import { resolveScopedEntityHref } from '@/lib/entity-project-url';\n";
+    expect(count(head + "const mk = () => flatHref;\nfunction f() { const mk = () => (h) => h; return resolveScopedEntityHref(s, `/docs?id=${id}`, build, mk()); }"), '가려진 항등 팩토리').toBe(1);
+    expect(count(head + "const mk = () => (h) => h;\nfunction f() { const mk = () => flatHref; return resolveScopedEntityHref(s, `/docs?id=${id}`, build, mk()); }"), '가려진 쪽이 진짜 — 음성').toBe(0);
+  });
+
+  it('⭐까디르 QA 4679 ③ — 감싸는 헬퍼는 호출 자리에서 import를 가리킬 때만(같은 파일 안 중첩 로컬 같은 이름은 아니다)', () => {
+    const head = "import { resolveScopedEntityHref } from '@/lib/entity-project-url';\n";
+    expect(count(head + "function g() { const resolveScopedEntityHref = (a, b, c, d) => b; return resolveScopedEntityHref(s, `/docs?id=${id}`, build, flatHref); }"), '중첩 로컬').toBe(1);
+    expect(count(head + "function g() { return resolveScopedEntityHref(s, `/docs?id=${id}`, build, flatHref); }"), '진짜 import — 음성').toBe(0);
+  });
+
   it(`⭐bare flat 목적지 수 = 기준값 ${BASELINE}(늘면 RED · 줄였으면 BASELINE도 낮출 것)`, () => {
     const { total, byFile } = countBareFlatLinks();
     expect(
@@ -376,5 +531,5 @@ describe('`?p=` 없는 flat 목적지 래칫(story #4226 → #4231 · TS AST 셈
       `bare flat 목적지 ${total}개(기준 ${BASELINE}). 늘었으면 새 목적지를 useFlatHref()로 감쌀 것 · 줄었으면 BASELINE을 ${total}로 낮출 것.\n`
         + JSON.stringify(byFile, null, 1),
     ).toBe(BASELINE);
-  });
+  }, 120_000); // 저장소 전수 · 식별자마다 스코프 해석 — 부하 때 5초 기본 제한을 넘었다(실측 ~7초).
 });
