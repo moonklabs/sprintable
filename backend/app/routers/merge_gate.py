@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.datetime_query import aware_datetime_query
@@ -46,6 +46,12 @@ async def get_merge_gate_metrics(
     _auth: AuthContext = Depends(get_current_user),
 ) -> MergeGateMetricsResponse:
     """merge verdict gate 6지표 on-the-fly 집계. denom 0이면 ratio=null, 데이터 있고 0이면 0."""
+    # story #4350 — 명시 project_id는 caller 접근 확인(없으면 404 · 존재 비노출). 예전엔 접근 불가 프로젝트의 집계를 그대로 읽었다.
+    if project_id is not None:
+        from app.services.project_auth import has_project_access
+
+        if not await has_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
     data = await compute_merge_gate_metrics(
         session, org_id, project_id=project_id, start=start, end=end
     )

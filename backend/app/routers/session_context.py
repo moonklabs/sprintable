@@ -71,8 +71,12 @@ async def get_session_context_endpoint(
     _auth: AuthContext = Depends(get_current_user),
 ) -> Any:
     try:
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        # story #4350 — caller가 접근 가능한 프로젝트의 일만(SEC-S8).
+        accessible = await accessible_project_ids_in_org(session, uuid.UUID(_auth.user_id), org_id)
         return await get_session_context(
-            session, org_id=org_id, member_id=member_id, project_id=project_id,
+            session, org_id=org_id, member_id=member_id, project_id=project_id, accessible_project_ids=accessible,
             since=since, activity_limit=activity_limit,
         )
     except MemberNotFoundError as e:

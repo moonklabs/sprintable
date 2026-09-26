@@ -32,8 +32,12 @@ async def get_dashboard(
     같은 함수를 재사용 — 재구현 0). 이 라우터는 그 함수를 부르고 404로 번역하는 얇은 래퍼다.
     """
     try:
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        # story #4350 — caller가 접근 가능한 프로젝트의 일만(SEC-S8). 다른 구성원의 일을 보는 시야 자체는 그대로.
+        accessible = await accessible_project_ids_in_org(session, uuid.UUID(_auth.user_id), org_id)
         my_stories, my_tasks = await get_my_work(
-            session, org_id=org_id, member_id=member_id, project_id=project_id,
+            session, org_id=org_id, member_id=member_id, project_id=project_id, accessible_project_ids=accessible,
         )
     except MemberNotFoundError as e:
         raise HTTPException(status_code=404, detail="Member not found or inactive") from e

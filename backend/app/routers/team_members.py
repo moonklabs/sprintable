@@ -1,5 +1,6 @@
 import os
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -97,7 +98,7 @@ async def _org_max_plugin_version(org_id: uuid.UUID, session: AsyncSession) -> s
 
 
 async def _inject_active_stories(
-    members: list, session: AsyncSession
+    members: list, session: AsyncSession, *, accessible_project_ids: Collection[uuid.UUID] | None = None,
 ) -> list[TeamMemberResponse]:
     """AC6: active_story_id → stories batch 조회 후 inject.
 
@@ -110,7 +111,12 @@ async def _inject_active_stories(
     ids = {m.active_story_id for m in members if m.active_story_id}
     stories: dict[uuid.UUID, Story] = {}
     if ids:
-        result = await session.execute(select(Story).where(Story.id.in_(ids)))
+        q = select(Story).where(Story.id.in_(ids))
+        # story #4350 — caller가 접근 가능한 프로젝트의 스토리만 싣는다(SEC-S8). 에이전트 행 자체는 그대로 나오고
+        # 접근 불가 프로젝트의 «지금 하는 스토리» 제목만 빠진다(None = 거르지 않음 · 지금 두 호출부 모두 넘김).
+        if accessible_project_ids is not None:
+            q = q.where(Story.project_id.in_(list(accessible_project_ids)))
+        result = await session.execute(q)
         for s in result.scalars().all():
             stories[s.id] = s
 
@@ -241,7 +247,10 @@ async def list_team_members(
             if user_id:
                 agent_filters["user_id"] = user_id
             agents = await repo.list(**agent_filters)
-            result.extend(await _inject_active_stories(agents, session))
+            from app.services.project_auth import accessible_project_ids_in_org
+
+            accessible = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
+            result.extend(await _inject_active_stories(agents, session, accessible_project_ids=accessible))
         return result
 
     # ratchet round2(story 8aec83b3): project_id 지정 분기가 접근권 검증 없이 repo.list로
@@ -258,7 +267,11 @@ async def list_team_members(
     if user_id:
         filters["user_id"] = user_id
     members = await repo.list(**filters)
-    return await _inject_active_stories(members, session)
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    # 이 프로젝트 구성원이라도 «지금 하는 스토리»는 다른 프로젝트일 수 있다 — 같은 규칙으로 거른다.
+    accessible = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
+    return await _inject_active_stories(members, session, accessible_project_ids=accessible)
 
 
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
