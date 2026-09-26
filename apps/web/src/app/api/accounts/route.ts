@@ -9,7 +9,7 @@ import {
   discardCookies,
   getVerifiedActiveAccountId,
 } from '@/lib/auth/account-vault';
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -53,8 +53,8 @@ export async function GET(request: Request) {
     const metaById = new Map<string, Partial<AccountMeta>>();
     try {
       const session = await getServerSession();
-      const r = await fetch(`${FASTAPI_URL()}/api/v2/accounts/resolve`, {
-        signal: backendSignal(request),
+      const r = await backendFetch(`${FASTAPI_URL()}/api/v2/accounts/resolve`, {
+        request,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

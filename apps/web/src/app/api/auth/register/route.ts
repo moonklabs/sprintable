@@ -4,7 +4,7 @@ import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -22,8 +22,9 @@ export async function POST(request: Request) {
   const utmCampaign = cookieStore.get('sp_attr_campaign')?.value;
   const referrer = cookieStore.get('sp_attr_ref')?.value;
 
-  const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
-    signal: backendSignal(request),
+  const fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
+    // story #4320(까디르 QA ③) — 계정 · 첫 토큰을 새로 만든다(귀속 쿠키 소비) — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+    timeLimitOnly: true,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

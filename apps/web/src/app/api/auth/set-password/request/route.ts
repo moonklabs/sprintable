@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { safeJsonParse } from '@/lib/api-response';
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -14,8 +14,8 @@ export async function POST(request: Request) {
   const body = await request.json() as { new_password: string };
   const spAt = request.headers.get('cookie')?.match(/sp_at=([^;]+)/)?.[1] ?? '';
 
-  const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/set-password/request`, {
-    signal: backendSignal(request),
+  const fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/set-password/request`, {
+    request,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${spAt}` },
     body: JSON.stringify({ new_password: body.new_password }),

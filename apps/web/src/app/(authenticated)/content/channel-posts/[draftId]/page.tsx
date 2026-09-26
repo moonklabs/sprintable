@@ -46,6 +46,7 @@ import {
 } from '@/components/content/content-rule-violation';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * story #3402(Phase1·마케팅운영, AC5/AC6·doc §3-1) — 채널 포스트 편집·상신(와이어프레임
@@ -1370,7 +1371,7 @@ export default function ChannelPostEditPage() {
       if (estimatedCostInput !== '' && generationBudgetCurrency !== null) {
         submitBody.estimated_cost_minor = majorToMinor(Number(estimatedCostInput), generationBudgetCurrency);
       }
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/submit`, { timeoutMs: LONG_ROUTES.channelDraftSubmit.browserMs,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(submitBody),
@@ -1513,7 +1514,7 @@ export default function ChannelPostEditPage() {
       setImageUploadStatus({ phase: 'confirming' });
       const confirmRes = await fetchWithAuth(
         `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/confirm`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+        { timeoutMs: LONG_ROUTES.channelAssetConfirm.browserMs, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
       );
       if (!confirmRes.ok) {
         const body = await confirmRes.json().catch(() => null);
@@ -1664,7 +1665,7 @@ export default function ChannelPostEditPage() {
       setVideoUploadStatus({ phase: 'confirming' });
       const confirmRes = await fetchWithAuth(
         `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/video/confirm`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+        { timeoutMs: LONG_ROUTES.channelAssetConfirm.browserMs, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
       );
       if (!confirmRes.ok) {
         const body = await confirmRes.json().catch(() => null);
@@ -1807,7 +1808,7 @@ export default function ChannelPostEditPage() {
     setGenBudgetExceeded(null);
     setApiUsageBudgetExceeded(null);
     try {
-      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/publish`, { timeoutMs: LONG_ROUTES.channelPublishNow.browserMs, method: 'POST' });
       if (res.ok) {
         const json = (await res.json().catch(() => null)) as
           { data?: { permalink?: string; external_id?: string; published_at?: string; scheduled?: boolean; scheduled_at?: string; publication_id?: string | null; processing?: boolean } } | null;

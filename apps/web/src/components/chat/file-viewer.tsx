@@ -7,6 +7,10 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
 import { MdBody } from '@/components/chat/embed-card';
 import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+
+// story #4320 — 화면 상한은 브라우저 fetch 시한보다 조금 길게(fetch가 먼저 끝나 오류 봉투를 읽고 · 이 타이머는 무한 로딩 방지 백스톱).
+const CONVERT_SCREEN_TIMEOUT_MS = LONG_ROUTES.attachmentConvert.browserMs + 2_000;
 
 type AttachmentTarget = Extract<ReadingPanelTarget, { kind: 'attachment' }>;
 
@@ -634,15 +638,16 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     // 상한 — run과 독립적으로 도는 타이머라 run 쪽에서 무슨 일이 있어도 항상 발화한다
     // (AC2·AC3, 무한 로딩 금지를 구조로 보장).
     const timeoutId = setTimeout(() => {
-      console.error('pptx 변환 시간 초과(130s)');
+      console.error(`pptx 변환 시간 초과(${CONVERT_SCREEN_TIMEOUT_MS / 1000}s)`);
       markFailed(t('pptxConvertTimeout'));
-    }, 130000);
+    }, CONVERT_SCREEN_TIMEOUT_MS);
 
     (async () => {
       try {
-        // story #4310 — 동기 변환(Gotenberg 왕복 BE 120s)이라 fetchWithAuth 기본 30s 상한 대신 위 화면 상한(130s)과 같게.
+        // story #4320(까디르 QA ①) — 예전 130초는 프런트 Cloud Run 한도(60초)에서 실제로 잘렸다(봉투 없는 504). 표 한 곳(bff-route-timeouts)의
+        // 브라우저 시한 — BFF가 한도 안에서 503 봉투로 먼저 답한다. 백엔드 변환(120초+)은 동기로 못 기다림(후속 카드: 비동기화).
         const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
-          method: 'POST', signal: controller.signal, timeoutMs: 130_000,
+          method: 'POST', signal: controller.signal, timeoutMs: LONG_ROUTES.attachmentConvert.browserMs,
         });
         const convertJson = (await convertRes.json().catch(() => null)) as
           | { data?: { asset_id?: string }; error?: { message?: string } }

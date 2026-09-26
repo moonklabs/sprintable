@@ -17,6 +17,8 @@ describe('/api/organizations/[id]/channel-connections/[channel]/callback (story 
     const resp = await POST(request, { params: Promise.resolve({ id: 'org-1', channel: 'threads' }) });
     expect(proxyToFastapiWithParams).toHaveBeenCalledWith(
       request, '/api/v2/organizations/[id]/channel-connections/[channel]/callback', { id: 'org-1', channel: 'threads' },
+      // story #4320 — OAuth 코드 소비 → 시간 제한만 · 외부 호출 사슬 시한.
+      expect.objectContaining({ timeLimitOnly: true }),
     );
     await expect(resp.json()).resolves.toEqual({ data: conn, error: null, meta: null });
   });

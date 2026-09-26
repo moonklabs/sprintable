@@ -4,6 +4,7 @@ const { proxyToFastapiWithParams } = vi.hoisted(() => ({ proxyToFastapiWithParam
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
 
 import { POST } from './route';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 describe('/api/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/confirm (story #3556)', () => {
   it('POST — FastAPI video confirm 엔드포인트로 draftId를 그대로 위임, 201 pass-through', async () => {
@@ -24,6 +25,8 @@ describe('/api/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/co
       request,
       '/api/v2/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/confirm',
       { id: 'org-1', draftId: 'd1' },
+      // story #4320 — 긴 라우트 시한은 표 한 곳(bff-route-timeouts).
+      expect.objectContaining({ timeoutMs: LONG_ROUTES.channelAssetConfirm.bffMs }),
     );
     expect(resp.status).toBe(201);
   });

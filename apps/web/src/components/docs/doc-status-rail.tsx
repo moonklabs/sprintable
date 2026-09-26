@@ -13,6 +13,7 @@ import type { GateItem } from '@/components/kanban/types';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * story #2955 §3/§7(doc docs-index-reader-redesign-handoff) — 셸 B "에디토리얼 리더"의
@@ -123,7 +124,7 @@ export function useDocGateData(docId: string, status: string | undefined) {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (res.ok) { onDone(); await load(); } else { setError(await parseErrorBody(res)); }

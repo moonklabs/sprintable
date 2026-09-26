@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -10,9 +10,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!session?.access_token) return ApiErrors.unauthorized();
 
   const body = await request.text();
-  const res = await fetch(
+  const res = await backendFetch(
     `${FASTAPI_URL()}/api/v2/channel/deliver?token=${encodeURIComponent(session.access_token)}`,
-    { signal: backendSignal(request), method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
+    { request, method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
   );
   const resBody = await res.text();
   return new NextResponse(resBody, {

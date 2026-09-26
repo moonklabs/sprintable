@@ -1,5 +1,6 @@
 import { apiSuccess } from '@/lib/api-response';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
+import { BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 
 type RouteParams = { params: Promise<{ id: string; channel: string }> };
 
@@ -10,6 +11,12 @@ export async function POST(request: Request, { params }: RouteParams) {
   const { id, channel } = await params;
   const _r = await proxyToFastapiWithParams(
     request, '/api/v2/organizations/[id]/channel-connections/[channel]/callback', { id, channel },
+    {
+      // 백엔드는 외부 호출을 잇달아(최대 3 × 15초 = 45초 · channel_connections.py:746,812,883) — 직접 콜백 라우트와 같은 60초.
+      // story #4320(까디르 QA ①③) — OAuth 코드를 소비한다(끊으면 연결은 됐는데 결과를 못 받음) — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+      timeLimitOnly: true,
+      timeoutMs: BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS,
+    },
   );
   if (!_r.ok) return _r;
   return apiSuccess(await _r.json());

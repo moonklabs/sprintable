@@ -51,8 +51,12 @@ interface ProxyOptions {
   // 보여주는 언어를 항상 Accept-Language로 실어 보낸다 — 이 옵션은 그 값을 라우트별로
   // override하고 싶을 때만 쓴다(대부분 안 써도 된다).
   extraHeaders?: Record<string, string>;
-  /** story #4320 — 백엔드 응답 머리까지 기다릴 최대 시간(기본 30초 · 4310과 같은 수). 변환 계열처럼 오래 걸리는 라우트만 길게. */
+  /** story #4320 — 백엔드 응답 **본문까지** 기다릴 최대 시간(기본 30초 · 4310과 같은 수). 긴 라우트는 `bff-route-timeouts`의 이름 붙은
+   * 값(근거 백엔드 파일:줄이 그 옆에)을 넘긴다. */
   timeoutMs?: number;
+  /** story #4320(까디르 QA ③) — 한 번 쓰는 값을 소비하거나 새 토큰 · 자격을 내는 호출(결제 · API 키 · 공유 토큰 …): 브라우저가 끊어도
+   * 백엔드 호출은 끝까지 간다(끊으면 값은 소비됐는데 결과를 못 받는다 · 결제는 다시 누르면 이중 결제). 시간 제한만. */
+  timeLimitOnly?: boolean;
 }
 
 /**
@@ -130,7 +134,7 @@ async function proxyToFastapiImpl(
       headers,
       body,
       // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
-      signal: backendSignal(request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
+      signal: backendSignal(options.timeLimitOnly ? null : request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
     });
   } catch (err) {
     // story #4320 — 시간 초과는 «연결 못 함»과 다른 코드(같은 503 계열 · 사용자 문장은 «응답이 늦다»).
@@ -156,7 +160,16 @@ async function proxyToFastapiImpl(
   }
   timer?.mark('be_ttfb');
 
-  const resBody = await res.text();
+  // story #4320(까디르 QA ④) — 시간 제한은 본문 읽기까지 덮는다: 머리를 받은 뒤 본문을 읽다 시간이 다 되면 fetch 때와 같은 봉투로.
+  let resBody: string;
+  try {
+    resBody = await res.text();
+  } catch (err) {
+    const kind = classifyBackendAbort(err);
+    if (kind === 'timeout') return apiError('UPSTREAM_TIMEOUT', '서버 응답이 늦어지고 있습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    if (kind === 'client-abort') return apiError('CLIENT_CLOSED_REQUEST', '요청이 취소되었습니다.', 499);
+    return apiError('UPSTREAM_UNREACHABLE', '서버에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+  }
   timer?.mark('be_body');
   const resHeaders: Record<string, string> = { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' };
   // story #2190 — board 분기(list_stories status+project_id 조합)가 커서 페이지네이션 신호를

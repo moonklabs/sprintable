@@ -8,11 +8,13 @@ import {
   verifyResolveCache,
 } from './route-resolve';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from './legacy-resource-tables';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 const JWT_SECRET = 'test-secret-for-route-resolve-tests';
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — 목은 맨 객체를 돌려도 된다(asFetchResponse가 진짜 Response로 · backendFetch는 본문을 다 읽는다).
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 beforeEach(() => {
   process.env['JWT_SECRET'] = JWT_SECRET;

@@ -13,9 +13,11 @@ vi.mock('@/lib/db/server', () => ({ SP_AT_COOKIE: 'sp_at', SP_RT_COOKIE: 'sp_rt'
 vi.mock('@/services/app-url', () => ({ resolveAppUrl: () => 'http://localhost:3108' }));
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — 목은 맨 객체를 돌려도 된다(asFetchResponse가 진짜 Response로 · backendFetch는 본문을 다 읽는다).
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 import { GET } from './route';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 // header.payload.signature — 서명은 검증 안 하므로 아무 값이나 무방. payload만 유효 base64url JSON.
 function fakeJwt(payload: Record<string, unknown>): string {

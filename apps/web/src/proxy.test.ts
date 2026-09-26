@@ -3,7 +3,8 @@ import { NextRequest } from 'next/server';
 import { SignJWT } from 'jose';
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — route-resolve가 backendFetch(본문을 다 읽는다)를 거친다 — 맨 객체 목을 진짜 Response로.
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 vi.mock('jose', async (importOriginal) => {
   const actual = await importOriginal<typeof import('jose')>();
@@ -11,6 +12,7 @@ vi.mock('jose', async (importOriginal) => {
 });
 
 import { proxy as middleware, RENAMED_RESOURCES, RETIRED_RESOURCES } from './proxy';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 

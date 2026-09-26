@@ -10,9 +10,11 @@ vi.mock('@/lib/auth/csrf', () => ({ verifyCsrfOrigin: h.csrfCheck }));
 vi.mock('next/headers', () => ({ cookies: vi.fn(async () => ({ get: h.cookieGet })) }));
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — 목은 맨 객체를 돌려도 된다(asFetchResponse가 진짜 Response로 · backendFetch는 본문을 다 읽는다).
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 import { POST } from './route';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 function makeRequest(body: string = '{}'): Request {
   return new Request('http://localhost/api/auth/refresh', { method: 'POST', body });

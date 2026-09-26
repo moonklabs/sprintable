@@ -1,5 +1,6 @@
 import { apiSuccess } from '@/lib/api-response';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 type RouteParams = { params: Promise<{ id: string; draftId: string }> };
 
@@ -14,6 +15,10 @@ export async function POST(request: Request, { params }: RouteParams) {
     request,
     '/api/v2/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/confirm',
     { id, draftId },
+    {
+      // story #4320(까디르 QA ①) — 영상 전체를 받아 파생물을 올린다 — 시한은 표 한 곳(bff-route-timeouts · 근거 백엔드 파일:줄).
+      timeoutMs: LONG_ROUTES.channelAssetConfirm.bffMs,
+    },
   );
   if (!_r.ok) return _r;
   // 백엔드가 201로 새 버전 생성을 알린다(assets/confirm/route.ts와 동일 이유).

@@ -3,7 +3,7 @@ import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getServerSession } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { NextResponse } from 'next/server';
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -15,8 +15,9 @@ export async function POST(request: Request) {
     const session = await getServerSession();
     if (!session) return ApiErrors.unauthorized();
 
-    const res = await fetch(`${FASTAPI_URL()}/api/v2/auth/totp/setup`, {
-      signal: backendSignal(request),
+    const res = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/totp/setup`, {
+      // story #4320(까디르 QA ③) — 2FA 비밀을 새로 낸다 — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
+      timeLimitOnly: true,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

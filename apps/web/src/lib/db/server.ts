@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { jwtVerify } from 'jose';
 import { cache } from 'react';
 import { verifySprintableSession, SP_FS_COOKIE } from '@/lib/auth/firebase-session';
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 export const SP_AT_COOKIE = 'sp_at';
 export const SP_RT_COOKIE = 'sp_rt';
@@ -82,9 +82,9 @@ export const resolveFirebaseServerSession = cache(async (sessionCookie: string):
   // 읽는다(backend/app/dependencies/auth.py — Cookie 추출 경로 자체가 존재하지 않음). 세션
   // 쿠키 값을 Cookie 헤더로 보내면 BE가 아예 못 읽어 항상 401 — Authorization: Bearer로
   // 그대로 전달해야 _resolve_firebase_session(token, db)가 검증할 수 있다.
-  const res = await fetch(`${FASTAPI_URL()}/api/v2/me`, {
+  const res = await backendFetch(`${FASTAPI_URL()}/api/v2/me`, {
     // story #4320 — 서버 세션 조회(요청 객체 없음 · next/headers 쿠키) — 시간 제한만.
-    signal: backendSignal(null),
+    
     headers: { Authorization: `Bearer ${sessionCookie}` },
   }).catch(() => null);
   if (!res || !res.ok) return null;

@@ -12,6 +12,7 @@ import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionE
 import { TodayV3ReasonDialog } from './today-v3-reason-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 /**
  * story #3964(E-UX-OVERHAUL·「오늘」 구현 4/N) — #3962/CHANGES-2가 지은 자리(위험
@@ -46,7 +47,7 @@ interface ActionResult {
 }
 
 async function postGateTransition(id: string, status: 'approved' | 'rejected', note?: string): Promise<ActionResult> {
-  const res = await fetchWithAuth(`/api/gates/${id}/transition`, {
+  const res = await fetchWithAuth(`/api/gates/${id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildGateTransitionBody({ status, note })),

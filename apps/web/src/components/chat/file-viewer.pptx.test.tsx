@@ -11,6 +11,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { FileViewer } from './file-viewer';
 import koMessages from '../../../messages/ko.json';
 import type { ReadingPanelTarget } from './reading-panel';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -86,7 +87,7 @@ describe('FileViewer pptx (story #2803)', () => {
       if (url.includes('/api/attachments/convert') && init?.method === 'POST') {
         expect(url).toContain(`asset_id=${ORIGINAL_ASSET_ID}`);
         // story #4310 — 동기 변환(BE 120s)이라 fetchWithAuth 기본 30s 대신 화면 상한과 같은 130s.
-        expect((init as { timeoutMs?: number }).timeoutMs).toBe(130_000);
+        expect((init as { timeoutMs?: number }).timeoutMs).toBe(LONG_ROUTES.attachmentConvert.browserMs);
         return jsonResponse({ data: { asset_id: CONVERTED_ASSET_ID, name: 'deck.pdf', content_type: 'application/pdf' } });
       }
       if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${CONVERTED_ASSET_ID}`)) {
@@ -207,7 +208,7 @@ describe('FileViewer pptx (story #2803)', () => {
     await act(async () => { await Promise.resolve(); });
     expect(container.textContent).toContain('변환 중이에요');
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LONG_ROUTES.attachmentConvert.browserMs + 2_000); });
 
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('변환에 실패했어요');
@@ -235,7 +236,7 @@ describe('FileViewer pptx (story #2803)', () => {
     mount(<FileViewer target={target} onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LONG_ROUTES.attachmentConvert.browserMs + 2_000); });
     expect(container.textContent).toContain('변환에 실패했어요');
 
     // failed 확정 후에야 convert가 뒤늦게 성공 응답으로 resolve — 나머지(sign) 왕복이 실제로

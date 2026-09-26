@@ -6,6 +6,7 @@
  */
 import { fetchWithAuth } from '@/lib/db/client';
 import type { TierId } from './pricing-data';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 export interface ChangeTierResult {
   org_id: string;
@@ -24,8 +25,9 @@ export type ChangeTierOutcome =
   | { kind: 'declined'; result: ChangeTierResult }
   | { kind: 'error'; status: number };
 
-async function postBillingAction(path: string, body?: object): Promise<ChangeTierOutcome> {
+async function postBillingAction(path: string, body?: object, timeoutMs?: number): Promise<ChangeTierOutcome> {
   const res = await fetchWithAuth(path, {
+    ...(timeoutMs ? { timeoutMs } : {}),
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -41,7 +43,8 @@ async function postBillingAction(path: string, body?: object): Promise<ChangeTie
 
 /** 유료→유료 상향 — 신 offering 전액 즉시 청구(기존 billing_key 재사용, authKey 불요). */
 export async function changeTier(newTier: Exclude<TierId, 'free'>): Promise<ChangeTierOutcome> {
-  return postBillingAction('/api/billing/change-tier', { new_tier: newTier });
+  // story #4320(까디르 QA ①) — 청구 · 환불 사슬이라 브라우저 기본 30초가 BFF보다 먼저 끊지 않게 표의 값(동기로 못 기다림 · 후속 카드: 주문번호 조회).
+  return postBillingAction('/api/billing/change-tier', { new_tier: newTier }, LONG_ROUTES.billingChangeTier.browserMs);
 }
 
 /** 하향 예약 — 다음 갱신일부터 적용(즉시 전이 없음, 부분 환불 없음). */

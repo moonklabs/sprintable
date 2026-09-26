@@ -13,6 +13,7 @@ vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
 import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped, mapApiError } from './fastapi-proxy';
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 // story #3786 후속(2026-09-10) — 이 파일의 다른 describe 블록들은 Accept-Language와
 // 무관한 축을 검증하므로, 그 블록들에서 getLocale()이 매번 'en'을 주도록 파일 전역
@@ -470,16 +471,17 @@ describe('fastapi-proxy — 백엔드 fetch 취소 · 시간 제한(story #4320)
     expect((await res.json()).error.code).toBe('CLIENT_CLOSED_REQUEST');
   });
 
-  it('기본 제한은 4310 브라우저 쪽과 같은 30초 · 라우트 옵션으로 늘린다(변환 계열 130초)', async () => {
+  it('기본 제한은 4310 브라우저 쪽과 같은 30초 · 라우트 옵션으로 늘린다(변환 계열 — 표 한 곳 · 프런트 한도 안 천장)', async () => {
     const { BFF_BACKEND_TIMEOUT_MS, BFF_BACKEND_CONVERT_TIMEOUT_MS } = await import('./backend-signal');
     const { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS } = await import('./db/client');
     expect(BFF_BACKEND_TIMEOUT_MS).toBe(FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS);
-    expect(BFF_BACKEND_CONVERT_TIMEOUT_MS).toBe(130_000);
+    // story #4320(까디르 QA ①) — 예전 130초는 프런트 Cloud Run 60초에서 실제로 잘리던 잠복 — 표의 천장 안(55초).
+    expect(BFF_BACKEND_CONVERT_TIMEOUT_MS).toBe(LONG_ROUTES.attachmentConvert.bffMs);
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
     global.fetch = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
     await proxyToFastapi(new Request('http://localhost/api/x'), '/api/v2/x');
     await proxyToFastapi(new Request('http://localhost/api/x'), '/api/v2/x', { timeoutMs: BFF_BACKEND_CONVERT_TIMEOUT_MS });
-    expect(timeoutSpy.mock.calls.map((c) => c[0])).toEqual([30_000, 130_000]);
+    expect(timeoutSpy.mock.calls.map((c) => c[0])).toEqual([30_000, LONG_ROUTES.attachmentConvert.bffMs]);
     timeoutSpy.mockRestore();
   });
 

@@ -34,6 +34,7 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { gateApproveLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -267,7 +268,7 @@ export default function GateDetailPage() {
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2: evidence_viewed는 GateSignatureApproval의 onApprove가 호출될 때만

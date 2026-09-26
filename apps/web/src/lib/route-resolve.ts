@@ -11,6 +11,7 @@
  */
 import { SignJWT, jwtVerify } from 'jose';
 import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 
 export const SP_RESOLVE_CACHE_COOKIE = 'sp_resolve_cache';
 
@@ -108,9 +109,9 @@ export async function fetchResolve(
   const params = new URLSearchParams({ workspace: wsSlug });
   if (projSlug) params.set('project', projSlug);
   try {
-    const res = await fetch(`${fastapiUrl}/api/v2/resolve?${params.toString()}`, {
+    const res = await backendFetch(`${fastapiUrl}/api/v2/resolve?${params.toString()}`, {
       // story #4320 — 경로 해석(서버 컴포넌트 · 요청 객체 없음)이라 이 파일의 백엔드 fetch는 모두 시간 제한만(backendSignal(null)).
-      signal: backendSignal(null),
+      
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return { kind: 'not_found' };
@@ -161,8 +162,8 @@ export async function resolveLegacyResourcePath(
     // 리스트 폴백 fix가 이 헤더 없이는 애초에 못 먹었던 진짜 근본원인.
     const authHeaderWithOrg = { ...authHeader, 'X-Org-Id': orgId };
     const [orgRes, projRes] = await Promise.all([
-      fetch(`${fastapiUrl}/api/v2/organizations/${orgId}`, { signal: backendSignal(null), headers: authHeader }),
-      fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { signal: backendSignal(null), headers: authHeaderWithOrg }),
+      backendFetch(`${fastapiUrl}/api/v2/organizations/${orgId}`, {  headers: authHeader }),
+      backendFetch(`${fastapiUrl}/api/v2/projects/${projectId}`, {  headers: authHeaderWithOrg }),
     ]);
     if (!orgRes.ok) return null;
     // story #4219 G2 — role(가산 필드)이 오면 호출부가 /glance 307에 resolve 캐시를 심는다(옛 백엔드면 없음 → 안 심음).
@@ -180,7 +181,7 @@ export async function resolveLegacyResourcePath(
     // 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면 그 자리에서
     // 정직하게 포기하지 않고 리스트에서 안전하게 한 번 더 찾는다.
     if (!projectSlug) {
-      const listRes = await fetch(`${fastapiUrl}/api/v2/projects`, { signal: backendSignal(null), headers: authHeaderWithOrg });
+      const listRes = await backendFetch(`${fastapiUrl}/api/v2/projects`, {  headers: authHeaderWithOrg });
       if (listRes.ok) {
         const list = await listRes.json() as Array<{ id?: string; slug?: string | null }>;
         projectSlug = list.find((p) => p.id === projectId)?.slug ?? null;

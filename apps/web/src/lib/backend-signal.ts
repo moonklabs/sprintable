@@ -11,17 +11,19 @@
  *
  * 시간 초과는 `DOMException` name `TimeoutError`, 원 요청 취소는 `AbortError`로 던져진다 — `classifyBackendAbort`로 가른다.
  */
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+
 /** 기본 백엔드 시간 제한 — 브라우저 쪽(4310 `FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS`)과 같은 수. 그 모듈은 'use client'라 서버에서 가져오지
  * 않고 값을 적어 두며, 같은 수인지는 테스트가 고정한다. 더 오래 걸리는 변환 계열은 호출부가 길게 넘긴다. */
 export const BFF_BACKEND_TIMEOUT_MS = 30_000;
 
-/** OAuth 콜백처럼 **브라우저 쪽 제한이 없는 이동**(페이지 이동 · 4310 fetchWithAuth 밖)인데 백엔드가 외부 API를 잇달아 부르는 계열 —
- * 채널 콜백은 외부 호출 최대 3번 × 호출당 15초(channel_connections.py httpx timeout=15), 로그인 콜백은 코드 교환 + 사용자 정보(auth.py
- * timeout=15). 코드에서 뽑은 최악값(45초)에 여유 — 실측 분포 아님. */
-export const BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS = 60_000;
+/** OAuth 콜백처럼 백엔드가 외부 API를 잇달아 부르는 계열 — 값 · 근거는 `bff-route-timeouts.ts` 표(externalChain). 예전 60초는 프런트
+ * Cloud Run 한도(60초)와 같아 BFF가 봉투로 답하기 전에 잘릴 수 있었다 — 표의 천장(55초) 안으로. */
+export const BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS = LONG_ROUTES.externalChain.bffMs;
 
-/** 문서 · 첨부 변환처럼 백엔드가 오래 걸리는 계열 — 브라우저 쪽 file-viewer 변환 호출(130초)과 같은 수. */
-export const BFF_BACKEND_CONVERT_TIMEOUT_MS = 130_000;
+/** 첨부 변환 — 값 · 근거는 표(attachmentConvert). 예전 130초는 프런트 Cloud Run 60초에서 **실제로 잘리던** 잠복(봉투 없는 504) — 천장
+ * 55초 안으로 · 백엔드 최악(125초+)은 동기로 못 기다림(후속 카드: 비동기화). */
+export const BFF_BACKEND_CONVERT_TIMEOUT_MS = LONG_ROUTES.attachmentConvert.bffMs;
 
 export function backendSignal(request: Request | null | undefined, timeoutMs: number = BFF_BACKEND_TIMEOUT_MS): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);

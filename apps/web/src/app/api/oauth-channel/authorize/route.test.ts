@@ -14,9 +14,11 @@ vi.mock('@/services/app-url', () => ({ resolveAppUrl: () => 'http://localhost:31
 vi.mock('@/lib/auth/oauth-cookies', () => ({ oauthCookieOptions: () => ({ httpOnly: true, secure: false, sameSite: 'lax' as const, maxAge: 300, path: '/' }) }));
 
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+// story #4320 — 목은 맨 객체를 돌려도 된다(asFetchResponse가 진짜 Response로 · backendFetch는 본문을 다 읽는다).
+vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 import { GET } from './route';
+import { stubFetch } from '@/test-utils/as-fetch-response';
 
 function makeRequest(query: Record<string, string>): Request {
   const url = new URL('http://localhost/api/oauth-channel/authorize');

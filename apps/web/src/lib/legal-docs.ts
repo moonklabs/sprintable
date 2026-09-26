@@ -1,4 +1,4 @@
-import { backendSignal } from '@/lib/backend-signal';
+import { backendFetch } from '@/lib/backend-fetch';
 /**
  * story #2606 — 공개 법적 문서(약관/개인정보처리방침/환불정책) 서버사이드 fetch.
  *
@@ -25,9 +25,9 @@ export async function getCurrentLegalDocument(
   locale: string = 'ko',
 ): Promise<LegalDocument | null> {
   try {
-    const res = await fetch(
+    const res = await backendFetch(
       `${FASTAPI_URL()}/api/v2/legal/${docType}?locale=${locale}`,
-      { /* story #4320 — 약관 문서 조회(서버 컴포넌트 · 요청 객체 없음) — 시간 제한만 */ signal: backendSignal(null), next: { revalidate: 300 } }, // 5분 캐시 — admin 개정 후 최대 5분 내 반영, 매 요청 백엔드 왕복 방지.
+      { /* story #4320 — 약관 문서 조회(서버 컴포넌트 · 요청 객체 없음) — 시간 제한만 */  next: { revalidate: 300 } }, // 5분 캐시 — admin 개정 후 최대 5분 내 반영, 매 요청 백엔드 왕복 방지.
     );
     if (!res.ok) return null;
     const data = await res.json();
