@@ -179,7 +179,9 @@ async def test_meetings_at_the_same_time_come_back_in_a_stable_order():
         async with Session() as s:
             w = await _seed(s)
             same = datetime(2026, 9, 20, 3, 0, 0, tzinfo=UTC)
-            low, high = uuid.UUID(int=1), uuid.UUID(int=(1 << 128) - 1)
+            # 실행마다 새 id(같은 DB에서 다시 돌려도 UniqueViolation 없음 · 디디 실측) — 윗 32비트로 크고 작음을 고정한다.
+            run = uuid.uuid4().int & ((1 << 96) - 1)
+            low, high = uuid.UUID(int=run), uuid.UUID(int=(((1 << 32) - 1) << 96) | run)
             for mid, title in ((low, "same-low"), (high, "same-high")):
                 await s.execute(
                     text(
