@@ -55,14 +55,26 @@ function report(fn: string, target: unknown): void {
   );
 }
 
-// 첫 인자 = 대상 경로. copy/rename은 두 번째(도착)도 본다.
+// 첫 인자 = 대상 경로. copy/rename/link는 두 번째(도착)도 본다.
+// 까디르 4701 ② — 스트림(createWriteStream) · 자르기(truncate) · 하드 링크(link) · 비동기 심볼릭 링크 · 콜백/Promise open을 더했다.
+// fd로 쓰는 함수(write/writeSync/writev · FileHandle.write)는 경로가 없어 여기서 못 본다 — 대신 **쓰기 fd를 얻는 길을 전부 막는다**
+// (openSync · open · promises.open · createWriteStream). 저장소 경로에 쓰기로 연 fd가 생기지 않으니 fd 쓰기는 트리에 닿지 못한다.
 const TARGET_ARGS: Record<string, number[]> = {
   writeFileSync: [0], appendFileSync: [0], mkdirSync: [0], mkdtempSync: [0], copyFileSync: [1], cpSync: [1],
   renameSync: [0, 1], rmSync: [0], rmdirSync: [0], unlinkSync: [0], symlinkSync: [1], openSync: [0],
+  truncateSync: [0], linkSync: [1], createWriteStream: [0],
   writeFile: [0], appendFile: [0], mkdir: [0], mkdtemp: [0], copyFile: [1], cp: [1], rename: [0, 1], rm: [0], rmdir: [0], unlink: [0],
+  symlink: [1], link: [1], truncate: [0], open: [0],
 };
-// openSync는 쓰기 플래그일 때만(읽기 열기는 통과).
-const WRITE_FLAGS = /[wa+]/;
+/** 여는 함수(openSync · open · promises.open)는 쓰기 플래그일 때만(읽기 열기는 통과). 숫자 플래그(fs.constants)도 푼다 — 문자열로만 보면
+ *  `O_WRONLY | O_CREAT`가 숫자 문자열이 돼 새어 나갔다. */
+const OPENERS = new Set(['openSync', 'open']);
+const WRITE_FLAG_BITS = fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_TRUNC;
+export function isWriteOpenFlag(flags: unknown): boolean {
+  if (typeof flags === 'number') return (flags & WRITE_FLAG_BITS) !== 0;
+  if (flags === undefined || flags === null || typeof flags === 'function') return false; // 기본 'r' · open(path, cb)
+  return /[wa+]/.test(String(flags));
+}
 
 const original = { appendFileSync: fs.appendFileSync.bind(fs) };
 
@@ -71,6 +83,7 @@ function wrap<T extends (...args: unknown[]) => unknown>(name: string, fn: T, as
   if (asPromise) {
     // fs.promises — 호출자는 await하므로 막힘도 거부된 promise로(동기로 던지면 promise 계약이 깨진다).
     return function guardedAsync(this: unknown, ...args: unknown[]) {
+      if (OPENERS.has(name) && !isWriteOpenFlag(args[1])) return fn.apply(this, args);
       for (const i of positions) {
         if (isRepoPath(args[i])) {
           try { report(name, args[i]); } catch (err) { return Promise.reject(err); }
@@ -80,7 +93,7 @@ function wrap<T extends (...args: unknown[]) => unknown>(name: string, fn: T, as
     } as T;
   }
   return function guarded(this: unknown, ...args: unknown[]) {
-    if (name === 'openSync' && !WRITE_FLAGS.test(String(args[1] ?? 'r'))) return fn.apply(this, args);
+    if (OPENERS.has(name) && !isWriteOpenFlag(args[1])) return fn.apply(this, args);
     for (const i of positions) {
       if (isRepoPath(args[i])) report(name, args[i]);
     }

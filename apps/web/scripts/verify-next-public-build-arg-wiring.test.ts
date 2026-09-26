@@ -421,11 +421,11 @@ describe('checkWiring — 합성 미니 레포 픽스처(AC2①②③, 시점 �
 describe('checkWiring — 실 develop HEAD 통합(1회 계산 공유, story #4346 패턴)', () => {
   let sharedResult: ReturnType<typeof checkWiring>;
 
-  // story #3902/#4346 패턴 — 전수 스캔(881파일)은 vitest 기본 5000ms를 넘길 수 있어
-  // 넉넉한 예산을 준다(로컬 실측 800ms대, CI 변동 감안 3배 여유).
+  // story #4333(까디르 4701 ①) — 예전 `beforeAll(…, 3000)`은 기본(5000ms)보다 **낮은** 벽시계 예산이었다(주석은 «넉넉히»라 했지만
+  // 실제로는 더 조였다). 시한은 기본 행 가드만 — 전수 스캔의 양은 describe당 1회로 이미 묶였다(#4346).
   beforeAll(() => {
     sharedResult = checkWiring();
-  }, 3000);
+  });
 
   // C1 — #3947(PR#4352) 착지 前엔 이 단언이 실패하는 게 «정답»이다(가드가 실제로
   // 재는 그 실사고를 지금 이 순간 잡고 있다는 뜻). 착지+rebase 뒤 GREEN 전환.
