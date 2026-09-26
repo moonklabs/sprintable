@@ -220,7 +220,9 @@ export interface TotalLeafFloorViolation {
 // 요구하던 구조 자체가 이 스토리가 없애려는 결함이었다). 실측(develop 46652946e, 2026-09-15
 // 13:xxZ, #4316·#4333 着地 뒤) 74ns·leaf수는 이 파일 자기 테스트에 실 수치로 고정 —
 // 하한은 그 실측치의 ~80%(3916 관례 그대로, 자연 증감은 통과하되 대량 삭제는 fail-loud).
-export const MIN_TOTAL_LEAF_COUNT = 4363;
+// story #4336 재실측(2026-09-26, develop 7a6d5581e + 4336 새 키): ko.json leaf 6233 → 하한 4986(80%). 옛 4363은 자연 증가로
+// 비율이 0.70 아래로 내려가 «~80% 근방» 고정 테스트가 RED였다(대량 삭제가 아니라 누적 증가 — 하한을 다시 잰다).
+export const MIN_TOTAL_LEAF_COUNT = 4986;
 
 /** ko.json 전체 leaf 수가 하한을 밑도는지 검사하는 순수 함수 — 위반이면 길이 1 배열,
  * 아니면 빈 배열(다른 판정 함수들과 같은 결, main()이 반환값으로 exit 여부를 결정). */

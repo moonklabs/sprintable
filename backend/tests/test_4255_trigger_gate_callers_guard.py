@@ -1,8 +1,11 @@
 """story #4255(PO 10:14Z) — 서버가 레시피 stage를 내는 입구 `emit_recipe_published_stage_event`의 호출처 전수 가드.
 
 레시피 게이트를 거친 발행이 그 게이트 id(`trigger_gate_id`) 없이 이벤트를 내면, 마지막 서버 stage의 수신자 해소가 «그 시점 최신
-승인 게이트»로 폴백해 같은 작업 항목의 다음 회차와 경합한다(까디르 4617 P1). 호출처는 지금 다섯 곳이고(즉시 채널 발행 · 예약 채널
-워커 · 외부 블로그 워커 · 뉴스레터 발송 · 자사 블로그 발행) 모두 촉발 게이트를 넘긴다. 새 호출처가 id 없이 생기면 여기서 RED.
+승인 게이트»로 폴백해 같은 작업 항목의 다음 회차와 경합한다(까디르 4617 P1). 호출처는 지금 네 곳이고(채널 워커 · 외부 블로그 워커 ·
+뉴스레터 발송 · 자사 블로그 발행) 모두 촉발 게이트를 넘긴다. 새 호출처가 id 없이 생기면 여기서 RED.
+
+story #4336 — 다섯 → 넷: 레시피 승인 전이의 «즉시 채널 발행» 자리가 사라졌다(승인은 대기열에만 넣고, 채널 발행과 그 published
+stage 이벤트는 워커 한 곳이 즉시 · 예약 둘 다 낸다).
 """
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ import ast
 from pathlib import Path
 
 _APP = Path(__file__).resolve().parents[1] / "app"
-_EXPECTED_CALLERS = 5
+_EXPECTED_CALLERS = 4
 
 
 def _calls() -> list[tuple[str, int, set[str]]]:

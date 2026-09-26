@@ -361,6 +361,19 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(container.textContent).not.toBe(koMessages.content.channelPostsFailureAutoRetryUnknown);
   });
 
+  it('⭐#4336 AC4 — publishing은 상세 «발행 중» 알림과 같은 문장(중립 · 버튼 0), publish_stuck은 같은 사유 문장(빨강 · 버튼 0 — 취소는 상세)', async () => {
+    await render({ kind: 'publishing' });
+    const publishing = container.querySelector('[data-testid="channel-post-failure-badge"]');
+    expect(publishing?.textContent).toBe(koMessages.content.channelPostsPublishingNotice);
+    expect(publishing?.className).toContain('text-muted-foreground');
+    expect(container.querySelector('button')).toBeNull();
+    await render({ kind: 'publish_stuck' });
+    const stuck = container.querySelector('[data-testid="channel-post-failure-badge"]');
+    expect(stuck?.textContent).toBe(koMessages.content.channelPostsPublishStuckNotice);
+    expect(stuck?.className).toContain('text-destructive');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
   it('onRetryClick이 dead_letter 재시도 버튼 클릭 시 호출된다', async () => {
     let clicked = false;
     await act(async () => {

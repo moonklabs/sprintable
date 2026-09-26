@@ -55,6 +55,18 @@ describe('deriveFailureAction', () => {
       .toEqual({ kind: 'processing' });
   });
 
+  it('⭐#4336 AC4 — 즉시 발행 대기(processing_kind=publishing)는 pending · in_progress에서 publishing, 예산 밖 사유는 그보다 먼저 publish_stuck', () => {
+    expect(deriveFailureAction({ commandStatus: 'pending', processingKind: 'publishing' })).toEqual({ kind: 'publishing' });
+    expect(deriveFailureAction({ commandStatus: 'in_progress', processingKind: 'publishing' })).toEqual({ kind: 'publishing' });
+    expect(deriveFailureAction({ commandStatus: 'pending', reasonCode: 'WORKER_TICK_BUDGET_TOO_SMALL' })).toEqual({ kind: 'publish_stuck' });
+    // 서버는 이 조합을 안 주지만(예산 밖이면 processing_kind=null) 와도 «발행 중»이라 말하지 않는다.
+    expect(deriveFailureAction({ commandStatus: 'pending', reasonCode: 'WORKER_TICK_BUDGET_TOO_SMALL', processingKind: 'publishing' }))
+      .toEqual({ kind: 'publish_stuck' });
+    // 끝난 명령 · 종결 상태엔 processing_kind가 남아 있어도 안 그린다(completed → 없음, dead_letter → 실패 갈래).
+    expect(deriveFailureAction({ commandStatus: 'completed', processingKind: 'publishing' })).toBeUndefined();
+    expect(deriveFailureAction({ commandStatus: 'dead_letter', processingKind: 'publishing' })?.kind).toBe('dead_letter');
+  });
+
   it('⭐pending+failureKind=transient — auto_retry(§17-13 "자동 재시도가 예정되면 수동 버튼 없음"), nextRetryAt을 실어 냄', () => {
     expect(deriveFailureAction({ commandStatus: 'pending', failureKind: 'transient', nextRetryAt: '2026-09-05T00:00:00Z' }))
       .toEqual({ kind: 'auto_retry', nextRetryAt: '2026-09-05T00:00:00Z' });

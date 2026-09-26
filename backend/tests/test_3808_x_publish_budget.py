@@ -393,3 +393,201 @@ async def test_x_sandbox_api_budget_exceeded_marker_is_deterministic():
     assert exc_info.value.code == "SANDBOX_X_API_BUDGET_EXCEEDED"
     assert exc_info.value.status_code == 402
     assert "[sandbox:api-budget-exceeded]" in exc_info.value.message
+
+
+# ─── story #4336(PO 05:24Z 조건 2 · 3) — 요청 때 통과 · 워커에서 걸림 ────────────────────────────────
+
+
+async def _x_org_with_budget(Session, *, limit_minor: int, drafts: int):
+    from app.services.channel_connection import upsert_channel_connection
+
+    async with Session() as s:
+        org_id, project_id = await _seed_org(s)
+        await _seed_default_role(s, org_id)
+        human_id = await _seed_human(s, org_id)
+        connection = await upsert_channel_connection(
+            s, org_id=org_id, channel="x_sandbox", account_id=f"x-sandbox-4336-{uuid.uuid4().hex[:8]}",
+            account_label="sandbox_x_user", credential_kind="oauth",
+            access_token="sandbox-x-access:app-4336", refresh_token="sandbox-x-refresh:app-4336:g0",
+            token_expires_at=datetime.now(timezone.utc), refresh_mode="refresh_token",
+            scopes=["tweet.read", "tweet.write", "offline.access"], connected_by=human_id,
+        )
+        await _put_rules(s, org_id=org_id, rules={
+            "api_usage_budget": {"limit_minor": limit_minor, "currency": "KRW", "period": "month"},
+        })
+        draft_ids = [
+            await _seed_and_approve_x_draft(s, org_id=org_id, project_id=project_id, human_id=human_id, connection_id=connection.id)
+            for _ in range(drafts)
+        ]
+    return org_id, human_id, draft_ids
+
+
+_BUDGET_FIELDS = ("code", "limit_minor", "spent_minor", "estimated_cost_minor", "remaining_minor")
+
+
+@pytest.mark.anyio
+async def test_worker_budget_stop_stores_the_same_body_as_the_publish_now_422():
+    """PO 조건 2 — 요청 때 예산이 남아 대기열에 들어갔는데 워커 차례 전에 다른 지출로 모자라졌다: 명령을 멈추고, 즉시 발행 422와
+    **같은 본문**(코드 · 한도 · 사용 · 이번 추정 · 남은 금액)을 명령에 남겨 초안 상세가 그대로 내보낸다(화면이 같은 배너).
+    뮤테이션: 워커가 `failure_detail`을 적지 않으면 상세의 `command_failure_detail`이 None으로 RED."""
+    from app.main import app
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, (queued, probe) = await _x_org_with_budget(Session, limit_minor=30, drafts=2)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                assert r.status_code == 200 and r.json()["processing"] is True, r.text
+                async with Session() as s:  # 그 사이 다른 지출(20) — 남은 10 < 단가 20
+                    story_id = uuid.uuid4()
+                    from app.services.x_publish_budget import API_USAGE_COST_KIND
+
+                    await _seed_cost_evidence(s, org_id=org_id, work_item_id=story_id, kind=API_USAGE_COST_KIND, cost_minor=20)
+                counts = await run_worker_tick(Session)
+                assert counts["blocked_unapproved"] == 1, counts
+                detail = await draft_detail(client, org_id, queued)
+                r_now = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{probe}/publish")
+        finally:
+            app.dependency_overrides.clear()
+        assert r_now.status_code == 422, r_now.text
+        expected = {k: r_now.json()["error"][k] for k in _BUDGET_FIELDS}
+        assert expected["code"] == "API_USAGE_BUDGET_EXCEEDED"
+        assert detail["command_failure_detail"] == expected
+        assert (detail["command_status"], detail["command_reason_code"]) == ("blocked_unapproved", "API_USAGE_BUDGET_EXCEEDED")
+    finally:
+        await engine.dispose()
+
+
+from tests.test_4336_preflight_error_body_classes import _cases as _preflight_failure_cases  # noqa: E402
+
+
+@pytest.mark.anyio
+async def test_every_preflight_failure_the_worker_meets_stores_the_same_body_as_the_request():
+    """PO P2(09:08Z) — 조건 2를 **모든** preflight 실패로: 요청 때 통과했는데 워커의 같은 검사에서 걸리면(종류 전수 — 봉인 · 승인 ·
+    일시 중지 · 연결 · 메타데이터 · 이어쓰기 · 초안 없음 · 예산 · 할당량 · 글자 수) 명령에 남은 본문(초안 상세 `command_failure_detail`)이
+    같은 실패를 요청에서 만났을 때의 4xx 본문과 키 · 값 모두 같다(명령 상태 두 칸 빼고).
+
+    PO 10:19Z(CI 시간 가드 109s > 60s) — 종류마다 조직 · 연결 · 엔진을 새로 세우던 매개변수 13벌을 **조직 하나 · 종류마다 새 초안 두 개**로
+    묶었다(기다리는 자리는 없었다 — 시간은 전부 반복 시드). 실패하면 어긋난 종류를 모아 한 번에 보인다.
+    뮤테이션: 워커의 한 갈래가 `failure_detail`을 안 적으면 그 종류가 None으로 RED · 라우터 한 갈래가 다른 모양을 내면 그 종류가 RED."""
+    from unittest.mock import patch
+
+    from app.main import app
+    from app.routers import channel_posts as router_module
+    from app.services import channel_posts as service_module
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    cases = _preflight_failure_cases()
+    engine, Session = await _session_factory()
+    mismatches: dict[str, object] = {}
+    try:
+        org_id, human_id, draft_ids = await _x_org_with_budget(Session, limit_minor=10_000_000, drafts=2 * len(cases))
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                # 연결 비활성 실패는 워커가 공유 연결 자체를 막는다(apply_command_failure → 연결 상태) — 맨 끝에(뒤 종류의 발행 요청이 막히지 않게).
+                order = sorted(cases, key=lambda name: (name == "ChannelConnectionNotActiveError", name))
+                for i, failure in enumerate(order):
+                    exc = cases[failure]
+                    queued, probe = draft_ids[2 * i], draft_ids[2 * i + 1]
+
+                    async def _raise(*_a, _exc=exc, **_k):
+                        raise _exc
+
+                    r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                    assert r.status_code == 200 and r.json()["processing"] is True, (failure, r.text)
+                    with patch.object(service_module, "publish_channel_post_draft", _raise):  # 워커 차례의 같은 검사에서 걸림
+                        await run_worker_tick(Session)
+                    stored = (await draft_detail(client, org_id, queued))["command_failure_detail"]
+                    with patch.object(router_module, "preflight_channel_post_publish", _raise):  # 요청 때 걸림
+                        r_now = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{probe}/publish")
+                    if not 400 <= r_now.status_code < 500:
+                        mismatches[failure] = ("status", r_now.status_code, r_now.text)
+                        continue
+                    request_body = {k: v for k, v in r_now.json()["error"].items() if k not in ("command_status", "next_attempt_at")}
+                    # 응답 봉투(main.py HTTPException 처리)는 dict 본문에 `message`가 없으면 빈 문자열을 채운다 — 같은 규칙을 저장본에 입혀 대조.
+                    if stored is None or {"message": stored.get("message", ""), **stored} != request_body:
+                        mismatches[failure] = (stored, request_body)
+        finally:
+            app.dependency_overrides.clear()
+        assert not mismatches, mismatches
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_resuming_a_paused_command_clears_the_stored_body(monkeypatch):
+    """PO P2 — 다시 시도(일시 중지 재개 포함 · 같은 `retry_dead_letter_command`)는 새 시도: 지난 멈춤의 본문을 화면에 남기지 않는다
+    (워커가 다시 집기 전 1분 동안 «일시 중지» 문장이 대기 중인 글 위에 남던 틈).
+    뮤테이션: 재시도 초기화에서 `failure_detail = None`을 빼면 재개 뒤에도 본문이 남아 RED."""
+    from app.main import app
+    from app.services import channel_posts as service_module
+    from app.services.external_publish_pause import ExternalPublishPausedError, _requeue_paused_commands
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    async def _paused(*_a, **_k):
+        raise ExternalPublishPausedError(reason=None)
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, (queued,) = await _x_org_with_budget(Session, limit_minor=100000, drafts=1)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                assert r.status_code == 200, r.text
+                monkeypatch.setattr(service_module, "publish_channel_post_draft", _paused)
+                await run_worker_tick(Session)
+                before = await draft_detail(client, org_id, queued)
+                async with Session() as s:
+                    assert await _requeue_paused_commands(s, org_id=org_id) == 1
+                    await s.commit()
+                after = await draft_detail(client, org_id, queued)
+        finally:
+            app.dependency_overrides.clear()
+        assert before["command_status"] == "blocked"
+        assert before["command_failure_detail"] == {"code": "EXTERNAL_PUBLISH_PAUSED", "message": "EXTERNAL_PUBLISH_PAUSED"}
+        assert after["command_status"] == "pending" and after["command_failure_detail"] is None, after
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_two_queued_posts_cannot_both_spend_past_the_budget():
+    """PO 조건 3 — 한도(30)가 한 건(20)만 허용하는데 둘이 동시에 요청 검사를 통과해 대기열에 들어갔다: 워커의 재검사가 실제 한도를
+    지킨다 — 공급자 게시 1 · 나머지 하나는 조건 2 모양(같은 본문)으로 멈춤.
+    뮤테이션: 워커 쪽 예산 재검사(`publish_channel_post_draft`의 check_api_usage_budget_or_raise)를 빼면 게시 2로 RED."""
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.channel_publication import ChannelPublication
+    from tests.publish_worker_helpers import draft_detail, run_worker_tick
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_id, drafts = await _x_org_with_budget(Session, limit_minor=30, drafts=2)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        try:
+            async with _client_for(app) as client:
+                for draft_id in drafts:
+                    r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                    assert r.status_code == 200 and r.json()["processing"] is True, r.text
+                await run_worker_tick(Session)
+                details = [await draft_detail(client, org_id, d) for d in drafts]
+        finally:
+            app.dependency_overrides.clear()
+        async with Session() as s:
+            published = (await s.execute(
+                select(ChannelPublication).where(ChannelPublication.org_id == org_id, ChannelPublication.status == "published")
+            )).scalars().all()
+        assert len(published) == 1, f"한도 30 · 단가 20인데 게시 {len(published)}건"
+        stopped = [d for d in details if d["command_status"] == "blocked_unapproved"]
+        assert len(stopped) == 1
+        body = stopped[0]["command_failure_detail"]
+        assert body["code"] == "API_USAGE_BUDGET_EXCEEDED"
+        assert (body["limit_minor"], body["spent_minor"], body["remaining_minor"]) == (30, 20, 10)
+    finally:
+        await engine.dispose()

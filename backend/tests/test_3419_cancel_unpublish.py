@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -483,7 +485,7 @@ async def _publish_immediately(app, Session, *, org_id, connection_id, story_id,
         patch.object(tp, "get_permalink", AsyncMock(return_value="https://www.threads.net/@demo/post/media-x")),
     ):
         async with _client_for(app) as client:
-            r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
     assert r_pub.status_code == 200, r_pub.text
     return draft_id, gate_id, "media-x"
 

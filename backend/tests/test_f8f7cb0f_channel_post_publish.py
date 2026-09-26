@@ -26,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -292,11 +294,13 @@ async def test_publish_success_full_flow_with_utm_and_audit():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                # story #4336 — 요청은 대기열(«발행 중»)만, 공급자 호출은 워커 한 틱.
+                r_publish = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
+                body = await draft_detail(client, org_id, draft_id)
         assert r_publish.status_code == 200, r_publish.text
-        body = r_publish.json()
+        assert r_publish.json()["processing"] is True
         assert body["external_id"] == "media-456"
         assert body["permalink"] == "https://www.threads.net/@demo/post/media-456"
         assert body["published_at"]
@@ -379,11 +383,14 @@ async def test_republish_same_version_is_idempotent_no_new_provider_call():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-                r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                url = f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish"
+                r1 = await publish_and_run_worker(client, Session, url)
+                r2 = await publish_and_run_worker(client, Session, url)
         assert r1.status_code == 200, r1.text
         assert r2.status_code == 200, r2.text
-        assert r1.json() == r2.json()
+        # story #4336 — 첫 요청은 «발행 중»(워커가 발행), 둘째 요청은 이미 끝난 명령이라 그 발행 결과를 그대로 돌려준다.
+        assert r1.json()["processing"] is True
+        assert (r2.json()["processing"], r2.json()["external_id"]) == (False, "media-1")
         assert create_mock.call_count == 1, "멱등 위반 — 컨테이너 생성이 두 번 불렸다"
         assert publish_mock.call_count == 1, "멱등 위반 — publish가 두 번 불렸다"
     finally:
@@ -431,9 +438,11 @@ async def test_partial_success_retry_only_calls_publish_not_create_container():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-            assert r1.status_code == 503, r1.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
-            assert r1.json()["error"]["code"] == "CHANNEL_PUBLISH_PROVIDER_ERROR"
+                r1 = await publish_and_run_worker(client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                detail = await draft_detail(client, org_id, draft_id)
+            # story #4336 — 요청은 «발행 중», 공급자 실패는 워커가 명령에 남긴다(publish 단계 실패 = 나갔는지 모름 → needs_check).
+            assert r1.status_code == 200, r1.text
+            assert (detail["command_status"], detail["failure_kind"]) == ("dead_letter", "needs_check")
 
             async with Session() as s:
                 from app.models.channel_publication import ChannelPublication
@@ -512,8 +521,9 @@ async def test_container_creation_failure_upserts_same_row_not_new_one():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r1 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-            assert r1.status_code == 503, r1.text  # story #3632 — 진짜 상류 실패는 502 대신 503(CF 통과)
+                r1 = await publish_and_run_worker(client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            # story #4336 — 요청은 «발행 중», 컨테이너 생성 실패(안 나감)는 워커가 자동 재시도 대기(transient)로 남긴다.
+            assert r1.status_code == 200, r1.text
 
             async with Session() as s:
                 from app.models.channel_publication import ChannelPublication
@@ -527,7 +537,8 @@ async def test_container_creation_failure_upserts_same_row_not_new_one():
             assert rows[0].external_container_id is None
 
             async with _client_for(app) as client:
-                r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                # 사람의 즉시 재요청 — 백오프를 지우고 지금 due(워커가 곧바로 집는다).
+                r2 = await publish_and_run_worker(client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r2.status_code == 200, r2.text
 
         async with Session() as s:
@@ -660,7 +671,9 @@ async def test_connection_revoked_before_publish_returns_409():
 
 
 @pytest.mark.anyio
-async def test_rate_limited_returns_429_with_reset_at():
+async def test_rate_limited_is_left_pending_with_a_retry_time():
+    """story #4336 — 공급자 게시 한도 조회는 네트워크라 요청 안 검사(preflight)에 없다: 요청은 «발행 중», 워커가 한도 초과를 만나면
+    명령을 자동 재시도 대기(pending · transient · 다음 시각)로 남긴다(예전 동기 경로의 429 대신)."""
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.main import app
@@ -684,13 +697,14 @@ async def test_rate_limited_returns_429_with_reset_at():
         with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 86400))):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_publish = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
-        assert r_publish.status_code == 429, r_publish.text
-        body = r_publish.json()
-        assert body["error"]["code"] == "CHANNEL_RATE_LIMITED"
-        assert body["error"]["reset_at"]
+                detail = await draft_detail(client, org_id, draft_id)
+        assert r_publish.status_code == 200, r_publish.text
+        assert (detail["command_status"], detail["failure_kind"]) == ("pending", "transient")
+        assert detail["command_reason_code"] == "CHANNEL_RATE_LIMITED"
+        assert detail["next_retry_at"]
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -802,12 +816,14 @@ async def test_publish_allows_immediate_retry_while_backoff_next_attempt_at_is_f
         with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 86400))):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_first = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_first = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
-        assert r_first.status_code == 429, r_first.text
-        assert r_first.json()["error"]["command_status"] == "pending"
-        assert r_first.json()["error"]["next_attempt_at"]
+                first = await draft_detail(client, org_id, draft_id)
+        # story #4336 — 한도 초과는 워커가 명령에 남긴다(요청은 «발행 중»).
+        assert r_first.status_code == 200, r_first.text
+        assert first["command_status"] == "pending"
+        assert first["next_retry_at"]
 
         # scheduled_at이 애초에 null(즉시 요청)이라 next_attempt_at이 미래여도
         # 거절하면 안 된다 — mock을 다시 안 씌우고 곧장 재호출.
@@ -821,10 +837,12 @@ async def test_publish_allows_immediate_retry_while_backoff_next_attempt_at_is_f
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_second = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_second = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
+                second = await draft_detail(client, org_id, draft_id)
         assert r_second.status_code == 200, r_second.text
+        assert second["external_id"] == "media-recovered", "백오프 중에도 사람의 즉시 재요청은 곧바로 워커 차례가 된다"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -861,7 +879,7 @@ async def test_publish_immediate_retry_leaves_no_stray_pending_row_for_worker_to
         with patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(250, 250, 86400))):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
         create_mock = AsyncMock(return_value="creation-recovered")
         with (
@@ -874,8 +892,8 @@ async def test_publish_immediate_retry_leaves_no_stray_pending_row_for_worker_to
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_second = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_second = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
         assert r_second.status_code == 200, r_second.text
 
@@ -887,7 +905,7 @@ async def test_publish_immediate_retry_leaves_no_stray_pending_row_for_worker_to
             )).scalar_one()
             assert cmd.status == "completed"
 
-            counts = await process_due_publication_commands(s)
+            counts = await process_due_publication_commands(s, tick_budget_seconds=1740)
             assert all(v == 0 for v in counts.values()), (
                 f"completed 행을 워커가 다시 집었다(0건 기대): {counts}"
             )
@@ -898,7 +916,8 @@ async def test_publish_immediate_retry_leaves_no_stray_pending_row_for_worker_to
 
 
 @pytest.mark.anyio
-async def test_token_expired_returns_409_and_marks_connection_expired():
+async def test_token_expired_blocks_the_command_and_marks_connection_expired():
+    """story #4336 — 토큰 만료는 공급자 응답(네트워크)이라 워커가 만난다: 명령 blocked(연결) · 연결 expired(재인증 유도)."""
     from unittest.mock import AsyncMock, patch
     import app.services.threads_publish as tp
     from app.services.threads_publish import ThreadsPublishError
@@ -929,11 +948,13 @@ async def test_token_expired_returns_409_and_marks_connection_expired():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_publish = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
-        assert r_publish.status_code == 409, r_publish.text
-        assert r_publish.json()["error"]["code"] == "CHANNEL_TOKEN_EXPIRED"
+                detail = await draft_detail(client, org_id, draft_id)
+        assert r_publish.status_code == 200, r_publish.text
+        assert (detail["command_status"], detail["failure_kind"]) == ("blocked", "connection")
+        assert detail["command_reason_code"] == "CHANNEL_TOKEN_EXPIRED"
 
         async with Session() as s:
             from app.models.channel_connection import ChannelConnection
@@ -953,7 +974,7 @@ async def test_token_expired_returns_409_and_marks_connection_expired():
 # 지나 connection.status가 (expired가 아니라) "revoked"로 정확히 남는 것은 다른
 # 주장이다 — 위 test_token_expired_*와 완전히 동형으로 HTTP 왕복까지 실측한다.
 @pytest.mark.anyio
-async def test_revoked_returns_409_with_connection_revoked_code_and_marks_connection_revoked():
+async def test_revoked_blocks_the_command_with_connection_revoked_code_and_marks_connection_revoked():
     """story #3605 CHANGES-2(페드루 PO 판정 2026-09-07) — HTTP error.code 계약이
     바뀌었다: 원래 이 테스트는 「상속 덕에 기존 except 절이 그대로 잡아 HTTP
     응답 code가 CHANNEL_TOKEN_EXPIRED 그대로」를 AC4의 "새 낱말 0"으로 못박았으나,
@@ -996,13 +1017,13 @@ async def test_revoked_returns_409_with_connection_revoked_code_and_marks_connec
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_publish = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
-        assert r_publish.status_code == 409, r_publish.text
-        # story #3605 CHANGES-2 — 새 계약: revoked는 CHANNEL_CONNECTION_REVOKED로
-        # 명시(구 계약이었던 CHANNEL_TOKEN_EXPIRED 뭉뚱그림은 폐기).
-        assert r_publish.json()["error"]["code"] == "CHANNEL_CONNECTION_REVOKED"
+                detail = await draft_detail(client, org_id, draft_id)
+        # story #4336 — 공급자 응답(권한 회수)은 워커가 만난다: 명령 blocked(연결) · 코드는 3605 CHANGES-2 계약 그대로 REVOKED.
+        assert r_publish.status_code == 200, r_publish.text
+        assert (detail["command_status"], detail["command_reason_code"]) == ("blocked", "CHANNEL_CONNECTION_REVOKED")
 
         async with Session() as s:
             from app.models.channel_connection import ChannelConnection
@@ -1058,8 +1079,8 @@ async def test_utm_skipped_when_link_already_has_utm_params():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_publish = await client.post(
-                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
+                r_publish = await publish_and_run_worker(
+                    client, Session, f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish",
                 )
         assert r_publish.status_code == 200, r_publish.text
         assert "utm_source=newsletter" in captured_text["text"]
@@ -1272,23 +1293,14 @@ async def test_true_concurrent_publish_requests_no_500_single_provider_call():
                 client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
             )
 
-        arrived = _asyncio.Event()
-        arrived_count = 0
-
-        async def _barrier_get_publishing_limit(*args, **kwargs):
-            nonlocal arrived_count
-            arrived_count += 1
-            if arrived_count >= 2:
-                arrived.set()
-            await arrived.wait()  # 둘 다 여기 도착해야 둘 다 통과 — INSERT 직전 지점을 강제로 겹치게 한다.
-            return (1, 250, 86400)
-
+        # story #4336 — 요청은 공급자를 부르지 않는다(대기열만). 경합은 이제 워커에서: 같은 명령을 겹친 두 틱이 동시에 집어도
+        # (`FOR UPDATE SKIP LOCKED`) 공급자 호출 1 · 발행 행 1.
         create_mock = AsyncMock(return_value="creation-race")
         publish_mock = AsyncMock(return_value="media-race")
         with (
             patch.object(tp, "create_container", create_mock),
             patch.object(tp, "publish_container", publish_mock),
-            patch.object(tp, "get_publishing_limit", AsyncMock(side_effect=_barrier_get_publishing_limit)),
+            patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(1, 250, 86400))),
             patch.object(tp, "get_permalink", AsyncMock(return_value=None)),
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
@@ -1299,6 +1311,9 @@ async def test_true_concurrent_publish_requests_no_500_single_provider_call():
                     )
 
                 r1, r2 = await _asyncio.gather(_call(), _call())
+                assert create_mock.call_count == 0, "요청이 공급자를 불렀다"
+                await _asyncio.gather(run_worker_tick(Session), run_worker_tick(Session))
+                detail = await draft_detail(client, org_id, draft_id)
 
         assert r1.status_code == 200, r1.text
         assert r2.status_code == 200, r2.text
@@ -1313,7 +1328,7 @@ async def test_true_concurrent_publish_requests_no_500_single_provider_call():
                 select(ChannelPublication).where(ChannelPublication.gate_id == gate_id)
             )).scalars().all()
         assert len(rows) == 1, f"UNIQUE(gate_id, version_id) 위반이 두 행을 만들었다: {len(rows)}개"
-        assert r1.json()["external_id"] == r2.json()["external_id"] == "media-race"
+        assert detail["external_id"] == "media-race"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

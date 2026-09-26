@@ -13,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _seed_connection,
@@ -79,6 +81,7 @@ MAYBE_SENT = [
     "FACEBOOK_CREATE_CAROUSEL_PARENT_FAILED", "FACEBOOK_REELS_FINISH_FAILED", "X_POST_TWEET_FAILED",
     "YOUTUBE_UPLOAD_PUT_FAILED", "FACEBOOK_REPLY_FAILED", "INSTAGRAM_REPLY_FAILED", "STIBEE_PUBLISH_PROVIDER_ERROR",
     "SITE_POST_PROVIDER_ERROR", "YOUTUBE_VIDEO_STATUS_FAILED",
+    "YOUTUBE_UPLOAD_PUT_TIMEOUT",  # story #4336 — 업로드 전체 상한을 바이트 PUT 도중 넘김(영상이 생겼을 수 있음)
 ]
 # 공급자에 보이는 글을 만드는 쓰기 호출 **전** 단계 — 자동 재시도 안전(까디르 codex P1 · PO 17:33Z: transient는 명시 목록만).
 RETRY_SAFE = [
@@ -100,10 +103,14 @@ RETRY_SAFE = [
     "SANDBOX_FACEBOOK_CAROUSEL_CHILD_FAILED", "SANDBOX_INSTAGRAM_CAROUSEL_CHILD_FAILED",  # sandbox 캐러셀 자식(부모 게시 전)
 ]
 NOT_SENT = [
+    "YOUTUBE_UPLOAD_PREP_TIMEOUT",  # story #4336 — 업로드 전체 상한을 PUT 전(원본 받기 · 세션 열기)에 넘김(영상 없음)
     "NEWSLETTER_SEND_CONNECTION_UNAVAILABLE", "NEWSLETTER_SEND_CHANNEL_UNSUPPORTED",
     "CHANNEL_POST_DRAFT_NOT_FOUND", "CHANNEL_TEXT_TOO_LONG", "SITE_POST_SEAL_MISSING", "YOUTUBE_QUOTA_EXCEEDED",
     "YOUTUBE_METADATA_INVALID", "EXTERNAL_PUBLISH_APPROVAL_REQUIRED", "GENERATION_BUDGET_EXCEEDED",
-    "API_USAGE_BUDGET_EXCEEDED", "INSTAGRAM_IMAGE_REQUIRED", "INSTAGRAM_REELS_VIDEO_REQUIRED",
+    "API_USAGE_BUDGET_EXCEEDED",
+    # story #4336(PO P2) — 이어쓰기 검사(HTTP 호출 전). 예전엔 코드가 없어 미분류(자동 재시도)로 떨어졌다.
+    "CHANNEL_THREAD_UNSUPPORTED", "CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED", "CHANNEL_THREAD_SEGMENT_TOO_LONG",
+    "INSTAGRAM_IMAGE_REQUIRED", "INSTAGRAM_REELS_VIDEO_REQUIRED",
     "FACEBOOK_REELS_VIDEO_REQUIRED", "CHANNEL_REELS_UNSUPPORTED", "CHANNEL_CAROUSEL_UNSUPPORTED",
     "YOUTUBE_IMAGE_CONTAINER_UNSUPPORTED", "X_MEDIA_SOURCE_FETCH_FAILED", "YOUTUBE_VIDEO_SOURCE_FETCH_FAILED",
     "STIBEE_CONNECTION_INCOMPLETE", "STIBEE_PLAN_RESTRICTED", "STIBEE_SENDER_NOT_VERIFIED",
@@ -313,13 +320,14 @@ async def test_the_immediate_publish_router_uses_the_same_helper(monkeypatch):
     from sqlalchemy import select
 
     from app.models.publication_command import PublicationCommand
-    from app.routers import channel_posts as router_module
+    import app.services.channel_posts as channel_posts_module
     from app.services.channel_posts import ChannelPublishProviderError
 
     async def _raises(*_args, **_kwargs):
         raise ChannelPublishProviderError(provider_code="X_POST_TWEET_MISSING_ID", provider_message="id missing")
 
-    monkeypatch.setattr(router_module, "publish_channel_post_draft", _raises)
+    # story #4336 — 즉시 발행의 공급자 호출은 이제 워커가 한다(같은 헬퍼 `provider_error_code`로 분류).
+    monkeypatch.setattr(channel_posts_module, "publish_channel_post_draft", _raises)
     from tests.test_620beefc_channel_post_image_upload import (
         _approve_gate_directly,
         _create_draft,
@@ -346,10 +354,10 @@ async def test_the_immediate_publish_router_uses_the_same_helper(monkeypatch):
                 assert r_submit.status_code == 200, r_submit.text
                 async with Session() as s:
                     await _approve_gate_directly(s, uuid.UUID(r_submit.json()["gate_id"]))
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         finally:
             app.dependency_overrides.clear()
-        assert r.status_code == 503, r.text
+        assert r.status_code == 200 and r.json()["processing"] is True, r.text
         async with Session() as s:
             row = (await s.execute(select(PublicationCommand).where(PublicationCommand.org_id == org_id))).scalar_one()
         assert (row.status, row.failure_kind, row.reason_code) == ("dead_letter", "needs_check", "X_POST_TWEET_MISSING_ID")
@@ -382,7 +390,7 @@ async def test_a_second_publish_on_a_needs_check_command_is_refused_without_call
     from sqlalchemy import select
 
     from app.models.publication_command import PublicationCommand
-    from app.routers import channel_posts as router_module
+    import app.services.channel_posts as channel_posts_module
     from app.services.channel_posts import ChannelPublishProviderError
 
     code = first_code or _not_sent_code()
@@ -392,7 +400,7 @@ async def test_a_second_publish_on_a_needs_check_command_is_refused_without_call
         calls["n"] += 1
         raise ChannelPublishProviderError(provider_code=code, provider_message="stub")
 
-    monkeypatch.setattr(router_module, "publish_channel_post_draft", _raises)
+    monkeypatch.setattr(channel_posts_module, "publish_channel_post_draft", _raises)
     from tests.test_620beefc_channel_post_image_upload import (
         _approve_gate_directly,
         _create_draft,
@@ -420,13 +428,14 @@ async def test_a_second_publish_on_a_needs_check_command_is_refused_without_call
                 async with Session() as s:
                     await _approve_gate_directly(s, uuid.UUID(r_submit.json()["gate_id"]))
                 url = f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish"
-                await client.post(url)
+                await publish_and_run_worker(client, Session, url)
                 async with Session() as s:
                     first = (await s.execute(select(PublicationCommand).where(PublicationCommand.org_id == org_id))).scalar_one()
                 assert first.failure_kind == first_kind
                 before = (first.status, first.attempt_count, first.reason_code)
                 calls["n"] = 0
-                r = await client.post(url, headers={"Accept-Language": "ko"})
+                # 두 번째 요청 — needs_check면 409(워커 차례 0), 그 밖은 다시 대기열 → 워커가 다시 부른다.
+                r = await publish_and_run_worker(client, Session, url, headers={"Accept-Language": "ko"})
         finally:
             app.dependency_overrides.clear()
         assert calls["n"] == second_calls
@@ -580,8 +589,8 @@ async def test_approval_and_budget_stops_are_stored_the_same_way_by_the_worker_a
         async with Session() as s:
             worker_row = (await s.execute(select(PublicationCommand).where(PublicationCommand.id == w["cmd_id"]))).scalar_one()
 
-        # 즉시 발행 라우터 경로.
-        monkeypatch.setattr(router_module, "publish_channel_post_draft", _raises)
+        # 즉시 발행 라우터 경로 — story #4336: 요청 안 검사(preflight)가 같은 예외를 낸다.
+        monkeypatch.setattr(router_module, "preflight_channel_post_publish", _raises)
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
@@ -598,7 +607,7 @@ async def test_approval_and_budget_stops_are_stored_the_same_way_by_the_worker_a
                 r_submit = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/submit", json={})
                 async with Session() as s:
                     await _approve_gate_directly(s, uuid.UUID(r_submit.json()["gate_id"]))
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         finally:
             app.dependency_overrides.clear()
         assert r.status_code in (403, 422), r.text

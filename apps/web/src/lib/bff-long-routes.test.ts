@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BFF_CEILING_MS, FRONTEND_REQUEST_LIMIT_MS, LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { BFF_CEILING_MS, DB_ONLY_BFF_MS, FRONTEND_REQUEST_LIMIT_MS, LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 const { getServerSessionMock, getLocaleMock } = vi.hoisted(() => ({ getServerSessionMock: vi.fn(), getLocaleMock: vi.fn() }));
 vi.mock('@/lib/db/server', async (orig) => ({ ...(await orig<Record<string, unknown>>()), getServerSession: getServerSessionMock }));
@@ -61,10 +61,19 @@ describe('긴 라우트 표(bff-route-timeouts · 까디르 QA ①②)', () => {
       expect(r.syncImpossible, key).toBe(r.backendWorstMs === null || r.backendWorstMs >= BFF_CEILING_MS);
       expect(r.basis.length, `${key} 근거(백엔드 파일:줄)`).toBeGreaterThan(10);
     }
-    // 동기로 못 기다리는 줄 — 후속 카드(제공자 긴 작업: 비동기화). 결제는 story #4335(시도 + 조회)로 이 목록에서 빠졌다.
+    // 동기로 못 기다리는 줄 — 후속 카드(제공자 긴 작업: 비동기화). 결제는 story #4335(시도 + 조회), 채널 발행 · 제출 · 게이트 전이는
+    // story #4336 PR1(공급자 호출 = 워커)로 이 목록에서 빠졌다. 남은 셋은 4336 PR2.
     expect(Object.entries(LONG_ROUTES).filter(([, r]) => r.syncImpossible).map(([k]) => k).sort()).toEqual(
-      ['attachmentConvert', 'channelAssetConfirm', 'channelDraftSubmit', 'channelPublishNow', 'gateTransition', 'loopContextPack'],
+      ['attachmentConvert', 'channelAssetConfirm', 'loopContextPack'],
     );
+  });
+
+  it('⭐#4336 — 공급자 호출이 워커로 나간 세 줄은 다른 DB 라우트와 같은 기본 시한(BFF = backend-signal 기본값)', async () => {
+    const { BFF_BACKEND_TIMEOUT_MS } = await import('@/lib/backend-signal');
+    expect(DB_ONLY_BFF_MS).toBe(BFF_BACKEND_TIMEOUT_MS);
+    for (const key of ['channelPublishNow', 'channelDraftSubmit', 'gateTransition'] as const) {
+      expect([LONG_ROUTES[key].backendWorstMs, LONG_ROUTES[key].bffMs, LONG_ROUTES[key].syncImpossible], key).toEqual([0, DB_ONLY_BFF_MS, false]);
+    }
   });
 
   it('프런트 한도가 배포 설정(cloudbuild.yaml _FRONTEND_TIMEOUT)과 같다', () => {

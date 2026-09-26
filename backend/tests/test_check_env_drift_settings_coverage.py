@@ -275,7 +275,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # story #4341 — ops_alert_conversation_id 1필드 신설(운영 알림 받는 운영 대화 · 빈 값 = 미설정)로 128→129.
     # 가드가 신규 필드를 설계대로 잡은 것.
     assert "OPS_ALERT_CONVERSATION_ID" in keys
-    assert len(keys) == 129
+    # story #4336 — 발행 명령 워커 틱 예산의 두 입력(요청 시한 · 스케줄러 시한) 신설로 129→131.
+    assert "BACKEND_REQUEST_TIMEOUT_SECONDS" in keys and "PUBLICATION_WORKER_SCHEDULER_DEADLINE_SECONDS" in keys
+    assert len(keys) == 131
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():

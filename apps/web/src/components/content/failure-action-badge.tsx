@@ -237,6 +237,21 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
       </p>
     );
   }
+  // story #4336 AC4 — 상세의 두 알림과 같은 문장(목록 · 캘린더 카드 한 줄). 버튼 0 — 발행 취소는 상세에서. 멈춤은 사람이 풀어야 해 blocked_unapproved와 같은 빨강(새 색 0).
+  if (action.kind === 'publishing') {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+        {t('channelPostsPublishingNotice')}
+      </p>
+    );
+  }
+  if (action.kind === 'publish_stuck') {
+    return (
+      <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
+        {t('channelPostsPublishStuckNotice')}
+      </p>
+    );
+  }
   if (action.kind === 'blocked_unapproved') {
     // story #4264 ④ — 사유 문장만 · 버튼 0(compact 여부와 무관). 사유가 비면 승인 필요(4264 전 워커 행).
     const approvalReason = !action.reasonCode || !(action.reasonCode in CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS)

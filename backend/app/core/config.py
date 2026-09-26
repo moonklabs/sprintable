@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # story #4332 — 요청마다 «풀 체크아웃 대기 · SQL 수 · SQL 합계 ms» 로그 한 줄(app/core/request_db_timing.py). 폴링 경로 때문에
     # 양이 커서 환경 값으로만 켠다(dev 켬 · PO). 응답 헤더엔 어떤 경우에도 싣지 않는다(존재 여부 누출 · test_2261_c3).
     db_timing_log_enabled: bool = False
+    # story #4336(PO 04:52Z) — 발행 명령 워커 틱 예산 = min(스케줄러 시한, 이 서비스의 요청 시한) − 여유(publication_command.py).
+    # 요청 시한은 배포가 Cloud Run `--timeout`과 같은 값을 넣는다(cloudbuild `_BACKEND_TIMEOUT`). 모르면 보수적으로 300(옛 prod 값).
+    backend_request_timeout_seconds: int = 300
+    # 스케줄러 시한은 infra/cloud-scheduler/jobs.json publication-commands.attempt_deadline과 같아야 한다(테스트 고정).
+    publication_worker_scheduler_deadline_seconds: int = 1800
 
     # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_engine(app/core/database.py)
     # 전용 풀 크기 — 위 db_pool_size 산식 갱신 주석 참조(신규 budget line, prod 재검산 필요).

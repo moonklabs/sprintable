@@ -236,6 +236,13 @@ const KNOWN_ERRORS: Record<string, KnownError> = {
   // 부가·i18n 완성 문구). YOUTUBE_QUOTA_EXCEEDED와 동형 — labelKey 비움(서버
   // message 그대로, FE가 문장을 다시 짓지 않는다).
   YOUTUBE_METADATA_INVALID: { labelKey: '', kind: 'validation' },
+  // story #4336(PO P2) — 발행 전 검사의 이어쓰기 실패 세 코드(예전엔 BE가 코드 없는 500). 서버가 요청 언어로 숫자까지 넣은 문장을
+  // 내므로 labelKey 비움(YOUTUBE_METADATA_INVALID와 같은 모양) — 워커가 남긴 본문(`command_failure_detail`)도 같은 문장.
+  CHANNEL_THREAD_UNSUPPORTED: { labelKey: '', kind: 'validation' },
+  CHANNEL_THREAD_SEGMENT_LIMIT_EXCEEDED: { labelKey: '', kind: 'validation' },
+  CHANNEL_THREAD_SEGMENT_TOO_LONG: { labelKey: '', kind: 'validation' },
+  // story #4336(PO P2) — 워커 차례에 초안이 사라짐(요청 404와 같은 코드). 예전엔 표 밖이라 «나갔는지 모름»으로 그렸다.
+  CHANNEL_POST_DRAFT_NOT_FOUND: { labelKey: 'editNotFound', kind: 'validation' },
   // story #3575(BE #3574, 페드루 PO 確定 2026-09-06) — 영상이 있는 초안에 커버를
   // 2장째 올리려 할 때의 서버 방어선(화면 상한 1이 정상 경로를 이미 막지만, 레이스
   // 등으로 도달 시 회귀 0). labelKey 빈칸 — 서버 message 그대로(3471 동형).

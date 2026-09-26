@@ -460,6 +460,10 @@ async def test_ac2_order_b_submit_then_approve_auto_publishes_without_manual_cli
 
             await transition_gate(s, org_id, gate_d_id, "approved", owner_member_id, "ⓓ 발행 승인", reviewed_draft=await reviewed_draft_for(s, org_id=org_id, work_item_id=story_id))
             await s.commit()
+        # story #4336 — 승인은 발행 명령을 대기열에만(publish_outcome=publishing) · 게시는 워커 한 틱.
+        from tests.publish_worker_helpers import run_worker_tick
+
+        await run_worker_tick(Session)
 
         async with Session() as s:
             scoped_gate = await s.get(Gate, scoped_gate_id)

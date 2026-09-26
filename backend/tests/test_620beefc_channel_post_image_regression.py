@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _approve_gate_directly,
     _client_for,
@@ -127,9 +129,10 @@ async def test_text_only_publish_unaffected_by_image_branch():
                 patch.object(tp, "publish_container", AsyncMock(return_value="media-text-only")),
                 patch.object(tp, "get_permalink", AsyncMock(return_value=None)),
             ):
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r.status_code == 200, r.text
-        body = r.json()
+        # story #4336 — 요청은 «발행 중»(대기열), 결과는 워커 한 틱 뒤 발행 행에.
+        body = await publication_body(Session, draft_id)
         assert body["processing"] is False
         assert body["external_id"] == "media-text-only"
         assert captured["image_url"] is None

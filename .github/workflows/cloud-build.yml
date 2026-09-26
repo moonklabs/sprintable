@@ -113,7 +113,11 @@ jobs:
             # 값은 인프라 기본값이었을 뿐 어디에도 명시돼 있지 않았다 — 이제 이 워크플로우가
             # 명시 소스가 된다(cloudbuild.yaml의 `_BACKEND_TIMEOUT` dev-safe 기본값 3600을
             # prod에서 이 output으로 override, `backend_max_instances`와 동일 배선 패턴).
-            echo "backend_timeout=300" >> "$GITHUB_OUTPUT"
+            # story #4336(PO 04:52Z 결정) — 300 → 1800. 발행 명령 워커(cron 요청)가 영상 업로드(전체 상한 900초) · 긴 스레드를
+            # 한 틱에 끝내려면 요청 시한이 스케줄러 시한(1800)만큼 필요하다(300이면 Cloud Run이 틱 중간에 끊는다). 사용자 요청은
+            # 앞단 BFF 상한(55초 · apps/web/src/lib/bff-route-timeouts.ts)이 먼저 끊으므로 긴 시한이 사용자 쪽으로 번지지 않는다.
+            # A2A /rpc 앱 상한(280초 · test_2005)은 그대로 이 값보다 짧다.
+            echo "backend_timeout=1800" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
             # ⭐story #2123 최종(2026-07-24) — 위 주석이 예고한 "realtime 배선을 마치는 승격 시점"이
             # 왔다. #2123 cutover(consume/dispatch/fanout_wake=true, 이전 커밋)가 배포돼 prod 배차
