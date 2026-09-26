@@ -2094,11 +2094,12 @@ def test_4283_step_places_that_relied_on_bash_e_still_stop_the_step(tmp_path, la
     assert needle in out, (label, out)
 
 
-# 스텝 안 mktemp 순서: elapsed · failed_out · overage_out · unweighted · suspects · rerun_elapsed · rerun_failed(7번째).
-@pytest.mark.parametrize("n", range(1, 8))
+# 스텝 안 mktemp 순서: elapsed · stall_evidence_dir(디렉터리 · story #4319) · failed_out · overage_out · unweighted · suspects ·
+# rerun_elapsed · rerun_failed(8번째).
+@pytest.mark.parametrize("n", range(1, 9))
 def test_4283_step_mktemp_failure_is_red(tmp_path, n):
     """까디르 P2 — `set +e` 뒤 임시 파일 생성 실패가 조용히 지나가면 안 된다: 몇 번째 mktemp가 실패하든(단발 튐 시나리오 —
-    재실행 갈래까지 가는 경로) exit 1 + ::error::. 특히 7번째(`rerun_failed`)가 안 생기면 `[ -s ]`가 «재실행 실패 없음»으로
+    재실행 갈래까지 가는 경로) exit 1 + ::error::. 특히 8번째(`rerun_failed`)가 안 생기면 `[ -s ]`가 «재실행 실패 없음»으로
     읽혀 테스트 실패를 초록으로 가렸다."""
     code, out, _ = _run_step(tmp_path, targets=_STEP_TARGET, first=_over, rerun=_normal, mktemp_fail_at=n)
     assert code == 1, (n, out)

@@ -38,8 +38,47 @@ KILL_AFTER="${STALL_KILL_AFTER:-30s}"
 # 제한에선 ≤1s라 무시해도 되지만, 합성 테스트처럼 초 단위 제한에선 그 창이 전체의
 # 상당 비율이라 실제로 샌다). `%s.%N`(나노초)+awk 실수 비교로 그 창을 구조적으로 닫는다.
 _start=$(date +%s.%N)
-timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"
-code=$?
+if [ -n "${STALL_EVIDENCE_DIR:-}" ]; then
+  # story #4319(AC5) — 죽이기 전에 증거: 제한 STALL_EVIDENCE_LEAD_SEC(기본 60초) 전에 명령이 아직 돌고 있으면
+  # stall-evidence.sh가 DB 연결 · 잠금과 pytest 스레드 · asyncio 태스크 스택을 로그에 남긴다. 명령이 먼저 끝나면 수집기를
+  # 거둬 정상 판엔 아무 일도 안 한다(AC7). STALL_EVIDENCE_DIR이 없으면 예전 경로 그대로.
+  mkdir -p "$STALL_EVIDENCE_DIR"
+  _lead="${STALL_EVIDENCE_LEAD_SEC:-60}"
+  _fire_at=$(awk "BEGIN { v = ${TIMEOUT_MIN} * 60 - ${_lead}; if (v < 0) v = 0; printf \"%.3f\", v }")
+  timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@" &
+  _cmd_pid=$!
+  (
+    # 뒤로 돌린 sleep을 wait한다 — 앞쪽 sleep이 거둬지면(명령이 먼저 끝남) 셸이 파일마다 «Terminated»를 로그에 찍었다(CI 대조 판 실측).
+    sleep "$_fire_at" &
+    wait $! || exit 0
+    if kill -0 "$_cmd_pid" 2>/dev/null; then
+      "$(dirname "${BASH_SOURCE[0]}")/stall-evidence.sh" "$_cmd_pid" "$STALL_EVIDENCE_DIR"
+    fi
+  ) &
+  _collector_pid=$!
+  wait "$_cmd_pid"
+  code=$?
+  # 명령이 먼저 끝났으면 아직 자는 수집기(와 그 sleep)를 거둔다 — 이미 수집 중이면 끝날 때까지 기다린다(덤프가 잘리지 않게).
+  # (수집 중이면 수집기의 직계 자식은 sleep이 아니라 stall-evidence.sh라 건드리지 않는다.)
+  pkill -P "$_collector_pid" -x sleep 2>/dev/null || true
+  # 까디르 ①(PR 4695) — 기다림에 상한: 수집기가 멈추면(DB 무응답 등) 잡 timeout이 먼저 쳐 STALL 판정(124)을 잃던 옛 모양으로
+  # 돌아간다. 상한을 넘으면 수집기 나무를 멈추고 «증거 수집 시한 초과»를 남긴 채 판정은 그대로.
+  _collect_max="${STALL_EVIDENCE_COLLECT_MAX_SEC:-45}"
+  _collect_deadline=$(awk "BEGIN { printf \"%.3f\", $(date +%s) + ${_collect_max} }")
+  while kill -0 "$_collector_pid" 2>/dev/null; do
+    if awk "BEGIN { exit !($(date +%s) >= ${_collect_deadline}) }"; then
+      echo "::warning::STALL 증거 수집 시한 초과(${_collect_max}s) — 수집기를 멈추고 판정은 그대로(story #4319)" >&2
+      _kill_tree() { local p="$1" c; for c in $(ps -eo pid=,ppid= | awk -v q="$p" '$2 == q { print $1 }'); do _kill_tree "$c"; done; kill -KILL "$p" 2>/dev/null || true; }
+      _kill_tree "$_collector_pid"
+      break
+    fi
+    sleep 0.2
+  done
+  wait "$_collector_pid" 2>/dev/null || true
+else
+  timeout -k "$KILL_AFTER" "${TIMEOUT_MIN}m" "$@"
+  code=$?
+fi
 _limit_sec=$(awk "BEGIN { printf \"%.9f\", (${TIMEOUT_MIN} * 60) }")
 # 페드루 PO CHANGES(PR#4348 6라운드, 카디르 재현) — 직전 버전은 `%.3f`로 반올림한
 # 문자열을 그 뒤 비교에도 그대로 재사용해, 예를 들어 raw 0.5996s(제한 0.6s 直前)가
