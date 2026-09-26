@@ -1581,6 +1581,9 @@ describe('StoryDetailPanel — 의존 행 조작 버튼이 호버 전용이 아�
       expect(tokens).not.toContain('hidden');
       expect(tokens.filter((t) => /(^|:)group-hover:(block|flex)$/.test(t))).toEqual([]);
       expect(tokens).not.toContain('opacity-0');
+      // 누르는 자리 24×24(PO · 유나 10:01Z) — 디자인 Button의 min-h-0 줄임을 걷고 상수로 · 행 높이는 -my-1로 무변
+      expect(tokens).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6', '-my-1', 'p-1.5']));
+      expect(tokens).not.toContain('min-h-0');
       expect(el.tabIndex).toBe(0);
     }
   });

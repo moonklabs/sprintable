@@ -6,7 +6,7 @@ import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { Columns2, Columns3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
 // ─── Columns Block View ───────────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         <button
           type="button"
           onClick={() => switchTo(2)}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
+          className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 2
               ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
@@ -72,7 +72,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         <button
           type="button"
           onClick={() => switchTo(3)}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
+          className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 3
               ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'

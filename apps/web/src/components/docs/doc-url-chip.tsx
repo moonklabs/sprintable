@@ -2,7 +2,7 @@
 
 import { Pencil, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { isUntitledSlug } from './lib/doc-slug';
 
 interface DocUrlChipProps {
@@ -51,7 +51,8 @@ export function DocUrlChip({ slug, onEdit, onDeriveFromTitle, labels }: DocUrlCh
           title={labels.editUrl}
           // story #4345 — 호버 없는 기기에선 늘 보인다(예전엔 초점에서만 · 터치는 늘 투명).
           // 초점 링은 규약 링(citron) — 예전 `ring-border`는 배경 대비가 거의 없어 초점이 사실상 안 보였다(까디르 P3 · 유나).
-          className={cn('rounded transition-opacity hover:text-foreground', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
+          // 누르는 자리 24×24(연필 그대로) · 줄 높이 무변(-my-1).
+          className={cn('-my-1 rounded transition-opacity hover:text-foreground', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <Pencil className="size-3" />
         </button>

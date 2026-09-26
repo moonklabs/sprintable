@@ -41,5 +41,7 @@ describe('StoryCard 액션 묶음 — 호버 전용 아님([SID:4345])', () => {
     expect(tokens.filter((t) => /^(sm|md|lg|xl):(opacity-0|group-hover:opacity-100)$/.test(t))).toEqual([]);
     expect(tokens).not.toContain('opacity-0');
     for (const t of HOVER_REVEAL_FOCUS_RING.split(' ')) expect(button.className.split(/\s+/), t).toContain(t);
+    // PO · 유나 10:01Z — 킥오프 누르는 자리 24×24(아이콘 그대로 · -m-0.5로 카드 줄 높이 무변)
+    expect(button.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6', '-m-0.5']));
   });
 });

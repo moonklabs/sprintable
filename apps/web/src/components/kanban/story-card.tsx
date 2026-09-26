@@ -16,7 +16,7 @@ import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
 import { MaterialChip } from '@/components/ui/material-chip';
 import { cn } from '@/lib/utils';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
@@ -617,7 +617,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       onClick={(e) => void handleKickoff(e)}
                       disabled={triggering}
                       title={t('kickoff')}
-                      className={cn('flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition', HOVER_REVEAL_FOCUS_RING)}
+                      // story #4345 — 누르는 자리 24×24(-m-0.5로 카드 줄 높이 무변 · 아이콘 그대로).
+                      className={cn('-m-0.5 h-5 w-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition', HOVER_REVEAL_HIT, HOVER_REVEAL_FOCUS_RING)}
                     >
                       {triggering ? (
                         <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />

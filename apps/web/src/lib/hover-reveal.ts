@@ -12,3 +12,10 @@ export const HOVER_REVEAL =
 
 /** 초점 링 — 디자인 Button과 같은 토큰(citron). Button이 아닌 raw 조작 요소에 단다. */
 export const HOVER_REVEAL_FOCUS_RING = 'outline-none focus-visible:ring-3 focus-visible:ring-proof-citron';
+
+/**
+ * story #4345(PO · 유나 10:01Z) — 드러난 조작 요소의 누르는 자리 최소 24×24(아이콘은 그대로 · padding · 투명 상자로 키움).
+ * 터치에서 늘 보이게 되면서 14~22px 자리가 손가락 오탭을 불렀다(첨부 ✕는 첨부 위에 겹쳐 있어 오탭 = 삭제).
+ * 줄 높이가 바뀌면 안 되는 자리는 호출부가 음수 margin(`-my-1` 등)을 같이 준다. 부류 가드: hover-reveal.guard.test.ts 셋째 규칙.
+ */
+export const HOVER_REVEAL_HIT = 'inline-flex min-h-6 min-w-6 items-center justify-center';

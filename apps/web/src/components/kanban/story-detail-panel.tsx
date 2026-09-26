@@ -38,7 +38,7 @@ import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components
 import { initials, formatDate } from '@/lib/storage/format';
 import { formatAtLeast } from '@/lib/format-at-least';
 import { cn } from '@/lib/utils';
-import { HOVER_REVEAL } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { actorRowLabels, memberDisplayLabel, memberLookup, memberRowLabels } from '@/lib/member-display';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
@@ -1205,11 +1205,127 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     }
   };
 
-  const handleRemoveAttachment = async (url: string) => {
-    const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
-    const { story: updated } = await patchStory({ attachments: next });
-    onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
+  // story #4345(유나 규격 · PO 10:02~10:03Z) — 터치에서 늘 보이게 된 첨부 삭제 ✕가 첨부(열기 대상) 위에 있어, 오탭 한 번이면
+  // 확인 · 되돌리기 없이 지워졌다. 이제:
+  // - 누르면 목록에서만 곧바로 숨기고 «첨부를 삭제했어요» + 파일 이름 + «되돌리기» 토스트를 띄운다(확인 창 없음).
+  // - 서버에 지우는 요청은 **토스트가 닫힐 때**(시간 끝 · ✕ · 새 토스트에 밀려남) 한 번 — 포인터/초점이 토스트 안이면 안 닫혀서,
+  //   «되돌리기»가 보이는 동안엔 요청이 안 나간다. 보낼 때는 **그때의 최신 목록**에서 그 url만 뺀다(묵은 목록으로 남의 새 첨부를 지우지 않게).
+  // - 되돌리기: 아직 안 보냈으면 요청 취소(실패 없음). 이미 보냈으면(화면 떠남 · 탭 숨김 flush) 지금 목록에 그 한 항목만 되넣기(있으면 무변).
+  // - 화면을 떠나거나(언마운트) `pagehide` · `visibilitychange(hidden)`이면 대기 중인 삭제를 keepalive로 즉시 한 번 보낸다(의도가 조용히 버려지지 않게).
+  // - 보낸 삭제가 실패하면 항목이 다시 보이고 «첨부를 삭제하지 못했어요» 토스트 · 되넣기가 실패하면 «첨부를 되돌리지 못했어요».
+  type PendingRemoval = { attachment: SendAttachment; index: number; state: 'pending' | 'sent'; inflight: Promise<KanbanStory | null> | null };
+  const pendingRemovalsRef = useRef(new Map<string, PendingRemoval>());
+  const [hiddenAttachmentUrls, setHiddenAttachmentUrls] = useState<string[]>([]);
+  const latestRef = useRef({ story, onStoryUpdate, addToast, t });
+  useEffect(() => { latestRef.current = { story, onStoryUpdate, addToast, t }; });
+  const mountedRef = useRef(true);
+  const unhideAttachment = useCallback((url: string) => {
+    if (mountedRef.current) setHiddenAttachmentUrls((cur) => cur.filter((u) => u !== url));
+  }, []);
+
+  const sendAttachments = useCallback(async (attachments: SendAttachment[], keepalive: boolean): Promise<KanbanStory | null> => {
+    try {
+      const res = await fetch(`/api/stories/${latestRef.current.story.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachments }),
+        keepalive,
+      });
+      if (!res.ok) return null;
+      const json = await res.json();
+      return (json.data as KanbanStory) ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** 대기 중인 삭제(들)를 한 PATCH로 — 최신 목록에서 그 url들만 뺀다. 이미 보낸 것은 다시 안 보낸다. */
+  const sendPendingRemovals = useCallback((urls: string[], keepalive: boolean) => {
+    const targets = urls.map((url) => [url, pendingRemovalsRef.current.get(url)] as const)
+      .filter((e): e is readonly [string, PendingRemoval] => !!e[1] && e[1].state === 'pending');
+    if (targets.length === 0) return;
+    const drop = new Set(targets.map(([url]) => url));
+    const next = (latestRef.current.story.attachments ?? []).filter((a) => !drop.has(a.url));
+    const inflight = sendAttachments(next, keepalive);
+    for (const [, p] of targets) { p.state = 'sent'; p.inflight = inflight; }
+    void inflight.then((updated) => {
+      const { story: latest, onStoryUpdate: push, addToast: toast, t: tr } = latestRef.current;
+      if (!updated) {
+        for (const [url] of targets) {
+          pendingRemovalsRef.current.delete(url);
+          unhideAttachment(url);
+        }
+        if (mountedRef.current) toast({ type: 'error', title: tr('attachmentRemoveFailed') });
+        return;
+      }
+      const merged = { ...latest, attachments: updated.attachments ?? next };
+      latestRef.current = { ...latestRef.current, story: merged }; // 화면을 떠난 뒤의 되돌리기도 서버 목록 기준으로
+      push?.(merged);
+    });
+  }, [sendAttachments, unhideAttachment]);
+
+  const undoRemoveAttachment = useCallback(async (url: string) => {
+    const p = pendingRemovalsRef.current.get(url);
+    if (!p) return;
+    pendingRemovalsRef.current.delete(url);
+    if (p.state === 'pending') { unhideAttachment(url); return; } // 요청 취소 — 실패 없음
+    // 보낸 삭제가 끝난 뒤에(그 사이 되넣기가 삭제보다 먼저 닿지 않게). 보낸 삭제가 실패했으면 이미 다시 보이고 서버에도 그대로다 → 할 일 0.
+    const sent = await p.inflight;
+    if (!sent) { unhideAttachment(url); return; }
+    // 서버에선 이미 빠졌다 — 지금 목록(그 사이 더해진 첨부 포함)에서 그 한 항목만 제자리에 되넣는다.
+    const next = (latestRef.current.story.attachments ?? []).filter((a) => a.url !== url);
+    next.splice(Math.min(p.index, next.length), 0, p.attachment);
+    const updated = await sendAttachments(next, false);
+    if (!updated) {
+      // 되넣기 실패 — 서버엔 지워진 채라 숨긴 채 둔다(보이면 거짓). 이 길에서만 뜨는 문구.
+      latestRef.current.addToast({ type: 'error', title: latestRef.current.t('attachmentRestoreFailed') });
+      return;
+    }
+    const merged = { ...latestRef.current.story, attachments: updated.attachments ?? next };
+    latestRef.current = { ...latestRef.current, story: merged };
+    latestRef.current.onStoryUpdate?.(merged);
+    unhideAttachment(url);
+  }, [sendAttachments, unhideAttachment]);
+
+  const handleRemoveAttachment = (url: string) => {
+    const list = story.attachments ?? [];
+    const index = list.findIndex((a) => a.url === url);
+    if (index < 0 || pendingRemovalsRef.current.has(url)) return;
+    pendingRemovalsRef.current.set(url, { attachment: list[index], index, state: 'pending', inflight: null });
+    setHiddenAttachmentUrls((cur) => [...cur, url]);
+    addToast({
+      title: t('attachmentRemovedToast'),
+      body: list[index].name ?? undefined,
+      bodySingleLine: true,
+      action: { label: t('attachmentUndoAction'), onClick: () => { void undoRemoveAttachment(url); } },
+      onClose: (reason) => {
+        if (reason === 'action') return;
+        sendPendingRemovals([url], false);
+        // 보낸 뒤엔 대기표만 치운다 — 숨김은 그대로(부모가 새 목록을 안 내려줘도 지운 첨부가 다시 나타나지 않게). 실패면 위에서 다시 보인다.
+        const p = pendingRemovalsRef.current.get(url);
+        void p?.inflight?.then(() => {
+          if (pendingRemovalsRef.current.get(url) === p) pendingRemovalsRef.current.delete(url);
+        });
+      },
+    });
   };
+
+  const visibleAttachments = (story.attachments ?? []).filter((a) => !hiddenAttachmentUrls.includes(a.url));
+
+  // 화면을 떠나거나 탭이 숨으면 대기 중인 삭제를 keepalive로 즉시(한 번만).
+  useEffect(() => {
+    mountedRef.current = true;
+    const flush = () => sendPendingRemovals([...pendingRemovalsRef.current.keys()], true);
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+      mountedRef.current = false;
+      flush();
+    };
+  }, [sendPendingRemovals]);
 
   // Fetch comments
   useEffect(() => {
@@ -1861,9 +1977,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 accept="image/*,.pdf,.txt,.md,.csv"
                 onChange={(e) => { void handleAttachFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }}
               />
-              {story.attachments && story.attachments.length > 0 ? (
+              {visibleAttachments.length > 0 ? (
                 <div className="mt-2 flex flex-col gap-1.5">
-                  {story.attachments.map((att, i) => {
+                  {visibleAttachments.map((att, i) => {
                     const isImage = att.content_type?.startsWith('image/');
                     const Icon = getFileIcon(att.content_type);
                     const label = att.name ?? t('attachmentFileFallback');
@@ -1880,8 +1996,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         <Button
                           type="button"
                           variant="ghost"
-                          onClick={() => void handleRemoveAttachment(att.url)}
-                          className={cn('h-auto min-h-0 min-w-0 absolute right-1 top-1 rounded bg-destructive-tint p-0.5 text-destructive hover:brightness-95', HOVER_REVEAL)}
+                          onClick={() => handleRemoveAttachment(att.url)}
+                          // story #4345 — 누르는 자리 24×24(아이콘 그대로 · padding) · 첨부 위 모서리 자리 그대로 바깥쪽으로(안쪽 가장자리 고정).
+                          className={cn('h-auto absolute -right-1 -top-1 rounded bg-destructive-tint p-1.5 text-destructive hover:brightness-95', HOVER_REVEAL, HOVER_REVEAL_HIT)}
                           aria-label={t('attachmentDelete')}
                         >
                           <X className="size-3" />
@@ -1934,21 +2051,24 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <>
                   {storyLabels.length > 0 ? (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
+                    <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
                       {storyLabels.map((label) => (
                         <span key={label.itemLabelId} className="group relative inline-flex">
                           <LabelChip label={label} />
+                          {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
+                              모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
                           <Button
                             type="button"
                             variant="ghost"
                             onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는
-                            // 이 테마에 매핑이 없는 no-op. trust-seal.tsx 선례로 hover 상태도
-                            // 테마별 반전(dark:hover:).
-                            className={cn('h-3.5 min-h-0 w-3.5 min-w-0 absolute -right-1 -top-1 items-center justify-center rounded-full bg-muted-foreground/20 p-0 text-foreground hover:bg-destructive/80 hover:text-white dark:hover:text-proof-bg', HOVER_REVEAL)}
+                            className={cn('h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
                             aria-label={t('removeItemAction', { item: label.name })}
                           >
-                            <X className="size-2" />
+                            {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
+                                trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
+                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-white dark:group-hover/button:text-proof-bg">
+                              <X className="size-2" />
+                            </span>
                           </Button>
                         </span>
                       ))}
@@ -2079,10 +2199,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-warning/20', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-warning/20', HOVER_REVEAL)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2100,10 +2220,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2121,10 +2241,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2142,10 +2262,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto min-h-0 min-w-0 shrink-0 rounded p-0.5 hover:bg-muted', HOVER_REVEAL)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>

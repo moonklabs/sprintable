@@ -9,7 +9,7 @@ import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
@@ -290,7 +290,8 @@ function TreeNode({
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
           className={cn(
-            'flex w-full items-center gap-2 rounded-lg pl-3 pr-7 py-2 text-left text-xs transition-all',
+            // story #4345 — «⋮» 누르는 자리 24px(right-2 + 24 = 32)만큼 오른쪽 여백 → 행 글자와 겹침 0.
+            'flex w-full items-center gap-2 rounded-lg pl-3 pr-8 py-2 text-left text-xs transition-all',
             isSelected
               ? 'bg-primary/10 text-primary'
               : 'text-foreground/88 hover:bg-muted hover:text-foreground',
@@ -322,7 +323,7 @@ function TreeNode({
             setContextMenuOpen(true);
           }}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setContextMenuOpen(true); } }}
-          className={cn('absolute right-2 top-1/2 -translate-y-1/2 rounded-sm transition', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
+          className={cn('absolute right-2 top-1/2 -translate-y-1/2 rounded-sm transition', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreVertical className="size-3.5 text-muted-foreground" />
         </div>

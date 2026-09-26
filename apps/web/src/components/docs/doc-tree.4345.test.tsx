@@ -69,7 +69,16 @@ describe('DocTree 행 «⋮» · 끌기 손잡이([SID:4345])', () => {
       'opacity-100', 'pointer-fine:opacity-0', 'pointer-fine:group-hover:opacity-100',
       'pointer-fine:group-focus-within:opacity-100', 'pointer-fine:focus-within:opacity-100',
       'focus-visible:ring-3', 'focus-visible:ring-proof-citron',
+      // PO · 유나 10:01Z — 누르는 자리 24×24(아이콘 그대로)
+      'inline-flex', 'min-h-6', 'min-w-6', 'items-center', 'justify-center',
     ]));
+  });
+
+  it('행 버튼 오른쪽 여백 pr-8 — «⋮» 누르는 자리(right-2 + 24px)와 행 글자가 안 겹침', () => {
+    const { row } = renderTree();
+    const rowBtn = row.querySelector<HTMLElement>('[data-doc-id="d1"]')!;
+    expect(tokens(rowBtn)).toContain('pr-8');
+    expect(tokens(rowBtn)).not.toContain('pr-7');
   });
 
   it('«⋮»에 Enter → 메뉴가 열린다(키보드로 닿는 조작 — 지금처럼)', () => {

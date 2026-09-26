@@ -56,9 +56,11 @@ export function hoverRevealRingProblems(src: string, file = 'sample.tsx'): { pro
   const check = (o: ts.JsxOpeningElement | ts.JsxSelfClosingElement) => {
     checked += 1;
     const tag = o.tagName.getText(sf);
-    if (DESIGN_CONTROL.test(tag)) return;
     const cls = attr(o, 'className');
     const at = `${file}:${sf.getLineAndCharacterOfPosition(o.getStart()).line + 1} <${tag}>`;
+    // 셋째 규칙(PO · 유나 10:01Z) — 누르는 자리 24×24: 디자인 Button도 호출부가 크기를 줄여 쓰므로 예외 없이 상수를 부른다.
+    if (!uses(cls, 'HOVER_REVEAL_HIT')) problems.push(`${at} 누르는 자리 24px(HOVER_REVEAL_HIT) 없음`);
+    if (DESIGN_CONTROL.test(tag)) return;
     if (!uses(cls, 'HOVER_REVEAL_FOCUS_RING')) problems.push(`${at} 규약 링(HOVER_REVEAL_FOCUS_RING) 없음`);
     else if (OFF_RING.test(cls ?? '')) problems.push(`${at} 규약 밖 ring 토큰`);
   };
@@ -169,15 +171,27 @@ describe('호버 전용 조작 요소 부류 가드([SID:4345])', () => {
       `<div role="button" tabIndex={0} className={cn('p-1', HOVER_REVEAL)} />`,
       `<span className={cn('flex', HOVER_REVEAL)}><button className="p-1">x</button></span>`,
     ];
-    for (const s of bad) expect(hoverRevealRingProblems(s).problems, s).toHaveLength(1);
+    // 링만 따지는 표본 — 누르는 자리 상수는 모두 갖췄다(링 문제 하나씩만).
+    for (const s of bad.map((b) => b.replace(/HOVER_REVEAL(?=[,)])/g, 'HOVER_REVEAL, HOVER_REVEAL_HIT').replace('className="p-1"', 'className={HOVER_REVEAL_HIT}'))) {
+      expect(hoverRevealRingProblems(s).problems, s).toHaveLength(1);
+    }
     const ok = [
-      `<Button className={cn('p-1', HOVER_REVEAL)} />`,
-      `<button className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)} />`,
-      `<div role="button" tabIndex={0} className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)} />`,
-      `<span className={cn('flex', HOVER_REVEAL)}><span title="x" /><button className={cn('p-1', HOVER_REVEAL_FOCUS_RING)}>x</button></span>`,
-      `<div className={\`flex \${HOVER_REVEAL}\`}><button className={\`p-1 \${HOVER_REVEAL_FOCUS_RING} x\`} /></div>`,
+      `<Button className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_HIT)} />`,
+      `<button className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_HIT, HOVER_REVEAL_FOCUS_RING)} />`,
+      `<div role="button" tabIndex={0} className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_HIT, HOVER_REVEAL_FOCUS_RING)} />`,
+      `<span className={cn('flex', HOVER_REVEAL)}><span title="x" /><button className={cn('p-1', HOVER_REVEAL_HIT, HOVER_REVEAL_FOCUS_RING)}>x</button></span>`,
+      `<div className={\`flex \${HOVER_REVEAL}\`}><button className={\`\${HOVER_REVEAL_HIT} p-1 \${HOVER_REVEAL_FOCUS_RING} x\`} /></div>`,
     ];
     for (const s of ok) expect(hoverRevealRingProblems(s).problems, s).toEqual([]);
+  });
+
+  it('셋째 규칙 양성 대조 — 누르는 자리 24px 상수가 없으면 RED(디자인 Button도 · 감싼 요소 안 버튼도)', () => {
+    const bad = [
+      `<Button className={cn('h-auto p-0.5', HOVER_REVEAL)} />`,
+      `<button className={cn('p-1', HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)} />`,
+      `<span className={cn('flex', HOVER_REVEAL)}><button className={cn('h-5 w-5', HOVER_REVEAL_FOCUS_RING)}>x</button></span>`,
+    ];
+    for (const s of bad) expect(hoverRevealRingProblems(s).problems.filter((p) => p.includes('HOVER_REVEAL_HIT')), s).toHaveLength(1);
   });
 
   it('둘째 규칙 — src 전체에서 HOVER_REVEAL 조작 요소는 모두 규약 링(또는 디자인 Button)', () => {

@@ -33,4 +33,10 @@ describe('DocUrlChip «주소 바꾸기» — 호버 전용 아님([SID:4345])',
     expect(tokens).toEqual(expect.arrayContaining(['focus-visible:ring-3', 'focus-visible:ring-proof-citron']));
     expect(tokens.filter((t) => /^focus-visible:ring-(border|1)$/.test(t))).toEqual([]);
   });
+
+  it('누르는 자리 24×24(연필 그대로) · 줄 높이 무변(-my-1)(PO · 유나 10:01Z)', () => {
+    const { button } = editButton();
+    expect(button.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6', 'inline-flex', '-my-1']));
+    expect(button.querySelector('svg')?.getAttribute('class')).toContain('size-3');
+  });
 });
