@@ -109,6 +109,10 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         # (예: 레거시 'manager')이 들어오면 0122 CHECK 위반(500) → clamp 로 정규화.
         if "role" in a_set:
             from app.services.project_auth import clamp_project_role
+            # story #4340 — clamp는 레거시 **비-enum 문자열**(예 'manager') 방어용이다. None이 여기 오면 예전엔 'member'로 조용한 강등이었다 —
+            # 스키마가 명시 null을 422로 막고(TeamMemberUpdate.NOT_NULL_FIELDS), 내부 호출이 None을 넘기면 강등 대신 멈춘다(fail-closed).
+            if a_set["role"] is None:
+                raise ValueError("team member role cannot be None — omit it to leave the role unchanged")
             a_set["role"] = clamp_project_role(a_set["role"])
         if m_set:
             await self.session.execute(
