@@ -465,42 +465,55 @@ from tests.test_4336_preflight_error_body_classes import _cases as _preflight_fa
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("failure", sorted(_preflight_failure_cases()))
-async def test_every_preflight_failure_the_worker_meets_stores_the_same_body_as_the_request(failure, monkeypatch):
+async def test_every_preflight_failure_the_worker_meets_stores_the_same_body_as_the_request():
     """PO P2(09:08Z) — 조건 2를 **모든** preflight 실패로: 요청 때 통과했는데 워커의 같은 검사에서 걸리면(종류 전수 — 봉인 · 승인 ·
     일시 중지 · 연결 · 메타데이터 · 이어쓰기 · 초안 없음 · 예산 · 할당량 · 글자 수) 명령에 남은 본문(초안 상세 `command_failure_detail`)이
     같은 실패를 요청에서 만났을 때의 4xx 본문과 키 · 값 모두 같다(명령 상태 두 칸 빼고).
+
+    PO 10:19Z(CI 시간 가드 109s > 60s) — 종류마다 조직 · 연결 · 엔진을 새로 세우던 매개변수 13벌을 **조직 하나 · 종류마다 새 초안 두 개**로
+    묶었다(기다리는 자리는 없었다 — 시간은 전부 반복 시드). 실패하면 어긋난 종류를 모아 한 번에 보인다.
     뮤테이션: 워커의 한 갈래가 `failure_detail`을 안 적으면 그 종류가 None으로 RED · 라우터 한 갈래가 다른 모양을 내면 그 종류가 RED."""
+    from unittest.mock import patch
+
     from app.main import app
     from app.routers import channel_posts as router_module
     from app.services import channel_posts as service_module
     from tests.publish_worker_helpers import draft_detail, run_worker_tick
 
-    exc = _preflight_failure_cases()[failure]
-
-    async def _raise(*_a, **_k):
-        raise exc
-
+    cases = _preflight_failure_cases()
     engine, Session = await _session_factory()
+    mismatches: dict[str, object] = {}
     try:
-        org_id, human_id, (queued, probe) = await _x_org_with_budget(Session, limit_minor=100000, drafts=2)
+        org_id, human_id, draft_ids = await _x_org_with_budget(Session, limit_minor=10_000_000, drafts=2 * len(cases))
         _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
         try:
             async with _client_for(app) as client:
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
-                assert r.status_code == 200 and r.json()["processing"] is True, r.text
-                monkeypatch.setattr(service_module, "publish_channel_post_draft", _raise)  # 워커 차례의 같은 검사에서 걸림
-                await run_worker_tick(Session)
-                stored = (await draft_detail(client, org_id, queued))["command_failure_detail"]
-                monkeypatch.setattr(router_module, "preflight_channel_post_publish", _raise)  # 요청 때 걸림
-                r_now = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{probe}/publish")
+                # 연결 비활성 실패는 워커가 공유 연결 자체를 막는다(apply_command_failure → 연결 상태) — 맨 끝에(뒤 종류의 발행 요청이 막히지 않게).
+                order = sorted(cases, key=lambda name: (name == "ChannelConnectionNotActiveError", name))
+                for i, failure in enumerate(order):
+                    exc = cases[failure]
+                    queued, probe = draft_ids[2 * i], draft_ids[2 * i + 1]
+
+                    async def _raise(*_a, _exc=exc, **_k):
+                        raise _exc
+
+                    r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{queued}/publish")
+                    assert r.status_code == 200 and r.json()["processing"] is True, (failure, r.text)
+                    with patch.object(service_module, "publish_channel_post_draft", _raise):  # 워커 차례의 같은 검사에서 걸림
+                        await run_worker_tick(Session)
+                    stored = (await draft_detail(client, org_id, queued))["command_failure_detail"]
+                    with patch.object(router_module, "preflight_channel_post_publish", _raise):  # 요청 때 걸림
+                        r_now = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{probe}/publish")
+                    if not 400 <= r_now.status_code < 500:
+                        mismatches[failure] = ("status", r_now.status_code, r_now.text)
+                        continue
+                    request_body = {k: v for k, v in r_now.json()["error"].items() if k not in ("command_status", "next_attempt_at")}
+                    # 응답 봉투(main.py HTTPException 처리)는 dict 본문에 `message`가 없으면 빈 문자열을 채운다 — 같은 규칙을 저장본에 입혀 대조.
+                    if stored is None or {"message": stored.get("message", ""), **stored} != request_body:
+                        mismatches[failure] = (stored, request_body)
         finally:
             app.dependency_overrides.clear()
-        assert 400 <= r_now.status_code < 500, (failure, r_now.status_code, r_now.text)
-        request_body = {k: v for k, v in r_now.json()["error"].items() if k not in ("command_status", "next_attempt_at")}
-        assert stored is not None, failure
-        # 응답 봉투(main.py HTTPException 처리)는 dict 본문에 `message`가 없으면 빈 문자열을 채운다 — 같은 규칙을 저장본에 입혀 대조.
-        assert {"message": stored.get("message", ""), **stored} == request_body, (failure, stored, request_body)
+        assert not mismatches, mismatches
     finally:
         await engine.dispose()
 
