@@ -144,12 +144,13 @@ def _render(alert: OperatorAlert) -> str:
     def line(values: dict[str, Any]) -> str:
         return ", ".join(f"{k}={v}" for k, v in values.items()) or "-"
 
+    # 고정 모양의 코드성 표기(종류 · id · 코드 · 금액)라 로케일 문장을 만들지 않는다 — 운영 대화에서 그대로 검색 · 대조한다(story #3779 규율).
     return "\n".join([
-        f"[운영 알림] {alert.kind}",
-        f"- 대상 조직: {alert.target_org_id or '-'}",
-        f"- 대상: {line(alert.target)}",
-        f"- 사실: {line(alert.facts)}",
-        f"- 사건 키: {alert.dedupe_key}",
+        f"[ops alert] {alert.kind}",
+        f"- org: {alert.target_org_id or '-'}",
+        f"- target: {line(alert.target)}",
+        f"- facts: {line(alert.facts)}",
+        f"- event key: {alert.dedupe_key}",
     ])
 
 
