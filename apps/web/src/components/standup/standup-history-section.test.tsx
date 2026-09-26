@@ -224,3 +224,19 @@ describe('StandupHistorySection — 떠난 사람이 작성자([SID:4300] · 430
   });
 });
 
+
+describe('StandupHistorySection — 늦게 온 응답(story #4328 · 까디르 4694 ①)', () => {
+  it('⭐프로젝트 A 기록이 B로 바꾼 뒤 늦게 와도 B 화면에 A 기록을 그리지 않는다', async () => {
+    const resolvers: Record<string, (r: Response) => void> = {};
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => {
+      resolvers[new URL(url, 'http://localhost').searchParams.get('project_id') ?? ''] = resolve;
+    })));
+    const page = (id: string) => new Response(JSON.stringify({ data: [entry(id, '2026-07-27')], meta: { has_more: false, next_cursor: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await act(async () => { root.render(withIntl(<StandupHistorySection projectId="proj-A" memberNamesLoaded />)); });
+    await act(async () => { root.render(withIntl(<StandupHistorySection projectId="proj-B" memberNamesLoaded />)); });
+    await act(async () => { resolvers['proj-B'](page('B')); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { resolvers['proj-A'](page('A')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('done-B');
+    expect(container.textContent, '늦게 온 A 기록').not.toContain('done-A');
+  });
+});
