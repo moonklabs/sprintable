@@ -130,12 +130,13 @@ async def _seed_binding(session, org_id, project_id, *, stage, agent_id):
     await session.commit()
 
 
-async def _seed_human(session, org_id):
-    """story #4251 — 첫 stage를 바인딩 없이 내는 자리(«레시피 시작»)는 프로젝트에 접근할 수 있는 사람이다(org owner)."""
+async def _seed_human(session, org_id, *, locale=None):
+    """story #4251 — 첫 stage를 바인딩 없이 내는 자리(«레시피 시작»)는 프로젝트에 접근할 수 있는 사람이다(org owner).
+    story #4250 — `locale`은 소유자의 users.locale = 조직 기준 언어(`resolve_org_locale`)."""
     from app.models.project import OrgMember
     from app.models.user import User
 
-    user = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x")
+    user = User(id=uuid.uuid4(), email=f"human-{uuid.uuid4().hex[:8]}@test.dev", hashed_password="x", locale=locale)
     session.add(user)
     await session.commit()
     session.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role="owner"))
@@ -156,12 +157,13 @@ def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> AuthContext:
     )
 
 
-def _fake_request() -> StarletteRequest:
+def _fake_request(accept_language: str | None = None) -> StarletteRequest:
     from starlette.requests import Request as StarletteRequest
-    return StarletteRequest(scope={"type": "http", "headers": []})
+    headers = [(b"accept-language", accept_language.encode())] if accept_language else []
+    return StarletteRequest(scope={"type": "http", "headers": headers})
 
 
-async def _publish_stage(session, *, org_id, publisher_id, story_id, stage, human=False):
+async def _publish_stage(session, *, org_id, publisher_id, story_id, stage, human=False, accept_language=None):
     from app.routers.events import EventPublishRequest, publish_registry_event
 
     body = EventPublishRequest(
@@ -169,7 +171,7 @@ async def _publish_stage(session, *, org_id, publisher_id, story_id, stage, huma
         payload={"stage": stage, "work_item_type": "story", "work_item_id": str(story_id)},
     )
     return await publish_registry_event(
-        body, BackgroundTasks(), _fake_request(), db=session,
+        body, BackgroundTasks(), _fake_request(accept_language), db=session,
         auth=_human_auth(publisher_id, org_id) if human else _auth(publisher_id, org_id), org_id=org_id,
     )
 
@@ -280,5 +282,38 @@ async def test_human_role_stage_without_role_actor_kinds_declaration_still_warns
             assert resp["zero_reach_warning"] is True
             assert "warning" in resp
             assert "notice" not in resp
+    finally:
+        await engine.dispose()
+
+
+# ── story #4250 — zero_reach 경고 문장은 조직/요청 로케일(i18n_catalog 한 원천) ─────────────────────────────
+_KO_WARNING = "발행은 됐지만 escalation·broadcast 대상이 모두 0명이에요 — work_item이 미배정이거나 routing이 아무도 가리키지 않아요."
+_EN_WARNING = "Published, but escalation and broadcast both reached 0 people — the work item is unassigned or the routing points to no one."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("owner_locale", "accept_language", "expected"), [
+    ("en", None, _EN_WARNING),  # 헤더 없는 발행(MCP · 자동 발행) — 조직 기준 언어(소유자 en)
+    ("ko", None, _KO_WARNING),  # ko 조직은 한국어(옛 문장과 같은 뜻 · 카탈로그 톤 가드로 해요체)
+    (None, None, _KO_WARNING),  # 소유자 로케일 미설정 → 기본 ko
+    ("en", "ko", _KO_WARNING),  # 요청 로케일이 조직 기준보다 먼저
+])
+async def test_zero_reach_warning_follows_the_org_or_request_locale(owner_locale, accept_language, expected):
+    """뮤테이션: 경고를 옛 하드코딩 한국어로 되돌리면 en 줄이 RED · 로케일 대신 "ko"를 넘기면 en 줄이 RED."""
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, slug=f"s4250-{uuid.uuid4().hex[:6]}")
+            await _seed_definition(s, org_id, role_actor_kinds=_ROLE_ACTOR_KINDS)
+            publisher_user_id = await _seed_human(s, org_id, locale=owner_locale)
+            story_id = await _seed_story(s, org_id, project_id)
+
+            resp = await _publish_stage(
+                s, org_id=org_id, publisher_id=publisher_user_id, story_id=story_id, stage="draft", human=True,
+                accept_language=accept_language,
+            )
+
+            assert resp["zero_reach_warning"] is True
+            assert resp["warning"] == expected
     finally:
         await engine.dispose()
