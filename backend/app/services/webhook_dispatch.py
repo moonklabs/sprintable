@@ -106,7 +106,7 @@ async def _fire_webhooks_now(
     fetch/send를 직접 호출해 그 사이에 세션을 반납한다(delivery_dispatcher.py 참조)."""
     targets = await _fetch_webhook_targets(
         session, org_id, event,
-        recipient_member_ids=recipient_member_ids, preserve_broadcast=preserve_broadcast,
+        recipient_member_ids=recipient_member_ids, preserve_broadcast=preserve_broadcast, event_data=data,
     )
     await _send_webhook_targets(targets, event, data, org_id)
 
@@ -118,8 +118,13 @@ async def _fetch_webhook_targets(
     *,
     recipient_member_ids: set[uuid.UUID] | None = None,
     preserve_broadcast: bool = True,
+    event_data: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """활성 WebhookConfig를 조회해 이벤트/타겟 게이팅까지 마친 순수 dict 리스트로 반환한다.
+
+    story #4358 — 배달 시점에 설정 주인(`member_id`)의 **지금** 접근을 다시 본다(만들 때 확인한 것으로 끝나지 않게 · outbox는 쌓인 뒤
+    배달까지 틈이 있어 여기서): 이벤트 데이터에 project_id가 있으면 주인이 그 프로젝트에 접근할 수 있어야 하고, 없으면(org 수준 이벤트)
+    주인이 그 org의 활성 구성원이어야 한다. 막힌 설정은 보내지 않고 사유를 로그로 남긴다(조용히 사라지지 않게 · 설정은 건드리지 않음).
     세션 I/O는 이 함수에서 끝 — 반환 直後 호출자가 세션을 커밋/반납해야 한다(story #2460
     PO 리뷰 F1, 위 `_fire_webhooks_now` docstring 참조)."""
     result = await session.execute(
@@ -131,6 +136,7 @@ async def _fetch_webhook_targets(
         ).where(WebhookConfig.org_id == org_id, WebhookConfig.is_active.is_(True))
     )
     targets: list[dict[str, Any]] = []
+    cache: dict = {}  # 주인별 판정(이 배달 한 번 안에서)
     for url, secret, events, member_id in result.all():
         if events and event not in events:
             continue
@@ -141,8 +147,64 @@ async def _fetch_webhook_targets(
                     continue  # broadcast 인데 보존 끄면 drop
             elif member_id not in recipient_member_ids:
                 continue  # member-bound 인데 관련자 아님 → drop(과다 fan-out 차단)
+        if member_id is not None:
+            reason = await _owner_block_reason(session, org_id, member_id, event_data, cache)
+            if reason is not None:
+                logger.warning(
+                    "webhook.dispatch.blocked reason=%s org_id=%s member_id=%s event=%s", reason, org_id, member_id, event,
+                )
+                continue
         targets.append({"url": url, "secret": secret})
     return targets
+
+
+def _event_project_id(event_data: dict[str, Any] | None) -> uuid.UUID | None:
+    raw = (event_data or {}).get("project_id")
+    try:
+        return uuid.UUID(str(raw)) if raw else None
+    except ValueError:
+        return None
+
+
+async def _owner_block_reason(
+    session: AsyncSession, org_id: uuid.UUID, member_id: uuid.UUID, event_data: dict[str, Any] | None, cache: dict,
+) -> str | None:
+    """story #4358 — 설정 주인이 지금 이 이벤트를 받을 수 있는지. 받을 수 있으면 None, 아니면 막는 사유(로그용 · 고정 낱말).
+    주인은 members 행(에이전트 · 사람) 또는 members 행 없는 사람(org_members id)일 수 있다 — 둘 다 본다. 모르면 막는다(fail-closed)."""
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    if member_id not in cache:
+        identity: uuid.UUID | None = None
+        active = False
+        row = (await session.execute(
+            select(Member.type, Member.user_id, Member.is_active, Member.deleted_at, Member.org_id).where(Member.id == member_id)
+        )).first()
+        if row is not None:
+            mtype, user_id, is_active, deleted_at, m_org = row
+            active = bool(is_active) and deleted_at is None and m_org == org_id
+            identity = member_id if mtype == "agent" else user_id
+        else:
+            om = (await session.execute(
+                select(OrgMember.user_id, OrgMember.deleted_at).where(OrgMember.id == member_id, OrgMember.org_id == org_id)
+            )).first()
+            if om is not None:
+                active = om[1] is None
+                identity = om[0]
+        accessible = (
+            set(await accessible_project_ids_in_org(session, identity, org_id)) if (active and identity is not None) else set()
+        )
+        cache[member_id] = (row is not None or identity is not None, active, accessible)
+    known, active, accessible = cache[member_id]
+    if not known:
+        return "owner_not_found"
+    if not active:
+        return "owner_inactive"
+    project_id = _event_project_id(event_data)
+    if project_id is not None and project_id not in accessible:
+        return "owner_no_project_access"
+    return None
 
 
 async def _send_webhook_targets(

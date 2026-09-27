@@ -47,33 +47,63 @@ async def _human_member(s, org_id, *, grant_project_id=None):
     return member.id
 
 
-async def test_webhook_of_an_owner_without_project_access_still_receives_events():
+async def _world_with_webhooks():
+    """org · 프로젝트 P · 주인 셋(P 접근 잃음 · P 접근 있음 · 비활성) · 각자 P 범위 활성 웹훅."""
+    from sqlalchemy import update
+
+    from app.models.member import Member
     from app.models.organization import Organization
     from app.models.project import Project
     from app.models.webhook_config import WebhookConfig
-    from app.services.webhook_dispatch import _fetch_webhook_targets
 
     engine, Session = await _session_factory()
+    async with Session() as s:
+        org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+        s.add(org)
+        await s.flush()
+        project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+        s.add(project)
+        await s.flush()
+        lost = await _human_member(s, org.id)  # P 접근 없음(잃었다)
+        kept = await _human_member(s, org.id, grant_project_id=project.id)
+        gone = await _human_member(s, org.id, grant_project_id=project.id)
+        await s.execute(update(Member).where(Member.id == gone).values(is_active=False))
+        for member_id, tag in ((lost, "LOST"), (kept, "KEPT"), (gone, "GONE")):
+            s.add(WebhookConfig(
+                id=uuid.uuid4(), org_id=org.id, member_id=member_id, project_id=project.id,
+                url=f"https://hooks.example.com/{tag}", is_active=True,
+            ))
+        await s.commit()
+    return engine, Session, org.id, project.id
+
+
+async def test_project_event_is_not_sent_to_an_owner_who_lost_project_access(caplog):
+    """AC1 · AC2 — 이벤트에 project_id가 있으면 주인의 지금 접근을 본다: 잃은 주인 → 막힘(사유 로그) · 가진 주인 → 그대로."""
+    from app.services.webhook_dispatch import _fetch_webhook_targets
+
+    engine, Session, org_id, project_id = await _world_with_webhooks()
     try:
         async with Session() as s:
-            org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
-            s.add(org)
-            await s.flush()
-            project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
-            s.add(project)
-            await s.flush()
-            lost = await _human_member(s, org.id)  # P 접근 없음(잃었다)
-            kept = await _human_member(s, org.id, grant_project_id=project.id)
-            for member_id, tag in ((lost, "LOST"), (kept, "KEPT")):
-                s.add(WebhookConfig(
-                    id=uuid.uuid4(), org_id=org.id, member_id=member_id, project_id=project.id,
-                    url=f"https://hooks.example.com/{tag}", is_active=True,
-                ))
-            await s.commit()
-        async with Session() as s:
-            targets = await _fetch_webhook_targets(s, org.id, "story.updated")
+            targets = await _fetch_webhook_targets(s, org_id, "story.updated", event_data={"project_id": str(project_id)})
         urls = {t["url"] for t in targets}
         assert "https://hooks.example.com/KEPT" in urls, "접근이 있는 주인의 설정은 그대로 대상(회귀 0)"
         assert "https://hooks.example.com/LOST" not in urls, "P 접근을 잃은 주인의 P 범위 웹훅으로 이벤트가 간다"
+        assert "https://hooks.example.com/GONE" not in urls, "비활성 주인에게 간다"
+        assert "owner_no_project_access" in caplog.text, "막힌 발송은 사유가 남아야 한다(조용히 사라지지 않게)"
+    finally:
+        await engine.dispose()
+
+
+async def test_org_level_event_needs_an_active_owner_only():
+    """AC2 — project_id 없는 org 수준 이벤트: 활성 구성원 주인은 받는다(프로젝트 접근과 무관 · 회귀 0) · 비활성 주인은 막힌다."""
+    from app.services.webhook_dispatch import _fetch_webhook_targets
+
+    engine, Session, org_id, _project_id = await _world_with_webhooks()
+    try:
+        async with Session() as s:
+            targets = await _fetch_webhook_targets(s, org_id, "agent_deployment.terminated", event_data={})
+        urls = {t["url"] for t in targets}
+        assert {"https://hooks.example.com/KEPT", "https://hooks.example.com/LOST"} <= urls
+        assert "https://hooks.example.com/GONE" not in urls
     finally:
         await engine.dispose()
