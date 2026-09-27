@@ -485,3 +485,66 @@ async def test_workflow_executions_list_of_an_inaccessible_project_is_404():
         own = await _get(Session, seeded, f"/api/v2/workflow-executions?project_id={seeded['pa']}&member_id={seeded['member_id']}", seeded["member_user"])
         assert other.status_code == 404 == missing.status_code, (other.text[:200], missing.text[:200])
         assert own.status_code == 200, own.text[:300]
+
+
+async def test_my_blockers_weight_counts_only_accessible_blocked_stories():
+    """까디르 델타(4731) — 블로커 무게(`waiting_count_approx`)가 접근 못 하는 프로젝트의 막힌 스토리까지 셌다(my_blockers 목록만 좁히고
+    이 수는 그대로 — «위와 동일 WHERE 축» 주석이 거짓이 된 자리). A 블로커 하나가 A 스토리 하나 · B 스토리 하나를 막음 → 수 1."""
+    from sqlalchemy import update
+
+    from app.models.dependency import ItemDependency
+    from app.models.pm import Story
+
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            await s.execute(update(Story).where(Story.id == seeded["story_a"]).values(assignee_id=seeded["member_id"], status="in-progress"))
+            a2 = Story(id=uuid.uuid4(), org_id=seeded["org"], project_id=seeded["pa"], title="VISIBLE-A-blocked", status="backlog")
+            s.add(a2)
+            await s.flush()
+            for blocked in (a2.id, seeded["story_b"]):
+                s.add(ItemDependency(
+                    id=uuid.uuid4(), org_id=seeded["org"], from_id=seeded["story_a"], to_id=blocked,
+                    dep_type="blocks", item_type="story",
+                ))
+            await s.commit()
+        resp = await _get(Session, seeded, "/api/v2/command-center/my-actions", seeded["member_user"])
+        assert resp.status_code == 200, resp.text[:300]
+        blockers = [i for i in resp.json()["action_queue"]["items"] if i["type"] == "my_blockers"]
+        assert blockers, resp.text[:300]
+        assert {b["context"]["waiting_count_approx"] for b in blockers} == {1}, blockers
+        assert {b["context"]["blocked_story_id"] for b in blockers} == {str(a2.id)}, "접근 불가 프로젝트의 막힌 스토리가 블로커 목록에 있다"
+
+
+async def test_my_actions_gate_approval_and_waiting_rows_drop_inaccessible_projects():
+    """까디르 델타(4731) — action queue의 결재 대기(gate_approval) · 남 기다림(waiting_on_others)도 접근 가능 프로젝트만:
+    각 프로젝트에 (내가 결재자인 대기 결재) · (내 담당 스토리가 남의 결재를 기다림)을 심고 → A 것만 보인다."""
+    from sqlalchemy import update
+
+    from app.models.pm import Story
+    from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
+
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            pb = (await s.get(Story, seeded["story_b"])).project_id
+            await s.execute(update(Story).where(Story.id.in_([seeded["story_a"], seeded["story_b"]])).values(assignee_id=seeded["member_id"], status="in-review"))
+            for key, project in (("a", seeded["pa"]), ("b", pb)):
+                for approver in (seeded["member_id"], uuid.uuid4()):  # 나(결재 대기) · 남(내 담당 스토리가 기다림)
+                    run = WorkflowLineStepRun(
+                        id=uuid.uuid4(), org_id=seeded["org"], project_id=project, entity_type="story", entity_id=seeded[f"story_{key}"],
+                        to_status="done", status="pending", mode="advisory_only", correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex,
+                    )
+                    s.add(run)
+                    await s.flush()
+                    s.add(WorkflowLineStepApproval(
+                        id=uuid.uuid4(), org_id=seeded["org"], project_id=project, step_run_id=run.id, approval_group_id=uuid.uuid4(),
+                        approver_member_id=approver, approver_member_type="human", status="pending", blocking=True,
+                    ))
+            await s.commit()
+        resp = await _get(Session, seeded, "/api/v2/command-center/my-actions", seeded["member_user"])
+        assert resp.status_code == 200, resp.text[:300]
+        items = resp.json()["action_queue"]["items"]
+        by_type = {t: [i for i in items if i["type"] == t] for t in ("gate_approval", "waiting_on_others")}
+        assert by_type["gate_approval"] and by_type["waiting_on_others"], items
+        # 결재 항목은 스토리 id · 제목을 싣지 않을 수 있어(단계 · 결재 id) 글로 못 가른다 — 수로 가른다: 프로젝트마다 하나씩 심었으니 A 몫 1.
+        assert len(by_type["gate_approval"]) == 1 and len(by_type["waiting_on_others"]) == 1, by_type
+        assert "SECRET-B" not in str(by_type) and str(seeded["story_b"]) not in str(by_type), by_type

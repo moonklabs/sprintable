@@ -268,6 +268,8 @@ async def my_actions(
                     _Blocked.org_id == org_id,
                     _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),
                     _Blocked.deleted_at.is_(None),
+                    # story #4351(까디르 델타) — 위 my_blockers와 같은 축: 접근 못 하는 프로젝트의 막힌 스토리는 세지 않는다(수로 존재가 새지 않게).
+                    _Blocked.project_id.in_(_accessible_project_ids),
                 )
                 .group_by(ItemDependency.from_id)
             )
