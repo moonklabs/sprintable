@@ -108,6 +108,7 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const langButtonRef = useRef<HTMLButtonElement>(null);
   const langListClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
 
   const language = (node.attrs as { language?: string }).language ?? null;
@@ -151,6 +152,8 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
     // **지금 선택 영역**의 코드 블록을 바꿔, 커서가 다른 코드 블록에 있으면 그 블록의 언어가 바뀌었다.
     updateAttributes({ language: lang });
     setShowLangMenu(false);
+    // 고른 선택지는 목록과 함께 사라진다 — 초점이 body로 떨어지지 않게 이 블록의 언어 버튼으로 돌려놓는다(키보드로 이어서 쓸 수 있게).
+    langButtonRef.current?.focus();
   }, [updateAttributes]);
 
   useEffect(() => {
@@ -172,6 +175,7 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
           {/* Language dropdown */}
           <div ref={langMenuRef} className="relative" contentEditable={false}>
             <button
+              ref={langButtonRef}
               type="button"
               onClick={() => isEditable && setShowLangMenu((v) => !v)}
               className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${

@@ -54,6 +54,54 @@ function languages(editor: Editor): Array<string | null> {
   return out;
 }
 
+async function mountTwoBlocks(): Promise<{ editor: Editor; pickers: HTMLButtonElement[] }> {
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <ToastProvider>
+          <DocEditor value={TWO_BLOCKS} contentFormat="html" onChange={() => {}} labels={LABELS} currentDocId="d1" projectId="p1" />
+        </ToastProvider>
+      </NextIntlClientProvider>,
+    );
+  });
+  await settle();
+  const dom = container.querySelector('.ProseMirror') as (HTMLElement & { editor?: Editor }) | null;
+  const pickers = [...container.querySelectorAll<HTMLButtonElement>('div[contenteditable="false"].relative > button')];
+  expect(pickers.length).toBe(2);
+  return { editor: dom!.editor!, pickers };
+}
+
+function otherLanguageOption(): HTMLButtonElement {
+  const options = [...container.querySelectorAll<HTMLButtonElement>('[data-dropdown-panel="code-lang"] button')];
+  const target = options.find((b) => !['JS', 'JavaScript', 'Python'].includes((b.textContent ?? '').trim()));
+  expect(target).toBeTruthy();
+  return target!;
+}
+
+describe('코드 블록 언어 고르개 — 고른 뒤 초점(유나 디자인 판 · story #4360 AC3)', () => {
+  it('마우스: 블록 B에서 고르면 초점이 B의 언어 버튼으로 돌아온다(body · A 버튼 아님)', async () => {
+    const { editor, pickers } = await mountTwoBlocks();
+    await act(async () => { editor.commands.setTextSelection(3); });  // 커서 = 블록 A
+    await act(async () => { pickers[1]!.click(); });
+    await act(async () => { otherLanguageOption().click(); });
+    expect(container.querySelector('[data-dropdown-panel="code-lang"]')).toBeNull();  // 목록은 닫혔다
+    expect(document.activeElement).toBe(pickers[1]);
+    expect(document.activeElement).not.toBe(pickers[0]);
+  });
+
+  it('키보드 모양: 버튼에 초점 → 열기 → 선택지에 초점 → 고르기 → 초점이 그 블록 버튼으로 돌아온다', async () => {
+    // jsdom은 네이티브 버튼의 Enter/Space → click 합성을 하지 않는다 — 초점을 옮기고 초점 요소에서 click으로 활성화를 대신한다(실 키는 유나 판).
+    const { pickers } = await mountTwoBlocks();
+    pickers[1]!.focus();
+    await act(async () => { (document.activeElement as HTMLButtonElement).click(); });
+    const option = otherLanguageOption();
+    option.focus();
+    expect(document.activeElement).toBe(option);
+    await act(async () => { (document.activeElement as HTMLButtonElement).click(); });
+    expect(document.activeElement).toBe(pickers[1]);
+  });
+});
+
 describe('코드 블록 언어 고르개 — 자기 블록만', () => {
   it('커서가 블록 A에 있는 채 블록 B의 고르개로 언어를 고르면 B만 바뀌고 A는 그대로 · 나가는 HTML에도 실린다', async () => {
     const changes: string[] = [];
