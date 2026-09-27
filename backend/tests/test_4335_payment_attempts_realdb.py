@@ -367,6 +367,65 @@ async def test_change_tier_attempt_charges_once_moves_tier_and_refunds_the_captu
 
 
 @pytest.mark.anyio
+async def test_change_tier_declined_on_an_active_plan_keeps_tier_period_and_the_old_order(Session, toss):
+    """story #4344 까디르 ② — 걷은 test_2880이 재던 «상향 청구 거절 → 원래 tier · 기간 그대로 · 옛 결제 환불 시도 0»을 결제 시도 경로로.
+    (위 :343 거절 테스트는 checkout(pending 구독)뿐이었다.) 뮤테이션: 거절에서도 tier를 옮기거나 옛 결제를 부분취소하면 RED."""
+    from app.services import billing_payment_attempt as svc
+
+    toss.charge_mode = "decline"
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        prior_order_id = (await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890))[0]
+        before = await _row(s, "SELECT tier, current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:o", o=org_id)
+        attempt_id = uuid.uuid4()
+        _attempt, token = await svc.start_change_tier_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, new_tier="team")
+        await svc.drive_attempt(s, attempt_id, token)
+        done = await svc.get_attempt(s, attempt_id)
+        assert done.status == "declined", done.status
+        after = await _row(s, "SELECT tier, current_period_start, current_period_end, checkout_claimed_at FROM org_subscriptions WHERE org_id=:o", o=org_id)
+        assert (after.tier, after.current_period_start, after.current_period_end) == (before.tier, before.current_period_start, before.current_period_end)
+        assert after.checkout_claimed_at is None, "거절 뒤 결제 슬롯이 풀려야 다시 시도할 수 있다"
+        prior = await _row(s, "SELECT refund_status FROM billing_orders WHERE order_id=:oid", oid=prior_order_id)
+        assert prior.refund_status is None, "청구가 거절됐는데 옛 결제를 건드렸다"
+    assert toss.approvals == 0 and toss.cancel_calls == []
+
+
+@pytest.mark.anyio
+async def test_two_concurrent_change_tier_attempts_charge_once(Session, toss):
+    """story #4344 까디르 ③ — 걷은 test_2880의 «동시 두 요금제 변경 → 성공 1 · 진행 중 1»을 결제 시도 경로로(서로 다른 시도 id · 두 세션이
+    동시에). :263은 checkout, :861은 순차였다. 뮤테이션: 조직 결제 슬롯 claim을 빼면 둘 다 시작돼 청구가 2."""
+    import asyncio
+
+    from app.services import billing_payment_attempt as svc
+    from app.services.org_subscription_tier_change import TierChangeInProgress
+
+    async with Session() as s:
+        org_id = await _new_org(s, seats=1)
+        await _seed_active_paid_subscription(s, org_id, tier="starter")
+        await _seed_active_billing_key(s, org_id)
+        await _seed_prior_confirmed_order(s, org_id, amount_minor=32_890)
+
+    async def _start(tier):
+        async with Session() as s:
+            try:
+                return await svc.start_change_tier_attempt(s, attempt_id=uuid.uuid4(), org_id=org_id, requested_by=None, new_tier=tier)
+            except TierChangeInProgress as exc:
+                return exc
+
+    results = await asyncio.gather(_start("team"), _start("business"))
+    started = [r for r in results if not isinstance(r, Exception)]
+    refused = [r for r in results if isinstance(r, TierChangeInProgress)]
+    assert (len(started), len(refused)) == (1, 1), results
+    (attempt, token), = started
+    async with Session() as s:
+        await svc.drive_attempt(s, attempt.id, token)
+        assert (await svc.get_attempt(s, attempt.id)).status == "succeeded"
+    assert toss.approvals == 1 and len(toss.charge_calls) == 1
+
+
+@pytest.mark.anyio
 async def test_declined_charge_ends_declined_with_no_approval_and_releases_the_slot(Session, toss):
     from app.services import billing_payment_attempt as svc
 
