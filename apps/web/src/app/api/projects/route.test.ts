@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 837a36c4(Group B b5): proxy 위임 리팩토링 후 stale 재작성. GET=순수 proxy / POST=auth 게이트+org_id
 // 보강 후 위임. 둘 다 /api/v2/projects.
 const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext, getOrgProjectAuthContext: getAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, POST } from './route';

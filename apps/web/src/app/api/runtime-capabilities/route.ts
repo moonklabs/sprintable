@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 /**
@@ -10,7 +10,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
  */
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapi(request, '/api/v2/runtime-capabilities');
     if (!_r.ok) return _r;

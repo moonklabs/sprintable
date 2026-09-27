@@ -4,7 +4,7 @@ import { createStorySchema } from '@sprintable/shared';
 import { StoryService, type CreateStoryInput } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext, getOrgProjectAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createStoryRepository } from '@/lib/storage/factory';
@@ -13,7 +13,7 @@ import { markRoute, markRouteReturn, withRouteTiming } from '@/lib/server-timing
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;

@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
   createSprintRepository: vi.fn(),
   kickoff: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createSprintRepository: h.createSprintRepository }));
 vi.mock('@/services/sprint', async (importActual) => ({
   // 에러클래스(NotFoundError·ForbiddenError 등)는 실제 유지(handleApiError가 instanceof로 참조)·SprintService만 오버라이드.

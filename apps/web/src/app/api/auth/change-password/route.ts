@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -7,7 +7,7 @@ const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://loca
 
 /** PATCH /api/auth/change-password */
 export async function PATCH(request: Request) {
-  const me = await getAuthContext(request);
+  const me = await getOrgProjectAuthContext(request);
   if (!me) return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, { status: 401 });
 
   const body = await request.json() as { current_password: string; new_password: string };

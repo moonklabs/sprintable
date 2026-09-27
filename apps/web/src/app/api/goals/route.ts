@@ -3,7 +3,7 @@ import { createEpicSchema } from '@sprintable/shared';
 import { GoalService, type CreateEpicInput } from '@/services/goal';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext, getOrgProjectAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { markRoute, markRouteReturn, withRouteTiming } from '@/lib/server-timing';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
@@ -105,7 +105,7 @@ export const GET = withRouteTiming('goals', async (request: Request) => {
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     // 권한(에픽 생성 = agent 또는 admin/owner)은 BE 단일 소스에서 강제한다 — create_epic →

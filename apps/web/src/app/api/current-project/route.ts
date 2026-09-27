@@ -1,12 +1,12 @@
 import { cookies } from 'next/headers';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { CURRENT_PROJECT_COOKIE, getAuthContext } from '@/lib/auth-helpers';
+import { CURRENT_PROJECT_COOKIE, getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { parseBody, setCurrentProjectSchema } from '@sprintable/shared';
 
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     const { fastapiCall } = await import('@sprintable/storage-api');

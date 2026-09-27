@@ -9,7 +9,7 @@ const h = vi.hoisted(() => ({
   // (BE X-Total-Count)를 쓰도록 바뀌어 mock 표면도 같이 늘어난다.
   count: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createTaskRepository: h.createTaskRepository }));
 vi.mock('@/services/task', async (importActual) => ({
   ...(await importActual<typeof import('@/services/task')>()),

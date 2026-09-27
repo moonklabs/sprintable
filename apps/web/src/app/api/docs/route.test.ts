@@ -15,7 +15,7 @@ const listByIdsMock = vi.fn();
 
 vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext, getOrgProjectAuthContext: getAuthContext }));
 vi.mock('@/services/docs', () => ({
   DocsService: class { list = listMock; search = searchMock; getDoc = getDocMock; listByIds = listByIdsMock; },
 }));
