@@ -40,9 +40,12 @@ class DocRepository(BaseRepository[Doc]):
         super().__init__(Doc, session, org_id)
 
     async def list(
-        self, limit: int = 500, cursor: str | None = None, **filters: Any
+        self, limit: int = 500, cursor: str | None = None, *, project_ids: list[uuid.UUID] | None = None, **filters: Any
     ) -> list[Doc]:  # type: ignore[override]
         q = select(Doc).where(self._org_filter(), Doc.deleted_at.is_(None))
+        if project_ids is not None:
+            # story #4350 PR 3(까디르 HIGH) — project 없는 목록은 caller의 접근 가능 프로젝트 문서만(SQL · 빈 집합 = 0건).
+            q = q.where(Doc.project_id.in_(project_ids))
         for attr, val in filters.items():
             q = q.where(getattr(Doc, attr) == val)
         parsed = parse_doc_cursor(cursor)

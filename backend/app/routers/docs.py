@@ -224,11 +224,17 @@ async def list_docs(
         return envelope
 
     filters: dict = {}
+    scope: list[uuid.UUID] | None = None
     if project_id:
         filters["project_id"] = project_id
+    else:
+        # story #4350 PR 3(까디르 HIGH · SEC-S8) — project_id 없이 부르면 org 전체 문서(제목 · 본문 요약)가 나갔다 → 접근 가능 프로젝트만.
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        scope = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
     if doc_type:
         filters["doc_type"] = doc_type
-    docs = await repo.list(limit=limit + 1, cursor=cursor, **filters)
+    docs = await repo.list(limit=limit + 1, cursor=cursor, project_ids=scope, **filters)
     envelope = _doc_page_envelope(docs, limit)
     if response is not None:
         response.headers["X-Result-Count"] = str(len(envelope["data"]))

@@ -133,18 +133,17 @@ async def list_hypotheses(
     """story fca4723d(C1): project_id 생략 시 org 전체 가설 조회 — retro list_sessions와
     동형 패턴(app/routers/retros.py). org-wide 조회는 각 항목의 실제 project 접근권으로
     후필터(비접근 project의 가설 비노출 — 존재 자체를 숨기는 404류 원칙과 정합)."""
+    # story #4350 PR 3(까디르) — project_id 생략 시 접근권을 SQL로(예전 후필터는 limit 뒤라 페이지가 모자랐다 · 항목마다 쿼리 1개).
+    scope = None
+    if project_id is None:
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        scope = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
     items = await svc.list_hypotheses(
         session, org_id, project_id,
         status=status_filter, owner_member_id=owner_member_id,
-        epic_id=epic_id, story_id=story_id, sprint_id=sprint_id, limit=limit,
+        epic_id=epic_id, story_id=story_id, sprint_id=sprint_id, limit=limit, project_ids=scope,
     )
-    if project_id is None:
-        user_id = uuid.UUID(auth.user_id)
-        accessible = [
-            item for item in items
-            if await has_project_access(session, user_id, item.project_id, org_id)
-        ]
-        items = accessible
     # story #2233(PO 판정 ㉢, 2026-08-16): X-Total-Count가 `len(items)`(이 페이지에 온
     # 개수)를 "전체"라 거짓 주장했었다 — svc.list_hypotheses는 COUNT를 안 내고, org-wide
     # 분기는 위에서 in-memory 후필터까지 걸려 DB COUNT 하나로도 못 맞힌다. 아무도 이

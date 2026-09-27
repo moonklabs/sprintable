@@ -36,10 +36,13 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
         story_id: uuid.UUID | None = None,
         sprint_id: uuid.UUID | None = None,
         limit: int = 100,
+        project_ids: list[uuid.UUID] | None = None,
     ) -> list[Hypothesis]:
-        # story fca4723d(C1): project_id 생략 시 org 전체(모든 project) 조회 — 접근권 후필터는
-        # 호출자(router)의 책임(retro list_sessions와 동형 분업).
+        # story fca4723d(C1): project_id 생략 시 org 전체(모든 project) 조회. story #4350 PR 3(까디르) — 접근권은 `project_ids`로
+        # SQL에서 건다(예전 라우터 후필터는 limit을 먼저 먹어 페이지가 모자랐다).
         q = select(Hypothesis).where(Hypothesis.org_id == self.org_id)
+        if project_ids is not None:
+            q = q.where(Hypothesis.project_id.in_(project_ids))
         if project_id is not None:
             q = q.where(Hypothesis.project_id == project_id)
         if status is not None:
