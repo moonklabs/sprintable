@@ -237,7 +237,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
       </p>
     );
   }
-  // story #4336 AC4 — 상세의 두 알림과 같은 문장(목록 · 캘린더 카드 한 줄). 버튼 0 — 발행 취소는 상세에서. 멈춤은 사람이 풀어야 해 blocked_unapproved와 같은 빨강(새 색 0).
+  // story #4336 AC4 — 상세의 두 알림과 같은 문장(목록 · 캘린더 카드 한 줄). 버튼 0 — 발행 취소는 상세에서. 상세와 같은 경고(유나 · 작은 경고 글 토큰 text-warning-strong — 빨강 아님).
   if (action.kind === 'publishing') {
     return (
       <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
@@ -247,7 +247,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   }
   if (action.kind === 'publish_stuck') {
     return (
-      <p className="break-keep text-xs text-destructive" data-testid="channel-post-failure-badge">
+      <p className="break-keep text-xs text-warning-strong" data-testid="channel-post-failure-badge">
         {t('channelPostsPublishStuckNotice')}
       </p>
     );
