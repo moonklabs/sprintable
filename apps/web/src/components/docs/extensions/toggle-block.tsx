@@ -3,10 +3,24 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Node, mergeAttributes } from '@tiptap/core';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
 
 // ─── Toggle Summary View ──────────────────────────────────────────────────────
+
+/**
+ * story #4365 — 요약 NodeView의 위치(getPos = 요약 **바로 앞**)에서 그 요약을 담은 토글 블록을 찾는다. 그 위치를 풀면 `$pos.parent`
+ * (= `node($pos.depth)`)가 토글 블록이고 `before($pos.depth)`가 그 자리다. 예전엔 `node($pos.depth - 1)`로 한 단계 **위**를 봐 최상위
+ * 토글이면 `doc`이 나와 여닫기가 곧바로 return · 열림 표시도 늘 «닫힘»이었다.
+ */
+export function resolveToggleBlockOfSummary(doc: PMNode, summaryPos: number): { node: PMNode; pos: number } | null {
+  const $pos = doc.resolve(summaryPos);
+  if ($pos.depth < 1) return null;
+  const node = $pos.parent;
+  if (node.type.name !== 'toggleBlock') return null;
+  return { node, pos: $pos.before($pos.depth) };
+}
 
 function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
   const t = useTranslations('docs');
@@ -15,11 +29,8 @@ function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
     try {
       const pos = getPos();
       if (pos === undefined) return false;
-      const $pos = editor.state.doc.resolve(pos);
-      if ($pos.depth >= 1) {
-        const parent = $pos.node($pos.depth - 1);
-        if (parent.type.name === 'toggleBlock') return Boolean(parent.attrs.open);
-      }
+      const toggle = resolveToggleBlockOfSummary(editor.state.doc, pos);
+      if (toggle) return Boolean(toggle.node.attrs.open);
     } catch { /* node may be deleted */ }
     return false;
   }, [editor, getPos]);
@@ -37,13 +48,10 @@ function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
     try {
       const pos = getPos();
       if (pos === undefined) return;
-      const $pos = editor.state.doc.resolve(pos);
-      if ($pos.depth < 1) return;
-      const parentPos = $pos.before($pos.depth);
-      const parent = $pos.node($pos.depth - 1);
-      if (parent.type.name !== 'toggleBlock') return;
+      const toggle = resolveToggleBlockOfSummary(editor.state.doc, pos);
+      if (!toggle) return;
       editor.commands.command(({ tr }) => {
-        tr.setNodeMarkup(parentPos, undefined, { open: !parent.attrs.open });
+        tr.setNodeMarkup(toggle.pos, undefined, { ...toggle.node.attrs, open: !toggle.node.attrs.open });
         return true;
       });
     } catch { /* node may be deleted */ }
