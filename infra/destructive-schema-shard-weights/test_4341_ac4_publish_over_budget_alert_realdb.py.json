@@ -1,0 +1,1 @@
+{"file": "tests/test_4341_ac4_publish_over_budget_alert_realdb.py", "sec": 39.1, "source": "story-4341 AC4(2026-09-28) — 1건: 예산 밖 발행 명령 → 운영 알림 한 번(다음 틱 재호출 0 · 거르기 무손실). 로컬 raw pytest 전체 wall time 실측(39.14s, 로컬 pg16) 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}

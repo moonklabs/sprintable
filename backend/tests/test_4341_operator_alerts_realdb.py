@@ -185,6 +185,45 @@ async def test_send_failure_is_non_terminal_backs_off_and_retry_delivers(monkeyp
         assert len(await _alert_messages(Session, conv_id, key)) == 1
 
 
+async def test_repeated_calls_during_backoff_do_not_resend_and_the_retry_tick_does(monkeypatch):
+    """story #4341(까디르 · 4744) — 같은 사건을 자주 부르는 호출자(발행 워커는 예산 밖인 동안 틱마다 부른다)가 전송 실패 백오프를 우회해
+    부를 때마다 재전송하지 않는다: 받는 곳 설정 + 전송 실패 → 두 번 부름 → 전송 시도 1(두 번째는 retry_scheduled) · 때가 되면 재시도 틱이
+    보낸다. 뮤테이션: notify_operator의 «백오프 중이면 건너뛰기»를 빼면 두 번째 부름이 다시 보내 RED."""
+    async with _ops_db() as db:
+        from datetime import datetime, timezone
+
+        from app.models.operator_alert import OperatorAlert
+
+        Session, conv_id = db
+        _configure(monkeypatch, conv_id)
+        key = _key()
+        attempts: list[int] = []
+
+        async def boom(*_a, **_k):
+            attempts.append(1)
+            raise RuntimeError("send down")
+
+        with patch.object(operator_alerts, "_send", boom):
+            first = await notify_operator(kind="publication.over_tick_budget", dedupe_key=key, session_factory=Session)
+            second = await notify_operator(kind="publication.over_tick_budget", dedupe_key=key, session_factory=Session)
+        assert (first.delivered, first.reason) == (False, "send_failed")
+        assert (second.delivered, second.reason) == (False, "retry_scheduled")
+        assert len(attempts) == 1, "백오프 중 다시 부른 것이 재전송했다"
+        assert (await _alert(Session, key)).attempt_count == 1
+
+        async with Session() as s:
+            row = (await s.execute(select(OperatorAlert).where(OperatorAlert.dedupe_key == key))).scalar_one()
+            row.next_attempt_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            await s.commit()
+        await process_due_operator_alerts(session_factory=Session)
+        assert (await _alert(Session, key)).status == "delivered"
+        assert len(await _alert_messages(Session, conv_id, key)) == 1
+        # 보낸 뒤 다시 불러도 새 메시지 0
+        again = await notify_operator(kind="publication.over_tick_budget", dedupe_key=key, session_factory=Session)
+        assert (again.delivered, again.reason) == (True, "already_delivered")
+        assert len(await _alert_messages(Session, conv_id, key)) == 1
+
+
 async def test_retry_tick_stays_within_item_and_time_share(monkeypatch):
     async with _ops_db() as db:
         """PO 조건 1 — 재시도는 한 틱 몫(건수 · 초) 안에서만. 시계는 주입(벽시계 예산 금지)."""

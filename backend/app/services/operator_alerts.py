@@ -61,7 +61,8 @@ _SENSITIVE_NAME_FRAGMENTS = (
 @dataclass(frozen=True)
 class OperatorAlertResult:
     delivered: bool
-    # delivered · already_delivered · not_configured · send_failed · busy(다른 틱이 같은 건을 보내는 중) · error(표에도 못 적음)
+    # delivered · already_delivered · not_configured · send_failed · busy(다른 틱이 같은 건을 보내는 중) · error(표에도 못 적음) ·
+    # retry_scheduled(이미 있는 pending 행이 백오프 중 — 재시도 틱 몫, story #4341)
     reason: str
     alert_id: uuid.UUID | None
 
@@ -288,13 +289,18 @@ async def notify_operator(
                 )
                 .on_conflict_do_nothing(index_elements=["dedupe_key"])
             )
-            alert_id = (await db.execute(
-                select(OperatorAlert.id).where(OperatorAlert.dedupe_key == dedupe_key)
-            )).scalar_one()
+            alert_id, status, next_attempt_at = (await db.execute(
+                select(OperatorAlert.id, OperatorAlert.status, OperatorAlert.next_attempt_at).where(OperatorAlert.dedupe_key == dedupe_key)
+            )).one()
             await db.commit()
     except Exception:
         logger.exception("operator alert could not be recorded kind=%s dedupe_key=%s", kind, dedupe_key)
         return OperatorAlertResult(False, "error", None)
+    # story #4341(까디르 · 4744) — 이미 있는 pending 행이 아직 재시도 때가 아니면(앞 전송이 실패해 백오프 중) 여기서 보내지 않는다:
+    # 재시도는 재시도 틱(`process_due_operator_alerts`)의 몫이다. 같은 사건을 자주 부르는 호출자(발행 워커는 예산 밖인 동안 틱마다)가
+    # 백오프를 우회해 틱마다 재전송하지 않게. 방금 만든 행은 next_attempt_at = 지금이라 그대로 보낸다(첫 전송 · 동시 호출 줄서기 무변).
+    if status == "pending" and next_attempt_at is not None and next_attempt_at > _now():
+        return OperatorAlertResult(False, "retry_scheduled", alert_id)
     # 같은 사건의 동시 호출은 행 잠금에서 줄을 서고, 뒤 호출은 delivered를 보고 새 메시지 없이 돌아간다.
     return await _deliver(Session, alert_id, skip_locked=False)
 
