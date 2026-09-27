@@ -92,3 +92,40 @@ describe('DocAssigneeControl × 포털 «더 보기»(유나 #4728 필수 1)', (
     expect(dispatched).toEqual([]);
   });
 });
+
+describe('DocAssigneeControl — Esc · 트리거 ARIA(story #4364 AC3 · 유나 4737 판)', () => {
+  const avatar = () => container.querySelector<HTMLButtonElement>('button')!;
+  const pressEscape = async (el: Element) => {
+    await act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+  };
+
+  it('트리거 aria-expanded가 창 열림을 따르고 aria-controls가 창을 가리킨다', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider>
+            <DocAssigneeControl docId="d1" projectId="p1" currentAssigneeId="m1" assigneeName="홍길동" onAssigneePatched={() => {}} />
+          </ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(avatar().getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { avatar().click(); });
+    expect(avatar().getAttribute('aria-expanded')).toBe('true');
+    expect(avatar().getAttribute('aria-controls')).toBe(assigneePanel()!.id);
+  });
+
+  it('«더 보기»에 초점 둔 채 Esc 두 번 — 첫 번째는 메뉴만 · 두 번째는 창을 닫고 초점은 아바타로(유나 재현: 예전엔 창 그대로)', async () => {
+    await mountOpen();
+    await act(async () => { moreBtn().click(); });
+    expect(menu()).not.toBeNull();
+    await pressEscape(document.activeElement ?? menu()!);  // 메뉴는 열면 첫 항목 초점 — 그 자리에서 Esc
+    expect(menu()).toBeNull();
+    expect(assigneePanel()).not.toBeNull();
+    expect(document.activeElement).toBe(moreBtn());  // 메뉴 훅이 «더 보기»로 돌려놓는다
+    await pressEscape(moreBtn());
+    expect(assigneePanel()).toBeNull();
+    expect(document.activeElement).toBe(avatar());
+    expect(avatar().getAttribute('aria-expanded')).toBe('false');
+  });
+});
