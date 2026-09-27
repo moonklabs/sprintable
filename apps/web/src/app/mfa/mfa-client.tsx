@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
 interface MfaClientProps {
@@ -15,6 +16,7 @@ interface MfaClientProps {
 
 export function MfaClient({ chatsHref }: MfaClientProps) {
   const router = useRouter();
+  const t = useTranslations('mfa'); // story #4359 — 이 화면은 i18n이 없어 ko 조직에도 영어였다
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,19 +41,19 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
         // 아래 문구도 자체 하드코딩 영문이다(raw 서버 누수는 아님·i18n 완성도 축). #2484는
         // "raw 서버 노출 제거"만 스코프라 여기서 전면 i18n 전환은 안 함 — 유나 design 확認.
         if (json.error?.code === 'USER_NOT_FOUND') {
-          setError('We could not find your account. Please sign in again.');
+          setError(t('errorAccountNotFound'));
         } else if (json.error?.code === 'TOTP_NOT_SETUP') {
-          setError('Two-factor authentication has not been set up yet.');
+          setError(t('errorNotSetUp'));
         } else if (json.error?.code === 'INVALID_TOTP') {
-          setError('That code did not match. Please try again.');
+          setError(t('errorCodeMismatch'));
         } else {
-          setError('Invalid verification code. Please try again.');
+          setError(t('errorInvalidCode'));
         }
         return;
       }
       router.push(chatsHref); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 — 목적지 모듈 경유.
     } catch {
-      setError('Verification failed. Please try again.');
+      setError(t('errorFailed'));
     } finally {
       setLoading(false);
     }
@@ -62,8 +64,8 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
       <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
         <div className="flex flex-col items-center gap-3 text-center">
           <SprintableLogo variant="stacked" className="text-foreground" markClassName="h-14" wordmarkClassName="h-5" />
-          <h1 className="text-lg font-semibold text-foreground">Two-Factor Authentication</h1>
-          <p className="text-sm text-muted-foreground">Enter the 6-digit code from your authenticator app.</p>
+          <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('description')}</p>
         </div>
         <div className="space-y-3">
           <input
@@ -85,7 +87,7 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
             disabled={loading || code.length !== 6}
             className="w-full rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
           >
-            {loading ? 'Verifying...' : 'Verify'}
+            {loading ? t('verifying') : t('verify')}
           </button>
         </div>
       </div>

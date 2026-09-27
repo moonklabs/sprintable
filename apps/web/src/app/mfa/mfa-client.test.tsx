@@ -9,6 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import enMessages from '../../../messages/en.json';
+import koMessages from '../../../messages/ko.json';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -38,12 +41,14 @@ function setNativeValue(el: HTMLInputElement, value: string) {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function mountAndSubmit() {
+async function mountAndSubmit(locale: 'en' | 'ko' = 'en') {
   const { MfaClient } = await import('./mfa-client');
-  await act(async () => { root.render(<MfaClient chatsHref="/chats" />); });
+  // story #4359 — 이 화면은 이제 i18n(`mfa`). 기존 단언은 en 문장 그대로, ko는 아래 별도 테스트.
+  await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages}><MfaClient chatsHref="/chats" /></NextIntlClientProvider>); });
   const codeInput = container.querySelector('input[type="text"]') as HTMLInputElement;
   await act(async () => { setNativeValue(codeInput, '123456'); });
-  const verifyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Verify');
+  const verifyLabel = (locale === 'ko' ? koMessages : enMessages).mfa.verify;
+  const verifyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === verifyLabel);
   await act(async () => {
     verifyBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
@@ -82,5 +87,14 @@ describe('MfaClient — error.code 분기 (story #2484)', () => {
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl?.textContent).not.toContain('brand new raw string');
     expect(alertEl?.textContent).toBe('Invalid verification code. Please try again.');
+  });
+});
+
+describe('MfaClient — ko 조직(story #4359)', () => {
+  it('⭐ko 로케일에선 화면 제목 · 오류 문장이 한국어(예전엔 i18n 없이 영어 고정)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({ error: { code: 'INVALID_TOTP', message: 'Invalid TOTP code' } }) })));
+    await mountAndSubmit('ko');
+    expect(container.textContent).toContain(koMessages.mfa.title);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(koMessages.mfa.errorCodeMismatch);
   });
 });

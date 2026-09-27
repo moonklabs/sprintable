@@ -6469,5 +6469,16 @@
     "upstreamUnreachable": "Couldn't reach the server. Please try again in a moment.",
     "clientClosedRequest": "The request was canceled.",
     "upstreamNonJson": "Couldn't process the server's response. Please try again in a moment."
+  },
+  "mfa": {
+    "title": "Two-Factor Authentication",
+    "description": "Enter the 6-digit code from your authenticator app.",
+    "errorAccountNotFound": "We could not find your account. Please sign in again.",
+    "errorNotSetUp": "Two-factor authentication has not been set up yet.",
+    "errorCodeMismatch": "That code did not match. Please try again.",
+    "errorInvalidCode": "Invalid verification code. Please try again.",
+    "errorFailed": "Verification failed. Please try again.",
+    "verify": "Verify",
+    "verifying": "Verifying..."
   }
 }

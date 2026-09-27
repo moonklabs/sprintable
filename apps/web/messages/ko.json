@@ -6469,5 +6469,16 @@
     "upstreamUnreachable": "서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.",
     "clientClosedRequest": "요청이 취소됐어요.",
     "upstreamNonJson": "서버 응답을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요."
+  },
+  "mfa": {
+    "title": "2단계 인증",
+    "description": "인증 앱에 표시된 6자리 코드를 입력하세요.",
+    "errorAccountNotFound": "계정을 찾을 수 없어요. 다시 로그인해 주세요.",
+    "errorNotSetUp": "2단계 인증이 아직 설정되지 않았어요.",
+    "errorCodeMismatch": "코드가 맞지 않아요. 다시 시도해 주세요.",
+    "errorInvalidCode": "인증 코드가 올바르지 않아요. 다시 시도해 주세요.",
+    "errorFailed": "인증에 실패했어요. 다시 시도해 주세요.",
+    "verify": "확인",
+    "verifying": "확인하는 중…"
   }
 }
