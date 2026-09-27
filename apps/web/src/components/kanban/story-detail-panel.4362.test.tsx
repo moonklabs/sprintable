@@ -63,7 +63,7 @@ describe('담당자 고르개 줄 — 긴 구성원 이름 줄바꿈([SID:4362])
       );
     });
     const edit = [...container.querySelectorAll('button')].filter((b) => /✎/.test(b.textContent ?? ''))
-      .find((b) => b.closest('div')?.parentElement?.textContent?.includes((koMessages.board as Record<string, string>).assignee ?? '담당'))!;
+      .find((b) => b.closest('div')?.parentElement?.textContent?.includes(koMessages.board.assignee))!;
     await act(async () => { edit.click(); });
     const name = container.querySelector('[data-assignee-name]')!;
     expect(name.textContent).toContain('아주 긴 이름');
