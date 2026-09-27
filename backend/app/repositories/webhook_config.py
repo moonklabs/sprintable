@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ class WebhookConfigRepository:
         self.org_id = org_id
 
     async def list(
-        self, member_id: uuid.UUID, project_id: uuid.UUID | None = None
+        self, member_id: uuid.UUID, project_id: uuid.UUID | None = None, *, project_ids: list[uuid.UUID] | None = None,
     ) -> list[WebhookConfig]:
         # IDOR(산티아고): webhook-config 는 **멤버 소유** 리소스 — org_id 만으론 same-org 타 멤버 config
         # (URL 포함)가 응답에 실린다(5c1258e2 토대 갭). caller member-scope 강제. admin 전체조회는 별도.
@@ -25,6 +25,9 @@ class WebhookConfigRepository:
         )
         if project_id is not None:
             q = q.where(WebhookConfig.project_id == project_id)
+        if project_ids is not None:
+            # story #4350 PR 3(까디르 MEDIUM) — 접근 가능 프로젝트의 config + 프로젝트에 안 매인 org 수준 config만(웹훅 URL 노출 차단).
+            q = q.where(or_(WebhookConfig.project_id.is_(None), WebhookConfig.project_id.in_(project_ids)))
         q = q.order_by(WebhookConfig.created_at.desc())
         result = await self.session.execute(q)
         return list(result.scalars().all())

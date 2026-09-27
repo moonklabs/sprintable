@@ -26,6 +26,18 @@ def _mock_config(is_active: bool = True) -> MagicMock:
     return c
 
 
+@pytest.fixture(autouse=True)
+def _webhook_project_scope_pinned(monkeypatch):
+    """story #4350 PR 3 — webhooks config 목록이 caller의 접근 가능 프로젝트 · 명시 project 접근을 조회한다. 이 파일은 목 세션이라 그
+    조회를 고정한다(범위 규칙 자체는 test_4350_pr3_docs_webhooks_hypotheses_realdb.py 실 PG)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    import app.services.project_auth as project_auth
+
+    monkeypatch.setattr(project_auth, "accessible_project_ids_in_org", _AsyncMock(return_value=None))
+    monkeypatch.setattr(project_auth, "require_project_access", _AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

@@ -380,9 +380,11 @@ async def list_hypotheses(
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
     limit: int = 100,
+    project_ids: list[uuid.UUID] | None = None,
 ) -> list[HypothesisResponse]:
     repo = HypothesisRepository(session, org_id)
     rows = await repo.list_filtered(
+        project_ids=project_ids,
         project_id=project_id,
         status=status,
         owner_member_id=owner_member_id,
