@@ -122,10 +122,14 @@ export function isDescendant(docs: Doc[], ancestorId: string, nodeId: string): b
  * `useTranslations('docs')`를 여는 이 파일 안 `Record<string, string>` 리터럴 표 값 → `docs.<값>`으로 셈(PO 2026-09-27 17:04Z · 예외 목록 등재 대신).
  */
 /**
- * story #4348 — 옮기기 메뉴 항목(위로 · 아래로 · 폴더로 · 고르개 줄)은 디자인 Button(ghost)로(DS 게이트 A · verify:no-new-raw-button).
- * 같은 메뉴의 기존 줄(이름 변경 · 삭제 …)과 높이 · 글자가 같게 겹쳐 쓴다: 높이 자동 · 테두리 0 · 왼쪽 정렬 · 보통 굵기 · 꺼짐 muted.
+ * story #4348 — «⋮» 메뉴 항목 **전부**(이름 변경 · 위로 · 아래로 · 폴더로 · 하위 문서/폴더 추가 · 삭제 · 고르개 줄)의 한 정의 = 디자인 Button(ghost) + 이 클래스.
+ * 유나 #4730(design CR 5860943821): 새 항목만 ghost · 기존 넷이 날 button이면 ↓로 훑을 때 초점 표시가 파란 outline ↔ 시트론 링으로 번갈았다 → 한 정의.
+ * 높이 자동 · 테두리 0 · 왼쪽 정렬 · 보통 굵기 · 꺼짐 muted(호버 배경 없음 — 다크도: ghost의 dark:hover:bg-muted/50이 이기지 않게). 삭제만 호버를 destructive-tint로 덮는다(DOC_MENU_ITEM_DESTRUCTIVE).
+ * `transition-colors`(Button 기본 transition-all 대신): 팝오버는 붙는 순간 visibility:hidden → 자리 잡고 보임(AnchoredPopover)인데, transition-all이면
+ * 물려받은 visibility도 전이라 열리는 그 순간 첫 항목이 아직 hidden → usePortalMenuKeys의 첫 항목 focus()가 헛돌아 초점이 «⋮»에 남았다(실 브라우저 · jsdom은 못 봄).
  */
-const MOVE_MENU_ITEM = 'h-auto min-h-0 w-full justify-start gap-2 border-0 px-3 py-2 text-left text-sm font-normal aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground aria-disabled:hover:bg-transparent';
+const DOC_MENU_ITEM = 'h-auto min-h-0 w-full justify-start gap-2 border-0 px-3 py-2 text-left text-sm font-normal transition-colors aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground aria-disabled:hover:bg-transparent dark:aria-disabled:hover:bg-transparent';
+const DOC_MENU_ITEM_DESTRUCTIVE = cn(DOC_MENU_ITEM, 'hover:bg-destructive-tint dark:hover:bg-destructive-tint');
 
 const DOC_MOVE_ANNOUNCE_KEY: Record<string, string> = {
   position: 'docTreeMovedPosition',
@@ -431,7 +435,7 @@ function TreeNode({
                     aria-disabled={target.current || undefined} aria-current={target.current ? 'location' : undefined}
                     onClick={() => runMove({ kind: 'into', parentId: target.id }, !target.current)}
                     style={{ paddingLeft: `${12 + target.depth * 12}px` }}
-                    className={MOVE_MENU_ITEM}>
+                    className={DOC_MENU_ITEM}>
                     <span className="min-w-0 flex-1 truncate">{moveTargetTitles.get(target.id)}</span>
                     {target.current ? <span aria-hidden="true" data-current-location="" className="shrink-0 text-[11px] text-muted-foreground">{t('docTreeMoveCurrentLocation')}</span> : null}
                   </Button>
@@ -439,19 +443,19 @@ function TreeNode({
               </>
             ) : (
               <>
-                <button type="button" role="menuitem" onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
+                <Button type="button" variant="ghost" role="menuitem" onClick={handleRename} className={DOC_MENU_ITEM}>{t('docTreeRename')}</Button>
                 {moveState ? (
                   <>
-                    <Button type="button" variant="ghost" role="menuitem" data-move="up" aria-disabled={!moveState.up || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : undefined} onClick={() => runMove({ kind: 'up' }, moveState.up)} className={MOVE_MENU_ITEM}>{t('docTreeMoveUp')}</Button>
-                    <Button type="button" variant="ghost" role="menuitem" data-move="down" aria-disabled={!moveState.down || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : moveState.downUnloaded ? unloadedNoteId : undefined} onClick={() => runMove({ kind: 'down' }, moveState.down)} className={MOVE_MENU_ITEM}>{t('docTreeMoveDown')}</Button>
+                    <Button type="button" variant="ghost" role="menuitem" data-move="up" aria-disabled={!moveState.up || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : undefined} onClick={() => runMove({ kind: 'up' }, moveState.up)} className={DOC_MENU_ITEM}>{t('docTreeMoveUp')}</Button>
+                    <Button type="button" variant="ghost" role="menuitem" data-move="down" aria-disabled={!moveState.down || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : moveState.downUnloaded ? unloadedNoteId : undefined} onClick={() => runMove({ kind: 'down' }, moveState.down)} className={DOC_MENU_ITEM}>{t('docTreeMoveDown')}</Button>
                     {moveState.targets.some((x) => !x.current) && (
-                      <Button type="button" variant="ghost" role="menuitem" data-move="into" onClick={() => setPickerOpen(true)} className={MOVE_MENU_ITEM}>{t('docTreeMoveInto')}</Button>
+                      <Button type="button" variant="ghost" role="menuitem" data-move="into" onClick={() => setPickerOpen(true)} className={DOC_MENU_ITEM}>{t('docTreeMoveInto')}</Button>
                     )}
                   </>
                 ) : null}
-                {isFolder && <button type="button" role="menuitem" onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
-                {isFolder && <button type="button" role="menuitem" onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
-                <button type="button" role="menuitem" onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
+                {isFolder && <Button type="button" variant="ghost" role="menuitem" onClick={handleAddChild} className={DOC_MENU_ITEM}>{t('docTreeAddChild')}</Button>}
+                {isFolder && <Button type="button" variant="ghost" role="menuitem" onClick={handleAddChildFolder} className={DOC_MENU_ITEM}>{t('docTreeAddChildFolder')}</Button>}
+                <Button type="button" variant="ghost" role="menuitem" onClick={handleDelete} className={DOC_MENU_ITEM_DESTRUCTIVE}>{t('docTreeDelete')}</Button>
                 {/* 까닭 줄은 하나만 — 정렬 까닭이 이기고, 아니면 «더 보기로 더 불러오면»(유나 확정). */}
                 {moveState?.sortLocked ? (
                   <p id={sortNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('moveSortModeActiveError')}</p>

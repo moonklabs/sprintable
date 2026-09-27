@@ -363,5 +363,39 @@ describe('옮기기 항목 = 디자인 Button(ghost) · 같은 메뉴 줄 모양
       expect(cls).not.toContain('justify-center');
     }
   });
+
+  // 유나 #4730 design CR(5860943821) — 새 항목만 ghost Button이고 기존 넷(이름 변경 · 하위 문서/폴더 추가 · 삭제)이 날 button이면
+  // ↓로 훑을 때 초점 표시가 파란 outline ↔ 시트론 링으로 번갈았다. 메뉴 안 menuitem **전부**가 한 정의(같은 Button · 같은 클래스 묶음).
+  it('메뉴 안 menuitem 전부 = 같은 정의(ghost Button · 같은 클래스) — 삭제만 호버가 destructive-tint', () => {
+    mount([...THREE, doc('f', 40, { is_folder: true, title: '기획' }), doc('g', 50, { is_folder: true, title: '보관' })]);
+    const tokens = (el: Element) => el.className.split(/\s+/).filter(Boolean).sort();
+    const seen = new Set<string>();
+    const check = (items: HTMLElement[]) => {
+      const plain = items.filter((el) => el.textContent !== KO.docTreeDelete);
+      const del = items.find((el) => el.textContent === KO.docTreeDelete);
+      for (const el of items) {
+        expect(el.getAttribute('data-slot'), el.textContent ?? '').toBe('button');
+        seen.add(el.textContent ?? '');
+      }
+      for (const el of plain) expect(tokens(el), el.textContent ?? '').toEqual(tokens(plain[0]!));
+      if (del) {
+        const swap = (t: string[]) => t.filter((c) => c !== 'hover:bg-muted' && c !== 'dark:hover:bg-muted/50');
+        expect(swap(tokens(del))).toEqual([...swap(tokens(plain[0]!)), 'hover:bg-destructive-tint', 'dark:hover:bg-destructive-tint'].sort());
+        expect(tokens(del)).not.toContain('hover:bg-muted');
+      }
+      return tokens(plain[0]!);
+    };
+    const items = () => Array.from(menu()!.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    open('f'); // 폴더 — 이름 변경 · 위로 · 아래로 · 폴더로 · 하위 문서 추가 · 하위 폴더 추가 · 삭제
+    const base = check(items());
+    // Button 기본 transition-all이면 열리는 순간 물려받은 visibility도 전이라 첫 항목 focus()가 헛돈다(실 브라우저 판 · jsdom은 못 봄) → 색만 전이.
+    expect(base).toContain('transition-colors');
+    expect(base).not.toContain('transition-all');
+    // 꺼진 항목은 다크에서도 호버 배경 없음(ghost의 dark:hover:bg-muted/50을 덮음).
+    expect(base).toEqual(expect.arrayContaining(['aria-disabled:hover:bg-transparent', 'dark:aria-disabled:hover:bg-transparent']));
+    click(moveItem('into'));
+    expect(check(items())).toEqual(base); // 고르개 줄도 같은 정의
+    expect([...seen]).toEqual(expect.arrayContaining([KO.docTreeRename, KO.docTreeMoveUp, KO.docTreeMoveDown, KO.docTreeMoveInto, KO.docTreeAddChild, KO.docTreeAddChildFolder, KO.docTreeDelete]));
+  });
 });
 
