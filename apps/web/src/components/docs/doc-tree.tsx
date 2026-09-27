@@ -2,7 +2,7 @@
 
 import { planMoveBeside, planMoveInto, planReorder, type DocMovePlan } from './doc-move-plan';
 import { DocRenameDialog } from './doc-rename-dialog';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useId, useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
@@ -18,6 +18,8 @@ import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
 import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
+import { Button } from '@/components/ui/button';
+import { docMoveAnnouncement, menuMoveState, type DocMoveAction, type MenuMoveResult } from './lib/doc-move';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -88,7 +90,9 @@ export function compareDocsForSort(a: Doc, b: Doc, mode: DocSortMode): number {
     const bt = b.updated_at ? new Date(b.updated_at).getTime() : 0;
     return bt - at; // 최근 수정 먼저
   }
-  return a.sort_order - b.sort_order;
+  // story #4348 — 같은 번호면 id로(서버 목록 · 커서와 같은 `(sort_order, id)`). 안 그러면 새로 만든 문서처럼 앞에 끼운 것이 화면 순서와
+  // «⋮» 위로 · 아래로가 보는 순서(doc-move orderedSiblings)를 어긋나게 해, 보이는 옆 문서가 아닌 문서와 자리를 바꿨다.
+  return a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /**
@@ -108,6 +112,29 @@ export function isDescendant(docs: Doc[], ancestorId: string, nodeId: string): b
   }
   return false;
 }
+
+/**
+ * story #4348 — «⋮» 메뉴로 문서 자리 옮기기(키보드 · 터치). 트리 전체가 한 번에 쓰는 것(옮기기 요청 · 안 받은 페이지 있음)만 문맥으로 내린다
+ * (TreeNode 재귀 호출마다 props를 늘리지 않게). 없으면(호출부가 onMenuMove를 안 넘김) 옮기기 항목 자체가 없다.
+ */
+/**
+ * story #4348 — 옮긴 뒤 알림(aria-live) 문구 키. i18n 가드(verify:no-unused-i18n-keys · A″)가 알아보는 모양:
+ * `useTranslations('docs')`를 여는 이 파일 안 `Record<string, string>` 리터럴 표 값 → `docs.<값>`으로 셈(PO 2026-09-27 17:04Z · 예외 목록 등재 대신).
+ */
+/**
+ * story #4348 — 옮기기 메뉴 항목(위로 · 아래로 · 폴더로 · 고르개 줄)은 디자인 Button(ghost)로(DS 게이트 A · verify:no-new-raw-button).
+ * 같은 메뉴의 기존 줄(이름 변경 · 삭제 …)과 높이 · 글자가 같게 겹쳐 쓴다: 높이 자동 · 테두리 0 · 왼쪽 정렬 · 보통 굵기 · 꺼짐 muted.
+ */
+const MOVE_MENU_ITEM = 'h-auto min-h-0 w-full justify-start gap-2 border-0 px-3 py-2 text-left text-sm font-normal aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground aria-disabled:hover:bg-transparent';
+
+const DOC_MOVE_ANNOUNCE_KEY: Record<string, string> = {
+  position: 'docTreeMovedPosition',
+  positionOnly: 'docTreeMovedPositionOnly',
+  intoFolder: 'docTreeMovedIntoFolder',
+  topLevel: 'docTreeMovedToTopLevel',
+};
+
+const DocMoveCtx = createContext<{ requestMove: (docId: string, action: DocMoveAction) => void; hasMore: boolean } | null>(null);
 
 interface DocTreeProps {
   docs: Doc[];
@@ -130,6 +157,13 @@ interface DocTreeProps {
   // 서버검색 결과 렌더)로 분리됐고, DocTree는 다시 순수 "검색어 없을 때의 트리 브라우징"
   // 전용으로 돌아간다. sortMode만 추가 — 수동/이름순/수정일순 표시 정렬(sort_order 비파괴).
   sortMode?: DocSortMode;
+  /**
+   * story #4348 — «⋮» 옮기기 저장(레이아웃이 낙관 반영 → 저장 → 서버 번호 · 실패면 되돌림). 옮긴 계획을 돌려주면 트리가 알림(aria-live) ·
+   * 초점(옮긴 행)을 맡는다. 실패면 null(레이아웃이 moveFailed 알림).
+   */
+  onMenuMove?: (docId: string, action: DocMoveAction) => Promise<MenuMoveResult>;
+  /** 아직 안 받은 문서 페이지가 있다 — 받은 형제 중 마지막 문서의 «아래로»를 끈다(다음 형제가 안 받은 자리일 수 있음). */
+  hasMore?: boolean;
 }
 
 function TreeNode({
@@ -222,6 +256,27 @@ function TreeNode({
   const closeMenu = useCallback(() => setContextMenuOpen(false), []);
   // 까디르(4724) — 메뉴 ARIA(트리거 aria-haspopup · aria-expanded · aria-controls / 패널 id · role=menu)도 같은 훅이 준다 · 항목 role=menuitem은 여기서.
   const { onPopoverKeyDown: handleMenuKeyDown, onTriggerKeyDown: handleMenuTriggerKeyDown, triggerProps: menuTriggerProps, popoverProps: menuPopoverProps } = usePortalMenuKeys({ open: contextMenuOpen, onClose: closeMenu, popoverRef: menuRef, triggerRef: menuTriggerRef, kind: 'menu' });
+  // story #4348 — «⋮» 옮기기(위로 · 아래로 · 폴더로). 폴더로는 메뉴 안에서 목록을 바꿔 고른다(고르개). 꺼진 항목은 숨기지 않고 aria-disabled(초점 닿음) +
+  // 까닭 줄(aria-describedby) — 정렬 모드 = moveSortModeActiveError 재사용(유나 확정).
+  const moveCtx = useContext(DocMoveCtx);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const sortNoteId = useId();
+  const unloadedNoteId = useId();
+  const pickerTitleId = useId();
+  // 고르개 순서 = 트리 보기와 같은 비교(유나 #4730 — 깊이 우선 · 들여쓰기).
+  const moveState = moveCtx && contextMenuOpen ? menuMoveState(allDocs, doc.id, sortMode, moveCtx.hasMore, (a, b) => compareDocsForSort(a, b, sortMode)) : null;
+  const openMenu = useCallback(() => { setPickerOpen(false); setContextMenuOpen(true); }, []);
+  // 고르개 줄 이름 표(줄마다 `{moveTargetTitles.get(target.id)}`로 그림 — 행마다 갈리는 라벨을 가드가 알아보는 «루프 필드로 표 조회» 모양:
+  // verify:no-new-repeated-row-action-names). 폴더 제목뿐(«· ID» 꼬리 없음)이라 한 덩어리 truncate가 맞다 — 꼬리 붙은 행 라벨(RowName 가드의 …Labels)과 다른 것.
+  const moveTargetTitles = new Map<string | null, string>((moveState?.targets ?? []).map((x) => [x.id, x.id === null ? t('docTreeMoveTopLevel') : (allDocs.find((d) => d.id === x.id)?.title?.trim() || t('newDocDefaultTitle'))]));
+  const runMove = (action: DocMoveAction, enabled: boolean) => {
+    if (!enabled || !moveCtx) return;
+    setContextMenuOpen(false);
+    moveCtx.requestMove(doc.id, action);
+  };
+  useEffect(() => {
+    if (contextMenuOpen && pickerOpen) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
+  }, [contextMenuOpen, pickerOpen]);
 
   useEffect(() => {
     if (!contextMenuOpen) return;
@@ -241,6 +296,7 @@ function TreeNode({
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setPickerOpen(false);
     setContextMenuOpen(true);
   }, []);
 
@@ -289,7 +345,7 @@ function TreeNode({
             story #4345(PO 08:45Z) — 마우스 전용 조작이다: 센서가 터치를 받지 않고(#1988 터치 스크롤 하이재킹 방지 · useTouchSafePointerSensor)
             키보드 센서도 없다. 그래서 호버로만 보이게 두고(터치에 늘 보이면 안 끌리는 손잡이 · 펼침 화살표를 가림),
             dnd-kit 속성이 주는 tabIndex 0 · «스페이스로 집기» 안내는 걷는다 — 초점이 가도 할 일이 0인 투명 칸이었다.
-            키보드로 순서 바꾸기는 따로 카드(«⋮» 메뉴엔 이동 항목이 없다). 가드 EXEMPT: hover-reveal.guard.test.ts. */}
+            키보드로 순서 바꾸기는 «⋮» 메뉴의 위로 · 아래로 · 폴더로 이동(#4348). 가드 EXEMPT: hover-reveal.guard.test.ts. */}
         <div
           {...attributes}
           {...listeners}
@@ -342,12 +398,12 @@ function TreeNode({
           {...menuTriggerProps}
           onClick={(e) => {
             e.stopPropagation();
-            setContextMenuOpen(true);
+            openMenu();
           }}
           // 기본 동작을 막는다(#4724 실 키 판): 막지 않으면 Chromium이 Enter의 활성화(keypress → click)를 **이미 첫 항목으로 옮겨 간 초점**에 보내
           // 메뉴가 열리자마자 «이름 변경»이 눌렸다(jsdom은 keypress를 안 만들어 단위 시험이 못 봄).
-          // story #4355 — 열린 채 초점이 «⋮»에 남아도 Esc로 닫힘(공용 훅) · Enter/Space는 열기.
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setContextMenuOpen(true); return; } handleMenuTriggerKeyDown(e); }}
+          // story #4355 — 열린 채 초점이 «⋮»에 남아도 Esc로 닫힘(공용 훅) · Enter/Space는 열기(4348 — 고르개 닫힌 메뉴로).
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openMenu(); return; } handleMenuTriggerKeyDown(e); }}
           className={cn('absolute right-2 top-1/2 -translate-y-1/2 rounded-sm transition', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreVertical className="size-3.5 text-muted-foreground" />
@@ -359,14 +415,51 @@ function TreeNode({
             align="end"
             gap={4}
             {...menuPopoverProps}
+            aria-labelledby={pickerOpen ? pickerTitleId : undefined}
             data-dropdown-panel="doc-tree-menu"
             onKeyDown={handleMenuKeyDown}
             className="z-50 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1"
           >
-            <button type="button" role="menuitem" onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
-            {isFolder && <button type="button" role="menuitem" onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
-            {isFolder && <button type="button" role="menuitem" onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
-            <button type="button" role="menuitem" onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
+            {pickerOpen && moveState ? (
+              <>
+                <p id={pickerTitleId} className="px-3 pb-1 pt-1.5 text-[11px] font-semibold text-muted-foreground">{t('docTreeMovePickerTitle')}</p>
+                {/* 유나 #4730(확정 01:43Z) — 트리와 같은 깊이 우선 순서 + 깊이만큼 들여쓰기(12 + 깊이×12px · 맨 위 단계 = 0 · 맨 위 폴더 = 1).
+                    지금 있는 자리는 누를 수 없는 줄(aria-disabled · aria-current="location")로 남겨 트리 모양을 지키고, 줄 끝에 «현재 위치»(aria-hidden — aria-current가 이미 읽음).
+                    긴 이름은 truncate + title. 열면 첫 누를 수 있는 줄에 초점 · ↑↓는 꺼진 줄에도 닿는다. */}
+                {moveState.targets.map((target) => (
+                  <Button key={target.id ?? '__top'} type="button" variant="ghost" role="menuitem" data-move-target={target.id ?? ''} data-depth={target.depth} title={moveTargetTitles.get(target.id)}
+                    aria-disabled={target.current || undefined} aria-current={target.current ? 'location' : undefined}
+                    onClick={() => runMove({ kind: 'into', parentId: target.id }, !target.current)}
+                    style={{ paddingLeft: `${12 + target.depth * 12}px` }}
+                    className={MOVE_MENU_ITEM}>
+                    <span className="min-w-0 flex-1 truncate">{moveTargetTitles.get(target.id)}</span>
+                    {target.current ? <span aria-hidden="true" data-current-location="" className="shrink-0 text-[11px] text-muted-foreground">{t('docTreeMoveCurrentLocation')}</span> : null}
+                  </Button>
+                ))}
+              </>
+            ) : (
+              <>
+                <button type="button" role="menuitem" onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
+                {moveState ? (
+                  <>
+                    <Button type="button" variant="ghost" role="menuitem" data-move="up" aria-disabled={!moveState.up || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : undefined} onClick={() => runMove({ kind: 'up' }, moveState.up)} className={MOVE_MENU_ITEM}>{t('docTreeMoveUp')}</Button>
+                    <Button type="button" variant="ghost" role="menuitem" data-move="down" aria-disabled={!moveState.down || undefined} aria-describedby={moveState.sortLocked ? sortNoteId : moveState.downUnloaded ? unloadedNoteId : undefined} onClick={() => runMove({ kind: 'down' }, moveState.down)} className={MOVE_MENU_ITEM}>{t('docTreeMoveDown')}</Button>
+                    {moveState.targets.some((x) => !x.current) && (
+                      <Button type="button" variant="ghost" role="menuitem" data-move="into" onClick={() => setPickerOpen(true)} className={MOVE_MENU_ITEM}>{t('docTreeMoveInto')}</Button>
+                    )}
+                  </>
+                ) : null}
+                {isFolder && <button type="button" role="menuitem" onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
+                {isFolder && <button type="button" role="menuitem" onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
+                <button type="button" role="menuitem" onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive-tint">{t('docTreeDelete')}</button>
+                {/* 까닭 줄은 하나만 — 정렬 까닭이 이기고, 아니면 «더 보기로 더 불러오면»(유나 확정). */}
+                {moveState?.sortLocked ? (
+                  <p id={sortNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('moveSortModeActiveError')}</p>
+                ) : moveState?.downUnloaded ? (
+                  <p id={unloadedNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('docTreeMoveDownUnloaded')}</p>
+                ) : null}
+              </>
+            )}
           </AnchoredPopover>
         )}
       </div>
@@ -426,7 +519,8 @@ function TreeNode({
   );
 }
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual' }: DocTreeProps) {
+export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual', onMenuMove, hasMore = false }: DocTreeProps) {
+  const tDocs = useTranslations('docs');
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => compareDocsForSort(a, b, sortMode));
   // story #2167: 이름순/수정일순 보기에서는 드래그 재정렬을 막는다 — sort_order 기반 드롭
   // 위치 계산이 화면 순서와 안 맞아 엉뚱한 곳에 꽂히는 것을 막기 위함(수동 순서 자체는
@@ -435,7 +529,45 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   // story #1988(C): 순수 PointerSensor는 모바일 터치 스크롤을 드래그로 하이재킹한다 —
   // kanban-board.tsx 0d142311 fix와 동일하게 터치는 드래그 활성화 자체를 배제.
   const sensors = useTouchSafePointerSensor(5);
-  const { isExpanded, toggleExpanded } = useTreeExpanded(projectId);
+  const { isExpanded, toggleExpanded, expandFolders } = useTreeExpanded(projectId);
+
+  // story #4348 — «⋮» 옮기기: 저장은 호출부(onMenuMove) · 여기선 옮긴 뒤 알림(aria-live) + 초점을 옮긴 행으로(닫힌 폴더로 옮겼으면 그 폴더와 조상을 펼침).
+  // 초점은 트리가 새 자리를 그린 뒤라서, 기다리는 id를 ref에 두고 매 렌더 뒤 effect가 그 행을 찾으면 옮긴다.
+  // 저장이 끝나고도(settled) 그 행이 없으면 놓는다 — 나중에 폴더를 펼칠 때 초점이 뜬금없이 끌려가지 않게.
+  const navRef = useRef<HTMLElement>(null);
+  const pendingFocusRef = useRef<{ id: string; settled: boolean } | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const [, setFocusTick] = useState(0);
+  const docsRef = useRef(docs);
+  useEffect(() => { docsRef.current = docs; });
+  const requestMove = useCallback((docId: string, action: DocMoveAction) => {
+    if (!onMenuMove) return;
+    const before = docsRef.current;
+    pendingFocusRef.current = { id: docId, settled: false };
+    if (action.kind === 'into') {
+      const chain: string[] = [];
+      for (let id = action.parentId; id && !chain.includes(id); id = before.find((d) => d.id === id)?.parent_id ?? null) chain.push(id);
+      expandFolders(chain);
+    }
+    void onMenuMove(docId, action).then((res) => {
+      // 실패면 트리를 다시 읽어 그 행이 다시 그려졌을 수 있다 — 초점이 떨어졌을(body) 때만 그 행으로 되찾는다(사용자가 옮긴 초점은 안 뺏음).
+      const lost = !document.activeElement || document.activeElement === document.body;
+      pendingFocusRef.current = lost ? { id: docId, settled: true } : null;
+      setFocusTick((n) => n + 1);
+      if (!res || !res.plan.ok) return;
+      const a = docMoveAnnouncement(before, res.plan, res.placed);
+      const values = 'folder' in a.values ? { ...a.values, folder: a.values.folder || tDocs('newDocDefaultTitle') } : a.values;
+      setAnnouncement(tDocs(DOC_MOVE_ANNOUNCE_KEY[a.kind], { ...values, title: values.title || tDocs('newDocDefaultTitle') }));
+    });
+  }, [onMenuMove, expandFolders, tDocs]);
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    const row = Array.from(navRef.current?.querySelectorAll<HTMLElement>('button[data-doc-id]') ?? []).find((el) => el.dataset.docId === pending.id);
+    if (row) row.focus();
+    if (row || pending.settled) pendingFocusRef.current = null;
+  });
+  const moveCtxValue = onMenuMove ? { requestMove, hasMore } : null;
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -499,14 +631,17 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   }, [docs, onReorder, onMove, onMoveDenied, dragEnabled]);
 
   return (
+    <DocMoveCtx.Provider value={moveCtxValue}>
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
-        <nav className="space-y-1">
+        <div data-doc-move-live="" aria-live="polite" role="status" className="sr-only">{announcement}</div>
+        <nav ref={navRef} className="space-y-1">
           {rootDocs.map((doc) => (
             <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} onAddChildFolder={onAddChildFolder} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} sortMode={sortMode} />
           ))}
         </nav>
       </SortableContext>
     </DndContext>
+    </DocMoveCtx.Provider>
   );
 }

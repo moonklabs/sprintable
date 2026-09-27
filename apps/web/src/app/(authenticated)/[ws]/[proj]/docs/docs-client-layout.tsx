@@ -26,6 +26,8 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { applyDocMove, placedFromSiblings, planDocMove, reorderRequestBody, type DocMoveAction, type DocMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
+import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
 // 낼 때 실제 서버 cap과 어긋나지 않게 한 곳에서만 선언한다.
@@ -238,6 +240,47 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const handleReorder = useCallback((plan: DocMovePlan) => placeDoc(plan, t('reorderFailed')), [placeDoc, t]);
   const handleMove = useCallback((plan: DocMovePlan) => placeDoc(plan, t('moveFailed')), [placeDoc, t]);
+
+  // story #4348 — «⋮» 위로 · 아래로 · 폴더로. 화면엔 바로 옮기고(낙관) 저장은 상대 이동 API(/api/docs/reorder) 하나로.
+  // - 저장은 한 줄로 보낸다: 앞 이동이 서버에 닿은 뒤 다음을 보내야 after_id가 서버에서도 같은 자리를 가리킨다.
+  // - 응답(서버 번호)을 반영한 위에 아직 안 닿은 뒤 이동들을 다시 얹는다 — 앞 응답이 뒤 이동의 낙관 순서를 되돌리지 않게.
+  // - 실패(409 낡은 순서 포함) = moveFailed + 서버 트리 다시 읽기(끌기 이동과 같은 규칙) · 줄에 선 뒤 이동은 보내지 않는다(없던 자리를 기준으로 짠 것).
+  const treeRef = useRef(tree);
+  useEffect(() => { treeRef.current = tree; });
+  const moveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const moveSeqRef = useRef(0);
+  const pendingMovesRef = useRef(new Map<number, Extract<DocMovePlan, { ok: true }>>());
+  // 까디르 #4730 P3 — 실패 뒤 다시 읽기는 **지금** 고른 태그로(저장 중에 태그를 바꿨으면 시작 때 태그로 읽어 필터와 목록이 어긋났다).
+  const selectedTagsRef = useRef(selectedTags);
+  useEffect(() => { selectedTagsRef.current = selectedTags; });
+  const handleMenuMove = useCallback((docId: string, action: DocMoveAction): Promise<MenuMoveResult> => {
+    const plan = planDocMove(treeRef.current, docId, action);
+    if (!plan.ok) return Promise.resolve({ plan, placed: null });
+    const next = applyDocMove(treeRef.current, plan);
+    treeRef.current = next;
+    setTree(next);
+    const seq = ++moveSeqRef.current;
+    const pending = pendingMovesRef.current;
+    pending.set(seq, plan);
+    const job = moveChainRef.current.then(async (): Promise<MenuMoveResult> => {
+      if (!pending.has(seq)) return null;
+      const result = await saveDocOrder(reorderRequestBody(plan));
+      pending.delete(seq);
+      if (result.ok) {
+        const later = [...pending.values()];
+        setTree((prev) => later.reduce<Doc[]>((acc, p) => applyDocMove(acc, p), applyReorderResult(prev, result)));
+        // 알림의 «N개 중 M번째»는 응답의 새 부모 형제 전부로 센다(불러온 20개가 아니라 · 까디르 #4730 P3).
+        return { plan, placed: placedFromSiblings(result.doc, result.siblings) };
+      }
+      pending.clear();
+      addToast({ title: t('moveFailed'), type: 'error' });
+      const tags = selectedTagsRef.current;
+      await fetchTree(tags.length ? tags : undefined);
+      return null;
+    });
+    moveChainRef.current = job.catch(() => undefined);
+    return job;
+  }, [fetchTree, addToast, t]);
 
   const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
@@ -604,7 +647,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (
-              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} />
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} />
             )}
             {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">
