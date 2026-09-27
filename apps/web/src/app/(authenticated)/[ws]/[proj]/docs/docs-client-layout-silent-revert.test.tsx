@@ -173,3 +173,28 @@ describe('DocsClientLayout — 낙관 UI 실패 시 문장(story #3637)', () => 
     expect(container.textContent).not.toContain(koMessages.docs.renameFailed);
   });
 });
+
+// 까디르(4736 P2) — 성공 응답(BFF가 감싼 {data: {doc, siblings}})을 화면이 실제로 읽는다: 서버 번호를 그대로 반영하고 트리 전체를
+// 다시 읽지 않는다(예전엔 json.data.doc이 비어 성공마다 재읽기 — 새로고침 뒤 유지가 그 재읽기 덕에 통과했었다).
+// 뮤테이션: placeDoc이 봉투 밖(json.doc)을 읽으면 재읽기가 생겨 RED.
+describe('DocsClientLayout — 재정렬 성공은 서버 번호로(story #4353 · 4736 P2)', () => {
+  it('⭐성공 응답의 번호를 반영하고 트리 목록을 다시 부르지 않는다', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.includes('/api/docs/reorder') && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ data: { doc: { id: 'd1', parent_id: null, sort_order: 0 }, siblings: [{ id: 'd1', sort_order: 0 }] } }) };
+      }
+      if (typeof url === 'string' && url.includes('/api/docs')) {
+        return { ok: true, json: async () => ({ data: [DOC_A], meta: { hasMore: false, nextCursor: null } }) };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const treeReads = () => fetchMock.mock.calls.filter(([u, i]) => typeof u === 'string' && u.includes('/api/docs') && !u.includes('/reorder') && (!i || !(i as RequestInit).method || (i as RequestInit).method === 'GET')).length;
+    const before = treeReads();
+    await act(async () => { await captured.onReorder!({ docId: 'd1', parentId: null, afterId: null }); });
+    expect(fetchMock.mock.calls.some(([u]) => typeof u === 'string' && u.includes('/api/docs/reorder'))).toBe(true);
+    expect(treeReads()).toBe(before);
+    expect(container.textContent).not.toContain(koMessages.docs.reorderFailed);
+  });
+});

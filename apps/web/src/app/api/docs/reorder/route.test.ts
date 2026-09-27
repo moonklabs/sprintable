@@ -21,6 +21,16 @@ describe('POST /api/docs/reorder', () => {
     expect(res.status).toBe(409);
   });
 
+  it('⭐성공: 백엔드 실제 모양(봉투 없는 {doc, siblings})을 화면이 읽는 {data: {doc, siblings}}로 감싼다', async () => {
+    h.getOrgProjectAuthContext.mockResolvedValue({ rateLimitExceeded: false });
+    const beBody = { doc: { id: 'd1', parent_id: null, sort_order: 0 }, siblings: [{ id: 'd1', sort_order: 0 }, { id: 'd2', sort_order: 1 }] };
+    h.proxyToFastapi.mockResolvedValue(new Response(JSON.stringify(beBody), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data).toEqual(beBody);
+  });
+
   it('인증이 없으면 백엔드를 부르지 않고 401', async () => {
     h.getOrgProjectAuthContext.mockResolvedValue(null);
     const res = await POST(req());

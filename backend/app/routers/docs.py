@@ -546,6 +546,11 @@ async def reorder_doc(
         raise HTTPException(status_code=404, detail="Doc not found")
     project_id = doc.project_id
 
+    if body.parent_id != doc.parent_id:
+        # 까디르(4736 P2) — 부모가 바뀌는 이동은 프로젝트 단위 잠금을 **먼저** 잡고 그 안에서 순환을 본다. 묶음 잠금은 새 부모 키라
+        # «A를 B 밑» · «B를 A 밑»이 동시면 키가 달라 둘 다 순환 검사를 통과해 A ↔ B 순환이 커밋됐다(둘과 자손이 트리에서 사라짐).
+        # 잠금 순서는 늘 프로젝트 → 묶음(같은 부모 재정렬은 묶음만) — 한 방향이라 교착 없음.
+        await session.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-tree-move:{project_id}"})
     if body.parent_id is not None:
         await _assert_doc_parent_in_project(session, project_id, body.parent_id)  # 없거나 다른 프로젝트 → 404
         # 순환: 새 부모의 조상 사슬에 옮기는 문서가 있으면 자기 자손 밑으로 가는 것.

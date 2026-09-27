@@ -213,3 +213,28 @@ async def test_reorder_waits_on_the_sibling_lock():
             await holder.commit()  # 거래 끝 = 잠금 해제
         r = await asyncio.wait_for(task, timeout=10)
         assert r.status_code == 200, r.text
+
+
+async def test_two_crossing_moves_cannot_make_a_cycle():
+    """까디르(4736 P2) — «A를 B 밑» · «B를 A 밑»이 동시에 와도 순환 0 · 하나는 400.
+    엇갈림을 결정적으로 만든다: 테스트가 두 새 부모 묶음 잠금을 쥔 채 두 이동을 동시에 시작하고, 둘 다 묶음 잠금 앞까지 온 뒤 풀어 준다.
+    고친 코드는 부모가 바뀌는 이동이 프로젝트 잠금을 먼저 잡고 그 안에서 순환을 보므로 둘째가 첫째의 커밋을 보고 400.
+    뮤테이션: 프로젝트 잠금을 빼면 둘 다 순환 검사를 통과한 채 묶음 잠금에서 기다리다 풀리면 둘 다 커밋 → A ↔ B 순환으로 RED."""
+    from sqlalchemy import text
+
+    from app.models.doc import Doc
+
+    async with _world() as (Session, seeded):
+        a, b = seeded["ids"][0], seeded["ids"][1]
+        async with Session() as holder:
+            for parent in (a, b):
+                await holder.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-siblings:{seeded['pa']}:{parent}"})
+            t1 = asyncio.create_task(_post(Session, seeded, {"doc_id": a, "parent_id": b}))
+            t2 = asyncio.create_task(_post(Session, seeded, {"doc_id": b, "parent_id": a}))
+            await asyncio.sleep(1.0)
+            await holder.commit()
+        r1, r2 = await asyncio.wait_for(asyncio.gather(t1, t2), timeout=15)
+        assert sorted([r1.status_code, r2.status_code]) == [200, 400], (r1.text, r2.text)
+        async with Session() as s:
+            parents = dict((await s.execute(select(Doc.id, Doc.parent_id).where(Doc.id.in_([a, b])))).all())
+        assert not (parents[a] == b and parents[b] == a), f"A ↔ B 순환이 커밋됐다: {parents}"
