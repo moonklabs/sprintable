@@ -151,8 +151,8 @@ def test_every_failure_ledger_write_in_the_router_reads_the_one_mark():
     assert "publish_channel_post_draft(" not in src[start:end], "라우터가 요청 안에서 공급자 호출 함수를 부른다"
     chain = src[start:end]
     writes = re.findall(r"_record_this_attempt\(approval_check=\"[a-z_]+\", adapter_called=([^,]+),", chain)
-    # 까디르(4716 대조) — 하한은 지금 실측 그대로(여유 없음 · 한 갈래라도 사라지면 RED). develop 15 → 14: 공급자 호출 결과를 적던
-    # 요청 경로 갈래(이미지 컨테이너 실패 · 공급자 오류 · 속도 제한 · 발행 성공)는 story #4336에서 워커(`_process_one_command`의
-    # `record_publication_attempt`)로 옮겨 합쳐졌고, 이어쓰기 검사 실패 갈래가 새로 생겼다.
+    # 까디르(4716 대조) — 하한은 지금 실측 그대로(여유 없음 · 한 갈래라도 사라지면 RED). develop 18 → 14: 공급자 호출 결과를 적던
+    # 요청 경로 다섯 갈래(이미지 컨테이너 실패 · 공급자 오류 · 속도 제한 · 발행 성공 둘)는 story #4336에서 워커(`_process_one_command`의
+    # `record_publication_attempt`)로 옮겨 합쳐졌고, 이어쓰기 검사 실패 갈래 하나가 새로 생겼다(18 − 5 + 1).
     assert len(writes) >= 14, writes  # 스캔이 실제 갈래들을 읽는지(공허 통과 방지)
     assert set(writes) == {"provider_call_marked()"}, writes
