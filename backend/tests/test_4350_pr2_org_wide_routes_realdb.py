@@ -213,6 +213,12 @@ async def test_merge_gate_org_totals_drop_only_inaccessible_project_gates():
                     id=uuid.uuid4(), org_id=seeded["org"], work_item_id=wid, work_item_type=wtype,
                     gate_type="merge", status="auto_passed", neutral_facts={},
                 ))
+            # 까디르(4727) — 게이트 자신이 프로젝트를 가진 모양(agent_decision · neutral_facts.project_id = B): work item으로 못 푼다고
+            # org 수준으로 남기면 제한 구성원 집계에 B 몫이 샌다.
+            s.add(Gate(
+                id=uuid.uuid4(), org_id=seeded["org"], work_item_id=uuid.uuid4(), work_item_type="agent_decision",
+                gate_type="merge", status="auto_passed", neutral_facts={"project_id": str(seeded["pb"])},
+            ))
             owner_uid = uuid.uuid4()
             s.add(User(id=owner_uid, email=f"o-{owner_uid.hex[:8]}@test.com", hashed_password="x"))
             await s.commit()
@@ -222,5 +228,5 @@ async def test_merge_gate_org_totals_drop_only_inaccessible_project_gates():
         restricted = await _call(Session, seeded, "/api/v2/merge-gate/metrics")
         full = await _call(Session, {**seeded, "user": owner_uid}, "/api/v2/merge-gate/metrics")
         assert restricted.status_code == 200 and full.status_code == 200, (restricted.text, full.text)
-        assert full.json()["trustworthy_merge_throughput"] == 3, "전체 접근은 옛 수 그대로(A + B + org 수준)"
-        assert restricted.json()["trustworthy_merge_throughput"] == 2, "제한 구성원은 B 몫만 빠진다(A + org 수준)"
+        assert full.json()["trustworthy_merge_throughput"] == 4, "전체 접근은 옛 수 그대로(A + B + B 앵커 + org 수준)"
+        assert restricted.json()["trustworthy_merge_throughput"] == 2, "제한 구성원은 B 몫(앵커 게이트 포함)만 빠진다(A + org 수준)"

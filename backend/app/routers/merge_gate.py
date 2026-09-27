@@ -43,7 +43,7 @@ async def _restricted_scope(session: AsyncSession, user_id: uuid.UUID, org_id: u
 
     from app.models.gate import Gate
     from app.models.project import Project
-    from app.services.gate_service import resolve_work_item_project_ids_batch
+    from app.services.gate_service import resolve_gate_project_ids_batch
     from app.services.project_auth import accessible_project_ids_in_org
 
     accessible = set(await accessible_project_ids_in_org(session, user_id, org_id))
@@ -52,11 +52,11 @@ async def _restricted_scope(session: AsyncSession, user_id: uuid.UUID, org_id: u
     )).scalars())
     if all_projects <= accessible:
         return None, None
-    gates = (await session.execute(
-        select(Gate.id, Gate.work_item_type, Gate.work_item_id).where(Gate.org_id == org_id)
-    )).all()
-    owner = await resolve_work_item_project_ids_batch(session, org_id, [(t, w) for _, t, w in gates])
-    hidden = [gid for gid, t, w in gates if (p := owner.get((t, w))) is not None and p not in accessible]
+    gates = (await session.execute(select(Gate).where(Gate.org_id == org_id))).scalars().all()
+    # 까디르(4727) — 게이트 자신이 프로젝트를 가진 모양(agent_decision · support_escalation = neutral_facts.project_id)도 풀어야 한다:
+    # work item만 보던 해소기는 그걸 org 수준으로 남겨 집계에 셌다. 목록 · 인박스와 같은 해소기.
+    owner = await resolve_gate_project_ids_batch(session, org_id, gates)
+    hidden = [g.id for g in gates if (p := owner.get(g.id)) is not None and p not in accessible]
     return list(accessible), hidden
 
 
