@@ -54,6 +54,29 @@ TICK_MARGIN_SECONDS = 60
 OVER_TICK_BUDGET_CODE = "WORKER_TICK_BUDGET_TOO_SMALL"
 
 
+def over_tick_budget_alert_dedupe_key(command_id: uuid.UUID) -> str:
+    """story #4341 AC4 — 같은 명령의 «예산 밖»은 운영 알림 한 번."""
+    return f"publication.over_tick_budget:{command_id}"
+
+
+async def _alert_over_tick_budget(
+    command_id: uuid.UUID, org_id: uuid.UUID, *, worst_seconds: float, budget_seconds: float,
+) -> bool:
+    """«예산 밖» 발행 명령 운영 알림(story #4341 AC4). 전달됐으면 True — 실패해도 예외 없이 False(워커 틱은 계속)."""
+    from app.services.operator_alerts import notify_operator
+
+    try:
+        result = await notify_operator(
+            kind="publication.over_tick_budget", dedupe_key=over_tick_budget_alert_dedupe_key(command_id),
+            target_org_id=org_id, target={"command_id": command_id},
+            facts={"code": OVER_TICK_BUDGET_CODE, "worst_case_seconds": int(worst_seconds), "tick_budget_seconds": int(budget_seconds)},
+        )
+        return result.delivered
+    except Exception:
+        logger.exception("operator alert for over-budget publication command %s failed", command_id)
+        return False
+
+
 def worker_tick_budget_seconds() -> float:
     from app.core.config import settings
 
@@ -1593,7 +1616,8 @@ async def process_due_publication_commands(
             # 어느 틱에도 못 들어간다 — 조용히 굶기지 않고 명령에 드러낸다(비종결). 이 틱의 나머지 명령은 계속 본다.
             over_budget_ids.append(command.id)
             counts["over_budget"] += 1
-            if command.reason_code != OVER_TICK_BUDGET_CODE:
+            newly_over_budget = command.reason_code != OVER_TICK_BUDGET_CODE
+            if newly_over_budget:
                 command.reason_code = OVER_TICK_BUDGET_CODE
                 command.last_error = f"worst case {worst}s exceeds worker tick budget {budget:.0f}s"
                 logger.error(
@@ -1601,6 +1625,10 @@ async def process_due_publication_commands(
                     command.id, worst, budget,
                 )
             await db.commit()
+            if newly_over_budget:
+                # story #4341 AC4 — «예산 밖» 명령은 사람이 받는 곳(운영 대화)으로 한 번 알린다(같은 명령 = 멱등 키 하나 · 틱마다 다시
+                # 불려도 메시지 1). 커밋 뒤에(알림은 자기 세션 · 예외를 던지지 않음 — 워커 틱을 막지 않는다).
+                await _alert_over_tick_budget(command.id, command.org_id, worst_seconds=worst, budget_seconds=budget)
             continue
         remaining = budget - (_monotonic() - tick_started)
         if worst > remaining:
