@@ -374,6 +374,19 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(container.querySelector('button')).toBeNull();
   });
 
+  it.each([
+    { kind: 'publishing' }, { kind: 'publish_stuck' }, { kind: 'processing' },
+    { kind: 'blocked' }, { kind: 'blocked', paused: true }, { kind: 'blocked', unknownReason: true },
+    { kind: 'needs_check' }, { kind: 'auto_retry', nextRetryAt: null },
+    { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null },
+    { kind: 'voided', reasonCode: null }, { kind: 'blocked_unapproved', reasonCode: null },
+  ] as const)('⭐#4336 유나 — 좁은 캘린더 칸에서 한국어 낱말이 중간에 끊기지 않게 모든 글 문단이 break-keep(%o)', async (action) => {
+    await render(action as never);
+    const paragraphs = [...container.querySelectorAll('p')].filter((p) => p.className.includes('text-xs'));
+    expect(paragraphs.length).toBeGreaterThan(0);
+    for (const p of paragraphs) expect(p.className, p.textContent ?? '').toContain('break-keep');
+  });
+
   it('onRetryClick이 dead_letter 재시도 버튼 클릭 시 호출된다', async () => {
     let clicked = false;
     await act(async () => {
