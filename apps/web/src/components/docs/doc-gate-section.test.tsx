@@ -133,6 +133,13 @@ describe('DocGateSection — story #3004(선생님 정책 확定) draft 상신�
     return fetchMock;
   }
 
+  it('draft 검토 안내는 낱말 단위로 줄을 바꾼다(story #4363 · 좁은 폭에서 낱말 중간 꺾임)', async () => {
+    await renderDraftSection();
+    const hint = Array.from(container.querySelectorAll('span')).find((el) => el.textContent === koMessages.docs.docGateRequestReviewHint);
+    expect(hint, '안내 문구가 렌더된다').toBeTruthy();
+    expect(hint?.classList.contains('break-keep')).toBe(true);
+  });
+
   it('"검토 요청" 클릭이 즉시 전이 대신 결재자 픽커를 연다(전이 fetch 미발생)', async () => {
     const fetchMock = await renderDraftSection();
     const reqBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.docs.docGateRequestReview));

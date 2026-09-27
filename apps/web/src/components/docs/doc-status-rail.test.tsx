@@ -81,6 +81,16 @@ describe('DocStatusHeader — 상태별 렌더(§3, 접힌 박스→상시 캡�
     expect(container.textContent).toContain('검토 요청');
   });
 
+  it('draft — 검토 안내는 낱말 단위로 줄을 바꾼다(story #4363 · 390/360에서 «승|인» · «검토자|가»로 꺾이던 자리)', async () => {
+    stubFetch({});
+    const { DocStatusHeader } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocStatusHeader docId="doc-1" status="draft" editHref={EDIT_HREF} onTransitioned={() => {}} />)); });
+    await flush();
+    const hint = Array.from(container.querySelectorAll('p')).find((el) => el.textContent === koMessages.docs.docGateRequestReviewHint);
+    expect(hint, '안내 문구가 렌더된다').toBeTruthy();
+    expect(hint?.classList.contains('break-keep')).toBe(true);
+  });
+
   it('draft — CTA 클릭 시 POST .../transition에 status=pending이 실린다', async () => {
     const fetchMock = stubFetch({});
     const { DocStatusHeader } = await import('./doc-status-rail');

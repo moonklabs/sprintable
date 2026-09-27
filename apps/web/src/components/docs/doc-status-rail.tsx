@@ -147,7 +147,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
   const fmtDate = (s: string | undefined | null) => (s ? formatRelativeTime(s, locale, displayTimezone) : '');
 
   const errorBanner = error ? (
-    <p className="mt-1.5 basis-full text-xs text-destructive">{error}</p>
+    <p className="mt-1.5 basis-full break-keep text-xs text-destructive">{error}</p>
   ) : null;
 
   // draft — 접힌 박스의 "검토 요청" CTA를 그대로 상시 승격(§7: 새 상태·새 API 0).
@@ -155,7 +155,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
     return (
       <div className="proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
         <Icon className="size-5 shrink-0 text-muted-foreground" />
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
+        <p className="min-w-0 flex-1 break-keep text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
         <Button size="sm" className="focus-outset" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
           {t('docGateRequestReview')}
         </Button>
@@ -186,7 +186,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         {state === 'confirmed' && gate ? (
           <div className="text-xs text-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
         ) : state === 'denied' ? (
-          <div className="mt-1 text-xs text-foreground">
+          <div className="mt-1 break-keep [overflow-wrap:anywhere] text-xs text-foreground">
             <span className="font-medium">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
           </div>
         ) : null}
@@ -223,7 +223,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         // 상단 삼항의 else 분기(bg-warning-tint)를 입는다 — text-muted-foreground는 그 tint
         // 배경 위에서 AA 미달. 항상 pending 상태에서만 렌더되므로 상시 노출 — text-foreground로
         // 교체(#3865 AC0 PO 확定).
-        <span className="shrink-0 text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
+        <span className="shrink-0 break-keep text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
       ) : state === 'denied' ? (
         <Button size="sm" variant="ghost" disabled={busy} className="shrink-0 gap-1" onClick={() => void docTransition('draft', onTransitioned)}>
           <RotateCcw className="size-3.5" />{t('docGateEdit')}
@@ -328,7 +328,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
               human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
             />
             {ev.note?.trim() ? (
-              <p className="mt-1 whitespace-pre-wrap border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
+              <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
             ) : null}
           </li>
         ))}

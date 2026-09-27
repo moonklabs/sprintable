@@ -622,8 +622,8 @@ export function DocEditor({
               <span className="flex size-9 items-center justify-center rounded-full bg-info/10 text-info">
                 <Plus className="size-4" />
               </span>
-              <span className="text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
-              <span className="text-xs text-muted-foreground">{tEditor('attachDropHint')}</span>
+              <span className="break-keep text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
+              <span className="break-keep text-xs text-muted-foreground">{tEditor('attachDropHint')}</span>
             </div>
           ) : null}
         </div>

@@ -321,7 +321,7 @@ export default function DocSlugPage() {
   if (!selectedDoc) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+        <p className="break-keep text-sm text-muted-foreground">{t('notFound')}</p>
       </div>
     );
   }
@@ -348,7 +348,7 @@ export default function DocSlugPage() {
         {mdCopyFailedRaw != null ? (
           <div ref={(el) => { mdCopyFailedPanelRef.current = el; mdCopyFailedClampRef(el); }} data-dropdown-panel="md-copy-failed" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
             <div className="flex items-start justify-between gap-2">
-              <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+              <p role="alert" className="break-keep text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
               <Button
                 type="button"
                 variant="ghost"
