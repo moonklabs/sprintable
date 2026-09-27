@@ -105,3 +105,20 @@ describe('GateSignatureApproval 서명 사유 초안(story #4370)', () => {
     expect(field()!.value).toBe('sha-a 검토 사유');
   });
 });
+
+// story #4370(유나 규칙) — 확인 조작은 초안에 절대 안 들어간다: «근거를 확인했어요» 체크는 다시 열면 늘 꺼진 채 · 같은 폼의 사유는 돌아온다.
+// (확인은 «지금 이 화면에서 다시 봤다»는 뜻 — 되살리면 안 본 채로 서명이 켜진다.)
+describe('GateSignatureApproval — 확인 체크는 초안 제외(story #4370)', () => {
+  it('체크 + 사유 입력 → 닫았다 열면 사유만 돌아오고 체크는 꺼져 있다', async () => {
+    await mount(gate());
+    const box = () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => { box().click(); });
+    expect(box().checked).toBe(true);
+    await type('근거 보고 서명');
+    await unmountLayer();
+    await mount(gate());
+    expect(field()!.value).toBe('근거 보고 서명');
+    expect(box().checked).toBe(false);
+    expect(Object.keys(window.sessionStorage).filter((k) => k.startsWith('sprintable:field-draft:')).every((k) => !/evidence|confirm|ack/i.test(k))).toBe(true);
+  });
+});
