@@ -107,3 +107,33 @@ async def test_org_level_event_needs_an_active_owner_only():
         assert "https://hooks.example.com/GONE" not in urls
     finally:
         await engine.dispose()
+
+
+async def test_owner_removed_from_the_org_is_blocked_even_if_the_member_row_stays_active():
+    """PO 09-27(까디르에 준 후보) — org에서 빠진 사람(org_members.deleted_at)인데 members 행 · 프로젝트 grant가 아직 활성이면 해소기의 team_member
+    갈래가 org 소속을 안 봐 통과할 수 있다 → 실 PG로 잰다: 그런 주인의 P 범위 웹훅은 P 이벤트를 못 받아야 한다."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from app.models.project import OrgMember
+    from app.services.webhook_dispatch import _fetch_webhook_targets
+
+    engine, Session, org_id, project_id = await _world_with_webhooks()
+    try:
+        async with Session() as s:
+            from app.models.webhook_config import WebhookConfig
+
+            kept_member = (await s.execute(
+                __import__("sqlalchemy").select(WebhookConfig.member_id).where(
+                    WebhookConfig.org_id == org_id, WebhookConfig.url == "https://hooks.example.com/KEPT",
+                )
+            )).scalar_one()
+            # KEPT 주인을 org에서 뺀다(org_members만 소프트 삭제 · members 행 · grant는 그대로 둔다).
+            await s.execute(update(OrgMember).where(OrgMember.id == kept_member).values(deleted_at=datetime.now(UTC)))
+            await s.commit()
+        async with Session() as s:
+            targets = await _fetch_webhook_targets(s, org_id, "story.updated", event_data={"project_id": str(project_id)})
+        assert "https://hooks.example.com/KEPT" not in {t["url"] for t in targets}, "org에서 빠진 주인에게 P 이벤트가 간다"
+    finally:
+        await engine.dispose()

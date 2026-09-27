@@ -185,6 +185,14 @@ async def _owner_block_reason(
             mtype, user_id, is_active, deleted_at, m_org = row
             active = bool(is_active) and deleted_at is None and m_org == org_id
             identity = member_id if mtype == "agent" else user_id
+            if active and mtype != "agent":
+                # PO 09-27(실 PG로 잼) — org에서 빠진 사람(org_members 소프트 삭제)의 members 행 · grant가 활성으로 남아 있으면 해소기의
+                # team_member 갈래가 org 소속을 안 봐 통과했다. 사람 주인은 그 org의 살아 있는 org_members 행이 있어야 한다.
+                active = (await session.execute(
+                    select(OrgMember.id).where(
+                        OrgMember.org_id == org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None),
+                    ).limit(1)
+                )).scalar_one_or_none() is not None
         else:
             om = (await session.execute(
                 select(OrgMember.user_id, OrgMember.deleted_at).where(OrgMember.id == member_id, OrgMember.org_id == org_id)
