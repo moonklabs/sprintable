@@ -63,20 +63,37 @@ export function scanRepo(root: string): TitleOnlyRef[] {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const BASELINE_PATH = path.join(HERE, 'title-only-disabled-reason-baseline.json');
 
-export function loadBaseline(): Set<string> {
-  return new Set((JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as { keys: string[] }).keys);
+/** baseline = 키별 **개수**(까디르 4742 P2 — 집합으로 비교하면 같은 키의 자리가 하나로 뭉쳐, 같은 파일에 같은 모양을 하나 더 넣어도
+ * 초록이고 중복 하나를 고쳐도 stale이 안 떴다). */
+export function loadBaseline(): Map<string, number> {
+  const parsed = JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as { counts: Record<string, number> };
+  return new Map(Object.entries(parsed.counts));
+}
+
+export function countByKey(refs: TitleOnlyRef[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of refs) m.set(refKey(r), (m.get(refKey(r)) ?? 0) + 1);
+  return m;
+}
+
+/** 늘어난 키(지금 > baseline) = 신규 · 줄어든 키(지금 < baseline) = stale(baseline을 줄일 것). */
+export function compare(found: Map<string, number>, baseline: Map<string, number>): { grown: string[]; shrunk: string[] } {
+  const grown: string[] = [];
+  const shrunk: string[] = [];
+  for (const [k, n] of found) if (n > (baseline.get(k) ?? 0)) grown.push(`${k} (${baseline.get(k) ?? 0} → ${n})`);
+  for (const [k, n] of baseline) if ((found.get(k) ?? 0) < n) shrunk.push(`${k} (${n} → ${found.get(k) ?? 0})`);
+  return { grown, shrunk };
 }
 
 function main(): number {
   const refs = scanRepo(path.resolve(HERE, '../src'));
   const baseline = loadBaseline();
-  const found = new Set(refs.map(refKey));
-  const fresh = refs.filter((r) => !baseline.has(refKey(r)));
-  const stale = [...baseline].filter((k) => !found.has(k));
-  console.log(`[4357] 꺼진 조작 · title만 설명 스캔 — 검출 ${refs.length}건 · baseline ${baseline.size}건 · 신규 ${fresh.length}건 · stale ${stale.length}건`);
-  for (const r of fresh) console.error(`  ❌ 신규 ${r.file}:${r.line} <${r.tag}> title=${r.title} — 까닭이면 보이는 글 + aria-describedby(+ aria-disabled), 이름표면 aria-label`);
-  for (const k of stale) console.error(`  ❌ 고쳐져 사라진 baseline(지울 것): ${k}`);
-  return fresh.length || stale.length ? 1 : 0;
+  const { grown, shrunk } = compare(countByKey(refs), baseline);
+  const total = [...baseline.values()].reduce((a, b) => a + b, 0);
+  console.log(`[4357] 꺼진 조작 · title만 설명 스캔 — 검출 ${refs.length}건 · baseline ${total}건(키 ${baseline.size}) · 늘어남 ${grown.length} · 줄어듦 ${shrunk.length}`);
+  for (const g of grown) console.error(`  ❌ 늘어남 ${g} — 까닭이면 보이는 글 + aria-describedby(+ aria-disabled), 이름표면 aria-label`);
+  for (const k of shrunk) console.error(`  ❌ 줄어듦(baseline 줄일 것) ${k}`);
+  return grown.length || shrunk.length ? 1 : 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exit(main());
