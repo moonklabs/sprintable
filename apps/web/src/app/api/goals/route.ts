@@ -5,7 +5,7 @@ import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext, getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
-import { withRouteTiming } from '@/lib/server-timing';
+import { markRoute, markRouteReturn, withRouteTiming } from '@/lib/server-timing';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createGoalRepository } from '@/lib/storage/factory';
 
@@ -13,10 +13,12 @@ import { createGoalRepository } from '@/lib/storage/factory';
 const IDS_BATCH_CAP = 200;
 
 // story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+// story #4299 AC2 꼬리 — 하위 구간 auth · service · serialize(dev 전용 · 꺼지면 첫 줄에서 돌아감).
 export const GET = withRouteTiming('goals', async (request: Request) => {
   try {
     // story #4346 — 목록 GET은 org/project 판단조차 BE에 맡긴다(rate-limit 칸만 읽음) → JWT claim으로 충분, `/me` 왕복 0.
     const me = await getOrgProjectAuthContext(request);
+    markRoute('auth');
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
@@ -30,7 +32,8 @@ export const GET = withRouteTiming('goals', async (request: Request) => {
       const repo = await createGoalRepository();
       const service = new GoalService(repo);
       const epics = await service.list({ ids: parsedIds, limit: parsedIds.length });
-      return apiSuccess(epics);
+      markRoute('service');
+      return markRouteReturn('serialize', apiSuccess(epics));
     }
 
     const orderBy = searchParams.get('order_by') ?? undefined;
@@ -58,6 +61,7 @@ export const GET = withRouteTiming('goals', async (request: Request) => {
       const _r = await proxyToFastapi(upstreamRequest, '/api/v2/goals');
       if (!_r.ok) return _r;
       const epics = (await _r.json()) as unknown[];
+      markRoute('service');
       const totalHeader = _r.headers.get('x-total-count');
       // 총계를 못 받으면(계약 위반·프록시 실패) "이게 전부"라고 단정하지 않는다 — null(모름),
       // false로 위장하지 않는다.
@@ -71,7 +75,7 @@ export const GET = withRouteTiming('goals', async (request: Request) => {
       const parsed = totalHeader === null ? null : Number(totalHeader);
       const totalCount = parsed !== null && Number.isFinite(parsed) ? parsed : null;
       const hasMore = totalCount === null ? null : epics.length < totalCount;
-      return apiSuccess(epics, { limit: pageInput.limit, hasMore, nextCursor: null, totalCount });
+      return markRouteReturn('serialize', apiSuccess(epics, { limit: pageInput.limit, hasMore, nextCursor: null, totalCount }));
     }
 
     const repo = await createGoalRepository();
@@ -90,11 +94,12 @@ export const GET = withRouteTiming('goals', async (request: Request) => {
       // 폴백만 타는 죽은 코드였다). BE는 정확히 "glance" 리터럴만 특별취급하므로 그대로 전달.
       include: searchParams.get('include') ?? undefined,
     });
+    markRoute('service');
     const { page, meta } = buildCursorPageMeta(epics, pageInput.limit, 'created_at');
     // story #3705 AC3 — position 모드가 totalCount를 갖게 됐으니 이 분기도 같은 meta 키를
     // 갖는다(형상 일관성). cursor 모드는 이 축을 안 읽으므로 null(모름 — 0/미측정을 섞지 않는
     // house 관례를 새 필드에도 적용).
-    return apiSuccess(page, { ...meta, totalCount: null });
+    return markRouteReturn('serialize', apiSuccess(page, { ...meta, totalCount: null }));
   } catch (err: unknown) { return handleApiError(err); }
 });
 

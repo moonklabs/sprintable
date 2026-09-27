@@ -76,6 +76,8 @@ interface SharedTimingState {
   socketConnectedAt: WeakMap<object, number>;
   pendingDispatch: Map<string, PendingEntry[]>;
   subscribed: boolean;
+  /** story #4299 AC2 꼬리 — 라우트 전체 계측(withRouteTiming) 안에서 핸들러가 하위 구간을 적는 타이머(markRoute). */
+  routeAls?: AsyncLocalStorage<RouteTimer>;
 }
 const STATE_KEY = Symbol.for('sprintable.serverTiming.state.v1');
 const state: SharedTimingState = ((globalThis as Record<symbol, unknown>)[STATE_KEY] as SharedTimingState | undefined) ?? {
@@ -86,7 +88,10 @@ const state: SharedTimingState = ((globalThis as Record<symbol, unknown>)[STATE_
   subscribed: false,
 };
 (globalThis as Record<symbol, unknown>)[STATE_KEY] = state;
+// 먼저 실린 벌(같은 빌드)이 만든 상태에 없을 수 있어 여기서 채운다 — 모든 벌이 같은 하나를 쓴다.
+state.routeAls ??= new AsyncLocalStorage<RouteTimer>();
 const { als, inflight, socketConnectedAt, pendingDispatch } = state;
+const routeAls = state.routeAls;
 
 /**
  * story #4299 AC2 — 디스패치 순간의 계측 범위. 연결 풀(server-dispatcher)이 백엔드 연결 상한(4)에 걸린 요청을 풀 줄에 세우면,
@@ -310,7 +315,7 @@ export function withRouteTiming<A extends unknown[]>(
   return async (request: Request, ...rest: A): Promise<Response> => {
     if (!isServerTimingEnabled()) return handler(request, ...rest);
     const timer = startRouteTimer(request);
-    const { value: response, spans } = await withServerTiming(() => handler(request, ...rest));
+    const { value: response, spans } = await withServerTiming(() => routeAls.run(timer, () => handler(request, ...rest)));
     const summary = timer.summary();
     try {
       response.headers.set('Server-Timing', formatRouteTiming(summary, spans));
@@ -320,6 +325,24 @@ export function withRouteTiming<A extends unknown[]>(
     logRouteTiming(`route/${kind}`, response.status, summary, spans);
     return response;
   };
+}
+
+/**
+ * story #4299 AC2 꼬리(PO 2026-09-27 01:40Z) — 라우트 핸들러 **안** 하위 구간. 배포 34 쿠키 판에서 BFF 자기 몫 +100ms를 넘은 9/66이
+ * 전부 조립 라우트(stories · goals · glance/attention)였는데, 라우트 계측이 핸들러를 한 구간(bff)으로만 재서 인증 · 서비스 호출 ·
+ * 변환/직렬화 중 어디인지 못 갈랐다. 핸들러가 경계마다 `markRoute(이름)`을 부르면 직전 표시(또는 라우트 시작)부터 지금까지가
+ * `bff_<이름>` 구간으로 같은 헤더 · 로그 줄에 실린다(백엔드 호출 be*는 서비스 구간 안에 따로 보임 → 서비스 − Σbe = BFF 쪽 변환).
+ * 꺼져 있으면(`SERVER_TIMING_MARKERS` ≠ 'true') 첫 줄에서 돌아간다 — 계측 범위 조회 · 타이머 0. 라우트 계측 밖에서 불러도 아무것도 안 한다.
+ */
+export function markRoute(name: string): void {
+  if (!isServerTimingEnabled()) return;
+  routeAls.getStore()?.mark(name);
+}
+
+/** `return markRouteReturn('serialize', apiSuccess(…))` — 인자(응답 만들기 · JSON 직렬화)가 먼저 돌고 그 끝에서 구간을 닫는다. */
+export function markRouteReturn<T>(name: string, value: T): T {
+  markRoute(name);
+  return value;
 }
 
 // 켜져 있으면 모듈 로드 시점에 구독 — 첫 계측 전에 열린 연결의 시각도 잡는다(꺼져 있으면 구독 0).

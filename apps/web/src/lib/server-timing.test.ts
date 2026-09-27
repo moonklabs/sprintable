@@ -200,6 +200,59 @@ describe('withRouteTiming — 라우트 전체(합계 · bff_pre · 모든 백�
   });
 });
 
+describe('markRoute — 라우트 안 하위 구간(story #4299 AC2 꼬리 · PO 01:40Z)', () => {
+  const req = () => new Request('https://app.example.com/api/stories?project_id=p-1', { headers: { 'x-sp-mw-t0': String(Date.now() - 3) } });
+  const handler = async () => {
+    const { markRoute, markRouteReturn } = await import('./server-timing');
+    await get('/api/v2/me');
+    markRoute('auth');
+    await get('/api/v2/stories');
+    markRoute('service');
+    return markRouteReturn('serialize', new Response(JSON.stringify({ data: [1] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  };
+
+  it('켜면 bff_auth → bff_service → bff_serialize가 bff_pre 뒤 · 백엔드 호출 앞에 차례로 · 로그 줄 marks도 같은 순서', async () => {
+    process.env['SERVER_TIMING_MARKERS'] = 'true';
+    const { withRouteTiming } = await import('./server-timing');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const res = await withRouteTiming('stories', handler)(req());
+      const st = res.headers.get('Server-Timing') ?? '';
+      expect(st).toMatch(/^bff;dur=\d+, bff_pre;dur=\d+;desc="mw\+queue", bff_auth;dur=\d+, bff_service;dur=\d+, bff_serialize;dur=\d+, be0-me;dur=\d+;desc=.*, be1-other;dur=\d+;desc=/);
+      const lines = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('"server_timing"'));
+      expect(JSON.parse(lines[0]!).marks.map((m: [string, number]) => m[0])).toEqual(['auth', 'service', 'serialize']);
+      // 합 ≤ bff(각 구간은 직전 표시부터라 겹치지 않음)
+      const dur = (n: string) => Number(new RegExp(`${n};dur=(\\d+)`).exec(st)![1]);
+      expect(dur('bff_auth') + dur('bff_service') + dur('bff_serialize')).toBeLessThanOrEqual(dur('bff') + 2);
+      expect(await res.json()).toEqual({ data: [1] });
+    } finally { log.mockRestore(); }
+  });
+
+  it('꺼져 있으면 첫 줄에서 돌아감 — 계측 범위 조회(ALS getStore) 0 · 헤더 · 로그 0 · 값은 그대로', async () => {
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    const getStore = vi.spyOn(AsyncLocalStorage.prototype, 'getStore');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const { withRouteTiming, markRoute, markRouteReturn } = await import('./server-timing');
+      getStore.mockClear();
+      markRoute('auth');
+      expect(markRouteReturn('serialize', 42)).toBe(42);
+      expect(getStore).not.toHaveBeenCalled();
+      const res = await withRouteTiming('stories', handler)(req());
+      expect(res.headers.get('Server-Timing')).toBeNull();
+      expect(log).not.toHaveBeenCalled();
+    } finally { getStore.mockRestore(); log.mockRestore(); }
+  });
+
+  it('켜져 있어도 라우트 계측 밖에서 부르면 아무것도 안 함(던지지 않음 · 다른 범위에 안 섞임)', async () => {
+    process.env['SERVER_TIMING_MARKERS'] = 'true';
+    const { markRoute, withServerTiming } = await import('./server-timing');
+    expect(() => markRoute('auth')).not.toThrow();
+    const r = await withServerTiming(async () => { markRoute('service'); return 1; });
+    expect(r.value).toBe(1);
+  });
+});
+
 describe('배선 핀 — 헤더 없던 라우트 9개는 라우트 전체 계측으로 감쌈', () => {
   // 기기 콜드(보드) 판에서 BFF 구간이 안 실리던 /api 9경로(4299 AC1 쿠키 판 · 13건): 응답을 apiSuccess로 새로 만들거나
   // 저장소 fastapiCall을 쓰거나 인증 /me를 먼저 부른다.

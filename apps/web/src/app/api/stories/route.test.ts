@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // story ca37b2b0 — GET ids 배치 lookup(BE #2131) 분기 회귀가드. StoryService.list()를
 // 목킹해 (a) ids 없으면 기존 커서 페이지네이션 경로 (b) ids 있으면 meta 없는 배치 응답
@@ -183,5 +183,45 @@ describe('/api/stories GET — priority · unassigned 화이트리스트 전달(
     const calledWith = h.list.mock.calls[0]![0] as { priority?: string; unassigned?: boolean };
     expect(calledWith.priority).toBeUndefined();
     expect(calledWith.unassigned).toBeUndefined();
+  });
+});
+
+// story #4299 AC2 꼬리 — 하위 구간(dev 전용 · SERVER_TIMING_MARKERS). 분기 셋 모두 auth → service → serialize.
+describe('/api/stories GET — 하위 구간 bff_auth · bff_service · bff_serialize(4299)', () => {
+  const ORDER = /^bff;dur=\d+, bff_auth;dur=\d+, bff_service;dur=\d+, bff_serialize;dur=\d+$/;
+  let log: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+    process.env['SERVER_TIMING_MARKERS'] = 'true';
+    log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { delete process.env['SERVER_TIMING_MARKERS']; log.mockRestore(); });
+
+  it.each([
+    ['목록(커서)', 'http://localhost/api/stories?project_id=p'],
+    ['ids 배치', 'http://localhost/api/stories?project_id=p&ids=a1'],
+    ['unattached 프록시', 'http://localhost/api/stories?project_id=p&unattached=true'],
+  ])('%s: 헤더에 셋이 차례로', async (_label, url) => {
+    h.list.mockResolvedValue([story('1')]);
+    h.proxyToFastapi.mockResolvedValue(new Response(JSON.stringify([story('1')]), { status: 200, headers: { 'Content-Type': 'application/json', 'x-total-count': '1' } }));
+    const res = await GET(new Request(url));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Server-Timing')).toMatch(ORDER);
+  });
+
+  it('인증 실패(401)면 auth까지만 — service · serialize 없음', async () => {
+    h.getAuthContext.mockResolvedValue(null);
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p'));
+    expect(res.status).toBe(401);
+    expect(res.headers.get('Server-Timing')).toMatch(/^bff;dur=\d+, bff_auth;dur=\d+$/);
+  });
+
+  it('꺼져 있으면 헤더 없음', async () => {
+    delete process.env['SERVER_TIMING_MARKERS'];
+    h.list.mockResolvedValue([story('1')]);
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p'));
+    expect(res.headers.get('Server-Timing')).toBeNull();
   });
 });
