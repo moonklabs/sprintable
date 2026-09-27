@@ -24,6 +24,7 @@ function wrap(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -42,7 +43,7 @@ describe('GuidedHypothesisForm', () => {
   it('빈 상태에서는 제출 버튼이 비활성이다', async () => {
     const onSubmit = vi.fn();
     await act(async () => {
-      root.render(wrap(<GuidedHypothesisForm onSubmit={onSubmit} onCancel={vi.fn()} />));
+      root.render(wrap(<GuidedHypothesisForm projectId="p1" onSubmit={onSubmit} onCancel={vi.fn()} />));
     });
 
     const submitBtn = findButtonByText(koMessages.flow.guidedSubmit) as HTMLButtonElement;
@@ -52,7 +53,7 @@ describe('GuidedHypothesisForm', () => {
   it('예시 칩을 고르면 statement·metric·target·direction이 한 번에 채워지고 제출 시 그대로 전달된다', async () => {
     const onSubmit = vi.fn();
     await act(async () => {
-      root.render(wrap(<GuidedHypothesisForm onSubmit={onSubmit} onCancel={vi.fn()} />));
+      root.render(wrap(<GuidedHypothesisForm projectId="p1" onSubmit={onSubmit} onCancel={vi.fn()} />));
     });
 
     const chip = findButtonByText(koMessages.flow.guidedExampleReviewAgent);
@@ -83,7 +84,7 @@ describe('GuidedHypothesisForm', () => {
   it('취소 버튼은 onCancel을 부른다', async () => {
     const onCancel = vi.fn();
     await act(async () => {
-      root.render(wrap(<GuidedHypothesisForm onSubmit={vi.fn()} onCancel={onCancel} />));
+      root.render(wrap(<GuidedHypothesisForm projectId="p1" onSubmit={vi.fn()} onCancel={onCancel} />));
     });
 
     const cancelBtn = findButtonByText(koMessages.flow.guidedCancel);
