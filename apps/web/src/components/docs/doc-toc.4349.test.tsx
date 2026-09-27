@@ -124,3 +124,21 @@ describe('DocToc — 카드 밖(body)에 · 모자라면 위로 · 키보드(sto
     expect(panel()!.hasAttribute('role')).toBe(false);
   });
 });
+
+// 유나 #4728 필수 2 — 새 키보드 길(«목차» → Tab)의 첫 자리 «✕»: 이름이 없었고, 누르면 초점이 body로 떨어졌다.
+describe('DocToc «✕» — 이름 · 닫으면 «목차»로 초점(유나 #4728)', () => {
+  it('«목차»에서 Tab → 첫 자리 = «✕»(이름 common.close) · 누르면 닫히고 초점 = «목차» 버튼(body 아님)', () => {
+    mount();
+    btn().focus();
+    act(() => { btn().click(); });
+    key(btn(), 'Tab');
+    const x = document.activeElement as HTMLElement;
+    expect(panel()!.contains(x)).toBe(true);
+    expect(x.getAttribute('aria-label')).toBe(koMessages.common.close);
+    act(() => { x.click(); });
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(btn());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+

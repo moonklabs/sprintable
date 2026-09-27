@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { List, X } from 'lucide-react';
 import type { DocHeading } from './doc-heading-utils';
 import { cn } from '@/lib/utils';
-import { AnchoredPopover, usePortalMenuKeys } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 interface DocTocProps {
   headings: DocHeading[];
@@ -16,6 +16,7 @@ interface DocTocProps {
 export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
   // story #3776(1층A) — "목차" 라벨, docs ns의 기존 tocSection 키 재사용.
   const t = useTranslations('docs');
+  const tc = useTranslations('common');
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   // story #4342 — 목록이 좁은 화면에서 뷰포트 밖으로 나가지 않게(열릴 때 재서 안으로 밀어 넣음 · 폭 상한).
@@ -30,10 +31,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (panelRef.current && !panelRef.current.contains(target) && !listRef.current?.contains(target)) {
-        setOpen(false);
-      }
+      if (isOutsidePress(panelRef.current, e.target)) setOpen(false); // 포털된 목록(listRef)은 공용 규칙이 «안»으로 셈
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -70,9 +68,11 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
         <AnchoredPopover anchorRef={panelRef} popoverRef={listRef} align="end" gap={6} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-dropdown-panel="doc-toc" className="z-50 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-background">
           <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
             <span className="text-xs font-semibold text-foreground">{t('tocSection')}</span>
+            {/* 유나 #4728 — 새 키보드 길(«목차» → Tab)의 첫 자리. 이름(common.close)을 달고, 닫을 땐 Esc와 같은 길(닫고 «목차»로 초점) — 예전엔 초점이 body로 떨어졌다. */}
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              aria-label={tc('close')}
+              onClick={keys.closeToTrigger}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <X className="size-3.5" />

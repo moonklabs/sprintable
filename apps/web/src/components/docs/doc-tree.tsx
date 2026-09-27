@@ -15,7 +15,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
-import { AnchoredPopover, usePortalMenuKeys } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -225,9 +225,7 @@ function TreeNode({
     if (!contextMenuOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setContextMenuOpen(false);
-      }
+      if (isOutsidePress(menuRef.current, e.target)) setContextMenuOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);

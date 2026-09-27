@@ -6,6 +6,7 @@ import { User, UserPlus } from 'lucide-react';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { initials as toInitials } from '@/lib/storage/format';
 import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { isOutsidePress } from '@/components/shared/anchored-popover';
 
 /**
  * 박스1: 담당자 아바타 + popover. 슬림 헤더 액션 클러스터에 glanceable owner 신호(누가 owner인지 보여야 함).
@@ -33,11 +34,11 @@ export function DocAssigneeControl({
   const ref = useRef<HTMLDivElement>(null);
   const memberName = assigneeName;
 
-  // click-outside 닫기
+  // click-outside 닫기 — 안의 «더 보기» 메뉴는 body로 포털된다(#4349 PR 2) → 포털 팝오버 안 누름도 «안»(유나 #4728: 예전엔 창이 먼저 닫혀 «이벤트 전달» 탭이 요청 0).
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (isOutsidePress(ref.current, e.target)) setOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);

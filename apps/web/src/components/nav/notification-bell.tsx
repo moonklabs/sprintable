@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnchoredPopover, usePortalMenuKeys } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { withProjectParam } from '@/lib/with-project-param';
 import { useRouter } from 'next/navigation';
 import {
@@ -558,10 +558,7 @@ export function NotificationBell() {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (containerRef.current && !containerRef.current.contains(target) && !desktopPanelRef.current?.contains(target)) {
-        setOpen(false);
-      }
+      if (isOutsidePress(containerRef.current, e.target)) setOpen(false); // 포털된 데스크톱 패널은 공용 규칙이 «안»으로 셈
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);

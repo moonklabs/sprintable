@@ -35,6 +35,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { copyTextSafely } from '@/lib/clipboard';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { isOutsidePress } from '@/components/shared/anchored-popover';
 
 interface DocDetail {
   id: string;
@@ -225,9 +226,8 @@ export default function DocSlugPage() {
   useEffect(() => {
     if (mdCopyFailedRaw == null) return;
     const onPointerDown = (e: MouseEvent) => {
-      if (mdCopyFailedPanelRef.current && !mdCopyFailedPanelRef.current.contains(e.target as Node)) {
-        setMdCopyFailedRaw(null);
-      }
+      // 이 화면은 포털 팝오버(목차 · 담당자 «더 보기»)를 품는다 — 바깥 판정은 공용 규칙 하나(#4349 PR 2 · 가드 outside-press).
+      if (isOutsidePress(mdCopyFailedPanelRef.current, e.target)) setMdCopyFailedRaw(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMdCopyFailedRaw(null);

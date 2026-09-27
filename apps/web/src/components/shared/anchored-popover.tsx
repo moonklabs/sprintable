@@ -48,6 +48,19 @@ export function placeVertical(
   return { top: height <= above ? top : fitIn(top), side: 'top' };
 }
 
+/**
+ * 바깥 누름 판정(#4349 PR 2 · 유나 #4728) — `root` 밖이면서 포털된 AnchoredPopover(`[data-anchored-popover]`) 안도 아니면 바깥이다.
+ * 포털 팝오버는 DOM상 body 직속이라 `root.contains`만 보면 늘 «바깥»이다. 그러면 부모가 mousedown에서 먼저 닫히고, 자식 메뉴가
+ * 언마운트돼 그 누름의 click이 오지 않는다(390 문서 담당자 창 → «더 보기» → «이벤트 전달» 탭 = 디스패치 요청 0).
+ * document 바깥 누름 닫기는 모두 이 규칙 하나를 쓴다(가드: `outside-press.guard.test.ts`). root가 아직 없으면 바깥 아님(예전 `ref.current &&`와 같음).
+ */
+export function isOutsidePress(root: Element | null | undefined, target: EventTarget | null): boolean {
+  if (!root || !(target instanceof Node)) return false;
+  if (root.contains(target)) return false;
+  const el = target instanceof Element ? target : target.parentElement;
+  return !el?.closest('[data-anchored-popover]');
+}
+
 export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, style, children, ...rest }: AnchoredPopoverProps) {
   const elRef = useRef<HTMLDivElement | null>(null);
 
@@ -120,9 +133,12 @@ export interface PortalMenuKeysOptions {
  * - menu: 트리거 `aria-haspopup="menu"` · `aria-expanded` · `aria-controls`(열렸을 때 패널 id) / 팝오버 `id` · `role="menu"` — 항목 `role="menuitem"`은 호출부가 단다.
  * - panel: 트리거 `aria-expanded` · `aria-controls` / 팝오버 `id`(메뉴 역할 아님).
  * `id`도 돌려준다(패널이 둘인 자리 — 벨의 좁은 화면 오버레이 — 가 aria-controls를 제 것으로 바꿀 때).
+ * `closeToTrigger`도 돌려준다(유나 #4728): 패널 안 «닫기» 버튼 같은 자리가 Esc와 같은 길(닫고 트리거로 초점)을 쓰게 — 안 그러면 누른 버튼이
+ * 사라지며 초점이 body로 떨어진다.
  */
 export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind }: PortalMenuKeysOptions) {
   const id = useId();
+  const closeToTrigger = useCallback(() => { onClose(); triggerRef.current?.focus(); }, [onClose, triggerRef]);
   useEffect(() => {
     if (open && kind === 'menu') popoverRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
   }, [open, kind, popoverRef]);
@@ -130,7 +146,6 @@ export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind 
   const onPopoverKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
     const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE));
     const i = items.indexOf(document.activeElement as HTMLElement);
-    const closeToTrigger = () => { onClose(); triggerRef.current?.focus(); };
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -147,7 +162,7 @@ export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind 
       e.preventDefault();
       closeToTrigger();
     }
-  }, [kind, onClose, triggerRef]);
+  }, [kind, closeToTrigger, triggerRef]);
 
   const onTriggerKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
     if (!open || e.key !== 'Tab' || e.shiftKey) return;
@@ -164,5 +179,5 @@ export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind 
     ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open, 'aria-controls': open ? id : undefined }
     : { 'aria-expanded': open, 'aria-controls': open ? id : undefined };
   const popoverProps = kind === 'menu' ? { id, role: 'menu' as const } : { id };
-  return { onPopoverKeyDown, onTriggerKeyDown, triggerProps, popoverProps, id };
+  return { onPopoverKeyDown, onTriggerKeyDown, triggerProps, popoverProps, id, closeToTrigger };
 }

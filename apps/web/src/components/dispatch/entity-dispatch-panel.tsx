@@ -10,7 +10,7 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { memberRowLabels } from '@/lib/member-display';
-import { AnchoredPopover, usePortalMenuKeys } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 interface TeamMember {
   id: string;
@@ -72,10 +72,8 @@ export function EntityDispatchPanel({
   useEffect(() => {
     if (!moreOpen) return;
     const handler = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as Node;
-      if (moreRef.current && !moreRef.current.contains(target) && !moreMenuRef.current?.contains(target)) {
-        setMoreOpen(false);
-      }
+      // 포털된 메뉴(moreMenuRef)는 body 직속 — 공용 규칙이 포털 팝오버 안을 «안»으로 센다.
+      if (isOutsidePress(moreRef.current, e.target)) setMoreOpen(false);
     };
     document.addEventListener('mousedown', handler as EventListener);
     document.addEventListener('touchstart', handler as EventListener);

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { AnchoredPopover } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress } from '@/components/shared/anchored-popover';
 
 /**
  * story #2531(E-FLOW-V4 S1)에서 지구층 전용으로 태어났다가, story #2535(S5)에서 다른 층
@@ -90,11 +90,8 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
   useEffect(() => {
     if (openReservedLevel === null) return;
     const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (infoPopoverRef.current?.contains(target)) return;
-      if (reservedWrapperRef.current && !reservedWrapperRef.current.contains(target)) {
-        setOpenReservedLevel(null);
-      }
+      // 포털된 안내 팝오버(infoPopoverRef)는 body 직속 — 공용 규칙이 «안»으로 센다.
+      if (isOutsidePress(reservedWrapperRef.current, e.target)) setOpenReservedLevel(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpenReservedLevel(null);

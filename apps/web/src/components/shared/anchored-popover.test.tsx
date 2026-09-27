@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AnchoredPopover, placeVertical, usePortalMenuKeys } from './anchored-popover';
+import { AnchoredPopover, isOutsidePress, placeVertical, usePortalMenuKeys } from './anchored-popover';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -239,5 +239,25 @@ describe('usePortalMenuKeys(story #4349 PR 2)', () => {
     expect(p2.hasAttribute('role')).toBe(false);
     expect(t2.getAttribute('aria-expanded')).toBe('true');
     expect(t2.getAttribute('aria-controls')).toBe(p2.id);
+  });
+});
+
+// 유나 #4728 — 바깥 누름 판정 하나(부모 · 포털 주인 모두). 가드: outside-press.guard.test.ts.
+describe('isOutsidePress', () => {
+  it('root 안 = 바깥 아님 · 포털 팝오버 안(자손 · 글자 노드 포함) = 바깥 아님 · 그 밖 = 바깥 · root 없음 = 바깥 아님', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div id="op-root"><button id="op-in">in</button></div><div data-anchored-popover=""><span id="op-pop">항목</span></div><p id="op-out">out</p>';
+    document.body.appendChild(host);
+    try {
+      const root = document.getElementById('op-root');
+      expect(isOutsidePress(root, document.getElementById('op-in'))).toBe(false);
+      expect(isOutsidePress(root, document.getElementById('op-pop'))).toBe(false);
+      expect(isOutsidePress(root, document.getElementById('op-pop')!.firstChild)).toBe(false);
+      expect(isOutsidePress(root, document.getElementById('op-out'))).toBe(true);
+      expect(isOutsidePress(null, document.getElementById('op-out'))).toBe(false);
+      expect(isOutsidePress(root, null)).toBe(false);
+    } finally {
+      host.remove();
+    }
   });
 });
