@@ -5,7 +5,7 @@ import { TaskService, type CreateTaskInput } from '@/services/task';
 import { createTaskRepository } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 
 async function getStoryTaskCounts(
@@ -42,7 +42,7 @@ async function getStoryTaskCounts(
 
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined as DbClient | undefined;
@@ -131,7 +131,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;

@@ -1,7 +1,7 @@
 import { parseBody, createDocSchema } from '@sprintable/shared';
 import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getAuthContext, getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { parseCursorPageInput } from '@/lib/pagination';
 import { checkResourceLimit } from '@/lib/check-feature';
@@ -9,7 +9,7 @@ import { createDocRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;

@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
   getAuthContext: vi.fn(), fastapiCall: vi.fn(), getServerSession: vi.fn(),
   cookieSet: vi.fn(), parseBody: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, CURRENT_PROJECT_COOKIE: 'sp_cur_proj' }));
+vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext, CURRENT_PROJECT_COOKIE: 'sp_cur_proj', getOrgProjectAuthContext: h.getAuthContext }));
 vi.mock('@sprintable/storage-api', () => ({ fastapiCall: h.fastapiCall }));
 vi.mock('@/lib/db/server', () => ({ getServerSession: h.getServerSession }));
 vi.mock('next/headers', () => ({ cookies: vi.fn(async () => ({ set: h.cookieSet })) }));

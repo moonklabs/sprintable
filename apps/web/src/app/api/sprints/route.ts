@@ -3,7 +3,7 @@
 import { SprintService, type CreateSprintInput } from '@/services/sprint';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext, getOrgProjectAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 import { withRouteTiming } from '@/lib/server-timing';
 import { buildHeaderCursorPageMeta } from '@/lib/pagination';
@@ -13,7 +13,7 @@ import { createSprintRepository } from '@/lib/storage/factory';
 // POST /api/sprints — 생성
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;

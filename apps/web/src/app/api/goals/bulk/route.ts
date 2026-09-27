@@ -1,7 +1,7 @@
 import { GoalService, type EpicPositionItem } from '@/services/goal';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { createGoalRepository } from '@/lib/storage/factory';
 
 /**
@@ -11,7 +11,7 @@ import { createGoalRepository } from '@/lib/storage/factory';
  */
 export async function PATCH(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 

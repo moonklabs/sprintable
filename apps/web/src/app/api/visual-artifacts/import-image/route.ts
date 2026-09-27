@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
 
@@ -16,7 +16,7 @@ const MAX_IMPORT_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB — 첨부(100MB)보다 
  */
 export async function POST(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     const formData = await request.formData();

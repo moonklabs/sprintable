@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -8,7 +8,7 @@ const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://loca
 /** POST /api/auth/set-password/request — OAuth 전용 사용자 최초 비밀번호 설정 1단계
  * (확인 이메일 발송, 아직 DB write 없음 — story #ab2a503f 재인증 게이트). */
 export async function POST(request: Request) {
-  const me = await getAuthContext(request);
+  const me = await getOrgProjectAuthContext(request);
   if (!me) return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, { status: 401 });
 
   const body = await request.json() as { new_password: string };
