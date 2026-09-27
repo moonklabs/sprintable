@@ -5,11 +5,22 @@ import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { cancelEscUsedByInnerLayer } from "@/lib/inner-layer-esc"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
-function Sheet({ ...props }: SheetPrimitive.Root.Props) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />
+// [SID:4367] 한 Esc = 한 층 — 안쪽 층이 쓴 Esc(preventDefault)면 이 시트의 Esc 닫기를 취소한다(inner-layer-esc.ts).
+function Sheet({ onOpenChange, ...props }: SheetPrimitive.Root.Props) {
+  return (
+    <SheetPrimitive.Root
+      data-slot="sheet"
+      onOpenChange={(open, details) => {
+        if (cancelEscUsedByInnerLayer(open, details)) return;
+        onOpenChange?.(open, details);
+      }}
+      {...props}
+    />
+  )
 }
 
 function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {

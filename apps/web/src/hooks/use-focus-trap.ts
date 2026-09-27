@@ -39,6 +39,9 @@ export function useFocusTrap(active: boolean, onClose: () => void, options: UseF
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (!handleEscape) return;
+        // [SID:4367] 한 Esc = 한 층 — 안쪽 층(새 폴더 입력칸 · 후보 목록 · 포털 메뉴 등)이 이 Esc로 자기를 닫고
+        // preventDefault로 «썼다»고 표시했으면 서랍은 그대로 둔다. 안쪽 React 핸들러는 뿌리에서 이 리스너보다 먼저 돈다.
+        if (e.defaultPrevented) return;
         e.stopPropagation();
         onClose();
         return;
