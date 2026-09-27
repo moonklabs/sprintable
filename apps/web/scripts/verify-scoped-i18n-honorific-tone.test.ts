@@ -225,8 +225,10 @@ describe('checkTotalLeafFloor — 순수 함수(네임스페이스별 leaf 하�
     const ko = JSON.parse(readFileSync(path.join(messagesDir, 'ko.json'), 'utf8')) as Record<string, unknown>;
     const actual = countAllLeaves(ko);
     expect(actual).toBeGreaterThanOrEqual(MIN_TOTAL_LEAF_COUNT);
-    // 하한이 실측치의 80% 근방이라는 것 자체를 고정(자연 증감은 통과, 대량 삭제는 fail-loud
-    // — 예를 들어 leaf가 반토막 나면 이 비율 자체가 깨져 이 테스트가 먼저 신호를 준다).
+    // 하한이 실측치의 80% 근방이라는 것 자체를 고정한다.
+    // - 줄면(대량 삭제): 비가 0.85를 넘거나 하한 아래로 떨어져 fail-loud(예: leaf가 반토막 나면 여기서 먼저 신호).
+    // - 늘면: ko leaf가 하한/0.7을 넘게 늘면 비가 0.7 아래로 내려가 이 검사가 하한 재측정을 요구한다(의도된 신호 —
+    //   하한이 실측과 멀어지면 대량 삭제 감지력이 약해지므로). 그때 MIN_TOTAL_LEAF_COUNT를 실측 × 0.8로 다시 매긴다.
     expect(MIN_TOTAL_LEAF_COUNT / actual).toBeGreaterThan(0.7);
     expect(MIN_TOTAL_LEAF_COUNT / actual).toBeLessThan(0.85);
   });
