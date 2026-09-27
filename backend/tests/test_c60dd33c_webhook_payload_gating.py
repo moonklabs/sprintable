@@ -20,6 +20,17 @@ from app.services.discord_webhook import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _owner_access_pinned_4358(monkeypatch):
+    """story #4358 — 발송 대상 고르기가 설정 주인의 지금 접근을 조회한다. 이 파일은 목 세션 · 관심은 페이로드 · 관련자 게이팅이라 주인
+    확인을 «통과»로 고정한다(주인 접근 규칙 자체는 test_4358_webhook_dispatch_owner_access_realdb.py 실 PG)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    import app.services.webhook_dispatch as webhook_dispatch
+
+    monkeypatch.setattr(webhook_dispatch, "_owner_block_reason", _AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
