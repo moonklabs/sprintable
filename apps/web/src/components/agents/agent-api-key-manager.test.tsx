@@ -286,7 +286,7 @@ describe('AgentApiKeyManager — 보이는 영어 0(story #4359)', () => {
     ]);
     const text = container.textContent ?? '';
     expect(text).toContain('마지막 사용');
-    expect(text).toContain('폐기');
+    expect(text).toContain('무효화');
     expect(text).toMatch(/3일 뒤 만료/);
     expect(text).toContain('만료 ');
     expect(text).toContain('만료됨');

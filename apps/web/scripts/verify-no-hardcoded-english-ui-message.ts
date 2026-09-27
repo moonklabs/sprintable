@@ -10,7 +10,12 @@
  * - (까디르 4740 ②) **JSX 자식 식 `{…}` 안의 문자열 · 템플릿 리터럴** — `{copied ? 'Copied!' : 'Copy'}` · `{x && \` • Last used: ${…}\`}`처럼
  *   JSX 글자 가드(verify-no-raw-ascii-jsx-text.ts — 식 밖 글자만)가 못 보던 자리. 템플릿은 글자 조각을 이어 판정 · 한글이 없으면
  *   ASCII 밖 기호(• ⚠ …)를 걷고 판정(기호 때문에 놓치지 않게). 식 안의 호출 인자 · 비교 · 속성 · 안쪽 JSX는 이 축 밖(각자 자리 · 가드).
- * 이 축이 **못 보는 것**: 객체 · 배열 리터럴 값으로 두었다가 그리는 문장(`const labels = { 1: '1-step' }` → `{labels[n]}`) — 값이 식 밖에 있다.
+ * **아직 못 보는 자리**(까디르 4740 · 범위를 밝혀 둔다 — 이 가드가 영어를 전부 잡는다고 읽지 말 것):
+ *   - 식별자 · 객체 · 배열 값으로 두었다가 그리는 문장(`const labels = { 1: '1-step' }` → `{labels[n]}` · `{msg}`) — 값이 식 밖에 있다.
+ *   - 템플릿 **치환 자리 안**의 영어(`\`${n} ${n === 1 ? 'day' : 'days'}\``) — 글자 조각만 잇고 치환 식은 안 본다.
+ *   - 호출 인자(`{format('Updated')}`) — 호출 안은 이 축 밖.
+ *   - JSX **속성** 값 — verify-no-raw-ascii-jsx-attr.ts 담당.
+ *   - `||` · `??` 의 **왼쪽**(`{'Untitled' || x}`) — 오른쪽(대체값)만 따라간다.
  * GRANDFATHER 없음(setter · toast) — 첫 전수를 이 PR에서 전부 고쳤다. JSX 식 축은 ALLOWLIST(코드 토큰 · 브랜드) + 이름 붙인 BASELINE(줄이기만).
  */
 import { readdirSync, readFileSync } from 'node:fs';
@@ -41,9 +46,8 @@ export const JSX_EXPR_ALLOWLIST: ReadonlyMap<string, string> = new Map([
   ['components/storage/storage-folder-tree.tsx::Sprintable', '제품 이름(프로젝트 이름이 없을 때) — 브랜드'],
 ]);
 /** JSX 식 축 — 알고 있는 남은 자리(줄이기만 · 새로 생기면 FAIL). 고치면 여기서 빼야 초록(stale도 FAIL). */
-export const JSX_EXPR_BASELINE: ReadonlyMap<string, string> = new Map([
-  ['components/settings/workflow-template-gallery-section.tsx:: -step', '단계 수 배지(`labels` 객체 값 «Kanban» · «1-step»…도 영어) — 이 카드(4359 API 키 · 이름 바꾸기) 밖 · 새 카드 후보로 PO에 올림'],
-]);
+// 첫 전수의 단 하나(설정 › 워크플로 갤러리 단계 배지 `${count}-step`)는 이 PR에서 고쳤다(PO 23:36Z) — 비어 있음. 새 자리는 고치거나 PO 승인으로 등재.
+export const JSX_EXPR_BASELINE: ReadonlyMap<string, string> = new Map([]);
 
 /** 템플릿 글자 조각을 잇는다(치환 자리는 공백). 한글이 있으면 번역된 문장. 없으면 ASCII 밖 기호를 걷고 판정. */
 function jsxExprCopy(e: ts.Node): string | undefined {

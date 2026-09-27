@@ -27,11 +27,13 @@ interface TeamMember {
   runtime_type?: string | null;
 }
 
+// story #4359(PO 23:37Z · 유나) — 영어 고정 배지(«1-step» · `${n}-step`)였다. 조직 레시피 갤러리(recipe-gallery.tsx)가 같은 셈을
+// 부르는 기존 키로 두 화면 말을 하나로. «Kanban»(0단계) 갈래는 지움 — 배지는 순환 정의(isCyclicDefinition = 단계 > 0)에만 그려져 닿지 않는 길.
 function StageCountBadge({ count }: { count: number }) {
-  const labels: Record<number, string> = { 0: 'Kanban', 1: '1-step', 2: '2-step', 3: '3-step' };
+  const tOrg = useTranslations('organization');
   return (
     <Badge variant="secondary" className="text-[10px]">
-      {labels[count] ?? `${count}-step`}
+      {tOrg('recipeGalleryStageCountBadge', { count })}
     </Badge>
   );
 }

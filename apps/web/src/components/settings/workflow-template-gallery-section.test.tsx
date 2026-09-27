@@ -438,3 +438,36 @@ describe('WorkflowTemplateGallerySection — 프리셋 이름 로케일(story #4
     }
   });
 });
+
+// story #4359(PO 23:36Z · 유나) — 단계 수 배지가 영어 고정(«1-step» · `${n}-step`)이었다. 조직 레시피 갤러리와 같은 키(ko «단계 {count}» ·
+// en 복수형)로. 한 단계 · 세 단계 둘 다 — ko/en 로케일에서.
+describe('WorkflowTemplateGallerySection — 단계 수 배지(story #4359)', () => {
+  const THREE = { ...DEFINITION, id: 'def-3', key: 'preset.test.three', name: '세 단계', payload_schema: { properties: { stage: { enum: ['a', 'b', 'c'] } } } };
+  async function renderWith(locale: 'ko' | 'en') {
+    LOCALE = locale;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/events/definitions' && !init?.method) return { ok: true, json: async () => [DEFINITION, THREE] };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: true, json: async () => ({ bindings: {} }) };
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+    LOCALE = 'ko';
+  }
+
+  it('⭐ko — «단계 1» · «단계 3» · 영어 «-step» 0', async () => {
+    await renderWith('ko');
+    const text = container.textContent ?? '';
+    expect(text).toContain('단계 1');
+    expect(text).toContain('단계 3');
+    expect(text).not.toMatch(/step|Kanban/);
+  });
+
+  it('⭐en — 복수형(«1 stage» · «3 stages»)', async () => {
+    await renderWith('en');
+    const text = container.textContent ?? '';
+    expect(text).toContain('1 stage');
+    expect(text).toContain('3 stages');
+    expect(text).not.toMatch(/-step/);
+  });
+});

@@ -2178,7 +2178,7 @@
     "agentApiKeyEmpty": "아직 발급한 API 키가 없어요",
     "agentApiKeyCreatedAt": "발급 {time}",
     "agentApiKeyLastUsedAt": "마지막 사용 {time}",
-    "agentApiKeyRevokedAt": "폐기 {time}",
+    "agentApiKeyRevokedAt": "무효화 {time}",
     "agentApiKeyExpiredAt": "{date} 만료됨",
     "agentApiKeyExpiresInDays": "{days}일 뒤 만료({date})",
     "agentApiKeyExpiresAt": "만료 {date}",
