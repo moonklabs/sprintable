@@ -98,7 +98,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
 
 // ─── Shiki Code Block View ────────────────────────────────────────────────────
 
-function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
+function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeViewProps) {
   // story #3776(1층B) — "복사됨"/"복사", docs ns의 기존 codeCopied/codeCopy 키 재사용.
   const t = useTranslations('docs');
   const [copied, setCopied] = useState(false);
@@ -147,9 +147,11 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   }, [code]);
 
   const handleLangSelect = useCallback((lang: string) => {
-    editor?.commands.updateAttributes('codeBlock', { language: lang });
+    // story #4360 — 이 고르개가 붙은 블록(NodeView 자기 위치)의 언어를 바꾼다. 예전 `editor.commands.updateAttributes('codeBlock', …)`는
+    // **지금 선택 영역**의 코드 블록을 바꿔, 커서가 다른 코드 블록에 있으면 그 블록의 언어가 바뀌었다.
+    updateAttributes({ language: lang });
     setShowLangMenu(false);
-  }, [editor]);
+  }, [updateAttributes]);
 
   useEffect(() => {
     if (!showLangMenu) return;
