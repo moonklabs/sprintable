@@ -168,6 +168,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
+  const tNav = useTranslations("nav") // story #4359 — 모바일 시트의 화면 읽기용 제목 · 설명
   const { isMobile, state, openMobile, setOpenMobile, isResizing } = useSidebar()
 
   if (collapsible === "none") {
@@ -202,8 +203,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>{tNav("mobileSidebarTitle")}</SheetTitle>
+            <SheetDescription>{tNav("mobileSidebarDescription")}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>

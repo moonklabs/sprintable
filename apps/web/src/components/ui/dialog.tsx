@@ -126,6 +126,7 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const t = useTranslations("common") // story #4359 — 하단 닫기 버튼 글자(예전 영어 고정)
   return (
     <div
       data-slot="dialog-footer"
@@ -138,7 +139,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t("close")}
         </DialogPrimitive.Close>
       )}
     </div>

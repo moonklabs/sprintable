@@ -2350,6 +2350,9 @@ jobs:
       # 문서 트리 이름 바꾸기 prompt('Enter new title:') · 링크 넣기 window.prompt('URL:') 재발 방지).
       - name: "Verify no hardcoded English in browser dialogs (story #4359 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-english-browser-dialog
+      # story #4359 — 화면에 뜨는 문자열 상태(오류 · 안내 setter · toast)에 영어 문장이 t() 없이 박히는 클래스.
+      - name: "Verify no hardcoded English in UI messages (story #4359 regression guard)"
+        run: pnpm --filter web verify:no-hardcoded-english-ui-message
 
       # story #3880(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — #3876 가드의 자매 축(a): JSX
       # 텍스트 자식이 아니라 title/label/placeholder/description/aria-label/alt 같은

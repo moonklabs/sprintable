@@ -70,7 +70,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects, chat
           <div className="flex items-center justify-between text-sm">
             {/* ⚠️Phase2 i18n·#2485 — "Organization" 라벨이 하드코딩 영문이다(t() 아님, 서버
                 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認. */}
-            <span className="text-muted-foreground">Organization</span>
+            <span className="text-muted-foreground">{tInvite('orgLabel')}</span>
             <span className="font-medium text-foreground/85">{orgName}</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-sm">

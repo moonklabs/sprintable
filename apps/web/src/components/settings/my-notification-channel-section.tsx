@@ -225,7 +225,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         addToast({ type: 'error', title: tc('error') });
         return;
       }
-      addToast({ type: 'success', title: 'Webhook URL saved' });
+      addToast({ type: 'success', title: t('webhookUrlSavedToast') });
       await fetchWebhookConfigs();
     } finally {
       setSavingNew(false);
