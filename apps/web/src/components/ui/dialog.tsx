@@ -5,11 +5,22 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { cancelEscUsedByInnerLayer } from "@/lib/inner-layer-esc"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+// [SID:4367] 한 Esc = 한 층 — 안쪽 층이 쓴 Esc(preventDefault)면 이 창의 Esc 닫기를 취소한다(inner-layer-esc.ts).
+function Dialog({ onOpenChange, ...props }: DialogPrimitive.Root.Props) {
+  return (
+    <DialogPrimitive.Root
+      data-slot="dialog"
+      onOpenChange={(open, details) => {
+        if (cancelEscUsedByInnerLayer(open, details)) return;
+        onOpenChange?.(open, details);
+      }}
+      {...props}
+    />
+  )
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
