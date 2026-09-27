@@ -185,3 +185,21 @@ describe('DocTree 행 메뉴 — 목록 밖(body)에 · 모자라면 위로 · �
     expect(trigger().tabIndex).toBe(0);
   });
 });
+
+// story #4355 — 누르기로 연 뒤 초점이 «⋮»로 돌아온 상태에서 Esc(서랍 트랩까지 가 서랍째 닫히던 자리).
+describe('DocTree «⋮» — 열린 채 초점이 트리거일 때 Esc(4355)', () => {
+  it('누르기로 열고 «⋮»로 초점이 돌아온 뒤 Esc → 닫힘 · 초점 «⋮» · 서랍 트랩 Esc 0', () => {
+    mount();
+    act(() => { trigger().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(menu()).not.toBeNull();
+    act(() => { trigger().focus(); });
+    const trap = vi.fn();
+    document.addEventListener('keydown', trap);
+    try {
+      key(trigger(), 'Escape');
+      expect(menu()).toBeNull();
+      expect(document.activeElement).toBe(trigger());
+      expect(trap.mock.calls.filter(([e]) => (e as KeyboardEvent).key === 'Escape')).toHaveLength(0);
+    } finally { document.removeEventListener('keydown', trap); }
+  });
+});

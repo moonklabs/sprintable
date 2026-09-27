@@ -123,3 +123,21 @@ describe('EntityDispatchPanel «더 보기» — 스크롤 면 밖(body)에 · �
     expect(menu()!.querySelector('button')!.getAttribute('role')).toBe('menuitem');
   });
 });
+
+// story #4355(유나 배포 35) — 포인터로 연 뒤 초점이 «더 보기»에 있는 상태에서 Esc가 안 닫혔다.
+describe('EntityDispatchPanel «더 보기» — 열린 채 초점이 트리거일 때 Esc(4355)', () => {
+  it('누르기로 열고 «더 보기»로 초점이 돌아온 뒤 Esc → 닫힘 · 초점 «더 보기» · 패널 트랩 Esc 0', async () => {
+    await mount();
+    await act(async () => { moreBtn().click(); });
+    expect(menu()).not.toBeNull();
+    await act(async () => { moreBtn().focus(); });
+    const trap = vi.fn();
+    document.addEventListener('keydown', trap);
+    try {
+      await act(async () => { moreBtn().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+      expect(menu()).toBeNull();
+      expect(document.activeElement).toBe(moreBtn());
+      expect(trap.mock.calls.filter(([e]) => (e as KeyboardEvent).key === 'Escape')).toHaveLength(0);
+    } finally { document.removeEventListener('keydown', trap); }
+  });
+});

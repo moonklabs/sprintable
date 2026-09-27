@@ -165,7 +165,19 @@ export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind 
   }, [kind, closeToTrigger, triggerRef]);
 
   const onTriggerKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
-    if (!open || e.key !== 'Tab' || e.shiftKey) return;
+    if (!open) return;
+    // story #4355(유나 배포 35) — 열린 채 초점이 트리거에 있어도 Esc = 닫힘(초점은 이미 트리거). 포인터로 연 패널(목차 · 벨)은 초점이 트리거에
+    // 남는 게 설계라 이 길이 없으면 Esc가 무시되거나, 서랍 · 셸 초점 트랩(document keydown)까지 가 서랍째 닫혔다.
+    // 트리거는 포털 밖(React 뿌리 안)이라 App Router처럼 뿌리가 document면 트랩과 **같은 노드**에서 듣는다 → stopPropagation으론 못 막고
+    // stopImmediatePropagation(React 뿌리 리스너가 hydrate 때 먼저 붙어 트랩보다 앞)으로 막는다.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== 'Tab' || e.shiftKey) return;
     // 안 보이는 패널(예: 넓은 화면 전용 `hidden lg:flex`가 좁은 화면에서 display:none)로는 초점을 안 보낸다 — Tab을 막기만 하는 일 0.
     const pop = popoverRef.current;
     if (!pop || getComputedStyle(pop).display === 'none') return;
@@ -173,7 +185,7 @@ export function usePortalMenuKeys({ open, onClose, popoverRef, triggerRef, kind 
     if (!first) return;
     e.preventDefault();
     first.focus();
-  }, [open, popoverRef]);
+  }, [open, onClose, popoverRef]);
 
   const triggerProps = kind === 'menu'
     ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open, 'aria-controls': open ? id : undefined }

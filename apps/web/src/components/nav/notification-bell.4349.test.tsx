@@ -109,3 +109,19 @@ describe('NotificationBell 넓은 화면 드롭다운 — 셸 스크롤 면 밖(
     expect(bell.getAttribute('aria-controls')).toBe(overlay.id);
   });
 });
+
+// story #4355 — 포인터로 연 벨 패널(초점은 벨에 남음)에서 Esc.
+describe('NotificationBell — 열린 채 초점이 벨일 때 Esc(4355)', () => {
+  it('벨에서 Esc → 닫힘 · 초점 벨 · 셸 트랩 Esc 0', async () => {
+    const bell = await openBell();
+    expect(document.activeElement).toBe(bell);
+    const trap = vi.fn();
+    document.addEventListener('keydown', trap);
+    try {
+      await key(bell, 'Escape');
+      expect(panel()).toBeNull();
+      expect(document.activeElement).toBe(bell);
+      expect(trap.mock.calls.filter(([e]) => (e as KeyboardEvent).key === 'Escape')).toHaveLength(0);
+    } finally { document.removeEventListener('keydown', trap); }
+  });
+});
