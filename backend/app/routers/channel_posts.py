@@ -639,6 +639,26 @@ class SubmitChannelPostDraftResponse(BaseModel):
     scheduled_at: str | None = None
 
 
+# story #4352 — 초안 버전을 새로 쓰는 모든 라우트(저장 · 이미지/영상 확정 · 이미지 삭제 · 순서 바꿈)가 `create_channel_post_draft_version`을
+# 거쳐 같은 검사 예외를 던진다. 예외 → 상태 · 본문 매핑은 이 한 자리(발행 경로의 원천 `publish_error_body`를 그대로 씀) — 라우트마다
+# except 본문을 복사하지 않는다. 호출자 전수는 tests/test_4352_draft_version_validation_guard.py가 AST로 대조한다.
+DRAFT_VERSION_VALIDATION_ERRORS = (
+    ChannelConnectionNotActiveError,
+    ChannelTextTooLongError,
+    ChannelYouTubeMetadataError,
+    ChannelThreadUnsupportedError,
+    ChannelThreadSegmentLimitExceededError,
+    ChannelThreadSegmentTooLongError,
+)
+
+
+def _draft_version_validation_http_error(exc: Exception, locale: str) -> HTTPException:
+    facts = preflight_error_facts(exc)
+    # 연결 비활성은 상태 충돌(409 · 재연결 필요) — 발행 결정표(f8f7cb0f)와 같은 코드 · 같은 상태. 나머지는 입력 형태 오류(422).
+    status_code = 409 if facts and facts.get("code") == "CHANNEL_CONNECTION_NOT_ACTIVE" else 422
+    return HTTPException(status_code=status_code, detail=preflight_error_body(facts, locale))
+
+
 @router.post(
     "/{org_id}/channel-posts/drafts", response_model=ChannelPostDraftVersionResponse, status_code=201,
 )
@@ -686,35 +706,10 @@ async def post_channel_post_draft_version(
             status_code=422,
             detail={"code": "CHANNEL_POST_SOURCE_CONTENT_ITEM_NOT_FOUND", "message": str(exc)},
         ) from exc
-    except ChannelConnectionNotActiveError as exc:
-        # 페드루 PO 리뷰(2026-09-03) — 발행 스토리(f8f7cb0f) 결정표가 이 코드를 409(상태
-        # 충돌·재연결 필요)로 정했다 — 같은 코드에 HTTP status가 갈리면 FE 매핑이 두 벌이
-        # 된다. 422는 입력 형태 오류에만 남긴다(CHANNEL_TEXT_TOO_LONG처럼).
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "CHANNEL_CONNECTION_NOT_ACTIVE", "message": str(exc)},
-        ) from exc
-    except ChannelTextTooLongError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "CHANNEL_TEXT_TOO_LONG", "message": str(exc),
-                "max_length": exc.max_length, "current_length": exc.current_length,
-            },
-        ) from exc
-    except ChannelYouTubeMetadataError as exc:
-        # story #3815(Phase3·3-5, 미르코 PR4 그라운딩 발견 → 페드루 PO 지적 2026-09-12
-        # 14:37Z) — 실 결함 처방: 이 예외가 라우터 어디서도 안 잡혀 사용자에게
-        # 코드 없는 500이 나갔다(4225 리뷰 miss). ChannelTextTooLongError와 동형
-        # 위치·모양(field/reason 추가) — 저장 시점 checkpoint.
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "YOUTUBE_METADATA_INVALID",
-                "message": t("channel_posts.youtube_metadata_invalid", resolved_locale),
-                "field": exc.field, "reason": exc.reason,
-            },
-        ) from exc
+    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
+        # story #4352 — 초안 버전 검사 예외(연결 · 글자 수 · YouTube 메타데이터 · 이어쓰기 셋)는 한 매핑으로(발행 경로와 같은 원천 ·
+        # `publish_error_body`). 예전엔 이어쓰기 셋을 잡는 절이 없어 저장이 코드 없는 500이었다(3808부터).
+        raise _draft_version_validation_http_error(exc, resolved_locale) from exc
 
     utm_rule_row = await get_org_content_rules(db, org_id=org_id)
     utm_rules = (utm_rule_row.rules or {}).get("utm_rules") if utm_rule_row else None
@@ -920,6 +915,9 @@ async def post_channel_post_video_confirm(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #4352 — 초안 버전 검사 예외 본문을 요청 언어로(저장 라우트와 같은 locale DI).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> ChannelPostVideoResponse:
     """story #3554(Phase2, 페드루 PO 確定 2026-09-06①~④) — 업로드 확인+MP4 규격
     검증(순수 파이썬 박스 파서, ffmpeg 없음)+계보. 이 호출도 새 버전을 만든다
@@ -941,6 +939,8 @@ async def post_channel_post_video_confirm(
             db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
             member_id=member_id, member_kind=actor_type,
         )
+    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
+        raise _draft_version_validation_http_error(exc, resolve_locale_from_request(locale, accept_language)) from exc
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
     except ChannelVideoUnsupportedError as exc:
@@ -1100,6 +1100,9 @@ async def post_channel_post_image_confirm(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #4352 — 초안 버전 검사 예외 본문을 요청 언어로(저장 라우트와 같은 locale DI).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> ChannelPostImageResponse:
     """AC1/AC3 — 업로드 확인+자동 변환(필요 시)+계보 기록. 이 호출 자체가 새
     `ChannelPostVersion`을 만든다(text/link_url은 직전 버전에서 캐리포워드, image_sha256만
@@ -1117,12 +1120,15 @@ async def post_channel_post_image_confirm(
     )
     member_id, actor_type = resolved.id, resolved.type
 
-    version, image_row = await _confirm_image_upload_or_raise(
-        confirm_channel_post_image_upload(
-            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
-            member_id=member_id, member_kind=actor_type,
+    try:
+        version, image_row = await _confirm_image_upload_or_raise(
+            confirm_channel_post_image_upload(
+                db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+                member_id=member_id, member_kind=actor_type,
+            )
         )
-    )
+    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
+        raise _draft_version_validation_http_error(exc, resolve_locale_from_request(locale, accept_language)) from exc
     return _image_response(version, image_row)
 
 
@@ -1286,6 +1292,9 @@ async def delete_channel_post_image_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #4352 — 초안 버전 검사 예외 본문을 요청 언어로(저장 라우트와 같은 locale DI).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> list[ChannelPostImageResponse]:
     """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 1장 삭제.
     attach(confirm)와 대칭축: 새 불변 버전을 만들어 반영한다(원본 행 삭제 X) —
@@ -1311,6 +1320,8 @@ async def delete_channel_post_image_endpoint(
             db, org_id=org_id, draft_id=draft_id, image_id=image_id,
             member_id=member_id, member_kind=actor_type,
         )
+    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
+        raise _draft_version_validation_http_error(exc, resolve_locale_from_request(locale, accept_language)) from exc
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
     except ChannelPostImageNotFoundError as exc:
@@ -1329,6 +1340,9 @@ async def reorder_channel_post_images_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #4352 — 초안 버전 검사 예외 본문을 요청 언어로(저장 라우트와 같은 locale DI).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> list[ChannelPostImageResponse]:
     """story #3550(Phase2 BE 2/2, 페드루 PO 確定 2026-09-06) — 이미지 순서 재배열.
     `image_ids`는 새 순서 그대로 **전체 집합**(부분 재정렬 불허). delete와 동형으로
@@ -1350,6 +1364,8 @@ async def reorder_channel_post_images_endpoint(
             db, org_id=org_id, draft_id=draft_id, image_ids=body.image_ids,
             member_id=member_id, member_kind=actor_type,
         )
+    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
+        raise _draft_version_validation_http_error(exc, resolve_locale_from_request(locale, accept_language)) from exc
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
     except ChannelPostImageReorderInvalidSetError as exc:
