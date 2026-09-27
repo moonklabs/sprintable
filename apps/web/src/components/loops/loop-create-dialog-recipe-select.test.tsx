@@ -57,7 +57,6 @@ function wrap(node: React.ReactNode) {
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear();  // story #4370 — 루프 만들기 폼 초안이 테스트 사이로 새지 않게
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

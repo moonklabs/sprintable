@@ -27,7 +27,6 @@ function wrap(node: React.ReactNode) {
 }
 
 beforeEach(() => {
-  window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
