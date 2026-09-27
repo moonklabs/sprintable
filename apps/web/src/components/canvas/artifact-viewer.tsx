@@ -47,7 +47,8 @@ interface ArtifactViewerProps {
   onReplyThread?: (threadId: string, body: string) => void;
   /** story #2725 — 새 좌표 스레드 생성(핀 추가 모드에서 캔버스 픽 → 작성). 생략하면 헤더
    * 배지가 토글 불가한 순수 카운트 표시로 폴백(onResolveThread/onReplyThread와 동일 옵션 규약). */
-  onCreateThread?: (anchorXPercent: number, anchorYPercent: number, body: string) => void;
+  /** 성공이면 true — 작성 칸 초안을 그때만 지운다(story #4370). */
+  onCreateThread?: (anchorXPercent: number, anchorYPercent: number, body: string) => Promise<boolean>;
   /** C4-S8 정본화 — 승인은 새 UI 없이 기존 GateInbox가 처리(§1), 여기선 제안만. 선택된
    * 버전에 이미 대기 중인 제안이 있으면 pendingCanonicalizeVersion === selectedVersion. */
   pendingCanonicalizeVersion?: number | null;
@@ -149,10 +150,11 @@ export function ArtifactViewer({
     setPinAddMode(false);
     setDraftPin({ x: xPercent, y: yPercent });
   }
-  function handleComposeSubmit(body: string) {
-    if (!draftPin) return;
-    onCreateThread?.(draftPin.x, draftPin.y, body);
+  async function handleComposeSubmit(body: string): Promise<boolean> {
+    if (!draftPin || !onCreateThread) return false;
+    const pin = draftPin;
     setDraftPin(null);
+    return onCreateThread(pin.x, pin.y, body);
   }
   function handleComposeCancel() {
     setDraftPin(null);
@@ -340,6 +342,7 @@ export function ArtifactViewer({
                           <CommentComposePopover
                             onSubmit={handleComposeSubmit}
                             onCancel={handleComposeCancel}
+                            draftTargetId={artifact.id}
                             style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
                           />
                         </>

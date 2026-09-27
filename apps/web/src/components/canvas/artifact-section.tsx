@@ -158,13 +158,14 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
    * BE 신규 0(그라운딩 확認 — 기존 POST /{id}/comments가 이미 anchor_x/anchor_y를 받음). */
   async function handleCreateThread(
     artifactId: string, nodes: ArtifactNode[], anchorXPercent: number, anchorYPercent: number, body: string,
-  ) {
-    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+  ): Promise<boolean> {
+    const created = await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: body, anchor_x: anchorXPercent, anchor_y: anchorYPercent }),
     });
     await refreshThreads(artifactId, nodes);
+    return created !== null;  // story #4370 — 성공일 때만 작성 칸 초안을 지운다
   }
 
   async function handleProposeCanonical(artifactId: string, versionNumber: number) {
@@ -325,7 +326,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
             onEnterEdit={() => setEditingArtifactId(artifact.id)}
             onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
             onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
-            onCreateThread={(x, y, body) => void handleCreateThread(artifact.id, nodes, x, y, body)}
+            onCreateThread={(x, y, body) => handleCreateThread(artifact.id, nodes, x, y, body)}
             pendingCanonicalizeVersion={pendingCanonicalizeVersion}
             onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
           />

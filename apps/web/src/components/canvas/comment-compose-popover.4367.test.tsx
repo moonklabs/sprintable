@@ -24,7 +24,7 @@ describe('CommentComposePopover — Esc는 이 칸만([SID:4367])', () => {
     window.addEventListener('keydown', outer);
     try {
       await act(async () => {
-        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><CommentComposePopover onSubmit={() => {}} onCancel={onCancel} /></NextIntlClientProvider>);
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><CommentComposePopover onSubmit={async () => true} draftTargetId="a1" onCancel={onCancel} /></NextIntlClientProvider>);
       });
       const ta = container.querySelector('textarea')!;
       await act(async () => { ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
@@ -41,7 +41,7 @@ describe('CommentComposePopover — 글 있는 칸 Esc 규칙([SID:4369])', () =
   it('글 쓰고 Esc → 칸에서만 → Esc → 폐기 · 조합 중 Esc는 그대로', async () => {
     const onCancel = vi.fn();
     await act(async () => {
-      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><CommentComposePopover onSubmit={() => {}} onCancel={onCancel} /></NextIntlClientProvider>);
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><CommentComposePopover onSubmit={async () => true} draftTargetId="a1" onCancel={onCancel} /></NextIntlClientProvider>);
     });
     const ta = container.querySelector('textarea')!;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;

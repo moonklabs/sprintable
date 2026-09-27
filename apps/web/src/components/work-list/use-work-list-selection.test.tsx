@@ -136,7 +136,7 @@ describe('useWorkListSelection — 안쪽이 쓴 Esc는 선택 해제 안 함([S
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
           <div data-testid="selected">{selectedRowId ?? 'none'}</div>
           <button type="button" data-testid="plain">plain</button>
-          <CommentComposePopover onSubmit={() => {}} onCancel={onCancel} />
+          <CommentComposePopover onSubmit={async () => true} draftTargetId="a1" onCancel={onCancel} />
         </NextIntlClientProvider>
       );
     }
