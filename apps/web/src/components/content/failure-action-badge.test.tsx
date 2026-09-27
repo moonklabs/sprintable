@@ -361,6 +361,33 @@ describe('FailureActionBadge — story #3422 ②-c 2/N(doc §17-13 버튼 유무
     expect(container.textContent).not.toBe(koMessages.content.channelPostsFailureAutoRetryUnknown);
   });
 
+  it('⭐#4336 AC4 — publishing은 상세 «발행 중» 알림과 같은 문장(중립 · 버튼 0), publish_stuck은 같은 사유 문장(경고 · 버튼 0 — 취소는 상세)', async () => {
+    await render({ kind: 'publishing' });
+    const publishing = container.querySelector('[data-testid="channel-post-failure-badge"]');
+    expect(publishing?.textContent).toBe(koMessages.content.channelPostsPublishingNotice);
+    expect(publishing?.className).toContain('text-muted-foreground');
+    expect(container.querySelector('button')).toBeNull();
+    await render({ kind: 'publish_stuck' });
+    const stuck = container.querySelector('[data-testid="channel-post-failure-badge"]');
+    expect(stuck?.textContent).toBe(koMessages.content.channelPostsPublishStuckNotice);
+    expect(stuck?.className).toContain('text-warning-strong');
+    expect(stuck?.className).not.toContain('text-destructive');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it.each([
+    { kind: 'publishing' }, { kind: 'publish_stuck' }, { kind: 'processing' },
+    { kind: 'blocked' }, { kind: 'blocked', paused: true }, { kind: 'blocked', unknownReason: true },
+    { kind: 'needs_check' }, { kind: 'auto_retry', nextRetryAt: null },
+    { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null },
+    { kind: 'voided', reasonCode: null }, { kind: 'blocked_unapproved', reasonCode: null },
+  ] as const)('⭐#4336 유나 — 좁은 캘린더 칸에서 한국어 낱말이 중간에 끊기지 않게 모든 글 문단이 break-keep(%o)', async (action) => {
+    await render(action as never);
+    const paragraphs = [...container.querySelectorAll('p')].filter((p) => p.className.includes('text-xs'));
+    expect(paragraphs.length).toBeGreaterThan(0);
+    for (const p of paragraphs) expect(p.className, p.textContent ?? '').toContain('break-keep');
+  });
+
   it('onRetryClick이 dead_letter 재시도 버튼 클릭 시 호출된다', async () => {
     let clicked = false;
     await act(async () => {

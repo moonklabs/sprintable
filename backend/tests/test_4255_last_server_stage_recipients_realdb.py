@@ -176,6 +176,10 @@ async def _run_to_published(app, Session, w) -> None:
         assert r_submit.status_code == 200, r_submit.text
     await _publish(Session, w, "pending_approval")
     await _approve_as_owner(app, Session, w, await _gate_id(Session, w, "external_publish"))
+    # story #4336 — 승인은 발행 명령을 대기열에만 넣는다. 게시와 published 단계 이벤트는 워커 한 틱.
+    from tests.publish_worker_helpers import run_worker_tick
+
+    await run_worker_tick(Session)
 
 
 async def _published_recipients_and_message(Session, w):

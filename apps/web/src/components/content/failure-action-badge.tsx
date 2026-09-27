@@ -93,7 +93,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     // auto_retry · processing과 같은 가족 · 같은 화면 발행 영역 줄 · 댓글 줄도 muted). connection · unknown은 빨강 그대로. 머리는 멈춘 이유(compact도) · 상세는 풀리는 길까지(소유자가 풀면
     // 서버가 스스로 다시 올린다 — 사람 재시도 대상 아님(4654) · 버튼 · 연결 링크 없음).
     return (
-      <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+      <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {t('channelPostsFailurePaused')}
         {compact ? null : <>{' — '}{t('channelPostsFailurePausedResumes')}</>}
       </p>
@@ -101,7 +101,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   }
   if (action.kind === 'blocked' && action.unknownReason) {
     // story #4305 — 사유를 모르는 blocked: 연결이라 말하지 않는 중립 머리 · 링크 없음 · 재시도는 서버 판정대로(버튼은 아래).
-    const head = <p className="text-xs text-destructive">{t('channelPostsFailureBlockedUnknown')}</p>;
+    const head = <p className="break-keep text-xs text-destructive">{t('channelPostsFailureBlockedUnknown')}</p>;
     if (compact || !canOffer) return <div data-testid="channel-post-failure-badge">{head}</div>;
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
@@ -116,7 +116,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     // story #4304(유나 확정) — 머리 «연결 문제로 멈춤» ` — ` «연결 확인»(링크) 한 줄 → 아래 «다시 시도»(고치기 → 다시 시도). 링크는 재시도를
     // 못 내밀어도(서버 판정 false) 늘 둔다(댓글 답변과 같음). compact(목록 · 캘린더 · 보드)는 글만(행이 이미 상세 링크).
     const headline = (
-      <p className="text-xs text-destructive" data-testid={canOffer && !compact ? undefined : 'channel-post-failure-badge'}>
+      <p className="break-keep text-xs text-destructive" data-testid={canOffer && !compact ? undefined : 'channel-post-failure-badge'}>
         {t('channelPostsFailureBlocked')}
         {!compact && connectionHref ? (
           <>
@@ -141,7 +141,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   if (action.kind === 'needs_check') {
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
-        <p className="text-xs text-muted-foreground">{t('channelPostsFailureNeedsCheck')}</p>
+        <p className="break-keep text-xs text-muted-foreground">{t('channelPostsFailureNeedsCheck')}</p>
         {compact ? null : (
           <>
             <Button
@@ -151,7 +151,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
               {t('channelPostsFailureCheckedRetryCta')}
             </Button>
             {canOffer ? null : (
-              <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
+              <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryUnavailable')}
               </p>
             )}
@@ -164,7 +164,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     // B2(페드루 PO 지적) — ISO 원문을 그대로 보간하던 것을 scheduled_at과 같은
     // formatScheduledAt(...).display로 바꾼다(같은 카드 안에서 두 형식이 섞이던 결함).
     return (
-      <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+      <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {action.nextRetryAt
           ? t('channelPostsFailureAutoRetryAt', { time: formatScheduledAt(action.nextRetryAt, displayTimezone).display })
           : t('channelPostsFailureAutoRetryUnknown')}
@@ -203,7 +203,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
     return (
       <div className="space-y-1" data-testid="channel-post-failure-badge">
         <p
-          className="text-xs text-destructive"
+          className="break-keep text-xs text-destructive"
           data-testid={deadLetterReasonKey ? 'channel-post-failure-reason' : undefined}
         >
           {bodyText}
@@ -217,11 +217,11 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
               {ctaText}
             </Button>
             {!resetPassed ? (
-              <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
+              <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryAfterReset')}
               </p>
             ) : canOffer ? null : (
-              <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
+              <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-retry-disabled-reason">
                 {t('channelPostsFailureRetryUnavailable')}
               </p>
             )}
@@ -232,8 +232,23 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   }
   if (action.kind === 'processing') {
     return (
-      <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+      <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
         {t('channelPostsFailureProcessing')}
+      </p>
+    );
+  }
+  // story #4336 AC4 — 상세의 두 알림과 같은 문장(목록 · 캘린더 카드 한 줄). 버튼 0 — 발행 취소는 상세에서. 상세와 같은 경고(유나 · 작은 경고 글 토큰 text-warning-strong — 빨강 아님).
+  if (action.kind === 'publishing') {
+    return (
+      <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+        {t('channelPostsPublishingNotice')}
+      </p>
+    );
+  }
+  if (action.kind === 'publish_stuck') {
+    return (
+      <p className="break-keep text-xs text-warning-strong" data-testid="channel-post-failure-badge">
+        {t('channelPostsPublishStuckNotice')}
       </p>
     );
   }
@@ -246,7 +261,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
       : CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS[action.reasonCode as string];
     const nextKey = approvalReason ? blockedApprovalNextKey(approvalContext) : undefined;
     return (
-      <p className="text-xs text-destructive" data-testid="channel-post-failure-badge">
+      <p className="break-keep text-xs text-destructive" data-testid="channel-post-failure-badge">
         <span data-testid="channel-post-failure-reason">{t(blockedReasonKey)}</span>
         {nextKey ? <>{' '}<span data-testid="channel-post-failure-next">{t(nextKey)}</span></> : null}
       </p>
@@ -258,7 +273,7 @@ export function FailureActionBadge({ action, onRetryClick, displayTimezone, comp
   // 메시지 키를 들고, 여기서 t(key)로 풀어야 en 로케일에서 사유만 한글로 남지 않는다.
   const voidReasonKey = action.reasonCode ? CHANNEL_POST_VOID_REASON_MESSAGE_KEYS[action.reasonCode] : undefined;
   return (
-    <p className="text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
+    <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-failure-badge">
       {voidReasonKey ? t('channelPostsFailureVoidedWithReason', { reason: t(voidReasonKey) }) : t('channelPostsFailureVoided')}
     </p>
   );

@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.publish_worker_helpers import run_worker_tick
+
 from tests.recipe_reviewed_draft import reviewed_draft_body_via
 from tests.test_4090_ac2_recipe_auto_publish_realdb import (
     _client_for,
@@ -507,6 +509,7 @@ async def _newsletter_chain_to_send_approval(app, Session, w):
 
     # 사람이 검수 게이트를 승인 → 서버가 sandbox 캠페인을 만들고 campaign_created를 낸다 → 발송 요청 담당에게 간다(4242).
     await _approve(app, Session, w, review_gate.id, note="캠페인 만들기 승인")
+    await run_worker_tick(Session)  # story #4336 — 승인은 대기열만, 발행은 워커 한 틱
     assert await _stage_event_count(Session, w, _NEWSLETTER, "campaign_created") == 1
     await _assert_reaches(Session, w, _NEWSLETTER, "campaign_created", publisher)
 
@@ -612,6 +615,8 @@ async def _social_text_chain_to_published(app, Session, w) -> None:
     await _assert_approval_card_reaches(Session, w, publish_gate.id, owner)
 
     await _approve(app, Session, w, publish_gate.id, note="최종 발행 승인")
+
+    await run_worker_tick(Session)  # story #4336 — 승인은 대기열만, 발행은 워커 한 틱
     async with Session() as s:
         publications = (await s.execute(
             select(ChannelPublication).where(ChannelPublication.org_id == w["org_id"])

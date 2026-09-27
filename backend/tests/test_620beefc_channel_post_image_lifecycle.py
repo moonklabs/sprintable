@@ -22,6 +22,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_620beefc_channel_post_image_upload import (
     _approve_gate_directly,
     _client_for,
@@ -319,7 +321,7 @@ async def test_image_publish_creates_container_then_waits_no_immediate_publish_c
                 patch.object(tp, "create_container", AsyncMock(return_value="container-img-1")),
                 patch.object(tp, "publish_container", publish_container_mock),
             ):
-                r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["processing"] is True
@@ -359,7 +361,7 @@ async def test_image_publish_in_progress_tick_does_not_call_publish_container():
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
                 patch.object(tp, "create_container", AsyncMock(return_value="container-img-2")),
             ):
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
             publish_container_mock = AsyncMock(side_effect=AssertionError("IN_PROGRESS tick엔 publish_container 호출 금지"))
             with (
@@ -402,7 +404,7 @@ async def test_image_publish_finished_tick_completes():
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
                 patch.object(tp, "create_container", AsyncMock(return_value="container-img-3")),
             ):
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
             with (
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
@@ -449,7 +451,7 @@ async def test_image_publish_error_status_needs_check_no_auto_retry():
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
                 patch.object(tp, "create_container", AsyncMock(return_value="container-img-4")),
             ):
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
             with (
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
@@ -504,7 +506,7 @@ async def test_image_publish_error_retry_creates_brand_new_container():
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
                 patch.object(tp, "create_container", AsyncMock(return_value="container-dead")),
             ):
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
             with (
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
@@ -563,7 +565,7 @@ async def test_image_publish_in_progress_beyond_5min_times_out_as_needs_check():
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
                 patch.object(tp, "create_container", AsyncMock(return_value="container-stuck")),
             ):
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
             pub = (await s.execute(
                 sa_select(ChannelPublication).where(ChannelPublication.org_id == org_id)
@@ -614,7 +616,7 @@ async def test_processing_kind_awaiting_container_exposed_in_list():
                 patch.object(tp, "get_publishing_limit", AsyncMock(return_value=(0, 100, 3600))),
                 patch.object(tp, "create_container", AsyncMock(return_value="container-img-5")),
             ):
-                await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
 
             r_list = await client.get(f"/api/v2/organizations/{org_id}/channel-posts/drafts")
         assert r_list.status_code == 200, r_list.text

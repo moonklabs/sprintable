@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -855,10 +857,11 @@ async def test_publish_via_sandbox_expired_token_marker_via_http():
                 client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
                 text="토큰 만료 테스트 [sandbox:expired-token]",
             )
-            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-        assert r.status_code == 409, r.text
-        error = r.json().get("error") or r.json()
-        assert error["code"] == "CHANNEL_TOKEN_EXPIRED"
+            r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            detail = await draft_detail(client, org_id, draft_id)
+        # story #4336 — 토큰 만료는 공급자 응답이라 워커가 만난다: 요청은 «발행 중», 명령은 연결 사유로 멈춘다(같은 코드).
+        assert r.status_code == 200, r.text
+        assert (detail["command_status"], detail["command_reason_code"]) == ("blocked", "CHANNEL_TOKEN_EXPIRED")
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -995,6 +998,104 @@ async def test_unpublish_via_sandbox():
             pub = await unpublish_channel_post(s, org_id=org_id, draft_id=draft_id, unpublished_by_member_id=human_id)
         assert pub.status == "unpublished"
         assert pub.external_id is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_90_second_provider_publish_answers_in_seconds_and_the_worker_completes_it(monkeypatch):
+    """story #4336 AC2 — 공급자 호출이 90초 걸리는 발행(`[sandbox:publish-slow]` — AC5 라이브와 같은 대상): 즉시 발행 요청은 공급자를
+    기다리지 않고 수 초 안에 «발행 중»으로 답하고(90초 기다림 0), 워커 한 틱이 그 90초 호출을 끝까지 돌려 발행이 끝난다(초안 상세
+    published). 기다림은 기록만 한다(실제로 90초를 재우지 않음 — 값만 단언).
+    뮤테이션: 라우터가 예전처럼 요청 안에서 발행하면 요청 중 기다림 90 기록으로 RED."""
+    import time
+
+    from app.main import app
+    from app.services import sandbox_publish
+
+    sleeps: list[float] = []
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(sandbox_publish.asyncio, "sleep", _sleep)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            connection_id = await _create_sandbox_connection(client, org_id)
+            draft_id, _gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
+                text="긴 발행 [sandbox:publish-slow]",
+            )
+            started = time.monotonic()
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            elapsed = time.monotonic() - started
+            assert r.status_code == 200 and r.json()["processing"] is True, r.text
+            assert sleeps == [], "요청이 공급자(90초)를 기다렸다"
+            assert elapsed < 5, f"요청이 {elapsed:.1f}초 걸렸다"
+
+            counts = await run_worker_tick(Session)
+            detail = await draft_detail(client, org_id, draft_id)
+        assert sleeps == [90], "워커가 90초짜리 공급자 호출을 돌리지 않았다"
+        assert counts["completed"] == 1, counts
+        assert detail["publication_status"] == "published" and detail["published_at"], detail
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cancelling_a_publish_the_worker_already_picked_up_is_refused_and_the_publish_finishes(monkeypatch):
+    """story #4336 M6(까디르 · PO 09:08Z) — 워커가 이미 집은(claimed · 공급자 호출 직전) 발행을 사람이 취소하면 409
+    `PUBLICATION_ALREADY_STARTED`이고, 발행은 멈추지 않고 끝까지 간다(초안 상세 published · 명령 completed). 취소 요청은 워커가
+    공급자를 부르기 바로 전에 끼워 넣는다(실제 경합 자리).
+    뮤테이션: 취소 거절 조건(상태 · 집힘 · 공급자 표식)을 통째로 빼면 이 자리에서 취소가 200으로 먹혀 RED(집힌 명령은 이미
+    in_progress라 한 칸만 빼면 나머지가 막는다 — 칸별 대조는 test_4287의 취소 테스트들)."""
+    from app.main import app
+    from app.services import channel_posts as service_module
+
+    real_publish = service_module.publish_channel_post_draft
+    cancel_responses: list = []
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            human_id = await _seed_human(s, org_id, project_id, role="owner")
+            story_id = await _seed_story(s, org_id, project_id)
+
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+        async with _client_for(app) as client, Session() as s:
+            connection_id = await _create_sandbox_connection(client, org_id)
+            draft_id, _gate_id = await _create_draft_submit_approve(
+                client, s, org_id=org_id, connection_id=connection_id, story_id=story_id, text="취소 경합",
+            )
+            cancel_url = f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/cancel-publish"
+
+            async def _cancel_then_publish(*args, **kwargs):
+                cancel_responses.append(await client.post(cancel_url))
+                return await real_publish(*args, **kwargs)
+
+            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            assert r.status_code == 200 and r.json()["processing"] is True, r.text
+            monkeypatch.setattr(service_module, "publish_channel_post_draft", _cancel_then_publish)
+            counts = await run_worker_tick(Session)
+            detail = await draft_detail(client, org_id, draft_id)
+        assert len(cancel_responses) == 1
+        refused = cancel_responses[0]
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["error"]["code"] == "PUBLICATION_ALREADY_STARTED"
+        assert counts["completed"] == 1, counts
+        assert detail["publication_status"] == "published" and detail["command_status"] == "completed", detail
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

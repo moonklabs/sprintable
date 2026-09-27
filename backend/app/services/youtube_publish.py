@@ -35,10 +35,19 @@ Content-Length` 등)·videos.insert 응답 스키마·`uploadStatus` enum 값
 않는다(지어내지 않는다, 페드루 明示③)."""
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from app.services.threads_publish import ThreadsPublishError
 from app.services.youtube_privacy import resolve_youtube_privacy_lock
+
+# story #4336(PO 03:58Z) — 영상 업로드 한 번(원본 받기 · 세션 열기 · 바이트 PUT)의 전체 상한. `provider_client(timeout=20)`은 네트워크
+# 동작 하나의 시한이라 큰 영상은 끝이 없었다(워커 틱 시한 1800초도 넘을 수 있다). 넘으면 어느 단계였는지로 부류를 가른다:
+# PUT 전(원본 · 세션) = 영상이 안 생김 → 자동 재시도 / PUT 중 = 영상이 생겼을 수 있음 → needs_check(자동 재업로드 0 · 중복 영상 0).
+YOUTUBE_UPLOAD_MAX_SECONDS = 900
+YOUTUBE_UPLOAD_PREP_TIMEOUT_CODE = "YOUTUBE_UPLOAD_PREP_TIMEOUT"
+YOUTUBE_UPLOAD_PUT_TIMEOUT_CODE = "YOUTUBE_UPLOAD_PUT_TIMEOUT"
 
 _UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 _VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
@@ -140,24 +149,33 @@ async def create_reels_container(
     끝낸 값이라 여기서 재검증하지 않는다. `cover_url`(썸네일)은 이 PR 범위
     밖 — YouTube 자동 생성 썸네일에 맡긴다(⚠️갭, 후속)."""
     payload = channel_payload or {}
-    video_resp = await client.get(video_url)
-    if video_resp.status_code != 200:
+    phase = "prep"
+    try:
+        async with asyncio.timeout(YOUTUBE_UPLOAD_MAX_SECONDS):
+            video_resp = await client.get(video_url)
+            if video_resp.status_code != 200:
+                raise ThreadsPublishError(
+                    "YOUTUBE_VIDEO_SOURCE_FETCH_FAILED", f"video_url fetch failed: {video_resp.status_code}",
+                    status_code=502,
+                )
+            mime_type = video_resp.headers.get("content-type", "video/mp4")
+            privacy_status, _privacy_locked = resolve_youtube_privacy_lock(
+                requested_privacy_status=payload.get("privacyStatus"), text=text,
+            )
+            session_url = await _initiate_resumable_session(
+                client, access_token=access_token, video_bytes=video_resp.content, mime_type=mime_type,
+                title=payload.get("title", ""), description=text, tags=list(payload.get("tags") or []),
+                category_id=payload.get("categoryId"), privacy_status=privacy_status,
+            )
+            phase = "put"
+            video_resource = await _put_video_bytes(
+                client, session_url=session_url, video_bytes=video_resp.content, mime_type=mime_type,
+            )
+    except TimeoutError as exc:
+        code = YOUTUBE_UPLOAD_PUT_TIMEOUT_CODE if phase == "put" else YOUTUBE_UPLOAD_PREP_TIMEOUT_CODE
         raise ThreadsPublishError(
-            "YOUTUBE_VIDEO_SOURCE_FETCH_FAILED", f"video_url fetch failed: {video_resp.status_code}",
-            status_code=502,
-        )
-    mime_type = video_resp.headers.get("content-type", "video/mp4")
-    privacy_status, _privacy_locked = resolve_youtube_privacy_lock(
-        requested_privacy_status=payload.get("privacyStatus"), text=text,
-    )
-    session_url = await _initiate_resumable_session(
-        client, access_token=access_token, video_bytes=video_resp.content, mime_type=mime_type,
-        title=payload.get("title", ""), description=text, tags=list(payload.get("tags") or []),
-        category_id=payload.get("categoryId"), privacy_status=privacy_status,
-    )
-    video_resource = await _put_video_bytes(
-        client, session_url=session_url, video_bytes=video_resp.content, mime_type=mime_type,
-    )
+            code, f"YouTube upload exceeded {YOUTUBE_UPLOAD_MAX_SECONDS}s during {phase}", status_code=504,
+        ) from exc
     video_id = video_resource.get("id")
     if not video_id:
         raise ThreadsPublishError(

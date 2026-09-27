@@ -20,7 +20,7 @@ import { contentPostStatusLabelKey } from '@/components/content/post-status';
 import { ScheduleAtDialog } from '@/components/content/schedule-at-dialog';
 import { parseScheduledAtServerError } from '@/components/content/validate-scheduled-at';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
-import { blockedByConnection, blockedReason, deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { blockedByConnection, blockedReason, deriveFailureAction, WORKER_TICK_BUDGET_TOO_SMALL, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
@@ -95,6 +95,8 @@ interface ChannelPostDraftDetail {
   // scheduled_at 스냅샷과 다르다 — 재승인 뒤 갱신된다).
   command_status?: string | null;
   command_reason_code?: string | null;
+  // story #4336(PO 조건 2) — 워커의 공급자 호출 전 검사가 걸렸을 때 즉시 발행 422와 같은 오류 본문(없으면 null).
+  command_failure_detail?: Record<string, unknown> | null;
   // story #3815(배포 82 라이브 회차 실 결함) — command_reason_code==='YOUTUBE_QUOTA_
   // EXCEEDED'일 때만 채워진다.
   command_reason_reset_at?: string | null;
@@ -497,6 +499,9 @@ const BLOCKED_REASON_LINE_KEYS: Record<string, string> = {
   paused: 'errorExternalPublishPaused',
   unknown: 'channelPostsCommandInFlightReasonBlockedUnknown',
 };
+
+// story #4336 — 워커가 발행하는 동안 초안을 다시 읽는 간격(워커는 1분마다 돈다).
+const PUBLISH_WORKER_POLL_MS = 5000;
 
 export default function ChannelPostEditPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -992,6 +997,9 @@ export default function ChannelPostEditPage() {
   // story #3426 ①-c — 예약 취소·회수. 둘 다 되돌릴 수 없는(또는 되돌리기 번거로운) 상태
   // 전환이라 ConfirmDialog를 거친다(site-posts::handleUnpublish와 동형 — story #2416).
   const [cancelScheduledConfirmOpen, setCancelScheduledConfirmOpen] = useState(false);
+  // story #4336 — 워커 예산 밖으로 멈춘 발행의 취소(공급자에 아무것도 안 간 명령만 · 확인 창 없음 · 유나).
+  const [cancellingPublish, setCancellingPublish] = useState(false);
+  const [cancelPublishResult, setCancelPublishResult] = useState<'success' | 'too_late' | 'failed' | null>(null);
   const [cancellingScheduled, setCancellingScheduled] = useState(false);
   // story #3454(유나 Design FAIL, PR#3801) — 8곳 중 이 state만 raw가 없었다. 같은
   // 패턴으로 마저 닫는다.
@@ -1801,10 +1809,56 @@ export default function ChannelPostEditPage() {
   // 두 축을 조인 축을 다르게 계산하므로(§4-2, story #3394 AC2) 화면이 그 판정을 흉내내지
   // 않는다 — 성공 응답 필드만 병합하고, 진짜 publication_status는 다음 로드/새로고침이
   // 정직하게 채운다(지어내지 않는다).
+  // story #4336(PO 조건 2) — 즉시 발행 422와 워커가 명령에 남긴 오류 본문(`command_failure_detail`)이 같은 화면을 그리도록 한 곳에서.
+  const presentPublishError = (info: SitePostApiErrorInfo) => {
+    // story #3808(PR5c, 페드루 PO 確定 2026-09-12 — 라이브 회차 결함 처방) — 예산 초과(생성 비용·X 비용)는 submit과 같은
+    // 구조화 배너(4값+통화). 통화를 모르면(축 GET이 실패/불완전) 배너를 접고 generic 문구로 폴백('KRW' 추정 금지).
+    if (
+      info.kind === 'generation_budget_exceeded'
+      && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+      && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+      && generationBudgetCurrency !== null
+    ) {
+      setGenBudgetExceeded({
+        limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+        estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+        currency: generationBudgetCurrency,
+      });
+      return;
+    }
+    if (
+      info.kind === 'api_usage_budget_exceeded'
+      && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
+      && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
+      && apiUsageBudgetCurrency !== null
+    ) {
+      setApiUsageBudgetExceeded({
+        limitMinor: info.limitMinor, spentMinor: info.spentMinor,
+        estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
+        currency: apiUsageBudgetCurrency,
+      });
+      return;
+    }
+    // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는 값을 보간해 문장을 짓는다(doc §5 표).
+    const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
+      ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
+      : info.kind === 'rate_limited' && info.resetAt
+        ? t('channelPostsRateLimitedUntil', { time: formatScheduledAt(info.resetAt, displayTimezone).display })
+        : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
+    // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
+    // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
+    // 판정 축은 http_status 숫자가 아니라 info.kind다(500/503/504·BFF 400·미지
+    // 코드는 parseSitePostApiError가 이미 kind='unknown'으로 fail-closed해 둠 —
+    // describeExternalImpact가 그 kind를 그대로 읽어 "모른다"를 "안 나갔다"로
+    // 단정하지 않는다).
+    setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(info.kind) });
+  };
+
   const handlePublish = async () => {
     if (!orgId || !draft || !canPublish || blockedByCommandInFlight) return;
     setPublishing(true);
     setPublishResult(null);
+    setCancelPublishResult(null);
     setGenBudgetExceeded(null);
     setApiUsageBudgetExceeded(null);
     try {
@@ -1834,8 +1888,10 @@ export default function ChannelPostEditPage() {
           // "처리 中"이라면서 발행 버튼은 눌리는 이 스토리의 원 사고(사람이 다시
           // 눌러 CHANNEL_PUBLISH_IN_PROGRESS로 꼬이는 것)가 그대로 재현된다(AC1
           // "발행 버튼은 오버레이 규칙대로").
+          // story #4336 — 즉시 발행도 이제 워커가 돌린다: 응답은 «발행 중»(processing)뿐이라 같은 모양으로 'publishing'을 병합하고,
+          // 아래 폴링이 초안을 다시 읽어 발행됨 카드 · 실패 배지로 넘어간다.
           setPublishResult(null);
-          setDraft((prev) => prev && { ...prev, processing_kind: 'awaiting_container', command_status: 'pending' });
+          setDraft((prev) => prev && { ...prev, processing_kind: 'publishing', command_status: 'pending' });
         } else if (published_at) {
           // story #4264(까디르 codex P1 · PO 17:33Z) — 게시 뒤 permalink 조회가 실패하면 BE는 게시 성공 · id 보존 · permalink만
           // 비워 준다(X username 없음도 같은 모양). 예전 조건(permalink && published_at)은 그 성공을 «발행 실패»로 그렸다 —
@@ -1857,32 +1913,6 @@ export default function ChannelPostEditPage() {
         // 특별취급 안 해 generic "발행에 실패했습니다"만 보여줬다(humanMessageKey가
         // 둘 다 빈 문자열이라). 통화를 모르면(축 GET이 실패/불완전) 배너를 접고
         // generic 문구로 폴백(submit과 동형 규율, 'KRW' 추정 금지).
-        if (
-          info.kind === 'generation_budget_exceeded'
-          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
-          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
-          && generationBudgetCurrency !== null
-        ) {
-          setGenBudgetExceeded({
-            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
-            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
-            currency: generationBudgetCurrency,
-          });
-          return;
-        }
-        if (
-          info.kind === 'api_usage_budget_exceeded'
-          && typeof info.limitMinor === 'number' && typeof info.spentMinor === 'number'
-          && typeof info.estimatedCostMinor === 'number' && typeof info.remainingMinor === 'number'
-          && apiUsageBudgetCurrency !== null
-        ) {
-          setApiUsageBudgetExceeded({
-            limitMinor: info.limitMinor, spentMinor: info.spentMinor,
-            estimatedCostMinor: info.estimatedCostMinor, remainingMinor: info.remainingMinor,
-            currency: apiUsageBudgetCurrency,
-          });
-          return;
-        }
         // story #3402 PR2 ②-c(AC10) — CHANNEL_TEXT_TOO_LONG·CHANNEL_RATE_LIMITED는
         // api-error.ts가 max_length/current_length·reset_at을 실어만 오고 문구 조립은
         // 소비부 몫으로 남겨 둔 코드다(doc §5 표 — 「500자 한도인데 517자입니다」·
@@ -1912,18 +1942,7 @@ export default function ChannelPostEditPage() {
           });
           return;
         }
-        const text = info.kind === 'text_too_long' && info.maxLength != null && info.currentLength != null
-          ? t('channelPostsTextTooLong', { max: info.maxLength, current: info.currentLength })
-          : info.kind === 'rate_limited' && info.resetAt
-            ? t('channelPostsRateLimitedUntil', { time: formatScheduledAt(info.resetAt, displayTimezone).display })
-            : info.humanMessageKey ? t(info.humanMessageKey) : (info.humanMessageFallback || t('publishFailed'));
-        // story #3402 AC11(doc §5-1) — "막혔다"(왜, text)와 "밖으로 나갔다"(externalImpact)
-        // 는 뭉치면 안 되는 별개 사실이다. 페드루 PO 블로커 판정(2026-09-04 06:17Z) —
-        // 판정 축은 http_status 숫자가 아니라 info.kind다(500/503/504·BFF 400·미지
-        // 코드는 parseSitePostApiError가 이미 kind='unknown'으로 fail-closed해 둠 —
-        // describeExternalImpact가 그 kind를 그대로 읽어 "모른다"를 "안 나갔다"로
-        // 단정하지 않는다).
-        setPublishResult({ type: 'error', text, raw: info.raw, externalImpact: describeExternalImpact(info.kind) });
+        presentPublishError(info);
       }
     } catch {
       // 네트워크 예외(fetch 자체가 throw) — 요청이 실제로 Threads까지 갔는지 여부를
@@ -2089,6 +2108,56 @@ export default function ChannelPostEditPage() {
       setRetrying(false);
     }
   };
+
+  const handleCancelPublish = async () => {
+    if (!orgId) return;
+    setCancellingPublish(true);
+    setCancelPublishResult(null);
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-posts/drafts/${draftId}/cancel-publish`, { method: 'POST' });
+      if (res.ok) {
+        setCancelPublishResult('success');
+        await reloadDraft();
+      } else if (res.status === 409) {
+        // 이미 집혀 공급자 호출이 시작됐다 — 결과는 이 화면에 뜬다(취소하지 않음).
+        setCancelPublishResult('too_late');
+        await reloadDraft();
+      } else {
+        setCancelPublishResult('failed');
+      }
+    } catch {
+      setCancelPublishResult('failed');
+    } finally {
+      setCancellingPublish(false);
+    }
+  };
+
+  // story #4336(PO 조건 2) — 워커가 명령에 남긴 오류 본문이면 즉시 발행 422와 같은 배너 · 문장을 그린다(초안을 읽을 때마다).
+  const failureDetail = draft?.command_failure_detail ?? null;
+  const failureDetailKey = failureDetail ? JSON.stringify(failureDetail) : null;
+  const presentPublishErrorRef = useRef(presentPublishError);
+  useEffect(() => {
+    presentPublishErrorRef.current = presentPublishError;
+  });
+  useEffect(() => {
+    if (!failureDetailKey) return;
+    presentPublishErrorRef.current(parseSitePostApiError({ error: JSON.parse(failureDetailKey) as Record<string, unknown> }));
+  }, [failureDetailKey, generationBudgetCurrency, apiUsageBudgetCurrency]);
+
+  // story #4336 — 발행은 워커(cron)가 돌린다: «발행 중»(publishing) · 컨테이너 대기인 동안 초안을 다시 읽어 결과로 넘어간다.
+  // 서버가 결과를 적으면 processing_kind가 null로 바뀌어 폴링이 멈춘다.
+  const awaitingWorker = draft?.processing_kind === 'publishing' || draft?.processing_kind === 'awaiting_container';
+  const reloadDraftRef = useRef(reloadDraft);
+  useEffect(() => {
+    reloadDraftRef.current = reloadDraft;
+  });
+  useEffect(() => {
+    if (!awaitingWorker) return;
+    const timer = setInterval(() => {
+      void reloadDraftRef.current();
+    }, PUBLISH_WORKER_POLL_MS);
+    return () => clearInterval(timer);
+  }, [awaitingWorker]);
 
   if (loading) {
     return <div className="mx-auto w-full max-w-2xl space-y-4 p-6" data-testid="channel-post-edit-loading" />;
@@ -2405,7 +2474,9 @@ export default function ChannelPostEditPage() {
             container 같은 조합은 «서버상 도달 불가»다. 도달 가능한 상태에선 kind!=='processing'
             억제와 동작이 같고, 이 넓힌 조건은 그 도달 불가 조합에 대한 «방어»다(전수 곱
             테스트가 그 조합까지 돌려도 실패 신호가 1개로 유지되게 한다). */}
-        {failureAction && draft.processing_kind !== 'awaiting_container' ? (
+        {/* story #4336 AC4 — publishing · publish_stuck은 위 상태 알림(발행 중 · 예산 밖 + 발행 취소)이 이미 말한다 — 배지로 두 번 말하지 않는다. */}
+        {failureAction && draft.processing_kind !== 'awaiting_container'
+          && failureAction.kind !== 'publishing' && failureAction.kind !== 'publish_stuck' ? (
           <FailureActionBadge
             action={failureAction} displayTimezone={displayTimezone}
             // story #3402 갭 후속(페드루 PO, 2026-09-10 ②) — 이 화면(상세)엔 아래
@@ -2685,6 +2756,41 @@ export default function ChannelPostEditPage() {
         // dead_letter/needs_check로 전이되면 서버가 processing_kind를 null로 되돌리므로
         // (BE 620beefc _to_draft_list_item) 이 분기는 자연히 사라지고 실패 알림이 대신
         // 선다 — 화면이 두 신호를 조합판정하지 않는다.
+        // story #4336(PO 04:57Z) — 워커 틱 예산보다 긴 명령은 집히지 않는다(비종결 · 예산이 커지면 자동으로 집힘). «발행 중»이 아니라 그 사유를 말한다.
+        if (cancelPublishResult === 'success' || cancelPublishResult === 'too_late') {
+          return (
+            <Alert role="status" data-testid="channel-post-cancel-publish-result" data-result={cancelPublishResult}>
+              <AlertDescription className="break-keep">
+                {cancelPublishResult === 'success' ? t('channelPostsCancelPublishSuccess') : t('channelPostsCancelPublishTooLate')}
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        if (draft.command_reason_code === WORKER_TICK_BUDGET_TOO_SMALL) {
+          return (
+            <Alert role="status" variant="warning" data-testid="channel-post-worker-budget-notice">
+              <AlertDescription className="space-y-2 break-keep">
+                <span className="block">{t('channelPostsPublishStuckNotice')}</span>
+                {cancelPublishResult === 'failed' ? (
+                  <span className="block" data-testid="channel-post-cancel-publish-failed">{t('channelPostsCancelPublishFailed')}</span>
+                ) : null}
+                <Button
+                  size="sm" variant="outline" disabled={cancellingPublish}
+                  onClick={() => void handleCancelPublish()} data-testid="channel-post-cancel-publish-button"
+                >
+                  {cancellingPublish ? t('channelPostsCancelPublishPendingCta') : t('channelPostsCancelPublishCta')}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        if (draft.processing_kind === 'publishing') {
+          return (
+            <Alert role="status" data-testid="channel-post-publishing-notice">
+              <AlertDescription className="break-keep">{t('channelPostsPublishingNotice')}</AlertDescription>
+            </Alert>
+          );
+        }
         if (draft.processing_kind === 'awaiting_container') {
           return (
             <Alert role="status" data-testid="channel-post-awaiting-container-notice">
@@ -2766,6 +2872,9 @@ export default function ChannelPostEditPage() {
             disabled={
               !canPublish || publishing || blockedByCommandInFlight
               || draft.processing_kind === 'awaiting_container'
+              // story #4336 — 워커가 발행하는 중(publishing)에도 잠근다.
+              || draft.processing_kind === 'publishing'
+              || draft.command_reason_code === WORKER_TICK_BUDGET_TOO_SMALL
               || (view.partialSuccess && blockedByReasonReset)
               // story #4264(유나 4632 CHANGES) — needs_check(«나갔는지 모름»)면 이 버튼이 확인 없이 다시 보낸다(`POST …/publish` →
               // 기존 command → 어댑터 재호출 · 서버 중복 막이는 «published 발행물 있음»뿐). 배지의 2단계(채널 확인 → «확인했어요 · 다시

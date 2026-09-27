@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 from tests.test_3414_publication_command_core import (
     _approve_gate_directly,
     _client_for,
@@ -170,7 +172,7 @@ async def test_immediate_publish_returns_423_while_paused_adapter_not_called():
     ):
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
-            r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r.status_code == 423, r.text
         assert r.json()["error"]["code"] == "EXTERNAL_PUBLISH_PAUSED"
         mock_create.assert_not_called()
@@ -190,7 +192,7 @@ async def test_immediate_publish_returns_423_while_paused_adapter_not_called():
     ):
         _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
         async with _client_for(app) as client:
-            r2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+            r2 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
         assert r2.status_code == 200, r2.text
         mock_create.assert_awaited_once()
 

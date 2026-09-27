@@ -23,6 +23,9 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.conftest import grant_org_projects
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -225,9 +228,10 @@ async def _submit_and_publish(
 
     _setup_org_scoped_app(app, Session, org_id, user_id=human_user_id, agent=False)
     async with _client_for(app) as client:
-        r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish", json={})
+        r_publish = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish", json={})
         assert r_publish.status_code == 200, r_publish.text
-        return uuid.UUID(r_publish.json()["publication_id"])
+        # story #4336 — 요청은 «발행 중», 발행은 워커 한 틱 뒤 초안 상세에 남는다.
+        return uuid.UUID((await draft_detail(client, org_id, draft_id))["publication_id"])
 
 
 @pytest.mark.anyio
@@ -246,6 +250,7 @@ async def test_publish_with_hook_key_creates_platform_cut_lineage_row_with_hook_
             await _seed_default_role(s, org_id)
             agent_id = await _seed_agent(s, org_id, project_id)
             human_user_id = await _seed_human(s, org_id, project_id)
+            await grant_org_projects(s, org_id, user_id=human_user_id)  # story #4351 — 초안 상세 GET이 프로젝트 접근을 본다(4336: 발행 결과를 상세로 읽음)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_sandbox_connection(s, org_id)
             master_evidence_id = await _seed_master_evidence(s, org_id, story_id)
@@ -287,6 +292,7 @@ async def test_publish_without_hook_key_creates_platform_cut_lineage_row():
             await _seed_default_role(s, org_id)
             agent_id = await _seed_agent(s, org_id, project_id)
             human_user_id = await _seed_human(s, org_id, project_id)
+            await grant_org_projects(s, org_id, user_id=human_user_id)  # story #4351 — 초안 상세 GET이 프로젝트 접근을 본다(4336: 발행 결과를 상세로 읽음)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_sandbox_connection(s, org_id)
             await _seed_master_evidence(s, org_id, story_id)
@@ -325,6 +331,7 @@ async def test_publish_without_master_evidence_creates_no_lineage_row_fail_soft(
             await _seed_default_role(s, org_id)
             agent_id = await _seed_agent(s, org_id, project_id)
             human_user_id = await _seed_human(s, org_id, project_id)
+            await grant_org_projects(s, org_id, user_id=human_user_id)  # story #4351 — 초안 상세 GET이 프로젝트 접근을 본다(4336: 발행 결과를 상세로 읽음)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_sandbox_connection(s, org_id)
             # 의도적으로 master evidence를 안 심는다.
@@ -362,6 +369,7 @@ async def test_hook_performance_endpoint_returns_real_nonzero_data_via_written_l
             await _seed_default_role(s, org_id)
             agent_id = await _seed_agent(s, org_id, project_id)
             human_user_id = await _seed_human(s, org_id, project_id)
+            await grant_org_projects(s, org_id, user_id=human_user_id)  # story #4351 — 초안 상세 GET이 프로젝트 접근을 본다(4336: 발행 결과를 상세로 읽음)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_sandbox_connection(s, org_id)
             await _seed_master_evidence(s, org_id, story_id)

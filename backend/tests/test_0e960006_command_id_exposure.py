@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from tests.conftest import grant_org_projects
+from tests.publish_worker_helpers import draft_detail, publish_and_run_worker, run_worker_tick  # noqa: F401
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -270,7 +271,7 @@ async def test_command_id_matches_latest_command_after_publish_request():
         ):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_pub.status_code == 200, r_pub.text
                 expected_command_id = (r_pub.json().get("data") or r_pub.json())["command_id"]
 
@@ -319,7 +320,7 @@ async def test_command_id_reflects_latest_command_after_reapproval_voids_prior_o
         with (patch.object(tp, "create_container", AsyncMock()), patch.object(tp, "publish_container", AsyncMock())):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_pub = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_pub.status_code == 200, r_pub.text
                 voided_command_id = (r_pub.json().get("data") or r_pub.json())["command_id"]
 
@@ -336,7 +337,7 @@ async def test_command_id_reflects_latest_command_after_reapproval_voids_prior_o
         with (patch.object(tp, "create_container", AsyncMock()), patch.object(tp, "publish_container", AsyncMock())):
             _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
             async with _client_for(app) as client:
-                r_pub2 = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
+                r_pub2 = await publish_and_run_worker(client, Session,f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
                 assert r_pub2.status_code == 200, r_pub2.text
                 new_command_id = (r_pub2.json().get("data") or r_pub2.json())["command_id"]
                 assert new_command_id != voided_command_id
