@@ -95,13 +95,13 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
     } catch (error) {
       addToast({
         type: 'error',
-        title: 'Error',
-        body: error instanceof Error ? error.message : 'Failed to load API keys',
+        title: tc('error'),
+        body: error instanceof Error ? error.message : t('agentApiKeyLoadFailed'),
       });
     } finally {
       setLoading(false);
     }
-  }, [agentId, addToast]);
+  }, [agentId, addToast, t, tc]);
 
   // Load API keys on mount
   useEffect(() => {
@@ -129,8 +129,8 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
     } catch (error) {
       addToast({
         type: 'error',
-        title: 'Error',
-        body: error instanceof Error ? error.message : 'Failed to generate API key',
+        title: tc('error'),
+        body: error instanceof Error ? error.message : t('agentApiKeyGenerateFailed'),
       });
     } finally {
       setLoading(false);
@@ -168,14 +168,14 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       await loadApiKeys();
       addToast({
         type: 'success',
-        title: 'Success',
-        body: 'API key revoked successfully',
+        title: t('agentApiKeyRevokedTitle'),
+        body: t('agentApiKeyRevokedBody'),
       });
     } catch (error) {
       addToast({
         type: 'error',
-        title: 'Error',
-        body: error instanceof Error ? error.message : 'Failed to revoke API key',
+        title: tc('error'),
+        body: error instanceof Error ? error.message : t('agentApiKeyRevokeFailed'),
       });
     } finally {
       setLoading(false);
@@ -192,7 +192,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       return;
     }
     setCopiedKey(true);
-    addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
+    addToast({ type: 'success', title: t('agentApiKeyCopiedTitle'), body: t('agentApiKeyCopiedBody') });
     window.setTimeout(() => setCopiedKey(false), 1500);
   };
 
@@ -217,15 +217,15 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
     <SectionCard className="p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold">API Keys - {agentLabel ?? agentName}</h3>
+          <h3 className="text-lg font-semibold">{t('agentApiKeyListTitle', { name: agentLabel ?? agentName })}</h3>
           <p className="text-sm text-muted-foreground">
-            Manage API keys for agent authentication
+            {t('agentApiKeyListDescription')}
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">
             <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
-              Refresh
+              {t('agentApiKeyRefresh')}
             </Button>
             <Button
               variant="outline"
@@ -247,7 +247,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
               }}
               disabled={loading}
             >
-              Generate API Key
+              {t('agentApiKeyGenerate')}
             </Button>
           </div>
           {copyFailedOnboardingMessage ? (
@@ -290,7 +290,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       </div>
 
       {apiKeys.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No API keys generated yet</p>
+        <p className="text-sm text-muted-foreground">{t('agentApiKeyEmpty')}</p>
       ) : (
         <div className="space-y-2">
           {apiKeys.map((key) => (
@@ -316,7 +316,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                     decay시키면 안 됨(음수 diff가 clamp돼 "지금"으로 오표시) — §11-2
                     정본(formatScheduledAt)으로 절대 표기. */}
                 <p className="text-xs text-muted-foreground">
-                  Created: {formatRelativeTime(key.created_at, locale, displayTimezone)}
+                  {t('agentApiKeyCreatedAt', { time: formatRelativeTime(key.created_at, locale, displayTimezone) })}
                   {key.last_used_at &&
                     ` • Last used: ${formatRelativeTime(key.last_used_at, locale, displayTimezone)}`}
                   {key.revoked_at && ` • Revoked: ${formatRelativeTime(key.revoked_at, locale, displayTimezone)}`}
@@ -345,7 +345,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                   onClick={() => setRevokeKeyId(key.id)}
                   disabled={loading}
                 >
-                  Revoke
+                  {t('agentApiKeySingleRevokeConfirmCta')}
                 </Button>
               )}
             </div>
@@ -389,15 +389,15 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>API Key Generated</DialogTitle>
+            <DialogTitle>{t('agentApiKeyGeneratedTitle')}</DialogTitle>
             <DialogDescription>
-              Copy this API key now. It will only be shown once.
+              {t('agentApiKeyShownOnce')}
             </DialogDescription>
           </DialogHeader>
           {generatedKey && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">API Key</label>
+                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">{t('agentApiKeyFieldLabel')}</label>
                 <div className="flex gap-2">
                   <Input
                     id="generated-api-key"
@@ -412,7 +412,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Use this key in the Authorization header:
+                {t('agentApiKeyHeaderHint')}
                 <code className="block mt-1 p-2 bg-muted rounded text-xs break-all">
                   Authorization: Bearer {generatedKey}
                 </code>
@@ -445,7 +445,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                 setGeneratedKey(null);
               }}
             >
-              Done
+              {t('agentApiKeyDone')}
             </Button>
           </DialogFooter>
         </DialogContent>
