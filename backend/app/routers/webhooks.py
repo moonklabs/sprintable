@@ -166,6 +166,13 @@ async def upsert_webhook_config(
     # story #3999 — 예약 멤버(「시스템 발행」) 대상 webhook 설정을 원자적으로 거부.
     await assert_member_id_not_system_publisher(session, target_member_id)
 
+    # story #4350 PR 3(까디르 P1) — 웹훅은 프로젝트 범위: 접근 못 하는 프로젝트를 걸어 만들면(또는 그 프로젝트로 바꾸면) 그 프로젝트
+    # 이벤트가 내 URL로 갈 수 있었다. 저장 전에 목록과 같은 확인 · 같은 404(없는 프로젝트와 같은 모양). org 수준(project_id 없음)은 그대로.
+    if body.project_id is not None:
+        from app.services.project_auth import require_project_access
+
+        await require_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
+
     config = await repo.upsert(
         member_id=target_member_id,
         url=body.url,

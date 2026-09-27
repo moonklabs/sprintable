@@ -70,12 +70,12 @@ async def _world():
                     created_at=datetime(2026, 1, 1 + i, tzinfo=UTC),
                 ))
             await s.commit()
-        yield Session, {"org": org.id, "pa": pa.id, "pb": pb.id, "user": member_user}
+        yield Session, {"org": org.id, "pa": pa.id, "pb": pb.id, "user": member_user, "member": member_id}
     finally:
         await engine.dispose()
 
 
-async def _get(Session, seeded, path):
+async def _get(Session, seeded, path, *, method="GET", json=None):
     from httpx import ASGITransport, AsyncClient
 
     from app.dependencies.auth import AuthContext, get_current_user
@@ -96,7 +96,7 @@ async def _get(Session, seeded, path):
     app.dependency_overrides[get_current_user] = _auth
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            return await c.get(path)
+            return await c.request(method, path, json=json)
     finally:
         app.dependency_overrides.clear()
 
@@ -131,3 +131,31 @@ async def test_hypotheses_limit_applies_after_scope_not_before():
         items = resp.json()
         items = items["data"] if isinstance(items, dict) and "data" in items else items
         assert len(items) == 1 and "VISIBLE-A" in items[0]["statement"], items
+
+
+async def test_webhook_upsert_into_inaccessible_project_is_404_and_writes_nothing(monkeypatch):
+    """까디르 P1 — 접근 못 하는 프로젝트를 걸어 웹훅을 만들면 그 프로젝트 이벤트가 내 URL로 갈 수 있었다. 저장 전 확인 · 없는 프로젝트와
+    같은 404 · 행 0 / 접근 가능한 프로젝트 · org 수준(project 없음)은 그대로 저장."""
+    from sqlalchemy import func, select
+
+    from app.models.webhook_config import WebhookConfig
+
+    # 관심은 프로젝트 접근 — URL 안전 검사(DNS 조회로 사설 IP 차단)는 test_ssrf.py 몫이라 여기선 끈다(샌드박스엔 DNS가 없다).
+    monkeypatch.setattr("app.schemas.webhook_config.validate_webhook_url", lambda _v: None)
+    async with _world() as (Session, seeded):
+        def body(project_id, tag):
+            return {"member_id": str(seeded["member"]), "url": f"https://hooks.example.com/{tag}",
+                    "project_id": str(project_id) if project_id else None}
+
+        other = await _get(Session, seeded, "/api/v2/webhooks/config", method="PUT", json=body(seeded["pb"], "NEW-B"))
+        missing = await _get(Session, seeded, "/api/v2/webhooks/config", method="PUT", json=body(uuid.uuid4(), "NEW-X"))
+        assert other.status_code == 404 == missing.status_code, (other.text[:200], missing.text[:200])
+        assert other.json() == missing.json(), "없는 프로젝트와 응답 모양이 달라 존재가 샌다"
+        own = await _get(Session, seeded, "/api/v2/webhooks/config", method="PUT", json=body(seeded["pa"], "NEW-A"))
+        org_level = await _get(Session, seeded, "/api/v2/webhooks/config", method="PUT", json=body(None, "NEW-ORG"))
+        assert own.status_code == 200 and org_level.status_code == 200, (own.text[:200], org_level.text[:200])
+        async with Session() as s:
+            written = (await s.execute(
+                select(func.count()).select_from(WebhookConfig).where(WebhookConfig.url == "https://hooks.example.com/NEW-B")
+            )).scalar_one()
+        assert written == 0, "접근 못 하는 프로젝트의 웹훅이 저장됐다"
