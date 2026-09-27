@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AnchoredPopover, placeVertical } from './anchored-popover';
+import { AnchoredPopover, isOutsidePress, placeVertical, usePortalMenuKeys } from './anchored-popover';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -139,5 +139,125 @@ describe('placeVertical — 세로 자리(뷰포트 768 · 여백 8)', () => {
   it('어느 쪽도 다 못 담으면 넓은 쪽에 두고 [8, 768 − 8] 안으로 민다', () => {
     expect(placeVertical({ top: 300, bottom: 320 }, 700, 768, 4)).toEqual({ top: 60, side: 'bottom' }); // 아래 436 ≥ 위 288 → 아래 · 324 → 760 − 700
     expect(placeVertical({ top: 500, bottom: 520 }, 700, 768, 4)).toEqual({ top: 8, side: 'top' }); // 위 488 > 아래 236 → 위 · −204 → 8
+  });
+});
+
+// story #4349 PR 2 — 공용 키보드 훅: 포털이면 DOM 순서상 트리거 뒤가 아니라 예전 Tab 길이 끊긴다 → 그 빈틈만 메운다.
+function KeysHarness({ kind, hidden = false }: { kind: 'menu' | 'panel'; hidden?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const keys = usePortalMenuKeys({ open, onClose: () => setOpen(false), popoverRef: popRef, triggerRef, kind });
+  return (
+    <div id="anchor" ref={anchorRef}>
+      <button type="button" id="trig" ref={triggerRef} onClick={() => setOpen((v) => !v)} onKeyDown={keys.onTriggerKeyDown} {...keys.triggerProps}>열기</button>
+      {open && (
+        <AnchoredPopover anchorRef={anchorRef} popoverRef={popRef} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-testid="pop" style={hidden ? { display: 'none' } : undefined}>
+          <button type="button" id="i1">하나</button><button type="button" id="i2">둘</button>
+        </AnchoredPopover>
+      )}
+    </div>
+  );
+}
+const byId = (id: string) => document.getElementById(id)!;
+const press = (el: Element, key: string, shiftKey = false) => {
+  const e = new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true });
+  act(() => { el.dispatchEvent(e); });
+  return e;
+};
+
+describe('usePortalMenuKeys(story #4349 PR 2)', () => {
+  it('menu: 열면 첫 항목 · ↓↑ 돌아감 · 마지막에서 Tab이면 닫고 트리거', () => {
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    act(() => { byId('trig').click(); });
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'ArrowDown');
+    expect(document.activeElement).toBe(byId('i2'));
+    press(byId('i2'), 'ArrowDown');
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'ArrowUp');
+    expect(document.activeElement).toBe(byId('i2'));
+    press(byId('i2'), 'Tab');
+    expect(document.querySelector('[data-testid="pop"]')).toBeNull();
+    expect(document.activeElement).toBe(byId('trig'));
+  });
+
+  it('panel: 열어도 초점은 트리거 · 트리거에서 Tab → 첫 조작 · Shift+Tab → 트리거(열린 채) · ↓는 안 옮김', () => {
+    act(() => { root.render(<KeysHarness kind="panel" />); });
+    byId('trig').focus();
+    act(() => { byId('trig').click(); });
+    expect(document.activeElement).toBe(byId('trig'));
+    expect(press(byId('trig'), 'Tab').defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'ArrowDown');
+    expect(document.activeElement).toBe(byId('i1'));
+    press(byId('i1'), 'Tab', true);
+    expect(document.activeElement).toBe(byId('trig'));
+    expect(document.querySelector('[data-testid="pop"]')).not.toBeNull();
+  });
+
+  it('안 보이는 패널(display:none — 좁은 화면 벨)로는 트리거 Tab을 안 가로챈다', () => {
+    act(() => { root.render(<KeysHarness kind="panel" hidden />); });
+    byId('trig').focus();
+    act(() => { byId('trig').click(); });
+    expect(press(byId('trig'), 'Tab').defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(byId('trig'));
+  });
+
+  it('Esc: 닫고 트리거 · 전파 멈춤(document keydown 트랩 0)', () => {
+    const trap = vi.fn();
+    document.addEventListener('keydown', trap);
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    act(() => { byId('trig').click(); });
+    press(byId('i2'), 'Escape');
+    document.removeEventListener('keydown', trap);
+    expect(document.querySelector('[data-testid="pop"]')).toBeNull();
+    expect(document.activeElement).toBe(byId('trig'));
+    expect(trap).not.toHaveBeenCalled();
+  });
+
+  // 까디르(4724 · 부류) — 훅이 ARIA props도 준다: menu는 메뉴 역할까지, panel은 펼침 · 가리킴만.
+  it('ARIA props — menu: aria-haspopup=menu · aria-expanded · aria-controls(열렸을 때 팝오버 id) · 팝오버 role=menu / panel: haspopup · role 없음', () => {
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    const trig = byId('trig');
+    expect(trig.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trig.getAttribute('aria-expanded')).toBe('false');
+    expect(trig.hasAttribute('aria-controls')).toBe(false);
+    act(() => { trig.click(); });
+    const pop = document.querySelector<HTMLElement>('[data-testid="pop"]')!;
+    expect(trig.getAttribute('aria-expanded')).toBe('true');
+    expect(pop.getAttribute('role')).toBe('menu');
+    expect(trig.getAttribute('aria-controls')).toBe(pop.id);
+    act(() => { root.unmount(); }); // 같은 root에서 kind만 바꾸면 훅 상태(열림)가 남는다 — 새 root로
+    root = createRoot(container);
+    act(() => { root.render(<KeysHarness kind="panel" />); });
+    const t2 = byId('trig');
+    expect(t2.hasAttribute('aria-haspopup')).toBe(false);
+    act(() => { t2.click(); });
+    const p2 = document.querySelector<HTMLElement>('[data-testid="pop"]')!;
+    expect(p2.hasAttribute('role')).toBe(false);
+    expect(t2.getAttribute('aria-expanded')).toBe('true');
+    expect(t2.getAttribute('aria-controls')).toBe(p2.id);
+  });
+});
+
+// 유나 #4728 — 바깥 누름 판정 하나(부모 · 포털 주인 모두). 가드: outside-press.guard.test.ts.
+describe('isOutsidePress', () => {
+  it('root 안 = 바깥 아님 · 포털 팝오버 안(자손 · 글자 노드 포함) = 바깥 아님 · 그 밖 = 바깥 · root 없음 = 바깥 아님', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div id="op-root"><button id="op-in">in</button></div><div data-anchored-popover=""><span id="op-pop">항목</span></div><p id="op-out">out</p>';
+    document.body.appendChild(host);
+    try {
+      const root = document.getElementById('op-root');
+      expect(isOutsidePress(root, document.getElementById('op-in'))).toBe(false);
+      expect(isOutsidePress(root, document.getElementById('op-pop'))).toBe(false);
+      expect(isOutsidePress(root, document.getElementById('op-pop')!.firstChild)).toBe(false);
+      expect(isOutsidePress(root, document.getElementById('op-out'))).toBe(true);
+      expect(isOutsidePress(null, document.getElementById('op-out'))).toBe(false);
+      expect(isOutsidePress(root, null)).toBe(false);
+    } finally {
+      host.remove();
+    }
   });
 });

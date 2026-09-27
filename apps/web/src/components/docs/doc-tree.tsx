@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useId, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
@@ -15,7 +15,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
-import { AnchoredPopover } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 // story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
 function StatusDot({ status }: { status: string | undefined }) {
@@ -174,9 +174,6 @@ function TreeNode({
   // 포털이라 DOM 순서상 «⋮» 뒤가 아니다 → 열면 첫 항목으로 초점 · ↑↓ · Tab이 끝을 넘거나 Esc면 닫고 «⋮»로 돌려준다.
   const rowRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLDivElement>(null);
-  // 까디르(4724) — ↑↓ 키보드 길을 얹어 «메뉴»가 됐으니 보조기기에도 메뉴로 읽히게: 트리거 aria-haspopup · aria-expanded · aria-controls(열렸을 때 패널 id) ·
-  // 패널 role=menu · 항목 role=menuitem(버튼 넷이 아니라 메뉴 항목 넷).
-  const menuId = useId();
   // story #2416 — native confirm() 대체. 각 TreeNode가 자기 대상(doc)의 삭제-확認만 소유.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
@@ -219,36 +216,16 @@ function TreeNode({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  useEffect(() => {
-    if (contextMenuOpen) menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, [contextMenuOpen]);
-
-  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
-    const i = items.indexOf(document.activeElement as HTMLButtonElement);
-    const closeToTrigger = () => { setContextMenuOpen(false); menuTriggerRef.current?.focus(); };
-    if (e.key === 'Escape') {
-      // 서랍의 초점 트랩(document keydown · Esc = 서랍 닫기)까지 가지 않게 — 메뉴만 닫는다.
-      e.preventDefault();
-      e.stopPropagation();
-      closeToTrigger();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const n = items.length;
-      items[e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n]?.focus();
-    } else if (e.key === 'Tab' && (e.shiftKey ? i <= 0 : i === items.length - 1)) {
-      e.preventDefault();
-      closeToTrigger();
-    }
-  }, []);
+  // 포털 메뉴 키보드 길(열면 첫 항목 · ↑↓ · Tab 넘김/Esc = 닫고 «⋮»로 · Esc는 서랍 트랩까지 안 감) — 공용 훅(#4349).
+  const closeMenu = useCallback(() => setContextMenuOpen(false), []);
+  // 까디르(4724) — 메뉴 ARIA(트리거 aria-haspopup · aria-expanded · aria-controls / 패널 id · role=menu)도 같은 훅이 준다 · 항목 role=menuitem은 여기서.
+  const { onPopoverKeyDown: handleMenuKeyDown, triggerProps: menuTriggerProps, popoverProps: menuPopoverProps } = usePortalMenuKeys({ open: contextMenuOpen, onClose: closeMenu, popoverRef: menuRef, triggerRef: menuTriggerRef, kind: 'menu' });
 
   useEffect(() => {
     if (!contextMenuOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setContextMenuOpen(false);
-      }
+      if (isOutsidePress(menuRef.current, e.target)) setContextMenuOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -353,9 +330,7 @@ function TreeNode({
           tabIndex={0}
           // 까디르 · 유나(4724) — 아이콘뿐이라 이름 없는 메뉴 버튼이었다 → 그 행 문서 제목을 끼운 이름(행마다 같은 소리 방지 · 빈 제목 = «제목 없음»).
           aria-label={t('treeRowMenuAriaLabel', { title: doc.title?.trim() || t('newDocDefaultTitle') })}
-          aria-haspopup="menu"
-          aria-expanded={contextMenuOpen}
-          aria-controls={contextMenuOpen ? menuId : undefined}
+          {...menuTriggerProps}
           onClick={(e) => {
             e.stopPropagation();
             setContextMenuOpen(true);
@@ -373,8 +348,7 @@ function TreeNode({
             popoverRef={menuRef}
             align="end"
             gap={4}
-            id={menuId}
-            role="menu"
+            {...menuPopoverProps}
             data-dropdown-panel="doc-tree-menu"
             onKeyDown={handleMenuKeyDown}
             className="z-50 w-48 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-1"

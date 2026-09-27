@@ -130,7 +130,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
 
     // jsdom은 Tailwind의 lg:flex/lg:hidden 반응형 클래스를 실제로 평가하지 않아 데스크톱
     // 드롭다운·모바일 오버레이 둘 다 DOM에 동시 존재한다 — 데스크톱 컨테이너(.w-80)로 좁혀서 잰다.
-    const desktopPanel = container.querySelector('.w-80')!;
+    const desktopPanel = document.querySelector('.w-80')!; // story #4349 — 넓은 화면 드롭다운은 body로 포털(셸 스크롤 면 밖) → document에서
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(30);
 
     const clickLoadMore = async () => {
@@ -155,7 +155,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     });
     await openBell();
 
-    const desktopPanel = container.querySelector('.w-80')!;
+    const desktopPanel = document.querySelector('.w-80')!;
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(30);
 
     // SSE로 실시간 알림 1건이 목록 맨 앞에 끼어든다 — API로 받은 게 아니므로 offsetRef는 그대로 30이어야.
@@ -359,7 +359,7 @@ describe('NotificationBell — 로드맵 P2·PR-E L1(드롭다운 패널 elevati
   it('데스크톱 드롭다운(.w-80)이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
     stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
     await openBell();
-    const desktopPanel = container.querySelector('.w-80');
+    const desktopPanel = document.querySelector('.w-80');
     expect(desktopPanel?.className).toContain('shadow-[var(--elev-overlay)]');
     expect(desktopPanel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
   });

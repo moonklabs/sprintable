@@ -106,7 +106,7 @@ describe('overflow 조상 × absolute 팝오버 부류 가드([SID:4349])', () =
     const files = walk(SRC);
     expect(files.length, '스캔 재료가 비지 않았다(조용한 0 방지)').toBeGreaterThan(300);
     // 조용한 0 방지(PO 11:52Z) — 숫자 바닥 대신, 잘리는 모양 픽스처 하나를 **실제 파일과 같은 길**(같은 거르개 · 같은 스캐너)로 흘린다.
-    // 스캐너가 망가져 아무것도 못 보면 픽스처가 안 잡혀 RED · 픽스처를 고치면(포털 · overflow 걷기) RED. 기록만: 이 판 src에서 본 팝오버 12곳.
+    // 스캐너가 망가져 아무것도 못 보면 픽스처가 안 잡혀 RED · 픽스처를 고치면(포털 · overflow 걷기) RED. 기록만: 이 판 src에서 본 팝오버 8곳(PR 1 판 12 — 전수 8 · 9 · 11 · 15번이 포털로 빠짐).
     const FIXTURE = '__positive-control__/list-row-menu.tsx';
     const fixtureSrc = `<div className="flex-1 overflow-y-auto p-2"><div className="relative"><button>행</button>
       {open && <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border bg-popover p-1">메뉴</div>}</div></div>`;

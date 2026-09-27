@@ -219,8 +219,9 @@ describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 e
     const moreBtn = container.querySelector('button[aria-label="더보기"]') as HTMLButtonElement;
     await act(async () => { moreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const dropdown = container.querySelector('.shadow-\\[var\\(--elev-overlay\\)\\]');
+    // story #4349 — 드롭다운은 body로 포털된다(스크롤 면 밖) → container가 아니라 document에서 찾는다(뜻 그대로).
+    const dropdown = document.querySelector('.shadow-\\[var\\(--elev-overlay\\)\\]');
     expect(dropdown).not.toBeNull();
-    expect(container.querySelector('.shadow-md')).toBeNull();
+    expect(document.querySelector('.shadow-md')).toBeNull();
   });
 });

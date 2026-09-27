@@ -10,7 +10,7 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { memberRowLabels } from '@/lib/member-display';
-import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 interface TeamMember {
   id: string;
@@ -48,7 +48,13 @@ export function EntityDispatchPanel({
   const [dispatching, setDispatching] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const moreMenuClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
+  // story #4349(전수 8번) — «더 보기» 메뉴는 스토리 상세 스크롤 면(`overflow-y-auto`) 안이라 면 아래 끝에서 잘린 채였다 → body로 포털
+  // (AnchoredPopover · 아래 모자라면 위로 · 가로는 4342 클램프 그대로). 포털이라 바깥 클릭 판정에 메뉴도 «안»으로 센다.
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  // 포털이라 DOM 순서상 «더 보기» 뒤가 아니다 → 열면 항목에 초점 · Tab 넘김/Esc = 닫고 «더 보기»로(공용 훅).
+  const closeMore = useCallback(() => setMoreOpen(false), []);
+  const moreKeys = usePortalMenuKeys({ open: moreOpen, onClose: closeMore, popoverRef: moreMenuRef, triggerRef: moreBtnRef, kind: 'menu' });
   const { addToast } = useToast();
   const t = useTranslations('board');
   // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
@@ -66,9 +72,8 @@ export function EntityDispatchPanel({
   useEffect(() => {
     if (!moreOpen) return;
     const handler = (e: MouseEvent | TouchEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
-      }
+      // 포털된 메뉴(moreMenuRef)는 body 직속 — 공용 규칙이 포털 팝오버 안을 «안»으로 센다.
+      if (isOutsidePress(moreRef.current, e.target)) setMoreOpen(false);
     };
     document.addEventListener('mousedown', handler as EventListener);
     document.addEventListener('touchstart', handler as EventListener);
@@ -172,6 +177,8 @@ export function EntityDispatchPanel({
       {mobileMode === 'assignee-only' && (
         <div ref={moreRef} className="relative md:hidden">
           <button
+            ref={moreBtnRef}
+            {...moreKeys.triggerProps}
             type="button"
             onClick={() => setMoreOpen((o) => !o)}
             className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
@@ -181,9 +188,10 @@ export function EntityDispatchPanel({
           </button>
           {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
           {moreOpen && (
-            <div ref={moreMenuClampRef} data-dropdown-panel="dispatch-more" className="absolute right-0 top-full z-10 mt-1 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
+            <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
               <button
                 type="button"
+                role="menuitem"
                 disabled={!assigneeId || dispatching}
                 onClick={() => { void handleDispatch(); setMoreOpen(false); }}
                 title={dispatchTitle}
@@ -197,7 +205,7 @@ export function EntityDispatchPanel({
                 <Zap className="size-3.5" />
                 {dispatching ? t('dispatching') : t('dispatch')}
               </button>
-            </div>
+            </AnchoredPopover>
           )}
         </div>
       )}
