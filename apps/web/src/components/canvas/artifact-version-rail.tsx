@@ -51,6 +51,9 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
               <button
                 type="button"
                 onClick={() => onSelectVersion(v.version)}
+                // story #4354(유나 실측) — 선택이 배경색으로만 보여 화면 읽기에 «선택됨»이 안 들렸다. 판 목록(ul/li + 버튼)의 «지금 보는 판»이라
+                // aria-current(listbox 아님) — 고른 줄에만, 선택이 바뀌면 이전 줄에서 빠진다. 상세 · 스토리 패널 둘 다 이 컴포넌트.
+                aria-current={isSelected ? 'true' : undefined}
                 className={cn(
                   'flex w-full items-start gap-2 rounded-md p-1 text-left transition-colors hover:bg-muted/40',
                   isSelected && 'bg-muted/60',

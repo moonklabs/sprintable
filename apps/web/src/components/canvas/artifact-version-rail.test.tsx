@@ -148,3 +148,29 @@ describe('ArtifactVersionRail — sm 이상은 스테이지가 줄 높이 · 목
     expect(list.contains(toggle)).toBe(false);
   });
 });
+
+// story #4354(유나 실측) — 고른 판 줄이 배경색으로만 달라 화면 읽기에 «선택됨»이 안 들렸다. 상세 · 스토리 패널 둘 다 이 컴포넌트를 쓴다.
+// 뮤테이션: aria-current를 빼거나 모든 줄에 달면 RED.
+describe('ArtifactVersionRail — 고른 판 줄의 선택 상태(story #4354)', () => {
+  const selectedRows = (selectedVersion: number) => {
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactVersionRail artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} selectedVersion={selectedVersion} onSelectVersion={vi.fn()} memberMap={MOCK_MEMBERS} />),
+    );
+    const doc = new DOMParser().parseFromString(markup, 'text/html');
+    const buttons = [...doc.querySelectorAll('[data-version-list] li > button')];
+    return { buttons, current: buttons.filter((b) => b.getAttribute('aria-current') === 'true') };
+  };
+
+  it('⭐고른 판 줄에만 aria-current="true" — 선택을 바꾸면 그 줄로 옮겨 가고 이전 줄에서 빠진다', () => {
+    const versions = [...MOCK_VERSIONS].map((v) => v.version);
+    expect(versions.length).toBeGreaterThan(1);
+    const [first, second] = versions;
+    const a = selectedRows(first!);
+    expect(a.current).toHaveLength(1);
+    const b = selectedRows(second!);
+    expect(b.current).toHaveLength(1);
+    expect(a.buttons.indexOf(a.current[0]!)).not.toBe(b.buttons.indexOf(b.current[0]!));
+    // 색 표시는 그대로(시각 무변) — 고른 줄에 예전 배경 클래스가 남아 있다.
+    expect(b.current[0]!.className).toContain('bg-muted/60');
+  });
+});
