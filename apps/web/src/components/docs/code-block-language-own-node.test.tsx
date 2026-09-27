@@ -100,6 +100,23 @@ describe('코드 블록 언어 고르개 — 고른 뒤 초점(유나 디자인 
     await act(async () => { (document.activeElement as HTMLButtonElement).click(); });
     expect(document.activeElement).toBe(pickers[1]);
   });
+
+  it('초점이 이미 고르개 밖(다른 입력)에 있으면 고른 뒤에도 빼앗지 않는다', async () => {
+    const { editor, pickers } = await mountTwoBlocks();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    try {
+      await act(async () => { pickers[1]!.click(); });
+      const option = otherLanguageOption();
+      outside.focus();  // 목록이 열린 사이 사용자가 딴 곳으로 초점을 옮겼다
+      expect(document.activeElement).toBe(outside);
+      await act(async () => { option.click(); });
+      expect(languages(editor)[1]).not.toBe('javascript');  // 고르기는 그대로 적용
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      outside.remove();
+    }
+  });
 });
 
 describe('코드 블록 언어 고르개 — 자기 블록만', () => {

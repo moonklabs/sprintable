@@ -150,10 +150,13 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
   const handleLangSelect = useCallback((lang: string) => {
     // story #4360 — 이 고르개가 붙은 블록(NodeView 자기 위치)의 언어를 바꾼다. 예전 `editor.commands.updateAttributes('codeBlock', …)`는
     // **지금 선택 영역**의 코드 블록을 바꿔, 커서가 다른 코드 블록에 있으면 그 블록의 언어가 바뀌었다.
+    // 고른 선택지는 목록과 함께 사라진다 — 초점이 body로 떨어지지 않게 이 블록의 언어 버튼으로 돌려놓는다(키보드로 이어서 쓸 수 있게).
+    // 단 초점이 아직 이 고르개 안(또는 body · 없음)일 때만 — 사용자가 그 사이 딴 데로 옮긴 초점은 빼앗지 않는다(까디르 09-27).
+    const active = document.activeElement;
+    const focusStillHere = !active || active === document.body || (langMenuRef.current?.contains(active) ?? false);
     updateAttributes({ language: lang });
     setShowLangMenu(false);
-    // 고른 선택지는 목록과 함께 사라진다 — 초점이 body로 떨어지지 않게 이 블록의 언어 버튼으로 돌려놓는다(키보드로 이어서 쓸 수 있게).
-    langButtonRef.current?.focus();
+    if (focusStillHere) langButtonRef.current?.focus();
   }, [updateAttributes]);
 
   useEffect(() => {
