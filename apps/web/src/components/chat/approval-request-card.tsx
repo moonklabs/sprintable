@@ -260,7 +260,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
   const [discussSubmitting, setDiscussSubmitting] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
-  const discuss = async (reason: string) => {
+  const discuss = async (reason: string): Promise<boolean> => {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -277,12 +277,14 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
         // 3연발 재현 — 눌러도 반응이 안 보여 반복 클릭). 즉시 토스트로 "보냈다"는 사실 자체를
         // 확인시킨다 — 지속 신호(누가 봐도 남는 배너)는 아래 discussion_requested 렌더가 맡는다.
         addToast({ type: 'success', title: t('approvalRequestDiscussSuccessToast') });
-        return;
+        return true;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? `HTTP ${res.status}`);
+      return false;
     } catch {
       setDiscussError(t('hitlSendFailed'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -375,9 +377,10 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
       <GateDiscussDialog
         open={discussDialogOpen}
         onOpenChange={setDiscussDialogOpen}
-        onSubmit={(reason) => void discuss(reason)}
+        onSubmit={discuss}
         submitting={discussSubmitting}
         error={discussError}
+        targetId={target.gate_id}
       />
       {!readingPanel && showPreview && (
         <EntityPreviewModal

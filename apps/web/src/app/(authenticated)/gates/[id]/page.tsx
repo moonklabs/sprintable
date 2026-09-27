@@ -338,8 +338,8 @@ export default function GateDetailPage() {
   // (형제)가 스스로 알 방법이 없어 이 숫자를 부모가 다리 놓는다 — 증가할 때마다
   // GateActivityHistory가 재조회(그 컴포넌트의 refreshKey prop 참고).
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
-  const discuss = useCallback(async (reason: string) => {
-    if (!gate) return;
+  const discuss = useCallback(async (reason: string): Promise<boolean> => {
+    if (!gate) return false;
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -348,13 +348,15 @@ export default function GateDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return; }
+      if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return true; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+      return false;
     } catch {
       // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
       // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
       setDiscussError(t('gateTransitionErrorGeneric'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -798,9 +800,10 @@ export default function GateDetailPage() {
         <GateDiscussDialog
           open={discussDialogOpen}
           onOpenChange={setDiscussDialogOpen}
-          onSubmit={(reason) => void discuss(reason)}
+          onSubmit={discuss}
           submitting={discussSubmitting}
           error={discussError}
+          targetId={gate.id}
         />
       ) : null}
     </>

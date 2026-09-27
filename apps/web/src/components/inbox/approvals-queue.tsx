@@ -224,7 +224,7 @@ export function ApprovalsQueue() {
     });
   };
 
-  const discuss = async (id: string, reason: string) => {
+  const discuss = async (id: string, reason: string): Promise<boolean> => {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -233,13 +233,15 @@ export function ApprovalsQueue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (res.ok) { setDiscussTargetId(null); return; }
+      if (res.ok) { setDiscussTargetId(null); return true; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+      return false;
     } catch {
       // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
       // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
       setDiscussError(t('gateTransitionErrorGeneric'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -852,9 +854,10 @@ export function ApprovalsQueue() {
       <GateDiscussDialog
         open={discussTargetId !== null}
         onOpenChange={(open) => { if (!open) setDiscussTargetId(null); }}
-        onSubmit={(reason) => { if (discussTargetId) void discuss(discussTargetId, reason); }}
+        onSubmit={(reason) => (discussTargetId ? discuss(discussTargetId, reason) : Promise.resolve(false))}
         submitting={discussSubmitting}
         error={discussError}
+        targetId={discussTargetId}
       />
       {/* story 22affaf2(유나 design③) — 고위험 인라인 서명 모달. canonical 상세와 동일
           컴포넌트(GateSignatureApproval)를 nav 없이 Dialog로 연다 — 어휘·게이팅(canSign)
