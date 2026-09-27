@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFieldDraft, type FieldDraftKey } from './use-field-draft';
 
 /**
@@ -11,7 +11,7 @@ import { useFieldDraft, type FieldDraftKey } from './use-field-draft';
 export function useJsonFieldDraft<T>(
   draftKey: FieldDraftKey,
   empty: T,
-): [value: T, setValue: (next: T) => void, clear: () => void] {
+): [value: T, setValue: (next: T | ((prev: T) => T)) => void, clear: () => void] {
   const emptyJson = useMemo(() => JSON.stringify(empty), [empty]);
   const [raw, setRaw, clear] = useFieldDraft(draftKey, emptyJson);
   const value = useMemo<T>(() => {
@@ -21,6 +21,13 @@ export function useJsonFieldDraft<T>(
       return JSON.parse(emptyJson) as T;
     }
   }, [raw, emptyJson]);
-  const setValue = useCallback((next: T) => setRaw(JSON.stringify(next)), [setRaw]);
+  // 업로드처럼 await 뒤에 고치는 자리는 `set((prev) => …)`로 — 그 사이 다른 칸에 쓴 글을 옛 값으로 덮지 않게 최신 값에서 계산한다.
+  const latest = useRef(value);
+  useEffect(() => { latest.current = value; }, [value]);
+  const setValue = useCallback((next: T | ((prev: T) => T)) => {
+    const resolved = typeof next === 'function' ? (next as (prev: T) => T)(latest.current) : next;
+    latest.current = resolved;
+    setRaw(JSON.stringify(resolved));
+  }, [setRaw]);
   return [value, setValue, clear];
 }

@@ -25,7 +25,7 @@ interface CommentComposePopoverProps {
 export function CommentComposePopover({ onSubmit, onCancel, style, className, draftTargetId }: CommentComposePopoverProps) {
   const t = useTranslations('canvas');
   // story #4370 — 쓴 글은 산출물별 초안: Esc · 바깥 누름으로 닫혀도 남고 보이는 «취소» · 보내기 성공에서만 지운다(유나 규칙).
-  const [body, setBody, clearBody] = useFieldDraft({ surface: 'artifact-comment-compose', targetId: draftTargetId, field: 'body' });
+  const [body, setBody, clearBody] = useFieldDraft({ surface: 'artifact-comment-compose', targetId: draftTargetId, field: 'form' });
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 

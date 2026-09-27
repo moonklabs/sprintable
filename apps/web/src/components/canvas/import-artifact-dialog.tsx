@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ArtifactStage } from './artifact-stage';
 import { newNodeId, type ArtifactNode } from '@/services/canvas-nodes';
-import { fieldDraftStorageKey, useFieldDraft } from '@/hooks/use-field-draft';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 type ImportTab = 'image' | 'html';
 
@@ -27,33 +27,25 @@ interface ImportArtifactDialogProps {
  * (OAuth/API 0). 미리보기=기존 ArtifactStage 재사용(신규 뷰어 0). 실패=조용한 info 안내
  * (⛔낙인 0 — provenance 규율의 연장).
  */
-/** 저장된 HTML 초안이 있는지(첫 마운트에 탭을 고르려고). */
-function hasStoredHtmlDraft(targetId: string | null): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return !!window.sessionStorage.getItem(fieldDraftStorageKey({ surface: 'artifact-import', targetId, field: 'html' }));
-  } catch {
-    return false;
-  }
-}
+interface ImportFormDraft { tab: ImportTab; imageUrl: string | null; html: string }
+/** 빈 가져오기 폼(안정 참조 — 같으면 초안 없음). */
+const EMPTY_IMPORT_FORM: ImportFormDraft = { tab: 'image', imageUrl: null, html: '' };
 
 export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }: ImportArtifactDialogProps) {
   const t = useTranslations('canvas');
-  const [tab, setTab] = useState<ImportTab>(() => (hasStoredHtmlDraft(targetId) ? 'html' : 'image'));
   const [uploading, setUploading] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  // story #4370 — 붙여넣은 HTML(여러 줄 칸)은 스토리별 초안: ✕ · 바깥 · Esc로 닫혀도 남고 «취소» · 가져오기 성공에서만 지운다.
-  // (예전엔 거꾸로 — Dialog 자체 닫힘에서만 비우고 «취소»는 남겼다.) 이미지 URL · 탭 · 오류는 칸 글이 아니라 닫힐 때 그대로 초기화.
-  const [htmlContent, setHtmlContent, clearHtmlDraft] = useFieldDraft({ surface: 'artifact-import', targetId, field: 'html' });
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(HTML 붙여넣기)이 든 폼이라 **폼 전체**(탭 · 올린 이미지 · HTML)가 스토리별 초안 하나:
+  // ✕ · 바깥 · Esc로 닫혀도 남고(다시 열면 쓰던 탭 그대로 — 숨은 초안 0) «취소» · 가져오기 성공에서만 지운다.
+  // (예전엔 거꾸로 — Dialog 자체 닫힘에서만 비우고 «취소»는 남겼다.)
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<ImportFormDraft>(
+    { surface: 'artifact-import', targetId, field: 'form' }, EMPTY_IMPORT_FORM,
+  );
+  const { tab, imageUrl, html: htmlContent } = form;
+  const setTab = (next: ImportTab) => setForm((prev) => ({ ...prev, tab: next }));
+  const setImageUrl = (next: string | null) => setForm((prev) => ({ ...prev, imageUrl: next }));
+  const setHtmlContent = (next: string) => setForm((prev) => ({ ...prev, html: next }));
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState(false);
-
-  /** 닫힐 때 초기화 — 남은 HTML 초안이 있으면 다시 열었을 때 그 탭이 보이게 `html`로 둔다(숨은 초안 0). */
-  function reset(tabAfter: ImportTab = 'image') {
-    setTab(tabAfter);
-    setImageUrl(null);
-    setError(false);
-  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -84,15 +76,15 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
     const ok = await onImport(nodes);
     setImporting(false);
     if (!ok) { setError(true); return; }
-    clearHtmlDraft();
-    reset('image');
+    clearFormDraft();
+    setError(false);
     onOpenChange(false);
   }
 
   const canConfirm = tab === 'image' ? (!!imageUrl && !uploading) : htmlContent.trim().length > 0;
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) reset(htmlContent.trim() ? 'html' : 'image'); onOpenChange(next); }}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) setError(false); onOpenChange(next); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{t('importDialogTitle')}</DialogTitle>
@@ -145,7 +137,7 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
         {error ? <p className="text-[11px] text-muted-foreground">{t('importFailedNote')}</p> : null}
 
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => { clearHtmlDraft(); reset('image'); onOpenChange(false); }} disabled={importing}>
+          <Button variant="outline" size="sm" onClick={() => { clearFormDraft(); setError(false); onOpenChange(false); }} disabled={importing}>
             {t('specPinCancelAction')}
           </Button>
           <Button size="sm" onClick={() => void handleConfirm()} disabled={!canConfirm || importing}>

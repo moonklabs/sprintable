@@ -35,7 +35,7 @@ export function TodayV3ReasonDialog({
   /** 테스트 id 앞머리(채팅 v3 카드가 같은 창을 `chat-v3`로 씀). */
   testIdPrefix?: string;
 }) {
-  const [reason, setReason, clearReason] = useFieldDraft({ ...draftKey, field: 'reason' });
+  const [reason, setReason, clearReason] = useFieldDraft({ ...draftKey, field: 'form' });
   const canSubmit = (!reasonRequired || reason.trim().length > 0) && !submitting;
 
   return (

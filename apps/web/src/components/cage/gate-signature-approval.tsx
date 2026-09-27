@@ -57,7 +57,7 @@ export function GateSignatureApproval({
   // story #4370 — 사유는 게이트 + 검토 대상(머리 SHA · 초안 버전)별 초안: 닫히거나 떠나도 남고 결재 성공에서만 지운다.
   // 검토 대상이 바뀌면 키가 바뀌어 빈 칸(story #4190 — 새 버전은 다시 보고 서명).
   const draftTarget = `${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`;
-  const [reason, setReason, clearReason] = useFieldDraft({ surface: 'gate-signature', targetId: draftTarget, field: 'reason' });
+  const [reason, setReason, clearReason] = useFieldDraft({ surface: 'gate-signature', targetId: draftTarget, field: 'form' });
   const act = (action: SignatureAction) => {
     const result = action(reason);
     if (result && typeof (result as Promise<boolean | void>).then === 'function') {

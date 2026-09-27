@@ -3,8 +3,9 @@
  * story #4370 — 산출물 가져오기 창의 HTML 붙여넣기(여러 줄 칸) 초안: 닫혀도(✕ · 바깥 · Esc) 남고 «취소» · 가져오기 성공에서만 지운다.
  * 예전엔 거꾸로(Dialog 자체 닫힘에서만 비우고 «취소»는 남김). 두 자리를 다 잰다 — 스토리 패널(늘 마운트 · open prop)과 갤러리(조건부 마운트).
  * 남은 초안이 있으면 다시 열었을 때 HTML 탭이 보인다(숨은 초안 0).
+ * 유나 판정 (가) — 여러 줄 칸이 든 폼은 폼 전체가 초안 하나: 올린 이미지(탭 · URL)도 닫혀도 남는다.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -105,5 +106,31 @@ describe.each(['always', 'conditional'] as const)('ImportArtifactDialog HTML 초
     await open();
     await toHtmlTab();
     expect(htmlField()!.value).toBe('');
+  });
+});
+
+describe('ImportArtifactDialog 폼 초안 — 올린 이미지(유나 판정 (가))', () => {
+  it('이미지를 올린 뒤 Esc로 닫아도 다시 열면 그 이미지로 가져오기가 바로 된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { url: 'https://cdn.example.com/kept.png' } }) })));
+    try {
+      await mount('always');
+      await open();
+      const fileInput = document.body.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File(['fake'], 'design.png', { type: 'image/png' });
+      await act(async () => {
+        Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await Promise.resolve(); await Promise.resolve();
+      });
+      const confirm = () => btn(c.importConfirmAction)!;
+      expect(confirm().hasAttribute('disabled')).toBe(false);
+      await act(async () => { esc(document.activeElement ?? document.body); });  // 글 칸 초점 없음 — 한 번에 닫힘
+      await settle();
+      expect(document.body.querySelector('input[type="file"]')).toBeNull();
+      await open();
+      expect(confirm().hasAttribute('disabled')).toBe(false);  // 올린 이미지가 남아 있어 바로 가져오기
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

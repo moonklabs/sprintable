@@ -30,7 +30,7 @@ export function GateDiscussDialog({
   error?: string | null;
 }) {
   const t = useTranslations('cage');
-  const [reason, setReason, clearReason] = useFieldDraft({ surface: 'gate-discuss', targetId, field: 'reason' });
+  const [reason, setReason, clearReason] = useFieldDraft({ surface: 'gate-discuss', targetId, field: 'form' });
   const canSubmit = reason.trim().length > 0 && !submitting;
 
   return (
