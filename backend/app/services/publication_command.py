@@ -1625,10 +1625,11 @@ async def process_due_publication_commands(
                     command.id, worst, budget,
                 )
             await db.commit()
-            if newly_over_budget:
-                # story #4341 AC4 — «예산 밖» 명령은 사람이 받는 곳(운영 대화)으로 한 번 알린다(같은 명령 = 멱등 키 하나 · 틱마다 다시
-                # 불려도 메시지 1). 커밋 뒤에(알림은 자기 세션 · 예외를 던지지 않음 — 워커 틱을 막지 않는다).
-                await _alert_over_tick_budget(command.id, command.org_id, worst_seconds=worst, budget_seconds=budget)
+            # story #4341 AC4 — «예산 밖» 명령은 사람이 받는 곳(운영 대화)으로 알린다. «처음 표시한 틱에만» 부르면 표시 커밋과 알림 사이에
+            # 워커가 죽을 때 다음 틱은 «이미 표시됨»으로 건너뛰어 영영 침묵한다(까디르 09-27) — 그래서 예산 밖인 동안 **틱마다** 부르고,
+            # 메시지 1은 명령마다 하나인 멱등 키가 지킨다(이미 보냈으면 서비스가 already_delivered로 끝낸다). 커밋 뒤에(알림은 자기 세션 ·
+            # 예외를 던지지 않음 — 워커 틱을 막지 않는다).
+            await _alert_over_tick_budget(command.id, command.org_id, worst_seconds=worst, budget_seconds=budget)
             continue
         remaining = budget - (_monotonic() - tick_started)
         if worst > remaining:
