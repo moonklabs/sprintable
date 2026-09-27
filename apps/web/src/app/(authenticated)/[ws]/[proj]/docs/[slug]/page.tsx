@@ -126,7 +126,7 @@ export default function DocSlugPage() {
   const shouldAutoDeriveSlug = selectedDoc !== null && !slugLocked && isUntitledSlug(selectedDoc.slug);
   const derivedSlug = shouldAutoDeriveSlug ? slugifyDocTitle(title) : '';
 
-  const { status: saveStatus, isDirty, save, clearSyncAlerts } = useDocSync<DocDetail>({
+  const { status: saveStatus, isDirty, save, clearSyncAlerts, adoptNormalized } = useDocSync<DocDetail>({
     docId: selectedDoc?.id ?? null,
     savePayload: derivedSlug
       ? { title, content, content_format: contentFormat, slug: derivedSlug, slug_locked: false }
@@ -136,6 +136,11 @@ export default function DocSlugPage() {
     autosave,
     onSaved: handleDocSaved,
   });
+
+  const handleNormalize = useCallback((value: string) => {
+    setContent(value);
+    adoptNormalized({ content: value });
+  }, [adoptNormalized]);
 
   const fetchDoc = useCallback(async () => {
     if (!projectId || !slug) return;
@@ -440,6 +445,8 @@ export default function DocSlugPage() {
           projectId={projectId}
           onNavigate={handleNavigate}
           onChange={setContent}
+          // story #4339(AC7) — 편집 없이 편집기가 다듬은 값 = 깨끗한 기준(쓰기 없음) · 입력했다 지우면 이 값으로 돌아와 dirty가 풀린다.
+          onNormalize={handleNormalize}
           onContentFormatChange={setContentFormat}
           isDirty={isDirty}
           onSave={save}

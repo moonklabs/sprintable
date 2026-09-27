@@ -174,12 +174,14 @@ function DocScreen({ doc, content, onContent, editorMounted, seen }: {
   seen: Seen[];
 }) {
   const payload = useMemo(() => ({ title: 'T', content, content_format: 'html' }), [content]);
-  const { status, isDirty } = useDocSync({
+  const { status, isDirty, adoptNormalized } = useDocSync({
     docId: doc?.id ?? null, savePayload: payload, serverUpdatedAt: doc?.updated_at ?? null, editing: doc !== null, autosaveDelay: 30,
   });
   seen.push({ status, isDirty });
+  // 문서 화면(docs/[slug]/page.tsx)의 handleNormalize와 같은 엮음.
+  const onNormalize = (v: string) => { onContent(v); adoptNormalized({ content: v }); };
   return doc && editorMounted
-    ? <DocEditor value={content} contentFormat="html" onChange={onContent} labels={LABELS} currentDocId={doc.id} projectId="p1" />
+    ? <DocEditor value={content} contentFormat="html" onChange={onContent} onNormalize={onNormalize} labels={LABELS} currentDocId={doc.id} projectId="p1" />
     : null;
 }
 
@@ -275,5 +277,67 @@ describe('useDocSync — unsaved는 dirty일 때만', () => {
     await act(async () => { root.render(<HookOnly content="둘째 문서 + 입력" doc={{ id: 'd2', updated_at: 't2' }} seen={seen} />); });
     await settle(60);
     expect(seen.at(-1)).toEqual({ status: 'unsaved', isDirty: true });
+  });
+});
+
+
+describe('유나 실측(1822af2f3) — 한 글자 쓰고 지우면 깨끗한 상태로', () => {
+  it.each(BODIES)('%s: 입력 → 지움 → dirty false · 자동 저장 0', async (_label, body) => {
+    const writes: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') !== 'GET') writes.push(`${init?.method} ${url}`);
+      return new Response(JSON.stringify({ updated_at: '2026-09-27T01:00:00Z' }), { status: 200 });
+    }));
+    const seen: Seen[] = [];
+    const DOC = { id: 'd1', updated_at: '2026-09-26T03:52:31Z' };
+    const ctl: { setContent?: (v: string) => void; setDoc?: (d: typeof DOC) => void } = {};
+    function Harness() {
+      const [content, setContent] = useState('');
+      const [doc, setDoc] = useState<typeof DOC | null>(null);
+      useEffect(() => { ctl.setContent = setContent; ctl.setDoc = setDoc; }, []);
+      return <Providers><DocScreen doc={doc} content={content} onContent={setContent} editorMounted seen={seen} /></Providers>;
+    }
+    await act(async () => { root.render(<Harness />); });
+    await act(async () => { ctl.setDoc!(DOC); ctl.setContent!(body); });
+    await settle(200);
+    const editor = editorOf();
+    await act(async () => { editor.commands.insertContentAt(1, '가'); });
+    await settle(10);
+    await act(async () => { editor.commands.deleteRange({ from: 1, to: 2 }); });  // 유나 실측 그대로 — 쓴 글자를 지움
+    await settle(400);
+    expect(writes).toEqual([]);
+    expect(seen.at(-1)).toEqual({ status: 'idle', isDirty: false });
+  });
+});
+
+describe('늦은 저장 응답 — 옮긴 문서를 덮지 않는다', () => {
+  it('A 저장 중 B로 옮김 → A 응답 도착 → B는 dirty false · onSaved 안 불림', async () => {
+    let resolveA: (r: Response) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { resolveA = r; })));
+    const saved: unknown[] = [];
+    const seen: Seen[] = [];
+    let saveFn: () => Promise<boolean> = async () => false;
+    function Hook({ doc, content }: { doc: { id: string; updated_at: string }; content: string }) {
+      const payload = useMemo(() => ({ content }), [content]);
+      const { status, isDirty, save } = useDocSync({
+        docId: doc.id, savePayload: payload, serverUpdatedAt: doc.updated_at, editing: true, autosave: false,
+        onSaved: (d) => { saved.push(d); },
+      });
+      useEffect(() => { saveFn = save; });
+      seen.push({ status, isDirty });
+      return null;
+    }
+    await act(async () => { root.render(<Hook doc={{ id: 'A', updated_at: 'tA' }} content="A 본문" />); });
+    await settle(40);
+    await act(async () => { root.render(<Hook doc={{ id: 'A', updated_at: 'tA' }} content="A 본문 + 입력" />); });
+    await settle(40);
+    let pending: Promise<boolean> = Promise.resolve(false);
+    await act(async () => { pending = saveFn(); });
+    await act(async () => { root.render(<Hook doc={{ id: 'B', updated_at: 'tB' }} content="B 본문" />); });
+    await settle(40);
+    await act(async () => { resolveA(new Response(JSON.stringify({ id: 'A', updated_at: 'tA2' }), { status: 200 })); await pending; });
+    await settle(40);
+    expect(saved).toEqual([]);
+    expect(seen.at(-1)).toEqual({ status: 'idle', isDirty: false });
   });
 });

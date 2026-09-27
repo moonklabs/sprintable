@@ -136,6 +136,20 @@ export function useDocSync<TDoc = { updated_at: string }>({
   }, [editing, serverUpdatedAt]);
 
   const isDirty = editing && baselineDocId === docId && currentSnapshot !== lastSavedSnapshot;
+  const isDirtyRef = useRef(isDirty);
+  useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
+  const savePayloadRef = useRef(savePayload);
+  useEffect(() => { savePayloadRef.current = savePayload; }, [savePayload]);
+  const docIdRef = useRef(docId);
+  useEffect(() => { docIdRef.current = docId; }, [docId]);
+
+  // story #4339(AC7 · 유나 실측) — 깨끗한 기준 = 편집기가 이 문서를 연 뒤 처음 다듬은 직렬화. 저장된 문자열을 기준으로 두면(API로 만든
+  // 문서처럼 편집기 출력과 모양이 다른 본문) 한 글자 쓰고 지워도 영원히 dirty였다. 편집기가 편집 없이 다듬을 때(onNormalize) 그 값을
+  // 기준으로 삼는다 — 쓰기 없음. 이미 dirty(사용자가 입력 중)면 건드리지 않는다.
+  const adoptNormalized = useCallback((override: Record<string, unknown>) => {
+    if (isDirtyRef.current) return;
+    setLastSavedSnapshot(JSON.stringify({ ...savePayloadRef.current, ...override }));
+  }, []);
 
   useEffect(() => {
     if (!editing || savingRef.current || conflictRef.current || remoteChangedRef.current || !isDirty) return;
@@ -183,6 +197,10 @@ export function useDocSync<TDoc = { updated_at: string }>({
 
     savingRef.current = true;
     setStatus('saving');
+    // story #4339(까디르) — 응답이 늦게 와서 그 사이 다른 문서로 옮겼으면 이 응답은 앞 문서 몫이다: 새 문서의 기준선 · updated_at ·
+    // onSaved를 덮지 않는다(새 문서가 dirty로 잘못 뜨거나 옛 동시성 기준으로 PATCH하던 자리).
+    const requestDocId = docId;
+    const stillSameDoc = () => docIdRef.current === requestDocId;
 
     try {
       const res = await fetch(`/api/docs/${docId}`, {
@@ -195,6 +213,10 @@ export function useDocSync<TDoc = { updated_at: string }>({
         }),
       });
 
+      if (!stillSameDoc()) {
+        savingRef.current = false;
+        return false;
+      }
       if (res.status === 409) {
         conflictRef.current = true;
         remoteChangedRef.current = false;
@@ -218,6 +240,10 @@ export function useDocSync<TDoc = { updated_at: string }>({
       }
 
       const json = await res.json();
+      if (!stillSameDoc()) {
+        savingRef.current = false;
+        return false;
+      }
       const { doc: savedDoc, updatedAt: nextUpdatedAt } = unwrapDocResponse<TDoc>(json);
       // A response with no `updated_at` cannot establish a baseline — treating it as
       // success would re-arm the exact unguarded-overwrite loop this story fixes, so
@@ -291,5 +317,6 @@ export function useDocSync<TDoc = { updated_at: string }>({
     isDirty,
     save,
     clearSyncAlerts,
+    adoptNormalized,
   };
 }
