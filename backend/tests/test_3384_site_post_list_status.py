@@ -84,13 +84,14 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
-    await grant_org_projects(session, org_id, agent_member_id=m.id)  # story #4351 — 목록 · 단건이 접근 가능 프로젝트로 좁혀짐
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
@@ -185,7 +186,7 @@ async def test_list_reflects_gate_and_publication_state_per_draft():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_none = await _seed_story(s, org_id, project_id, title="게이트 없음")
             story_pending = await _seed_story(s, org_id, project_id, title="심사중")
             story_published = await _seed_story(s, org_id, project_id, title="발행됨")

@@ -88,17 +88,18 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
-    await grant_org_projects(session, org_id, agent_member_id=m.id)  # story #4351 — 목록 · 단건이 접근 가능 프로젝트로 좁혀짐
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="owner"):
+async def _seed_human(session, org_id, *, role="owner", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -108,7 +109,8 @@ async def _seed_human(session, org_id, *, role="owner"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
-    await grant_org_projects(session, org_id, user_id=user.id)  # story #4351 — 목록 · 단건이 접근 가능 프로젝트로 좁혀짐
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -196,7 +198,7 @@ async def test_channel_draft_creation_persists_and_exposes_source_content_item_i
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             blog_story_id = await _seed_story(s, org_id, project_id, title="블로그 스토리")
             channel_story_id = await _seed_story(s, org_id, project_id, title="채널 스토리")
             connection_id = await _seed_connection(s, org_id)
@@ -236,7 +238,7 @@ async def test_variants_endpoint_returns_derived_channel_drafts_for_content_item
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
             channel_story_1 = await _seed_story(s, org_id, project_id, title="채널1")
             channel_story_2 = await _seed_story(s, org_id, project_id, title="채널2(무관)")
@@ -359,8 +361,8 @@ async def test_campaign_create_and_detail_returns_content_items_with_nested_vari
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
-            human_id = await _seed_human(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
+            human_id = await _seed_human(s, org_id, grant=True)
             blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
             solo_story_id = await _seed_story(s, org_id, project_id, title="단독 글")
             channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
@@ -697,7 +699,7 @@ async def test_source_changed_false_when_source_not_revised_since_derivation():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
             channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
             connection_id = await _seed_connection(s, org_id)
@@ -735,7 +737,7 @@ async def test_source_changed_true_when_source_revised_since_derivation():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
             channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
             connection_id = await _seed_connection(s, org_id)
@@ -780,7 +782,7 @@ async def test_source_changed_none_when_source_site_post_version_id_unknown():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             blog_story_id = await _seed_story(s, org_id, project_id, title="블로그")
             channel_story_id = await _seed_story(s, org_id, project_id, title="채널")
             connection_id = await _seed_connection(s, org_id)

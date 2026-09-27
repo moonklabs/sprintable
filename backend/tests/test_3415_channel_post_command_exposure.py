@@ -93,17 +93,18 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
-    await grant_org_projects(session, org_id, agent_member_id=m.id)  # story #4351 — 목록 · 단건이 접근 가능 프로젝트로 좁혀짐
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="member"):
+async def _seed_human(session, org_id, *, role="member", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -113,7 +114,8 @@ async def _seed_human(session, org_id, *, role="member"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
-    await grant_org_projects(session, org_id, user_id=user.id)  # story #4351 — 목록 · 단건이 접근 가능 프로젝트로 좁혀짐
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -232,7 +234,7 @@ async def test_no_command_yet_all_new_fields_null():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
 
@@ -268,7 +270,7 @@ async def test_command_status_and_reason_code_distinguish_voided_pending_blocked
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -389,7 +391,7 @@ async def test_transient_failure_exposes_failure_kind_and_next_retry_at():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -451,7 +453,7 @@ async def test_dead_letter_exposes_dead_letter_at_and_null_next_retry_at():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -511,7 +513,7 @@ async def test_latest_command_wins_over_older_completed_history_on_same_gate():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -567,7 +569,7 @@ async def test_list_and_detail_parity_for_new_fields():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -638,7 +640,7 @@ async def test_list_query_count_with_commands_does_not_scale_with_draft_count():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             connection_id = await _seed_connection(s, org_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

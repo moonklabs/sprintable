@@ -127,7 +127,7 @@ async def test_hosted_site_publication_view_regression_unchanged():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

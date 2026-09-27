@@ -156,8 +156,12 @@ async def _grant_project(session, org_id, user_id, project_id):
     om_id = (await session.execute(
         select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
     )).scalar_one()
-    session.add(ProjectAccess(id=uuid.uuid4(), project_id=project_id, org_member_id=om_id, permission="granted", role="member"))
-    await session.commit()
+    exists = (await session.execute(
+        select(ProjectAccess.id).where(ProjectAccess.project_id == project_id, ProjectAccess.org_member_id == om_id)
+    )).scalar_one_or_none()
+    if exists is None:  # 이미 grant가 있으면 건너뜀(uq_project_access_project_member)
+        session.add(ProjectAccess(id=uuid.uuid4(), project_id=project_id, org_member_id=om_id, permission="granted", role="member"))
+        await session.commit()
 
 
 @pytest.mark.anyio

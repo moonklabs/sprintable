@@ -43,7 +43,7 @@ async def test_channel_post_drafts_filter_by_work_item_id_hits_and_misses():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_a = await _seed_story(s, org_id, project_id, title="일 A")
             story_b = await _seed_story(s, org_id, project_id, title="일 B")
             connection_id = await _seed_connection(s, org_id)
@@ -144,7 +144,7 @@ async def test_site_post_drafts_filter_by_work_item_id_hits_and_misses():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_a = await _seed_story(s, org_id, project_id, title="일 A")
             story_b = await _seed_story(s, org_id, project_id, title="일 B")
 

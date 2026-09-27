@@ -26,7 +26,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import grant_org_projects
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
@@ -134,7 +133,6 @@ async def _seed_human(session, org_id, project_id, *, role="owner"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
-    await grant_org_projects(session, org_id, user_id=user.id)  # story #4351 — 목록 · 단건이 접근 가능 프로젝트로 좁혀짐
     return user.id
 
 

@@ -176,7 +176,7 @@ async def test_site_posts_list_endpoint_sets_x_total_count_header():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story1 = await _seed_story(s, org_id, project_id)
             story2 = await _seed_story(s, org_id, project_id)
 
@@ -212,7 +212,7 @@ async def test_channel_posts_list_endpoint_sets_x_total_count_header():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
 
@@ -298,7 +298,7 @@ async def test_site_posts_list_public_url_null_when_not_published():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

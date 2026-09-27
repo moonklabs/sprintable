@@ -960,6 +960,7 @@ async def grant_org_projects(session, org_id, *, user_id=None, agent_member_id=N
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
 
+    await session.flush()  # 같은 세션에 아직 flush 안 된 grant도 아래 «이미 있음» 조회에 보이게(uq_project_access_project_member 중복 방지)
     project_ids = list((await session.execute(
         select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
     )).scalars())

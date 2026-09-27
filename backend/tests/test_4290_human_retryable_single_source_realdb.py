@@ -89,8 +89,8 @@ async def _world(Session):
     async with Session() as s:
         org_id, project_id = await _seed_org(s)
         await _seed_default_role(s, org_id)
-        agent_id = await _seed_agent(s, org_id, project_id)
-        human_id = await _seed_human(s, org_id)
+        agent_id = await _seed_agent(s, org_id, project_id, grant=True)
+        human_id = await _seed_human(s, org_id, grant=True)
         story_id = await _seed_story(s, org_id, project_id)
         connection_id = await _seed_connection(s, org_id)
     _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
