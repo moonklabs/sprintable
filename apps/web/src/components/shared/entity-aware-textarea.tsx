@@ -69,7 +69,8 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       if (ent) selectEntity(ent);
       return;
     }
-    if (e.key === 'Escape') { entityPicker.close(); return; }
+    // [SID:4367] 후보만 닫고 «썼다»고 표시 — 바깥(스토리 패널 window Esc)이 편집 취소까지 하지 않게. 후보가 없을 때의 Esc는 위에서 그냥 지나간다.
+    if (e.key === 'Escape') { e.preventDefault(); entityPicker.close(); return; }
   };
 
   return (

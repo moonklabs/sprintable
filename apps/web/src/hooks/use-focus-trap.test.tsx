@@ -116,3 +116,27 @@ describe('useFocusTrap — story #2061', () => {
     trigger.remove();
   });
 });
+
+// [SID:4367] 한 Esc = 한 층 — 안쪽 층(새 폴더 입력칸 · 후보 목록 · 포털 메뉴)이 Esc로 자기를 닫고 preventDefault로 «썼다»고 표시하면
+// 가두기는 onClose를 부르지 않는다. 안쪽 React 핸들러는 뿌리 리스너라 이 훅의 document 리스너보다 먼저 돈다(App Router는 뿌리가 document).
+describe('useFocusTrap — 안쪽이 쓴 Esc는 건너뜀([SID:4367])', () => {
+  function WithInnerLayer({ onClose }: { onClose: () => void }) {
+    const ref = useFocusTrap(true, onClose);
+    return (
+      <div ref={ref} tabIndex={-1}>
+        <input data-testid="inner" onKeyDown={(e) => { if (e.key === 'Escape') e.preventDefault(); }} />
+        <button type="button" data-testid="plain">plain</button>
+      </div>
+    );
+  }
+
+  it('안쪽 입력칸이 preventDefault한 Esc → onClose 0 · 표시 없는 Esc(다른 버튼) → onClose 1', async () => {
+    const onClose = vi.fn();
+    await act(async () => { root.render(<WithInnerLayer onClose={onClose} />); });
+    const inner = container.querySelector('[data-testid="inner"]')!;
+    await act(async () => { dispatchKey(inner, 'Escape'); });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { dispatchKey(container.querySelector('[data-testid="plain"]')!, 'Escape'); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

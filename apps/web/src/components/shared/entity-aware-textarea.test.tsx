@@ -211,3 +211,29 @@ describe('EntityAwareTextarea — 로드맵 P2·PR-E L1(리스트박스 elevatio
     expect(listbox?.className).not.toMatch(/(^|\s)shadow-md(\s|$)/);
   });
 });
+
+// [SID:4367] 한 Esc = 한 층 — 후보가 열린 채 Esc는 후보만 닫고 preventDefault로 «썼다»고 표시한다(스토리 패널 window Esc가 이 표시를 보고
+// 편집 취소를 건너뛴다). 후보가 없을 때 Esc는 표시하지 않고 그대로 지나간다(바깥이 편집 취소 · 설계대로).
+describe('EntityAwareTextarea — 후보 Esc는 «썼다» 표시([SID:4367])', () => {
+  it('후보 열림 → Esc: 후보 닫힘 · defaultPrevented 참 / 후보 없음 → Esc: defaultPrevented 거짓', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 'x1', title: '회의록 정리', status: null }] }))));
+    await act(async () => { root.render(<ControlledHarness initial="" projectId="p1" onValueChange={() => {}} />); });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#회');
+      el.selectionStart = 2;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+    expect(document.querySelector('[data-dropdown-panel="entity-candidates"]')).not.toBeNull();
+    const esc = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const first = esc();
+    await act(async () => { el.dispatchEvent(first); });
+    expect(first.defaultPrevented).toBe(true);
+    expect(document.querySelector('[data-dropdown-panel="entity-candidates"]')).toBeNull();
+    const second = esc();
+    await act(async () => { el.dispatchEvent(second); });
+    expect(second.defaultPrevented).toBe(false);
+  });
+});

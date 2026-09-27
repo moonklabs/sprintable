@@ -1474,6 +1474,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // [SID:4367] 한 Esc = 한 층 — 안쪽 층(설명 · AC의 `#` 후보 · 산출물 댓글 쓰기 칸 · 포털 메뉴)이 이 Esc로 자기를 닫고
+        // preventDefault했으면 편집 취소 · 패널 닫기를 하지 않는다(후보를 닫으려던 Esc가 쓴 글까지 버리던 결함).
+        if (e.defaultPrevented) return;
         if (editingTitle) { setEditingTitle(false); setTitleDraft(story.title); return; }
         if (editingDescription) { setEditingDescription(false); setDescriptionDraft(story.description ?? ''); return; }
         if (editingAC) { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); return; }
