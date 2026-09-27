@@ -5,9 +5,7 @@
     "스코프 밖 화면). 마이그레이션 대상 아님 — \"더 늘지 않는다\"만 보장(freeze, 전량 정리는 후속 별건)."
   ],
   "keys": [
-    "app/(authenticated)/organization/workforce/[id]/page.tsx::placeholder::role",
     "app/internal-dogfood/page.tsx::placeholder::internal access secret",
-    "components/docs/extensions/page-embed-node.tsx::placeholder::Enter document slug or ID…",
     "components/organization/event-definer-form.tsx::label::payload",
     "components/organization/event-definer-form.tsx::label::routing",
     "components/settings/workflow-policy-simulator-section.tsx::placeholder::merged",

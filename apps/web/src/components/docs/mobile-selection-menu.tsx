@@ -84,7 +84,7 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
       label: t('toolbarLink'),
       action: () => {
         if (editor.isActive('link')) { editor.chain().focus().unsetLink().run(); return; }
-        const url = window.prompt('URL:');
+        const url = window.prompt(t('linkUrlPrompt'));
         if (url) editor.chain().focus().setLink({ href: url }).run();
       },
       active: editor.isActive('link'),

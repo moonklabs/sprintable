@@ -168,7 +168,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
             type="text"
             value={inputSlug}
             onChange={(e) => setInputSlug(e.target.value)}
-            placeholder="Enter document slug or ID…"
+            placeholder={tDocs('pageEmbedPlaceholder')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />

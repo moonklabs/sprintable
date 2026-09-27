@@ -335,9 +335,9 @@ export function DocEditor({
 
   const addLink = useCallback(() => {
     if (!editor) return;
-    const url = window.prompt('URL:');
+    const url = window.prompt(tEditor('linkUrlPrompt'));
     if (url) editor.chain().focus().setLink({ href: url }).run();
-  }, [editor]);
+  }, [editor, tEditor]);
 
   // addImage/insertTable: 데스크 영구 툴바 제거로 dead code화 — 이미지/표는 slash command(/)으로 도달(기능 보존).
 
@@ -500,7 +500,7 @@ export function DocEditor({
               if (editor.isActive('link')) {
                 editor.chain().focus().unsetLink().run();
               } else {
-                const url = window.prompt('URL:');
+                const url = window.prompt(tEditor('linkUrlPrompt'));
                 if (url) editor.chain().focus().setLink({ href: url }).run();
               }
             }}

@@ -431,7 +431,7 @@ export default function AgentDetailPage() {
                 <OperatorInput
                   value={editRole}
                   onChange={(e) => setEditRole(e.target.value)}
-                  placeholder="role"
+                  placeholder={t('agentRolePlaceholder')}
                   className="max-w-32"
                 />
                 <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-success transition hover:opacity-80 disabled:opacity-50">

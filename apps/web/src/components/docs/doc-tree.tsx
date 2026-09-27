@@ -1,6 +1,7 @@
 'use client';
 
 import { planMoveBeside, planMoveInto, planReorder, type DocMovePlan } from './doc-move-plan';
+import { DocRenameDialog } from './doc-rename-dialog';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
@@ -243,13 +244,12 @@ function TreeNode({
     setContextMenuOpen(true);
   }, []);
 
+  // story #4359 — 브라우저 prompt(영어 고정) 대신 디자인 창.
+  const [renameOpen, setRenameOpen] = useState(false);
   const handleRename = useCallback(() => {
-    const newTitle = prompt('Enter new title:', doc.title);
-    if (newTitle && newTitle !== doc.title && onRename) {
-      void onRename(doc.id, newTitle);
-    }
     setContextMenuOpen(false);
-  }, [doc, onRename]);
+    setRenameOpen(true);
+  }, []);
 
   const handleDelete = useCallback(() => {
     setDeleteConfirmOpen(true);
@@ -274,6 +274,13 @@ function TreeNode({
   }, [doc.id, onAddChildFolder]);
 
   return (
+    <>
+      <DocRenameDialog
+        open={renameOpen}
+        currentTitle={doc.title}
+        onClose={() => setRenameOpen(false)}
+        onSubmit={(newTitle) => { if (onRename) void onRename(doc.id, newTitle); }}
+      />
     <div ref={setNodeRef} style={style}>
       <div ref={rowRef} className="group relative">
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
@@ -414,6 +421,7 @@ function TreeNode({
         </>
       )}
     </div>
+    </>
   );
 }
 
