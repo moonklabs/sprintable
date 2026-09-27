@@ -188,6 +188,7 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
           onOpenChange={(o) => { if (!o) setDraftPin(null); }}
           initialDescription=""
           onSave={handleSaveDraft}
+          draftKey={{ surface: 'spec-pin-new', targetId: artifactId ?? null }}
         />
       ) : null}
       {editingPin ? (
@@ -198,6 +199,7 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
           initialDescription={editingPin.description}
           onSave={handleSaveEdit}
           onDelete={handleDeleteEditing}
+          draftKey={{ surface: 'spec-pin-edit', targetId: editingPin.id }}
         />
       ) : null}
     </div>
