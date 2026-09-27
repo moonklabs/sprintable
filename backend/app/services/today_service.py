@@ -185,7 +185,7 @@ async def _needs_me_from_workflow_steps(
 
 
 async def _resolve_needs_me(
-    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> tuple[list[dict[str, Any]], int]:
     member = await resolve_member(auth, org_id, session)
     raw = (
@@ -206,6 +206,19 @@ async def _resolve_needs_me(
             collapsed[key] = it
 
     items = list(collapsed.values())
+    if restricted_project_ids is not None and items:
+        # story #4351 PR B(까디르 C) — 결재 · 워크플로 항목은 스토리 제목을 싣는다: 접근 불가 프로젝트로 풀리는 항목은 뺀다(게이트 목록과
+        # 같은 규칙 — 어느 프로젝트로도 안 풀리면 org 수준이라 둔다).
+        from app.services.gate_service import resolve_work_item_project_ids_batch
+
+        owner = await resolve_work_item_project_ids_batch(
+            session, org_id, [(it["work_item_type"], it["work_item_id"]) for it in items],
+        )
+        allowed = set(restricted_project_ids)
+        items = [
+            it for it in items
+            if (p := owner.get((it["work_item_type"], it["work_item_id"]))) is None or p in allowed
+        ]
 
     # title 배치 채움(N+1 0) — story #3821 그라운딩 AC4: merge gate 등 work_item_
     # summary가 안 채워진 항목은 story 제목을 별도 배치 조회로 채운다(gates.py의
@@ -278,7 +291,7 @@ async def _resolve_needs_me(
 
 
 async def _resolve_agent_progress(
-    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> list[dict[str, Any]]:
     """story #3821 AC5 — 「위임/참여」는 Story.assignee_id(위임 대상 — human/agent
     혼용 컬럼)==caller 또는 Story.human_owner_member_id(위임한 사람)==caller로
@@ -292,6 +305,8 @@ async def _resolve_agent_progress(
         .join(Story, Story.id == AgentRun.story_id, isouter=True)
         .where(
             AgentRun.org_id == org_id,
+            # story #4351 PR B(까디르 C) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
+            *([] if restricted_project_ids is None else [AgentRun.project_id.in_(restricted_project_ids)]),
             AgentRun.status.in_(_AGENT_RUN_IN_PROGRESS_STATUSES),
             (Story.assignee_id == member.id) | (Story.human_owner_member_id == member.id),
         )
@@ -370,7 +385,7 @@ async def _resolve_agent_progress(
 
 
 async def _resolve_completed_today(
-    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, tz: str,
+    session: AsyncSession, org_id: uuid.UUID, auth: AuthContext, tz: str, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> list[dict[str, Any]]:
     """story #3833 AC2/AC3 — 오늘(tz 자정 이후) 종료된 run 중 호출자가 위임/참여한
     것(_resolve_agent_progress와 **같은** 참여 술어 — Story.assignee_id 또는
@@ -388,6 +403,8 @@ async def _resolve_completed_today(
         .join(Story, Story.id == AgentRun.story_id, isouter=True)
         .where(
             AgentRun.org_id == org_id,
+            # story #4351 PR B(까디르 C) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
+            *([] if restricted_project_ids is None else [AgentRun.project_id.in_(restricted_project_ids)]),
             AgentRun.status.in_(_TERMINAL_STATUSES),
             AgentRun.finished_at.isnot(None),
             AgentRun.finished_at >= since,
@@ -590,13 +607,13 @@ async def _resolve_today_results(
 async def build_today_snapshot(
     session: AsyncSession, *, org_id: uuid.UUID, auth: AuthContext, tz: str,
 ) -> dict[str, Any]:
-    needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth)
-    agent_progress = await _resolve_agent_progress(session, org_id, auth)
-    completed_today = await _resolve_completed_today(session, org_id, auth, tz)
     from app.services.project_auth import restricted_accessible_project_ids
 
-    # story #4351 PR B — 접근이 제한된 caller면 접근 가능 프로젝트 목록(owner/admin = None = 옛 동작). 이 화면의 수 셋이 같은 값을 쓴다.
+    # story #4351 PR B — 접근이 제한된 caller면 접근 가능 프로젝트 목록(owner/admin = None = 옛 동작). 이 화면의 모든 칸이 같은 값을 쓴다.
     restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(auth.user_id)), org_id)
+    needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth, restricted_project_ids=restricted)
+    agent_progress = await _resolve_agent_progress(session, org_id, auth, restricted_project_ids=restricted)
+    completed_today = await _resolve_completed_today(session, org_id, auth, tz, restricted_project_ids=restricted)
     published_today = await _resolve_published_today(session, org_id, tz, restricted_project_ids=restricted)
     usage = await _resolve_usage(session, org_id)
     today_results = await _resolve_today_results(session, org_id, tz, restricted_project_ids=restricted)

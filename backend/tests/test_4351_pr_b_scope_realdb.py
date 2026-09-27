@@ -360,3 +360,52 @@ async def test_insights_board_published_today_and_hook_performance_count_only_ac
             "rows": 2, "board_scope": "org", "secret_in_board": True,
             "published_today": 2, "today_scope": "org", "hook_variants": 2, "hook_scope": "org",
         }, seen
+
+
+async def test_today_needs_me_agent_progress_and_completed_drop_inaccessible_projects(monkeypatch):
+    """까디르 C(PO 2026-09-27) — /today의 결재 항목(needs_me) · 에이전트 진행 · 오늘 완료가 접근 불가 프로젝트 스토리를 싣지 않는다
+    (참여 술어만으론 접근 잃은 프로젝트 제목이 보였다) · owner는 그대로. needs_me 원천 둘은 합성 항목으로 대체(거르기 · 해소는 실 PG)."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    import app.services.today_service as today_service
+    from app.models.agent_run import AgentRun
+    from app.models.pm import Story
+
+    async with _world() as (Session, seeded):
+        now = datetime.now(UTC)
+
+        def _item(key):
+            return {
+                "kind": "approval", "risk": "low", "source": "workflow_step", "source_id": str(uuid.uuid4()),
+                "work_item_type": "story", "work_item_id": seeded[f"story_{key}"], "gate_type": "merge", "title": None,
+                "requested_by_member_id": None, "reason": None, "created_at": now, "gate_id": None,
+                "actions": ["approve", "request_changes", "hold"],
+            }
+
+        async def _gates(*_a, **_k):
+            return [_item("a"), _item("b")]
+
+        async def _steps(*_a, **_k):
+            return []
+
+        monkeypatch.setattr(today_service, "_needs_me_from_gate_inbox", _gates)
+        monkeypatch.setattr(today_service, "_needs_me_from_workflow_steps", _steps)
+        async with Session() as s:
+            for key in ("a", "b"):
+                story = await s.get(Story, seeded[f"story_{key}"])
+                await s.execute(update(Story).where(Story.id == story.id).values(assignee_id=seeded["member_id"]))
+                for status, ended in (("running", None), ("completed", now)):
+                    s.add(AgentRun(
+                        id=uuid.uuid4(), org_id=seeded["org"], project_id=story.project_id, agent_id=seeded["member_id"],
+                        story_id=story.id, status=status, started_at=now, finished_at=ended,
+                    ))
+            await s.commit()
+        member = await _get(Session, seeded, "/api/v2/today?tz=UTC", seeded["member_user"])
+        owner = await _get(Session, seeded, "/api/v2/today?tz=UTC", seeded["owner_user"])
+        assert member.status_code == 200 and owner.status_code == 200, (member.text[:300], owner.text[:300])
+        assert "SECRET-B" not in member.text, "접근 불가 프로젝트 스토리 제목이 /today에 있다"
+        assert "VISIBLE-A-story" in member.text
+        assert member.json()["needs_me_count"] == 1
+        assert "SECRET-B-story" in owner.text and owner.json()["needs_me_count"] == 2

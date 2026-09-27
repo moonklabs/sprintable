@@ -4,7 +4,7 @@
 - «프로젝트 소속 엔터티를 싣는다» = 핸들러 몸통이 `project_id` 칼럼을 가진 모델(등록된 매퍼 전수에서 계산) 또는 Task를 이름으로 쓴다.
 - «해소기를 거친다» = 몸통에 `project_access` · `accessible` · `can_access` · `_scope_filter`를 담은 이름(has_project_access ·
   require_project_access · accessible_project_ids_in_org · restricted_accessible_project_ids · 라우터별 `_require_*_project_access` 등)이 있다.
-- 둘 다 아니면 잡는다. 지금 잡히는 72자리는 `_KNOWN`에 고정(래칫) — **새로 잡히면 RED**, 고쳐져 안 잡히는데 `_KNOWN`에 남아도 RED
+- 둘 다 아니면 잡는다. 지금 잡히는 71자리는 `_KNOWN`에 고정(래칫) — **새로 잡히면 RED**, 고쳐져 안 잡히는데 `_KNOWN`에 남아도 RED
   (양방향 · 고친 자리는 목록에서 뺀다).
 
 ⛔못 잡는 것(선언): ① 핸들러가 서비스 함수에 조회를 넘기는 모양(judgments · verdicts · workflow-line/metrics · /today가 그랬다 —
@@ -37,7 +37,6 @@ _KNOWN = {
     "app/routers/auth_firebase_internal.py::consume_native_bootstrap",
     "app/routers/auth_native_bootstrap.py::native_bootstrap",
     "app/routers/auth_native_bootstrap.py::native_bootstrap_challenge",
-    "app/routers/command_center.py::my_actions",
     "app/routers/conversations.py::add_participant",
     "app/routers/conversations.py::get_conversation",
     "app/routers/conversations.py::list_conversations",
