@@ -133,8 +133,8 @@ async def test_draft_lists_show_only_accessible_projects(path, visible):
         member = await _get(Session, seeded, path, seeded["member_user"])
         assert member.status_code == 200, member.text[:300]
         assert visible in member.text and "SECRET-B" not in member.text
-        if "x-total-count" in member.headers:
-            assert member.headers["x-total-count"] == "1", "총계도 접근 가능분만(존재가 새지 않게)"
+        # 까디르 P3 — 헤더가 없으면 그 자체로 RED(예전엔 조건부라 헤더가 빠져도 통과했다).
+        assert member.headers.get("x-total-count") == "1", "총계도 접근 가능분만(존재가 새지 않게)"
         owner = await _get(Session, seeded, path, seeded["owner_user"])
         assert "SECRET-B" in owner.text, "전체 접근은 옛 동작 그대로"
 
@@ -144,6 +144,8 @@ async def test_draft_lists_show_only_accessible_projects(path, visible):
     "/api/v2/organizations/{org}/channel-posts/drafts/{channel_b}/versions",
     "/api/v2/organizations/{org}/site-posts/drafts/{site_b}",
     "/api/v2/organizations/{org}/site-posts/drafts/{site_b}/versions",
+    # 까디르 P2 — 부모 원문이 접근 불가면 변형 목록도 없는 원문과 같은 404(예전 200 [] = 존재 누설).
+    "/api/v2/organizations/{org}/site-posts/drafts/{site_b}/variants",
 ])
 async def test_single_inaccessible_draft_is_404(path):
     async with _world() as (Session, seeded):
@@ -232,3 +234,27 @@ async def test_reconcile_of_inaccessible_publication_writes_nothing(monkeypatch)
                 .where(ChannelPublicationReconciliation.publication_id == pubs["b"])
             )).scalar_one()
         assert written == 0, "접근 못 하는 프로젝트 발행물에 대조 행이 써졌다"
+
+
+async def test_campaign_detail_carries_only_accessible_project_items():
+    """까디르 P2 — 캠페인 상세 안의 글은 SQL에서 접근 가능 프로젝트 것만(제한 구성원) · owner는 둘 다."""
+    from sqlalchemy import update
+
+    from app.models.site_post_draft import SitePostDraft
+    from app.services.campaigns import create_campaign
+
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            campaign = await create_campaign(
+                s, org_id=seeded["org"], name="C-4351", starts_at=None, ends_at=None, created_by_member_id=uuid.uuid4(),
+            )
+            await s.execute(update(SitePostDraft).where(
+                SitePostDraft.id.in_([uuid.UUID(d) for d in seeded["site"].values()])
+            ).values(campaign_id=campaign.id))
+            await s.commit()
+        path = f"/api/v2/organizations/{{org}}/campaigns/{campaign.id}"
+        member = await _get(Session, seeded, path, seeded["member_user"])
+        owner = await _get(Session, seeded, path, seeded["owner_user"])
+        assert member.status_code == 200 and owner.status_code == 200, (member.text[:300], owner.text[:300])
+        assert "VISIBLE-A-site-title" in member.text and "SECRET-B" not in member.text
+        assert "SECRET-B-site-title" in owner.text

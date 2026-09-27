@@ -344,13 +344,15 @@ def gate_in_inaccessible_project_clause(accessible_project_ids: Iterable[uuid.UU
     branches = [
         and_(
             Gate.work_item_type == wtype,
-            Gate.work_item_id.in_(select(model.id).where(~model.project_id.in_(acc))),
+            # 까디르 P3 — `NULL NOT IN ()`는 참이라, 접근 가능 프로젝트가 0인 caller에겐 project_id NULL(org 수준) 행이 숨겨졌다 →
+            # «프로젝트가 있고 그게 접근 불가»일 때만 숨긴다(빈 집합이어도 org 수준은 보인다).
+            Gate.work_item_id.in_(select(model.id).where(model.project_id.isnot(None), ~model.project_id.in_(acc))),
         )
         for wtype, model in _BATCH_PROJECT_MODELS
     ]
     branches.append(and_(
         Gate.work_item_type == "task",
-        Gate.work_item_id.in_(select(Task.id).join(Story, Task.story_id == Story.id).where(~Story.project_id.in_(acc))),
+        Gate.work_item_id.in_(select(Task.id).join(Story, Task.story_id == Story.id).where(Story.project_id.isnot(None), ~Story.project_id.in_(acc))),
     ))
     anchor_project = Gate.neutral_facts["project_id"].astext
     branches.append(and_(

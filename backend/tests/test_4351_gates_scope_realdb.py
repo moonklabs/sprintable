@@ -133,3 +133,36 @@ async def test_inbox_hitl_rows_follow_the_same_rule():
         owner = await _get(Session, seeded, "/api/v2/gates/inbox", seeded["owner_user"])
         assert "VISIBLE-A-hitl-prompt" in member.text and "SECRET-B-hitl" not in member.text
         assert "SECRET-B-hitl-prompt" in owner.text
+
+
+async def test_member_with_no_accessible_project_still_sees_org_level_gates():
+    """까디르 P3 — 접근 가능 프로젝트가 0인 구성원: `NULL NOT IN ()`가 참이라 project_id NULL(org 수준 워크플로) 게이트가 숨겨졌다.
+    org 수준 게이트는 보이고 프로젝트 B 게이트는 안 보여야 한다."""
+    from app.models.gate import Gate
+    from app.models.project import OrgMember
+    from app.models.user import User
+    from app.models.workflow_line import WorkflowLineDefinitionVersion
+
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            nobody = uuid.uuid4()
+            s.add(User(id=nobody, email=f"n-{nobody.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            s.add(OrgMember(id=uuid.uuid4(), org_id=seeded["org"], user_id=nobody, role="member"))
+            version = WorkflowLineDefinitionVersion(
+                id=uuid.uuid4(), org_id=seeded["org"], project_id=None, entity_type="story", version=1,
+                config_hash="h-4351", created_by_member_id=uuid.uuid4(),
+            )
+            s.add(version)
+            await s.flush()
+            wf_gate = Gate(
+                id=uuid.uuid4(), org_id=seeded["org"], work_item_id=version.id, work_item_type="wf_line_version",
+                gate_type="merge", status="pending", neutral_facts={},
+            )
+            s.add(wf_gate)
+            await s.commit()
+        resp = await _get(Session, seeded, "/api/v2/gates", nobody)
+        ids = {item["id"] for item in resp.json()}
+        assert str(wf_gate.id) in ids, "접근 0 구성원에게도 org 수준 워크플로 게이트는 보여야 한다"
+        assert seeded["gates"]["b"] not in ids and seeded["gates"]["a"] not in ids
+        assert seeded["gates"]["org"] in ids

@@ -1694,6 +1694,17 @@ async def list_content_item_variants_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     content_item = await get_site_post_draft(db, org_id=org_id, draft_id=content_item_id)
+    # story #4351(까디르 P2) — 부모 원문(사이트 글 초안)이 caller가 접근 못 하는 프로젝트면 없는 원문과 같은 404. 예전엔 부모를 org 전체로
+    # 찾고 변형만 좁혀 «접근 불가 = 200 []» · «없음 = 404»로 갈려 존재가 샜다.
+    if content_item is not None:
+        from app.models.pm import Story
+        from app.services.project_auth import has_project_access
+
+        parent_project_id = (await db.execute(
+            select(Story.project_id).where(Story.id == content_item.work_item_id, Story.org_id == org_id)
+        )).scalar_one_or_none()
+        if parent_project_id is None or not await has_project_access(db, uuid.UUID(auth.user_id), parent_project_id, org_id):
+            content_item = None
     if content_item is None:
         raise HTTPException(status_code=404, detail=f"원문을 찾을 수 없습니다: {content_item_id}")
 
