@@ -98,7 +98,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
 
 // ─── Shiki Code Block View ────────────────────────────────────────────────────
 
-function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
+function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeViewProps) {
   // story #3776(1층B) — "복사됨"/"복사", docs ns의 기존 codeCopied/codeCopy 키 재사용.
   const t = useTranslations('docs');
   const [copied, setCopied] = useState(false);
@@ -108,6 +108,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   const [highlightedHtml, setHighlightedHtml] = useState('');
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langMenuRef = useRef<HTMLDivElement>(null);
+  const langButtonRef = useRef<HTMLButtonElement>(null);
   const langListClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
 
   const language = (node.attrs as { language?: string }).language ?? null;
@@ -147,9 +148,16 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
   }, [code]);
 
   const handleLangSelect = useCallback((lang: string) => {
-    editor?.commands.updateAttributes('codeBlock', { language: lang });
+    // story #4360 — 이 고르개가 붙은 블록(NodeView 자기 위치)의 언어를 바꾼다. 예전 `editor.commands.updateAttributes('codeBlock', …)`는
+    // **지금 선택 영역**의 코드 블록을 바꿔, 커서가 다른 코드 블록에 있으면 그 블록의 언어가 바뀌었다.
+    // 고른 선택지는 목록과 함께 사라진다 — 초점이 body로 떨어지지 않게 이 블록의 언어 버튼으로 돌려놓는다(키보드로 이어서 쓸 수 있게).
+    // 단 초점이 아직 이 고르개 안(또는 body · 없음)일 때만 — 사용자가 그 사이 딴 데로 옮긴 초점은 빼앗지 않는다(까디르 09-27).
+    const active = document.activeElement;
+    const focusStillHere = !active || active === document.body || (langMenuRef.current?.contains(active) ?? false);
+    updateAttributes({ language: lang });
     setShowLangMenu(false);
-  }, [editor]);
+    if (focusStillHere) langButtonRef.current?.focus();
+  }, [updateAttributes]);
 
   useEffect(() => {
     if (!showLangMenu) return;
@@ -170,6 +178,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
           {/* Language dropdown */}
           <div ref={langMenuRef} className="relative" contentEditable={false}>
             <button
+              ref={langButtonRef}
               type="button"
               onClick={() => isEditable && setShowLangMenu((v) => !v)}
               className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${
