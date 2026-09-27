@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import { useTranslations } from 'next-intl';
 import {
   Dialog,
@@ -38,8 +39,13 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
   const t = useTranslations('content');
   const tc = useTranslations('common');
   const prefillTitle = `${t('commentsConvertDialogTitlePrefix')} ${postTitle}`;
-  const [title, setTitle] = useState(prefillTitle);
-  const [note, setNote] = useState('');
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(메모)이 든 폼이라 폼 전체(제목 · 메모)가 댓글별 초안 하나: ✕ · 바깥 · Esc로 닫혀도 남고
+  // 보이는 «취소»와 만들기 성공에서만 지운다. 처음 값 = 미리 채운 제목 + 빈 메모(같으면 초안 없음).
+  const emptyForm = useMemo(() => ({ title: prefillTitle, note: '' }), [prefillTitle]);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft({ surface: 'comment-convert-to-task', targetId: comment.id, field: 'form' }, emptyForm);
+  const { title, note } = form;
+  const setTitle = (v: string) => setForm((f) => ({ ...f, title: v }));
+  const setNote = (v: string) => setForm((f) => ({ ...f, note: v }));
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successStoryId, setSuccessStoryId] = useState<string | null>(null);
@@ -50,6 +56,7 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
     try {
       const result = await onSubmit({ title: title.trim() || prefillTitle, note: note.trim() });
       if (result.ok) {
+        clearFormDraft();
         setSuccessStoryId(result.storyId);
       } else {
         setErrorMessage(result.errorMessage);
@@ -135,7 +142,7 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
             ) : null}
 
             <DialogFooter className="shrink-0">
-              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onClose}>{t('commentsConvertCancel')}</Button>} />
+              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { clearFormDraft(); onClose(); }}>{t('commentsConvertCancel')}</Button>} />
               <Button type="submit" disabled={submitting}>
                 {submitting ? tc('creating') : t('commentsConvertSubmit')}
               </Button>

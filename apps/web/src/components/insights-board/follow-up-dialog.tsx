@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import { useTranslations } from 'next-intl';
 import {
   Dialog,
@@ -40,7 +41,6 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
   const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
   const t = useTranslations('insightsBoard');
   const tc = useTranslations('common');
-  const [kind, setKind] = useState<FollowUpKind>('republish');
   const kindLabel: Record<FollowUpKind, string> = {
     republish: t('followUpKindRepublish'),
     edit: t('followUpKindEdit'),
@@ -49,8 +49,14 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
   // §21-5 — 「제목 칸을 비워 두지 않는다·기본값을 채워 보인다」. 처음엔 기본 유형
   // (republish)의 프리필로 시작한다.
   const prefillTitle = (k: FollowUpKind) => `[${kindLabel[k]}] ${originalTitle}`;
-  const [title, setTitle] = useState(() => prefillTitle('republish'));
-  const [note, setNote] = useState('');
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(메모)이 든 폼이라 폼 전체(유형 · 제목 · 메모)가 발행물별 초안 하나: ✕ · 바깥 · Esc로
+  // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 처음 값 = 기본 유형(republish) + 그 프리필 제목 + 빈 메모.
+  const initialTitle = prefillTitle('republish');
+  const emptyForm = useMemo(() => ({ kind: 'republish' as FollowUpKind, title: initialTitle, note: '' }), [initialTitle]);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft({ surface: 'insights-follow-up', targetId: publicationId, field: 'form' }, emptyForm);
+  const { kind, title, note } = form;
+  const setTitle = (v: string) => setForm((f) => ({ ...f, title: v }));
+  const setNote = (v: string) => setForm((f) => ({ ...f, note: v }));
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successStoryId, setSuccessStoryId] = useState<string | null>(null);
@@ -72,6 +78,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
         const json = (await res.json().catch(() => null)) as { data?: FollowUpCreateResponse } | null;
         const storyId = json?.data?.story_id;
         if (storyId) {
+          clearFormDraft();
           setSuccessStoryId(storyId);
         } else {
           setErrorMessage(t('followUpErrorGeneric'));
@@ -137,8 +144,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                       // 규율: "손 댄 값은 화면이 조용히 덮어쓰지 않는다"). 지금 값이 «직전
                       // 유형의 프리필 그대로»일 때만(=손 안 댄 기본값) 새 유형의 프리필로
                       // 갈아끼운다 — 이미 고쳤으면 그대로 둔다.
-                      setTitle((current) => (current === prefillTitle(kind) ? prefillTitle(option) : current));
-                      setKind(option);
+                      setForm((f) => ({ ...f, kind: option, title: f.title === prefillTitle(f.kind) ? prefillTitle(option) : f.title }));
                     }}
                     aria-pressed={kind === option}
                     className={`rounded-md border px-3 py-1.5 text-sm ${
@@ -189,7 +195,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
             ) : null}
 
             <DialogFooter className="shrink-0">
-              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onClose}>{t('followUpCancel')}</Button>} />
+              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { clearFormDraft(); onClose(); }}>{t('followUpCancel')}</Button>} />
               <Button type="submit" disabled={submitting}>
                 {submitting ? tc('creating') : t('followUpSubmit')}
               </Button>
