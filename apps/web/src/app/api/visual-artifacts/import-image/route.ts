@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
+import { getAuthContext } from '@/lib/auth-helpers';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
 
@@ -16,7 +16,10 @@ const MAX_IMPORT_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB — 첨부(100MB)보다 
  */
 export async function POST(request: Request) {
   try {
-    const me = await getOrgProjectAuthContext(request);
+    // story #4347 — claim만 보는 `getOrgProjectAuthContext`로 옮기지 않는다: 이 핸들러는 BE를 거치지 않고 스토리지에 직접 쓴다
+    // (BE 재인가 없음). 인가는 `/me`(멤버 행 실조회) 한 번뿐이라, claim만 보면 접근이 취소돼도 JWT 만료 전까지 옛 org/프로젝트 경로에
+    // 올리기가 된다. 톱니 가드(get-auth-context-ratchet.guard.test.ts)가 이 부류를 잡는다.
+    const me = await getAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
 
     const formData = await request.formData();

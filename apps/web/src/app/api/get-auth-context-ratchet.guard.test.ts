@@ -11,12 +11,35 @@
  * - 세 모양을 본다(story #4347 AC5): 변수에 담기(`const me = await getAuthContext(...)`) · 구조분해(`const { org_id } = ...` — `...rest`면
  *   통째로 넘긴 것으로 보고 걸지 않는다) · 인라인(`(await getAuthContext(req)).org_id`).
  * - 못 보는 것: 핸들러 밖 도우미 함수 안의 호출(지금 0곳 — 필요해지면 넓힌다) · `let` 뒤 재할당 같은 드문 모양.
+ *
+ * 예외 부류(story #4347 · 까디르 P1): BE를 거치지 않고 **스토리지에 직접 쓰는** 핸들러(`putObject(`)는 BE 재인가가 없어 인가가 `/me`(멤버 행
+ * 실조회)뿐이다 — claim만 보는 `getOrgProjectAuthContext`면 접근이 취소돼도 JWT 만료 전까지 옛 org/프로젝트 경로에 올리기가 된다. 그래서
+ * 이 핸들러는 톱니에서 빼고(`getAuthContext` 유지), 거꾸로 `getOrgProjectAuthContext`를 쓰면 RED다.
+ * 못 보는 것: `putObject` 말고 다른 이름으로 쓰는 경로 · 도우미 함수 안의 쓰기(지금 BFF 직접 쓰기는 전부 `putObject(`).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const FULL_ONLY_FIELDS = new Set(['id', 'project_name', 'scope']);
+
+/** BE 재인가 없이 스토리지에 직접 쓰는 핸들러 표식(story #4347). */
+const DIRECT_STORAGE_WRITE = /\bputObject\(/;
+
+/** 핸들러 본문들(«메서드» → 본문). */
+function handlerBodies(source: string): Array<[string, string]> {
+  const parts = ('\n' + source).split(/\nexport (?:async function|const) (GET|POST|PUT|PATCH|DELETE)\b/);
+  const out: Array<[string, string]> = [];
+  for (let i = 1; i < parts.length; i += 2) out.push([parts[i], parts[i + 1]]);
+  return out;
+}
+
+/** 스토리지에 직접 쓰면서 claim만 보는 인증을 쓰는 핸들러(메서드들) — 있으면 안 된다. */
+export function scanDirectStorageClaimOnly(source: string): string[] {
+  return handlerBodies(source)
+    .filter(([, body]) => DIRECT_STORAGE_WRITE.test(body) && body.includes('getOrgProjectAuthContext('))
+    .map(([method]) => method);
+}
 
 export interface FlaggedHandler {
   method: string;
@@ -31,6 +54,7 @@ export function scanRouteSource(source: string): FlaggedHandler[] {
     const method = parts[i];
     const body = parts[i + 1];
     if (!body.includes('getAuthContext(')) continue;
+    if (DIRECT_STORAGE_WRITE.test(body)) continue;  // 직접 스토리지 쓰기 — `/me` 재인가가 필요하다(위 예외 부류)
     const fields = new Set<string>();
     let needsFull = false;
     let seen = false;
@@ -128,6 +152,30 @@ describe('getAuthContext 톱니 가드(story #4346)', () => {
     const found = new Set(scanRepo());
     expect(BASELINE.filter((k) => !found.has(k))).toEqual([]);
     expect(new Set(BASELINE).size).toBe(BASELINE.length);
+  });
+
+  it('판정 대조(story #4347) — 스토리지에 직접 쓰는 핸들러는 톱니에서 빠지고, claim만 보는 인증이면 걸린다', () => {
+    const wrap = (auth: string) =>
+      `export async function POST(request: Request) {\n  const me = await ${auth}(request);\n  await storage.putObject(B, \`org/\${me.org_id}\`, body, t);\n}`;
+    expect(scanRouteSource(wrap('getAuthContext'))).toEqual([]);
+    expect(scanDirectStorageClaimOnly(wrap('getAuthContext'))).toEqual([]);
+    expect(scanDirectStorageClaimOnly(wrap('getOrgProjectAuthContext'))).toEqual(['POST']);
+    // 쓰지 않는 핸들러는 이 규칙과 무관
+    expect(scanDirectStorageClaimOnly(`export async function GET(request: Request) {\n  const me = await getOrgProjectAuthContext(request);\n}`)).toEqual([]);
+  });
+
+  it('스토리지에 직접 쓰는 핸들러는 claim만 보는 인증을 쓰지 않는다(BE 재인가 없음 → /me로 재인가)', () => {
+    const offenders: string[] = [];
+    const writers: string[] = [];
+    for (const rel of routeFiles()) {
+      const source = readFileSync(path.join(API_DIR, rel), 'utf8');
+      for (const [method, body] of handlerBodies(source)) if (DIRECT_STORAGE_WRITE.test(body)) writers.push(`${rel} ${method}`);
+      for (const method of scanDirectStorageClaimOnly(source)) offenders.push(`${rel} ${method}`);
+    }
+    expect(offenders, '이 핸들러는 getAuthContext로(스토리지 직접 쓰기 전 멤버 행 재인가)').toEqual([]);
+    // 대조 — 스캐너가 실제 직접 쓰기 자리를 본다(import-image · 대화 · 문서 · 스토리 첨부 · storage/local).
+    expect(writers).toContain('visual-artifacts/import-image/route.ts POST');
+    expect(writers.length).toBeGreaterThanOrEqual(5);
   });
 
   it('스캐너가 실제 라우트를 읽는다(헛돌지 않음)', () => {

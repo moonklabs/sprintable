@@ -6,6 +6,8 @@
  * - 사람 세션 + claim → `/me` 0
  * - claim 없음 → `/me` 1(fail-closed · 예전과 같은 인증)
  * - 세션 없음 → 401
+ *
+ * 옮기지 않은 1곳(`KEPT`): BE를 거치지 않고 스토리지에 직접 쓰는 핸들러 — claim이 있어도 `/me`(멤버 행 실조회)로 재인가한다.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,7 +29,7 @@ vi.mock('@/lib/fastapi-proxy', async (importOriginal) => ({
   proxyToFastapi: vi.fn(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })),
 }));
 
-/** 옮긴 핸들러(«파일 메서드») — 4346 톱니 가드의 옛 목록 그대로. */
+/** 옮긴 핸들러(«파일 메서드») — 4346 톱니 가드의 옛 목록(75)에서 `KEPT`를 뺀 74곳. */
 const MOVED: readonly string[] = [
   'agents/[id]/recruit/route.ts POST',
   'auth/change-password/route.ts PATCH',
@@ -101,10 +103,12 @@ const MOVED: readonly string[] = [
   'visual-artifacts/[id]/versions/[versionNumber]/export/png/upload-url/route.ts POST',
   'visual-artifacts/[id]/versions/[versionNumber]/route.ts GET',
   'visual-artifacts/[id]/versions/route.ts GET',
-  'visual-artifacts/import-image/route.ts POST',
   'visual-artifacts/route.ts GET',
   'visual-artifacts/route.ts POST',
 ];
+
+/** 옮기지 않은 핸들러 — BE 재인가 없이 스토리지에 직접 쓴다(claim만 보면 접근 취소 뒤에도 JWT 만료 전까지 올리기가 된다). */
+const KEPT: readonly string[] = ['visual-artifacts/import-image/route.ts POST'];
 
 const meCalls = () => fastapiCallMock.mock.calls.filter(([, p]) => p === '/api/v2/me').length;
 const PARAMS = { params: Promise.resolve(new Proxy({}, { get: () => '00000000-0000-4000-8000-000000000001' })) };
@@ -130,8 +134,16 @@ beforeEach(() => {
 });
 
 describe('story #4347 — 옮긴 BFF 핸들러 75곳의 /me 왕복', () => {
-  it('목록이 75곳이다(옛 톱니 가드 목록 그대로)', () => {
-    expect(MOVED.length).toBe(75);
+  it('목록이 75곳이다(옛 톱니 가드 목록 = 옮긴 74 + 유지 1)', () => {
+    expect(MOVED.length).toBe(74);
+    expect(MOVED.filter((e) => KEPT.includes(e))).toEqual([]);
+    expect(MOVED.length + KEPT.length).toBe(75);
+  });
+
+  it.each(KEPT)('%s — 유지: 사람 세션 + claim이어도 /me 1(스토리지 직접 쓰기 전 재인가)', async (entry) => {
+    getServerSessionMock.mockResolvedValue({ access_token: 'tok', user_id: 'u1', org_id: 'org-1', project_id: 'proj-1' });
+    await call(entry);
+    expect(meCalls()).toBe(1);
   });
 
   it.each(MOVED)('%s — 사람 세션 + claim → /me 0', async (entry) => {
