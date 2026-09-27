@@ -37,6 +37,12 @@ let seededProjectId = '';
 // `p` 없이 나와 프록시가 쿠키 프로젝트로 고르므로 순회가 다른 프로젝트를 잴 수 있었다(까디르 검수 · 그 링크 자체의 결함은 별 카드).
 const withProject = (path: string) => (/[?&]p=/.test(path) ? path : `${path}${path.includes('?') ? '&' : '?'}p=${seededProjectId}`);
 const LONG_DOC_TITLE = '[FE·prod 승격 준비] 명령 팔레트 «작업 목록»이 /work-list(직접 경로)로 보내는데 옛 주소 변환 표에 work-list가 없어 404가 난다';
+// [SID:4356] 문서 읽기 빵부스러기 «지식 / 분류 / 제목» — 분류 = 문서의 맨 위 폴더. 짧은 분류 + 긴 제목 · 긴 분류 + 긴 제목(유나 CR 4747).
+const CRUMB_SHORT_CATEGORY = '기획';
+const CRUMB_LONG_CATEGORY = '제품 · 디자인 · 개발이 함께 보는 분기 계획 문서 모음';
+const CRUMB_LONG_TITLE = '[문서 읽기 빵부스러기] 짧은 분류 옆에 아주 긴 제목이 오면 분류는 통째로 남고 제목만 말줄임으로 줄어야 한다';
+let crumbShortSlug = '';
+let crumbLongSlug = '';
 
 /** 응답 봉투({data} · 날것 · 목록)에서 조건에 맞는 첫 객체를 찾는다. */
 function findDeep(value: unknown, pred: (o: Record<string, unknown>) => boolean): Record<string, unknown> | null {
@@ -83,6 +89,16 @@ test.beforeAll(async () => {
   seededProjectId = projectId;
   // 실사용 프로젝트 이름 길이(민 기기의 «뭉클랩 / 제로고»처럼 상단바 컨텍스트 칩이 최대 폭까지 차는 쪽) — 짧은 이름이면 칩이 좁아 상단바 경합이 안 드러난다.
   await json(await api.patch(`/api/v2/projects/${projectId}`, { headers: H, data: { name: PROJECT_NAME } }), 'project name');
+
+  // [SID:4356] 맨 위 폴더(분류) 둘 · 그 안에 긴 제목 문서 하나씩 — 문서 읽기 빵부스러기 실제 폭을 잰다(아래 빵부스러기 테스트).
+  const stamp = Date.now();
+  for (const [category, key] of [[CRUMB_SHORT_CATEGORY, 'short'], [CRUMB_LONG_CATEGORY, 'long']] as const) {
+    const folder = findDeep(await json(await api.post('/api/v2/docs', { headers: H, data: { org_id: orgId, project_id: projectId, slug: `crumb-${key}-folder-${stamp}`, title: category, content: '', is_folder: true } }), 'crumb folder'), (o) => typeof o['id'] === 'string')!;
+    const slug = `crumb-${key}-doc-${stamp}`;
+    await json(await api.post('/api/v2/docs', { headers: H, data: { org_id: orgId, project_id: projectId, slug, title: CRUMB_LONG_TITLE, content: '본문', parent_id: folder['id'] } }), 'crumb doc');
+    if (key === 'short') crumbShortSlug = slug;
+    else crumbLongSlug = slug;
+  }
 
   for (const title of LONG_STORY_TITLES) {
     await json(await api.post('/api/v2/stories', { headers: H, data: { org_id: orgId, project_id: projectId, title } }), 'story');
@@ -292,4 +308,48 @@ test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정�
   await selectedTrigger.click();
   await expect(unnamed.locator('svg'), '고른 행에 선택 표시').toHaveCount(1);
   await expect(page.getByRole('menuitem', { name: '전체 담당자', exact: true }).locator('svg'), '«전체 담당자»에서 선택 표시가 빠짐').toHaveCount(0);
+});
+
+// [SID:4356] 유나 CR(PR 4747) — 문서 읽기 빵부스러기를 클래스가 아니라 실 페이지 배치로 잰다(320 · 360 · 390).
+// 짧은 분류(«기획»)는 긴 제목 옆에서 통째로(잘림 0 · 폭 ≥ 글자 폭) 남고, 긴 분류는 말줄임(…)으로 줄며, «지식»은 늘 한 줄 · 제목은 바닥 3rem.
+// 옛 규칙(분류 · 제목 둘 다 바탕 = 글자 폭)이면 짧은 분류가 5.8~10.6px로 눌려 «기»만 남았다 → 첫 단언이 빨개진다.
+test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통째로 · 긴 분류는 말줄임 · «지식» 한 줄(story #4356)', async ({ page }) => {
+  test.setTimeout(5 * 60_000);
+  expect(crumbShortSlug && crumbLongSlug, '빵부스러기 문서 시드').toBeTruthy();
+  const measure = (category: string) => page.evaluate((cat) => {
+    const root = [...document.querySelectorAll('a')].find((a) => a.textContent === '지식' && (a.parentElement?.textContent ?? '').includes(cat));
+    const row = root?.parentElement;
+    const kids = row ? ([...row.children] as HTMLElement[]) : [];
+    const catEl = kids.find((el) => el.textContent === cat);
+    if (!root || !catEl) return null;
+    const title = kids[kids.indexOf(catEl) + 2];
+    const range = (el: Element) => { const r = document.createRange(); r.selectNodeContents(el); return r; };
+    // 줄 수 = 글자 조각 사각형의 서로 다른 윗변 수(블록이 된 flex 항목도 글자 줄은 따로 센다).
+    const lines = (el: Element) => new Set([...range(el).getClientRects()].map((q) => Math.round(q.top))).size;
+    return {
+      rootLines: lines(root),
+      catW: catEl.clientWidth, catScroll: catEl.scrollWidth, catText: range(catEl).getBoundingClientRect().width, catOverflow: getComputedStyle(catEl).textOverflow,
+      titleW: title?.clientWidth ?? 0, titleScroll: title?.scrollWidth ?? 0,
+    };
+  }, category);
+
+  for (const width of [320, 360, 390]) {
+    await page.setViewportSize({ width, height: 874 });
+    for (const [slug, category, isLong] of [[crumbShortSlug, CRUMB_SHORT_CATEGORY, false], [crumbLongSlug, CRUMB_LONG_CATEGORY, true]] as const) {
+      await page.goto(withProject(`/docs/${slug}/view`), { waitUntil: 'domcontentloaded' });
+      await expect.poll(() => measure(category), { timeout: 90_000, message: `${width} ${category} — 빵부스러기 줄이 그려짐` }).not.toBeNull();
+      const m = (await measure(category))!;
+      const at = `${width} · ${isLong ? '긴' : '짧은'} 분류`;
+      expect(m.rootLines, `${at} — «지식» 한 줄`).toBe(1);
+      if (isLong) {
+        expect(m.catOverflow, `${at} — 말줄임(…)`).toBe('ellipsis');
+        expect(m.catScroll, `${at} — 줄어서 말줄임`).toBeGreaterThan(m.catW);
+      } else {
+        expect(m.catScroll, `${at} — 통째로(잘림 0)`).toBeLessThanOrEqual(m.catW + 1);
+        expect(m.catW, `${at} — 폭 ≥ 글자 폭`).toBeGreaterThanOrEqual(Math.floor(m.catText));
+        expect(m.titleScroll, `${at} — 긴 제목은 말줄임`).toBeGreaterThan(m.titleW);
+      }
+      expect(m.titleW, `${at} — 제목 바닥 3rem`).toBeGreaterThanOrEqual(47);
+    }
+  }
 });

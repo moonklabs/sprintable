@@ -160,3 +160,27 @@ describe('DocViewPage — 페이지 h1 1개(story #3946)', () => {
     expect(h1s[0]!.className).toContain('sr-only');
   });
 });
+
+// [SID:4356] 390/360 빵부스러기 «지식»이 한 글자 폭(10~12px)까지 줄어 «지 / 식»으로 꺾였다(nowrap flex · 한글 최소 폭 = 한 글자).
+// jsdom은 배치를 안 해서 배치를 정하는 클래스를 못박는다(실제 폭은 헤드리스 Chromium 판 — PR 본문 표).
+describe('DocViewPage — 빵부스러기 좁은 폭(4356)', () => {
+  // 유나 CR(PR 4747) — 제목은 남는 자리만(flex-1 · 바탕 0 · 바닥 3rem) · 분류는 바탕 = 글자 폭(flex-1 아님)이라 짧은 분류가 통째로 남는다.
+  // jsdom은 배치를 안 해서 여기선 클래스만 — 실제 폭은 e2e/mobile-width-overflow.spec.ts(짧은 분류 + 긴 제목 · 320/360/390)가 잰다.
+  it('«지식» · 구분 «/»는 shrink-0(«지식»은 whitespace-nowrap) · 분류는 min-w-0 truncate(바탕 = 글자 폭) · 제목은 min-w-[3rem] flex-1 truncate', async () => {
+    await mount();
+    const c = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/);
+    const rootLink = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.docs.breadcrumbKnowledgeRoot)!;
+    expect(c(rootLink)).toEqual(expect.arrayContaining(['shrink-0', 'whitespace-nowrap']));
+    const row = rootLink.parentElement!;
+    const seps = [...row.children].filter((el) => el.textContent === '/');
+    expect(seps).toHaveLength(2);
+    for (const sep of seps) expect(c(sep)).toContain('shrink-0');
+    const cat = [...row.children].find((el) => el.textContent === '제품 스펙')!;
+    const title = [...row.children].find((el) => el.textContent === '결제 스펙 v2')!;
+    expect(c(cat)).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+    expect(c(cat)).not.toContain('flex-1');
+    expect(c(title)).toEqual(expect.arrayContaining(['min-w-[3rem]', 'flex-1', 'truncate']));
+    expect(c(title)).not.toContain('min-w-0');
+  });
+});
+
