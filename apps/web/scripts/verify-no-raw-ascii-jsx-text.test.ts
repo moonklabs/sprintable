@@ -112,11 +112,12 @@ describe('실 파일 뮤테이션 — story-detail-panel.tsx(Labels 헤딩)', ()
 // 교체한 게 실제로 이 자리를 잡는지(baseline에서 빼면 RED) 직접 확인한다. "Loading
 // document…"는 아직 낱말 미확定이라 baseline에 남아있다 — 고쳐진 게 아니라 "이 술어가
 // 이 자리를 볼 수 있다"는 것만 증명.
-describe('실 파일 실측 양성대조 — page-embed-node.tsx("Loading document…", 구두점 섞인 자리)', () => {
+// story #4359 — 이 자리(page-embed-node.tsx "Loading document…")는 i18n으로 고쳐져 실 파일에서 사라졌다(baseline에서도 빠짐). 구두점(…) 섞인
+// JSX 글자를 잡는지의 양성 대조는 그대로 두되, 표본을 **고치기 전 그 줄**을 담은 픽스처로 옮긴다(jsx-attr 가드와 같은 처리).
+describe('양성대조 — 구두점 섞인 JSX 글자(옛 page-embed-node.tsx 줄 · story #4359에서 i18n으로 고침)', () => {
   const REL_FILE = 'components/docs/extensions/page-embed-node.tsx';
-  const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
-  const original = readFileSync(ABS_FILE, 'utf8');
-  const baseline = loadBaseline(BASELINE_PATH);
+  const original = '<span className="text-sm">Loading document…</span>';
+  const baseline = new Set([...loadBaseline(BASELINE_PATH), `${REL_FILE}::Loading document…`]);
 
   it('원본 실측 — "Loading document…"가 이 가드에 걸린다(옛 ASCII_WORD_RE는 …때문에 놓쳤을 자리)', () => {
     const refs = scanContent(original, REL_FILE);
