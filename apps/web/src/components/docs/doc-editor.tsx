@@ -28,6 +28,7 @@ export function DocEditor({
   onFileError,
   projectId,
   onChange,
+  onNormalize,
   onSave,
   isDirty = false,
   autosave = true,
@@ -53,6 +54,9 @@ export function DocEditor({
   onFileError?: (message: string) => void;
   projectId?: string;
   onChange: (value: string) => void;
+  /** story #4339(AC7) — 편집 없이 편집기가 값을 다듬은 결과(열 때 · 불러온 뒤 · 플러그인 정규화). 사용자 편집이 아니다 — 받는 쪽은
+   *  이 값을 «깨끗한 기준»으로 삼는다(쓰기 없이). 없으면 무시. */
+  onNormalize?: (value: string) => void;
   onContentFormatChange?: (format: ContentFormat) => void;
   onSave?: () => Promise<boolean>;
   isDirty?: boolean;
@@ -140,6 +144,10 @@ export function DocEditor({
     toggleDefaultTitle: tSlash('toggleDefaultTitle'),
   };
   const suppressUpdateRef = useRef(false);
+  // 편집기 콜백은 처음 만든 때의 prop을 붙잡으므로 최신 값은 ref로 읽는다.
+  const onNormalizeRef = useRef(onNormalize);
+  useEffect(() => { onNormalizeRef.current = onNormalize; }, [onNormalize]);
+  const serialize = useCallback((html: string) => (contentFormat === 'markdown' ? htmlToMarkdown(html) : html), [contentFormat]);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
   const [isFocused, setIsFocused] = useState(false);
@@ -174,14 +182,25 @@ export function DocEditor({
     }),
     editable,
     content: contentFormat === 'markdown' ? markdownToHtml(value) : value,
-    onUpdate: ({ editor: e }) => {
+    onUpdate: ({ editor: e, transaction }) => {
       if (suppressUpdateRef.current) return;
+      // story #4339(AC7) — 편집 없이 연 문서는 onChange를 내지 않는다. tiptap은 문서를 바꾸지 않은 거래에도 update를 낸다:
+      // `setEditable`(빈 거래) · BubbleMenu의 옵션 갱신(meta만)에 플러그인 appendTransaction(끝 빈 문단 · 표 보정)이 붙어 정규화된 값이
+      // 사용자 편집처럼 나갔다 → 저장 표시 «변경사항 있음» · 자동 저장. 실제 편집(입력 · 붙여넣기 · 업로드 교체)은 뿌리 거래가 문서를 바꾼다.
+      if (!transaction.docChanged) {
+        // 정규화만 한 거래(끝 빈 문단 등) — 편집이 아니라 기준을 다듬은 것이라 onNormalize로(쓰기 없이 깨끗한 기준 갱신).
+        onNormalizeRef.current?.(contentFormat === 'markdown' ? htmlToMarkdown(e.getHTML()) : e.getHTML());
+        return;
+      }
       const html = e.getHTML();
       if (contentFormat === 'markdown') {
         onChange(htmlToMarkdown(html));
       } else {
         onChange(html);
       }
+    },
+    onCreate: ({ editor: e }) => {
+      onNormalizeRef.current?.(contentFormat === 'markdown' ? htmlToMarkdown(e.getHTML()) : e.getHTML());
     },
     onFocus: () => setIsFocused(true),
     onBlur: () => setIsFocused(false),
@@ -281,7 +300,9 @@ export function DocEditor({
     suppressUpdateRef.current = true;
     editor.commands.setContent(incomingHtml, { emitUpdate: false });
     suppressUpdateRef.current = false;
-  }, [editor, value, contentFormat]);
+    // 불러온 값을 편집기가 다듬은 모양 — 깨끗한 기준(story #4339 AC7).
+    onNormalizeRef.current?.(serialize(editor.getHTML()));
+  }, [editor, value, contentFormat, serialize]);
 
   const rawMarkdown = contentFormat === 'markdown' ? value : htmlToMarkdown(value);
 
