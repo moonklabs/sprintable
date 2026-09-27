@@ -22,6 +22,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { fetchWithAuth } from '@/lib/db/client';
 import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { useFieldDraft } from '@/hooks/use-field-draft';
 
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
@@ -94,7 +95,8 @@ export function DocGateSection({
   const [busy, setBusy] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false); // 기본 접힘(본문 우선·이력 secondary)
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [note, setNote] = useState('');
+  // story #4370 — 반려 사유(여러 줄)는 게이트별 초안: 페이지를 떠났다 와도 남고, 보이는 «취소»와 반려 성공에서만 지운다.
+  const [note, setNote, clearNoteDraft] = useFieldDraft({ surface: 'doc-gate-reject', targetId: gate?.id ?? null, field: 'reason' }, '');
   // story #6c89e40d(페드루 PO 판정 2026-08-17, ⓑ) — doc_approval이 ⓐ항목(하위 처방)으로 high 세트에 명시
   // 등재되며 usesSignatureFlow가 항상 true가 되므로, 결재함 카드(approvals-queue.tsx)와
   // 동일 패턴(canonical GateSignatureApproval을 Dialog로) 그대로 배선한다 — 새 UI 발명 0.
@@ -236,7 +238,7 @@ export function DocGateSection({
   const submitReject = async () => {
     if (!currentTeamMemberId) return;
     const { ok } = await gateTransition({ status: 'rejected', resolver_id: currentTeamMemberId, note: note.trim() || null });
-    if (ok) { setRejectOpen(false); setNote(''); } // 실패 시 모달 유지·재시도 허용
+    if (ok) { setRejectOpen(false); clearNoteDraft(); } // 실패 시 모달 유지·재시도 허용
   };
 
   // story #6c89e40d(ⓑ) — GateSignatureApproval 하나가 승인/반려 둘 다 담당(canonical과 동형).
@@ -477,7 +479,7 @@ export function DocGateSection({
               className="w-full resize-none break-keep rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRejectOpen(false)}>{t('cancel')}</Button>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => { clearNoteDraft(); setRejectOpen(false); }}>{t('cancel')}</Button>
               <Button
                 variant="ghost"
                 size="sm"
