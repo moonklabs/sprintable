@@ -162,15 +162,18 @@ export function ArtifactViewer({
     <div className={className}>
       {/* story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card. */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--elev-card)]">
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-          <span className="truncate text-sm font-semibold text-foreground">{artifact.title}</span>
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+        {/* [SID:4362] 좁은 폭(390/360 스토리 패널)에서 머리 한 줄에 다 안 들어가면 줄을 넘긴다(제목 줄 / 조작 줄). 예전엔 nowrap 한 줄이라
+         * 조작 글자가 한 글자씩 세로로 쌓이고(한글은 글자마다 끊을 수 있어 최소 폭 = 한 글자) 제목은 0~8px로 눌렸다.
+         * 제목 = 줄어들 수 있게(min-w-0 · 말줄임) · 조작 = 줄지 않고 안 꺾임(shrink-0 · whitespace-nowrap). 넓으면 예전과 같은 한 줄. */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 border-b border-border px-4 py-3">
+          <span className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground">{artifact.title}</span>
+          <span className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
             {artifact.format}
           </span>
           {/* story 64010b05 §5 — provenance는 신뢰(투명성) 축이지 감시 축이 아니다. 낙인/경고색
            * 0(muted 중립), created엔 라벨 자체가 없다(무표시=디폴트). */}
           {artifact.source === 'imported' ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <Import className="h-3 w-3" aria-hidden />
               {t('provenanceImportedBadge')}
             </span>
@@ -183,7 +186,7 @@ export function ArtifactViewer({
           <select
             value={selectedVersion}
             onChange={(e) => setSelectedVersion(Number(e.target.value))}
-            className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {[...versions].sort((a, b) => b.version - a.version).map((v) => (
               <option key={v.id} value={v.version}>v{v.version}</option>
@@ -196,14 +199,14 @@ export function ArtifactViewer({
             <button
               type="button"
               onClick={() => setExpandOpen(true)}
-              className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <Maximize2 className="h-3 w-3" aria-hidden />
               {t('viewerExpandAction')}
             </button>
           ) : null}
           {artifact.anchor_version != null ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-success/85">
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-semibold text-success/85">
               <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
               {t('anchorBadge', { version: artifact.anchor_version })}
             </span>
@@ -212,7 +215,7 @@ export function ArtifactViewer({
            * 이미 대기 중인 제안이 있으면 제안 버튼을 숨긴다(중복 제안 방지). */}
           {!isViewingAnchor && onProposeCanonical ? (
             pendingCanonicalizeVersion === selectedVersion ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+              <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
                 <Clock className="h-3 w-3" aria-hidden />
                 {t('canonicalizePendingBadge')}
               </span>
@@ -220,14 +223,14 @@ export function ArtifactViewer({
               <button
                 type="button"
                 onClick={() => onProposeCanonical(selectedVersion)}
-                className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
               >
                 <Sparkles className="h-3 w-3" aria-hidden />
                 {t('proposeCanonicalAction')}
               </button>
             )
           ) : null}
-          <span className="ml-auto flex items-center gap-3 text-muted-foreground">
+          <span className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap text-muted-foreground">
             {artifact.format === 'tree' && onEnterEdit ? (
               <button
                 type="button"

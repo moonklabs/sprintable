@@ -1650,10 +1650,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               <Button
                 type="button"
                 variant="ghost"
-                className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 p-0 text-left font-normal"
+                // [SID:4362] 디자인 Button 기본이 whitespace-nowrap이라 제목이 한 줄로 패널 밖까지 늘었다(390에서 525px · 초점 링도 패널 밖) →
+                // 줄바꿈 허용 · 긴 낱말(경로 · URL)도 꺾음.
+                className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 whitespace-normal p-0 text-left font-normal"
                 onClick={() => setEditingTitle(true)}
               >
-                <h2 className="text-lg font-semibold text-foreground">{story.title}</h2>
+                <h2 className="min-w-0 text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{story.title}</h2>
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </Button>
             )}
@@ -1829,14 +1831,15 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         type="button"
                         variant="ghost"
                         onClick={() => void handleToggleAssignee(m.id)}
-                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
+                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
                           {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 User · UnnamedMemberIcon 정본 · 유나 판정). */}
                           {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
-                        {m.label}
-                        {selected && <span className="ml-auto text-primary">✓</span>}
+                        {/* [SID:4362 · PO 18:11Z 전수] 디자인 Button 기본 nowrap이라 긴 구성원 이름이 줄 밖으로 넘쳤다(390에서 글 483px · 줄 338px) → 줄바꿈 · 긴 낱말 꺾음. */}
+                        <span data-assignee-name="" className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
+                        {selected && <span className="ml-auto shrink-0 text-primary">✓</span>}
                       </Button>
                     );
                   })}
