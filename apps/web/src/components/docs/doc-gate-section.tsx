@@ -311,11 +311,11 @@ export function DocGateSection({
       {isDraft && approverPickerOpen ? (
         <div className="space-y-1.5">
           {approverError ? (
-            <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{approverError}</p>
+            <p role="alert" aria-live="assertive" className="break-keep text-[11px] text-foreground">{approverError}</p>
           ) : null}
           {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
           {approverHasDuplicateNames ? (
-            <p role="alert" className="text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
+            <p role="alert" className="break-keep text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
           ) : null}
           <OperatorDropdownSelect
             value={selectedApprover}
@@ -377,7 +377,7 @@ export function DocGateSection({
             </>
           ) : state === 'pending' ? (
             /* ② pending + author/비자격자 = 검토자 응답 대기(액션 없음·self-approval 금지). */
-            <span className="text-xs text-muted-foreground">
+            <span className="break-keep text-xs text-muted-foreground">
               {t('docGateAwaitingGeneric')}
             </span>
           ) : state === 'confirmed' && gate ? (
@@ -406,7 +406,7 @@ export function DocGateSection({
       {state === 'denied' ? (
         <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
           <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
-          <p className="whitespace-pre-wrap text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
+          <p className="whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1"><User className="size-3" />{resolveName(gate?.resolver_id)}</span>
             {gate?.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
@@ -441,13 +441,13 @@ export function DocGateSection({
                       <AIcon className="size-2.5" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-xs text-foreground">
+                      <p className="break-keep text-xs text-foreground">
                         {t(ev.nameFallback ? 'docGateAuditByFallback' : 'docGateAuditBy', { name: ev.name, josa: pickIGaJosa(ev.name), action: t(am.labelKey) })}
                         {ev.version ? <span className="text-muted-foreground"> (v{ev.version})</span> : null}
                       </p>
                       <p className="mt-px text-[10.5px] text-muted-foreground">{fmtDate(ev.at)}</p>
                       {ev.note?.trim() ? (
-                        <p className="mt-1 whitespace-pre-wrap rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
                       ) : null}
                     </div>
                   </li>
@@ -466,13 +466,13 @@ export function DocGateSection({
               <ShieldX className="size-4 shrink-0 text-destructive" />
               <DialogTitle className="text-sm font-semibold">{t('docGateRejectModalTitle')}</DialogTitle>
             </div>
-            <label className="mb-1.5 block text-[11.5px] text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
+            <label className="mb-1.5 block break-keep text-[11.5px] text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
             <textarea
               rows={3}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={t('docGateRejectReasonPlaceholder')}
-              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full resize-none break-keep rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRejectOpen(false)}>{t('cancel')}</Button>

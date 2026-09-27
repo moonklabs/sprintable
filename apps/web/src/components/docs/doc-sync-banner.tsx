@@ -61,8 +61,8 @@ export function DocSyncBanner({
           currentColor를 상속해 variant 색을 잃는다. info 분기만 명시 필요(warning은
           이미 text-foreground라 무영향). */}
       {isConflict ? <AlertTriangle className="size-4" /> : <RotateCw className="size-4 text-info" />}
-      <AlertTitle>{labels.title}</AlertTitle>
-      {showDiscardWarning && <AlertDescription>{labels.discardWarning}</AlertDescription>}
+      <AlertTitle className="break-keep">{labels.title}</AlertTitle>
+      {showDiscardWarning && <AlertDescription className="break-keep">{labels.discardWarning}</AlertDescription>}
       <div className="col-start-2 mt-2 flex flex-wrap gap-2">
         {isConflict ? (
           <>
