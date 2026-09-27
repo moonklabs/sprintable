@@ -120,7 +120,7 @@ async def test_site_post_detail_no_rules_violations_empty():
         async with Session() as s:
             org_id, project_id = await _seed_sp_org(s)
             await _seed_sp_default_role(s, org_id)
-            agent_id = await _seed_sp_agent(s, org_id, project_id)
+            agent_id = await _seed_sp_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_sp_story(s, org_id, project_id)
             connection_id = await _seed_wordpress_connection(s, org_id, site_url="https://example.com")
 
@@ -148,7 +148,7 @@ async def test_site_post_detail_reflects_current_rules_without_resave():
         async with Session() as s:
             org_id, project_id = await _seed_sp_org(s)
             await _seed_sp_default_role(s, org_id)
-            agent_id = await _seed_sp_agent(s, org_id, project_id)
+            agent_id = await _seed_sp_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_sp_story(s, org_id, project_id)
             connection_id = await _seed_wordpress_connection(s, org_id, site_url="https://example.com")
 
@@ -219,7 +219,7 @@ async def test_channel_post_detail_reflects_current_rules_without_resave():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_cp_org(s)
-            agent_id = await _seed_cp_agent(s, org_id, project_id)
+            agent_id = await _seed_cp_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_cp_story(s, org_id, project_id)
             connection_id = await _seed_cp_connection(s, org_id)
 

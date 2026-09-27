@@ -65,6 +65,14 @@ def _verdict_for_metric(*, stored: int | None, live: int | None, monotonic: bool
     return "match" if stored == live else "mismatch"
 
 
+def publication_not_found(publication_id: uuid.UUID) -> InsightFetchError:
+    """«없는 발행물» 오류 한 곳 — story #4351: 접근 못 하는 프로젝트의 발행물도 라우터가 이것을 그대로 던져 응답이 똑같다(존재 비노출)."""
+    return InsightFetchError(
+        error_code="INSIGHT_PUBLICATION_NOT_FOUND",
+        message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
+    )
+
+
 async def reconcile_publication(
     db: AsyncSession, *, org_id: uuid.UUID, publication_id: uuid.UUID, requested_by_member_id: uuid.UUID,
 ) -> ChannelPublicationReconciliation:
@@ -78,10 +86,7 @@ async def reconcile_publication(
         )
     )).scalar_one_or_none()
     if pub is None:
-        raise InsightFetchError(
-            error_code="INSIGHT_PUBLICATION_NOT_FOUND",
-            message=f"channel_publication을 찾을 수 없습니다: {publication_id}",
-        )
+        raise publication_not_found(publication_id)
 
     adapter = CHANNEL_ADAPTERS.get(pub.channel)
     declared = adapter.insight_metrics if adapter is not None else ()

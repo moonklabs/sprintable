@@ -704,6 +704,22 @@ async def accessible_project_ids_in_org(
     return [uuid.UUID(str(r[0])) for r in rows.all()]
 
 
+async def restricted_accessible_project_ids(
+    session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID,
+) -> list[uuid.UUID] | None:
+    """story #4351 — caller가 org의 **모든** 프로젝트에 접근하면 None(거를 것 없음 — owner/admin 등은 옛 동작 그대로), 아니면 접근 가능
+    프로젝트 목록. «제한된 caller에게만 범위를 건다»는 목록 · 집계 라우트가 같이 쓴다."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+
+    accessible = await accessible_project_ids_in_org(session, user_id, org_id)
+    all_projects = set((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+    return None if all_projects <= set(accessible) else accessible
+
+
 async def project_accessible_member_ids(
     session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID,
 ) -> set[uuid.UUID]:

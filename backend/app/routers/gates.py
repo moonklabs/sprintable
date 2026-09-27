@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_query import OffsetDatetime
@@ -1242,6 +1242,14 @@ async def list_gates(
                 raise HTTPException(status_code=404, detail="Gate not found")
 
     q = select(Gate).where(Gate.org_id == org_id)
+    # story #4351 — 접근이 제한된 caller에겐 접근 불가 프로젝트의 게이트를 싣지 않는다(SEC-S8 · PO 2026-09-26: 접근 가능 프로젝트 게이트 +
+    # 어느 프로젝트에도 안 걸린 org 수준 게이트 · owner/admin 등 전체 접근은 옛 동작 그대로 — merge-gate 집계와 같은 규칙).
+    from app.services.gate_service import gate_in_inaccessible_project_clause
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    _restricted = await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id)
+    if _restricted is not None:
+        q = q.where(~gate_in_inaccessible_project_clause(_restricted))
     if gate_ids is not None:
         # story #5ace2e84 — ids 배치는 고정 집합 앵커 조회(stories.py list_stories ids 분기와
         # 동형). 나머지 필터/정렬/페이지네이션은 의미가 없어 전부 건너뛴다.
@@ -1657,13 +1665,16 @@ _GATE_REQUEST_TYPE = "gate_approval"
 
 
 async def _list_hitl_inbox_rows(
-    session: AsyncSession, org_id: uuid.UUID, status: str | None,
+    session: AsyncSession, org_id: uuid.UUID, status: str | None, *, restricted_project_ids: list[uuid.UUID] | None,
 ) -> list[HitlRequest]:
     q = select(HitlRequest).where(
         HitlRequest.org_id == org_id,
         HitlRequest.request_type == _GATE_REQUEST_TYPE,
         HitlRequest.deleted_at.is_(None),
     )
+    # story #4351 — 제한된 caller는 접근 가능 프로젝트의 결재 + 프로젝트 없는 org 수준 결재만(None = 전체 접근 · 옛 동작).
+    if restricted_project_ids is not None:
+        q = q.where(or_(HitlRequest.project_id.is_(None), HitlRequest.project_id.in_(restricted_project_ids)))
     if status:
         q = q.where(HitlRequest.status == status)
     return list((await session.execute(q)).scalars().all())
@@ -1716,7 +1727,12 @@ async def list_gate_inbox(
         work_item_id=None, work_item_type=None, status=status, sort=sort,
         assigned_to_me=assigned_to_me, session=session, org_id=org_id, auth=auth,
     )
-    hitl_rows = await _list_hitl_inbox_rows(session, org_id, status)
+    from app.services.project_auth import restricted_accessible_project_ids
+
+    hitl_rows = await _list_hitl_inbox_rows(
+        session, org_id, status,
+        restricted_project_ids=await restricted_accessible_project_ids(session, uuid.UUID(auth.user_id), org_id),
+    )
 
     if assigned_to_me:
         # Gate의 non-doc assigned_to_me(WHO)와 동일 규칙 재사용: gate_approval park 대상

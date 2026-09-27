@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.conftest import grant_org_projects
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -77,16 +79,18 @@ async def _seed_org(session, *, slug=None):
     return org.id, project.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name="담롱"):
+async def _seed_agent(session, org_id, project_id, *, name="담롱", grant: bool = False):
     from app.models.team import TeamMember
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, agent_member_id=m.id)
     return m.id
 
 
-async def _seed_human(session, org_id, *, role="member"):
+async def _seed_human(session, org_id, *, role="member", grant: bool = False):
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -96,6 +100,8 @@ async def _seed_human(session, org_id, *, role="member"):
     om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user.id, role=role)
     session.add(om)
     await session.commit()
+    if grant:  # story #4351 — 기본 grant 없음 · 접근이 필요한 테스트만 grant=True
+        await grant_org_projects(session, org_id, user_id=user.id)
     return user.id
 
 
@@ -425,7 +431,7 @@ async def test_publication_info_all_null_when_never_published_not_404():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -534,8 +540,8 @@ async def test_published_body_sha256_reflects_live_content_not_pending_edit():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
-            human_id = await _seed_human(s, org_id, role="owner")
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
+            human_id = await _seed_human(s, org_id, role="owner", grant=True)
             story_id = await _seed_story(s, org_id, project_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
@@ -591,7 +597,7 @@ async def test_agent_can_read_publication_info_no_human_only_restriction():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
 
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)

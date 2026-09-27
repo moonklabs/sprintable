@@ -24,7 +24,7 @@ from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
-from app.services.project_auth import require_project_access
+from app.services.project_auth import require_project_access, restricted_accessible_project_ids
 from app.services.publication_command import viewer_can_retry
 from app.services.provider_call_mark import provider_call_marked, reset_provider_call_mark
 from app.services.channel_posts import (
@@ -1587,6 +1587,7 @@ async def list_channel_post_drafts_endpoint(
 
     rows = await list_channel_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset,
+        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
         include_withdrawn=include_withdrawn, include_deleted=include_deleted,
         work_item_id=work_item_id,
@@ -1594,6 +1595,7 @@ async def list_channel_post_drafts_endpoint(
     total = await count_channel_post_drafts(
         db, org_id=org_id, include_withdrawn=include_withdrawn, include_deleted=include_deleted,
         work_item_id=work_item_id,
+        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
     )
     response.headers["X-Total-Count"] = str(total)
     source_titles = await get_source_titles_and_latest_versions(
@@ -1638,6 +1640,7 @@ async def get_channel_post_draft_detail_endpoint(
     # 필터가 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
     rows = await list_channel_post_drafts(
         db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True, include_deleted=True,
+        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
     )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
@@ -1691,11 +1694,23 @@ async def list_content_item_variants_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
     content_item = await get_site_post_draft(db, org_id=org_id, draft_id=content_item_id)
+    # story #4351(까디르 P2) — 부모 원문(사이트 글 초안)이 caller가 접근 못 하는 프로젝트면 없는 원문과 같은 404. 예전엔 부모를 org 전체로
+    # 찾고 변형만 좁혀 «접근 불가 = 200 []» · «없음 = 404»로 갈려 존재가 샜다.
+    if content_item is not None:
+        from app.models.pm import Story
+        from app.services.project_auth import has_project_access
+
+        parent_project_id = (await db.execute(
+            select(Story.project_id).where(Story.id == content_item.work_item_id, Story.org_id == org_id)
+        )).scalar_one_or_none()
+        if parent_project_id is None or not await has_project_access(db, uuid.UUID(auth.user_id), parent_project_id, org_id):
+            content_item = None
     if content_item is None:
         raise HTTPException(status_code=404, detail=f"원문을 찾을 수 없습니다: {content_item_id}")
 
     rows = await list_channel_post_drafts(
         db, org_id=org_id, source_content_item_id=content_item_id, limit=200,
+        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
     )
     # story #3437(후속 묶음) — 이 엔드포인트는 filter 자체가 content_item_id 단건이라
     # source_content_item_id가 전부 이 값 하나 — 배치라 해도 실질 단건 조회.
@@ -1727,9 +1742,10 @@ async def list_channel_post_draft_version_history(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
-    if draft is None:
-        raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
+    # story #4351 — 초안은 프로젝트 소속 — 쓰기 가드와 같은 헬퍼로 접근 확인(접근 불가 = 404 · 존재 비노출).
+    draft = await _require_channel_post_draft_project_access(
+        db, org_id=org_id, draft_id=draft_id, member_id=uuid.UUID(auth.user_id),
+    )
 
     versions = await list_channel_post_draft_versions(db, draft_id=draft_id)
     utm_rule_row = await get_org_content_rules(db, org_id=org_id)

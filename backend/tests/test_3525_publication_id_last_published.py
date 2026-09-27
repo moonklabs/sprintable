@@ -67,8 +67,8 @@ async def test_new_version_after_publish_keeps_publication_id_pointing_at_last_p
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             await _seed_default_role(s, org_id)
-            agent_id = await _seed_agent(s, org_id, project_id)
-            human_id = await _seed_human(s, org_id, role="owner")
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
+            human_id = await _seed_human(s, org_id, role="owner", grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             connection_id = await _seed_connection(s, org_id)
 

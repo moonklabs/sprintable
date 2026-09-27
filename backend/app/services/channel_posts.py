@@ -23,7 +23,7 @@ import asyncio
 import logging
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import cast, func, select
@@ -932,6 +932,7 @@ async def list_channel_post_drafts(
     include_withdrawn: bool = False,
     include_deleted: bool = False,
     work_item_id: uuid.UUID | None = None,
+    project_ids: Collection[uuid.UUID] | None = None,
 ) -> list[
     tuple[
         ChannelPostDraft, ChannelPostVersion, ChannelPostVersion,
@@ -1047,6 +1048,14 @@ async def list_channel_post_drafts(
         )
         .where(ChannelPostDraft.org_id == org_id)
     )
+    # story #4351 — 초안은 프로젝트 소속(work_item_id → Story.project_id · 쓰기 가드 `_require_channel_post_draft_project_access`와 같은
+    # 축). 접근이 제한된 caller면 접근 가능 프로젝트 스토리의 초안만(None = 전체 접근 · 옛 동작).
+    if project_ids is not None:
+        from app.models.pm import Story
+
+        stmt = stmt.where(ChannelPostDraft.work_item_id.in_(
+            select(Story.id).where(Story.org_id == org_id, Story.project_id.in_(list(project_ids)))
+        ))
     if not include_withdrawn:
         stmt = stmt.where(ChannelPostDraft.status != "withdrawn")
     if not include_deleted:
@@ -1268,7 +1277,7 @@ async def list_channel_post_drafts(
 
 async def count_channel_post_drafts(
     db: AsyncSession, *, org_id: uuid.UUID, include_withdrawn: bool = False, include_deleted: bool = False,
-    work_item_id: uuid.UUID | None = None,
+    work_item_id: uuid.UUID | None = None, project_ids: Collection[uuid.UUID] | None = None,
 ) -> int:
     """story #3744 — list_channel_post_drafts와 같은 org_id/include_withdrawn/
     include_deleted 필터의 전체 개수(limit/offset·scheduled_from/to/unscheduled 무관 —
@@ -1282,6 +1291,13 @@ async def count_channel_post_drafts(
         stmt = stmt.where(ChannelPostDraft.status != "withdrawn")
     if work_item_id is not None:
         stmt = stmt.where(ChannelPostDraft.work_item_id == work_item_id)
+    # story #4351 — 목록과 같은 범위(총계가 접근 불가 프로젝트 초안을 세면 존재가 샌다).
+    if project_ids is not None:
+        from app.models.pm import Story
+
+        stmt = stmt.where(ChannelPostDraft.work_item_id.in_(
+            select(Story.id).where(Story.org_id == org_id, Story.project_id.in_(list(project_ids)))
+        ))
     return (await db.execute(stmt)).scalar_one()
 
 
