@@ -488,6 +488,33 @@ async def get_doc(
     return await _enrich_doc_response(doc, session)
 
 
+async def _guard_doc_parent_write(
+    session: AsyncSession, *, project_id: uuid.UUID, doc_id: uuid.UUID, new_parent_id: uuid.UUID | None,
+) -> None:
+    """story #4353(까디르 4736 P2 ①②) — 문서의 부모를 쓰는 **모든** 길(reorder · PATCH {parent_id})이 부르는 한 검사.
+
+    1. 프로젝트 단위 advisory lock(트랜잭션 끝까지) — 동시 두 이동이 서로의 순환 검사를 지나치지 못하게. 잠금 순서는 늘
+       프로젝트 → 형제 묶음(reorder만 묶음을 더 잡음) — 한 방향이라 교착 없음.
+    2. 자기 자신을 부모로 → 400 `DOC_REORDER_INVALID`.
+    3. 부모가 없거나 다른 프로젝트 → 404(`_assert_doc_parent_in_project`).
+    4. 새 부모의 조상 사슬에 이 문서가 있으면(자기 자손 밑) → 400 `DOC_REORDER_CYCLE` — 잠금 뒤에 읽으므로 사이에 옮겨진 것도 본다."""
+    from sqlalchemy import text as sa_text
+
+    await session.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-tree-move:{project_id}"})
+    if new_parent_id is None:
+        return
+    if new_parent_id == doc_id:
+        raise HTTPException(status_code=400, detail={"code": "DOC_REORDER_INVALID", "message": "doc cannot be its own parent or anchor"})
+    await _assert_doc_parent_in_project(session, project_id, new_parent_id)
+    cursor_id: uuid.UUID | None = new_parent_id
+    seen: set[uuid.UUID] = set()
+    while cursor_id is not None and cursor_id not in seen:
+        if cursor_id == doc_id:
+            raise HTTPException(status_code=400, detail={"code": "DOC_REORDER_CYCLE", "message": "cannot move a doc under its own descendant"})
+        seen.add(cursor_id)
+        cursor_id = (await session.execute(select(Doc.parent_id).where(Doc.id == cursor_id))).scalar_one_or_none()
+
+
 class DocReorderRequest(BaseModel):
     """story #4353 — 문서 하나를 부모 아래 형제 순서의 한 자리로(재정렬 · 폴더로 옮기기 한 길). 형제 번호는 서버가 안다.
 
@@ -546,21 +573,9 @@ async def reorder_doc(
         raise HTTPException(status_code=404, detail="Doc not found")
     project_id = doc.project_id
 
-    if body.parent_id != doc.parent_id:
-        # 까디르(4736 P2) — 부모가 바뀌는 이동은 프로젝트 단위 잠금을 **먼저** 잡고 그 안에서 순환을 본다. 묶음 잠금은 새 부모 키라
-        # «A를 B 밑» · «B를 A 밑»이 동시면 키가 달라 둘 다 순환 검사를 통과해 A ↔ B 순환이 커밋됐다(둘과 자손이 트리에서 사라짐).
-        # 잠금 순서는 늘 프로젝트 → 묶음(같은 부모 재정렬은 묶음만) — 한 방향이라 교착 없음.
-        await session.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-tree-move:{project_id}"})
-    if body.parent_id is not None:
-        await _assert_doc_parent_in_project(session, project_id, body.parent_id)  # 없거나 다른 프로젝트 → 404
-        # 순환: 새 부모의 조상 사슬에 옮기는 문서가 있으면 자기 자손 밑으로 가는 것.
-        cursor_id: uuid.UUID | None = body.parent_id
-        seen: set[uuid.UUID] = set()
-        while cursor_id is not None and cursor_id not in seen:
-            if cursor_id == doc.id:
-                raise HTTPException(status_code=400, detail={"code": "DOC_REORDER_CYCLE", "message": "cannot move a doc under its own descendant"})
-            seen.add(cursor_id)
-            cursor_id = (await session.execute(select(Doc.parent_id).where(Doc.id == cursor_id))).scalar_one_or_none()
+    # 까디르(4736 P2 ①) — 부모를 쓰는 이동은 **늘** 프로젝트 잠금 뒤 순환 검사(잠금 전에 읽은 parent_id로 «같은 부모»를 가르면 그 사이
+    # 옮겨진 문서를 놓쳤다). reorder는 늘 parent_id를 쓰므로 늘 잡는다(사람 속도라 비용 무시).
+    await _guard_doc_parent_write(session, project_id=project_id, doc_id=doc.id, new_parent_id=body.parent_id)
 
     lock_key = f"doc-siblings:{project_id}:{body.parent_id or 'root'}"
     await session.execute(sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": lock_key})
@@ -668,7 +683,9 @@ async def update_doc(
             )
 
     if "parent_id" in data:
-        await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
+        # 까디르(4736 P2 ②) — PATCH의 parent_id도 reorder와 같은 검사(프로젝트 잠금 · 자기 참조 · 자손 = 순환). 예전엔 프로젝트 소속만
+        # 봐 `{parent_id: 자기}` · 자손 지정으로 순환이 커밋돼 문서가 트리에서 사라졌다(MCP sprintable_update_doc로 에이전트도 닿는 길).
+        await _guard_doc_parent_write(session, project_id=doc.project_id, doc_id=doc.id, new_parent_id=data["parent_id"])
 
     # story #2874(하드닝): slug/slug_locked도 아래서 setattr 직접 대신 data에 모아 뒀다가
     # update_with_cas() 한 SQL 문으로 함께 반영한다 — 필드 적용을 두 단계(setattr 여기 +

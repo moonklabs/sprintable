@@ -44,6 +44,7 @@ const captured: {
   onMove?: (plan: { docId: string; parentId: string | null; afterId?: string | null }) => Promise<void>;
   onRename?: (docId: string, name: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
+  docs?: Array<{ id: string; parent_id: string | null; sort_order: number }>;
 } = {};
 vi.mock('@/components/docs/doc-tree', () => ({
   DocTree: (props: typeof captured) => {
@@ -51,6 +52,7 @@ vi.mock('@/components/docs/doc-tree', () => ({
     captured.onMove = props.onMove;
     captured.onRename = props.onRename;
     captured.onDelete = props.onDelete;
+    captured.docs = props.docs; // story #4353(까디르 4736 P3) — 서버 번호 반영을 트리 입력으로 확인
     return <div data-testid="doc-tree-mock" />;
   },
 }));
@@ -181,7 +183,7 @@ describe('DocsClientLayout — 재정렬 성공은 서버 번호로(story #4353 
   it('⭐성공 응답의 번호를 반영하고 트리 목록을 다시 부르지 않는다', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (typeof url === 'string' && url.includes('/api/docs/reorder') && init?.method === 'POST') {
-        return { ok: true, json: async () => ({ data: { doc: { id: 'd1', parent_id: null, sort_order: 0 }, siblings: [{ id: 'd1', sort_order: 0 }] } }) };
+        return { ok: true, json: async () => ({ data: { doc: { id: 'd1', parent_id: null, sort_order: 7 }, siblings: [{ id: 'd1', sort_order: 7 }] } }) };
       }
       if (typeof url === 'string' && url.includes('/api/docs')) {
         return { ok: true, json: async () => ({ data: [DOC_A], meta: { hasMore: false, nextCursor: null } }) };
@@ -195,6 +197,8 @@ describe('DocsClientLayout — 재정렬 성공은 서버 번호로(story #4353 
     await act(async () => { await captured.onReorder!({ docId: 'd1', parentId: null, afterId: null }); });
     expect(fetchMock.mock.calls.some(([u]) => typeof u === 'string' && u.includes('/api/docs/reorder'))).toBe(true);
     expect(treeReads()).toBe(before);
+    // 까디르(4736 P3) — 서버 번호(7)를 처음 값(0)과 다르게 둬 «반영»을 실제로 잰다.
+    expect(captured.docs?.find((d) => d.id === 'd1')?.sort_order).toBe(7);
     expect(container.textContent).not.toContain(koMessages.docs.reorderFailed);
   });
 });
