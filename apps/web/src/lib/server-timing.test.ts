@@ -244,6 +244,30 @@ describe('markRoute — 라우트 안 하위 구간(story #4299 AC2 꼬리 · PO
     } finally { getStore.mockRestore(); log.mockRestore(); }
   });
 
+  // 까디르 #4732(17:07Z) — 조립 라우트 둘이 겹쳐 돌 때 각 응답에 제 하위 구간만. 타이머가 요청마다 계측 범위(ALS)에 있어서다 —
+  // 모듈 하나를 같이 쓰면 늦게 온 쪽 표시가 앞 요청 헤더로 새고, 앞 요청 표시가 뒤 요청에 섞인다.
+  it('동시 두 요청: 표시가 엇갈려 찍혀도 각 헤더 · 로그 줄에는 제 구간만(섞임 0)', async () => {
+    process.env['SERVER_TIMING_MARKERS'] = 'true';
+    const { withRouteTiming, markRoute, markRouteReturn } = await import('./server-timing');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const gate = () => { let open!: () => void; const p = new Promise<void>((r) => { open = r; }); return { p, open }; };
+    const aMarked = gate(); const bMarked = gate();
+    const ok = () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    // A: a_auth → (B가 b_auth 찍을 때까지 기다림) → a_service → a_serialize
+    const handlerA = async () => { markRoute('a_auth'); aMarked.open(); await bMarked.p; markRoute('a_service'); return markRouteReturn('a_serialize', ok()); };
+    // B: (A가 a_auth 찍은 뒤) b_auth → b_service → b_serialize — A의 a_service보다 먼저 끝날 수도 있게 엇갈림
+    const handlerB = async () => { await aMarked.p; markRoute('b_auth'); bMarked.open(); await Promise.resolve(); markRoute('b_service'); return markRouteReturn('b_serialize', ok()); };
+    try {
+      const [ra, rb] = await Promise.all([withRouteTiming('stories', handlerA)(req()), withRouteTiming('goals', handlerB)(req())]);
+      const names = (st: string | null) => (st ?? '').split(', ').map((x) => x.split(';')[0]).filter((n) => n.startsWith('bff_') && n !== 'bff_pre');
+      expect(names(ra.headers.get('Server-Timing'))).toEqual(['bff_a_auth', 'bff_a_service', 'bff_a_serialize']);
+      expect(names(rb.headers.get('Server-Timing'))).toEqual(['bff_b_auth', 'bff_b_service', 'bff_b_serialize']);
+      const lines = log.mock.calls.map((c) => JSON.parse(String(c[0]))).filter((j) => j.message === 'server_timing');
+      const byKind = Object.fromEntries(lines.map((j) => [j.kind, j.marks.map((m: [string, number]) => m[0])]));
+      expect(byKind).toEqual({ 'route/stories': ['a_auth', 'a_service', 'a_serialize'], 'route/goals': ['b_auth', 'b_service', 'b_serialize'] });
+    } finally { log.mockRestore(); }
+  });
+
   it('켜져 있어도 라우트 계측 밖에서 부르면 아무것도 안 함(던지지 않음 · 다른 범위에 안 섞임)', async () => {
     process.env['SERVER_TIMING_MARKERS'] = 'true';
     const { markRoute, withServerTiming } = await import('./server-timing');
