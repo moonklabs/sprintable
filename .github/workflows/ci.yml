@@ -2343,6 +2343,9 @@ jobs:
       # Dependencies/Blocked by 등 8곳이 ko 로케일에서도 영문 그대로 노출된 재발 방지).
       - name: "Verify no raw ASCII JSX text (story #3876 regression guard)"
         run: pnpm --filter web verify:no-raw-ascii-jsx-text
+      # story #4357 — 꺼진 조작의 설명이 title(호버)에만 실리는 클래스(터치 · 키보드 · 화면 읽기에 안 닿음). 지금 자리는 baseline(줄이기만).
+      - name: "Verify disabled controls don't explain themselves only in title (story #4357 regression guard)"
+        run: pnpm --filter web verify:no-title-only-disabled-reason
 
       # story #3880(§⑤ 낱말 드리프트, PO 확定 2026-09-14) — #3876 가드의 자매 축(a): JSX
       # 텍스트 자식이 아니라 title/label/placeholder/description/aria-label/alt 같은
