@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "story #4357 — 첫 도입 때 있던 «disabled + title + aria-describedby 없음» 자리(줄이기만). 까닭인 자리와 아이콘 이름표 자리가 섞여 있다 — 분류는 PR 4357 본문 표.",
+    "고치면 그 줄을 지운다(가드가 stale로 알림). 새 자리는 여기 올리지 말고 고칠 것.",
+    "story #4357 까디르(4742 P2) — 키별 개수로 센다(같은 키 자리가 여럿이면 그 수)."
+  ],
+  "counts": {
+    "app/(authenticated)/channel/page.tsx::Button::{t('send')}": 1,
+    "components/canvas/artifact-gallery-view.tsx::button::{t('galleryFeatureAxisUnsupported')}": 1,
+    "components/canvas/edit-canvas.tsx::button::{artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}": 1,
+    "components/canvas/export-dialog.tsx::button::{f === 'png' && !pngAllowed ? t('exportPngUnavailableForHtml') : undefined}": 1,
+    "components/chat/event-block-card.tsx::Button::{t('eventActionUnauthorized')}": 1,
+    "components/chat/file-viewer.tsx::button::{tChats('fullscreen')}": 1,
+    "components/chat/file-viewer.tsx::button::{tChats('mediaDownload')}": 1,
+    "components/chat/reading-panel.tsx::button::{targetLabel(item)}": 1,
+    "components/dispatch/entity-dispatch-panel.tsx::button::{dispatchTitle}": 2,
+    "components/hypotheses/story-hypotheses-section.tsx::button::{t('unlink')}": 1,
+    "components/kanban/story-card.tsx::button::{t('kickoff')}": 1,
+    "components/kanban/story-detail-panel.tsx::Button::{t('dep.toggleType')}": 4,
+    "components/settings/gate-level-matrix.tsx::Button::{floorDisabled ? t('floorDisabledHint') : undefined}": 1,
+    "components/settings/gate-level-matrix.tsx::button::{t('revertToDefault')}": 1,
+    "components/settings/linked-accounts-section.tsx::button::{canUnlink ? undefined : t('linkedAccountsOnlyMethodTitle')}": 1,
+    "components/settings/org-members-section.tsx::Button::{invite.invite_url ? t('orgInviteCopyLinkTitle') : t('orgInviteCopyLinkUnavailableTitle')}": 1,
+    "ee/components/billing/billing-tab.tsx::Button::{t('packDialogComingSoon')}": 1
+  }
+}
