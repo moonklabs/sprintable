@@ -166,16 +166,17 @@ describe('DocEditor — docChanged 막이가 실제 편집 경로를 막지 않�
 type Seen = { status: string; isDirty: boolean };
 
 /** 문서 화면(docs/[slug]/page.tsx)과 같은 엮음 — 실 DocEditor.onChange → content → useDocSync. */
-function DocScreen({ doc, content, onContent, editorMounted, seen }: {
+function DocScreen({ doc, content, onContent, editorMounted, seen, autosaveDelay = 30 }: {
   doc: { id: string; updated_at: string } | null;
   content: string;
   onContent: (v: string) => void;
   editorMounted: boolean;
   seen: Seen[];
+  autosaveDelay?: number;
 }) {
   const payload = useMemo(() => ({ title: 'T', content, content_format: 'html' }), [content]);
   const { status, isDirty, adoptNormalized } = useDocSync({
-    docId: doc?.id ?? null, savePayload: payload, serverUpdatedAt: doc?.updated_at ?? null, editing: doc !== null, autosaveDelay: 30,
+    docId: doc?.id ?? null, savePayload: payload, serverUpdatedAt: doc?.updated_at ?? null, editing: doc !== null, autosaveDelay,
   });
   seen.push({ status, isDirty });
   // 문서 화면(docs/[slug]/page.tsx)의 handleNormalize와 같은 엮음.
@@ -282,7 +283,12 @@ describe('useDocSync — unsaved는 dirty일 때만', () => {
 
 
 describe('유나 실측(1822af2f3) — 한 글자 쓰고 지우면 깨끗한 상태로', () => {
-  it.each(BODIES)('%s: 입력 → 지움 → dirty false · 자동 저장 0', async (_label, body) => {
+  // 순서는 가짜 타이머로 고정한다(CI 흔들림 원인 = 실시간 대기에 기댄 것): 편집기는 실 타이머 · rAF로 붙으므로 붙은 뒤에 setTimeout ·
+  // setInterval만 가짜로 바꾸고, 입력 · 지움 뒤 자동 저장 지연을 넘겨 시계를 민다. 양성 대조(입력만 → 저장 1)가 같은 harness에서
+  // 저장이 실제로 나갈 수 있음을 보여 «저장 0» 단언이 이빨을 갖게 한다.
+  const AUTOSAVE_DELAY = 1500;
+
+  async function openThenEdit(body: string, edit: (editor: Editor) => void) {
     const writes: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if ((init?.method ?? 'GET') !== 'GET') writes.push(`${init?.method} ${url}`);
@@ -295,18 +301,35 @@ describe('유나 실측(1822af2f3) — 한 글자 쓰고 지우면 깨끗한 상
       const [content, setContent] = useState('');
       const [doc, setDoc] = useState<typeof DOC | null>(null);
       useEffect(() => { ctl.setContent = setContent; ctl.setDoc = setDoc; }, []);
-      return <Providers><DocScreen doc={doc} content={content} onContent={setContent} editorMounted seen={seen} /></Providers>;
+      return <Providers><DocScreen doc={doc} content={content} onContent={setContent} editorMounted seen={seen} autosaveDelay={AUTOSAVE_DELAY} /></Providers>;
     }
     await act(async () => { root.render(<Harness />); });
     await act(async () => { ctl.setDoc!(DOC); ctl.setContent!(body); });
-    await settle(200);
+    await settle(200);  // 편집기 붙음 · 기준선 캡처(실 타이머)
     const editor = editorOf();
-    await act(async () => { editor.commands.insertContentAt(1, '가'); });
-    await settle(10);
-    await act(async () => { editor.commands.deleteRange({ from: 1, to: 2 }); });  // 유나 실측 그대로 — 쓴 글자를 지움
-    await settle(400);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    try {
+      await act(async () => { edit(editor); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY + 200); });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle(40);
+    return { writes, last: seen.at(-1) };
+  }
+
+  it.each(BODIES)('%s: 입력 → 지움 → 자동 저장 지연을 넘겨도 저장 0 · dirty false', async (_label, body) => {
+    const { writes, last } = await openThenEdit(body, (editor) => {
+      editor.commands.insertContentAt(1, '가');
+      editor.commands.deleteRange({ from: 1, to: 2 });  // 유나 실측 그대로 — 쓴 글자를 지움
+    });
     expect(writes).toEqual([]);
-    expect(seen.at(-1)).toEqual({ status: 'idle', isDirty: false });
+    expect(last).toEqual({ status: 'idle', isDirty: false });
+  });
+
+  it.each(BODIES)('%s: 양성 대조 — 입력만 → 자동 저장 지연을 넘기면 저장 1', async (_label, body) => {
+    const { writes } = await openThenEdit(body, (editor) => { editor.commands.insertContentAt(1, '가'); });
+    expect(writes).toEqual(['PATCH /api/docs/d1']);
   });
 });
 
