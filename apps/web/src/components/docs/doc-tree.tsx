@@ -91,7 +91,7 @@ export function compareDocsForSort(a: Doc, b: Doc, mode: DocSortMode): number {
     return bt - at; // 최근 수정 먼저
   }
   // story #4348 — 같은 번호면 id로(서버 목록 · 커서와 같은 `(sort_order, id)`). 안 그러면 새로 만든 문서처럼 앞에 끼운 것이 화면 순서와
-  // «⋮» 위로 · 아래로가 보는 순서(doc-move orderedSiblings)를 어긋나게 해, 보이는 옆 문서가 아닌 문서와 자리를 바꿨다.
+  // «⋮» 위로 · 아래로가 보는 순서(doc-move-plan siblingsInServerOrder)를 어긋나게 해, 보이는 옆 문서가 아닌 문서와 자리를 바꿨다.
   return a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 

@@ -1,6 +1,7 @@
 // story #4348 — 문서 옮기기 계산(키보드 · 터치 «⋮» 메뉴 · 끌기와 같은 결과). 저장 API와 무관한 순수 함수.
 import { describe, expect, it } from 'vitest';
-import { applyDocMove, docMoveAnnouncement, menuMoveState, moveBounds, moveTargets, orderedSiblings, placedFromSiblings, planDocMove, reorderRequestBody, type MovableDoc, type MoveTarget } from './doc-move';
+import { applyDocMove, docMoveAnnouncement, menuMoveState, moveBounds, moveTargets, placedFromSiblings, planDocMove, type MovableDoc, type MoveTarget } from './doc-move';
+import { planMoveInto, planReorder, reorderRequestBody, siblingsInServerOrder } from '../doc-move-plan';
 
 // 루트: a(0) · b(0) · c(0) — sort_order가 전부 0(대부분의 실데이터) · id로 갈림. f는 폴더(자식 f1 · f2), g는 f 안 폴더.
 const DOCS: MovableDoc[] = [
@@ -14,10 +15,10 @@ const DOCS: MovableDoc[] = [
 ];
 const ok = (p: ReturnType<typeof planDocMove>) => { if (!p.ok) throw new Error(p.reason); return p; };
 
-describe('orderedSiblings — 서버와 같은 (sort_order, id)', () => {
+describe('siblingsInServerOrder(doc-move-plan) — 서버와 같은 (sort_order, id)', () => {
   it('sort_order가 같으면 id 순 · 부모별로', () => {
-    expect(orderedSiblings(DOCS, null).map((d) => d.id)).toEqual(['a', 'b', 'c', 'f']);
-    expect(orderedSiblings(DOCS, 'f').map((d) => d.id)).toEqual(['f1', 'f2', 'g']);
+    expect(siblingsInServerOrder(DOCS, null).map((d) => d.id)).toEqual(['a', 'b', 'c', 'f']);
+    expect(siblingsInServerOrder(DOCS, 'f').map((d) => d.id)).toEqual(['f1', 'f2', 'g']);
   });
 });
 
@@ -111,25 +112,25 @@ describe('placedFromSiblings — 저장 응답으로 센 자리(까디르 #4730 
 
 describe('reorderRequestBody — 저장 본문 {doc_id, parent_id, after_id?}(4353 모양 (가))', () => {
   it('위로 = 새 자리 바로 앞 형제 뒤 · 맨 앞으로면 after_id null', () => {
-    expect(reorderRequestBody(ok(planDocMove(DOCS, 'c', { kind: 'up' })))).toEqual({ doc_id: 'c', parent_id: null, after_id: 'a' }); // a · c · b · f
-    expect(reorderRequestBody(ok(planDocMove(DOCS, 'b', { kind: 'up' })))).toEqual({ doc_id: 'b', parent_id: null, after_id: null }); // b · a · c · f
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'c', { kind: 'up' })).placement)).toEqual({ doc_id: 'c', parent_id: null, after_id: 'a' }); // a · c · b · f
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'b', { kind: 'up' })).placement)).toEqual({ doc_id: 'b', parent_id: null, after_id: null }); // b · a · c · f
   });
   it('아래로 = 다음 형제 뒤', () => {
-    expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'down' })))).toEqual({ doc_id: 'f1', parent_id: 'f', after_id: 'f2' });
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'down' })).placement)).toEqual({ doc_id: 'f1', parent_id: 'f', after_id: 'f2' });
   });
   it('폴더로 · 맨 위 단계로 = after_id 키 없음(서버의 진짜 맨 끝)', () => {
-    const into = reorderRequestBody(ok(planDocMove(DOCS, 'a', { kind: 'into', parentId: 'f' })));
+    const into = reorderRequestBody(ok(planDocMove(DOCS, 'a', { kind: 'into', parentId: 'f' })).placement);
     expect(into).toEqual({ doc_id: 'a', parent_id: 'f' });
     expect('after_id' in into).toBe(false);
-    expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'into', parentId: null })))).toEqual({ doc_id: 'f1', parent_id: null });
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'into', parentId: null })).placement)).toEqual({ doc_id: 'f1', parent_id: null });
   });
 });
 
 describe('applyDocMove — 로컬 트리 낙관 반영', () => {
   it('새 부모 · 간격 번호 · 다른 부모의 문서는 그대로', () => {
     const out = applyDocMove(DOCS, ok(planDocMove(DOCS, 'a', { kind: 'into', parentId: 'f' })));
-    expect(orderedSiblings(out, 'f').map((d) => d.id)).toEqual(['f1', 'f2', 'g', 'a']);
-    expect(orderedSiblings(out, null).map((d) => d.id)).toEqual(['b', 'c', 'f']);
+    expect(siblingsInServerOrder(out, 'f').map((d) => d.id)).toEqual(['f1', 'f2', 'g', 'a']);
+    expect(siblingsInServerOrder(out, null).map((d) => d.id)).toEqual(['b', 'c', 'f']);
     expect(out.find((d) => d.id === 'b')).toBe(DOCS.find((d) => d.id === 'b'));
   });
 });
@@ -166,5 +167,16 @@ describe('menuMoveState — 아직 안 받은 문서가 있을 때(20개씩 페�
     expect(menuMoveState(DOCS, 'b', 'manual', true)).toMatchObject({ down: true, downUnloaded: false });
     expect(menuMoveState(DOCS, 'f', 'manual', false)).toMatchObject({ down: false, downUnloaded: false });
     expect(menuMoveState(DOCS, 'f', 'title', true)).toMatchObject({ down: false, downUnloaded: false, sortLocked: true });
+  });
+});
+
+// story #4348 × 4353 — 끌기 길과 «⋮» 메뉴 길이 **같은 요청 본문**을 보낸다(계획 모듈 한 곳 · doc-move-plan.ts). 한쪽 계획이 바뀌면 여기가 빨개진다.
+describe('같은 길 — 메뉴 옮기기 본문 = 끌기 계획 본문', () => {
+  it('아래로 = 다음 형제 위에 끌어 놓기 · 위로 = 앞 형제 위에 끌어 놓기 · 폴더로 = 폴더 안으로 끌기', () => {
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'b', { kind: 'down' })).placement)).toEqual(reorderRequestBody(planReorder(DOCS, 'b', 'c')!));
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'c', { kind: 'up' })).placement)).toEqual(reorderRequestBody(planReorder(DOCS, 'c', 'b')!));
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'down' })).placement)).toEqual(reorderRequestBody(planReorder(DOCS, 'f1', 'f2')!));
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'a', { kind: 'into', parentId: 'f' })).placement)).toEqual(reorderRequestBody(planMoveInto('a', 'f')));
+    expect(reorderRequestBody(ok(planDocMove(DOCS, 'f1', { kind: 'into', parentId: null })).placement)).toEqual(reorderRequestBody(planMoveInto('f1', null)));
   });
 });

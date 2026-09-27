@@ -11,7 +11,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { DocTree, compareDocsForSort } from './doc-tree';
-import { applyDocMove, planDocMove, type DocMoveAction, type DocMovePlaced, type DocMovePlan, type MenuMoveResult } from './lib/doc-move';
+import { applyDocMove, planDocMove, type DocMoveAction, type DocMovePlaced, type MenuMovePlan, type MenuMoveResult } from './lib/doc-move';
 import type { DocSortMode } from '@/app/(authenticated)/[ws]/[proj]/docs/docs-context';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -52,7 +52,7 @@ function Harness({ initial, sortMode, hasMore, withMove }: { initial: TestDoc[];
   const [docs, setDocs] = useState(initial);
   useEffect(() => { harness.setDocs = setDocs; }, []);
   const onMenuMove = (docId: string, action: DocMoveAction) => new Promise<MenuMoveResult>((resolve) => {
-    let plan: DocMovePlan | null = null;
+    let plan: MenuMovePlan | null = null;
     setDocs((prev) => {
       plan = planDocMove(prev, docId, action);
       return plan.ok ? applyDocMove(prev, plan) : prev;

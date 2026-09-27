@@ -8,12 +8,8 @@
  * - 오류: 400 모양 · 순환 = `invalid` · 409 `after_id`가 그 부모의 형제가 아님(그 사이 옮겨짐) = `stale` · 404 접근 불가 = `not-found` ·
  *   그 밖(망 오류 · 5xx) = `failed`. 409는 새 문구 없이 `moveFailed` + 트리 다시 읽기(PO).
  */
-export interface ReorderRequest {
-  doc_id: string;
-  parent_id: string | null;
-  /** 그 형제 바로 뒤 · null = 맨 앞 · undefined(키 생략) = 맨 끝 */
-  after_id?: string | null;
-}
+import { reorderRequestBody, type DocMovePlan } from '../doc-move-plan';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export type ReorderResult =
   | { ok: true; doc: { id: string; parent_id: string | null; sort_order: number }; siblings: Array<{ id: string; sort_order: number }> }
@@ -21,10 +17,12 @@ export type ReorderResult =
 
 export const DOC_REORDER_URL = '/api/docs/reorder';
 
-export async function saveDocOrder(body: ReorderRequest, fetchImpl: typeof fetch = fetch): Promise<ReorderResult> {
+// 본문은 계획 모듈(doc-move-plan.ts reorderRequestBody) 한 곳이 만든다 — 끌기 · «⋮» 메뉴가 같은 계획 → 같은 본문(story #4348 · 4353).
+// 기본 fetch = fetchWithAuth(401 → 토큰 갱신 · 시간 제한 · 세션 만료 신호) — 끌기 길이 4353에서 쓰던 그대로.
+export async function saveDocOrder(plan: DocMovePlan, fetchImpl: typeof fetch = fetchWithAuth): Promise<ReorderResult> {
   let res: Response;
   try {
-    res = await fetchImpl(DOC_REORDER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    res = await fetchImpl(DOC_REORDER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reorderRequestBody(plan)) });
   } catch {
     return { ok: false, reason: 'failed' };
   }

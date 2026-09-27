@@ -8,7 +8,7 @@ import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
-import { reorderRequestBody, type DocMovePlan } from '@/components/docs/doc-move-plan';
+import type { DocMovePlan } from '@/components/docs/doc-move-plan';
 import { DocAutoGroups } from '@/components/docs/doc-auto-groups';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
@@ -26,7 +26,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { applyDocMove, placedFromSiblings, planDocMove, reorderRequestBody, type DocMoveAction, type DocMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
+import { applyDocMove, placedFromSiblings, planDocMove, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
 import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
@@ -219,23 +219,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // story #4353 — 재정렬 · 폴더로 옮기기 한 길(`POST /api/docs/reorder`). 예전 PATCH {sort_order}는 그 한 문서 값만 바꿔 형제가 0
   // 동률이면 무동작이었다. 서버가 새 부모의 형제 번호를 한 번에 다시 매기고 그 번호를 돌려준다 — 화면은 그 번호를 그대로 반영한다
   // (낙관 추측 번호 없음). 실패하면 문장을 내고 트리를 다시 읽는다(story #3637과 같은 축).
+  // story #4348 — 저장은 어댑터 한 곳(`lib/doc-reorder-api.ts` saveDocOrder · 응답 {doc, siblings} 해석 · 오류 갈래) — 끌기(여기)와 «⋮» 메뉴(아래)가 같은 길.
   const placeDoc = useCallback(async (plan: DocMovePlan, failedTitle: string) => {
-    try {
-      const res = await fetchWithAuth('/api/docs/reorder', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reorderRequestBody(plan)),
-      });
-      if (!res.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return; }
-      const json = (await res.json().catch(() => null)) as
-        { data?: { doc?: { id: string; parent_id: string | null }; siblings?: Array<{ id: string; sort_order: number }> } } | null;
-      const placed = json?.data?.doc;
-      const numbers = new Map((json?.data?.siblings ?? []).map((sib) => [sib.id, sib.sort_order]));
-      if (!placed) { await fetchTree(); return; }
-      setTree((prev) => prev.map((doc) => {
-        const nextOrder = numbers.get(doc.id);
-        if (doc.id === placed.id) return { ...doc, parent_id: placed.parent_id, sort_order: nextOrder ?? doc.sort_order };
-        return nextOrder === undefined ? doc : { ...doc, sort_order: nextOrder };
-      }));
-    } catch { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); }
+    const result = await saveDocOrder(plan);
+    if (!result.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return; }
+    setTree((prev) => applyReorderResult(prev, result));
   }, [fetchTree, addToast]);
 
   const handleReorder = useCallback((plan: DocMovePlan) => placeDoc(plan, t('reorderFailed')), [placeDoc, t]);
@@ -249,7 +237,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   useEffect(() => { treeRef.current = tree; });
   const moveChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const moveSeqRef = useRef(0);
-  const pendingMovesRef = useRef(new Map<number, Extract<DocMovePlan, { ok: true }>>());
+  const pendingMovesRef = useRef(new Map<number, Extract<MenuMovePlan, { ok: true }>>());
   // 까디르 #4730 P3 — 실패 뒤 다시 읽기는 **지금** 고른 태그로(저장 중에 태그를 바꿨으면 시작 때 태그로 읽어 필터와 목록이 어긋났다).
   const selectedTagsRef = useRef(selectedTags);
   useEffect(() => { selectedTagsRef.current = selectedTags; });
@@ -264,7 +252,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     pending.set(seq, plan);
     const job = moveChainRef.current.then(async (): Promise<MenuMoveResult> => {
       if (!pending.has(seq)) return null;
-      const result = await saveDocOrder(reorderRequestBody(plan));
+      const result = await saveDocOrder(plan.placement);
       pending.delete(seq);
       if (result.ok) {
         const later = [...pending.values()];

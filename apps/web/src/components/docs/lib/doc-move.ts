@@ -1,11 +1,17 @@
+import { compareServerOrder, planMoveInto, planReorder, siblingsInServerOrder, type DocMovePlan as DocPlacement } from '../doc-move-plan';
+
 /**
  * story #4348 — 문서 트리에서 키보드 · 터치로 문서 자리를 옮긴다(«⋮» 메뉴: 위로 · 아래로 · 폴더로). 끌기는 마우스 전용이라
  * (센서가 터치를 안 받음 #1988 · 키보드 센서 없음) 키보드 · 보조기기 · 터치 사용자는 문서 순서 · 위치를 바꿀 길이 0이었다.
  *
+ * **자리 계산은 한 모듈**(`components/docs/doc-move-plan.ts` · 4353): 형제 순서(siblingsInServerOrder) · 어디에 놓나(planReorder · planMoveInto) ·
+ * 요청 본문(reorderRequestBody). 이 파일은 그 위의 **메뉴 층**만 — 켜고 끄기 · 거부 까닭 · 고르개 목록 · 낙관 반영 · 알림. 끌기 길과 메뉴 길이
+ * 같은 요청 본문을 보낸다(같은 계획 함수 · doc-move.test.ts «같은 길»).
+ *
  * 이 파일은 **계산만** 한다(저장 API와 무관): 옮긴 뒤의 새 부모 · 그 부모 아래 형제들의 새 순서(id 목록) · 경계 · 거부 까닭.
  * - 형제 순서는 서버 목록과 같은 `(sort_order, id)` 복합 정렬이다(backend `repositories/doc.py` — sort_order는 기본값 0이 대부분이라
  *   같은 값끼리는 id로 갈린다). 트리 렌더(수동 순서)도 서버가 준 이 순서를 그대로 쓴다.
- * - 저장은 새 BE API(4353 · PO 23:01Z 모양 (가))다: 본문 `{ doc_id, parent_id, after_id? }` = `reorderRequestBody(plan)` — 옮긴 문서 하나와
+ * - 저장은 새 BE API(4353 · PO 23:01Z 모양 (가))다: 본문 `{ doc_id, parent_id, after_id? }` = `reorderRequestBody(plan.placement)`(doc-move-plan.ts) — 옮긴 문서 하나와
  *   바로 앞 이웃만 말한다(트리는 20개씩 페이지로 받아 형제 **전부**는 모를 수 있지만, 받은 목록은 늘 전체의 앞부분이라 이웃은 확실히 앎).
  *   문서마다 PATCH로 번호를 다시 매기는 길은 버렸다(형제 1,295/1,305가 sort_order 0 → 끌기 순서 저장이 사실상 무효였던 원인이 PATCH가 형제를 다시 안 매기는 것).
  */
@@ -21,16 +27,10 @@ export type DocMoveAction = { kind: 'up' } | { kind: 'down' } | { kind: 'into'; 
 
 export type DocMoveDenied = 'not-found' | 'boundary' | 'circular' | 'same-place' | 'not-folder';
 
-export type DocMovePlan =
-  | { ok: true; docId: string; fromParentId: string | null; parentId: string | null; orderedIds: string[]; index: number }
+/** 메뉴 옮기기 계획 — `placement` = 서버에 보낼 자리(doc-move-plan.ts가 짠 것 그대로) · 나머지는 낙관 반영 · 알림용. */
+export type MenuMovePlan =
+  | { ok: true; docId: string; fromParentId: string | null; parentId: string | null; orderedIds: string[]; index: number; placement: DocPlacement }
   | { ok: false; reason: DocMoveDenied };
-
-const byServerOrder = (a: MovableDoc, b: MovableDoc) => a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
-/** 한 부모 아래 형제들 — 서버와 같은 `(sort_order, id)` 순서. */
-export function orderedSiblings(docs: MovableDoc[], parentId: string | null): MovableDoc[] {
-  return docs.filter((d) => (d.parent_id ?? null) === parentId).sort(byServerOrder);
-}
 
 /** `nodeId`가 `ancestorId`의 자손인가(자기 자신 포함 아님) — 폴더 안으로 옮길 때 순환 거부용. */
 function isUnder(docs: MovableDoc[], ancestorId: string, nodeId: string): boolean {
@@ -49,7 +49,7 @@ function isUnder(docs: MovableDoc[], ancestorId: string, nodeId: string): boolea
 export function moveBounds(docs: MovableDoc[], docId: string): { up: boolean; down: boolean } {
   const doc = docs.find((d) => d.id === docId);
   if (!doc) return { up: false, down: false };
-  const siblings = orderedSiblings(docs, doc.parent_id ?? null);
+  const siblings = siblingsInServerOrder(docs, doc.parent_id ?? null);
   const i = siblings.findIndex((d) => d.id === docId);
   return { up: i > 0, down: i >= 0 && i < siblings.length - 1 };
 }
@@ -64,7 +64,7 @@ export interface MoveTarget { id: string | null; depth: number; current: boolean
  * - 자기 자신과 그 아래는 빠진다(순환). 트리에 안 보이는 폴더(부모를 아직 안 받음)도 빠진다 — 트리가 안 그리는 자리.
  * - 지금 있는 자리(부모 폴더 · 루트면 맨 위 단계)는 빼지 않고 `current`로 남긴다: 빼면 그 아래 폴더가 엉뚱한 줄 밑으로 들여써져 트리 모양이 깨진다.
  */
-export function moveTargets<T extends MovableDoc>(docs: T[], docId: string, compare: (a: T, b: T) => number = byServerOrder): MoveTarget[] {
+export function moveTargets<T extends MovableDoc>(docs: T[], docId: string, compare: (a: T, b: T) => number = compareServerOrder): MoveTarget[] {
   const doc = docs.find((d) => d.id === docId);
   if (!doc) return [];
   const here = doc.parent_id ?? null;
@@ -83,18 +83,21 @@ export function moveTargets<T extends MovableDoc>(docs: T[], docId: string, comp
   return out;
 }
 
-/** 옮기기 계획 — 위로 · 아래로는 같은 부모 안에서 한 칸 바꾸기, 폴더로는 그 폴더 끝에 붙이기. */
-export function planDocMove(docs: MovableDoc[], docId: string, action: DocMoveAction): DocMovePlan {
+/** 옮기기 계획 — 위로 · 아래로는 같은 부모 안에서 한 칸 바꾸기(끌기의 planReorder와 같은 함수), 폴더로는 그 폴더 끝(planMoveInto). */
+export function planDocMove(docs: MovableDoc[], docId: string, action: DocMoveAction): MenuMovePlan {
   const doc = docs.find((d) => d.id === docId);
   if (!doc) return { ok: false, reason: 'not-found' };
   const from = doc.parent_id ?? null;
   if (action.kind === 'up' || action.kind === 'down') {
-    const ids = orderedSiblings(docs, from).map((d) => d.id);
+    const ids = siblingsInServerOrder(docs, from).map((d) => d.id);
     const i = ids.indexOf(docId);
     const j = action.kind === 'up' ? i - 1 : i + 1;
     if (i < 0 || j < 0 || j >= ids.length) return { ok: false, reason: 'boundary' };
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    return { ok: true, docId, fromParentId: from, parentId: from, orderedIds: ids, index: j };
+    // 끌기로 이웃 위에 놓는 것과 같은 계획(아래로 = 그 이웃 뒤 · 위로 = 그 이웃 앞) — 두 길이 같은 요청 본문.
+    const placement = planReorder(docs, docId, ids[j]!);
+    if (!placement) return { ok: false, reason: 'boundary' };
+    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+    return { ok: true, docId, fromParentId: from, parentId: from, orderedIds: ids, index: j, placement };
   }
   const to = action.parentId;
   if (to === from) return { ok: false, reason: 'same-place' };
@@ -103,21 +106,12 @@ export function planDocMove(docs: MovableDoc[], docId: string, action: DocMoveAc
     if (!target || !target.is_folder) return { ok: false, reason: 'not-folder' };
     if (to === docId || isUnder(docs, docId, to)) return { ok: false, reason: 'circular' };
   }
-  const ids = [...orderedSiblings(docs, to).map((d) => d.id), docId];
-  return { ok: true, docId, fromParentId: from, parentId: to, orderedIds: ids, index: ids.length - 1 };
-}
-
-/**
- * 저장 API 본문 — 위로 · 아래로 = 새 자리의 **바로 앞 형제** 뒤(`after_id` · 맨 앞이면 null), 폴더로 = `after_id` 생략(맨 끝 — 새 부모의 형제를
- * 다 받지 못했을 수 있어 «받은 마지막 뒤»가 아니라 서버의 진짜 끝).
- */
-export function reorderRequestBody(plan: Extract<DocMovePlan, { ok: true }>): { doc_id: string; parent_id: string | null; after_id?: string | null } {
-  if (plan.parentId !== plan.fromParentId) return { doc_id: plan.docId, parent_id: plan.parentId };
-  return { doc_id: plan.docId, parent_id: plan.parentId, after_id: plan.index > 0 ? plan.orderedIds[plan.index - 1] : null };
+  const ids = [...siblingsInServerOrder(docs, to).map((d) => d.id), docId];
+  return { ok: true, docId, fromParentId: from, parentId: to, orderedIds: ids, index: ids.length - 1, placement: planMoveInto(docId, to) };
 }
 
 /** 옮긴 결과를 로컬 트리에 바로 반영(낙관) — 새 부모 · 간격 번호. 저장 실패면 호출부가 서버 트리로 되돌린다. */
-export function applyDocMove<T extends MovableDoc>(docs: T[], plan: Extract<DocMovePlan, { ok: true }>, step = 10): T[] {
+export function applyDocMove<T extends MovableDoc>(docs: T[], plan: Extract<MenuMovePlan, { ok: true }>, step = 10): T[] {
   const order = new Map(plan.orderedIds.map((id, i) => [id, (i + 1) * step]));
   return docs.map((d) => {
     if (!order.has(d.id)) return d;
@@ -156,13 +150,13 @@ export function placedFromSiblings(doc: { id: string; sort_order: number }, sibl
 }
 
 /** 호출부(레이아웃 handleMenuMove)가 돌려주는 것 — 거부면 `{ plan(ok:false), placed: null }` · 성공이면 계획 + 서버 자리 · 저장 실패면 null. */
-export type MenuMoveResult = { plan: DocMovePlan; placed: DocMovePlaced | null } | null;
+export type MenuMoveResult = { plan: MenuMovePlan; placed: DocMovePlaced | null } | null;
 
 /**
  * 위로 · 아래로 알림: 서버 자리(`placed`)를 알면 «N개 중 M번째», 모르면 «M번째»만 — 불러온 형제 수(N)로 전체를 단정하지 않는다.
  * M은 계획의 자리로도 맞다(불러온 쪽은 늘 전체 순서의 앞부분).
  */
-export function docMoveAnnouncement(docs: MovableDoc[], plan: Extract<DocMovePlan, { ok: true }>, placed: DocMovePlaced | null = null): DocMoveAnnouncement {
+export function docMoveAnnouncement(docs: MovableDoc[], plan: Extract<MenuMovePlan, { ok: true }>, placed: DocMovePlaced | null = null): DocMoveAnnouncement {
   const title = docs.find((d) => d.id === plan.docId)?.title ?? '';
   if (plan.parentId === plan.fromParentId) {
     return placed
@@ -180,14 +174,14 @@ export function docMoveAnnouncement(docs: MovableDoc[], plan: Extract<DocMovePla
  * - 맨 위면 위로 · 맨 아래면 아래로도 끈다(수동 보기에서도).
  * - 폴더로 이동은 정렬과 무관하게 켜 둔다(옮길 폴더가 있을 때).
  */
-export function menuMoveState<T extends MovableDoc>(docs: T[], docId: string, sortMode: 'manual' | 'title' | 'updated_at', hasMore = false, compare: (a: T, b: T) => number = byServerOrder): {
+export function menuMoveState<T extends MovableDoc>(docs: T[], docId: string, sortMode: 'manual' | 'title' | 'updated_at', hasMore = false, compare: (a: T, b: T) => number = compareServerOrder): {
   up: boolean; down: boolean; sortLocked: boolean; downUnloaded: boolean; targets: MoveTarget[];
 } {
   const manual = sortMode === 'manual';
   const b = moveBounds(docs, docId);
   // 아래로 = 다음 형제 뒤. 받은 형제 중 마지막인데 트리에 아직 안 받은 문서가 있으면(hasMore), 다음 형제가 안 받은 자리일 수 있어 끈다(PO 23:01Z).
   const doc = docs.find((d) => d.id === docId);
-  const siblings = doc ? orderedSiblings(docs, doc.parent_id ?? null) : [];
+  const siblings = doc ? siblingsInServerOrder(docs, doc.parent_id ?? null) : [];
   const lastLoaded = siblings.length > 0 && siblings[siblings.length - 1].id === docId;
   const downUnloaded = manual && hasMore && lastLoaded;
   // downUnloaded면 받은 형제 중 마지막이라 b.down이 이미 거짓이다(«아래로»를 끄는 건 moveBounds) — downUnloaded는 까닭 줄을 고르는 데만 쓴다(러너 e M18 동등).
