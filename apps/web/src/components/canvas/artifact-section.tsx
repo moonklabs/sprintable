@@ -275,7 +275,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
             </button>
           </div>
         </div>
-        <ImportArtifactDialog open={importOpen} onOpenChange={setImportOpen} onImport={handleImportCommit} />
+        <ImportArtifactDialog open={importOpen} onOpenChange={setImportOpen} onImport={handleImportCommit} targetId={storyId} />
       </div>
     );
   }
