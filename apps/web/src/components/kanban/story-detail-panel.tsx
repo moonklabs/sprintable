@@ -62,6 +62,8 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { useFieldDraft } from '@/hooks/use-field-draft';
+import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -410,7 +412,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   const [loadingActivities, setLoadingActivities] = useState(false);
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [loadingMoreActivities, setLoadingMoreActivities] = useState(false);
-  const [commentInput, setCommentInput] = useState('');
+  // [SID:4369] 댓글 초안(디디 useFieldDraft · 유나 규칙 ④) — Esc · ✕ · 바깥 누름 · 다른 스토리로 이동으로 닫혀도 남고, 보내기 성공 때만 지운다.
+  const [commentInput, setCommentInput, clearCommentDraft] = useFieldDraft({ surface: 'story-panel', targetId: story.id, field: 'comment' });
   const [submittingComment, setSubmittingComment] = useState(false);
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
 
@@ -482,11 +485,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     onExtraEvent: handleTrustStageChanged,
   });
 
-  const [editingDescription, setEditingDescription] = useState(false);
-  const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
+  // [SID:4369] 설명 · AC 초안(디디 useFieldDraft · 유나 (가)) — 닫는 길과 무관하게 남고 · 저장 성공 · 보이는 «취소»에서만 지운다.
+  // 초안이 남은 채 다시 열면 그 칸은 편집 모드로 초안을 보여 준다(서버 글이 바뀌었어도 초안 · 합치기 없음 = 저장하면 덮어씀).
+  const [descriptionDraft, setDescriptionDraft, clearDescriptionDraft] = useFieldDraft({ surface: 'story-panel', targetId: story.id, field: 'description' }, story.description ?? '');
+  const [acDraft, setAcDraft, clearAcDraft] = useFieldDraft({ surface: 'story-panel', targetId: story.id, field: 'acceptance-criteria' }, story.acceptance_criteria ?? '');
+  const [editingDescription, setEditingDescription] = useState(() => descriptionDraft !== (story.description ?? ''));
   const [savingDescription, setSavingDescription] = useState(false);
-  const [editingAC, setEditingAC] = useState(false);
-  const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
+  const [editingAC, setEditingAC] = useState(() => acDraft !== (story.acceptance_criteria ?? ''));
   const [savingAC, setSavingAC] = useState(false);
   // story #178c7c6d(3015②) — Workcell Brief의 "더 보기"가 위임할 기존 본문 섹션 앵커.
   // ref 기반(전역 DOM id 아님) — 이 패널이 kanban/epic-swimlane/flow-node 여러 곳에서
@@ -588,9 +593,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
   useEffect(() => {
     setTitleDraft(story.title);
-    setDescriptionDraft(story.description ?? '');
-    setAcDraft(story.acceptance_criteria ?? '');
-  }, [story.id, story.title, story.description, story.acceptance_criteria]);
+    // [SID:4369] 설명 · AC는 useFieldDraft가 대상(스토리) · 서버 값 변화를 따른다(초안이 없을 때만 서버 값) — 여기서 되돌리면 초안이 사라진다.
+  }, [story.id, story.title]);
 
   useEffect(() => {
     if (editingTitle) {
@@ -1157,7 +1161,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     setSavingDescription(false);
     setEditingDescription(false);
     setReferenceDropped(dropped);
-    if (updated) onStoryUpdate?.({ ...story, description: updated.description });
+    if (updated) { clearDescriptionDraft(); onStoryUpdate?.({ ...story, description: updated.description }); }
     else addToast({ type: 'error', title: t('descriptionSaveFailed') });
   };
 
@@ -1171,7 +1175,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     setSavingAC(false);
     setEditingAC(false);
     setReferenceDropped(dropped);
-    if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
+    if (updated) { clearAcDraft(); onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria }); }
     else addToast({ type: 'error', title: t('acSaveFailed') });
   };
 
@@ -1477,15 +1481,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         // [SID:4367] 한 Esc = 한 층 — 안쪽 층(설명 · AC의 `#` 후보 · 산출물 댓글 쓰기 칸 · 포털 메뉴)이 이 Esc로 자기를 닫고
         // preventDefault했으면 편집 취소 · 패널 닫기를 하지 않는다(후보를 닫으려던 Esc가 쓴 글까지 버리던 결함).
         if (e.defaultPrevented) return;
+        // [SID:4369] 유나 규칙 — ① 조합 중 Esc = 조합만 ② 글 있는 여러 줄 칸(댓글 · 설명 · AC …)의 첫 Esc = 칸에서만 빠져나옴(초점 = 패널 뿌리 ·
+        // 글 유지) ③ 그 밖 · 둘째 Esc = 패널 닫힘. Esc는 여러 줄 글을 버리지 않는다(설명 · AC «Esc = 편집 취소»는 없앰 — 초안은 useFieldDraft에 남음).
+        if (leaveMultilineFieldOnEsc(e, panelTrapRef.current)) return;
+        // 한 줄 칸(제목 인라인)은 «Esc = 취소» 관례 그대로.
         if (editingTitle) { setEditingTitle(false); setTitleDraft(story.title); return; }
-        if (editingDescription) { setEditingDescription(false); setDescriptionDraft(story.description ?? ''); return; }
-        if (editingAC) { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); return; }
         onClose();
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose, editingTitle, editingDescription, editingAC, story.title, story.description, story.acceptance_criteria]);
+  }, [onClose, editingTitle, story.title, panelTrapRef]);
 
   const handleSubmitComment = async () => {
     if (!commentInput.trim() || submittingComment) return;
@@ -1501,7 +1507,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
       if (res.ok) {
         const json = await res.json();
         setComments((prev) => [json.data, ...prev]);
-        setCommentInput('');
+        clearCommentDraft();
       }
     } catch {
       // silent
@@ -1960,7 +1966,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     <Button size="sm" onClick={handleSaveDescription} disabled={savingDescription}>
                       {savingDescription ? t('loading') : t('save')}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setEditingDescription(false); setDescriptionDraft(story.description ?? ''); }}>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingDescription(false); clearDescriptionDraft(); }}>
                       {t('cancel')}
                     </Button>
                   </div>
@@ -2020,7 +2026,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
                       {savingAC ? t('loading') : t('save')}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setEditingAC(false); setAcDraft(story.acceptance_criteria ?? ''); }}>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingAC(false); clearAcDraft(); }}>
                       {t('cancel')}
                     </Button>
                   </div>

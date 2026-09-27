@@ -150,3 +150,32 @@ describe('useWorkListSelection — 안쪽이 쓴 Esc는 선택 해제 안 함([S
     expect(replaceCalls.at(-1)).toBe('/work-list');
   });
 });
+
+// [SID:4369] 유나 규칙 — 상세 패널(`data-work-list-detail`) 안 글 있는 여러 줄 칸의 첫 Esc = 칸에서만(선택 · 글 그대로 · 초점 = 패널 뿌리) ·
+// 둘째 Esc = 선택 해제 · 조합 중 Esc = 아무것도 안 함.
+describe('useWorkListSelection — 여러 줄 칸 Esc 규칙([SID:4369])', () => {
+  function WithDetail() {
+    const [selectedRowId] = useWorkListSelection();
+    return (
+      <div>
+        <div data-testid="selected">{selectedRowId ?? 'none'}</div>
+        <aside data-work-list-detail="" tabIndex={-1} data-testid="detail"><textarea data-testid="reason" defaultValue="결재 사유 쓰던 글" /></aside>
+      </div>
+    );
+  }
+  it('칸 글 있음: 첫 Esc = 칸에서만 · 둘째 Esc = 선택 해제 · 조합 중 = 그대로', async () => {
+    searchParamsRef.current = new URLSearchParams('row=row-a');
+    await act(async () => { root.render(<WithDetail />); });
+    const reason = container.querySelector('[data-testid="reason"]') as HTMLTextAreaElement;
+    const esc = (t: EventTarget, init: KeyboardEventInit = {}) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init }));
+    reason.focus();
+    await act(async () => { esc(reason, { isComposing: true }); });
+    expect(replaceCalls).toEqual([]);
+    await act(async () => { esc(reason); });
+    expect(replaceCalls).toEqual([]);
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="detail"]'));
+    expect(reason.value).toBe('결재 사유 쓰던 글');
+    await act(async () => { esc(document.activeElement!); });
+    expect(replaceCalls.at(-1)).toBe('/work-list');
+  });
+});

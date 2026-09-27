@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 
 /**
  * story #3845(우패널, 페드루 PO 확定 2026-09-14 08:26Z) — 행 선택 상태를 URL `?row=`에
@@ -30,7 +31,10 @@ export function useWorkListSelection(): [string | null, (rowId: string | null) =
     function handleKeyDown(e: KeyboardEvent) {
       // [SID:4367] 한 Esc = 한 층 — 선택 해제는 상세 패널(산출물 · 증거 · 게이트 서명 칸)을 통째로 내린다. 안쪽 층(댓글 쓰기 칸 ·
       // 후보 목록 등)이 Esc로 자기를 닫고 preventDefault했으면 선택을 그대로 둔다(useFocusTrap · 스토리 패널과 같은 계약).
-      if (e.key === 'Escape' && !e.defaultPrevented) setSelectedRowId(null);
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // [SID:4369] 유나 규칙 — 상세 패널(`data-work-list-detail`) 안 글 있는 여러 줄 칸의 첫 Esc는 칸에서만 빠져나옴 · 조합 중 Esc는 조합만.
+      if (leaveMultilineFieldOnEsc(e, document.querySelector<HTMLElement>('[data-work-list-detail]'))) return;
+      setSelectedRowId(null);
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);

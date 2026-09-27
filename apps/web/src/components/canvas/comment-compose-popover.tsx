@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 
 interface CommentComposePopoverProps {
   onSubmit: (body: string) => void;
@@ -47,9 +48,18 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className }: 
       ref={containerRef}
       style={style}
       // story #3007(로드맵 P2·PR-E, L1) — 팝오버는 floating이라 --elev-overlay.
-      className={`absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] ${className ?? ''}`}
+      className={`absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] outline-none ${className ?? ''}`}
+      // [SID:4369] 유나 규칙의 층 뿌리 — 글 있는 칸에서 빠져나온 초점이 여기로(tabIndex=-1).
+      tabIndex={-1}
       // [SID:4367] Esc = 이 칸만 닫음(폐기)·«썼다»고 표시 — 스토리 패널 안 산출물 카드에서 이 Esc가 패널 window Esc로 흘러 패널째 닫혔다.
-      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } }}
+      // [SID:4369] 유나 규칙 — 글이 있으면 첫 Esc는 칸에서만 빠져나옴(글 유지 · 초점 = 이 틀) · 조합 중 Esc는 조합만 · 둘째 Esc(또는 빈 칸) = 폐기 + 닫기.
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          if (leaveMultilineFieldOnEsc(e.nativeEvent, containerRef.current)) return;
+          e.preventDefault();
+          onCancel();
+        }
+      }}
     >
       <textarea
         ref={inputRef}
