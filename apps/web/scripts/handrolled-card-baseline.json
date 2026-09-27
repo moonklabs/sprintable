@@ -105,7 +105,7 @@
     "components/canvas/artifact-section.tsx::flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-9 text-center",
     "components/canvas/artifact-stage.tsx::relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20",
     "components/canvas/artifact-viewer.tsx::overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--elev-card)]",
-    "components/canvas/comment-compose-popover.tsx::absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)]  ",
+    "components/canvas/comment-compose-popover.tsx::absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] outline-none  ",
     "components/canvas/comment-thread-card.tsx::rounded-xl border border-border bg-card shadow-[var(--elev-card)]",
     "components/canvas/edit-canvas.tsx::h-full w-full space-y-2 overflow-auto rounded-lg border border-dashed border-border bg-background p-3",
     "components/chat/approval-request-card.tsx::min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3",
@@ -276,7 +276,7 @@
     "components/standup/board-bridge-modal.tsx::flex w-full items-center justify-between gap-2 rounded-lg border border-border/70 bg-background p-2.5 text-left transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50",
     "components/standup/standup-board-card.tsx::flex flex-col rounded-xl border border-border bg-card shadow-[var(--elev-card)]",
     "components/standup/standup-history-section.tsx::rounded-lg border border-border bg-card p-3",
-    "components/support-widget/support-widget-launcher.tsx::pointer-events-auto flex max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
+    "components/support-widget/support-widget-launcher.tsx::pointer-events-auto flex outline-none max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
     "components/support-widget/support-widget-panel.tsx::min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50",
     "ee/components/billing/pricing-packs.tsx::rounded-2xl border border-border bg-card p-4",
     "ee/components/billing/pricing-plan-card.tsx::relative flex flex-col rounded-2xl border border-border bg-card p-4"
