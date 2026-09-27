@@ -102,6 +102,12 @@ async def _seed(s) -> dict[str, uuid.UUID]:
         f"(gen_random_uuid(),'{PROJ}','{tm_member_id}','granted')"
     ))
     # ⚠️GRANT_ONLY_USER/OTHER_USER: members/team_members 어디에도 안 넣음(team_member 행 없음).
+    # story #4351 — 실행 기록 목록이 project 접근을 보게 됐다(없으면 404). 이 파일의 관심은 «team_member 행 없는 org 멤버의 신원 해소»라
+    # grant-only 멤버에게 PROJ grant(org_member_id 축)를 준다 — 이름 그대로 «grant만 있는» 멤버.
+    await s.execute(text(
+        f"INSERT INTO project_access (id,project_id,org_member_id,permission) VALUES "
+        f"(gen_random_uuid(),'{PROJ}','{grant_only_row[0]}','granted')"
+    ))
     await s.commit()
     return {"grant_only_om": grant_only_row[0], "other_om": other_row[0], "tm_member": tm_member_id}
 

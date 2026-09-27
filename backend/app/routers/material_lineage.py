@@ -62,8 +62,8 @@ class HookPerformanceView(BaseModel):
 
 
 async def _caller_can_access_story_project(session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, auth) -> bool:
-    """story #4351 PR B — 계보의 마스터(항상 story)가 caller가 접근 못 하는 프로젝트면 False. 스토리가 없으면(지워짐) True —
-    그땐 org 스코프만 남는 옛 동작(가릴 프로젝트가 없다)."""
+    """story #4351 PR B — 계보의 마스터(항상 story)가 caller가 접근 못 하는 프로젝트면 False. 스토리가 없으면(지워짐)도 False(fail-closed ·
+    까디르 P2): 계보 행은 스토리 FK · 정리가 없어 지운 스토리의 고아 행이 남는데, 가릴 프로젝트를 모른다고 누구에게나 보이면 안 된다."""
     from app.models.pm import Story
     from app.services.project_auth import has_project_access
 
@@ -71,7 +71,7 @@ async def _caller_can_access_story_project(session: AsyncSession, org_id: uuid.U
         select(Story.project_id).where(Story.id == story_id, Story.org_id == org_id)
     )).scalar_one_or_none()
     if story_project_id is None:
-        return True
+        return False
     return await has_project_access(session, uuid.UUID(str(auth.user_id)), story_project_id, org_id)
 
 

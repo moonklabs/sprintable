@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -305,8 +305,13 @@ async def _resolve_agent_progress(
         .join(Story, Story.id == AgentRun.story_id, isouter=True)
         .where(
             AgentRun.org_id == org_id,
-            # story #4351 PR B(까디르 C) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
-            *([] if restricted_project_ids is None else [AgentRun.project_id.in_(restricted_project_ids)]),
+            # story #4351 PR B(까디르 C · P2) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
+            # 표시하는 건 JOIN한 스토리 제목이라 거르는 축도 그 스토리의 프로젝트(run의 project_id가 아니라 — POST /agent-runs가 story 소속을
+            # 확인하지 않아 A 프로젝트 run에 B 스토리를 달 수 있다). 스토리 없는 run만 run의 프로젝트로.
+            *([] if restricted_project_ids is None else [or_(
+                and_(Story.id.isnot(None), Story.project_id.in_(restricted_project_ids)),
+                and_(Story.id.is_(None), AgentRun.project_id.in_(restricted_project_ids)),
+            )]),
             AgentRun.status.in_(_AGENT_RUN_IN_PROGRESS_STATUSES),
             (Story.assignee_id == member.id) | (Story.human_owner_member_id == member.id),
         )
@@ -403,8 +408,13 @@ async def _resolve_completed_today(
         .join(Story, Story.id == AgentRun.story_id, isouter=True)
         .where(
             AgentRun.org_id == org_id,
-            # story #4351 PR B(까디르 C) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
-            *([] if restricted_project_ids is None else [AgentRun.project_id.in_(restricted_project_ids)]),
+            # story #4351 PR B(까디르 C · P2) — 참여 술어(담당/위임)만으론 접근 잃은 프로젝트 스토리 제목이 보였다 → 접근 가능 프로젝트만.
+            # 표시하는 건 JOIN한 스토리 제목이라 거르는 축도 그 스토리의 프로젝트(run의 project_id가 아니라 — POST /agent-runs가 story 소속을
+            # 확인하지 않아 A 프로젝트 run에 B 스토리를 달 수 있다). 스토리 없는 run만 run의 프로젝트로.
+            *([] if restricted_project_ids is None else [or_(
+                and_(Story.id.isnot(None), Story.project_id.in_(restricted_project_ids)),
+                and_(Story.id.is_(None), AgentRun.project_id.in_(restricted_project_ids)),
+            )]),
             AgentRun.status.in_(_TERMINAL_STATUSES),
             AgentRun.finished_at.isnot(None),
             AgentRun.finished_at >= since,

@@ -108,6 +108,7 @@ async def my_actions(
                 WorkflowLineStepApproval.approver_member_id == member_id,
                 WorkflowLineStepApproval.status == "pending",
                 WorkflowLineStepApproval.blocking.is_(True),
+                WorkflowLineStepRun.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
             .order_by(WorkflowLineStepApproval.created_at.asc())
             .limit(50)
@@ -175,6 +176,7 @@ async def my_actions(
                 Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Story.deleted_at.is_(None),
                 ~exists(_blocked_by_open_dependency),
+                Story.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
             .order_by(Story.updated_at.desc())
             .limit(50)
@@ -198,6 +200,7 @@ async def my_actions(
             .where(
                 Task.org_id == org_id,
                 Task.assignee_id == member_id,
+                Story.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
                 # story #2288 리뷰(2026-07-29, PO 지적): "미완료"는 명세5(review_merge)와
                 # «같은 자»를 써야 한다 — 안 그러면 같은 화면에 "다른 뜻의 미완료"가 둘 선다.
                 # _OPEN_EXCLUDED_STATUSES(파일 상단, 지금은 ("done",) 하나)가 그 SSOT다.
@@ -238,6 +241,8 @@ async def my_actions(
                 _Blocker.org_id == org_id,                # defense-in-depth: 조인 story 도 org-scope.
                 _Blocked.org_id == org_id,
                 _Blocker.assignee_id == member_id,        # 막은 쪽이 내 담당.
+                _Blocker.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
+                _Blocked.project_id.in_(_accessible_project_ids),
                 _Blocker.deleted_at.is_(None),
                 _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),  # 막힌 쪽이 아직 open.
                 _Blocked.deleted_at.is_(None),
@@ -331,6 +336,7 @@ async def my_actions(
                 _WaitingStory.org_id == org_id,
                 _WaitingStory.assignee_id == member_id,
                 _WaitingStory.deleted_at.is_(None),
+                _WaitingStory.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
                 WorkflowLineStepApproval.approver_member_id != member_id,
                 ~exists(_my_pending_approval_on_step),
             )

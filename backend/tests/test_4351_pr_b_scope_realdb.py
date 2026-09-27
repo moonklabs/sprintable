@@ -409,3 +409,79 @@ async def test_today_needs_me_agent_progress_and_completed_drop_inaccessible_pro
         assert "VISIBLE-A-story" in member.text
         assert member.json()["needs_me_count"] == 1
         assert "SECRET-B-story" in owner.text and owner.json()["needs_me_count"] == 2
+
+
+async def test_lineage_of_a_deleted_master_story_is_hidden_from_everyone():
+    """까디르 P2 — 계보 행은 스토리 FK · 정리가 없어 지운 스토리의 고아 행이 남는다. 가릴 프로젝트를 모른다고 누구에게나 보이면 안 된다
+    (fail-closed): 없는 스토리 = 거부 · owner도 `[]`."""
+    async with _world() as (Session, seeded):
+        orphan_story = uuid.uuid4()
+        async with Session() as s:
+            evidence_id = await _seed_master_evidence(s, org_id=seeded["org"], work_item_id=orphan_story)
+            await _seed_lineage(s, org_id=seeded["org"], source_evidence_id=evidence_id, work_item_id=orphan_story, derived_id=uuid.uuid4())
+        for who in ("member_user", "owner_user"):
+            resp = await _get(Session, seeded, f"/api/v2/material-lineage?work_item_id={orphan_story}", seeded[who])
+            assert resp.status_code == 200 and resp.json() == [], (who, resp.text[:300])
+
+
+async def test_today_agent_run_in_an_accessible_project_linking_an_inaccessible_story_hides_its_title():
+    """까디르 P2 — `POST /agent-runs`가 story 소속을 확인하지 않아 A 프로젝트 run에 B 스토리를 달 수 있다. 표시는 스토리 제목이라 거르는
+    축도 스토리 프로젝트: (run A · 스토리 B) → 숨김 / 대조 (run B · 스토리 A) → 보임(run의 프로젝트가 아니라 스토리로 가른다)."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from app.models.agent_run import AgentRun
+    from app.models.pm import Story
+
+    async with _world() as (Session, seeded):
+        now = datetime.now(UTC)
+        async with Session() as s:
+            await s.execute(update(Story).where(Story.id.in_([seeded["story_a"], seeded["story_b"]])).values(assignee_id=seeded["member_id"]))
+            pb = (await s.get(Story, seeded["story_b"])).project_id
+            for run_project, story in ((seeded["pa"], seeded["story_b"]), (pb, seeded["story_a"])):
+                for status, finished in (("running", None), ("completed", now)):
+                    s.add(AgentRun(
+                        id=uuid.uuid4(), org_id=seeded["org"], project_id=run_project, agent_id=seeded["member_id"],
+                        story_id=story, status=status, started_at=now, finished_at=finished,
+                    ))
+            await s.commit()
+        member = await _get(Session, seeded, "/api/v2/today?tz=UTC", seeded["member_user"])
+        assert member.status_code == 200, member.text[:300]
+        assert "SECRET-B" not in member.text, "A 프로젝트 run에 달린 B 스토리 제목이 보인다"
+        assert "VISIBLE-A-story" in member.text, "B 프로젝트 run에 달린 A 스토리는 보여야 한다(스토리 기준)"
+
+
+async def test_my_actions_queue_drops_inaccessible_project_items():
+    """PO 09-27 — my-actions의 action queue(리뷰 · 할 일 · 블로커 · 대기 · 결재)는 «내 몫»이지만 project 접근을 안 봤다: 접근 잃은 프로젝트의
+    스토리 · 과제 제목이 보였다. A 담당 스토리 · 과제 → 보임 / B 담당 스토리 · 과제 → 숨김."""
+    from sqlalchemy import update
+
+    from app.models.pm import Story, Task
+
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            await s.execute(update(Story).where(Story.id.in_([seeded["story_a"], seeded["story_b"]])).values(assignee_id=seeded["member_id"]))
+            for key, mark in (("a", "VISIBLE-A"), ("b", "SECRET-B")):
+                s.add(Task(id=uuid.uuid4(), org_id=seeded["org"], story_id=seeded[f"story_{key}"], title=f"{mark}-task", assignee_id=seeded["member_id"]))
+            await s.commit()
+        resp = await _get(Session, seeded, "/api/v2/command-center/my-actions", seeded["member_user"])
+        assert resp.status_code == 200, resp.text[:300]
+        queue = resp.json()["action_queue"]
+        assert "SECRET-B" not in str(queue), "접근 불가 프로젝트의 담당 항목이 action queue에 있다"
+        assert "VISIBLE-A-story" in str(queue) and "VISIBLE-A-task" in str(queue)
+
+
+async def test_workflow_executions_list_of_an_inaccessible_project_is_404():
+    """PO 09-27 — 실행 기록 목록은 비관리자에게 «자기 member_id»만 허락했지만 project 접근은 안 봤다. 접근 불가 project = 없는 프로젝트와
+    같은 404 · 자기 프로젝트 = 200."""
+    async with _world() as (Session, seeded):
+        async with Session() as s:
+            from app.models.pm import Story
+
+            pb = (await s.get(Story, seeded["story_b"])).project_id
+        other = await _get(Session, seeded, f"/api/v2/workflow-executions?project_id={pb}&member_id={seeded['member_id']}", seeded["member_user"])
+        missing = await _get(Session, seeded, f"/api/v2/workflow-executions?project_id={uuid.uuid4()}&member_id={seeded['member_id']}", seeded["member_user"])
+        own = await _get(Session, seeded, f"/api/v2/workflow-executions?project_id={seeded['pa']}&member_id={seeded['member_id']}", seeded["member_user"])
+        assert other.status_code == 404 == missing.status_code, (other.text[:200], missing.text[:200])
+        assert own.status_code == 200, own.text[:300]
