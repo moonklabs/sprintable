@@ -9,7 +9,7 @@ import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createStoryRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
-import { withRouteTiming } from '@/lib/server-timing';
+import { markRoute, markRouteReturn, withRouteTiming } from '@/lib/server-timing';
 
 export async function POST(request: Request) {
   try {
@@ -39,10 +39,12 @@ export async function POST(request: Request) {
 const IDS_BATCH_CAP = 200;
 
 // story #4299 AC2 — 라우트 전체 계측(합계 · bff_pre · 인증 /me 포함 모든 백엔드 호출 · dev 전용 · 꺼지면 그대로 호출).
+// AC2 꼬리 — 하위 구간 auth · service · serialize.
 export const GET = withRouteTiming('stories', async (request: Request) => {
   try {
     // story #4346 — 목록 GET은 org/project 판단조차 BE에 맡긴다(rate-limit 칸만 읽음) → JWT claim으로 충분, `/me` 왕복 0.
     const me = await getOrgProjectAuthContext(request);
+    markRoute('auth');
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
@@ -68,10 +70,11 @@ export const GET = withRouteTiming('stories', async (request: Request) => {
       const _r = await proxyToFastapi(request, '/api/v2/stories');
       if (!_r.ok) return _r;
       const data = await _r.json();
+      markRoute('service');
       const totalHeader = _r.headers.get('x-total-count');
       // story #3761 — `total` 은퇴, 정본 `totalCount`(goals/tasks 관례) — 헤더 없으면
       // 키 생략이 아니라 `totalCount: null`로 «모른다»를 명시한다.
-      return apiSuccess(data, { totalCount: totalHeader !== null ? Number(totalHeader) : null });
+      return markRouteReturn('serialize', apiSuccess(data, { totalCount: totalHeader !== null ? Number(totalHeader) : null }));
     }
 
     const repo = await createStoryRepository();
@@ -84,7 +87,8 @@ export const GET = withRouteTiming('stories', async (request: Request) => {
         ids,
         limit: ids.length,
       });
-      return apiSuccess(stories);
+      markRoute('service');
+      return markRouteReturn('serialize', apiSuccess(stories));
     }
 
     const pageInput = parseCursorPageInput({
@@ -121,8 +125,9 @@ export const GET = withRouteTiming('stories', async (request: Request) => {
       limit: pageInput.limit + 1,  // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });
+    markRoute('service');
     const { page, meta } = buildCursorPageMeta(stories, pageInput.limit, 'created_at');
-    return apiSuccess(page, meta);
+    return markRouteReturn('serialize', apiSuccess(page, meta));
   } catch (err: unknown) {
     return handleApiError(err);
   }
