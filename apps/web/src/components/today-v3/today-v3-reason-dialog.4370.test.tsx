@@ -5,7 +5,7 @@
  * 닫힘은 실제 사용 순서(칸 초점 → Esc 두 번, 4369)로 일으킨다.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, useState, type ComponentType } from 'react';
+import { act, useEffect, useState, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -43,7 +43,7 @@ describe.each(CASES)('%s 사유 창 초안(story #4370)', (_label, Dialog, prefi
   async function mount() {
     function Harness() {
       const [target, setTarget] = useState<string | null>(null);
-      ctl.open = setTarget;
+      useEffect(() => { ctl.open = setTarget; }, []);
       return (
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
           <Dialog

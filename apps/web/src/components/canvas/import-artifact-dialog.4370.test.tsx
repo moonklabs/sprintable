@@ -5,7 +5,7 @@
  * 남은 초안이 있으면 다시 열었을 때 HTML 탭이 보인다(숨은 초안 0).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, useState } from 'react';
+import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -35,7 +35,7 @@ let importResult = true;
 async function mount(mode: 'always' | 'conditional') {
   function Harness() {
     const [open, setOpen] = useState(false);
-    ctl.setOpen = setOpen;
+    useEffect(() => { ctl.setOpen = setOpen; }, []);
     const dialog = (
       <ImportArtifactDialog
         open={mode === 'always' ? open : true}

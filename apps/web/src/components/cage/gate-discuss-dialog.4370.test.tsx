@@ -5,8 +5,8 @@
  * 받은함은 창 하나를 모든 게이트가 공유해 한 게이트에 쓴 사유가 다른 게이트 창에 떴다 — 게이트별 초안 키로 막는다.
  * 닫힘은 실제 사용 순서(칸에 초점 → Esc 두 번: 첫 Esc는 칸에서만 · 둘째가 창을 닫음, 4369)로 일으킨다.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -35,7 +35,7 @@ let submitResult = true;
 async function mount() {
   function Harness() {
     const [target, setTarget] = useState<string | null>(null);
-    ctl.open = setTarget;
+    useEffect(() => { ctl.open = setTarget; }, []);
     return (
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <GateDiscussDialog
