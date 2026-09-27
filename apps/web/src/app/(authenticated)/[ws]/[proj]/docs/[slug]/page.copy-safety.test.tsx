@@ -144,3 +144,40 @@ describe('DocSlugPage — 마크다운 복사 실패 패널(story #3986 CHANGES)
     expect(container.querySelector('[data-testid="docs-copy-markdown-failed-raw"]')).toBeNull();
   });
 });
+
+// story #4361(유나 실측 390/360) — 좁은 폭에서 도구 줄 오른쪽 무리가 편집 카드 밖으로 밀려 «공유» · «⋯» · «마크다운 복사»를 누를 길이
+// 없었다. jsdom은 배치를 안 해 픽셀은 못 재므로(픽셀은 유나 실측 · PR 본문) 계약을 고정한다: 두 버튼은 `lg` 미만에서 도구 줄에 없고
+// («hidden … lg:inline-flex»), 같은 동작 · 같은 이름이 «⋯» 메뉴 안에 `lg` 미만에서만 있다. 뮤테이션: 버튼에서 hidden을 빼거나 메뉴
+// 항목을 지우면 RED.
+describe('DocSlugPage — 좁은 폭 도구 줄(story #4361)', () => {
+  it('⭐«마크다운 복사» · «공유» 도구 줄 버튼은 lg 미만에서 숨는다', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    await mount();
+    for (const id of ['docs-toolbar-copy-markdown', 'docs-toolbar-share']) {
+      const cls = container.querySelector(`[data-testid="${id}"]`)?.className ?? '';
+      expect(cls.split(/\s+/), id).toContain('hidden');
+      expect(cls.split(/\s+/), id).toContain('lg:inline-flex');
+    }
+  });
+
+  it('⭐«⋯» 메뉴 안에 같은 두 동작이 lg 미만 전용으로 있고, 메뉴의 복사가 실제로 복사한다', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    await mount();
+    const trigger = Array.from(container.ownerDocument.querySelectorAll('button')).find((b) => b.querySelector('svg.lucide-ellipsis, svg.lucide-more-horizontal'))
+      ?? Array.from(container.ownerDocument.querySelectorAll('[aria-haspopup="menu"]'))[0] as HTMLElement | undefined;
+    expect(trigger).toBeTruthy();
+    await act(async () => {
+      trigger!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger!.click();
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    const copyItem = container.ownerDocument.querySelector('[data-testid="docs-menu-copy-markdown"]') as HTMLElement | null;
+    const shareItem = container.ownerDocument.querySelector('[data-testid="docs-menu-share"]') as HTMLElement | null;
+    expect(copyItem?.className).toContain('lg:hidden');
+    expect(shareItem?.className).toContain('lg:hidden');
+    expect(copyItem?.textContent).toContain('마크다운');
+    await act(async () => { copyItem!.click(); await vi.advanceTimersByTimeAsync(20); });
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+});
