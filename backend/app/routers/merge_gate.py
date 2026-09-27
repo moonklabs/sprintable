@@ -52,7 +52,17 @@ async def _restricted_scope(session: AsyncSession, user_id: uuid.UUID, org_id: u
     )).scalars())
     if all_projects <= accessible:
         return None, None
-    gates = (await session.execute(select(Gate).where(Gate.org_id == org_id))).scalars().all()
+    # 까디르(4727 · PO 09-27) — 전 행(JSONB 칸 통째)을 ORM으로 올리지 않는다(dev 실측 org 2482행 · 2.5MB): 해소기가 읽는 칸만 —
+    # id · work_item_type · work_item_id + neutral_facts에서 project_id 키 하나(SQL에서 뽑음). 가벼운 행 객체로 넘긴다.
+    from types import SimpleNamespace
+
+    gates = [
+        SimpleNamespace(id=gid, work_item_type=wtype, work_item_id=wid, neutral_facts={"project_id": anchor} if anchor else {})
+        for gid, wtype, wid, anchor in (await session.execute(
+            select(Gate.id, Gate.work_item_type, Gate.work_item_id, Gate.neutral_facts["project_id"].astext)
+            .where(Gate.org_id == org_id)
+        )).all()
+    ]
     # 까디르(4727) — 게이트 자신이 프로젝트를 가진 모양(agent_decision · support_escalation = neutral_facts.project_id)도 풀어야 한다:
     # work item만 보던 해소기는 그걸 org 수준으로 남겨 집계에 셌다. 목록 · 인박스와 같은 해소기.
     owner = await resolve_gate_project_ids_batch(session, org_id, gates)
