@@ -1,5 +1,6 @@
 'use client';
 
+import { planMoveBeside, planMoveInto, planReorder, type DocMovePlan } from './doc-move-plan';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
@@ -111,8 +112,8 @@ interface DocTreeProps {
   docs: Doc[];
   selectedSlug: string | null;
   onSelect: (slug: string) => void;
-  onReorder?: (docId: string, newSortOrder: number, siblings: Doc[]) => Promise<void>;
-  onMove?: (docId: string, newParentId: string | null, newSortOrder: number) => Promise<void>;
+  onReorder?: (plan: DocMovePlan) => Promise<void>;
+  onMove?: (plan: DocMovePlan) => Promise<void>;
   onMoveDenied?: (reason: 'circular' | 'no-permission' | 'sort-mode-active') => void;
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
@@ -151,7 +152,7 @@ function TreeNode({
   allDocs: Doc[];
   selectedSlug: string | null;
   onSelect: (slug: string) => void;
-  onReorder?: (docId: string, newSortOrder: number, siblings: Doc[]) => Promise<void>;
+  onReorder?: (plan: DocMovePlan) => Promise<void>;
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
@@ -458,7 +459,8 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
         onMoveDenied?.('no-permission');
         return;
       }
-      await onMove(activeDoc.id, overDoc.id, overDoc.sort_order);
+      // story #4353 — 폴더 안으로 = 그 부모의 맨 끝(서버가 번호를 다시 매긴다).
+      await onMove(planMoveInto(activeDoc.id, overDoc.id));
       return;
     }
 
@@ -474,18 +476,17 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
         onMoveDenied?.('no-permission');
         return;
       }
-      await onMove(activeDoc.id, overDoc.parent_id, overDoc.sort_order);
+      // story #4353 — 그 문서 위쪽 가장자리면 앞, 아래쪽이면 뒤(예전엔 그 문서의 sort_order를 그대로 넣어 동률이면 무동작).
+      const plan = planMoveBeside(docs, activeDoc.id, overDoc.id, relativeY <= 0.25 ? 'before' : 'after');
+      if (plan) await onMove(plan);
       return;
     }
 
-    const siblings = docs.filter((d) => d.parent_id === activeDoc.parent_id).sort((a, b) => a.sort_order - b.sort_order);
-    const oldIndex = siblings.findIndex((d) => d.id === active.id);
-    const newIndex = siblings.findIndex((d) => d.id === over.id);
-
-    if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
-
-    const newSortOrder = siblings[newIndex]!.sort_order;
-    await onReorder(activeDoc.id, newSortOrder, siblings);
+    // story #4353 — 예전엔 대상의 sort_order를 옮긴 문서에 그대로 넣었다(바꿔치기 아님) — 형제가 0 동률(dev 대부분)이면 0 → 0으로
+    // 저장돼 새로고침하면 id 순으로 돌아갔다. 이제 «그 형제 뒤/앞»만 보내고 서버가 형제 번호를 한 번에 다시 매긴다.
+    const plan = planReorder(docs, String(active.id), String(over.id));
+    if (!plan) return;
+    await onReorder(plan);
   }, [docs, onReorder, onMove, onMoveDenied, dragEnabled]);
 
   return (

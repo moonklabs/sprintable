@@ -39,8 +39,9 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
 
 // DocTree를 목으로 대체 — onReorder/onMove/onRename/onDelete를 전역에 노출해 직접 호출.
 const captured: {
-  onReorder?: (docId: string, n: number) => Promise<void>;
-  onMove?: (docId: string, p: string | null, n: number) => Promise<void>;
+  // story #4353 — 끌기 콜백은 «어느 부모 · 어느 형제 뒤» 한 자리(plan)를 받는다.
+  onReorder?: (plan: { docId: string; parentId: string | null; afterId?: string | null }) => Promise<void>;
+  onMove?: (plan: { docId: string; parentId: string | null; afterId?: string | null }) => Promise<void>;
   onRename?: (docId: string, name: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
 } = {};
@@ -67,7 +68,7 @@ const DOC_A = { id: 'd1', parent_id: null, title: '문서A', slug: 'doc-a', icon
 
 function stubFetch(patchOk: boolean) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    if (typeof url === 'string' && url.includes('/api/docs') && init?.method === 'PATCH') {
+    if (typeof url === 'string' && url.includes('/api/docs') && (init?.method === 'PATCH' || (init?.method === 'POST' && url.includes('/api/docs/reorder')))) {
       return patchOk
         ? { ok: true, json: async () => ({ data: { updated_at: '2026-09-07T00:00:00Z' } }) }
         : { ok: false, json: async () => ({}) };
@@ -140,14 +141,14 @@ describe('DocsClientLayout — 낙관 UI 실패 시 문장(story #3637)', () => 
   it('handleReorder 실패 시 reorderFailed 토스트가 뜬다', async () => {
     stubFetch(false);
     await mount();
-    await act(async () => { await captured.onReorder!('d1', 5); });
+    await act(async () => { await captured.onReorder!({ docId: 'd1', parentId: null, afterId: null }); });
     expect(container.textContent).toContain(koMessages.docs.reorderFailed);
   });
 
   it('handleMove 실패 시 moveFailed 토스트가 뜬다', async () => {
     stubFetch(false);
     await mount();
-    await act(async () => { await captured.onMove!('d1', null, 0); });
+    await act(async () => { await captured.onMove!({ docId: 'd1', parentId: 'p1' }); });
     expect(container.textContent).toContain(koMessages.docs.moveFailed);
   });
 
