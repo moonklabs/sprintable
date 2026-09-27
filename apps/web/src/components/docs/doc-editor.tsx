@@ -13,7 +13,8 @@ import { type DocHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 import { createDocEditorExtensions } from './doc-editor-extensions';
 import { computeHeadingAnchors } from './extensions/heading-ids';
-import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
+import { MobileSelectionMenu } from './mobile-selection-menu';
+import { shouldShowDesktopBubbleMenu } from './bubble-menu-visibility';
 import { useTranslations } from 'next-intl';
 
 type ContentFormat = 'markdown' | 'html';
@@ -450,7 +451,10 @@ export function DocEditor({
         <>
         <BubbleMenu
           editor={editor}
-          shouldShow={() => !isMobileDevice()}
+          // story #4368 — 렌더마다 새 함수(예전 `() => !isMobileDevice()`와 같은 모양)를 유지한다: BubbleMenu가 렌더마다 옵션을 갱신하며
+          // 내는 meta 거래가 지금 «깨끗한 기준»의 끝 빈 문단 정규화를 우연히 태운다(story #4339 AC7 · 실측) — 안정 참조로 바꾸면 첫 입력이
+          // 그 정규화를 끌고 들어와 저장이 난다. 그 의존은 별도 기록(4368 PR), 이 줄은 판정만 바꾼다.
+          shouldShow={(args) => shouldShowDesktopBubbleMenu(args)}
           className="flex items-center gap-0.5 rounded-lg border border-border bg-background p-1"
         >
           <BubbleButton
