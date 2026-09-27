@@ -263,7 +263,7 @@ export default function GateDetailPage() {
   const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
   useEffect(() => { setRejectPanelOpen(false); }, [gate?.id]);
 
-  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
+  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean): Promise<boolean | void> => {
     if (!gate) return;
     setResolving(true);
     setTransitionError(null);
@@ -295,7 +295,7 @@ export default function GateDetailPage() {
       // '?tab=gates'로 명시해 실제 결재함(게이트 탭)으로 돌아간다.
       if (res.ok) {
         router.replace(flatHref('/inbox?tab=gates'));
-        return;
+        return true;  // story #4370 — 서명 사유 초안을 지우는 신호
       }
       // story #2043 AC3: 서버 거부(예: #2027 — 고위험 승인은 note 필수, 422)를 사람이 읽을
       // 문구로 보여준다. story #2500 — `body.detail`은 실 envelope({data,error,meta})에
@@ -625,9 +625,9 @@ export default function GateDetailPage() {
                   gate={gate}
                   resolving={resolving}
                   error={transitionError}
-                  onApprove={(reason) => void transition('approved', reason, true)}
-                  onReject={(reason) => void transition('rejected', reason)}
-                  onDiscuss={(reason) => void discuss(reason)}
+                  onApprove={(reason) => transition('approved', reason, true)}
+                  onReject={(reason) => transition('rejected', reason)}
+                  onDiscuss={(reason) => discuss(reason)}
                 />
                 {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
                     (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로

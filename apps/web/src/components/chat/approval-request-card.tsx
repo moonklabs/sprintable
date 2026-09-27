@@ -212,7 +212,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     return unsub;
   }, [mux, target.gate_id, fetchGate]);
 
-  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
+  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean): Promise<boolean | void> => {
     setResolving(true);
     setTransitionError(null);
     try {
@@ -232,7 +232,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           reviewedDraft: state.kind === 'ready' ? reviewedDraftOf(state.gate) : null,
         })),
       });
-      if (res.ok) { await fetchGate(); return; }
+      if (res.ok) { await fetchGate(); return true; }  // story #4370 — 서명 사유 초안을 지우는 신호
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
       const code = body?.error?.code;
       // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문) 대신 사람
@@ -364,8 +364,8 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
-            onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
-            onReject={(reason) => void transition('rejected', reason)}
+            onApprove={(reason, evidenceViewed) => transition('approved', reason, evidenceViewed)}
+            onReject={(reason) => transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
             onDiscussClick={() => setDiscussDialogOpen(true)}
             onUndone={() => void fetchGate()}
@@ -403,8 +403,8 @@ function ApprovalRequestBody({
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
-  onApprove: (reason?: string, evidenceViewed?: boolean) => void;
-  onReject: (reason?: string) => void;
+  onApprove: (reason?: string, evidenceViewed?: boolean) => void | Promise<boolean | void>;
+  onReject: (reason?: string) => void | Promise<boolean | void>;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
   onDiscuss: (reason: string) => void;
   /** story #2631 — 저위험 플로우엔 사유 입력창이 없어 별도 다이얼로그를 연다. */

@@ -241,22 +241,24 @@ export function DocGateSection({
 
   // story #6c89e40d(ⓑ) — GateSignatureApproval 하나가 승인/반려 둘 다 담당(canonical과 동형).
   // approve만 evidence_viewed=true(canSign 게이팅 자체가 열람 확인 — gates/[id]/page.tsx와 동일 근거).
-  const sigApprove = async (reason: string) => {
-    if (!currentTeamMemberId) return;
+  const sigApprove = async (reason: string): Promise<boolean> => {
+    if (!currentTeamMemberId) return false;
     setSigError(null);
     const { ok, error } = await gateTransition({
       status: 'approved', resolver_id: currentTeamMemberId, note: reason.trim() || null, evidence_viewed: true,
     });
     if (ok) setSigOpen(false); else setSigError(error ?? null);
+    return ok;  // story #4370 — 성공이면 서명 사유 초안을 지운다
   };
 
-  const sigReject = async (reason: string) => {
-    if (!currentTeamMemberId) return;
+  const sigReject = async (reason: string): Promise<boolean> => {
+    if (!currentTeamMemberId) return false;
     setSigError(null);
     const { ok, error } = await gateTransition({
       status: 'rejected', resolver_id: currentTeamMemberId, note: reason.trim() || null,
     });
     if (ok) setSigOpen(false); else setSigError(error ?? null);
+    return ok;
   };
 
   // audit 타임라인 이벤트(display 병합): revision = 검토요청/재검토요청, gate resolution = 승인/반려(+사유).
@@ -505,8 +507,8 @@ export function DocGateSection({
               gate={gate}
               resolving={busy}
               error={sigError}
-              onApprove={(reason) => void sigApprove(reason)}
-              onReject={(reason) => void sigReject(reason)}
+              onApprove={(reason) => sigApprove(reason)}
+              onReject={(reason) => sigReject(reason)}
               compact
             />
           </DialogContent>

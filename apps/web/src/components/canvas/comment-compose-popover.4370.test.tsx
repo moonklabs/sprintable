@@ -3,7 +3,7 @@
  * story #4370 — 산출물 댓글 쓰기 칸 초안(유나 규칙: Esc는 여러 줄 글을 안 버림 · 버림은 보이는 «취소»로만 · 성공에서 지움).
  * 4369 뒤에도 둘째 Esc = 쓴 글 폐기 + 닫기였다(유나 4751 판). 이제 둘째 Esc · 바깥 누름은 닫기만(초안으로 남음) — 다시 열면(팝오버 재마운트) 그대로.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -14,14 +14,14 @@ import { CommentComposePopover } from './comment-compose-popover';
 
 let container: HTMLDivElement;
 let root: Root;
-let onCancel: ReturnType<typeof vi.fn>;
+let onCancel: Mock<() => void>;
 let submitResult = true;
 beforeEach(() => {
   window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  onCancel = vi.fn();
+  onCancel = vi.fn<() => void>();
   submitResult = true;
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });

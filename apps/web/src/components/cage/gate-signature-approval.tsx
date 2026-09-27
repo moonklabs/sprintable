@@ -7,6 +7,11 @@ import { Button } from '@/components/ui/button';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 import { sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
+import { reviewedDraftOf } from '@/components/cage/gate-risk';
+import { useFieldDraft } from '@/hooks/use-field-draft';
+
+/** 부르는 쪽이 성공을 알리면(Promise<true>) 초안을 지운다 — 돌려주는 값이 없거나 false면 남긴다(story #4370). */
+type SignatureAction = (reason: string) => void | Promise<boolean | void>;
 
 /**
  * story #1954(P1a-S4) — 고위험 게이트 서명 플로우. AC: "근거 열람+사유 없인 [승인하고 서명] 비활성".
@@ -29,12 +34,12 @@ export function GateSignatureApproval({
   // 이후에나 버튼이 풀리므로, 서버 거부는 클라이언트 검증을 통과했는데도 막힌 경우라 더더욱
   // 이유를 보여줘야 한다.
   error?: string | null;
-  onApprove: (reason: string) => void;
-  onReject: (reason: string) => void;
+  onApprove: SignatureAction;
+  onReject: SignatureAction;
   /** story #2631(FE 계약 doc bb733f26) — «보류(논의 필요)». 승인/반려와 같은 사유 입력을
    * 공유한다(별도 모달 불필요 — 이미 이 화면에 사유 textarea가 있다). 미전달 시(#2043
    * 기존 소비처가 아직 업데이트 안 된 경우 등) 버튼 자체를 안 그린다 — 회귀 없음. */
-  onDiscuss?: (reason: string) => void;
+  onDiscuss?: SignatureAction;
   /** story #2625(유나 design 확定, 카디르 QA 320px 실측 대응) — 챗 카드 좁은 폭(실효 ~166px)
    * 컨텍스트. 원 컨텍스트(gates 페이지 672px)는 가로 2버튼이 여유롭지만, 좁은 폭에서
    * whitespace-nowrap+shrink-0(button.tsx 기본) 그대로면 라벨이 잘린다. truncate나
@@ -49,7 +54,16 @@ export function GateSignatureApproval({
   // 붙어 정작 여기엔 「승인하고 서명」이 그대로 남아 있었다.
   const approveAndSignLabelKey = sigApproveAndSignLabelKey(gate);
   const [evidenceViewed, setEvidenceViewed] = useState(false);
-  const [reason, setReason] = useState('');
+  // story #4370 — 사유는 게이트 + 검토 대상(머리 SHA · 초안 버전)별 초안: 닫히거나 떠나도 남고 결재 성공에서만 지운다.
+  // 검토 대상이 바뀌면 키가 바뀌어 빈 칸(story #4190 — 새 버전은 다시 보고 서명).
+  const draftTarget = `${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`;
+  const [reason, setReason, clearReason] = useFieldDraft({ surface: 'gate-signature', targetId: draftTarget, field: 'reason' });
+  const act = (action: SignatureAction) => {
+    const result = action(reason);
+    if (result && typeof (result as Promise<boolean | void>).then === 'function') {
+      void (result as Promise<boolean | void>).then((ok) => { if (ok === true) clearReason(); });
+    }
+  };
   const canSign = evidenceViewed && reason.trim().length > 0 && !resolving;
   // discuss는 근거 열람 불필요(승인이 아니므로) — 사유만 있으면 된다.
   const canDiscuss = reason.trim().length > 0 && !resolving;
@@ -106,7 +120,7 @@ export function GateSignatureApproval({
             variant="outline"
             className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-1 gap-1.5'}
             disabled={!canReject}
-            onClick={() => onReject(reason)}
+            onClick={() => act(onReject)}
           >
             <Pencil className="size-4" />
             {t('sigRequestChanges')}
@@ -114,7 +128,7 @@ export function GateSignatureApproval({
           <Button
             className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-[1.4] gap-1.5'}
             disabled={!canSign}
-            onClick={() => onApprove(reason)}
+            onClick={() => act(onApprove)}
           >
             <CheckCircle className="size-4" />
             {resolving ? '...' : t(approveAndSignLabelKey)}
@@ -127,7 +141,7 @@ export function GateSignatureApproval({
             size="sm"
             className="gap-1.5 text-muted-foreground"
             disabled={!canDiscuss}
-            onClick={() => onDiscuss(reason)}
+            onClick={() => act(onDiscuss)}
           >
             {t('gateDiscussSubmit')}
           </Button>
