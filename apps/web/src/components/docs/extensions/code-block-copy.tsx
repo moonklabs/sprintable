@@ -14,6 +14,7 @@ import {
 import { renderMermaid } from '../lib/mermaid-renderer';
 import { copyTextSafely } from '@/lib/clipboard';
 import { useViewportClampRef } from '@/hooks/use-viewport-clamp';
+import { usePortalMenuKeys } from '@/components/shared/anchored-popover';
 
 // ─── Mermaid Block ───────────────────────────────────────────────────────────
 
@@ -110,6 +111,14 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
   const langMenuRef = useRef<HTMLDivElement>(null);
   const langButtonRef = useRef<HTMLButtonElement>(null);
   const langListClampRef = useViewportClampRef<HTMLDivElement>(); // story #4342 — 좁은 화면 뷰포트 안으로
+  // story #4364 — 목록의 키보드 길 · ARIA는 공용 훅 하나(4349): Esc = 닫고 이 블록 트리거로 · 열면 첫 항목 초점 · ↑↓ ·
+  // 트리거 aria-haspopup/expanded/controls · 목록 role=menu.
+  const langListRef = useRef<HTMLDivElement | null>(null);
+  const setLangList = useCallback((el: HTMLDivElement | null) => { langListRef.current = el; langListClampRef(el); }, [langListClampRef]);
+  const closeLangMenu = useCallback(() => setShowLangMenu(false), []);
+  const langKeys = usePortalMenuKeys({
+    open: showLangMenu, onClose: closeLangMenu, popoverRef: langListRef, triggerRef: langButtonRef, kind: 'menu',
+  });
 
   const language = (node.attrs as { language?: string }).language ?? null;
   const resolvedLang = resolveLanguage(language);
@@ -181,6 +190,8 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
               ref={langButtonRef}
               type="button"
               onClick={() => isEditable && setShowLangMenu((v) => !v)}
+              onKeyDown={langKeys.onTriggerKeyDown}
+              {...(isEditable ? langKeys.triggerProps : {})}
               className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${
                 isEditable
                   ? 'text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer'
@@ -191,11 +202,13 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
               {isEditable && <ChevronDown className="size-3" />}
             </button>
             {showLangMenu && (
-              <div ref={langListClampRef} data-dropdown-panel="code-lang" className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-border bg-popover py-1">
+              <div ref={setLangList} onKeyDown={langKeys.onPopoverKeyDown} {...langKeys.popoverProps} data-dropdown-panel="code-lang" className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-border bg-popover py-1">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang}
                     type="button"
+                    role="menuitemradio"
+                    aria-checked={lang === language}
                     onClick={() => handleLangSelect(lang)}
                     className={`flex w-full items-center px-3 py-1.5 text-left text-xs transition hover:bg-accent ${
                       lang === language ? 'text-primary' : 'text-foreground'

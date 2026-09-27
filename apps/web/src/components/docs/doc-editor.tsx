@@ -3,6 +3,7 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { BubbleMenu } from '@tiptap/react/menus';
 import { registerDocIdProvider } from './extensions/image-upload';
 import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft, Plus, ImageIcon, Paperclip } from 'lucide-react';
@@ -156,6 +157,13 @@ export function DocEditor({
   // S4 첨부 진입: gutter "+" 위치 / DnD active-zone.
   const [gutterTop, setGutterTop] = useState<number | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
+  // story #4364 AC3 — 삽입 메뉴도 코드 블록 언어 목록과 같은 공용 훅(4349): Esc = 닫고 «+» 트리거로 · 열면 첫 항목 초점 · ↑↓ · ARIA.
+  const insertTriggerRef = useRef<HTMLButtonElement>(null);
+  const insertMenuRef = useRef<HTMLDivElement>(null);
+  const closeInsertMenu = useCallback(() => setInsertMenuOpen(false), [setInsertMenuOpen]);
+  const insertKeys = usePortalMenuKeys({
+    open: insertMenuOpen, onClose: closeInsertMenu, popoverRef: insertMenuRef, triggerRef: insertTriggerRef, kind: 'menu',
+  });
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
 
@@ -575,10 +583,11 @@ export function DocEditor({
                 onMouseDown={(e) => e.preventDefault()}
               >
                 <button
+                  ref={insertTriggerRef}
                   type="button"
                   aria-label={tEditor('attachInsertMenu')}
-                  aria-haspopup="menu"
-                  aria-expanded={insertMenuOpen}
+                  {...insertKeys.triggerProps}
+                  onKeyDown={insertKeys.onTriggerKeyDown}
                   onClick={(e) => { e.stopPropagation(); setInsertMenuOpen((v) => !v); }}
                   className="flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
@@ -586,7 +595,9 @@ export function DocEditor({
                 </button>
                 {insertMenuOpen ? (
                   <div
-                    role="menu"
+                    ref={insertMenuRef}
+                    {...insertKeys.popoverProps}
+                    onKeyDown={insertKeys.onPopoverKeyDown}
                     onClick={(e) => e.stopPropagation()}
                     // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
                     className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-[var(--elev-overlay)]"
