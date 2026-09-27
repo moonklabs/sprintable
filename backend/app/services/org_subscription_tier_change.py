@@ -1,4 +1,4 @@
-"""story #2880(결제 트랙 갭①) — 월납 유료→유료 상향 엔진. doc
+"""story #2880(결제 트랙 갭①) — 월납 유료→유료 상향의 단계 함수들. doc
 `billing-policy-scenario-audit-20260821` 1번 갭: `checkout_subscription()`은 신규 결제
 전용이라 활성 유료 org에 다시 부르면 신규 티어 전액을 이중청구한다. 이 모듈이 그 전용
 경로(change-tier)를 연다.
@@ -29,12 +29,16 @@
 ⓐ동시성 — checkout_subscription과 **같은** `org_subscriptions.checkout_claimed_at`
   필드를 claim으로 재사용한다(같은 org에 checkout과 change-tier가 동시에 들어오면 안
   되는 것도 이 필드 하나가 막는다 — org당 "진행 中인 결제 작업" 슬롯은 하나뿐).
+
+story #4344 — 위 단계를 한 호출 안에서 잇던 동기 판 `change_tier()`(와 그 전용 부분취소 · 거절 예외)는 결제 시도(story #4335
+`billing_payment_attempt`) 뒤 운영 호출처 0이라 걷었다 — 돈 기록 하나에 주인 하나(결제 시도 행) 규칙 밖에서 청구 · 환불이 나갈
+자리였다. 이 모듈에 남은 것은 결제 시도가 부르는 단계 함수(검증 · claim · 전이 · 일할액 · 환불 대상 선택 · 주문명)뿐이다. 청구 ·
+환불은 결제 시도만 한다(`test_4344_no_direct_money_path.py`가 고정).
 """
 from __future__ import annotations
 
-import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,20 +46,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.billing_order import BillingOrder
 from app.models.offering_version import OfferingVersion
 from app.models.org_subscription import OrgSubscription
-from app.services.billing_charge import charge_org
-from app.services.billing_charge_amount import (
-    ChargeAmountError,
-    apply_vat_minor,
-    compute_full_charge_for_new_offering,
-    prorate_minor,
-)
+from app.services.billing_charge_amount import apply_vat_minor, prorate_minor
 from app.services.billing_period import new_subscription_period
-from app.services.billing_refund import refund_org
 from app.services.platform_settings import get_platform_settings
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
-from app.services.payment.toss_adapter import TossApiError
-
-logger = logging.getLogger(__name__)
 
 PAID_TIERS = frozenset({"starter", "team", "business"})
 _TIER_RANK = {"starter": 1, "team": 2, "business": 3}
@@ -65,39 +59,8 @@ class TierChangeError(Exception):
     """상향을 진행할 수 없는 상태(정책 위반·데이터 갭) — 명시 실패, 호출부가 400으로 번역."""
 
 
-class TierChangeDeclined(Exception):
-    """Toss 카드 거절 등 비즈니스 사유 — 시스템 오류 아님. 구독은 원 tier인 채(재시도 가능)."""
-
-    def __init__(self, message: str, *, subscription: OrgSubscription):
-        self.subscription = subscription
-        super().__init__(message)
-
-
 class TierChangeInProgress(Exception):
     """같은 org에 다른 결제 작업(checkout·change-tier)이 진행 中 — 409, 재시도 가능."""
-
-
-async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:
-    """⛔같은 클래스 latent 버그 방어(org_subscription_checkout.py::_refetch_subscription
-    참고, 2026-08-21 P0 작업 中 실증) — 이 함수 진입 前에 이미 이 org_id 행을 SELECT한
-    적이 있으면(이 함수 자체가 change_tier() 첫 줄의 `sub` 조회 이후에 불린다)
-    SQLAlchemy identity map이 캐시된 인스턴스를 돌려줄 위험이 있다.
-    `populate_existing()`으로 항상 강제 재조회한다.
-
-    카디르군 관찰(2907 PR 리뷰, 2026-08-21) — 이 모듈의 write 3곳(claim·tier리셋·claim
-    해제)이 전부 순수 `update(OrgSubscription)` Core구문이라 SQLAlchemy의
-    synchronize_session='auto'가 identity map을 이미 자동 동기화한다 — 실측(populate_existing
-    임시제거+test_2880 9건 재실행) 결과 현재 코드경로 기준으로는 inert(어느 테스트도 못
-    잡음, checkout.py의 `pg_insert().on_conflict_do_update()`와 달리 이쪽은 INSERT
-    구문이 아님). 그래도 걷어내지 않는다 — 이 write 중 하나가 훗날 upsert류로 바뀌면
-    (예: claim을 pg_insert 기반으로 바꾸는 리팩터) 같은 staleness 클래스가 조용히
-    재발할 수 있는 방어선이라, 인위적으로 조작한 테스트로 "증명"하는 대신 이 주석으로
-    위험을 명시해둔다."""
-    return (
-        await session.execute(
-            select(OrgSubscription).where(OrgSubscription.org_id == org_id).execution_options(populate_existing=True)
-        )
-    ).scalar_one()
 
 
 async def latest_confirmed_subscription_order(session: AsyncSession, org_id: uuid.UUID) -> BillingOrder | None:
@@ -121,7 +84,7 @@ async def latest_confirmed_subscription_order(session: AsyncSession, org_id: uui
 async def validate_change_tier(
     session: AsyncSession, *, org_id: uuid.UUID, new_tier: str,
 ) -> tuple[OrgSubscription, OfferingVersion, OfferingVersion]:
-    """상향 진입 가드(Toss · 쓰기 0) → (지금 구독, 옛 offering, 새 offering). `change_tier` · 결제 시도(story #4335) 공용."""
+    """상향 진입 가드(Toss · 쓰기 0) → (지금 구독, 옛 offering, 새 offering). 결제 시도(story #4335)의 요금제 변경이 부른다."""
     if new_tier not in PAID_TIERS:
         raise TierChangeError(f"new_tier={new_tier!r}는 유료 티어만(starter/team/business)")
 
@@ -208,31 +171,6 @@ async def apply_tier_change(
     return result.rowcount
 
 
-async def refund_old_remainder(
-    session: AsyncSession, *, org_id: uuid.UUID, old_offering: OfferingVersion,
-    old_period_start: datetime, old_period_end: datetime, refund_target: BillingOrder | None,
-    from_tier: str, to_tier: str, now: datetime,
-) -> None:
-    """②③ 구 tier 잔여분 부분취소. refund_target이 없으면(예: 최초 체크아웃
-    직후 잔여 팩분 정산 등 예외 상태) 부분취소할 대상 자체가 없다는 뜻 — charge는
-    이미 confirmed로 완결됐으니 여기서 실패로 되돌리지 않고 조용히 skip(로그만)."""
-    if refund_target is None:
-        logger.warning(
-            "tier change org_id=%s: no prior confirmed billing_order to partially refund "
-            "(charge already confirmed, tier/period already advanced — skipping refund step)",
-            org_id,
-        )
-        return
-    refund_amount = await prorated_refund_amount(
-        session, old_offering=old_offering, old_period_start=old_period_start, old_period_end=old_period_end, now=now,
-    )
-    if refund_amount > 0:
-        await _attempt_partial_refund(
-            session, org_id=org_id, order=refund_target, refund_amount=refund_amount,
-            from_tier=from_tier, to_tier=to_tier,
-        )
-
-
 async def prorated_refund_amount(
     session: AsyncSession, *, old_offering: OfferingVersion, old_period_start: datetime, old_period_end: datetime,
     now: datetime,
@@ -247,110 +185,11 @@ async def prorated_refund_amount(
     return prorate_minor(taxed_old_monthly, now=now, period_start=old_period_start, period_end=old_period_end)
 
 
-async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str) -> OrgSubscription:
-    """동기 한 번에 끝까지(claim → 신 전액 청구 → tier · period 리셋 → 옛 결제 부분취소). 웹 요청 경로는 story #4335부터
-    결제 시도(`billing_payment_attempt`)를 쓴다 — 이 함수는 같은 단계 함수를 한 호출 안에서 잇는 판(테스트 · 내부 호출)."""
-    sub, old_offering, new_offering = await validate_change_tier(session, org_id=org_id, new_tier=new_tier)
-
-    now = datetime.now(timezone.utc)
-    if not await claim_tier_change_slot(session, org_id=org_id, now=now):
-        raise TierChangeInProgress(f"org_id={org_id}에 다른 결제 작업이 이미 진행 중 — 완료 후 재시도")
-
-    try:
-        # ⛔카디르 MEDIUM(2026-08-21, PR#3306 리뷰) — 이전 버전은 이 조회가 try 밖이라
-        # 조회 자체가 실패하면 finally(claim 해제)를 못 타 stale window 동안 org가
-        # 잠겼다. claim commit 직후를 try 시작점으로 당겨 이 조회도 finally 보호 안에
-        # 넣는다. claim이 이 시점부터 이 org의 결제 작업을 배타적으로 쥐므로, 이 조회와
-        # 아래 charge_org 사이에 다른 호출이 새 order를 confirmed로 만들 여지가 없다
-        # (레이스 없음 — 스냅샷 의미는 그대로).
-        old_confirmed_order = await latest_confirmed_subscription_order(session, org_id)
-
-        try:
-            amount_minor, currency = await compute_full_charge_for_new_offering(
-                session, org_id=org_id, new_offering=new_offering,
-            )
-        except ChargeAmountError as exc:
-            raise TierChangeError(str(exc)) from exc
-
-        order_id = f"tierchange-{org_id}-{new_offering.id}-{uuid.uuid4().hex[:12]}"
-        try:
-            # ① 신 offering 전액 즉시 청구. 감사 기록(billing_orders+billing_ledger_entries,
-            # entry_type="charge" 기본값)은 charge_org 자체가 진다 — 별도 entry_type 신설
-            # 불요(이건 실제로 청구되는 돈이라 "charge" 분류가 맞다).
-            order = await charge_org(
-                session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
-                currency=currency, order_name=tier_change_order_name(sub.tier, new_tier),
-                ledger_metadata=tier_change_ledger_metadata(sub.tier, new_tier),
-            )
-        except TossApiError as exc:
-            refreshed = await _refetch_subscription(session, org_id)
-            raise TierChangeDeclined(str(exc), subscription=refreshed) from exc
-
-        # ④권리는 confirmed 後에만. 실패(pending/failed)면 tier/period 그대로 — 신 전액이
-        # 승인 안 됐는데 구 결제를 부분취소하면 이중 손실이 난다.
-        if order.status != "confirmed":
-            return await _refetch_subscription(session, org_id)
-
-        old_period_start, old_period_end, from_tier = sub.current_period_start, sub.current_period_end, sub.tier
-        await apply_tier_change(
-            session, org_id=org_id, claim_value=now, new_tier=new_tier, new_offering_id=new_offering.id,
-        )
-        await session.commit()
-
-        await refund_old_remainder(
-            session, org_id=org_id, old_offering=old_offering,
-            old_period_start=old_period_start, old_period_end=old_period_end,
-            refund_target=old_confirmed_order, from_tier=from_tier, to_tier=new_tier, now=now,
-        )
-        return await _refetch_subscription(session, org_id)
-    finally:
-        await session.execute(
-            update(OrgSubscription)
-            .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == now)
-            .values(checkout_claimed_at=None)
-        )
-        await session.commit()
-
-
 def tier_change_order_name(from_tier: str, to_tier: str) -> str:
-    """Toss 주문명(영수증에 보임) — 동기 경로 · 결제 시도(story #4335) 공용."""
+    """Toss 주문명(영수증에 보임) — 결제 시도(story #4335)의 요금제 변경 청구."""
     return f"Sprintable {from_tier}→{to_tier} 상향"
 
 
 def tier_change_ledger_metadata(from_tier: str, to_tier: str) -> dict:
     return {"kind": "tier_change", "from_tier": from_tier, "to_tier": to_tier}
 
-
-async def _attempt_partial_refund(
-    session: AsyncSession, *, org_id: uuid.UUID, order: BillingOrder, refund_amount: int,
-    from_tier: str, to_tier: str, idempotency_key: str | None = None,
-) -> str:
-    """구 결제 건에 잔여기간 일할 부분취소 — 실패해도 예외를 전파하지 않는다(④, 선생님
-    지시: 이미 confirmed된 신규 charge를 되돌리지 않는다). 결과는 billing_orders.
-    refund_status에 명시 기록(0267) — 향후 재시도/스윕이 이 필드로 찾는다(이 스토리는
-    스윕 자체는 안 짓는다)."""
-    try:
-        await refund_org(
-            session, org_id=org_id, order_id=order.order_id,
-            cancel_reason=f"tier change {from_tier}->{to_tier} — prorated remainder",
-            cancel_amount_minor=refund_amount, idempotency_key=idempotency_key,
-        )
-        refund_status = "confirmed"
-    except Exception as exc:
-        # 카디르 MEDIUM(2026-08-21, PR#3306 리뷰) — 이전엔 (RefundError, TossApiError)만
-        # 좁게 잡아, 그 외 예외(예: Toss 취소는 성공했는데 record_ledger_entry의 DB write가
-        # 실패)는 refund_status가 NULL로 남아 스윕이 못 찾는 사각지대였다. 이 함수의 계약
-        # 자체가 "실패해도 절대 전파 안 함"이라(④) — 예외 종류를 좁혀 잡을 이유가 없다,
-        # 전부 잡아 반드시 'failed'를 남긴다.
-        logger.error(
-            "tier change org_id=%s order_id=%s: partial refund FAILED(amount=%d) — %s. "
-            "charge already confirmed, NOT rolled back — needs retry/sweep.",
-            org_id, order.order_id, refund_amount, exc,
-        )
-        refund_status = "failed"
-
-    await session.execute(
-        update(BillingOrder).where(BillingOrder.id == order.id).values(refund_status=refund_status)
-    )
-    await session.commit()
-    return refund_status

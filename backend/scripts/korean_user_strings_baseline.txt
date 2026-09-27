@@ -1125,7 +1125,6 @@ app/services/org_subscription_tier_change.py::는 상향이 아님(하향/동일
 app/services/org_subscription_tier_change.py::는 유료 티어만(starter/team/business)
 app/services/org_subscription_tier_change.py::를 찾을 수 없음
 app/services/org_subscription_tier_change.py::상향
-app/services/org_subscription_tier_change.py::에 다른 결제 작업이 이미 진행 중 — 완료 후 재시도
 app/services/org_subscription_tier_change.py::의 활성 offering_version(krw)을 찾을 수 없음
 app/services/org_subscription_tier_change.py::활성 유료 구독이 아님 — 상향 엔진(change-tier)이 아니라 신규 결제(checkout)로 진입해야 함
 app/services/participation_helpers.py::구현
