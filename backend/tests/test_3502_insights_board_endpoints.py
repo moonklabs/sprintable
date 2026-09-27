@@ -69,7 +69,7 @@ async def test_get_insights_board_endpoint_agent_200_with_rows():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_id = await _seed_story(s, org_id, project_id)
             await _seed_site_post(
                 s, org_id=org_id, work_item_id=story_id, slug="post-http", title="HTTP",
@@ -101,7 +101,7 @@ async def test_get_insights_board_endpoint_work_item_id_query_param_narrows_resu
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)
             story_a = await _seed_story(s, org_id, project_id)
             story_b = await _seed_story(s, org_id, project_id)
             await _seed_site_post(

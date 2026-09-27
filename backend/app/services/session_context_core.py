@@ -92,6 +92,8 @@ async def get_session_context(
     for item in (*my_stories, *my_tasks):
         judgments_by_work_item[str(item.id)] = await list_judgments(
             session, org_id=org_id, work_item_id=item.id, method=None, scope=None,
+            # story #4351 PR B — 접근 가능 항목에 붙은 판정이라도 접근 불가 스토리에 같이 걸려 있으면 뺀다(judgments 목록과 같은 규칙).
+            restricted_project_ids=list(accessible_project_ids),
         )
 
     recent_activity_by_work_item: dict[str, dict] | None = None

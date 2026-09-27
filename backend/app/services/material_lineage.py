@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.insight_snapshot import InsightSnapshot
+from app.models.pm import Story
 from app.models.material_lineage import MaterialLineage
 from app.services.ads_spend_snapshots import organic_snapshots_only
 from app.services.insight_snapshots import NORMALIZED_KEYS
@@ -37,7 +38,7 @@ class HookPerformanceSummary:
 
 
 async def compute_hook_performance(
-    session: AsyncSession, *, org_id: uuid.UUID, hook_key: str,
+    session: AsyncSession, *, org_id: uuid.UUID, hook_key: str, project_ids: list[uuid.UUID] | None = None,
 ) -> HookPerformanceSummary:
     """조인 축은 work_item_id가 아니라 **derived_id == insight_snapshots.publication_id**
     직접 매치다(둘 다 channel_publication.id) — 한 스토리(work_item_id)가 서로 다른 훅을 쓴
@@ -49,6 +50,11 @@ async def compute_hook_performance(
         select(MaterialLineage.derived_kind, MaterialLineage.derived_id).where(
             MaterialLineage.org_id == org_id,
             MaterialLineage.hook_key == hook_key,
+            # story #4351 PR B(수 · PO 2026-09-26) — hook_key는 org 수준 개념이어도 합산에 접근 불가 프로젝트 발행이 섞이면 안 된다:
+            # `project_ids`(접근이 제한된 caller · None = 전체)면 마스터 스토리가 그 프로젝트인 변주만. 서비스 직접 호출은 전체 접근 뜻.
+            *([] if project_ids is None else [
+                MaterialLineage.work_item_id.in_(select(Story.id).where(Story.project_id.in_(project_ids)))
+            ]),
         )
     )).all()
     variant_count = len(all_lineage_rows)

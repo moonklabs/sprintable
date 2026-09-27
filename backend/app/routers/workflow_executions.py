@@ -157,6 +157,12 @@ async def list_executions(
         if not is_self:
             raise HTTPException(status_code=403, detail="Can only query own executions")
 
+    # story #4351(PO 09-27) — 비관리자는 «자기 member_id»만 보지만 project 접근은 안 봤다: 접근 잃은(또는 없는) 프로젝트의 자기 실행
+    # 기록이 보였다. 같은 해소기로 404(없는 프로젝트와 같게) · owner/admin은 org 전체 접근이라 그대로 통과.
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(db, uuid.UUID(str(auth.user_id)), project_id, org_id, not_found_detail="Project not found")
+
     base = (
         select(WorkflowExecutionLog)
         .where(

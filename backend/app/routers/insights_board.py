@@ -128,6 +128,8 @@ class ViewsInWindowView(BaseModel):
 
 
 class InsightsBoardResponse(BaseModel):
+    # story #4351 PR B — 행 · 수의 범위(접근이 제한된 caller = "accessible_projects" · owner/admin = "org").
+    scope: Literal["org", "accessible_projects"] = "org"
     rows: list[InsightsBoardRow]
     has_more: bool
     next_cursor: str | None
@@ -278,10 +280,14 @@ async def get_insights_board_endpoint(
     viewer_is_human = (await resolve_member(_auth, org_id, db)).type == "human"
 
     try:
+        from app.services.project_auth import restricted_accessible_project_ids
+
         result = await list_insights_board(
             db, org_id=org_id, window=window, channel=channel, status=status,
             sort=sort, sort_dir=sort_dir, cursor=cursor, limit=limit,
             work_item_id=work_item_id, include_deleted=include_deleted, viewer_is_human=viewer_is_human,
+            # story #4351 PR B(⑤ 읽기) — 접근이 제한된 caller는 접근 가능 프로젝트의 발행 행 · 수만(owner/admin = None).
+            project_ids=await restricted_accessible_project_ids(db, uuid.UUID(str(_auth.user_id)), org_id),
         )
     except InsightsBoardInvalidWindowError as exc:
         raise HTTPException(

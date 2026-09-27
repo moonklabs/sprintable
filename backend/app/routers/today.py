@@ -157,6 +157,9 @@ class TodayResponse(BaseModel):
     landed_today: LandedToday
     qa_passed_today: QaPassedToday
     open_defects: OpenDefects
+    # story #4351 PR B — 수(published_today · landed_today · qa_passed_today)의 범위. 접근이 제한된 caller면 "accessible_projects"
+    # (접근 가능 프로젝트 몫만) — 화면이 «조직 전체»라고 단정하지 않게. owner/admin은 "org".
+    scope: Literal["org", "accessible_projects"] = "org"
 
 
 @router.get("", response_model=TodayResponse)
