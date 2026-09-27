@@ -378,7 +378,10 @@ export function DocEditor({
         ) : null}
         {metaSlot ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline-flex">{metaSlot}</span> : null}
         {urlSlot ? <div className="hidden shrink-0 lg:block">{urlSlot}</div> : null}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {/* story #4361(유나 실측 390/360) — 헤더는 이미 flex-wrap이라 이 무리는 새 줄로 내려가지만, 무리 자체(456px)가 한 줄 폭보다 넓어
+            카드(overflow-hidden) 밖으로 잘렸다. `lg` 미만에서는 무리가 카드 폭을 넘지 않고(max-w-full) 안에서 줄을 바꾼다(flex-wrap) —
+            조작을 더 숨기지 않고 전부 카드 안 · 누를 수 있게(가로 스크롤 줄 아님). `lg` 이상은 예전 한 줄 그대로. */}
+        <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5 lg:max-w-none lg:flex-nowrap" data-testid="doc-editor-toolbar-actions">
           {/* compact 탭 세그먼트 */}
           <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
             {(['preview', 'markdown'] as const).map((mode) => (

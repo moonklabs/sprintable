@@ -104,3 +104,16 @@ describe('DocEditor — story #3917: 빈 문서 안내는 한 자리에 하나(�
     expect((enMessages.docs as Record<string, unknown>).attachEmptyHint).toBeUndefined();
   });
 });
+
+// story #4361(유나 실측 390/360) — 도구 줄 오른쪽 무리(456px)가 한 줄 폭보다 넓어 카드 밖으로 잘렸다. jsdom은 배치를 안 해 픽셀은
+// 유나 실측(PR 본문)이고, 여기선 계약: `lg` 미만에서 무리는 카드 폭을 넘지 않고(max-w-full) 안에서 줄을 바꾼다(flex-wrap), `lg` 이상은
+// 예전 한 줄. 뮤테이션: flex-wrap 또는 max-w-full을 빼면 RED.
+describe('DocEditor — 좁은 폭 도구 줄 무리(story #4361)', () => {
+  it('⭐lg 미만에서 조작 무리는 카드 폭 안에서 줄을 바꾼다 · lg 이상은 한 줄', async () => {
+    await act(async () => {
+      root.render(wrap(<DocEditor value="" contentFormat="markdown" onChange={() => {}} labels={LABELS} actions={<button type="button">x</button>} />, koMessages, 'ko'));
+    });
+    const cls = (container.querySelector('[data-testid="doc-editor-toolbar-actions"]')?.className ?? '').split(/\s+/);
+    for (const c of ['flex-wrap', 'max-w-full', 'lg:flex-nowrap', 'lg:max-w-none']) expect(cls, c).toContain(c);
+  });
+});

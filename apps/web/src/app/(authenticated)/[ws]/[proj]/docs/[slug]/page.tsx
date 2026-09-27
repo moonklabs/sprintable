@@ -335,7 +335,8 @@ export default function DocSlugPage() {
           onClick={handleCopyMarkdown}
           title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
           aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+          data-testid="docs-toolbar-copy-markdown"
         >
           {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
         </button>
@@ -386,7 +387,8 @@ export default function DocSlugPage() {
         onClick={() => setShareDialogOpen(true)}
         title={ts('share')}
         aria-label={ts('share')}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        className="hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+        data-testid="docs-toolbar-share"
       >
         <Share2 className="h-4 w-4" />
       </button>
@@ -395,6 +397,18 @@ export default function DocSlugPage() {
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
+          {/* story #4361(유나 실측 390/360) — 도구 줄 오른쪽 무리가 편집 카드(overflow-hidden) 밖으로 밀려 폰에서 «공유» · «⋯»(360은
+              «마크다운 복사»까지)를 누를 길이 없었다. `lg` 미만(GNB가 모바일 모양인 폭 — 웹 규칙 `md` 금지)에서는 두 버튼을 도구 줄에서
+              빼고 이 메뉴 안에서 같은 동작 · 같은 이름으로. 복사 실패 패널은 버튼을 감싼 칸에 그대로 떠서 여기서 눌러도 보인다. */}
+          <DropdownMenuItem className="lg:hidden" onClick={() => void handleCopyMarkdown()} data-testid="docs-menu-copy-markdown">
+            <Copy className="mr-2 h-4 w-4" />
+            {t('copyMarkdown')}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="lg:hidden" onClick={() => setShareDialogOpen(true)} data-testid="docs-menu-share">
+            <Share2 className="mr-2 h-4 w-4" />
+            {ts('share')}
+          </DropdownMenuItem>
+          {selectedDoc.doc_type !== 'sprint_report' && <DropdownMenuSeparator className="lg:hidden" />}
           {selectedDoc.doc_type !== 'sprint_report' && (
             <>
               <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>
