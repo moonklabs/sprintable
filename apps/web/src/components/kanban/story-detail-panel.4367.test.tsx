@@ -58,7 +58,7 @@ const editorOf = (orig: string) => [...container.querySelectorAll('textarea')].f
 
 describe('StoryDetailPanel — 편집 중 후보 Esc는 후보만([SID:4367])', () => {
   for (const [name, orig, label] of [['설명', '원래 설명', koMessages.board.description], ['AC', '원래 AC', koMessages.board.acceptanceCriteria]] as const) {
-    it(`${name} 편집 중 후보 열고 Esc → 후보만 닫힘 · 쓴 글 그대로 → Esc → 편집 취소 → Esc → 패널 닫힘`, async () => {
+    it(`${name} 편집 중 후보 열고 Esc → 후보만 닫힘 · 쓴 글 그대로 → Esc → 칸에서만 빠져나옴(글 · 편집 그대로) → Esc → 패널 닫힘`, async () => {
       const onClose = vi.fn();
       await mount(onClose);
       // 그 칸 머리(«설명» · «완료 조건» 글자)와 같은 줄의 ✎ 버튼(차례를 세지 않고 머리 글자로 짚는다).
@@ -82,11 +82,14 @@ describe('StoryDetailPanel — 편집 중 후보 Esc는 후보만([SID:4367])', 
       expect(editorOf(orig)?.value).toBe(typed);
       expect(onClose).not.toHaveBeenCalled();
 
+      // [SID:4369] 바뀐 기대(유나 규칙 · 여러 줄 Esc는 글을 버리지 않음) — 둘째 Esc는 «편집 취소(글 버림)»가 아니라 칸에서만 빠져나옴:
+      // 편집 · 쓴 글 그대로 · 초점 = 패널 뿌리. 셋째 Esc = 패널 닫힘(초안은 useFieldDraft에 남음 — story-detail-panel.4369.test.tsx).
       await act(async () => { esc(editorOf(orig)!); });
-      expect(editorOf(orig)).toBeNull();
+      expect(editorOf(orig)?.value).toBe(typed);
+      expect(document.activeElement).toBe(container.querySelector('[role="dialog"][tabindex="-1"]'));
       expect(onClose).not.toHaveBeenCalled();
 
-      await act(async () => { esc(document.body); });
+      await act(async () => { esc(document.activeElement!); });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
   }

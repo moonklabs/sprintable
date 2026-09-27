@@ -35,3 +35,28 @@ describe('CommentComposePopover — Esc는 이 칸만([SID:4367])', () => {
     }
   });
 });
+
+// [SID:4369] 유나 규칙 — 글 있는 칸: 첫 Esc = 칸에서만(폐기 0 · 글 그대로 · 초점 = 칸 틀 · 표시) · 둘째 Esc = 폐기 + 닫기 · 조합 중 Esc = 아무것도 안 함.
+describe('CommentComposePopover — 글 있는 칸 Esc 규칙([SID:4369])', () => {
+  it('글 쓰고 Esc → 칸에서만 → Esc → 폐기 · 조합 중 Esc는 그대로', async () => {
+    const onCancel = vi.fn();
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><CommentComposePopover onSubmit={() => {}} onCancel={onCancel} /></NextIntlClientProvider>);
+    });
+    const ta = container.querySelector('textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { ta.focus(); setter.call(ta, '핀 메모 쓰던 글'); ta.dispatchEvent(new Event('input', { bubbles: true })); });
+    const esc = (t: EventTarget, init: KeyboardEventInit = {}) => { const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init }); t.dispatchEvent(e); return e; };
+    await act(async () => { esc(ta, { isComposing: true }); });
+    expect(onCancel).not.toHaveBeenCalled();
+    let first!: KeyboardEvent;
+    await act(async () => { first = esc(ta); });
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(first.defaultPrevented).toBe(true);
+    expect(ta.value).toBe('핀 메모 쓰던 글');
+    const frame = ta.parentElement!;
+    expect(document.activeElement).toBe(frame);
+    await act(async () => { esc(frame); });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});

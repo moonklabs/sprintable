@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -42,6 +43,8 @@ export function useFocusTrap(active: boolean, onClose: () => void, options: UseF
         // [SID:4367] 한 Esc = 한 층 — 안쪽 층(새 폴더 입력칸 · 후보 목록 · 포털 메뉴 등)이 이 Esc로 자기를 닫고
         // preventDefault로 «썼다»고 표시했으면 서랍은 그대로 둔다. 안쪽 React 핸들러는 뿌리에서 이 리스너보다 먼저 돈다.
         if (e.defaultPrevented) return;
+        // [SID:4369] 유나 규칙 — 조합 중 Esc는 조합만 · 글 있는 여러 줄 칸의 첫 Esc는 칸에서만 빠져나옴(초점 = 서랍 뿌리) · 둘째 Esc = 서랍 닫힘.
+        if (leaveMultilineFieldOnEsc(e, container)) return;
         e.stopPropagation();
         onClose();
         return;
