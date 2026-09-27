@@ -115,6 +115,17 @@ describe('DocAssigneeControl — Esc · 트리거 ARIA(story #4364 AC3 · 유나
     expect(avatar().getAttribute('aria-controls')).toBe(assigneePanel()!.id);
   });
 
+  it('창 연 채 아바타 트리거에 초점 두고 Esc — 창이 닫히고 초점은 아바타(4355 트리거 Esc 계약 · 까디르 09-27)', async () => {
+    await mountOpen();
+    expect(assigneePanel()).not.toBeNull();
+    avatar().focus();
+    expect(document.activeElement).toBe(avatar());
+    await pressEscape(avatar());
+    expect(assigneePanel()).toBeNull();
+    expect(document.activeElement).toBe(avatar());
+    expect(avatar().getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('«더 보기»에 초점 둔 채 Esc 두 번 — 첫 번째는 메뉴만 · 두 번째는 창을 닫고 초점은 아바타로(유나 재현: 예전엔 창 그대로)', async () => {
     await mountOpen();
     await act(async () => { moreBtn().click(); });
