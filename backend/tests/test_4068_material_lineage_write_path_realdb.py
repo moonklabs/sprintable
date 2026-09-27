@@ -34,6 +34,17 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _full_access_caller_4351(monkeypatch):
+    """story #4351 PR B — 이 파일의 관심은 계보 쓰기 경로이라 caller를 «전체 접근»으로 고정한다(접근 범위 규칙은 test_4351_pr_b_scope_realdb.py)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    import app.services.project_auth as project_auth
+
+    monkeypatch.setattr(project_auth, "restricted_accessible_project_ids", _AsyncMock(return_value=None))
+    monkeypatch.setattr(project_auth, "has_project_access", _AsyncMock(return_value=True))
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

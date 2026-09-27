@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -28,6 +29,17 @@ pytestmark = [
     pytest.mark.destructive_schema,
     pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _full_access_caller_4351(monkeypatch):
+    """story #4351 PR B — 이 파일의 관심은 계보 · 훅/소재 성과 집계이라 caller를 «전체 접근»으로 고정한다(접근 범위 규칙은 test_4351_pr_b_scope_realdb.py)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    import app.services.project_auth as project_auth
+
+    monkeypatch.setattr(project_auth, "restricted_accessible_project_ids", _AsyncMock(return_value=None))
+    monkeypatch.setattr(project_auth, "has_project_access", _AsyncMock(return_value=True))
 
 
 @pytest.fixture
@@ -329,7 +341,7 @@ async def test_list_material_lineage_endpoint_scoped_to_work_item_and_org():
             # 다른 org — 안 섞여야 함(org_id 스코프 회귀 방지).
             await _seed_lineage(session, org_id=other_org, source_evidence_id=ev_other, work_item_id=story_a, derived_id=uuid.uuid4(), hook_key="hook_leak")
 
-            edges = await list_material_lineage(work_item_id=story_a, session=session, org_id=org_id, _auth=None)
+            edges = await list_material_lineage(work_item_id=story_a, session=session, org_id=org_id, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             assert {e.hook_key for e in edges} == {"hook_a", "hook_b"}
             assert all(e.work_item_id == story_a for e in edges)
             assert all(e.master_title == "A" for e in edges)  # 디디 갭2 ① — uuid 대신 표시명
@@ -369,7 +381,7 @@ async def test_list_material_lineage_endpoint_exposes_channel_display_name():
             # 매칭 row가 아예 없는 derived_id — fail-soft None(에러 아님).
             await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=uuid.uuid4(), hook_key="hook_orphan")
 
-            edges = await list_material_lineage(work_item_id=story, session=session, org_id=org_id, _auth=None)
+            edges = await list_material_lineage(work_item_id=story, session=session, org_id=org_id, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             by_hook = {e.hook_key: e.channel for e in edges}
             assert by_hook["hook_draft"] == "instagram_sandbox"
             assert by_hook["hook_pub"] == "threads"
@@ -394,13 +406,13 @@ async def test_hook_performance_endpoint_matches_service_and_handles_unknown_key
             await _seed_lineage(session, org_id=org_id, source_evidence_id=ev, work_item_id=story, derived_id=pub, hook_key="hook_x")
             await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub, normalized={"impressions": 42})
 
-            view = await get_hook_performance(hook_key="hook_x", session=session, org_id=org_id, _auth=None)
+            view = await get_hook_performance(hook_key="hook_x", session=session, org_id=org_id, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             assert view.hook_key == "hook_x"
             assert view.variant_count == 1
             assert view.snapshot_count == 1
             assert view.totals["impressions"] == 42
 
-            empty_view = await get_hook_performance(hook_key="never_seen", session=session, org_id=org_id, _auth=None)
+            empty_view = await get_hook_performance(hook_key="never_seen", session=session, org_id=org_id, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             assert empty_view.variant_count == 0
             assert empty_view.snapshot_count == 0
     finally:
@@ -424,7 +436,7 @@ async def test_material_performance_endpoint_returns_snapshots_for_owned_publica
             await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub, status="captured", normalized={"impressions": 100})
             await _seed_snapshot(session, org_id=org_id, work_item_id=story, publication_id=pub, status="pending", normalized=None)
 
-            views = await get_material_performance(derived_id=pub, session=session, org_id=org_id, _auth=None)
+            views = await get_material_performance(derived_id=pub, session=session, org_id=org_id, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             assert len(views) == 2  # organic_snapshots_only는 paid만 거른다 — pending도 목록엔 포함(상태는 소비부 판단)
             captured = [v for v in views if v.status == "captured"]
             assert len(captured) == 1
@@ -450,7 +462,7 @@ async def test_material_performance_endpoint_draft_variant_returns_empty_not_err
                 session, org_id=org_id, source_evidence_id=ev, work_item_id=story,
                 derived_id=draft_id, derived_kind="channel_post_draft", hook_key="hook_draft",
             )
-            views = await get_material_performance(derived_id=draft_id, session=session, org_id=org_id, _auth=None)
+            views = await get_material_performance(derived_id=draft_id, session=session, org_id=org_id, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             assert views == []
     finally:
         await engine.dispose()
@@ -473,7 +485,7 @@ async def test_material_performance_endpoint_cross_org_id_returns_empty_not_leak
             await _seed_lineage(session, org_id=org_a, source_evidence_id=ev_a, work_item_id=story_a, derived_id=pub_a, hook_key="hook_a")
             await _seed_snapshot(session, org_id=org_a, work_item_id=story_a, publication_id=pub_a, normalized={"impressions": 999})
 
-            views = await get_material_performance(derived_id=pub_a, session=session, org_id=org_b, _auth=None)
+            views = await get_material_performance(derived_id=pub_a, session=session, org_id=org_b, _auth=SimpleNamespace(user_id=str(uuid.uuid4())))
             assert views == []
     finally:
         await engine.dispose()

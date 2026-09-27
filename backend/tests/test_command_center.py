@@ -18,6 +18,17 @@ MEMBER = uuid.uuid4()
 
 
 @pytest.fixture(autouse=True)
+def _full_access_caller_4351(monkeypatch):
+    """story #4351 PR B — 이 파일의 관심은 overview 집계 모양 · 목 세션 execute 순서이라 caller를 «전체 접근»으로 고정한다(접근 범위 규칙은 test_4351_pr_b_scope_realdb.py)."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    import app.services.project_auth as project_auth
+
+    monkeypatch.setattr(project_auth, "restricted_accessible_project_ids", _AsyncMock(return_value=None))
+    monkeypatch.setattr(project_auth, "has_project_access", _AsyncMock(return_value=True))
+
+
+@pytest.fixture(autouse=True)
 def _accessible_projects_pinned(monkeypatch):
     """story #4350 PR 2 — 목록 · 집계가 caller의 접근 가능 프로젝트를 먼저 조회한다(SEC-S8). 이 파일은 execute 순서를 세는 목 세션이라
     그 조회를 고정한다(범위 규칙 자체는 test_4350_pr2_org_wide_routes_realdb.py 실 PG)."""
