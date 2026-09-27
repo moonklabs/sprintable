@@ -293,6 +293,8 @@ export function lowercaseWordRefKey(r: Pick<LowercaseWordRef, 'key' | 'word'>): 
 //    stderr에 실제로 찍히는 로그 문자열 리터럴.
 //  - 브랜드명 예시(moonklabs)·시스템 기능명 리터럴(ping).
 export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story #4359 — 버튼이 복사하는 셸 `export KEY=…` 줄의 명령어 그대로(유나 문구 판정 · PO 2026-09-27 22:42Z 전달).
+  'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',
   'board.backlinksEmptyScoped::source',
   'cage.githubCheckRependingReason::pending',
