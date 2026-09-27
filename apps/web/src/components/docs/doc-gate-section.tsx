@@ -292,7 +292,7 @@ export function DocGateSection({
           <span className="grid size-6 shrink-0 place-items-center text-muted-foreground">
             <Shield className="size-4" />
           </span>
-          <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('docGateRequestReviewHint')}</span>
+          <span className="min-w-0 flex-1 break-keep text-xs text-muted-foreground">{t('docGateRequestReviewHint')}</span>
           <Button
             size="sm"
             variant="default"

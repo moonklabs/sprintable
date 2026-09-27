@@ -155,7 +155,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
     return (
       <div className="proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
         <Icon className="size-5 shrink-0 text-muted-foreground" />
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
+        <p className="min-w-0 flex-1 break-keep text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
         <Button size="sm" className="focus-outset" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
           {t('docGateRequestReview')}
         </Button>
