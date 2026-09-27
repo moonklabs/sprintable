@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 export interface OrgSwitcherItem {
   orgId: string;
@@ -96,6 +97,10 @@ export function withSwitchedSlugs(
  * 똑같이 물려받는다). 컨테이너(DropdownMenu vs Sheet)만 두 곳이 각자 고른다 — `open`은
  * 훅이 들고 있지만 그 값을 어느 UI 프리미티브의 open/onOpenChange에 묶을지는 호출부 몫이다.
  */
+/** story #4370 — 새 프로젝트 폼 초안(이름 · 설명). */
+interface NewProjectDraft { name: string; description: string }
+const EMPTY_NEW_PROJECT: NewProjectDraft = { name: '', description: '' };
+
 export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId }: UseUnifiedSwitcherArgs) {
   const tSwitcher = useTranslations('nav');
   const router = useRouter();
@@ -133,8 +138,15 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   const [open, setOpen] = useState(false);
   const [createOrgOpen, setCreateOrgOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectDesc, setNewProjectDesc] = useState('');
+  // story #4370(유나 판정 (가)) — 새 프로젝트 폼은 여러 줄 칸(설명)이 든 폼이라 폼 전체(이름 · 설명)가 조직별 초안: 창이 닫히거나
+  // 페이지를 새로 열어도 남고, 보이는 «취소»(clearNewProjectDraft)와 만들기 성공에서만 지운다.
+  const [newProjectForm, setNewProjectForm, clearNewProjectDraft] = useJsonFieldDraft<NewProjectDraft>(
+    { surface: 'project-create', targetId: currentOrgId ?? null, field: 'form' }, EMPTY_NEW_PROJECT,
+  );
+  const newProjectName = newProjectForm.name;
+  const newProjectDesc = newProjectForm.description;
+  const setNewProjectName = (v: string) => setNewProjectForm((f) => ({ ...f, name: v }));
+  const setNewProjectDesc = (v: string) => setNewProjectForm((f) => ({ ...f, description: v }));
   const [creating, setCreating] = useState(false);
 
   // story #3147(doc mobile-switcher-redesign-spec-4758744a §③) — 검색 state 신규. 데스크톱
@@ -358,8 +370,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const data = await res.json() as { id?: string; data?: { id: string } };
       const newId = data.id ?? data.data?.id;
       setCreateProjectOpen(false);
-      setNewProjectName('');
-      setNewProjectDesc('');
+      clearNewProjectDraft();
       setCreateProjectError(null);
       if (newId) await switchProject(newId);
       else router.refresh();
@@ -400,6 +411,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     switchOrgError,
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
+    clearNewProjectDraft,
     creating,
     searchQuery, setSearchQuery,
     otherOrgProjects,

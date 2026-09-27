@@ -304,3 +304,48 @@ describe('ContextSwitcherChip — story #3147/#3146 재설계(44px·검색·3층
     expect(global.fetch).toHaveBeenCalledWith('/api/auth/switch-account', expect.objectContaining({ method: 'POST' }));
   });
 });
+
+// story #4370 — 새 프로젝트 창: 설명(여러 줄)이 든 폼이라 폼 전체가 조직별 초안. Esc로 닫혀도 남고, 보이는 «취소»는 지운다.
+describe('ContextSwitcherChip — 새 프로젝트 폼 초안 (story #4370)', () => {
+  const desc = () => document.body.querySelector('#chip-proj-desc') as HTMLTextAreaElement | null;
+  const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
+  async function openNewProject() {
+    if (!document.body.textContent?.includes(koMessages.nav.switcherNewProject)) {
+      await act(async () => { container.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+    const item = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.nav.switcherNewProject)!;
+    await act(async () => { item.click(); });
+    await settle();
+  }
+  async function type(text: string) {
+    const el = desc()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, text);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  it('Esc로 닫혀도 설명이 남고 · 보이는 «취소»는 지운다', async () => {
+    window.sessionStorage.clear();
+    await act(async () => {
+      root.render(wrap(<ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />));
+    });
+    await openNewProject();
+    await type('카드 · 계좌 흐름 정리\n3분기 목표');
+    const esc = (t: EventTarget) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await act(async () => { desc()!.focus(); });
+    await act(async () => { esc(desc()!); });
+    await act(async () => { esc(document.activeElement ?? document.body); });
+    await settle();
+    expect(desc()).toBeNull();
+    await openNewProject();
+    expect(desc()!.value).toBe('카드 · 계좌 흐름 정리\n3분기 목표');
+    const dialog = desc()!.closest('[role="dialog"]')!;
+    const cancel = [...dialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.common.cancel)!;
+    await act(async () => { cancel.click(); });
+    await settle();
+    expect(desc()).toBeNull();
+    await openNewProject();
+    expect(desc()!.value).toBe('');
+  });
+});

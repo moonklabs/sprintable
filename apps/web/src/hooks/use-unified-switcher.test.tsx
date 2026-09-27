@@ -416,3 +416,45 @@ describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
     expect(result?.searchQuery).toBe('landing');
   });
 });
+
+// story #4370(유나 판정 (가)) — 새 프로젝트 폼(이름 · 설명 — 설명이 여러 줄 칸)은 조직별 초안: 전환기가 다시 마운트돼도(페이지 이동 ·
+// 새로 열기) 남고, 보이는 «취소»(clearNewProjectDraft)와 만들기 성공에서만 지운다. 예전엔 훅 상태라 언마운트면 사라졌다.
+describe('useUnifiedSwitcher — 새 프로젝트 폼 초안 (story #4370)', () => {
+  async function remount() {
+    await act(async () => { root.render(<></>); });
+    await act(async () => { root.render(<TestComp />); });
+  }
+
+  it('다시 마운트돼도 이름 · 설명이 남고 · clearNewProjectDraft는 지운다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectName('결제 개편'); });
+    await act(async () => { result!.setNewProjectDesc('카드 · 계좌 흐름 정리\n3분기 목표'); });
+    await remount();
+    expect(result!.newProjectName).toBe('결제 개편');
+    expect(result!.newProjectDesc).toBe('카드 · 계좌 흐름 정리\n3분기 목표');
+    await act(async () => { result!.clearNewProjectDraft(); });
+    await remount();
+    expect(result!.newProjectName).toBe('');
+    expect(result!.newProjectDesc).toBe('');
+  });
+
+  it('만들기 실패는 남기고 · 성공은 지운다', async () => {
+    let ok = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects' && init?.method === 'POST') return ok ? { ok: true, json: async () => ({ id: 'proj-new' }) } : { ok: false, status: 403, json: async () => ({}) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectName('결제 개편'); });
+    await act(async () => { result!.setNewProjectDesc('설명'); });
+    await act(async () => { await result!.createProject(result!.newProjectName, result!.newProjectDesc); });
+    await remount();
+    expect(result!.newProjectDesc).toBe('설명');
+    ok = true;
+    await act(async () => { await result!.createProject(result!.newProjectName, result!.newProjectDesc); });
+    await remount();
+    expect(result!.newProjectName).toBe('');
+    expect(result!.newProjectDesc).toBe('');
+  });
+});

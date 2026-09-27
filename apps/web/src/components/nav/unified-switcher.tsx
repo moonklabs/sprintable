@@ -244,7 +244,8 @@ export function UnifiedSwitcher({
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
             )}
             <DialogFooter>
-              <DialogClose render={<Button type="button" variant="ghost" disabled={s.creating}>{tCommon('cancel')}</Button>} />
+              {/* story #4370 — 보이는 «취소»는 폼 초안을 버린다(✕ · 바깥 · Esc 닫힘은 남긴다). */}
+              <DialogClose render={<Button type="button" variant="ghost" disabled={s.creating} onClick={s.clearNewProjectDraft}>{tCommon('cancel')}</Button>} />
               <Button type="submit" disabled={!s.newProjectName.trim() || s.creating}>
                 {s.creating ? tCommon('creating') : t('switcherCreateButton')}
               </Button>
