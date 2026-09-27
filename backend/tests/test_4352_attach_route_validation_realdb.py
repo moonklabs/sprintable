@@ -230,3 +230,101 @@ async def test_confirm_route_rejected_by_the_draft_version_check_removes_the_upl
         from app.main import app as _app
         _app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def _committed_image_objects_alive(Session, draft_id, storage_root) -> tuple[int, bool]:
+    """(이 초안의 이미지 행 수, 그 행들이 가리키는 원본 객체가 저장소에 전부 있는지)."""
+    from sqlalchemy import select
+
+    from app.models.channel_post_image import ChannelPostImage
+
+    async with Session() as s:
+        paths = list((await s.execute(
+            select(ChannelPostImage.original_object_path).where(ChannelPostImage.draft_id == uuid.UUID(draft_id))
+        )).scalars())
+    files = {str(p.relative_to(storage_root)).split("/", 1)[-1] for p in storage_root.rglob("*") if p.is_file()} if storage_root.exists() else set()
+    return len(paths), all(p in files for p in paths)
+
+
+def _arm_commit_then_fail(monkeypatch):
+    """«실패로 보고됐지만 실제로 커밋된» 커밋(연결 끊김 흉내): 이미지 행이 걸린 커밋만 진짜 커밋한 뒤 예외를 던진다."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.channel_post_image import ChannelPostImage
+
+    real_commit = AsyncSession.commit
+
+    async def commit(self):
+        has_image = any(isinstance(o, ChannelPostImage) for o in self.identity_map.values())
+        await real_commit(self)
+        if has_image:
+            raise ConnectionError("connection lost after COMMIT was sent")
+
+    monkeypatch.setattr(AsyncSession, "commit", commit)
+
+
+def _arm_refresh_fail(monkeypatch):
+    """커밋은 성공 · 그 뒤 refresh에서 던진다."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.channel_post_image import ChannelPostImage
+
+    real_refresh = AsyncSession.refresh
+
+    async def refresh(self, instance, *args, **kwargs):
+        if isinstance(instance, ChannelPostImage):
+            raise ConnectionError("connection lost during refresh")
+        return await real_refresh(self, instance, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "refresh", refresh)
+
+
+@pytest.mark.parametrize("failure", ["commit_then_fail", "refresh_fail"])
+async def test_import_failure_at_or_after_commit_keeps_the_committed_object(tmp_path, monkeypatch, failure):
+    """까디르 09-27 ① ② — 커밋 중 · 뒤 실패(커밋은 들어감)면 행이 객체를 가리킨다 → 정리하면 끊긴 참조. 남는 고아 < 끊긴 참조:
+    가져오기 입구 · confirm 정리 모두 지우지 않는다(행 1 · 객체 살아 있음)."""
+    import base64
+
+    from tests.test_620beefc_channel_post_image_upload import _jpeg_bytes
+
+    engine, Session = await _session_factory()
+    try:
+        app, org_id, connection_id, story_id = await _world_with_draft(Session)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            (_arm_commit_then_fail if failure == "commit_then_fail" else _arm_refresh_fail)(monkeypatch)
+            with pytest.raises(ConnectionError):
+                await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/import-image",
+                    json={"image_base64": base64.b64encode(_jpeg_bytes(800, 1000)).decode("ascii"), "content_type": "image/jpeg"},
+                )
+        monkeypatch.undo()
+        rows, alive = await _committed_image_objects_alive(Session, draft_id, tmp_path / ".storage")
+        assert rows == 1, "커밋은 들어갔어야 한다(실패로 보고됐을 뿐)"
+        assert alive, "커밋된 이미지 행이 가리키는 객체를 지웠다(끊긴 참조)"
+    finally:
+        from app.main import app as _app
+        _app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_confirm_route_commit_reported_failed_but_committed_keeps_the_object(tmp_path, monkeypatch):
+    """② 확정 라우트 쪽 — confirm 정리 구간에 커밋이 들어 있으면 «실패로 보고된 커밋»에서 객체를 지워 끊긴 참조가 된다(뮤테이션 대조)."""
+    from tests.test_620beefc_channel_post_image_upload import _jpeg_bytes, _upload_and_confirm
+
+    engine, Session = await _session_factory()
+    try:
+        app, org_id, connection_id, story_id = await _world_with_draft(Session)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            _arm_commit_then_fail(monkeypatch)
+            with pytest.raises(ConnectionError):
+                await _upload_and_confirm(client, org_id, draft_id, _jpeg_bytes(800, 1000), content_type="image/jpeg")
+        monkeypatch.undo()
+        rows, alive = await _committed_image_objects_alive(Session, draft_id, tmp_path / ".storage")
+        assert rows == 1
+        assert alive, "커밋된 이미지 행이 가리키는 객체를 지웠다(끊긴 참조)"
+    finally:
+        from app.main import app as _app
+        _app.dependency_overrides.clear()
+        await engine.dispose()

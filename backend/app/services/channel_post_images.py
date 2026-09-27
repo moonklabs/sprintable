@@ -306,11 +306,13 @@ async def import_channel_post_image(
             db, org_id=org_id, draft_id=draft_id, object_path=object_path,
             member_id=member_id, member_kind=member_kind,
         )
-    except Exception:
-        # story #4352(까디르 P2 ③) — 이 객체는 서버가 방금 제 경로(`_object_path`)에 올린 것이라, confirm이 어느 단계에서 거절하든
+    except Exception as exc:
+        # story #4352(까디르 P2 ③) — 이 객체는 서버가 방금 제 경로(`_object_path`)에 올린 것이라, confirm이 **커밋 전**에 거절하면
         # (검사 구간 앞의 초안 없음 · 채널 미지원 · 장 수 초과 · 초안 버전 검사 포함) 어떤 행에도 안 걸린다 — 지운다(이미 지웠으면 무해).
-        # 브라우저가 올린 경로(확정 라우트)는 경로 범위 확인 전이라 여기처럼 무조건 지우지 않는다(confirm 안의 정리가 맡음).
-        await _discard_unreferenced_objects(provider, bucket, object_path, None)
+        # 커밋 중 · 뒤에서 난 예외(confirm이 표식을 단다)는 행이 객체를 가리킬 수 있어 지우지 않는다(남는 고아 < 끊긴 참조).
+        # 브라우저가 올린 경로(확정 라우트)는 경로 범위 확인 전이라 여기처럼 지우지 않는다(confirm 안의 정리가 맡음).
+        if not may_be_committed(exc):
+            await _discard_unreferenced_objects(provider, bucket, object_path, None)
         raise
 
 
@@ -387,6 +389,23 @@ def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int
         raise ChannelImageConversionFailedError(final_bytes=len(derived_bytes), max_bytes=adapter.image_max_bytes)
     derived_content_type = "image/png" if out_format == "PNG" else "image/jpeg"
     return derived_bytes, derived_content_type, work.width, work.height, out_format
+
+
+_MAY_BE_COMMITTED_ATTR = "channel_image_may_be_committed"
+
+
+def mark_may_be_committed(exc: BaseException) -> None:
+    """story #4352 — 이 예외는 confirm의 커밋 중 · 뒤에서 났다(행이 들어갔을 수 있음) → 업로드 객체를 지우면 끊긴 참조가 된다."""
+    try:
+        setattr(exc, _MAY_BE_COMMITTED_ATTR, True)
+    except Exception:  # noqa: BLE001 — 속성을 못 다는 예외(드묾) — may_be_committed 한계 참조
+        pass
+
+
+def may_be_committed(exc: BaseException) -> bool:
+    """confirm이 커밋 중 · 뒤 예외에 단 표식이 있으면 True. 한계: 속성을 못 다는 예외(`__slots__` 등)는 표식이 없어 False로 읽힌다 —
+    이 경로에서 나는 예외(SQLAlchemy · asyncpg · HTTPException)는 모두 속성을 받는다."""
+    return getattr(exc, _MAY_BE_COMMITTED_ATTR, False) is True
 
 
 async def _discard_unreferenced_objects(provider, bucket: str, object_path: str, derived_object_path: str | None) -> None:
@@ -562,7 +581,8 @@ async def confirm_channel_post_image_upload(
         composite_sha256 = compute_image_seal_hash(ordered_hashes)
 
     # story #4352(까디르 P2 ③) — 새 버전 쓰기(초안 버전 검사 포함)에서 거절돼도 올린 객체(원본 · 파생)가 어떤 행에도 안 걸린 채 남지 않게,
-    # 커밋까지를 같은 정리로 감싼다(위 검사 구간의 정리와 한 도우미). 커밋 뒤(refresh)는 행이 객체를 가리키므로 감싸지 않는다.
+    # **커밋 전**까지만 같은 정리로 감싼다(위 검사 구간의 정리와 한 도우미 · flush로 제약 위반도 여기서 드러냄). 커밋 · 그 뒤는 감싸지 않는다:
+    # 커밋이 실패로 보고돼도 실제로는 들어갔을 수 있고(연결 끊김), 커밋 뒤엔 행이 객체를 가리킨다 — 남는 고아 < 끊긴 참조(PO · 까디르 09-27).
     try:
         new_version, _channel, _violations = await create_channel_post_draft_version(
             db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
@@ -592,11 +612,17 @@ async def confirm_channel_post_image_upload(
             created_by=member_id,
         )
         db.add(image_row)
-        await db.commit()
+        await db.flush()
     except Exception:
         await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
         raise
-    await db.refresh(image_row)
+    try:
+        await db.commit()
+        await db.refresh(image_row)
+    except Exception as exc:
+        # 커밋 중 · 뒤의 실패 — 행이 이미 들어갔을 수 있다. 부르는 쪽(가져오기 입구)이 객체를 지우지 않게 표식을 단다.
+        mark_may_be_committed(exc)
+        raise
     return new_version, image_row
 
 
