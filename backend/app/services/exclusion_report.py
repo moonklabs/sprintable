@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import func, select
@@ -27,6 +28,7 @@ async def generate_exclusion_report(
     session: AsyncSession,
     org_id: uuid.UUID,
     project_id: uuid.UUID | None = None,
+    project_ids: Collection[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
     """오염 후보 dry-run 리포트 — 조회 전용, 마킹 없음.
 
@@ -45,6 +47,9 @@ async def generate_exclusion_report(
     ]
     if project_id:
         base_where.append(Story.project_id == project_id)
+    # story #4350 — caller가 접근 가능한 프로젝트로만(SEC-S8). 한 base_where를 네 조회가 같이 쓴다.
+    if project_ids is not None:
+        base_where.append(Story.project_id.in_(list(project_ids)))
 
     # 전체/제외 건수
     total_r = await session.execute(select(func.count(Story.id)).where(*base_where))

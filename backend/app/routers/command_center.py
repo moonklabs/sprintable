@@ -69,6 +69,12 @@ async def my_actions(
     member = await resolve_member(auth, org_id, session)
     member_id = member.id
     now = _now()
+    # story #4350(PO 2026-09-26) — `attention`은 org 자동 이상감지지만 **caller가 접근 가능한 프로젝트의 항목 · 수만**(SEC-S8 선생님
+    # 확정: org 전체 노출 = 갭). 예전엔 loop_measure_due 큐가 «같은 3축이 여기로 이미 org-wide»를 근거로 org-wide를 유지했다 —
+    # 둘 다 같은 해소기로 맞춘다. 프로젝트에 매이지 않은 항목(에이전트 인증 실패)은 그대로.
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    _accessible_project_ids = await accessible_project_ids_in_org(session, uuid.UUID(auth.user_id), org_id)
 
     # ⛔⛔ story #2288 리뷰(2026-07-29, PO 지적 — my_blockers 누락 버그의 근본): 이 함수가
     # queue.append({"type": ...})로 내보내는 문자열 전수는 **세 곳이 같이 움직여야 하는**
@@ -354,6 +360,7 @@ async def my_actions(
             select(WorkflowLineStepRun)
             .where(
                 WorkflowLineStepRun.org_id == org_id,
+                WorkflowLineStepRun.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 WorkflowLineStepRun.status == "pending",
                 WorkflowLineStepRun.started_at < now - timedelta(minutes=_AGENT_STUCK_MINUTES),
                 WorkflowLineStepRun.resolved_member_type == "agent",  # HIGH2: agent run 만.
@@ -427,6 +434,7 @@ async def my_actions(
                 ItemDependency.item_type == "story",
                 ItemDependency.created_at < now - timedelta(days=_BLOCKER_UNANSWERED_DAYS),
                 _BlockedU.org_id == org_id,               # defense-in-depth: 조인 story 도 org-scope.
+                _BlockedU.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 _BlockedU.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedU.deleted_at.is_(None),
             )
@@ -452,6 +460,7 @@ async def my_actions(
             )
             .where(
                 Hypothesis.org_id == org_id,
+                Hypothesis.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Hypothesis.status == "falsified",
                 Hypothesis.updated_at >= now - timedelta(days=_HYPOTHESIS_FALSIFIED_DAYS),
             )
@@ -480,6 +489,7 @@ async def my_actions(
             )
             .where(
                 Hypothesis.org_id == org_id,
+                Hypothesis.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Hypothesis.status.in_(("active", "measuring")),
                 Hypothesis.measure_after <= now,
             )
@@ -500,6 +510,7 @@ async def my_actions(
             select(Goal.id, Goal.title, Goal.measure_after, Goal.assignee_id, Goal.project_id)
             .where(
                 Goal.org_id == org_id,
+                Goal.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Goal.status == "active",
                 Goal.measure_after.isnot(None),
                 Goal.measure_after <= now,
@@ -525,6 +536,7 @@ async def my_actions(
             select(Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id, Goal.project_id)
             .where(
                 Goal.org_id == org_id,
+                Goal.project_id.in_(_accessible_project_ids),  # story #4350 — 접근 가능 프로젝트만(SEC-S8)
                 Goal.status == "done",
                 Goal.outcome_status.in_(("n_a", "unmeasured")),
             )
@@ -548,6 +560,7 @@ async def my_actions(
                 Goal.org_id == org_id,
                 Goal.status == "active",
                 Goal.measure_after.is_(None),
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -561,6 +574,7 @@ async def my_actions(
                 Hypothesis.org_id == org_id,
                 Hypothesis.status.in_(("active", "measuring")),
                 Hypothesis.measure_after <= now,
+                Hypothesis.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -571,6 +585,7 @@ async def my_actions(
                 Goal.status == "active",
                 Goal.measure_after.isnot(None),
                 Goal.measure_after <= now,
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -580,6 +595,7 @@ async def my_actions(
                 Goal.org_id == org_id,
                 Goal.status == "done",
                 Goal.outcome_status.in_(("n_a", "unmeasured")),
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()
@@ -592,6 +608,7 @@ async def my_actions(
                 Goal.org_id == org_id,
                 Goal.status == "done",
                 Goal.outcome_status == "unmeasurable",
+                Goal.project_id.in_(_accessible_project_ids),
             )
         )
     ).scalar_one()

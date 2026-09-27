@@ -57,10 +57,16 @@ async def get_activity_stream(
     if order == "desc" and after_seq is not None:
         raise HTTPException(status_code=422, detail="after_seq requires order=asc (the default)")
 
+    # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트의 활동만(SEC-S8 선생님 확정: org 전체 노출 = 갭).
+    project_ids = None
+    if project_id is None:
+        from app.services.project_auth import accessible_project_ids_in_org
+        project_ids = await accessible_project_ids_in_org(db, uuid.UUID(auth.user_id), org_id)
     rows, next_cursor = await query_activity_stream(
         db,
         org_id,
         project_id=project_id,
+        project_ids=project_ids,
         actor_id=actor_id,
         verb=verb,
         object_type=object_type,

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import exists, func, select, text, tuple_
+from sqlalchemy import exists, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
@@ -113,7 +114,7 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
 
     async def list_paginated(
         self, *, limit: int = 1000, cursor: tuple[date, datetime, uuid.UUID] | None = None,
-        **filters: Any,
+        project_ids: Collection[uuid.UUID] | None = None, **filters: Any,
     ) -> tuple[list[StandupEntry], int]:
         """story #3841 — `.list()`(위)의 조용한 1000-cap을 true cursor 페이지네이션으로
         대체하는 신규 메서드(`.list()` 자신은 그대로 둔다 — 코드베이스 전체에서 그 메서드의
@@ -135,6 +136,15 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
                     StandupEntryProject.project_id == project_id,
                 )
             )
+        if project_ids is not None:
+            # story #4350 — caller가 접근 가능한 프로젝트에 투영된 기록 + 어느 프로젝트에도 투영되지 않은 org 수준 기록만(SEC-S8).
+            # 기록은 org 1행 · 프로젝트 표면은 standup_entry_projects 링크(51447ca0) — 링크로 가른다.
+            linked_accessible = exists().where(
+                StandupEntryProject.entry_id == StandupEntry.id,
+                StandupEntryProject.project_id.in_(list(project_ids)),
+            )
+            any_link = exists().where(StandupEntryProject.entry_id == StandupEntry.id)
+            conds.append(or_(linked_accessible, ~any_link))
         if cursor is not None:
             cursor_date, cursor_created_at, cursor_id = cursor
             conds.append(

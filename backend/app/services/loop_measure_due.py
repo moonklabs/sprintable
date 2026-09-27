@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Any
 
@@ -168,6 +169,7 @@ async def list_measure_due_queue(
     org_id: uuid.UUID,
     *,
     project_id: uuid.UUID | None = None,
+    project_ids: Collection[uuid.UUID] | None = None,
     unclaimed_only: bool = False,
     limit: int = 100,
     offset: int = 0,
@@ -196,6 +198,9 @@ async def list_measure_due_queue(
     )
     if project_id is not None:
         hyp_q = hyp_q.where(Hypothesis.project_id == project_id)
+    # story #4350 — caller가 접근 가능한 프로젝트로만(SEC-S8 · 세 축 모두).
+    if project_ids is not None:
+        hyp_q = hyp_q.where(Hypothesis.project_id.in_(list(project_ids)))
     if unclaimed_only:
         hyp_q = hyp_q.where(Hypothesis.owner_member_id.is_(None))
     for hyp_id, statement, measure_after, owner_id, p_id in (await session.execute(hyp_q)).all():
@@ -216,6 +221,8 @@ async def list_measure_due_queue(
     )
     if project_id is not None:
         goal_q = goal_q.where(Goal.project_id == project_id)
+    if project_ids is not None:
+        goal_q = goal_q.where(Goal.project_id.in_(list(project_ids)))
     if unclaimed_only:
         goal_q = goal_q.where(Goal.assignee_id.is_(None))
     for goal_id, title, measure_after, assignee_id, p_id in (await session.execute(goal_q)).all():
@@ -236,6 +243,8 @@ async def list_measure_due_queue(
     )
     if project_id is not None:
         done_q = done_q.where(Goal.project_id == project_id)
+    if project_ids is not None:
+        done_q = done_q.where(Goal.project_id.in_(list(project_ids)))
     if unclaimed_only:
         done_q = done_q.where(Goal.assignee_id.is_(None))
     for goal_id, title, updated_at, assignee_id, p_id in (await session.execute(done_q)).all():

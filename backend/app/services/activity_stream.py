@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from typing import Literal
 
@@ -216,6 +217,7 @@ async def query_activity_stream(
     org_id: uuid.UUID,
     *,
     project_id: uuid.UUID | None = None,
+    project_ids: Collection[uuid.UUID] | None = None,
     actor_id: uuid.UUID | None = None,
     verb: str | None = None,
     object_type: str | None = None,
@@ -241,6 +243,11 @@ async def query_activity_stream(
     query = select(ActivityEvent).where(ActivityEvent.org_id == org_id)
     if project_id is not None:
         query = query.where(ActivityEvent.project_id == project_id)
+    # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트로만(SEC-S8 · 빈 집합이면 0건).
+    if project_ids is not None:
+        if not project_ids:
+            return [], None
+        query = query.where(ActivityEvent.project_id.in_(list(project_ids)))
     if actor_id is not None:
         query = query.where(ActivityEvent.actor_id == actor_id)
     if verb is not None:

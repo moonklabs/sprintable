@@ -183,7 +183,10 @@ async def list_standups(
     # 단독으로 우회 가능 — Sprint.project_id는 필수 FK라 sprint_id만 알면 특정 project로
     # 골라낼 수 있었다). sprint_id가 주어지면 org-scope로 실제 project_id를 서버에서
     # 도출하고, project_id도 함께 주어졌으면 상호 일치까지 확인(불일치=404, 상세 비노출).
-    # project_id·sprint_id 둘 다 없는 org-wide 무필터 목록은 의도된 org 투명성 설계라 무변경.
+    # project_id·sprint_id 둘 다 없는 목록 — story #4350(2026-09-26, 페드루 PO 재판정): caller가 접근 가능한 프로젝트의 기록 +
+    # 프로젝트에 매이지 않은 기록만. 예전엔 «의도된 org 투명성 설계»로 org 전체였으나, 같은 화면의 plan_stories는 이미
+    # SEC-S8로 접근 가능 프로젝트만 걸러(`_entries_with_plan_stories`) 한 화면에 규칙이 둘이었다 — 선생님 SEC-S8(«org-level =
+    # 갭»)로 맞춘다(화면 동작 변화 — 선생님 보고에 «SEC-S8 적용 · 뒤집을 수 있음»).
     target_project_id = project_id
     if sprint_id is not None:
         sprint_row = await repo.session.execute(
@@ -213,7 +216,11 @@ async def list_standups(
         filters["date"] = date_filter
 
     cursor_parsed = parse_standup_cursor(cursor)
-    entries, total = await repo.list_paginated(limit=limit, cursor=cursor_parsed, **filters)
+    project_ids = None
+    if target_project_id is None:
+        from app.services.project_auth import accessible_project_ids_in_org
+        project_ids = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+    entries, total = await repo.list_paginated(limit=limit, cursor=cursor_parsed, project_ids=project_ids, **filters)
     # story #3841 AC1 — goals.py/retros.py와 동일 헤더 계약(X-Total-Count·X-Next-Cursor).
     # 응답 바디는 그대로 bare list — 기존 소비처(웹·모바일·MCP)가 무변경으로 첫 페이지를
     # 그대로 받는다(바디 봉투로 바꾸면 전부 깨진다 — docs.py류 {data,meta} 봉투는 여기 미적용).

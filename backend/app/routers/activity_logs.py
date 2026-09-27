@@ -106,6 +106,14 @@ async def list_activity_logs(
 
     if project_id:
         q = q.where(ActivityLog.project_id == project_id)
+    else:
+        # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트의 로그 + 프로젝트에 매이지 않은 org 수준 로그만
+        # (SEC-S8 선생님 확정: org 전체 노출 = 갭 · assets `_scope_filter`와 같은 모양). EE RBAC 필터는 이 위에 그대로 얹힌다.
+        from sqlalchemy import or_
+
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(db, uuid.UUID(auth.user_id), org_id)
+        q = q.where(or_(ActivityLog.project_id.is_(None), ActivityLog.project_id.in_(accessible)))
     if actor_id:
         q = q.where(ActivityLog.actor_id == actor_id)
     if action:

@@ -25,6 +25,16 @@ _ASYNC_URL = (
 _db = pytest.mark.skipif(not _ASYNC_URL, reason="real-DB URL 미설정 — skip")
 
 
+@pytest.fixture(autouse=True)
+def _accessible_projects_pinned(monkeypatch):
+    """story #4350 PR 2 — 목록 · 집계가 caller의 접근 가능 프로젝트를 먼저 조회한다(SEC-S8). 이 파일은 execute 순서를 세는 목 세션이라
+    그 조회를 고정한다(범위 규칙 자체는 test_4350_pr2_org_wide_routes_realdb.py 실 PG)."""
+    import app.services.project_auth as project_auth
+
+    # None = 거를 것 없음(서비스의 project_ids=None 경로 = 전체 접근과 같은 옛 동작) — 이 파일의 관심은 커서 · 모양.
+    monkeypatch.setattr(project_auth, "accessible_project_ids_in_org", AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

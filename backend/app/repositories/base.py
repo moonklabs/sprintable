@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,9 +101,14 @@ class BaseRepository(Generic[T]):
         for attr, val in filters.items():
             conds.append(getattr(self.model, attr) == val)
         if project_ids is not None:
-            if not project_ids:
+            # project_id가 nullable인 표(예: standup_entries)는 프로젝트에 매이지 않은 org 수준 행을 그대로 둔다 — 어느
+            # 프로젝트의 내용도 아니라서(assets `_scope_filter` · activity_logs와 같은 모양). NOT NULL 표는 IN만.
+            col = self.model.project_id  # type: ignore[attr-defined]
+            nullable = bool(getattr(col.property.columns[0], "nullable", False))
+            if not project_ids and not nullable:
                 return [], 0
-            conds.append(self.model.project_id.in_(list(project_ids)))  # type: ignore[attr-defined]
+            in_accessible = col.in_(list(project_ids))
+            conds.append(or_(col.is_(None), in_accessible) if nullable else in_accessible)
 
         if order_by not in self._orderable_fields():
             order_by = "created_at"
