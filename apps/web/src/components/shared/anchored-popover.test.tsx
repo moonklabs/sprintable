@@ -217,6 +217,56 @@ describe('usePortalMenuKeys(story #4349 PR 2)', () => {
     expect(trap).not.toHaveBeenCalled();
   });
 
+  // story #4355(유나 배포 35) — 열린 채 초점이 **트리거**에 있으면(포인터로 연 패널 · 포인터로 연 뒤 트리거로 돌아온 메뉴) Esc가 무시되거나
+  // 서랍 · 셸 트랩(document keydown)까지 가 서랍째 닫혔다. App Router처럼 React 뿌리가 트랩과 같은 노드면 stopPropagation으로는 못 막는다 —
+  // 뿌리 노드(여기선 container)에 붙은 트랩도 안 불려야 한다(stopImmediatePropagation).
+  it('panel: 열린 채 트리거에서 Esc → 닫힘 · 초점 트리거 · 트랩 0(document · 뿌리와 같은 노드 둘 다)', () => {
+    act(() => { root.render(<KeysHarness kind="panel" />); });
+    const docTrap = vi.fn(); const rootTrap = vi.fn();
+    document.addEventListener('keydown', docTrap);
+    container.addEventListener('keydown', rootTrap); // React 뿌리 리스너보다 늦게 붙은 같은 노드 리스너(App Router의 document 뿌리 + 트랩 모양)
+    try {
+      byId('trig').focus();
+      act(() => { byId('trig').click(); });
+      expect(document.activeElement).toBe(byId('trig'));
+      const e = press(byId('trig'), 'Escape');
+      expect(e.defaultPrevented).toBe(true);
+      expect(document.querySelector('[data-testid="pop"]')).toBeNull();
+      expect(document.activeElement).toBe(byId('trig'));
+      expect(docTrap).not.toHaveBeenCalled();
+      expect(rootTrap).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', docTrap);
+      container.removeEventListener('keydown', rootTrap);
+    }
+  });
+
+  it('menu: 연 뒤 초점이 트리거로 돌아와도(포인터 뒤 등) Esc → 닫힘 · 트랩 0', () => {
+    act(() => { root.render(<KeysHarness kind="menu" />); });
+    const docTrap = vi.fn();
+    document.addEventListener('keydown', docTrap);
+    try {
+      act(() => { byId('trig').click(); });
+      act(() => { byId('trig').focus(); });
+      press(byId('trig'), 'Escape');
+      expect(document.querySelector('[data-testid="pop"]')).toBeNull();
+      expect(document.activeElement).toBe(byId('trig'));
+      expect(docTrap).not.toHaveBeenCalled();
+    } finally { document.removeEventListener('keydown', docTrap); }
+  });
+
+  it('닫혀 있으면 트리거 Esc를 삼키지 않는다(서랍 Esc 그대로 닿음)', () => {
+    act(() => { root.render(<KeysHarness kind="panel" />); });
+    const docTrap = vi.fn();
+    document.addEventListener('keydown', docTrap);
+    try {
+      byId('trig').focus();
+      const e = press(byId('trig'), 'Escape');
+      expect(e.defaultPrevented).toBe(false);
+      expect(docTrap).toHaveBeenCalledTimes(1);
+    } finally { document.removeEventListener('keydown', docTrap); }
+  });
+
   // 까디르(4724 · 부류) — 훅이 ARIA props도 준다: menu는 메뉴 역할까지, panel은 펼침 · 가리킴만.
   it('ARIA props — menu: aria-haspopup=menu · aria-expanded · aria-controls(열렸을 때 팝오버 id) · 팝오버 role=menu / panel: haspopup · role 없음', () => {
     act(() => { root.render(<KeysHarness kind="menu" />); });

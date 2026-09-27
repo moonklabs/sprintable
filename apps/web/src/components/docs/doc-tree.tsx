@@ -219,7 +219,7 @@ function TreeNode({
   // 포털 메뉴 키보드 길(열면 첫 항목 · ↑↓ · Tab 넘김/Esc = 닫고 «⋮»로 · Esc는 서랍 트랩까지 안 감) — 공용 훅(#4349).
   const closeMenu = useCallback(() => setContextMenuOpen(false), []);
   // 까디르(4724) — 메뉴 ARIA(트리거 aria-haspopup · aria-expanded · aria-controls / 패널 id · role=menu)도 같은 훅이 준다 · 항목 role=menuitem은 여기서.
-  const { onPopoverKeyDown: handleMenuKeyDown, triggerProps: menuTriggerProps, popoverProps: menuPopoverProps } = usePortalMenuKeys({ open: contextMenuOpen, onClose: closeMenu, popoverRef: menuRef, triggerRef: menuTriggerRef, kind: 'menu' });
+  const { onPopoverKeyDown: handleMenuKeyDown, onTriggerKeyDown: handleMenuTriggerKeyDown, triggerProps: menuTriggerProps, popoverProps: menuPopoverProps } = usePortalMenuKeys({ open: contextMenuOpen, onClose: closeMenu, popoverRef: menuRef, triggerRef: menuTriggerRef, kind: 'menu' });
 
   useEffect(() => {
     if (!contextMenuOpen) return;
@@ -337,7 +337,8 @@ function TreeNode({
           }}
           // 기본 동작을 막는다(#4724 실 키 판): 막지 않으면 Chromium이 Enter의 활성화(keypress → click)를 **이미 첫 항목으로 옮겨 간 초점**에 보내
           // 메뉴가 열리자마자 «이름 변경»이 눌렸다(jsdom은 keypress를 안 만들어 단위 시험이 못 봄).
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setContextMenuOpen(true); } }}
+          // story #4355 — 열린 채 초점이 «⋮»에 남아도 Esc로 닫힘(공용 훅) · Enter/Space는 열기.
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setContextMenuOpen(true); return; } handleMenuTriggerKeyDown(e); }}
           className={cn('absolute right-2 top-1/2 -translate-y-1/2 rounded-sm transition', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreVertical className="size-3.5 text-muted-foreground" />

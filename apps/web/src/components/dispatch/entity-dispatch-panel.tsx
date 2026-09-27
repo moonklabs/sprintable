@@ -181,6 +181,8 @@ export function EntityDispatchPanel({
             {...moreKeys.triggerProps}
             type="button"
             onClick={() => setMoreOpen((o) => !o)}
+            // story #4355 — 열린 채 초점이 트리거에 남아도(포인터로 연 뒤 등) Esc로 닫힘 · Tab은 메뉴로(공용 훅).
+            onKeyDown={moreKeys.onTriggerKeyDown}
             className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
             aria-label={t('moreOptionsAria')}
           >

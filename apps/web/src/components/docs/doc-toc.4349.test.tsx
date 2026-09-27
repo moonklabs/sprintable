@@ -142,3 +142,21 @@ describe('DocToc «✕» — 이름 · 닫으면 «목차»로 초점(유나 #47
   });
 });
 
+// story #4355(유나 배포 35) — 포인터로 연 목차는 초점이 «목차»에 남는다(패널 설계). 그 상태에서 Esc가 무시되거나 서랍 트랩까지 갔다.
+describe('DocToc — 열린 채 초점이 «목차»일 때 Esc(4355)', () => {
+  it('누르기로 열고 «목차»에서 Esc → 닫힘 · 초점 «목차» · 서랍 트랩(document keydown) Esc 0', () => {
+    mount();
+    btn().focus();
+    act(() => { btn().click(); });
+    expect(panel()).not.toBeNull();
+    expect(document.activeElement).toBe(btn());
+    const trap = vi.fn();
+    document.addEventListener('keydown', trap);
+    try {
+      key(btn(), 'Escape');
+      expect(panel()).toBeNull();
+      expect(document.activeElement).toBe(btn());
+      expect(trap.mock.calls.filter(([e]) => (e as KeyboardEvent).key === 'Escape')).toHaveLength(0);
+    } finally { document.removeEventListener('keydown', trap); }
+  });
+});
