@@ -1003,7 +1003,7 @@ async def post_channel_post_video_confirm(
 
 
 async def _confirm_image_upload_or_raise(
-    coro,
+    coro, *, locale: str,
 ) -> tuple[ChannelPostVersion, ChannelPostImage]:
     """story #3666 리팩터 — `post_channel_post_image_confirm`(기존 3단계 업로드-URL 플로우의
     마지막 걸음)과 `post_channel_post_image_import`(#3666 신규, 에이전트 원콜 base64 입구)
@@ -1012,6 +1012,10 @@ async def _confirm_image_upload_or_raise(
     await 안 된 코루틴만 넘긴다."""
     try:
         return await coro
+    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
+        # story #4352(까디르 P1) — confirm은 새 버전을 쓰며 초안 버전 검사를 탄다. 매핑을 이 도우미 안에 둬 확정 · 가져오기 두 라우트가
+        # 한 자리를 쓴다(예전엔 확정 라우트만 바깥에서 잡아 가져오기는 코드 없는 500).
+        raise _draft_version_validation_http_error(exc, locale) from exc
     except ChannelPostDraftNotFoundError as exc:
         raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
     except ChannelImageStorageNotConfiguredError as exc:
@@ -1120,15 +1124,13 @@ async def post_channel_post_image_confirm(
     )
     member_id, actor_type = resolved.id, resolved.type
 
-    try:
-        version, image_row = await _confirm_image_upload_or_raise(
-            confirm_channel_post_image_upload(
-                db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
-                member_id=member_id, member_kind=actor_type,
-            )
-        )
-    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
-        raise _draft_version_validation_http_error(exc, resolve_locale_from_request(locale, accept_language)) from exc
+    version, image_row = await _confirm_image_upload_or_raise(
+        confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
+            member_id=member_id, member_kind=actor_type,
+        ),
+        locale=resolve_locale_from_request(locale, accept_language),
+    )
     return _image_response(version, image_row)
 
 
@@ -1141,6 +1143,9 @@ async def post_channel_post_image_import(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    # story #4352 — 초안 버전 검사 예외 본문을 요청 언어로(저장 · 확정 라우트와 같은 locale DI).
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> ChannelPostImageResponse:
     """story #3666(Phase2·마케팅운영, 페드루 PO 確定 2026-09-07) — MCP/플러그인 에이전트
     전용 원콜 입구. 미르코 배포 52 표본 준비 중 실측 갭: `create_channel_post_draft`가
@@ -1192,7 +1197,8 @@ async def post_channel_post_image_import(
         import_channel_post_image(
             db, org_id=org_id, draft_id=draft_id, image_bytes=image_bytes, content_type=body.content_type,
             member_id=member_id, member_kind=actor_type,
-        )
+        ),
+        locale=resolve_locale_from_request(locale, accept_language),
     )
     return _image_response(version, image_row)
 

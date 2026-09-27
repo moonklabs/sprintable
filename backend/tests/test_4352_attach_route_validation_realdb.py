@@ -95,3 +95,138 @@ async def test_reorder_after_the_channel_limit_tightened_is_422_with_the_shared_
         object.__setattr__(adapter, "max_text_length", original_limit)
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def test_import_route_after_the_limit_tightened_is_422_and_leaves_no_uploaded_object(tmp_path):
+    """까디르 P1 · ③ — 이미지 **가져오기**(MCP/플러그인 에이전트 길: import → confirm → 새 버전)도 같은 매핑: 조인 한도에서 422
+    `CHANNEL_TEXT_TOO_LONG` · 새 버전 0. 그리고 서버가 검사 **전**에 올린 객체가 거절 뒤 남지 않는다(고아 0).
+    대조: 한도를 조이기 전 같은 가져오기는 성공하고 저장소 파일이 늘어난다(파일 세기가 헛돌지 않음)."""
+    import base64
+
+    from sqlalchemy import func, select
+
+    from app.main import app
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.services.channel_adapters import get_channel_adapter
+    from tests.test_620beefc_channel_post_image_upload import _jpeg_bytes
+
+    storage_root = tmp_path / ".storage"
+
+    def stored_files() -> int:
+        return sum(1 for p in storage_root.rglob("*") if p.is_file()) if storage_root.exists() else 0
+
+    async def import_image(client, org_id, draft_id, raw):
+        return await client.post(
+            f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/import-image",
+            json={"image_base64": base64.b64encode(raw).decode("ascii"), "content_type": "image/jpeg"},
+        )
+
+    engine, Session = await _session_factory()
+    adapter = get_channel_adapter("instagram")
+    original_limit = adapter.max_text_length
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human_id = await _seed_human(s, org_id, project_id)
+            connection_id = await _seed_connection(s, org_id, channel="instagram")
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            before_ok = stored_files()
+            ok = await import_image(client, org_id, draft_id, _jpeg_bytes(800, 1000, color=(1, 2, 3)))
+            assert ok.status_code == 201 or ok.status_code == 200, ok.text[:300]
+            assert stored_files() > before_ok, "대조: 성공한 가져오기는 저장소에 객체를 남긴다"
+
+            async with Session() as s:
+                versions_before = (await s.execute(
+                    select(func.count()).select_from(ChannelPostVersion).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+                )).scalar_one()
+            files_before = stored_files()
+            object.__setattr__(adapter, "max_text_length", 1)
+            resp = await import_image(client, org_id, draft_id, _jpeg_bytes(800, 1000, color=(4, 5, 6)))
+        assert resp.status_code == 422, f"{resp.status_code}: {resp.text[:300]}"
+        assert "CHANNEL_TEXT_TOO_LONG" in resp.text, resp.text[:300]
+        assert stored_files() == files_before, "거절된 가져오기가 올린 객체가 저장소에 남았다(고아)"
+        async with Session() as s:
+            versions_after = (await s.execute(
+                select(func.count()).select_from(ChannelPostVersion).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+            )).scalar_one()
+        assert versions_after == versions_before
+    finally:
+        object.__setattr__(adapter, "max_text_length", original_limit)
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def _world_with_draft(Session):
+    from app.main import app
+
+    async with Session() as s:
+        org_id, project_id = await _seed_org(s)
+        human_id = await _seed_human(s, org_id, project_id)
+        connection_id = await _seed_connection(s, org_id, channel="instagram")
+        story_id = await _seed_story(s, org_id, project_id)
+    _setup_org_scoped_app(app, Session, org_id, user_id=human_id, agent=False)
+    return app, org_id, connection_id, story_id
+
+
+def _count_files(root) -> int:
+    return sum(1 for p in root.rglob("*") if p.is_file()) if root.exists() else 0
+
+
+async def test_import_rejected_before_confirms_checks_still_removes_its_upload(tmp_path):
+    """③ 가져오기 쪽 정리만 지키는 자리 — confirm의 검사 구간 **앞**에서 거절(장 수 초과)되면 confirm 안의 정리는 안 돈다. 서버가 올린
+    객체는 가져오기 입구가 지운다(거절 뒤 저장소 파일 수 그대로)."""
+    import base64
+
+    from app.services.channel_adapters import get_channel_adapter
+    from tests.test_620beefc_channel_post_image_upload import _jpeg_bytes
+
+    engine, Session = await _session_factory()
+    adapter = get_channel_adapter("instagram")
+    original_max = adapter.image_max_count
+    try:
+        app, org_id, connection_id, story_id = await _world_with_draft(Session)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            body = {"image_base64": base64.b64encode(_jpeg_bytes(800, 1000)).decode("ascii"), "content_type": "image/jpeg"}
+            url = f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/import-image"
+            first = await client.post(url, json=body)
+            assert first.status_code in (200, 201), first.text[:300]
+            object.__setattr__(adapter, "image_max_count", 1)
+            files_before = _count_files(tmp_path / ".storage")
+            resp = await client.post(url, json=body)
+        assert resp.status_code == 422 and "CHANNEL_POST_IMAGE_COUNT_EXCEEDED" in resp.text, resp.text[:300]
+        assert _count_files(tmp_path / ".storage") == files_before, "장 수 초과로 거절된 가져오기의 객체가 남았다(고아)"
+    finally:
+        object.__setattr__(adapter, "image_max_count", original_max)
+        from app.main import app as _app
+        _app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_confirm_route_rejected_by_the_draft_version_check_removes_the_uploaded_object(tmp_path):
+    """③ confirm 안 정리(새 버전 쓰기 구간)만 지키는 자리 — 확정 라우트(브라우저가 올린 객체)가 초안 버전 검사에서 거절되면 그 객체도
+    어떤 행에도 안 걸린다 → 지운다. 가져오기 입구의 정리는 이 길을 안 탄다."""
+    from app.services.channel_adapters import get_channel_adapter
+    from tests.test_620beefc_channel_post_image_upload import _jpeg_bytes, _upload_and_confirm
+
+    engine, Session = await _session_factory()
+    adapter = get_channel_adapter("instagram")
+    original_limit = adapter.max_text_length
+    try:
+        app, org_id, connection_id, story_id = await _world_with_draft(Session)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            files_before = _count_files(tmp_path / ".storage")
+            object.__setattr__(adapter, "max_text_length", 1)
+            resp = await _upload_and_confirm(client, org_id, draft_id, _jpeg_bytes(800, 1000), content_type="image/jpeg")
+        assert resp.status_code == 422 and "CHANNEL_TEXT_TOO_LONG" in resp.text, resp.text[:300]
+        assert _count_files(tmp_path / ".storage") == files_before, "거절된 확정의 업로드 객체가 남았다(고아)"
+    finally:
+        object.__setattr__(adapter, "max_text_length", original_limit)
+        from app.main import app as _app
+        _app.dependency_overrides.clear()
+        await engine.dispose()

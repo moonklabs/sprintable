@@ -301,10 +301,17 @@ async def import_channel_post_image(
     if not ok:
         raise ChannelImageUploadFailedError(object_path=object_path)
 
-    return await confirm_channel_post_image_upload(
-        db, org_id=org_id, draft_id=draft_id, object_path=object_path,
-        member_id=member_id, member_kind=member_kind,
-    )
+    try:
+        return await confirm_channel_post_image_upload(
+            db, org_id=org_id, draft_id=draft_id, object_path=object_path,
+            member_id=member_id, member_kind=member_kind,
+        )
+    except Exception:
+        # story #4352(까디르 P2 ③) — 이 객체는 서버가 방금 제 경로(`_object_path`)에 올린 것이라, confirm이 어느 단계에서 거절하든
+        # (검사 구간 앞의 초안 없음 · 채널 미지원 · 장 수 초과 · 초안 버전 검사 포함) 어떤 행에도 안 걸린다 — 지운다(이미 지웠으면 무해).
+        # 브라우저가 올린 경로(확정 라우트)는 경로 범위 확인 전이라 여기처럼 무조건 지우지 않는다(confirm 안의 정리가 맡음).
+        await _discard_unreferenced_objects(provider, bucket, object_path, None)
+        raise
 
 
 def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int | None, int | None, str | None]:
@@ -380,6 +387,16 @@ def _derive_image(raw: bytes, *, adapter) -> tuple[bytes | None, str | None, int
         raise ChannelImageConversionFailedError(final_bytes=len(derived_bytes), max_bytes=adapter.image_max_bytes)
     derived_content_type = "image/png" if out_format == "PNG" else "image/jpeg"
     return derived_bytes, derived_content_type, work.width, work.height, out_format
+
+
+async def _discard_unreferenced_objects(provider, bucket: str, object_path: str, derived_object_path: str | None) -> None:
+    """confirm이 거절될 때 어떤 행에도 안 걸린 업로드 객체(원본 · 파생)를 지운다. 정리 실패는 로그만(원래 거절을 가리지 않는다)."""
+    try:
+        await provider.delete_object(bucket, object_path)
+        if derived_object_path is not None:
+            await provider.delete_object(bucket, derived_object_path)
+    except Exception:
+        logger.exception("이미지 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
 
 
 async def confirm_channel_post_image_upload(
@@ -521,12 +538,7 @@ async def confirm_channel_post_image_upload(
 
         latest = latest_for_cover_check
     except Exception:
-        try:
-            await provider.delete_object(bucket, object_path)
-            if derived_object_path is not None:
-                await provider.delete_object(bucket, derived_object_path)
-        except Exception:
-            logger.exception("이미지 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+        await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
         raise
 
     # story #3554(Phase2, 페드루 PO 確定 2026-09-06③) — 이 draft에 영상이 이미
@@ -549,35 +561,41 @@ async def confirm_channel_post_image_upload(
         ordered_hashes = [img.final_sha256 for img in existing_images] + [final_sha256]
         composite_sha256 = compute_image_seal_hash(ordered_hashes)
 
-    new_version, _channel, _violations = await create_channel_post_draft_version(
-        db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
-        text=latest.text, link_url=latest.link_url,
-        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
-    )
+    # story #4352(까디르 P2 ③) — 새 버전 쓰기(초안 버전 검사 포함)에서 거절돼도 올린 객체(원본 · 파생)가 어떤 행에도 안 걸린 채 남지 않게,
+    # 커밋까지를 같은 정리로 감싼다(위 검사 구간의 정리와 한 도우미). 커밋 뒤(refresh)는 행이 객체를 가리키므로 감싸지 않는다.
+    try:
+        new_version, _channel, _violations = await create_channel_post_draft_version(
+            db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
+            text=latest.text, link_url=latest.link_url,
+            author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
+        )
 
-    if existing_video is not None:
-        db.add(_copy_video_row(existing_video, new_version_id=new_version.id))
-    else:
-        # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
-        # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
-        # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
-        # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
-        # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
-        for existing in existing_images:
-            db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
+        if existing_video is not None:
+            db.add(_copy_video_row(existing_video, new_version_id=new_version.id))
+        else:
+            # story #3550(PO 確定 ②) — create_channel_post_draft_version()의 자체 carry-forward
+            # 훅(image_sha256이 sentinel일 때만 발동)은 여기서 안 탄다(위에서 합성값을 명시로
+            # 넘겼으므로) — 기존 이미지 행들을 새 version_id로 직접 복제한다(파일 재업로드·
+            # 재변환 없음, object_path·sha256·position 그대로 — 단일 이미지 carry-forward
+            # 패턴(channel_posts.py::create_channel_post_draft_version)을 N장으로 그대로 확장).
+            for existing in existing_images:
+                db.add(_copy_image_row(existing, new_version_id=new_version.id, new_position=existing.position))
 
-    image_row = ChannelPostImage(
-        id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id, position=new_position,
-        original_object_path=object_path, original_sha256=original_sha256,
-        original_content_type=original_mime, original_bytes=size,
-        original_width=width, original_height=height,
-        derived_object_path=derived_object_path, derived_sha256=derived_sha256,
-        derived_content_type=derived_content_type, derived_bytes=len(derived_bytes) if derived_bytes else None,
-        derived_width=derived_width, derived_height=derived_height,
-        created_by=member_id,
-    )
-    db.add(image_row)
-    await db.commit()
+        image_row = ChannelPostImage(
+            id=uuid.uuid4(), org_id=org_id, draft_id=draft_id, version_id=new_version.id, position=new_position,
+            original_object_path=object_path, original_sha256=original_sha256,
+            original_content_type=original_mime, original_bytes=size,
+            original_width=width, original_height=height,
+            derived_object_path=derived_object_path, derived_sha256=derived_sha256,
+            derived_content_type=derived_content_type, derived_bytes=len(derived_bytes) if derived_bytes else None,
+            derived_width=derived_width, derived_height=derived_height,
+            created_by=member_id,
+        )
+        db.add(image_row)
+        await db.commit()
+    except Exception:
+        await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
+        raise
     await db.refresh(image_row)
     return new_version, image_row
 

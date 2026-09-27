@@ -4,8 +4,10 @@
 이어쓰기 셋은 아무 데서도 안 잡아 코드 없는 500이었다(3808부터). 이미지/영상 확정 · 삭제 · 순서 바꿈도 같은 함수를 거쳐 새 버전을
 쓰므로(지금 어댑터 선언 아래서는 이미 통과한 값을 이어 써 도달 0이지만, 조각 한도 · 스레드 지원이 바뀌는 날 같은 500) 같은 매핑이다.
 
-규칙(AST): 서비스에서 `create_channel_post_draft_version`을 부르는 함수(자동 수집) 또는 그 함수 자체를 부르는 라우트 핸들러는
-`except DRAFT_VERSION_VALIDATION_ERRORS`를 가져야 한다. 대조: 지금 그런 라우트가 다섯이다(스캐너가 헛돌지 않음).
+규칙(AST): 서비스에서 `create_channel_post_draft_version`에 **닿는** 함수(전이 수집 — writer를 부르는 함수를 부르는 함수 …, 까디르 P2:
+한 겹만 모으면 가져오기 → 확정 → writer 같은 도우미 사슬을 놓쳤다)를 부르는 라우트 핸들러는 매핑을 거쳐야 한다: 자기 안에
+`except DRAFT_VERSION_VALIDATION_ERRORS`가 있거나, 그 except를 가진 같은 모듈 도우미(`_confirm_image_upload_or_raise` 등)를 부른다.
+대조: 가져오기 라우트가 표에 들어오고 · 지금 그런 라우트가 여섯 이상이다(스캐너가 헛돌지 않음).
 """
 from __future__ import annotations
 
@@ -26,13 +28,26 @@ def _called_names(node: ast.AST) -> set[str]:
     return out
 
 
-def _service_writers() -> set[str]:
+def _reaching_writers(functions: dict[str, set[str]]) -> set[str]:
+    """이름 → 그 함수가 부르는 이름들. writer에 (몇 겹을 거쳐서든) 닿는 함수 이름 전부(고정점)."""
     names = {_WRITER}
+    changed = True
+    while changed:
+        changed = False
+        for name, calls in functions.items():
+            if name not in names and calls & names:
+                names.add(name)
+                changed = True
+    return names
+
+
+def _service_writers() -> set[str]:
+    functions: dict[str, set[str]] = {}
     for path in (_BACKEND / "app" / "services").glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name != _WRITER and _WRITER in _called_names(node):
-                names.add(node.name)
-    return names
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.setdefault(node.name, set()).update(_called_names(node))
+    return _reaching_writers(functions)
 
 
 def _catches_shared_mapping(fn: ast.AST) -> bool:
@@ -43,11 +58,14 @@ def _catches_shared_mapping(fn: ast.AST) -> bool:
 
 
 def _routes_writing_draft_versions(source: str, writers: set[str]) -> dict[str, bool]:
+    top = [n for n in ast.parse(source).body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    mapping_helpers = {n.name for n in top if _catches_shared_mapping(n)}
     out: dict[str, bool] = {}
-    for node in ast.parse(source).body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _called_names(node) & writers:
+    for node in top:
+        calls = _called_names(node)
+        if calls & writers:
             if any(isinstance(d, ast.Call) and getattr(d.func, "attr", None) in {"get", "post", "put", "patch", "delete"} for d in node.decorator_list):
-                out[node.name] = _catches_shared_mapping(node)
+                out[node.name] = _catches_shared_mapping(node) or bool(calls & mapping_helpers)
     return out
 
 
@@ -59,8 +77,9 @@ def test_every_route_that_writes_a_draft_version_goes_through_the_shared_mapping
             found[f"{path.name}::{name}"] = ok
     missing = sorted(k for k, ok in found.items() if not ok)
     assert not missing, f"초안 버전을 쓰는데 `except DRAFT_VERSION_VALIDATION_ERRORS`가 없는 라우트: {missing}"
-    # 대조 — 스캐너가 실제 라우트를 본다(저장 · 영상 확정 · 이미지 확정 · 이미지 삭제 · 순서 바꿈).
-    assert len(found) >= 5, found
+    # 대조 — 스캐너가 실제 라우트를 본다(저장 · 영상 확정 · 이미지 확정 · 이미지 가져오기 · 이미지 삭제 · 순서 바꿈).
+    assert "channel_posts.py::post_channel_post_image_import" in found, "가져오기 → 확정 → writer(두 겹) 사슬을 못 모은다"
+    assert len(found) >= 6, found
 
 
 def test_guard_positive_control():
@@ -72,3 +91,15 @@ def test_guard_positive_control():
     )
     assert _routes_writing_draft_versions(bare, writers) == {"a": False}
     assert _routes_writing_draft_versions(wrapped, writers) == {"b": True}
+    # 도우미가 매핑을 품으면 그 도우미를 부르는 라우트도 덮인다
+    via_helper = (
+        'async def _map(c):\n    try:\n        return await c\n    except DRAFT_VERSION_VALIDATION_ERRORS as exc:\n        raise boom(exc)\n'
+        '@router.post("/c")\nasync def c():\n    return await _map(confirm_x())\n'
+    )
+    assert _routes_writing_draft_versions(via_helper, writers) == {"c": True}
+
+
+def test_writer_collection_is_transitive():
+    """까디르 P2 대조 — 두 겹 사슬(import → confirm → writer)도 닿는 함수로 모인다."""
+    functions = {"import_x": {"confirm_x", "put"}, "confirm_x": {_WRITER}, "other": {"put"}}
+    assert _reaching_writers(functions) == {_WRITER, "confirm_x", "import_x"}
