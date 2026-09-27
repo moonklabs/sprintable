@@ -169,7 +169,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     const generateBtn = Array.from(document.querySelectorAll('button'))
-      .find((b) => b.textContent === 'Generate API Key');
+      .find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate); // story #4359 — ko 문구
     expect(generateBtn).toBeTruthy();
     await act(async () => { generateBtn?.click(); await Promise.resolve(); await Promise.resolve(); });
 
@@ -209,7 +209,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     });
 
     const generateBtn = Array.from(document.querySelectorAll('button'))
-      .find((b) => b.textContent === 'Generate API Key');
+      .find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate); // story #4359 — ko 문구
     await act(async () => { generateBtn?.click(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(capturedBody).toBeTruthy();
@@ -231,7 +231,7 @@ describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
       );
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(document.querySelector('h3')?.textContent).toBe('API Keys - 봇 · aaaa1111');
+    expect(document.querySelector('h3')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇 · aaaa1111')); // story #4359 — ko 머리 줄
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages}>
@@ -239,7 +239,7 @@ describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
         </NextIntlClientProvider>,
       );
     });
-    expect(document.querySelector('h3')?.textContent).toBe('API Keys - 봇');
+    expect(document.querySelector('h3')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇')); // story #4359 — ko 머리 줄
   });
 });
 
