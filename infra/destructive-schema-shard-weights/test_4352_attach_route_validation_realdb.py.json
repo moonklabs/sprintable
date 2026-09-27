@@ -1,0 +1,1 @@
+{"file": "tests/test_4352_attach_route_validation_realdb.py", "sec": 14.6, "source": "story-4352(2026-09-28) — 4건: 이미지 순서 바꿈 · 가져오기(조인 한도 → 422 · 새 버전 0 · 고아 객체 0) · 장 수 초과 가져오기 거절 뒤 객체 0 · 확정 라우트 초안 버전 검사 거절 뒤 객체 0. 로컬 raw pytest 전체 wall time 실측(14.63s, 로컬 pg16) 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}

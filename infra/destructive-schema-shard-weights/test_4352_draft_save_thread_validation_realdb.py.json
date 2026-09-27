@@ -1,0 +1,1 @@
+{"file": "tests/test_4352_draft_save_thread_validation_realdb.py", "sec": 10.3, "source": "story-4352(2026-09-28) — 3건: 저장 라우트 이어쓰기 검사(threads 미지원 · x 11조각 · x 281자) → 422 + 코드 · 초안 행 0. 로컬 raw pytest 전체 wall time 실측(10.27s, 로컬 pg16) 그대로 등재. 실 CI 샤드 로그로 재확認 필요(AC2 재측정 규칙)."}
