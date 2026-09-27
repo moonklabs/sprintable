@@ -1650,10 +1650,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               <Button
                 type="button"
                 variant="ghost"
-                className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 p-0 text-left font-normal"
+                // [SID:4362] 디자인 Button 기본이 whitespace-nowrap이라 제목이 한 줄로 패널 밖까지 늘었다(390에서 525px · 초점 링도 패널 밖) →
+                // 줄바꿈 허용 · 긴 낱말(경로 · URL)도 꺾음.
+                className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 whitespace-normal p-0 text-left font-normal"
                 onClick={() => setEditingTitle(true)}
               >
-                <h2 className="text-lg font-semibold text-foreground">{story.title}</h2>
+                <h2 className="min-w-0 text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{story.title}</h2>
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </Button>
             )}
