@@ -7,7 +7,7 @@ import { ArtifactViewer } from './artifact-viewer';
 import { ArtifactEditor } from './artifact-editor';
 import { ImportArtifactDialog } from './import-artifact-dialog';
 import {
-  adaptArtifactDetail, createArtifact, editArtifact, type ArtifactVersion, type BeArtifactVersionSummary,
+  adaptArtifactDetail, createArtifact, editArtifact, loadArtifactVersion, mergeVersionSummaries, type ArtifactVersion, type BeArtifactVersionSummary,
   type MemberRef, type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
 } from '@/services/canvas';
 import { adaptComments, type BeArtifactComment, type CommentThread } from '@/services/canvas-comments';
@@ -49,12 +49,19 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T |
   }
 }
 
-export async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): Promise<CommentThread[]> {
+/** story #4343 — 코멘트(결과 연결 ↳ vN)와 «버전 계보» 레일이 같은 버전 목록을 쓴다 — 한 번 받아 둘 다에 넘긴다(같은 GET 두 번 0). */
+export async function loadArtifactThreadsAndVersions(
+  artifactId: string, nodes: ArtifactNode[],
+): Promise<{ threads: CommentThread[]; versionSummaries: BeArtifactVersionSummary[] | null }> {
   const [comments, versionSummaries] = await Promise.all([
     fetchJson<BeArtifactComment[]>(`/api/visual-artifacts/${artifactId}/comments`),
     fetchJson<BeArtifactVersionSummary[]>(`/api/visual-artifacts/${artifactId}/versions`),
   ]);
-  return adaptComments(comments ?? [], nodes, versionSummaries ?? []);
+  return { threads: adaptComments(comments ?? [], nodes, versionSummaries ?? []), versionSummaries };
+}
+
+export async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): Promise<CommentThread[]> {
+  return (await loadArtifactThreadsAndVersions(artifactId, nodes)).threads;
 }
 
 /** GET /api/gates는 BE list_gates(response_model=list[...])를 그대로 pass-through — {data} 봉투가
@@ -101,12 +108,13 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
         const resolved = await Promise.all(artifacts.map(async (a): Promise<ArtifactItem | null> => {
           const detail = await fetchJson<BeVisualArtifactDetail>(`/api/visual-artifacts/${a.id}`);
           if (!detail) return null;
-          const { artifact, versions } = adaptArtifactDetail(detail);
-          const [threads, pendingCanonicalizeVersion, specPins] = await Promise.all([
-            loadArtifactThreads(a.id, detail.nodes),
+          const { artifact, versions: [current] } = adaptArtifactDetail(detail);
+          const [{ threads, versionSummaries }, pendingCanonicalizeVersion, specPins] = await Promise.all([
+            loadArtifactThreadsAndVersions(a.id, detail.nodes),
             loadPendingCanonicalizeVersion(a.id),
             listSpecPins(a.id),
           ]);
+          const versions = mergeVersionSummaries(current, versionSummaries);
 
           return { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins };
         }));
@@ -183,12 +191,13 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
       addToast({ title: t('saveFailedNote'), type: 'error' });
       return;
     }
-    const { artifact, versions } = adaptArtifactDetail(detail);
-    const [threads, pendingCanonicalizeVersion, specPins] = await Promise.all([
-      loadArtifactThreads(artifact.id, detail.nodes),
+    const { artifact, versions: [current] } = adaptArtifactDetail(detail);
+    const [{ threads, versionSummaries }, pendingCanonicalizeVersion, specPins] = await Promise.all([
+      loadArtifactThreadsAndVersions(artifact.id, detail.nodes),
       loadPendingCanonicalizeVersion(artifact.id),
       listSpecPins(artifact.id),
     ]);
+    const versions = mergeVersionSummaries(current, versionSummaries);
     setItems((cur) => cur.map((it) => (it.artifact.id === artifact.id
       ? { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins }
       : it)));
@@ -208,11 +217,12 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
       addToast({ title: t('artifactCreateFailed'), type: 'error' });
       return;
     }
-    const { artifact, versions } = adaptArtifactDetail(detail);
-    const [threads, pendingCanonicalizeVersion] = await Promise.all([
-      loadArtifactThreads(artifact.id, detail.nodes),
+    const { artifact, versions: [current] } = adaptArtifactDetail(detail);
+    const [{ threads, versionSummaries }, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreadsAndVersions(artifact.id, detail.nodes),
       loadPendingCanonicalizeVersion(artifact.id),
     ]);
+    const versions = mergeVersionSummaries(current, versionSummaries);
     // 생성 중엔 artifactId가 없어 핀 저작 자체가 불가했다(EditCanvas가 도구를 비활성 처리) — 방금
     // 막 생겨난 artifact라 핀이 있을 수 없음, 빈 배열로 시작(불필요한 fetch 0).
     setItems((cur) => [...cur, { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins: [] }]);
@@ -227,11 +237,12 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
       console.error('[canvas-import] artifact import commit failed', storyId);
       return false;
     }
-    const { artifact, versions } = adaptArtifactDetail(detail);
-    const [threads, pendingCanonicalizeVersion] = await Promise.all([
-      loadArtifactThreads(artifact.id, detail.nodes),
+    const { artifact, versions: [current] } = adaptArtifactDetail(detail);
+    const [{ threads, versionSummaries }, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreadsAndVersions(artifact.id, detail.nodes),
       loadPendingCanonicalizeVersion(artifact.id),
     ]);
+    const versions = mergeVersionSummaries(current, versionSummaries);
     setItems((cur) => [...cur, { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins: [] }]);
     return true;
   }
@@ -306,6 +317,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
             key={artifact.id}
             artifact={artifact}
             versions={versions}
+            loadVersion={(versionNumber) => loadArtifactVersion(artifact.id, versionNumber)}
             memberMap={memberMap}
             threads={threads}
             nodes={nodes}

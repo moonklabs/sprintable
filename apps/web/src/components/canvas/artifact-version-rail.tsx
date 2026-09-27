@@ -32,10 +32,14 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
   // [SID:4311 PR 3] 판 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번).
   const authorLabels = actorRowLabels(sorted.map((v) => ({ id: v.created_by, label: memberLookup(memberMap, v.created_by, tc)!.label })));
 
+  // story #4343(유나 실측) — 레일 줄이 버전 수만큼 서자, sm 이상에서 레일(8버전 517px)이 카드 줄 높이를 정해 스테이지(375px) 아래가 ~140px 비었다.
+  // 이제 sm 이상에선 레일이 줄 높이에 안 얹히고(`sm:h-0`) 스테이지가 정한 줄을 꽉 채우며(`sm:min-h-full`), **버전 목록만** 안에서 스크롤한다
+  // (머리글 · 설명 패널은 목록 밖에 고정 · 전역 스크롤바 숨김이라 `.scrollbar-visible`로 굴러감을 보인다 · 스크롤 상자가 줄 버튼 초점 링을 자르지 않게 `focus-inset`).
+  // 390(쌓임)은 상한 없음.
   return (
-    <div className="border-l border-border p-3">
-      <p className="mb-3 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('versionLineage')}</p>
-      <ul className="space-y-3">
+    <div className="flex flex-col border-l border-border p-3 sm:h-0 sm:min-h-full">
+      <p className="mb-3 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('versionLineage')}</p>
+      <ul data-version-list="" className="focus-inset scrollbar-visible space-y-3 sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
         {sorted.map((v) => {
           const isCurrent = v.version === artifact.current_version;
           const isAnchor = v.version === artifact.anchor_version;
@@ -86,7 +90,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
       <button
         type="button"
         onClick={() => setDescOpen((v) => !v)}
-        className="mt-3 flex w-full items-center gap-1 border-t border-border pt-3 text-left text-[11px] text-muted-foreground hover:text-foreground"
+        className="mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-[11px] text-muted-foreground hover:text-foreground"
       >
         {t('descriptionPaneToggle')}
         {descOpen ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}

@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Clock, Download, Import, Maximize2, MessageCircle, Pencil, Sparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ui/button';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
 import { ArtifactVersionRail } from './artifact-version-rail';
@@ -20,7 +21,10 @@ import type { SpecPin } from '@/services/canvas-spec-pins';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
+  /** story #4343 — 버전 목록 전부(`mergeVersionSummaries`). 실물이 아직 없는 항목(`contentLoaded: false`)은 고를 때 `loadVersion`으로 받는다. */
   versions: ArtifactVersion[];
+  /** story #4343 — 이전 버전 실물 받기(`GET /{id}/versions/{n}`). 없으면 실물 없는 버전은 «불러오지 못했어요»로 둔다. */
+  loadVersion?: (versionNumber: number) => Promise<ArtifactVersion | null>;
   memberMap?: Record<string, MemberRef>;
   /** C2 — 좌표 앵커 스레드는 스테이지에 핀 오버레이. element 앵커는 후속(실 artifact tree
    * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). 헤더 아래 스레드 목록 패널도 이 prop으로
@@ -57,10 +61,11 @@ interface ArtifactViewerProps {
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
 export function ArtifactViewer({
-  artifact, versions, memberMap = {}, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
+  artifact, versions, loadVersion, memberMap = {}, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
   onCreateThread, pendingCanonicalizeVersion, onProposeCanonical, className,
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
   const [expandOpen, setExpandOpen] = useState(false);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
@@ -75,7 +80,55 @@ export function ArtifactViewer({
   // story d72db00a — ArtifactStage의 콘텐츠 레이어에 직접 꽂힌다(contentRef prop 경유),
   // 뷰어 크롬 wrapper가 아니다 — PNG export가 크롬 없이 아트보드 전체 프레임만 캡처하도록.
   const captureTargetRef = useRef<HTMLDivElement>(null);
-  const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
+  // story #4343 — 레일 · 고르개로 고른 이전 버전은 목록 요약뿐(`contentLoaded: false`)이라, 처음 고르는 순간 실물을 받아 둔다(한 번만).
+  // 받는 중은 따로 적지 않는다(«실물이 필요한데 아직 없음»이 곧 받는 중) — 한 번만 부르게 부른 버전은 ref에 적는다.
+  const [fetchedVersions, setFetchedVersions] = useState<Record<number, ArtifactVersion | 'failed'>>({});
+  const requestedVersionsRef = useRef(new Set<number>());
+  // 까디르 · 유나(4723) — «다시 시도»를 누르면 그 버튼이 사라지며(받는 중으로 바뀜) 키보드 초점이 body로 떨어졌다 → 스테이지 칸(받는 중 · 실물이
+  // 번갈아 서는 늘 있는 자리 · tabIndex -1)으로 옮긴다. 실물이 서면 그 자리에 남고, **다시 실패하면 새 «다시 시도» 버튼으로** 돌려준다
+  // (그사이 사용자가 초점을 다른 데로 옮겼으면 건드리지 않는다).
+  const stageRegionRef = useRef<HTMLDivElement>(null);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const retryFocusRef = useRef<number | null>(null);
+  const loadVersionRef = useRef(loadVersion);
+  useEffect(() => { loadVersionRef.current = loadVersion; });
+  const listedVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
+  const fetched = listedVersion ? fetchedVersions[listedVersion.version] : undefined;
+  const needsContent = listedVersion?.contentLoaded === false;
+  useEffect(() => {
+    if (!needsContent || !listedVersion || fetched) return;
+    const n = listedVersion.version;
+    const load = loadVersionRef.current;
+    if (!load || requestedVersionsRef.current.has(n)) return;
+    requestedVersionsRef.current.add(n);
+    void load(n).then(
+      (v) => setFetchedVersions((cur) => ({ ...cur, [n]: v ?? 'failed' })),
+      () => setFetchedVersions((cur) => ({ ...cur, [n]: 'failed' })),
+    );
+  }, [needsContent, listedVersion, fetched]);
+  const activeVersion = !needsContent ? listedVersion : typeof fetched === 'object' ? fetched : undefined;
+  const versionLoadFailed = needsContent && (fetched === 'failed' || !loadVersion);
+  useEffect(() => {
+    const n = retryFocusRef.current;
+    if (n === null || listedVersion?.version !== n) return;
+    if (versionLoadFailed) {
+      retryFocusRef.current = null;
+      if (document.activeElement === stageRegionRef.current) retryButtonRef.current?.focus();
+    } else if (activeVersion) {
+      retryFocusRef.current = null; // 실물이 섰다 — 초점은 스테이지 칸에 그대로
+    }
+  }, [versionLoadFailed, activeVersion, listedVersion]);
+  // 유나(4723) — 한 번 실패한 버전이 «부른 적 있음» 표시 때문에 다시 안 불려 늘 «못 했어요»였다 → 그 버전만 표시를 지우고 다시 부른다.
+  const retryVersion = (n: number) => {
+    retryFocusRef.current = n;
+    stageRegionRef.current?.focus();
+    requestedVersionsRef.current.delete(n);
+    setFetchedVersions((cur) => {
+      const next = { ...cur };
+      delete next[n];
+      return next;
+    });
+  };
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
   const selectedThreadDescription = selectedThread?.anchor.element_id
     ? (nodes.find((n) => n.id === selectedThread.anchor.element_id)?.description ?? null)
@@ -220,7 +273,18 @@ export function ArtifactViewer({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
-          <div className="relative min-w-0 bg-muted/20 p-4">
+          <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className="relative min-w-0 bg-muted/20 p-4 outline-none">
+            {!activeVersion && needsContent ? (
+              // story #4343 — 이전 버전 실물을 받는 중 · 못 받음(빈 캔버스로 «그 버전이 비었다»는 거짓을 그리지 않는다).
+              <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className="flex h-[320px] w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <p role={versionLoadFailed ? 'alert' : 'status'}>{versionLoadFailed ? t('versionLoadFailed') : tc('loading')}</p>
+                {versionLoadFailed && loadVersion && listedVersion ? (
+                  <Button ref={retryButtonRef} type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
+                    {tc('retry')}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             {activeVersion ? (
               <div className="h-[320px] w-full">
                 <ArtifactStage
