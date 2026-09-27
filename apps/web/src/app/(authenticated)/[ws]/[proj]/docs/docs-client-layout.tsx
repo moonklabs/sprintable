@@ -8,6 +8,7 @@ import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
+import { reorderRequestBody, type DocMovePlan } from '@/components/docs/doc-move-plan';
 import { DocAutoGroups } from '@/components/docs/doc-auto-groups';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
@@ -213,25 +214,30 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     setTreeDrawerOpen(false);
   }, [router, pushRecent, wsSlug, projSlug]);
 
-  const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
-    setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc)));
+  // story #4353 — 재정렬 · 폴더로 옮기기 한 길(`POST /api/docs/reorder`). 예전 PATCH {sort_order}는 그 한 문서 값만 바꿔 형제가 0
+  // 동률이면 무동작이었다. 서버가 새 부모의 형제 번호를 한 번에 다시 매기고 그 번호를 돌려준다 — 화면은 그 번호를 그대로 반영한다
+  // (낙관 추측 번호 없음). 실패하면 문장을 내고 트리를 다시 읽는다(story #3637과 같은 축).
+  const placeDoc = useCallback(async (plan: DocMovePlan, failedTitle: string) => {
     try {
-      const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort_order: newSortOrder }) });
-      // story #3637(유나 silent-failure-sweep-3632) — 낙관 순서변경이 실패하면 fetchTree()로
-      // 조용히 원복되던 자리(형제 kanban-board.tsx:1074처럼 문장까지 낸다).
-      if (!res.ok) { addToast({ title: t('reorderFailed'), type: 'error' }); await fetchTree(); }
-    } catch { addToast({ title: t('reorderFailed'), type: 'error' }); await fetchTree(); }
-  }, [fetchTree, addToast, t]);
+      const res = await fetchWithAuth('/api/docs/reorder', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reorderRequestBody(plan)),
+      });
+      if (!res.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return; }
+      const json = (await res.json().catch(() => null)) as
+        { data?: { doc?: { id: string; parent_id: string | null }; siblings?: Array<{ id: string; sort_order: number }> } } | null;
+      const placed = json?.data?.doc;
+      const numbers = new Map((json?.data?.siblings ?? []).map((sib) => [sib.id, sib.sort_order]));
+      if (!placed) { await fetchTree(); return; }
+      setTree((prev) => prev.map((doc) => {
+        const nextOrder = numbers.get(doc.id);
+        if (doc.id === placed.id) return { ...doc, parent_id: placed.parent_id, sort_order: nextOrder ?? doc.sort_order };
+        return nextOrder === undefined ? doc : { ...doc, sort_order: nextOrder };
+      }));
+    } catch { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); }
+  }, [fetchTree, addToast]);
 
-  const handleMove = useCallback(async (docId: string, newParent: string | null, newSortOrder: number) => {
-    setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, parent_id: newParent, sort_order: newSortOrder } : doc)));
-    try {
-      const res = await fetch(`/api/docs/${docId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent_id: newParent, sort_order: newSortOrder }) });
-      // story #3637 — 이동 실패도 동일(circular/permission/sort-mode 거부와 다른 축 — 이건
-      // 거부가 아니라 시도 자체가 서버에서 실패한 경우).
-      if (!res.ok) { addToast({ title: t('moveFailed'), type: 'error' }); await fetchTree(); }
-    } catch { addToast({ title: t('moveFailed'), type: 'error' }); await fetchTree(); }
-  }, [fetchTree, addToast, t]);
+  const handleReorder = useCallback((plan: DocMovePlan) => placeDoc(plan, t('reorderFailed')), [placeDoc, t]);
+  const handleMove = useCallback((plan: DocMovePlan) => placeDoc(plan, t('moveFailed')), [placeDoc, t]);
 
   const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
