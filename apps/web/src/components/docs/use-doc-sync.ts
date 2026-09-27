@@ -200,7 +200,13 @@ export function useDocSync<TDoc = { updated_at: string }>({
     // story #4339(까디르) — 응답이 늦게 와서 그 사이 다른 문서로 옮겼으면 이 응답은 앞 문서 몫이다: 새 문서의 기준선 · updated_at ·
     // onSaved를 덮지 않는다(새 문서가 dirty로 잘못 뜨거나 옛 동시성 기준으로 PATCH하던 자리).
     const requestDocId = docId;
-    const stillSameDoc = () => docIdRef.current === requestDocId;
+    // 응답을 적용하는 모든 자리(성공 · 409 · non-OK · 실패)는 await가 끝날 때마다 이 확인을 거친다 — 그 사이 다른 문서로 옮겼으면
+    // 이 응답은 앞 문서 몫이라 새 문서의 상태(status · 기준선 · updated_at · onSaved)를 건드리지 않는다(까디르 P2).
+    const staleResponse = () => {
+      if (docIdRef.current === requestDocId) return false;
+      savingRef.current = false;
+      return true;
+    };
 
     try {
       const res = await fetch(`/api/docs/${docId}`, {
@@ -212,22 +218,21 @@ export function useDocSync<TDoc = { updated_at: string }>({
           force_overwrite: isForce || undefined,
         }),
       });
+      if (staleResponse()) return false;
 
-      if (!stillSameDoc()) {
-        savingRef.current = false;
-        return false;
-      }
       if (res.status === 409) {
-        conflictRef.current = true;
-        remoteChangedRef.current = false;
         // BE conflict body: { error: { code: 'DOC_CONFLICT', current_updated_at } }. Adopt the
         // server's current updated_at as the new baseline so an acknowledged retry reconciles
         // against the live version instead of conflicting again (151e05f1 CP2).
+        let current: string | undefined;
         try {
           const conflictBody = await res.json() as { error?: { current_updated_at?: string } };
-          const current = conflictBody.error?.current_updated_at;
-          if (current) setBaselineUpdatedAt(current);
+          current = conflictBody.error?.current_updated_at;
         } catch { /* malformed conflict body — still surface the conflict */ }
+        if (staleResponse()) return false;
+        conflictRef.current = true;
+        remoteChangedRef.current = false;
+        if (current) setBaselineUpdatedAt(current);
         setStatus('conflict');
         savingRef.current = false;
         return false;
@@ -240,10 +245,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
       }
 
       const json = await res.json();
-      if (!stillSameDoc()) {
-        savingRef.current = false;
-        return false;
-      }
+      if (staleResponse()) return false;
       const { doc: savedDoc, updatedAt: nextUpdatedAt } = unwrapDocResponse<TDoc>(json);
       // A response with no `updated_at` cannot establish a baseline — treating it as
       // success would re-arm the exact unguarded-overwrite loop this story fixes, so
@@ -263,6 +265,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
       savingRef.current = false;
       return true;
     } catch {
+      if (staleResponse()) return false;
       setStatus('error');
       savingRef.current = false;
       return false;

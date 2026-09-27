@@ -311,33 +311,66 @@ describe('유나 실측(1822af2f3) — 한 글자 쓰고 지우면 깨끗한 상
 });
 
 describe('늦은 저장 응답 — 옮긴 문서를 덮지 않는다', () => {
-  it('A 저장 중 B로 옮김 → A 응답 도착 → B는 dirty false · onSaved 안 불림', async () => {
-    let resolveA: (r: Response) => void = () => {};
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { resolveA = r; })));
-    const saved: unknown[] = [];
-    const seen: Seen[] = [];
-    let saveFn: () => Promise<boolean> = async () => false;
-    function Hook({ doc, content }: { doc: { id: string; updated_at: string }; content: string }) {
-      const payload = useMemo(() => ({ content }), [content]);
-      const { status, isDirty, save } = useDocSync({
-        docId: doc.id, savePayload: payload, serverUpdatedAt: doc.updated_at, editing: true, autosave: false,
-        onSaved: (d) => { saved.push(d); },
+  // 까디르 P2 — 응답을 적용하는 모든 갈래(성공 · 409 · non-OK · 실패)에서. 409는 본문을 await하는 사이에 옮기는 경우.
+  it.each(['ok', 'network-failure', 'conflict-body-await', 'non-ok'] as const)(
+    'A 저장 중 B로 옮김 → A가 %s로 끝남 → B는 idle · dirty false · onSaved 0 · B 다음 저장의 기준 updated_at 무변',
+    async (outcome) => {
+      let finishA: () => void = () => {};
+      let resolveConflictBody: () => void = () => {};
+      const bodies: Array<Record<string, unknown>> = [];
+      vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')));
+        if (bodies.length > 1) return Promise.resolve(new Response(JSON.stringify({ id: 'B', updated_at: 'tB2' }), { status: 200 }));
+        if (outcome === 'conflict-body-await') {
+          return Promise.resolve({
+            status: 409, ok: false,
+            json: () => new Promise((r) => { resolveConflictBody = () => r({ error: { current_updated_at: 'tA-server' } }); }),
+          } as unknown as Response);
+        }
+        return new Promise<Response>((resolve, reject) => {
+          finishA = () => {
+            if (outcome === 'network-failure') reject(new TypeError('network'));
+            else if (outcome === 'non-ok') resolve(new Response('{}', { status: 500 }));
+            else resolve(new Response(JSON.stringify({ id: 'A', updated_at: 'tA2' }), { status: 200 }));
+          };
+        });
+      }));
+      const saved: unknown[] = [];
+      const seen: Seen[] = [];
+      let saveFn: () => Promise<boolean> = async () => false;
+      function Hook({ doc, content }: { doc: { id: string; updated_at: string }; content: string }) {
+        const payload = useMemo(() => ({ content }), [content]);
+        const { status, isDirty, save } = useDocSync({
+          docId: doc.id, savePayload: payload, serverUpdatedAt: doc.updated_at, editing: true, autosave: false,
+          onSaved: (d) => { saved.push(d); },
+        });
+        useEffect(() => { saveFn = save; });
+        seen.push({ status, isDirty });
+        return null;
+      }
+      const A = { id: 'A', updated_at: 'tA' };
+      const B = { id: 'B', updated_at: 'tB' };
+      await act(async () => { root.render(<Hook doc={A} content="A 본문" />); });
+      await settle(40);
+      await act(async () => { root.render(<Hook doc={A} content="A 본문 + 입력" />); });
+      await settle(40);
+      let pending: Promise<boolean> = Promise.resolve(false);
+      await act(async () => { pending = saveFn(); });
+      await settle(20);
+      await act(async () => { root.render(<Hook doc={B} content="B 본문" />); });
+      await settle(40);
+      await act(async () => {
+        if (outcome === 'conflict-body-await') resolveConflictBody(); else finishA();
+        await pending;
       });
-      useEffect(() => { saveFn = save; });
-      seen.push({ status, isDirty });
-      return null;
-    }
-    await act(async () => { root.render(<Hook doc={{ id: 'A', updated_at: 'tA' }} content="A 본문" />); });
-    await settle(40);
-    await act(async () => { root.render(<Hook doc={{ id: 'A', updated_at: 'tA' }} content="A 본문 + 입력" />); });
-    await settle(40);
-    let pending: Promise<boolean> = Promise.resolve(false);
-    await act(async () => { pending = saveFn(); });
-    await act(async () => { root.render(<Hook doc={{ id: 'B', updated_at: 'tB' }} content="B 본문" />); });
-    await settle(40);
-    await act(async () => { resolveA(new Response(JSON.stringify({ id: 'A', updated_at: 'tA2' }), { status: 200 })); await pending; });
-    await settle(40);
-    expect(saved).toEqual([]);
-    expect(seen.at(-1)).toEqual({ status: 'idle', isDirty: false });
-  });
+      await settle(40);
+      expect(saved).toEqual([]);
+      expect(seen.at(-1)).toEqual({ status: 'idle', isDirty: false });
+      // B의 기준 updated_at이 A 응답으로 바뀌지 않았다 — B의 다음 저장이 B 자신의 기준(tB)으로 간다.
+      await act(async () => { root.render(<Hook doc={B} content="B 본문 + 입력" />); });
+      await settle(40);
+      await act(async () => { await saveFn(); });
+      expect(bodies.at(-1)?.expected_updated_at).toBe('tB');
+    },
+  );
 });
