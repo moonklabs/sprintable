@@ -280,6 +280,7 @@ function TreeNode({
         currentTitle={doc.title}
         onClose={() => setRenameOpen(false)}
         onSubmit={(newTitle) => { if (onRename) void onRename(doc.id, newTitle); }}
+        returnFocusRef={menuTriggerRef}
       />
     <div ref={setNodeRef} style={style}>
       <div ref={rowRef} className="group relative">

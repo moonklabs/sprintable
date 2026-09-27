@@ -93,10 +93,12 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       const result = await response.json() as { data?: ApiKey[] };
       setApiKeys(result.data ?? []);
     } catch (error) {
+      console.error('[agent-api-key] load failed', error);
       addToast({
         type: 'error',
         title: tc('error'),
-        body: error instanceof Error ? error.message : t('agentApiKeyLoadFailed'),
+        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+        body: t('agentApiKeyLoadFailed'),
       });
     } finally {
       setLoading(false);
@@ -127,10 +129,12 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {
+      console.error('[agent-api-key] generate failed', error);
       addToast({
         type: 'error',
         title: tc('error'),
-        body: error instanceof Error ? error.message : t('agentApiKeyGenerateFailed'),
+        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+        body: t('agentApiKeyGenerateFailed'),
       });
     } finally {
       setLoading(false);
@@ -172,10 +176,12 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
         body: t('agentApiKeyRevokedBody'),
       });
     } catch (error) {
+      console.error('[agent-api-key] revoke failed', error);
       addToast({
         type: 'error',
         title: tc('error'),
-        body: error instanceof Error ? error.message : t('agentApiKeyRevokeFailed'),
+        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+        body: t('agentApiKeyRevokeFailed'),
       });
     } finally {
       setLoading(false);
@@ -317,9 +323,8 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                     정본(formatScheduledAt)으로 절대 표기. */}
                 <p className="text-xs text-muted-foreground">
                   {t('agentApiKeyCreatedAt', { time: formatRelativeTime(key.created_at, locale, displayTimezone) })}
-                  {key.last_used_at &&
-                    ` • Last used: ${formatRelativeTime(key.last_used_at, locale, displayTimezone)}`}
-                  {key.revoked_at && ` • Revoked: ${formatRelativeTime(key.revoked_at, locale, displayTimezone)}`}
+                  {key.last_used_at && <>{' · '}{t('agentApiKeyLastUsedAt', { time: formatRelativeTime(key.last_used_at, locale, displayTimezone) })}</>}
+                  {key.revoked_at && <>{' · '}{t('agentApiKeyRevokedAt', { time: formatRelativeTime(key.revoked_at, locale, displayTimezone) })}</>}
                 </p>
                 {key.expires_at && !key.revoked_at && (() => {
                   const expiresDate = new Date(key.expires_at);
@@ -330,10 +335,10 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                   return (
                     <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-warning-strong font-medium' : 'text-muted-foreground'}`}>
                       {isExpired
-                        ? `Expired ${expiresDisplay}`
+                        ? t('agentApiKeyExpiredAt', { date: expiresDisplay })
                         : isWarning
-                          ? `⚠ Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${expiresDisplay})`
-                          : `Expires: ${expiresDisplay}`}
+                          ? <><span aria-hidden="true">⚠ </span>{t('agentApiKeyExpiresInDays', { days: daysLeft, date: expiresDisplay })}</>
+                          : t('agentApiKeyExpiresAt', { date: expiresDisplay })}
                     </p>
                   );
                 })()}
@@ -407,7 +412,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
                   />
                   <Button onClick={() => void copyToClipboard(generatedKey)} className="gap-1.5 shrink-0">
                     {copiedKey ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copiedKey ? 'Copied!' : 'Copy'}
+                    {copiedKey ? t('agentApiKeyKeyCopiedLabel') : t('agentApiKeyCopyKeyCta')}
                   </Button>
                 </div>
               </div>
