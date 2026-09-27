@@ -99,6 +99,43 @@ describe('useFieldDraft(story #4370)', () => {
     expect(api.value).toBe('v2');
   });
 
+  // [SID:4369 · 까디르 P3] 서버 값이 저장된 초안과 같아지면 키를 지운다 — 안 지우면 서버가 그 뒤 C로 바뀌어도 옛 초안 B가 C를 덮어 보였다.
+  it('초안 B 저장 → 서버가 B로 저장됨 → 서버 C → 다시 열면 C(닫힌 사이 · 열린 채 둘 다)', async () => {
+    const DESC: FieldDraftKey = { surface: 'story-panel', targetId: 's1', field: 'description' };
+    const K = fieldDraftStorageKey(DESC);
+    // 닫힌 사이: 다른 곳에서 B로 저장 → 다시 열면(서버 B) 키 지움 → 서버 C → 다시 열면 C.
+    await mount(DESC, 'A');
+    await act(async () => { api.set('B'); });
+    await unmountLayer();
+    await mount(DESC, 'B');
+    expect(api.value).toBe('B');
+    expect(window.sessionStorage.getItem(K)).toBeNull();
+    await unmountLayer();
+    await mount(DESC, 'C');
+    expect(api.value).toBe('C');
+    // 열린 채: 초안 B 쓰는 중 서버가 B로 → C로 바뀌면 C를 따른다.
+    await unmountLayer();
+    window.sessionStorage.clear();
+    await mount(DESC, 'A');
+    await act(async () => { api.set('B'); });
+    await act(async () => { root.render(<Field k={DESC} initial="B" />); });
+    expect(window.sessionStorage.getItem(K)).toBeNull();
+    await act(async () => { root.render(<Field k={DESC} initial="C" />); });
+    expect(api.value).toBe('C');
+    await unmountLayer();
+    await mount(DESC, 'C');
+    expect(api.value).toBe('C');
+  });
+
+  it('서버 값이 바뀌어도 초안과 다르면 초안이 남는다(지우는 건 같을 때만)', async () => {
+    const DESC: FieldDraftKey = { surface: 'story-panel', targetId: 's1', field: 'description' };
+    await mount(DESC, 'A');
+    await act(async () => { api.set('B'); });
+    await act(async () => { root.render(<Field k={DESC} initial="C" />); });
+    expect(api.value).toBe('B');
+    expect(window.sessionStorage.getItem(fieldDraftStorageKey(DESC))).toBe('B');
+  });
+
   it('저장소가 던져도(프라이빗 모드 · 용량) 입력은 된다', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceeded'); });
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('SecurityError'); });
