@@ -92,6 +92,16 @@ describe('코드 블록 언어 목록 — Esc · ARIA(story #4364)', () => {
     expect(pickers[1]!.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('4355 계약 위 — 열린 채 초점이 트리거에 있어도 Esc로 닫힌다(공용 훅의 트리거 Esc)', async () => {
+    const { pickers } = await mountTwoBlocks();
+    await act(async () => { pickers[1]!.click(); });
+    pickers[1]!.focus();
+    await pressEscape(pickers[1]!);
+    expect(list()).toBeNull();
+    expect(document.activeElement).toBe(pickers[1]);
+    expect(pickers[1]!.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('AC2 — 지금 언어 항목만 aria-checked=true(색만이 아니라) · 고르면 따라간다', async () => {
     const { editor, pickers } = await mountTwoBlocks();
     await act(async () => { pickers[0]!.click(); });  // 블록 A(python)
@@ -127,5 +137,17 @@ describe('코드 블록 언어 목록 — Esc · ARIA(story #4364)', () => {
     await pressEscape(document.activeElement!);
     expect(container.querySelector('[role="menu"]:not([data-dropdown-panel])')).toBeNull();
     expect(document.activeElement).toBe(plus);
+  });
+
+  it('AC3 · 4355 계약 위 — «+» 메뉴도 초점이 «+»에 있을 때 Esc로 닫힌다', async () => {
+    const { editor } = await mountTwoBlocks();
+    await act(async () => { editor.commands.setTextSelection(3); });
+    await settle(60);
+    const plus = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label]')].find((b) => b.getAttribute('aria-label') === koMessages.docs.attachInsertMenu)!;
+    await act(async () => { plus.click(); });
+    plus.focus();
+    await pressEscape(plus);
+    expect(container.querySelector('[role="menu"]:not([data-dropdown-panel])')).toBeNull();
+    expect(plus.getAttribute('aria-expanded')).toBe('false');
   });
 });
