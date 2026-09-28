@@ -1,5 +1,8 @@
+import logging
 import os
 from collections.abc import AsyncGenerator
+
+from fastapi import BackgroundTasks
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -117,7 +120,46 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+def _end_read_transaction_before_background(session: AsyncSession, background_tasks: BackgroundTasks | None) -> None:
+    """story #4402 — a request's read transaction must not stay open while its background tasks run.
+
+    FastAPI 0.136 runs this dependency's teardown (commit / close) only after the BackgroundTasks, and the commit before the
+    response (commit_before_response) only touches sessions that wrote. A handler that commits and then reads
+    (`db.refresh(...)`) left that read transaction idle in transaction — holding a pooled connection — for the whole
+    background work (routers/events.py: a webhook dispatch waits up to ~33 s).
+
+    This queues a task **first** in the request's BackgroundTasks (the dependency runs before the handler adds its own). When
+    the background work starts — after the response has been sent, streaming bodies included — it ends the session's open
+    transaction if the session did not write. Only when the handler added background work: a request without any is left
+    exactly as before (no extra COMMIT anywhere near its headers — the #4389 read-request pin).
+
+    COMMIT, not ROLLBACK: a rollback expires every loaded ORM object regardless of expire_on_commit, and a background task
+    touching one would need an async refresh from a sync attribute access (MissingGreenlet). A read-only transaction has
+    nothing to commit, and every session factory here uses expire_on_commit=False. A session that wrote (after the response
+    started) is left to the teardown, as before.
+
+    Not covered: a handler that returns a Response carrying its own separate BackgroundTask (FastAPI then does not attach the
+    request's BackgroundTasks, so this task does not run) — the transaction ends at teardown, as before.
+    """
+    if background_tasks is None:  # called directly (scripts, tests), not as a FastAPI dependency
+        return
+
+    async def _end() -> None:
+        from app.core.commit_before_response import COMMIT_FAILED_KEY, session_wrote
+
+        if len(background_tasks.tasks) <= 1:  # only this task: no background work to wait out
+            return
+        if session.info.get(COMMIT_FAILED_KEY) or session_wrote(session) or not session.in_transaction():
+            return
+        try:
+            await session.commit()
+        except Exception:  # noqa: BLE001 — the response is already sent; the teardown still closes the session
+            logging.getLogger(__name__).warning("ending the read transaction before background tasks failed", exc_info=True)
+
+    background_tasks.add_task(_end)
+
+
+async def get_db(background_tasks: BackgroundTasks = None) -> AsyncGenerator[AsyncSession, None]:  # type: ignore[assignment]
     # story #4389 — the session is registered so CommitBeforeResponseMiddleware commits it (if it wrote) **before** the response
     # headers go out. This teardown still commits whatever is written after the response (BackgroundTasks · streaming bodies); if the
     # early commit failed (500 already sent), it rolls back instead of committing again.
@@ -128,6 +170,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
     async with async_session_factory() as session:
         register_request_session(session)
+        _end_read_transaction_before_background(session, background_tasks)  # story #4402
         try:
             yield session
             if session.info.get(COMMIT_FAILED_KEY):
@@ -139,7 +182,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-async def get_worker_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_worker_db(background_tasks: BackgroundTasks = None) -> AsyncGenerator[AsyncSession, None]:  # type: ignore[assignment]
     """story #2461(§6 봉합③ part2) — 배치워커 cron 엔드포인트(embed-backlog·workflow-sla·
     workflow-handoff-watchdog) 전용. 요청 primary 풀이 아니라 `worker_engine`에서 세션을
     뜬다 — FOR UPDATE SKIP LOCKED 락을 쥔 채 외부 서비스(Vertex AI 등)를 기다리는 구간이
@@ -152,6 +195,7 @@ async def get_worker_db() -> AsyncGenerator[AsyncSession, None]:
 
     async with worker_session_factory() as session:
         register_request_session(session)  # story #4389 — same as get_db
+        _end_read_transaction_before_background(session, background_tasks)  # story #4402
         try:
             yield session
             if session.info.get(COMMIT_FAILED_KEY):
@@ -163,7 +207,7 @@ async def get_worker_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_read_db(background_tasks: BackgroundTasks = None) -> AsyncGenerator[AsyncSession, None]:  # type: ignore[assignment]
     """Phase3(§6): 읽기 전용 세션 — read replica(DATABASE_URL_READ 설정 時) 또는 primary(폴백).
 
     ⚠️ «read-your-writes lag 허용» 읽기(목록·대시보드·타인 데이터·집계)에만 쓴다 — 방금 쓴 걸
@@ -173,6 +217,7 @@ async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
     커밋하지 않는다(읽기 전용) — 예외 時 rollback, 정상 時 세션 정리만.
     """
     async with read_session_factory() as session:
+        _end_read_transaction_before_background(session, background_tasks)  # story #4402
         try:
             yield session
         except Exception:
