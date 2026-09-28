@@ -79,10 +79,11 @@ export function OrgHintBanner() {
   return (
     <Alert data-testid="org-hint-banner">
       <AlertTitle>{t('orgHintTitle')}</AlertTitle>
-      {/* AlertTitle · AlertDescription are <p>: only text inside them; the error and the buttons are their own blocks */}
+      {/* AlertTitle · AlertDescription are <p>: only text inside them; the error and the buttons are their own blocks, placed in
+          the Alert grid's text column (col-start-2) like the title and description — column 1 is the icon slot */}
       <AlertDescription>{t('orgHintBody', { org: target.orgName })}</AlertDescription>
-      {failed ? <p role="alert" className="text-sm">{t('switcherSwitchOrgError')}</p> : null}
-      <div className="mt-2 flex flex-wrap gap-2">
+      {failed ? <p role="alert" className="col-start-2 text-sm">{t('switcherSwitchOrgError')}</p> : null}
+      <div className="col-start-2 mt-2 flex flex-wrap gap-2">
         <Button size="sm" disabled={pending} onClick={() => void switchNow()}>
           {t('switcherSwitchToOrg')}
         </Button>

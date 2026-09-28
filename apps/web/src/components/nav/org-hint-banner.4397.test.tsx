@@ -144,5 +144,21 @@ describe('[SID:4397] OrgHintBanner', () => {
     await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
     expect(nav.replace).toHaveBeenCalledWith('/inbox?tab=gates');
   });
+
+  it('the error and the buttons sit in the text column like the title (Yuna 20:47Z — column 1 is the icon slot)', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: {} }), { status: 403 }));
+    await mount(`org_id=${ORG_B}`);
+    await act(async () => { button(koMessages.nav.switcherSwitchToOrg).click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const card = banner()!;
+    const titleColumn = [...card.children].find((el) => el.textContent === koMessages.nav.orgHintTitle)!;
+    expect(titleColumn.className).toContain('col-start-2');
+    const buttons = button(koMessages.nav.switcherSwitchToOrg).parentElement!;
+    const error = card.querySelector('[role="alert"]')!;
+    for (const block of [buttons, error]) {
+      expect(block.parentElement).toBe(card);
+      expect(block.className.split(/\s+/)).toContain('col-start-2');
+    }
+  });
 });
 
