@@ -112,10 +112,13 @@ describe('저장된 임베드 — 열 때 한 번 조회(story #4371 AC3 · AC5)
     expect(container.textContent).not.toContain('옛 제목');
   });
 
-  it('순환 → 순환 오류', async () => {
+  it('순환 → 순환 오류 · 문장은 낱말 단위로 줄을 바꾼다(break-keep · 유나 판)', async () => {
     fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [CURRENT] }));
     await mount(SAVED);
-    expect(container.querySelector('[data-testid="page-embed-error"]')?.textContent).toContain(docs.pageEmbedCycle);
+    const card = container.querySelector('[data-testid="page-embed-error"]')!;
+    expect(card.textContent).toContain(docs.pageEmbedCycle);
+    const text = Array.from(card.querySelectorAll('span')).find((el) => el.textContent === docs.pageEmbedCycle)!;
+    expect(text.className).toContain('break-keep');
   });
 
   it('제목 · 아이콘이 바뀜 → 최신 값으로 그리되 속성(문서 내용)은 쓰지 않는다 — 열기 = 읽기(PO 4371)', async () => {

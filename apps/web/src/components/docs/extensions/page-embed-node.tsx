@@ -228,7 +228,8 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
       <NodeViewWrapper data-testid="page-embed-error">
         <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
           <AlertCircle className="size-4 shrink-0 text-muted-foreground" />
-          <span className="flex-1 text-sm text-muted-foreground">{error}</span>
+          {/* story #4371(유나 판) — 한국어 오류 문장이 낱말 중간(음절)에서 꺾이지 않게(입력칸 오류 줄과 같은 break-keep). */}
+          <span className="min-w-0 flex-1 break-keep text-sm text-muted-foreground [overflow-wrap:anywhere]">{error}</span>
           <button
             type="button"
             onClick={handleReset}
