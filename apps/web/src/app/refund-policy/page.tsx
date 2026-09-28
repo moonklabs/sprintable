@@ -11,8 +11,8 @@ import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/
 
 // story #4377 — 탭 제목도 로케일(본문은 이미 getTranslations · 예전엔 영어 고정 metadata라 한국어 화면에도 «Refund Policy — Sprintable»).
 export async function generateMetadata() {
-  const t = await getTranslations('legal');
-  return { title: `${t('refundPolicy')} — Sprintable` };
+  const tLegal = await getTranslations('legal');
+  return { title: `${tLegal('refundPolicy')} — Sprintable` };
 }
 export const revalidate = 300;
 
