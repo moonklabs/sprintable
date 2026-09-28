@@ -15,8 +15,15 @@ Storage (PO 17:20Z): Redis only, no table / migration.
 - HASH `expo:receipt:<ticket id>` — device_id · org_id · platform · sent_at, TTL 24 h. **No token value.**
 - Without Redis (OSS / local) receipts are simply not checked — the same as before this module.
 
-Checking runs inside the in-process delivery dispatcher loop (every backend instance). A ticket is taken with ZREM: only the
+Checking runs beside the in-process delivery dispatcher loop (every backend instance). A ticket is taken with ZREM: only the
 instance whose ZREM removed it processes it, so instances never check the same ticket twice.
+
+Delivery guarantee: **best-effort, at most once.** A ticket taken by ZREM and lost before its receipt is handled (the instance
+crashes in between) is not checked again. That is acceptable: this is observation plus dead-token cleanup, and the next send to
+that device records a new ticket.
+
+A late DeviceNotRegistered never switches off a device registered again after the push: deactivation requires
+`last_seen_at <= sent_at` (a re-registration sets is_active=True and last_seen_at=now() — PushDeviceRepository.upsert).
 """
 from __future__ import annotations
 
@@ -26,6 +33,7 @@ import logging
 import time
 import uuid
 from collections import Counter
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import update
@@ -109,18 +117,28 @@ async def _fetch_receipts(ids: list[str]) -> dict[str, dict]:
     return data if isinstance(data, dict) else {}
 
 
-async def _deactivate_devices(org_id: uuid.UUID, device_ids: list[uuid.UUID]) -> None:
+async def _deactivate_devices(org_id: uuid.UUID, devices: list[tuple[uuid.UUID, float]]) -> None:
     """DeviceNotRegistered → is_active=false, in its **own** session (never the dispatcher's): a failure here must not expire
-    another step's ORM objects or roll back anything else."""
+    another step's ORM objects or roll back anything else.
+
+    Only a device **not registered again since the push** (last_seen_at <= sent_at): the receipt can arrive up to 24 h later,
+    and in between the app may have registered the same token again, which turns the row back on. Switching that row off
+    would silence the user's notifications.
+    """
     from app.core.database import async_session_factory
     from app.models.push_device import PushDevice
 
     async with async_session_factory() as session:
-        await session.execute(
-            update(PushDevice)
-            .where(PushDevice.org_id == org_id, PushDevice.id.in_(device_ids))
-            .values(is_active=False)
-        )
+        for device_id, sent_at in devices:
+            await session.execute(
+                update(PushDevice)
+                .where(
+                    PushDevice.org_id == org_id,
+                    PushDevice.id == device_id,
+                    PushDevice.last_seen_at <= datetime.fromtimestamp(sent_at, tz=UTC),
+                )
+                .values(is_active=False)
+            )
         await session.commit()
 
 
@@ -177,7 +195,7 @@ async def check_due_expo_receipts(now: float | None = None, limit: int = MAX_IDS
     if not_ready:
         await requeue(not_ready)
 
-    dead: dict[uuid.UUID, list[uuid.UUID]] = {}
+    dead: dict[uuid.UUID, list[tuple[uuid.UUID, float]]] = {}
     errors: Counter[tuple[str, str, str]] = Counter()
     for t, receipt in receipts.items():
         meta = tickets.get(t)
@@ -186,7 +204,9 @@ async def check_due_expo_receipts(now: float | None = None, limit: int = MAX_IDS
         error = str((receipt.get("details") or {}).get("error") or "unknown")
         errors[(error, meta.get("org_id", ""), meta.get("platform", ""))] += 1
         if error == "DeviceNotRegistered":
-            dead.setdefault(uuid.UUID(meta["org_id"]), []).append(uuid.UUID(meta["device_id"]))
+            dead.setdefault(uuid.UUID(meta["org_id"]), []).append(
+                (uuid.UUID(meta["device_id"]), float(meta.get("sent_at") or 0)),
+            )
 
     for (error, org_id, platform), count in errors.items():
         # One line per kind · org · platform. No token and no ticket id.

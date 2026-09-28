@@ -120,7 +120,7 @@ async def test_device_not_registered_deactivates_and_errors_log_one_line_per_kin
         "tk-3": {"status": "error", "message": "x", "details": {"error": "MessageRateExceeded"}},
     }
     await er.check_due_expo_receipts(now=NOW + 16 * 60)
-    assert deactivated == [(ORG, sorted([d1, d2]))]
+    assert deactivated == [(ORG, sorted([(d1, NOW), (d2, NOW)]))]
     lines = sorted(_receipt_errors(caplog), key=lambda x: x["error"])
     assert lines == [
         {"event": "expo_receipt_error", "error": "DeviceNotRegistered", "org_id": str(ORG), "platform": "android", "count": 2},
