@@ -14,6 +14,8 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useConnectRulesHref: () => '/organization/channels' }));
 
 import { NewsletterSendStatus } from './newsletter-send-status';
+import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
+import { FailureActionBadge } from '@/components/content/failure-action-badge';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -100,3 +102,48 @@ describe('외부 발행 게이트 — 발행 상태(story #4336 AC4 · 목록 ·
     expect(q('newsletter-send-status')).toBeNull();
   });
 });
+
+// story #4336(까디르 QA changes · PR 4767 · 렌즈 ① «목록 · 상세와 같은 말») — 게이트가 외부 발행 명령에도 뉴스레터 갈래(blocked_unapproved →
+// 일반 멈춤 · 일시정지 → 줄 없음)를 먼저 태워 목록 · 상세와 다른 말을 했다. 같은 명령을 목록 · 상세가 쓰는 판정(deriveFailureAction → 같은 배지)으로
+// 그린 기준과 게이트의 배지 글이 같아야 한다.
+describe('외부 발행 게이트 = 목록 · 상세 같은 말(까디르 QA changes)', () => {
+  async function referenceText(command: Partial<Publish>) {
+    const ref = document.createElement('div');
+    document.body.appendChild(ref);
+    const refRoot = createRoot(ref);
+    const action = deriveFailureAction({
+      commandStatus: command.status as CommandStatus,
+      failureKind: command.failure_kind ?? null,
+      nextRetryAt: null,
+      reasonCode: command.reason_code ?? null,
+      reasonResetAt: null,
+      processingKind: null,
+      retryable: false,
+    });
+    expect(action, '목록 · 상세 판정이 있어야 비교가 뜻이 있다').not.toBeNull();
+    await act(async () => {
+      refRoot.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <FailureActionBadge action={action!} displayTimezone="Asia/Seoul" />
+        </NextIntlClientProvider>,
+      );
+    });
+    const text = ref.textContent ?? '';
+    await act(async () => { refRoot.unmount(); });
+    ref.remove();
+    return text;
+  }
+
+  it.each([
+    ['⭐승인 필요로 멈춤(blocked_unapproved · EXTERNAL_PUBLISH_APPROVAL_REQUIRED)', { status: 'blocked_unapproved', reason_code: 'EXTERNAL_PUBLISH_APPROVAL_REQUIRED' }],
+    ['⭐예산 초과로 멈춤(blocked_unapproved · GENERATION_BUDGET_EXCEEDED)', { status: 'blocked_unapproved', reason_code: 'GENERATION_BUDGET_EXCEEDED' }],
+    ['⭐조직 일시정지(blocked · failure_kind=paused)', { status: 'blocked', failure_kind: 'paused' }],
+  ] as const)('%s — 게이트 배지 글 = 목록 · 상세 배지 글', async (_label, command) => {
+    const expected = await referenceText(command as Partial<Publish>);
+    await mount(gate({ ...(command as Partial<Publish>), command_retryable: false }));
+    const got = container.textContent ?? '';
+    expect(got.length, '게이트에 아무것도 안 보이면 안 된다').toBeGreaterThan(0);
+    expect(got).toBe(expected);
+  });
+});
+

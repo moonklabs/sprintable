@@ -44,7 +44,22 @@ function commandOf(gate: GateItem): { command: GateCommand; isPublish: boolean }
 }
 
 function viewOf(command: GateCommand, isPublish: boolean): View | null {
-  if (isPublish && command.status === 'completed') return { kind: 'published' };
+  if (isPublish) {
+    // story #4336(까디르 QA changes · PR 4767) — 외부 발행은 채널 초안 목록 · 상세와 **같은 입력으로 같은 판정 하나만**. 아래 두 뉴스레터 갈래
+    // (blocked_unapproved → 일반 멈춤 · 일시정지 → 줄 없음)를 태우면 승인 필요 · 예산 초과가 «멈춤»으로, 조직 일시정지가 빈칸으로 목록 · 상세와
+    // 다른 말을 했다.
+    if (command.status === 'completed') return { kind: 'published' };
+    const publishAction = deriveFailureAction({
+      commandStatus: command.status as CommandStatus,
+      failureKind: command.failure_kind,
+      nextRetryAt: command.next_attempt_at,
+      reasonCode: command.reason_code,
+      reasonResetAt: command.reason_reset_at,
+      processingKind: command.processing_kind ?? null,
+      retryable: command.command_retryable ?? null,
+    });
+    return publishAction ? { kind: 'badge', action: publishAction } : null;
+  }
   if (command.status === 'blocked_unapproved') {
     if (command.reason_code === CONNECTION_UNAVAILABLE) return { kind: 'connection_blocked' };
     return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null } };
@@ -56,7 +71,6 @@ function viewOf(command: GateCommand, isPublish: boolean): View | null {
     nextRetryAt: command.next_attempt_at,
     reasonCode: command.reason_code,
     reasonResetAt: command.reason_reset_at,
-    processingKind: isPublish ? command.processing_kind ?? null : undefined,
   });
   if (!action) return null;
   return { kind: 'badge', action };
@@ -141,7 +155,10 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
           // 재시도 대상이 아니면(사람이 아니거나 서버 판정 false) 버튼 없이 상태 줄만(compact) — 4262/4290 뉴스레터 디자인(비활성 버튼 없음).
           // story #4304(유나 반려 08:56Z) — 단 연결로 멈춘 발송은 재시도를 못 해도 «연결 확인» 링크가 서야 해서 접지 않는다: blocked 배지는
           // onRetryClick이 없으면 버튼 없이 머리 줄(+ 링크)만 그린다. (dead_letter · needs_check는 펼치면 비활성 버튼이 생겨 그대로 접는다.)
-          compact={!canRetry && !blockedByConnection(command.status, command.failure_kind)}
+          // story #4336(까디르 QA changes) — 조직 일시정지도 접지 않는다: 버튼이 없는 줄이라 펼쳐도 비활성 버튼이 안 생기고, 상세와 같이 «소유자가
+          // 풀면 다시 나가요»까지 말한다.
+          compact={!canRetry && !blockedByConnection(command.status, command.failure_kind)
+            && !(view.action.kind === 'blocked' && view.action.paused)}
           onRetryClick={canRetry ? openConfirm : undefined}
           connectionHref={blockedByConnection(command.status, command.failure_kind) ? connectRulesHref : undefined}
         />
