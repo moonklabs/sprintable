@@ -46,14 +46,6 @@
       "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
     },
     {
-      "name": "au-usage-warn",
-      "route": "au-usage-warn",
-      "method": "GET",
-      "schedule": "*/5 * * * *",
-      "time_zone": "Asia/Seoul",
-      "basis": "dev 실물 작업(PO gcloud 덤프 2026-09-24 00:26Z) 그대로 옮김"
-    },
-    {
       "name": "detect-unclosed-loops",
       "route": "detect-unclosed-loops",
       "method": "POST",
