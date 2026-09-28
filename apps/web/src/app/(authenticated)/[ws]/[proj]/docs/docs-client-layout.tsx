@@ -644,7 +644,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             ) : (
               <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} filtered={selectedTags.length > 0} />
             )}
-            {viewMode === 'folders' && docsHasMore && (
+            {/* story #4385 — 두 보기 모두(예전엔 «폴더 보기»만 · develop부터): 상한을 넘는 프로젝트에서 «묶음 보기»도 나머지를 이어 받는다. */}
+            {docsHasMore && (
               <div className="px-2 py-1">
                 {docsTotal !== null && (
                   <p className="px-2 pb-1 text-center text-[11px] text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
