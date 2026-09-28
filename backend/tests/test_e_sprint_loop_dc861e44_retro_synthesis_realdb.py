@@ -492,3 +492,70 @@ async def test_a_failed_generation_fails_the_job_with_the_old_502_body():
     finally:
         await eng.dispose()
 
+
+@pytest.mark.anyio
+async def test_combined_synthesis_failure_fails_the_job_and_keeps_the_existing_cache():
+    """PO 10:39Z(지운 테스트의 빈 짝 ①) — 합쳐 부르기(mode=synthesis)에서 L2가 실패하면 작업 = failed(예전 502 본문) · 저장 0(예전 캐시 그대로)."""
+    import json
+
+    from app.routers.retros import get_session, synthesize_and_recommend
+    from tests.background_job_helpers import read_background_job, run_one_background_job
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        good = '{"items": [{"text": "예전 학습(보존)", "source": "가설 1"}]}'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text", return_value=good):
+                await synthesize_session_via_job(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+        async with Session() as s:
+            job = json.loads((await synthesize_and_recommend(SESSION_A, db=s, auth=_auth(), repo=_repo(s))).body)
+        with patch("app.services.llm_client.generate_text", return_value=None):
+            counts = await run_one_background_job(Session, job["id"])
+        assert counts["failed"] == 1, counts
+        failed = await read_background_job(Session, ORG, job["id"], _auth())
+        assert (failed["error"]["status_code"], failed["error"]["detail"]["code"]) == (502, "SYNTHESIS_GENERATION_FAILED")
+        async with Session() as s:
+            after = await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert after.synthesis.learned[0].text == "예전 학습(보존)"
+        assert after.next_hypotheses is None
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_llm_failure_fails_the_job_and_keeps_the_existing_recommendations():
+    """PO 10:39Z(빈 짝 ②) — 추천 LLM 실패를 실 PG로: 작업 = failed(RECOMMENDATION_GENERATION_FAILED) · 예전 추천 그대로(update 안 됨)."""
+    import json
+
+    from app.routers.retros import get_session, recommend_next_session
+    from tests.background_job_helpers import read_background_job, run_one_background_job
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text", return_value='{"items": [{"text": "학습", "source": "가설 1"}]}'):
+                await synthesize_session_via_job(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text",
+                       return_value='{"items": [{"statement": "예전 추천(보존)", "rationale": "r", "confidence": 0.5}]}'):
+                await recommend_next_session_via_job(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+        async with Session() as s:
+            job = json.loads((await recommend_next_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))).body)
+        with patch("app.services.llm_client.generate_text", return_value=None):
+            counts = await run_one_background_job(Session, job["id"])
+        assert counts["failed"] == 1, counts
+        failed = await read_background_job(Session, ORG, job["id"], _auth())
+        assert (failed["error"]["status_code"], failed["error"]["detail"]["code"]) == (502, "RECOMMENDATION_GENERATION_FAILED")
+        async with Session() as s:
+            after = await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert after.next_hypotheses[0].statement == "예전 추천(보존)"
+    finally:
+        await eng.dispose()
+

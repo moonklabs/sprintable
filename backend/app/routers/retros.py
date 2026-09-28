@@ -353,6 +353,7 @@ async def _queue_retro_generation(db: AsyncSession, auth: AuthContext, org_id: u
     job = await enqueue_background_job(
         db, org_id=org_id, kind="retro_synthesis", requested_by_member_id=requester.id,
         payload={"session_id": str(session_id), "mode": mode},
+        dedup_key=f"retro:{session_id}:{mode}",  # 종합 단추를 다시 눌러도 열린 작업 하나(LLM 한 번)
     )
     await db.commit()
     return JSONResponse(status_code=202, content=background_job_view(job))

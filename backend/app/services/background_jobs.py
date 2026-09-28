@@ -229,17 +229,52 @@ def _worst_seconds(kind: str) -> float:
 
 async def enqueue_background_job(
     db: AsyncSession, *, org_id: uuid.UUID, kind: str, requested_by_member_id: uuid.UUID, payload: dict[str, Any],
+    dedup_key: str | None = None,
 ) -> BackgroundJob:
-    """행만 넣는다(flush) — 커밋은 호출부(요청 트랜잭션과 같이)."""
+    """행만 넣는다(flush) — 커밋은 호출부(요청 트랜잭션과 같이).
+
+    story #4336 PR2 ②(PO 10:39Z) — `dedup_key`를 주면 같은 사람 · 같은 종류 · 같은 대상의 **열린**(대기 · 실행 중) 작업이 있을 때 새로 만들지
+    않고 그 작업을 돌려준다(MCP가 30초 뒤 «다시 부르라»고 안내 → 다시 불러도 작업 하나 · LLM 한 번). DB 부분 유일 인덱스
+    `uq_background_jobs_open_dedup`가 판정 — 동시 두 요청도 하나(뒤 요청은 앞 트랜잭션 커밋까지 기다렸다가 그 작업을 받는다)."""
     if kind not in HANDLERS:
         raise ValueError(f"unknown background job kind: {kind}")
-    job = BackgroundJob(
-        id=uuid.uuid4(), org_id=org_id, kind=kind, payload=payload, status="pending",
-        requested_by_member_id=requested_by_member_id,
-    )
-    db.add(job)
-    await db.flush()
-    return job
+    if dedup_key is None:
+        job = BackgroundJob(
+            id=uuid.uuid4(), org_id=org_id, kind=kind, payload=payload, status="pending",
+            requested_by_member_id=requested_by_member_id,
+        )
+        db.add(job)
+        await db.flush()
+        return job
+
+    from sqlalchemy import text as sa_text
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.background_job import OPEN_DEDUP_WHERE
+
+    for _ in range(2):  # 기존 작업이 방금 끝나 조회가 비면 한 번 더 넣는다
+        inserted = (await db.execute(
+            pg_insert(BackgroundJob)
+            .values(
+                id=uuid.uuid4(), org_id=org_id, kind=kind, payload=payload, status="pending", attempt_count=0,
+                requested_by_member_id=requested_by_member_id, dedup_key=dedup_key,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[BackgroundJob.org_id, BackgroundJob.kind, BackgroundJob.requested_by_member_id, BackgroundJob.dedup_key],
+                index_where=sa_text(OPEN_DEDUP_WHERE),
+            )
+            .returning(BackgroundJob.id)
+        )).scalar_one_or_none()
+        job_id = inserted or (await db.execute(
+            select(BackgroundJob.id).where(
+                BackgroundJob.org_id == org_id, BackgroundJob.kind == kind,
+                BackgroundJob.requested_by_member_id == requested_by_member_id, BackgroundJob.dedup_key == dedup_key,
+                BackgroundJob.status.in_(("pending", "in_progress")),
+            )
+        )).scalar_one_or_none()
+        if job_id is not None:
+            return (await db.execute(select(BackgroundJob).where(BackgroundJob.id == job_id))).scalar_one()
+    raise RuntimeError("background job dedup: could not insert or find the open job")
 
 
 def background_job_view(job: BackgroundJob, *, rendered: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -25,6 +25,10 @@ BACKGROUND_JOB_KINDS = ("channel_video_confirm", "attachment_convert", "loop_con
 BACKGROUND_JOB_STATUSES = ("pending", "in_progress", "completed", "failed")
 
 
+# 열린(대기 · 실행 중) 작업만 겹침을 막는다 — 끝난 작업 뒤에는 같은 대상으로 새 작업을 만들 수 있다.
+OPEN_DEDUP_WHERE = "status IN ('pending', 'in_progress') AND dedup_key IS NOT NULL"
+
+
 class BackgroundJob(Base):
     __tablename__ = "background_jobs"
 
@@ -41,6 +45,8 @@ class BackgroundJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #4336 PR2 ②(PO 10:39Z) — 같은 사람 · 같은 종류 · 같은 대상의 대기 · 실행 중 작업은 하나(다시 부르면 그 작업을 돌려줌). 0417.
+    dedup_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         # story #4336 PR2 ②(마이그 0417) — 첨부 변환 · 컨텍스트팩(캐시 미스) · 회고 종합/추천.
@@ -50,4 +56,8 @@ class BackgroundJob(Base):
         ),
         CheckConstraint("status IN ('pending', 'in_progress', 'completed', 'failed')", name="ck_background_jobs_status"),
         Index("ix_background_jobs_due", "created_at", postgresql_where=text("status IN ('pending', 'in_progress')")),
+        Index(
+            "uq_background_jobs_open_dedup", "org_id", "kind", "requested_by_member_id", "dedup_key", unique=True,
+            postgresql_where=text(OPEN_DEDUP_WHERE),
+        ),
     )

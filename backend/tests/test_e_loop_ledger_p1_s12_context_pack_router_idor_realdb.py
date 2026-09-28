@@ -160,3 +160,80 @@ async def test_context_pack_cache_miss_queues_a_job_then_the_next_get_is_a_cache
     finally:
         await eng.dispose()
 
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_calling_again_while_the_job_is_open_returns_the_same_job():
+    """story #4336 PR2 ②(PO 10:39Z) — MCP가 30초 뒤 «다시 부르라»고 안내한다. 첫 작업이 열려 있는 동안 다시 불러도 같은 job_id · 행 하나."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy import func, select
+
+    from app.models.background_job import BackgroundJob
+    from app.repositories.loop import LoopRunRepository
+    from app.routers import loops as r
+    from app.schemas.context_pack import ContextPackItem
+    from app.services import context_pack_items as cpi
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            loop = await LoopRunRepository(s, ORG).create(
+                project_id=PROJ_A, title="A loop", goal_tags=[], status="draft", created_by_member_id=uuid.uuid4(),
+            )
+            await s.commit()
+            loop_id = loop.id
+        item = ContextPackItem(entity_type="hypothesis", entity_id=uuid.uuid4(), similarity=0.9, goal="예전 가설", href=None)
+        with (
+            patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768),
+            patch("app.services.context_pack_search.search_similar_embeddings", new=AsyncMock(return_value=[MagicMock()])),
+            patch.object(cpi, "_build_items", new=AsyncMock(return_value=[item])),
+        ):
+            ids = []
+            for _ in range(2):
+                async with Session() as s:
+                    ids.append(json.loads((await r.get_loop_context_pack(loop_id=loop_id, session=s, auth=_auth(), org_id=ORG)).body)["id"])
+        assert ids[0] == ids[1]
+        async with Session() as s:
+            assert (await s.execute(select(func.count()).select_from(BackgroundJob).where(BackgroundJob.org_id == ORG))).scalar_one() == 1
+    finally:
+        await eng.dispose()
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_two_concurrent_requests_make_one_job():
+    """동시 두 요청(두 트랜잭션) — 뒤 요청은 앞 트랜잭션이 커밋할 때까지 유일 인덱스에서 기다렸다가 그 작업을 받는다 → 행 하나."""
+    import asyncio
+
+    from sqlalchemy import func, select
+
+    from app.models.background_job import BackgroundJob
+    from app.services.background_jobs import enqueue_background_job
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        member = uuid.uuid4()
+        target = f"loop:{uuid.uuid4()}"
+        async with Session() as first, Session() as second:
+            a = await enqueue_background_job(first, org_id=ORG, kind="loop_context_pack", requested_by_member_id=member,
+                                             payload={}, dedup_key=target)
+            a_id = a.id
+            waiting = asyncio.create_task(enqueue_background_job(
+                second, org_id=ORG, kind="loop_context_pack", requested_by_member_id=member, payload={}, dedup_key=target,
+            ))
+            await asyncio.sleep(0.3)
+            assert not waiting.done(), "뒤 요청은 앞 트랜잭션 커밋 전까지 유일 인덱스에서 기다려야 한다"
+            await first.commit()
+            b = await asyncio.wait_for(waiting, timeout=5)
+            assert b.id == a_id
+            await second.commit()
+        async with Session() as s:
+            assert (await s.execute(select(func.count()).select_from(BackgroundJob).where(BackgroundJob.org_id == ORG))).scalar_one() == 1
+    finally:
+        await eng.dispose()

@@ -274,6 +274,7 @@ async def convert_attachment(
         requester = await resolve_member(auth, org_id, db)
         job = await enqueue_background_job(
             db, org_id=org_id, kind="attachment_convert", requested_by_member_id=requester.id, payload={"asset_id": str(asset_id)},
+            dedup_key=f"asset:{asset_id}",  # 뷰어를 다시 열어도 열린 변환 작업 하나
         )
         await db.commit()
         return JSONResponse(status_code=202, content=background_job_view(job))

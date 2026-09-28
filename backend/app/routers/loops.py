@@ -165,6 +165,8 @@ async def get_loop_context_pack(
     job = await enqueue_background_job(
         session, org_id=org_id, kind="loop_context_pack", requested_by_member_id=requester.id,
         payload={"loop_id": str(loop_id)},
+        # PO 10:39Z — MCP가 30초 뒤 «다시 부르라»고 안내 → 다시 불러도 열린 작업 하나(두 틱이 LLM을 두 번 부르지 않게)
+        dedup_key=f"loop:{loop_id}",
     )
     await session.commit()
     return JSONResponse(status_code=202, content=background_job_view(job))
