@@ -68,8 +68,17 @@ describe('mayReadLegacyTotal — story #4408(파싱 전 거름)', () => {
     expect(mayReadLegacyTotal('const n = res.meta.total;')).toBe(true);
   });
 
-  it('⭐유니코드 이스케이프 식별자 — AST는 total로 풀어 걸고, 거름도 통과시킨다(거름이 위반을 숨기지 않음)', () => {
-    const src = 'const n = res.meta.\\u0074otal;';
+  // 이스케이프로 `total`을 만드는 모양 — AST는 전부 total로 풀어 건다. 거름이 이것들을 건너뛰면 develop에선 잡던 위반을 숨긴다.
+  // (백슬래시 하나 = '\\'. 까디르 4806 렌즈 ①: 16진 둘 · 줄 이음 — 뜻 없는 이스케이프는 같은 부류로 미르코가 더함.)
+  const BS = '\\';
+  const ESCAPED: Array<[string, string]> = [
+    ['식별자 유니코드 이스케이프', `const n = res.meta.${BS}u0074otal;`],
+    ['문자열 16진 이스케이프(앞)', `const n = res.meta['${BS}x74otal'];`],
+    ['문자열 16진 이스케이프(가운데)', `const n = res.meta['t${BS}x6ftal'];`],
+    ['줄 이음(백슬래시 + 줄바꿈)', `const n = res.meta['tot${BS}\nal'];`],
+    ['뜻 없는 이스케이프(백슬래시 + 보통 글자)', `const n = res.meta['t${BS}otal'];`],
+  ];
+  it.each(ESCAPED)('⭐%s — AST는 total로 풀어 걸고, 거름도 통과시킨다(거름이 위반을 숨기지 않음)', (_name, src) => {
     expect(src.includes('total')).toBe(false);
     expect(scanFileContent(src, 'escaped.ts')).toHaveLength(1);
     expect(mayReadLegacyTotal(src)).toBe(true);
@@ -81,7 +90,7 @@ describe('scanRepo — story #3761 후속(실 트리 실행)', () => {
   // ALLOWLIST(derive-loop-queue.ts:77, 근거는 스크립트 상단 docstring) 하나만 남고 0건.
   // story #4408 — 시한은 CI 실측으로: 예전 6000ms(로컬 동시부하 재현 최댓값 1913ms × 3)는 CI 실제
   // (2026-09-28 CI work 26 run · 전 파일 파싱 판)에서 중앙값 5498ms · 최댓값 6042ms였고 6042 · 6651ms에서
-  // 시간 초과 — 로컬 부하 재현이 CI 전체 병렬을 3.5배쯤 덜 쟀다. 이제 `total` 글자 거름으로 파싱이 1/12쯤으로
+  // 시간 초과 — 로컬 부하 재현이 CI 전체 병렬을 3.5배쯤 덜 쟀다. 이제 거름(`total` 글자 또는 백슬래시)으로 파싱이 1/5쯤으로
   // 줄었지만, 시한은 거름 전 CI 최댓값 6651ms의 4.5배 = 30000ms(거름이 풀려도 CI 부하로는 안 넘고, 무한 대기는
   // 여전히 RED). 시한으로 성능 예산을 걸지 않는다(story #4333).
   it('실 트리(apps/web/src) — legacy 읽기 0건(ALLOWLIST 제외), ALLOWLIST는 전부 실제로 걸린다', () => {
