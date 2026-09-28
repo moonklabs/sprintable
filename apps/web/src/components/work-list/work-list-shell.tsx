@@ -22,7 +22,7 @@ import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useWorkListSelection } from './use-work-list-selection';
 import { WorkListDetailPanel } from './work-list-detail-panel';
 import { findSelectedRowContext, isRowVisibleInFiltered } from './work-list-detail-actions';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 /** PO 확定(2026-09-14) — 시안 3840 v2 필터 칩 3종 커스터마이즈: 펀넬 아이콘·선택 표시
@@ -354,9 +354,13 @@ export function WorkListShell({ projectId }: { projectId: string }) {
           </aside>
         ) : null}
       </div>
-      {/* 모바일 Sheet — detailPanel이 있을 때만 open. */}
+      {/* 모바일 Sheet — detailPanel이 있을 때만 open.
+          [SID:4374] 닫기는 하나 — 안쪽 상세 패널 머리의 «닫기»(선택 해제 → open 거짓 → 시트도 닫힘)만 남기고 시트 기본 «✕»(절대 위치 · 같은 자리)는 끈다.
+          Esc 한 번 = 같은 동작(시트 onOpenChange(false) → 선택 해제). 1440 aside는 이 시트를 안 거쳐 그대로.
+          창 접근 이름 = 열린 항목 제목(화면 읽기 전용 SheetTitle → 창 aria-labelledby · 보이는 제목은 패널 머리 h2) · 제목이 비면 페이지 이름. */}
       <Sheet open={!!detailPanel && isMobile} onOpenChange={(open) => { if (!open) setSelectedRowId(null); }}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-sm">
+        <SheetContent side="right" className="w-full p-0 sm:max-w-sm" showCloseButton={false}>
+          {selectedContext ? <SheetTitle className="sr-only">{selectedContext.row.title || t('title')}</SheetTitle> : null}
           {detailPanel}
         </SheetContent>
       </Sheet>
