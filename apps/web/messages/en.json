@@ -3441,7 +3441,6 @@
     "pageEmbedPlaceholder": "Enter a document slug or ID…",
     "pageEmbedNotFound": "Document not found",
     "pageEmbedUnavailable": "Document unavailable",
-    "pageEmbedCycle": "Circular embed detected — this would create an embed cycle.",
     "pageEmbedSelf": "Circular embed detected — a document cannot embed itself.",
     "pageEmbedLoadFailed": "Failed to load document",
     "pageEmbedLoading": "Loading document…",

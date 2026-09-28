@@ -3441,7 +3441,6 @@
     "pageEmbedPlaceholder": "문서 슬러그나 ID를 입력하세요",
     "pageEmbedNotFound": "문서를 찾을 수 없어요",
     "pageEmbedUnavailable": "문서를 불러올 수 없어요",
-    "pageEmbedCycle": "서로를 임베드하는 문서라 임베드할 수 없어요",
     "pageEmbedSelf": "문서는 자기 자신을 임베드할 수 없어요",
     "pageEmbedLoadFailed": "문서를 불러오지 못했어요",
     "pageEmbedLoading": "문서를 불러오는 중…",

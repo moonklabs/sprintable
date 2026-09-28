@@ -15,23 +15,13 @@ import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/h
 // ---------------------------------------------------------------------------
 
 /**
- * Returns true if embedding `docId` inside a document identified by
- * `currentDocId` would create a circular reference.
+ * 문서가 자기 자신(A에 A)을 임베드하는지.
  *
- * Detects two cases:
- *  - Direct self-embed (A embeds A): docId === currentDocId
- *  - Indirect cycle (A embeds B, B already embeds A):
- *    currentDocId appears in `embedChain` (the list of doc IDs transitively
- *    embedded by the target doc, returned by the preview API).
+ * [SID:4381] 간접 순환(A↔B) 판정은 걷었다 — 미리보기 API의 embed_chain이 도입 때부터 `[]` 고정이라 운영에서 한 번도 걸린 적이
+ * 없었고, 임베드는 대상 내용을 펼치지 않고 카드(제목 · 아이콘 · 경로)만 그려 서로 임베드해도 막을 해가 없다(카드 둘 · 참조 행 둘).
  */
-export function isCircularEmbed(
-  docId: string | null | undefined,
-  currentDocId: string | undefined,
-  embedChain: string[] = [],
-): boolean {
-  if (!docId || !currentDocId) return false;
-  if (docId === currentDocId) return true;
-  return embedChain.includes(currentDocId);
+export function isSelfEmbed(docId: string | null | undefined, currentDocId: string | undefined): boolean {
+  return !!docId && !!currentDocId && docId === currentDocId;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +44,6 @@ interface DocPreview {
   title: string;
   icon: string | null;
   slug: string;
-  embedChain: string[];
 }
 
 type NodeAttrs = {
@@ -77,10 +66,10 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
 
   const [inputSlug, setInputSlug] = useState('');
   // story #4371 — 저장된 임베드의 속성(title · icon · slug)은 첫 그림용 자리표시일 뿐. 열 때 대상 문서를 한 번 조회해
-  // 지워짐 · 접근 불가 · 순환이면 오류 줄, 성공이면 최신 값을 그린다(속성은 안 씀 · 예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
+  // 지워짐 · 접근 불가면 오류 줄, 성공이면 최신 값을 그린다(속성은 안 씀 · 예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
   const [doc, setDoc] = useState<DocPreview | null>(
     docId
-      ? { id: docId, title: title ?? '', icon: icon ?? null, slug: slug ?? '', embedChain: [] }
+      ? { id: docId, title: title ?? '', icon: icon ?? null, slug: slug ?? '' }
       : null,
   );
   const [loading, setLoading] = useState(false);
@@ -91,7 +80,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
   const verifiedDocId = useRef<string | null>(null);
 
   // Direct circular embed check (A embeds A) — caught from node attrs immediately.
-  const circular = isCircularEmbed(docId, currentDocId);
+  const circular = isSelfEmbed(docId, currentDocId);
 
   // mode 'submit' = 입력칸 제출(불러오는 동안 로딩 표시 · 실패면 입력칸 아래 오류 줄 · 초점은 입력칸),
   // mode 'verify' = 저장된 임베드를 열 때 한 번(자리표시 카드를 그대로 두고 조용히 조회 · 실패면 오류 줄).
@@ -116,14 +105,8 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
 
         // [SID:4378] 자기 자신(A에 A — slug · id 어느 쪽으로 넣어도 조회 결과 id로 가름)은 «서로를 임베드» 문구가 아니라
         // 저장된 자기 임베드 갈래와 같은 «자기 자신» 문구로.
-        if (currentDocId && d.id === currentDocId) {
+        if (isSelfEmbed(d.id, currentDocId)) {
           fail(tDocs('pageEmbedSelf'));
-          return;
-        }
-
-        // Indirect circular embed check: target doc's embedChain contains currentDocId (A→B→A)
-        if (isCircularEmbed(d.id, currentDocId, d.embedChain)) {
-          fail(tDocs('pageEmbedCycle'));
           return;
         }
 
@@ -143,7 +126,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
 
   // 저장된 임베드(docId 있음)는 열 때 대상 문서를 한 번 조회한다(story #4371).
   useEffect(() => {
-    if (!docId || verifiedDocId.current === docId || isCircularEmbed(docId, currentDocId)) return;
+    if (!docId || verifiedDocId.current === docId || isSelfEmbed(docId, currentDocId)) return;
     verifiedDocId.current = docId;
     void fetchDoc(docId, 'verify');
   }, [docId, currentDocId, fetchDoc]);
@@ -178,7 +161,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
   }
 
   // --- No doc selected — show picker ---
-  // story #4371 — 제출 실패(찾을 수 없음/불가 · 순환 · 불러오기 실패)는 입력칸 아래 오류 한 줄로(예전엔 이 갈래가 오류 갈래보다
+  // story #4371 — 제출 실패(찾을 수 없음/불가 · 자기 자신 · 불러오기 실패)는 입력칸 아래 오류 한 줄로(예전엔 이 갈래가 오류 갈래보다
   // 먼저 반환해 오류가 영영 안 그려졌다). 입력값은 그대로 · 초점은 입력칸(fetchDoc).
   if (!docId) {
     return (
@@ -229,7 +212,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
     );
   }
 
-  // --- Error / unavailable / circular (indirect) ---
+  // --- Error / unavailable ---
   if (error) {
     return (
       <NodeViewWrapper data-testid="page-embed-error">
