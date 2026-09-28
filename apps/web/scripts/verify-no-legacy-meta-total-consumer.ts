@@ -122,7 +122,19 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
 export interface ScanRepoResult {
   refs: LegacyTotalConsumerRef[];
   fileCount: number;
+  /** AST로 실제 파싱한 파일 수 — `mayReadLegacyTotal`이 거른 뒤. */
+  parsedCount: number;
   allowlistHit: Set<string>;
+}
+
+// story #4408 — 전 파일(2천여 개)을 AST로 파싱하던 것이 CI 부하에서 6000ms를 넘겨 거짓 RED(26 run 최댓값
+// 6042ms · 실패 run 6651ms). 위반(`meta.total` · `meta?.total` · `meta['total']`)은 소스에 글자 `total`이
+// 있어야만 생기므로, 그 글자가 없는 파일은 파싱할 필요가 없다(develop 기준 2474개 중 194개만 남음).
+// 식별자의 유니코드 이스케이프(`total`)는 AST가 `total`로 풀어 읽으므로 `\u`가 든 파일도 파싱한다.
+// 거른 파일도 읽고 세므로 완전성 검사(scannedCount === files.length)는 그대로다. 문법 오류 검출은 이
+// 가드의 계약이 아니다(type-check가 잡는다) — 파싱하는 파일에서는 예전처럼 파싱 실패를 던진다.
+export function mayReadLegacyTotal(content: string): boolean {
+  return content.includes('total') || content.includes('\\u');
 }
 
 const MIN_EXPECTED_FILES = 500;
@@ -136,11 +148,14 @@ export function scanRepo(srcRoot: string): ScanRepoResult {
 
   const allRefs: LegacyTotalConsumerRef[] = [];
   let scannedCount = 0;
+  let parsedCount = 0;
   for (const abs of files) {
     const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     const content = readFileSync(abs, 'utf8');
-    allRefs.push(...scanFileContent(content, rel));
     scannedCount += 1;
+    if (!mayReadLegacyTotal(content)) continue;
+    allRefs.push(...scanFileContent(content, rel));
+    parsedCount += 1;
   }
 
   // 완전성(fail-closed) — [[feedback_a_guard_iterating_over_extracted_not_expected_fails_silent]]
@@ -157,7 +172,7 @@ export function scanRepo(srcRoot: string): ScanRepoResult {
     return true;
   });
 
-  return { refs, fileCount: files.length, allowlistHit };
+  return { refs, fileCount: files.length, parsedCount, allowlistHit };
 }
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');

@@ -110,6 +110,7 @@ export function OutsidePressFixtureParent() {
 }`;
 
 describe('부류 가드 — 포털 팝오버를 품은 바깥 누름 닫기는 isOutsidePress(story #4349 PR 2 · 유나 #4728)', () => {
+  // story #4408 — 실 트리 전수라 행 가드(story #4333)를 기본 5초보다 넉넉히: CI work 26 run(2026-09-28) 이 테스트 중앙값 3526ms · 최댓값 4099ms로 기본 5초의 82%까지 차 있었다(부하로 넘으면 까닭 없는 RED). 30초 ≈ 최댓값의 7.3배.
   it('실 트리 + 같은 경로 양성 대조: 걸림은 대조 하나뿐', () => {
     const files = sourceFiles(SRC);
     const inputs: Array<[string, string]> = [...files.map((f) => [path.relative(SRC, f), fs.readFileSync(f, 'utf8')] as [string, string]), [FIXTURE, FIXTURE_SRC]];
@@ -119,7 +120,7 @@ describe('부류 가드 — 포털 팝오버를 품은 바깥 누름 닫기는 i
     expect(violations).toEqual([`${FIXTURE}:6 (OutsidePressFixtureParent)`]);
     // 참고치(하한 아님): 포털 팝오버에 닿는 컴포넌트 수 · `.contains(`로 바깥을 재는 리스너 수
     console.info(`[outside-press guard] reaching=${reaching} checked=${checked}`);
-  });
+  }, 30_000);
 
   it('대조를 공용 규칙으로 고치면 0 · 포털을 안 품으면 .contains만 써도 대상 아님', () => {
     const fixed = FIXTURE_SRC.replace('if (ref.current && !ref.current.contains(e.target as Node)) close();', 'if (isOutsidePress(ref.current, e.target)) close();');
