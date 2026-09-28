@@ -349,3 +349,53 @@ describe('ContextSwitcherChip — 새 프로젝트 폼 초안 (story #4370)', ()
     expect(desc()!.value).toBe('');
   });
 });
+
+// story #4372 — 조직 전환 실패가 말없이 되돌아갔다(훅의 switchOrgError를 칩이 안 읽음). 사이드바와 같은 문구 · role=alert.
+// 두 길 다: 프로젝트 없는 다른 조직 «전환»(switchOrg) · 다른 조직의 프로젝트 행(switchOrgAndProject).
+describe('ContextSwitcherChip — 조직 전환 실패 표시(story #4372)', () => {
+  const orgsWithOther = [...ORGS, { orgId: 'org-2', orgName: 'E2E Test Corp', orgSlug: 'e2e', role: 'owner' }];
+  function orgIdOf(init?: RequestInit): string | null {
+    const h = init?.headers;
+    if (!h) return null;
+    if (h instanceof Headers) return h.get('X-Org-Id');
+    return (h as Record<string, string>)['X-Org-Id'] ?? null;
+  }
+  async function openWithOtherOrgProjects(otherOrgProjects: typeof PROJECTS) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/switch-org') return { ok: false, status: 500, json: async () => ({}) };
+      if (url === '/api/projects') {
+        const list = orgIdOf(init) === 'org-2' ? otherOrgProjects : PROJECTS;
+        return { ok: true, json: async () => ({ data: list.map((p) => ({ id: p.projectId, name: p.projectName })) }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await act(async () => {
+      root.render(wrap(<ContextSwitcherChip orgs={orgsWithOther} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />));
+    });
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+  }
+  async function expectSwitchError() {
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    const alert = document.body.querySelector('[data-testid="context-switcher-chip-switch-org-error"]');
+    expect(alert?.getAttribute('role')).toBe('alert');
+    expect(alert?.textContent).toBe(koMessages.nav.switcherSwitchOrgError);
+  }
+
+  it('⭐프로젝트 없는 다른 조직 «전환» 실패 → 시트 안에 전환 실패 알림', async () => {
+    await openWithOtherOrgProjects([]);
+    const switchTo = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.nav.switcherSwitchToOrg));
+    expect(switchTo).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="context-switcher-chip-switch-org-error"]')).toBeNull();
+    await act(async () => { switchTo!.click(); });
+    await expectSwitchError();
+  });
+
+  it('⭐다른 조직의 프로젝트 행 전환 실패 → 같은 알림', async () => {
+    await openWithOtherOrgProjects([{ projectId: 'p-other', projectName: 'Other Proj' }]);
+    const row = [...document.body.querySelectorAll('button')].find((b) => b.textContent === 'Other Proj');
+    expect(row).toBeTruthy();
+    await act(async () => { row!.click(); });
+    await expectSwitchError();
+  });
+});

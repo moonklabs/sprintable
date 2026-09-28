@@ -103,7 +103,8 @@ export function MarketingRecipeApplyDialog({
   // 닫지 않고(적용은 이미 성공) 결과 영역에 목록을 보여준다.
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  const { options, loading: loadingMembers } = useRecipeMemberOptions(projectId || null);
+  // story #4372 — 담당자 조회 실패(loadFailed)를 안 읽어 선택칸이 자리표시만 남아 «담당자 없음»처럼 보였다 → 칸 목록 위 실패 알림 하나 + 다시 시도.
+  const { options, loading: loadingMembers, loadFailed: membersLoadFailed, refresh: refreshMembers } = useRecipeMemberOptions(projectId || null);
 
   const loadChannelConnections = useCallback(() => {
     if (!orgId) { setChannelConnectionsStatus('loaded'); return; }
@@ -469,6 +470,14 @@ export function MarketingRecipeApplyDialog({
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
+
+        {/* story #4372 — 담당자 조회 실패는 칸 목록 위 한 줄 하나로(알림 한 번 · 다시 시도). 칸마다 두면 한 번의 실패가 칸 수만큼 연달아 읽혔다(PO). */}
+        {membersLoadFailed ? (
+          <div role="alert" className="flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-members-load-error">
+            <span>{t('recipeApplyV2MembersLoadFailed')}</span>
+            <Button variant="outline" size="sm" onClick={refreshMembers}>{t('eventApplyAgentsRetry')}</Button>
+          </div>
+        ) : null}
 
         <div className="space-y-2.5">
           {roleGroups.map(renderRoleGroup)}

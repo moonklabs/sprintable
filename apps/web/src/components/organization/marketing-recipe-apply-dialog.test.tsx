@@ -1214,3 +1214,44 @@ describe('MarketingRecipeApplyDialog — story #4243', () => {
     expect(slot.textContent).toContain(koMessages.organization.recipeApplyV2EitherBadge);
   });
 });
+
+// story #4372 — 멤버 조회 실패(useRecipeMemberOptions loadFailed)를 안 읽어 선택칸이 자리표시만 남아 «멤버 없음»처럼 보였다.
+describe('담당자 조회 실패 표시(story #4372)', () => {
+  // 담당자 칸 3개(게이트 없는 역할 셋) — 알림이 칸 수만큼 반복되지 않는지를 보려면 칸이 여럿이어야 한다(영상 레시피는 담당자 칸 1개).
+  const THREE_MEMBER_RECIPE: EventDefinitionResponse & { id: string } = {
+    id: 'mkt-3', key: 'preset.marketing.three_roles', org_id: null, name: '세 역할', description: null,
+    payload_schema: { properties: { stage: { enum: ['a', 'b', 'c'] } } },
+    stage_metadata: { a: { role: '크리에이터' }, b: { role: '에디터' }, c: { role: '리서처' } },
+    enabled: true,
+  };
+  it('⭐담당자 조회가 실패하면 칸 목록 위 알림 한 번 + 다시 시도 · 다시 시도는 다시 조회한다', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) { calls += 1; return { ok: false, status: 500, json: async () => ({}) }; }
+      if (url.startsWith('/api/organizations/org-1/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.startsWith('/api/organizations/org-1/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mountDialog(THREE_MEMBER_RECIPE);
+    expect(document.body.querySelector('[data-testid="marketing-apply-members-load-error"]')).toBeNull(); // 프로젝트 고르기 전 = 조회 전
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    const lines = document.body.querySelectorAll('[data-testid="marketing-apply-members-load-error"]');
+    // 담당자 칸이 여럿이어도 알림은 한 번(PO — 칸마다 두면 한 번의 실패가 칸 수만큼 연달아 읽혔다).
+    expect(document.body.querySelectorAll('[data-testid="slot-creator"]').length).toBe(3);
+    expect(lines.length).toBe(1);
+    expect(document.body.querySelectorAll('[role="alert"]').length).toBe(1);
+    expect(lines[0]!.getAttribute('role')).toBe('alert');
+    expect(lines[0]!.textContent).toContain(ORG.recipeApplyV2MembersLoadFailed);
+    const before = calls;
+    await act(async () => { lines[0]!.querySelector('button')!.click(); });
+    await flush();
+    expect(calls).toBeGreaterThan(before);
+  });
+
+  it('담당자 조회가 성공하면 실패 줄 0', async () => {
+    stubAll();
+    await mountDialog(VIDEO_PRODUCTION_RECIPE);
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    expect(document.body.querySelector('[data-testid="marketing-apply-members-load-error"]')).toBeNull();
+  });
+});
