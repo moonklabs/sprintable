@@ -13,6 +13,8 @@ const nav = vi.hoisted(() => ({ segments: ['flow'] as string[] }));
 vi.mock('next/navigation', () => ({
   useSelectedLayoutSegments: () => nav.segments,
   useParams: () => ({ ws: 'my-ws', proj: 'my-proj' }),
+  // [SID:4299] 탭이 첫 화면 뒤 · 누르려는 기색 때 router.prefetch를 부른다.
+  useRouter: () => ({ prefetch: () => {}, push: () => {}, replace: () => {} }),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

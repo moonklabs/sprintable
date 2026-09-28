@@ -15,6 +15,8 @@ vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
   useSelectedLayoutSegments: () => nav.segments,
   useParams: () => ({ ws: 'my-ws', proj: 'my-proj' }),
+  // [SID:4299] 일감 탭이 첫 화면 뒤 · 누르려는 기색 때 router.prefetch를 부른다.
+  useRouter: () => ({ prefetch: () => {}, push: () => {}, replace: () => {} }),
 }));
 // 결재 loading의 선행 요청 조각은 이 검사와 무관 — 네트워크 없이 비운다.
 vi.mock('@/components/inbox/inbox-prefetch-starter', () => ({ InboxPrefetchStarter: () => null }));

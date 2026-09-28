@@ -12,6 +12,8 @@ import enMessages from '../../../messages/en.json';
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ ws: 'my-ws', proj: 'my-proj' }),
+  // [SID:4299] 탭이 첫 화면 뒤 · 누르려는 기색 때 router.prefetch를 부른다.
+  useRouter: () => ({ prefetch: () => {}, push: () => {}, replace: () => {} }),
 }));
 
 // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — <lg에서 이 탭행 텍스트·인디케이터가 커진다
