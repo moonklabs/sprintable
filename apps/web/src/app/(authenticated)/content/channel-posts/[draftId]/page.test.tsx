@@ -19,6 +19,19 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useChatsHref: () => '/chats',
   useConnectRulesHref: (fallback: string) => fallback,
 }));
+// story #4336 PR2 — 영상 확정 작업 기다리기: 이 파일은 고정 횟수 flush(마이크로태스크)로 진행을 맞춘다 → 타이머(매크로태스크) 없이 작업 상태를
+// 곧바로 한 번 묻는 대역(같은 주소 · 같은 목 응답). 폴링 간격 · 멈춤 규칙은 lib/background-job.test.ts가 따로 본다.
+vi.mock('@/lib/background-job', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/background-job')>();
+  return {
+    ...actual,
+    waitForBackgroundJob: async (orgId: string, jobId: string) => {
+      const res = await fetch(`/api/organizations/${orgId}/background-jobs/${jobId}`);
+      const json = (await res.json()) as { data?: unknown };
+      return json.data ?? null;
+    },
+  };
+});
 vi.mock('next/navigation', () => ({
   useParams: () => useParamsMock(),
 }));
@@ -277,6 +290,7 @@ function stubFetch(opts: {
   let rejectNextDraftRefetch = false;
   let commentReplyRetried = false;
   let currentImages = opts.initialImages ?? [];
+  const confirmedVideoJobs = new Map<string, unknown>();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -452,8 +466,19 @@ function stubFetch(opts: {
         if (ok) {
           const confirmed = result.body as { version?: number; video_url?: string | null };
           currentDraftDetail = { ...currentDraftDetail, current_version: confirmed.version, video_url: confirmed.video_url };
+          // story #4336 PR2 — 영상 확정은 작업화: 202 + 작업. 끝난 작업(아래 GET)이 이 영상을 결과로 돌려준다.
+          confirmedVideoJobs.set('job-video-1', result.body);
+          return { ok: true, status: 202, json: async () => ({ data: { id: 'job-video-1', kind: 'channel_video_confirm', status: 'pending', result: null, error: null }, error: null, meta: null }) };
         }
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      const jobMatch = url.match(new RegExp(`^/api/organizations/${ORG_ID}/background-jobs/([^/]+)$`));
+      if (jobMatch && (!init || init.method === undefined || init.method === 'GET')) {
+        const video = confirmedVideoJobs.get(jobMatch[1] as string);
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: { id: jobMatch[1], kind: 'channel_video_confirm', status: 'completed', result: { video }, error: null }, error: null, meta: null }),
+        };
       }
       const assetsListMatch = url.match(/\/versions\/([^/]+)\/assets$/);
       if (assetsListMatch && (!init || init.method === undefined || init.method === 'GET')) {

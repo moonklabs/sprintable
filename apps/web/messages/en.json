@@ -3226,6 +3226,8 @@
     "errorChannelImageStorageNotConfigured": "Image uploads aren't configured for this environment yet.",
     "errorChannelImageUnsupported": "This channel doesn't support image attachments.",
     "errorChannelImageUndecodable": "This image couldn't be decoded — it may be corrupted or unsupported.",
+    "errorChannelAssetStorageTimeout": "Checking the file took too long, so it stopped — please try again.",
+    "errorBackgroundJobFailed": "Couldn't finish processing — please try again.",
     "errorChannelImageUploadFailed": "The image upload failed — please try again.",
     "channelPostsCommandNotCancellable": "This is already {status}, so it can't be cancelled.",
     "channelPostsApprovalStatusLabel": "Approval status",

@@ -3226,6 +3226,8 @@
     "errorChannelImageStorageNotConfigured": "이 환경에 이미지 업로드가 아직 구성되지 않았어요.",
     "errorChannelImageUnsupported": "이 채널은 이미지 첨부를 지원하지 않아요.",
     "errorChannelImageUndecodable": "이미지를 해독할 수 없어요 — 손상됐거나 지원하지 않는 파일이에요.",
+    "errorChannelAssetStorageTimeout": "파일을 확인하는 데 시간이 너무 오래 걸려 멈췄어요 — 다시 시도해 주세요.",
+    "errorBackgroundJobFailed": "처리하지 못했어요 — 다시 시도해 주세요.",
     "errorChannelImageUploadFailed": "이미지 업로드에 실패했어요 — 다시 시도해 주세요.",
     "channelPostsCommandNotCancellable": "이미 {status} 상태라 취소할 수 없어요.",
     "channelPostsApprovalStatusLabel": "승인 상태",

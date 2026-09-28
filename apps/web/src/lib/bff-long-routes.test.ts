@@ -64,7 +64,7 @@ describe('긴 라우트 표(bff-route-timeouts · 까디르 QA ①②)', () => {
     // 동기로 못 기다리는 줄 — 후속 카드(제공자 긴 작업: 비동기화). 결제는 story #4335(시도 + 조회), 채널 발행 · 제출 · 게이트 전이는
     // story #4336 PR1(공급자 호출 = 워커)로 이 목록에서 빠졌다. 남은 셋은 4336 PR2.
     expect(Object.entries(LONG_ROUTES).filter(([, r]) => r.syncImpossible).map(([k]) => k).sort()).toEqual(
-      ['attachmentConvert', 'channelAssetConfirm', 'loopContextPack'],
+      ['attachmentConvert', 'loopContextPack'],
     );
   });
 

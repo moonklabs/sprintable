@@ -42,6 +42,7 @@ from app.services.channel_posts import (
     get_channel_post_draft,
 )
 from app.services.storage import get_storage_provider
+from app.services.storage.deadline import with_storage_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,14 @@ class ChannelPostImageReorderInvalidSetError(Exception):
         super().__init__("image_ids가 현재 이미지 집합과 정확히 일치해야 합니다(누락·중복·불일치 없이)")
 
 
+# story #4336 PR2(PO 04:32Z) — 이미지 확인 · 가져오기는 요청 안에 둔다(작업화 X). 근거 = dev 백엔드 요청 로그 14일(09-14~09-28)
+# `import-image` 349건 p50 0.48s · p95 1.4s · 최대 9.3s · 45s 초과 0. 호출마다 시한을 걸고(아래) 요청 총 예산 40s(라우트)를 둔다.
+IMAGE_HEAD_SECONDS = 10.0
+IMAGE_DOWNLOAD_SECONDS = 20.0
+IMAGE_PUT_SECONDS = 20.0
+IMAGE_DELETE_SECONDS = 10.0
+
+
 def compute_image_seal_hash(ordered_final_sha256s: list[str]) -> str:
     """story #3550(Phase2, 페드루 PO 確定 2026-09-06 ①) — `ChannelPostVersion.
     image_sha256`(→`Gate.sealed_media_sha256`)에 담을 값. **N=1은 항등**(그 이미지의
@@ -297,7 +306,9 @@ async def import_channel_post_image(
     ext = _MIME_TO_EXT.get(content_type, "bin")
     object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
     provider = get_storage_provider()
-    ok = await provider.put_object(bucket, object_path, image_bytes, content_type=content_type)
+    ok = await with_storage_deadline(
+        provider.put_object(bucket, object_path, image_bytes, content_type=content_type), seconds=IMAGE_PUT_SECONDS, what="put",
+    )
     if not ok:
         raise ChannelImageUploadFailedError(object_path=object_path)
 
@@ -411,9 +422,9 @@ def may_be_committed(exc: BaseException) -> bool:
 async def _discard_unreferenced_objects(provider, bucket: str, object_path: str, derived_object_path: str | None) -> None:
     """confirm이 거절될 때 어떤 행에도 안 걸린 업로드 객체(원본 · 파생)를 지운다. 정리 실패는 로그만(원래 거절을 가리지 않는다)."""
     try:
-        await provider.delete_object(bucket, object_path)
+        await with_storage_deadline(provider.delete_object(bucket, object_path), seconds=IMAGE_DELETE_SECONDS, what="delete")
         if derived_object_path is not None:
-            await provider.delete_object(bucket, derived_object_path)
+            await with_storage_deadline(provider.delete_object(bucket, derived_object_path), seconds=IMAGE_DELETE_SECONDS, what="delete")
     except Exception:
         logger.exception("이미지 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
 
@@ -452,7 +463,7 @@ async def confirm_channel_post_image_upload(
         raise ChannelImagePathNotScopedError(object_path=object_path)
 
     provider = get_storage_provider()
-    size = await provider.head_object(bucket, object_path)
+    size = await with_storage_deadline(provider.head_object(bucket, object_path), seconds=IMAGE_HEAD_SECONDS, what="head")
     if size is None:
         raise ChannelImageObjectNotFoundError(object_path=object_path)
 
@@ -467,7 +478,7 @@ async def confirm_channel_post_image_upload(
         if size > _MAX_ORIGINAL_UPLOAD_BYTES:
             raise ChannelImageTooLargeError(size_bytes=size, max_bytes=_MAX_ORIGINAL_UPLOAD_BYTES)
 
-        raw = await provider.download_object(bucket, object_path)
+        raw = await with_storage_deadline(provider.download_object(bucket, object_path), seconds=IMAGE_DOWNLOAD_SECONDS, what="download")
         original_sha256 = hashlib.sha256(raw).hexdigest()
 
         try:
@@ -548,7 +559,10 @@ async def confirm_channel_post_image_upload(
         if derived_bytes is not None:
             ext = "png" if derived_content_type == "image/png" else "jpg"
             derived_object_path = _object_path(org_id=org_id, draft_id=draft_id, ext=ext)
-            ok = await provider.put_object(bucket, derived_object_path, derived_bytes, content_type=derived_content_type)
+            ok = await with_storage_deadline(
+                provider.put_object(bucket, derived_object_path, derived_bytes, content_type=derived_content_type),
+                seconds=IMAGE_PUT_SECONDS, what="put",
+            )
             if not ok:
                 raise ChannelImageUploadFailedError(object_path=derived_object_path)
             derived_sha256 = hashlib.sha256(derived_bytes).hexdigest()
