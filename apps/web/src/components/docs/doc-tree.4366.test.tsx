@@ -45,6 +45,7 @@ let root: Root;
 let store: Map<string, string>;
 
 beforeEach(() => {
+  dragging = false;
   store = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (k: string) => store.get(k) ?? null,
@@ -107,11 +108,22 @@ function pointerAt(y: number) {
   handlers.collide?.({ pointerCoordinates: { x: 10, y }, droppableRects: new Map(), droppableContainers: [], active: null, collisionRect: null });
 }
 const rowTop = (id: string) => rowButtons().findIndex((b) => b.dataset.docId === id) * ROW;
-async function move(activeId: string, overId: string, y: number, scrolled = 0) { await act(async () => { pointerAt(y); handlers.move?.(dragEvent(activeId, overId, y, scrolled)); }); }
+// 실 끌기처럼 먼저 끌기를 시작한다(onDragStart) — 끄는 중이 아닐 때 온 move/over는 무시한다(4752 · 놓은 뒤 늦은 effect).
+let dragging = false;
+async function begin(activeId: string) {
+  if (dragging) return;
+  dragging = true;
+  await act(async () => { (handlers as { start?: Handler }).start?.({ active: { id: activeId } }); });
+}
+async function move(activeId: string, overId: string, y: number, scrolled = 0) {
+  await begin(activeId);
+  await act(async () => { pointerAt(y); handlers.move?.(dragEvent(activeId, overId, y, scrolled)); });
+}
 // 실 끌기처럼 그 자리로 움직여(표시가 그려진 뒤) 놓는다 — 놓을 때는 마지막으로 그린 표시를 쓴다(까디르 4752).
 async function drop(activeId: string, overId: string, y: number, scrolled = 0) {
   await move(activeId, overId, y, scrolled);
   await act(async () => { pointerAt(y); await handlers.end?.(dragEvent(activeId, overId, y, scrolled)); });
+  dragging = false;
 }
 const zones = () => Array.from(container.querySelectorAll<HTMLElement>('[data-drop-zone]')).map((b) => `${b.dataset.docId}:${b.dataset.dropZone}`);
 const lines = () => Array.from(container.querySelectorAll<HTMLElement>('[data-drop-line]'));
@@ -222,6 +234,7 @@ describe('DocTree 끌어 떨굼 — 상자 = 행 · 표시 = 결과(story #4366)
   it('⭐같은 포인터면 복제 사각형(translated)이 어디 있든 같은 구역 · 같은 요청', async () => {
     const { onMove } = await mount();
     const y = rowTop('F') + ROW / 2;
+    await begin('a');
     for (const translatedTop of [y - 200, y + 36, y + 500]) {
       await act(async () => { pointerAt(y); handlers.move?.(dragEvent('a', 'F', y, 0, translatedTop)); });
       expect(zones()).toEqual(['F:into']);
@@ -259,6 +272,24 @@ describe('DocTree 끌어 떨굼 — 상자 = 행 · 표시 = 결과(story #4366)
     const shifted = { ...dragEvent('a', 'F', y), over: { id: 'F', rect: { ...dropBoxRect('F'), top: dropBoxRect('F').top - 14, bottom: dropBoxRect('F').bottom - 14 } } };
     await act(async () => { pointerAt(y); await handlers.end?.(shifted); });
     expect(onMove).toHaveBeenCalledWith({ docId: 'a', parentId: 'F' });
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  // 까디르 · codex(4752 실물 하네스 100회 중 4) — 놓은 뒤 드롭 표시가 남았다: dnd-kit은 onDragMove/onDragOver를 렌더 뒤 effect에서 부르는데
+  // (core.esm.js 3210 · 3244) pointerup의 동기 정리 **뒤에** 앞 렌더의 effect가 돌아 표시를 다시 채웠다. 옛 코드(끄는 중 가드 없음) → RED.
+  it('⭐놓은 뒤 늦게 온 move/over는 표시를 되살리지 않고 · 다음 놓기에도 옛 표시가 새지 않는다', async () => {
+    const { onMove, onReorder } = await mount();
+    const y = rowTop('F') + ROW / 2;
+    await drop('a', 'F', y);
+    expect(onMove).toHaveBeenCalledTimes(1);
+    expect(zones()).toEqual([]);
+    // 늦은 effect: 놓기 전 마지막 이벤트가 한 번 더 온다(move · over 둘 다 같은 처리기).
+    await act(async () => { pointerAt(y); handlers.move?.(dragEvent('a', 'F', y)); });
+    expect(zones()).toEqual([]);
+    expect(lines()).toHaveLength(0);
+    // 그 뒤 표시 없이 놓이는 끝(예: 취소 뒤 놓기)이 옛 표시로 저장하지 않는다.
+    await act(async () => { pointerAt(y); await handlers.end?.(dragEvent('a', 'F', y)); });
+    expect(onMove).toHaveBeenCalledTimes(1);
     expect(onReorder).not.toHaveBeenCalled();
   });
 

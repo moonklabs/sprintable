@@ -668,21 +668,29 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     return plan ? { target: { overId: overDoc.id, zone }, plan } : null;
   }, [docs]);
 
+  // 까디르 · codex(4752) — 놓은 뒤 드롭 표시가 남았다(100회 중 4 · 다음 끌기 전까지). dnd-kit이 onDragMove/onDragOver를 렌더 뒤 effect에서
+  // 부르는데(core.esm.js 3210 · 3244), pointerup에서 동기로 clearDrag한 **뒤에** 그 앞 렌더의 effect가 돌아 표시와 ref를 다시 채웠다.
+  // 끄는 중인지는 state(activeId)가 아니라 ref로 본다 — 늦게 도는 effect가 옛 클로저를 들고 있어도 지금 값을 읽는다.
+  const draggingRef = useRef(false);
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    draggingRef.current = true;
     pointerRef.current = null;
     drawnTargetRef.current = null;
+    setDropTarget(null);
     setActiveId(String(event.active.id));
   }, []);
 
   // dnd-kit은 포인터가 움직이면 onDragMove를, 겨눈 행이 바뀌면 onDragOver를 따로 부른다 — onDragMove만 들으면 행이 바뀐 직후 표시가
   // 한 걸음 늦어(실 브라우저: 폴더 아래 가장자리에서 «다음 행 앞»을 보이고 떨굼은 «폴더 뒤») 표시와 결과가 갈렸다. 둘 다 같은 판정.
   const handleDragMove = useCallback((event: DragMoveEvent | DragOverEvent) => {
-    if (!dragEnabled) return;
+    if (!dragEnabled || !draggingRef.current) return;
     const next = resolveDrop(event)?.target ?? null;
     setDropTarget((prev) => (prev?.overId === next?.overId && prev?.zone === next?.zone ? prev : next));
   }, [dragEnabled, resolveDrop]);
 
   const clearDrag = useCallback(() => {
+    draggingRef.current = false;
+    drawnTargetRef.current = null;
     setActiveId(null);
     setDropTarget(null);
   }, []);
