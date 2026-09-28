@@ -85,6 +85,9 @@ export function portalContainerFor(anchor: Element | null): Element | null {
 
 export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, trackAnchor = false, style, children, ...rest }: AnchoredPopoverProps) {
   const elRef = useRef<HTMLDivElement | null>(null);
+  // story #4373(까디르 실측) — 마지막으로 둔 뒤 실제로 보인 자리. trackAnchor가 «트리거는 그대로인데 담는 블록만 바뀐»(시트 애니 끝 프레임에
+  // translate가 빠짐) 경우를 이 값과의 어긋남으로 잡는다.
+  const shownRef = useRef<{ left: number; top: number } | null>(null);
   // 여는 순간엔 트리거가 이미 붙어 있다(열림 = 트리거를 누른 뒤) — 첫 그림부터 제자리(팝업 안)에 그려야 연 뒤 한 번 도는 효과
   // (첫 항목 초점 · 칸 휠 리스너)가 요소를 본다. 같은 커밋에 트리거가 늦게 붙는 드문 순서면 body로 먼저 그리고 레이아웃 단계에서 바로잡는다.
   const [container, setContainer] = useState<Element | null>(() => portalContainerFor(anchorRef.current));
@@ -121,6 +124,8 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
     el.dataset.side = v.side;
     el.style.visibility = '';
     clampIntoViewX(el);
+    const shown = el.getBoundingClientRect();
+    shownRef.current = { left: shown.left, top: shown.top };
   }, [anchorRef, gap, offsetX, align]);
 
   // 같은 커밋에서 트리거 wrapper의 ref가 이 요소보다 **늦게** 붙을 수 있다(자식 ref가 먼저) → 붙는 순간엔 숨겨 두고,
@@ -151,7 +156,10 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
       const r = anchorRef.current?.getBoundingClientRect();
       const own = elRef.current;
       const key = r ? `${r.left},${r.top},${r.width},${r.height}|${own?.offsetWidth ?? 0},${own?.offsetHeight ?? 0}` : '';
-      if (key !== last) {
+      // 트리거 · 자기 크기가 그대로여도, 담는 블록이 움직이면(시트 여는 도중 translate가 붙었다 빠짐) 실제 자리가 어긋난다 — 재서 다시 둔다.
+      const shown = own && shownRef.current ? own.getBoundingClientRect() : null;
+      const drifted = !!shown && (Math.abs(shown.left - shownRef.current!.left) >= 0.5 || Math.abs(shown.top - shownRef.current!.top) >= 0.5);
+      if (key !== last || drifted) {
         last = key;
         place();
       }

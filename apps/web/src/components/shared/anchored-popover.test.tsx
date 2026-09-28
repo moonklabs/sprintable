@@ -365,6 +365,28 @@ describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
     expect(visible().top).toBe(68);    // 트리거 아래 8px
   });
 
+  it('trackAnchor: 트리거는 그대로인데 담는 블록만 바뀌어도(시트 애니 끝 translate 0 → none) 다음 프레임에 재서 다시 둔다', async () => {
+    mockBrowserLikeRects();
+    function TrackHarness() {
+      const anchorRef = useRef<HTMLDivElement>(null);
+      return (
+        <div role="dialog" id="modal" data-modal-popup="" data-block-offset={JSON.stringify({ left: 40, top: 0 })}>
+          <div id="anchor" ref={anchorRef} />
+          <AnchoredPopover anchorRef={anchorRef} trackAnchor id="pop" className="w-56">안내</AnchoredPopover>
+        </div>
+      );
+    }
+    act(() => { root.render(<TrackHarness />); });
+    await act(async () => { for (let i = 0; i < 2; i += 1) await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    expect(visible().left).toBe(100);
+    // 담는 블록이 사라짐(팝업 translate none) — 트리거 rect · 자기 크기는 그대로라 예전 trackAnchor(키 = 트리거 · 크기)는 다시 두지 않았다.
+    document.getElementById('modal')!.setAttribute('data-block-offset', JSON.stringify({ left: 0, top: 0 }));
+    expect(visible().left).toBe(60);  // 되민 값(100 − 40)이 그대로 남아 40px 어긋남
+    await act(async () => { for (let i = 0; i < 2; i += 1) await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    expect(visible().left).toBe(100);
+    expect(visible().top).toBe(68);
+  });
+
   it('시트 미끄러짐(여는 도중) — 담는 블록이 움직여도 매 프레임 재서 트리거에 붙는다', async () => {
     mockBrowserLikeRects();
     act(() => { root.render(<ModalHarness slot="modal" blockOffset={{ left: 40, top: 0 }} />); });
