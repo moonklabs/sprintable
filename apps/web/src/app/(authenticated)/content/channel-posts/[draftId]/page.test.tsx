@@ -261,6 +261,8 @@ function stubFetch(opts: {
   videoCodecs?: string[];
   onVideoUploadUrl?: (body: unknown) => { status: number; body: unknown };
   onVideoConfirm?: (body: unknown) => { status: number; body: unknown };
+  /** story #4336 PR2 — 영상 확정 작업 상태 보기를 이 약속이 풀릴 때까지 붙잡는다(느린 작업 흉내). */
+  videoJobGate?: Promise<void>;
   // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 이어쓰기
   // 상한(image_max_count와 동형 관례). 기본값 0=미지원(기존 시나리오 전부 회귀
   // 0 — 목록 UI 자체가 안 뜬다).
@@ -474,6 +476,7 @@ function stubFetch(opts: {
       }
       const jobMatch = url.match(new RegExp(`^/api/organizations/${ORG_ID}/background-jobs/([^/]+)$`));
       if (jobMatch && (!init || init.method === undefined || init.method === 'GET')) {
+        if (opts.videoJobGate) await opts.videoJobGate;
         const video = confirmedVideoJobs.get(jobMatch[1] as string);
         return {
           ok: true, status: 200,
@@ -5812,6 +5815,37 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
     expect(container.querySelector('[data-testid="channel-post-video-attach-trigger"]')?.textContent).toBe('영상 선택');
     expect(container.querySelector('[data-testid="channel-post-image-attach"] span')?.textContent).toBe('이미지 첨부');
+  });
+
+  // story #4336 PR2(PO 05:22Z · 유나) — 영상 확정 작업을 10초 넘게 기다리면 같은 진행 줄에 «시간이 걸리고 있어요 — 창을 닫아도 계속 처리돼요».
+  it('⭐영상 확인을 10초 넘게 기다리면 같은 줄에 «창을 닫아도 계속 처리돼요» · 10초 전엔 없음 · 끝나면 줄째 사라짐', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let release: () => void = () => {};
+      const videoJobGate = new Promise<void>((resolve) => { release = resolve; });
+      stubXhrForVideoUpload();
+      stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1, videoJobGate });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: [new File(['x'], 'a.mp4', { type: 'video/mp4' })] });
+      await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+      await flush();
+      const K = koMessages.content as Record<string, string>;
+      const line = () => container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.textContent ?? null;
+      expect(line()).toBe(K.channelPostsImageConfirming);
+      await act(async () => { vi.advanceTimersByTime(9_000); });
+      expect(line()).toBe(K.channelPostsImageConfirming);
+      await act(async () => { vi.advanceTimersByTime(1_500); });
+      expect(line()).toBe(`${K.channelPostsImageConfirming} ${K.channelPostsVideoConfirmSlow}`);
+      await act(async () => { release(); });
+      await flush();
+      await flush();
+      expect(line()).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-video-preview"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('⭐업로드 왕복 — requesting_url→uploading(%)→confirming→성공, video 상태 반영+커버 라벨 전환', async () => {

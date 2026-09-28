@@ -23,7 +23,7 @@ import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { blockedByConnection, blockedReason, deriveFailureAction, WORKER_TICK_BUDGET_TOO_SMALL, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { isAwaitingPublishWorker, PUBLISH_WORKER_POLL_MS } from '@/lib/publish-worker-poll';
-import { waitForBackgroundJob, type BackgroundJob } from '@/lib/background-job';
+import { SLOW_JOB_NOTICE_MS, waitForBackgroundJob, type BackgroundJob } from '@/lib/background-job';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { BoostRequestDialog } from '@/components/content/boost-request-dialog';
@@ -935,7 +935,8 @@ export default function ChannelPostEditPage() {
     | { phase: 'idle' }
     | { phase: 'requesting_url' }
     | { phase: 'uploading'; progress: number }
-    | { phase: 'confirming' }
+    // story #4336 PR2 — slow = 작업을 SLOW_JOB_NOTICE_MS 넘게 기다리는 중(같은 줄에 «창을 닫아도 계속 처리돼요»).
+    | { phase: 'confirming'; slow?: boolean }
     | { phase: 'error'; text: string; raw?: string }
   >({ phase: 'idle' });
   const videoFileInputRef = useRef<HTMLInputElement>(null);
@@ -1693,9 +1694,13 @@ export default function ChannelPostEditPage() {
       // 결과(영상)를 받는다. 실패 본문은 예전 확정 응답과 같은 모양이라 같은 문장을 고른다. 화면을 떠나면 묻기를 멈춘다(워커는 계속 — 다시 오면 초안에 반영돼 있음).
       const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: BackgroundJob<{ video?: ChannelPostVideoResponse }> } | null;
       const queued = confirmJson?.data;
+      const slowTimer = setTimeout(() => {
+        setVideoUploadStatus((prev) => (prev.phase === 'confirming' ? { phase: 'confirming', slow: true } : prev));
+      }, SLOW_JOB_NOTICE_MS);
       const finished = queued?.id
         ? await waitForBackgroundJob<{ video?: ChannelPostVideoResponse }>(orgId, queued.id, { signal: videoJobAbortRef.current.signal })
-        : null;
+            .finally(() => clearTimeout(slowTimer))
+        : (clearTimeout(slowTimer), null);
       if (queued?.id && finished === null) return;
       if (finished?.status === 'failed') {
         const info = parseSitePostApiError({ detail: finished.error?.detail });
@@ -3459,7 +3464,9 @@ export default function ChannelPostEditPage() {
                 ? t('channelPostsImageUploadRequestingUrl')
                 : videoUploadStatus.phase === 'uploading'
                   ? t('channelPostsVideoUploading', { pct: videoUploadStatus.progress })
-                  : t('channelPostsImageConfirming')}
+                  : videoUploadStatus.phase === 'confirming' && videoUploadStatus.slow
+                    ? `${t('channelPostsImageConfirming')} ${t('channelPostsVideoConfirmSlow')}`
+                    : t('channelPostsImageConfirming')}
             </p>
           ) : null}
           {videoUploadStatus.phase === 'error' ? (
