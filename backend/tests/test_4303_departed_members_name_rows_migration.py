@@ -164,7 +164,9 @@ def test_upgrade_creates_name_only_rows_for_departed_and_downgrade_removes_only_
             before_total = c.execute(sa.text("SELECT count(*) FROM members")).scalar_one()
         assert all(ids[k] not in before for k in targets)
 
-        started = datetime.now(UTC)
+        # 까디르(04:03Z) — 호스트 시계와 DB 시계가 몇 ms 어긋나 «마이그 시각 ≥ started»가 깨졌다 → 기준도 DB 시계(업의 now()와 같은 시계).
+        with eng.begin() as c:
+            started = c.execute(sa.text("SELECT clock_timestamp()")).scalar_one()
         _run(eng, mig, "upgrade")
         with eng.begin() as c:
             after = _members(c, watched)

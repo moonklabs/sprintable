@@ -156,16 +156,31 @@ async def test_pickers_and_rosters_never_carry_departed_members():
 
 async def _seed_name_rows(session, orgs):
     """story #4303(C안 · 마이그 0414) — 0075가 빠뜨린 떠난 사람의 이름 행(members.id = 옛 legacy id · user_id NULL · deleted_at 있음)을
-    조직 A · B에 하나씩, 그리고 0075가 사용자 없는 옛 행에 id 문자열을 name으로 넣은 모양(user_id NULL · deleted_at NULL)을 A에 하나."""
+    조직 A · B에 하나씩(각각 같은 id의 team_members_legacy 휴먼 행과 함께), 0075가 사용자 없는 옛 행에 id 문자열을 name으로 넣은 모양
+    (user_id NULL · deleted_at NULL)을 A에 하나, 그리고 까디르 codex(04:03Z) — **이름 행과 같은 모양인데 옛 사람 id가 아닌** 행(계정 삭제 뒤
+    users가 지워져 FK SET NULL · name에 이메일이 남은 경우)을 A에 하나."""
+    from sqlalchemy import text
+
     from app.models.member import Member
 
-    ids = {"name_row": uuid.uuid4(), "other_name_row": uuid.uuid4(), "orphan_user_row": uuid.uuid4()}
+    ids = {"name_row": uuid.uuid4(), "other_name_row": uuid.uuid4(), "orphan_user_row": uuid.uuid4(), "not_legacy_row": uuid.uuid4()}
     session.add(Member(id=ids["name_row"], org_id=orgs["a"], type="human", user_id=None, name="옛 떠난 사람",
                        is_active=False, deleted_at=_LEFT_AT))
     session.add(Member(id=ids["other_name_row"], org_id=orgs["b"], type="human", user_id=None, name="다른 조직 옛 사람",
                        is_active=False, deleted_at=_LEFT_AT))
     session.add(Member(id=ids["orphan_user_row"], org_id=orgs["a"], type="human", user_id=None,
                        name=str(ids["orphan_user_row"]), is_active=True))
+    session.add(Member(id=ids["not_legacy_row"], org_id=orgs["a"], type="human", user_id=None,
+                       name="deleted-user@example.test", is_active=False, deleted_at=_LEFT_AT))
+    await session.commit()
+    # 0414가 이름 행을 만드는 기준 = 같은 id의 옛 사람 행(team_members_legacy · 휴먼). 이름 행 둘만 짝이 있다.
+    for key, org_key in (("name_row", "a"), ("other_name_row", "b")):
+        project_id = uuid.uuid4()
+        await session.execute(text("INSERT INTO projects (id, org_id, name) VALUES (:id, :org, 'legacy')"), {"id": project_id, "org": orgs[org_key]})
+        await session.execute(text(
+            "INSERT INTO team_members_legacy (id, project_id, org_id, type, user_id, name) "
+            "VALUES (:id, :p, :o, 'human', (SELECT id FROM users LIMIT 1), 'legacy name')"
+        ), {"id": ids[key], "p": project_id, "o": orgs[org_key]})
     await session.commit()
     return ids
 
@@ -185,7 +200,9 @@ async def test_name_rows_resolve_in_org_names_and_lookup_only():
         async with Session() as s:
             orgs, ids = await _seed(s)
             rows_ = await _seed_name_rows(s, orgs)
-        name_row, other_row, orphan_row = (str(rows_[k]) for k in ("name_row", "other_name_row", "orphan_user_row"))
+        name_row, other_row, orphan_row, not_legacy = (
+            str(rows_[k]) for k in ("name_row", "other_name_row", "orphan_user_row", "not_legacy_row")
+        )
 
         names = {r["id"]: r for r in await _get(Session, orgs, ids, "/api/v2/team-members?include_inactive=true")}
         row = names[name_row]
@@ -193,6 +210,9 @@ async def test_name_rows_resolve_in_org_names_and_lookup_only():
         assert (row["user_id"], row["avatar_url"], row["role"]) == (None, None, "member")
         assert other_row not in names
         assert orphan_row not in names
+        # 같은 모양이어도 옛 사람 id가 아니면 로스터에 없다 — 이메일이 이름 자리로 나가지 않는다.
+        assert not_legacy not in names
+        assert "deleted-user@example.test" not in str(names)
         # 4303 1안(org_members 떠난 사람)도 그대로 — 두 갈래가 함께 선다.
         assert names[str(ids["departed"])]["name"] == "떠난 사람"
 
@@ -203,10 +223,11 @@ async def test_name_rows_resolve_in_org_names_and_lookup_only():
             assert name_row not in seen and other_row not in seen, path
 
         async with Session() as s:
-            resolved = await _lookup_members_by_ids_anchor({rows_["name_row"], rows_["orphan_user_row"]}, s)
+            resolved = await _lookup_members_by_ids_anchor({rows_["name_row"], rows_["orphan_user_row"], rows_["not_legacy_row"]}, s)
         hit = resolved[rows_["name_row"]]
         assert (hit.name, hit.type, hit.user_id, hit.resolved) == ("옛 떠난 사람", "human", None, True)
         assert hit.org_id == orgs["a"]
         assert resolved[rows_["orphan_user_row"]].name is None
+        assert resolved[rows_["not_legacy_row"]].name is None
     finally:
         await engine.dispose()
