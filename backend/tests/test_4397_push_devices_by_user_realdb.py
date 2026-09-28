@@ -258,29 +258,39 @@ async def test_unregister_rejects_a_bad_body(monkeypatch, body):
 
 
 async def test_unregister_cap_is_per_real_client_ip(monkeypatch):
-    """PO 18:10Z ① — behind Cloudflare → Cloud Run the socket peer is the front end; the key is CF-Connecting-IP (then the
-    first X-Forwarded-For entry), so different callers are counted apart."""
+    """PO 18:10Z ① + story #4398 — 키는 공용 `client_ip()`: 프런트(비밀 일치)가 넘긴 사용자 IP → Cloud Run 앞단이 붙인 접속 주소
+    (XFF 오른쪽 끝). 서로 다른 사용자는 따로 세고, 직통 요청이 꾸민 CF-Connecting-IP로는 상한을 못 피한다."""
+    from app.core.client_ip import CLIENT_IP_HEADER, EDGE_KEY_HEADER
+    from app.core.config import settings
+
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
+    monkeypatch.setattr(settings, "edge_client_ip_secret", "edge-secret")
     monkeypatch.setattr(router_module, "_unregister_limiter", MovingWindowRateLimiter(MemoryStorage()))
     async with _env(monkeypatch) as (Session, _ids):
         app = _app(Session)
         body = {"expo_push_token": _token()}
+        via_front = {CLIENT_IP_HEADER: "203.0.113.1", EDGE_KEY_HEADER: "edge-secret", "x-forwarded-for": "34.1.2.3"}
         for _ in range(router_module.UNREGISTER_PER_HOUR):
-            assert (await _post_unregister(app, body, {"cf-connecting-ip": "203.0.113.1"})).status_code == 204
-        over = await _post_unregister(app, body, {"cf-connecting-ip": "203.0.113.1"})
+            assert (await _post_unregister(app, body, via_front)).status_code == 204
+        over = await _post_unregister(app, body, via_front)
         assert over.status_code == 429 and over.headers["Retry-After"] == "3600"
-        assert (await _post_unregister(app, body, {"cf-connecting-ip": "203.0.113.2"})).status_code == 204
-        assert (await _post_unregister(app, body, {"x-forwarded-for": "198.51.100.7, 10.0.0.1"})).status_code == 204
+        other_user = {**via_front, CLIENT_IP_HEADER: "203.0.113.2"}
+        assert (await _post_unregister(app, body, other_user)).status_code == 204
+        mobile_direct = {"x-forwarded-for": "198.51.100.7"}  # 모바일 네이티브 → 백엔드 직통
+        assert (await _post_unregister(app, body, mobile_direct)).status_code == 204
+        # 직통 공격자가 CF-Connecting-IP · XFF 앞 칸을 바꿔 가며 보내도 접속 주소(오른쪽 끝) 하나로 센다
+        for n in range(router_module.UNREGISTER_PER_HOUR - 1):
+            forged = {"cf-connecting-ip": f"192.0.2.{n}", "x-forwarded-for": f"192.0.2.{n}, 198.51.100.7"}
+            assert (await _post_unregister(app, body, forged)).status_code == 204
+        forged = {"cf-connecting-ip": "192.0.2.250", "x-forwarded-for": "192.0.2.250, 198.51.100.7"}
+        assert (await _post_unregister(app, body, forged)).status_code == 429
 
 
-def test_client_ip_prefers_cf_then_first_forwarded_entry():
-    from starlette.requests import Request
+def test_unregister_key_uses_the_shared_client_ip_helper():
+    """story #4398 — 받이만의 IP 규칙을 두지 않는다(CF-Connecting-IP를 그대로 믿던 자체 헬퍼를 걷음)."""
+    from app.core import client_ip as shared
 
-    def req(headers):
-        return Request({"type": "http", "headers": [(k.encode(), v.encode()) for k, v in headers], "client": ("10.1.1.1", 1)})
-
-    assert router_module.client_ip(req([("cf-connecting-ip", "203.0.113.9"), ("x-forwarded-for", "1.1.1.1")])) == "203.0.113.9"
-    assert router_module.client_ip(req([("x-forwarded-for", "198.51.100.7, 10.0.0.1")])) == "198.51.100.7"
-    assert router_module.client_ip(req([])) == "10.1.1.1"
+    assert router_module.client_ip is shared.client_ip
 
 
 # ─── 0418 backfill ───────────────────────────────────────────────────────────────────────────────────────────────

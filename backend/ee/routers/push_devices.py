@@ -23,6 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+# story #4398 — 요청 상한이 셀 사용자 IP는 한 곳(`app.core.client_ip`)에서 정한다: 프런트가 비밀과 함께 넘긴 값 → Cloud Run 앞단이
+# 붙인 접속 주소(XFF 오른쪽 끝) → 소켓. CF-Connecting-IP · XFF 앞 칸은 run.app 직통에서 꾸밀 수 있어 받이가 직접 믿지 않는다.
+from app.core.client_ip import client_ip
 from app.dependencies.database import get_db
 from app.repositories.push_device import PushDeviceRepository
 from app.schemas.push_device import (
@@ -50,19 +53,6 @@ _unregister_rate = RateLimitItemPerHour(UNREGISTER_PER_HOUR)
 _unregister_limiter = MovingWindowRateLimiter(
     storage_from_string(settings.redis_url or "memory://", wrap_exceptions=True),
 )
-
-
-def client_ip(request: Request) -> str:
-    """The caller's real IP behind Cloudflare → Cloud Run (and the web BFF, which forwards these headers): CF-Connecting-IP
-    (set by Cloudflare), else the first X-Forwarded-For entry, else the socket peer. `request.client.host` alone is the front
-    end's address there, which would put every caller in one bucket."""
-    cf = (request.headers.get("cf-connecting-ip") or "").strip()
-    if cf:
-        return cf
-    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if xff:
-        return xff
-    return request.client.host if request.client else "unknown"
 
 
 def _require_ee() -> None:
