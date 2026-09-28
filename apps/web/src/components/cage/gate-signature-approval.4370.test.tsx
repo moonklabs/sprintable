@@ -159,3 +159,18 @@ describe('GateSignatureApproval — onCancel(보이는 «취소»)는 사유 초
   });
 });
 
+// PO 판단(4753) — 고위험 서명 블록(게이트 페이지 · 작업 목록 패널)엔 «취소»가 없다: 늘 보이는 칸이라 글을 직접 지우는 것이 버리는 길.
+// 그 «직접 지움»이 진짜 버림인지 고정 — 칸을 비우면 저장된 초안도 사라져, 다시 그려도(새로고침 · 떠났다 옴) 되살아나지 않는다.
+describe('GateSignatureApproval — 사유 칸을 직접 비우면 초안도 사라진다(story #4370 · PO 판단)', () => {
+  it('쓰고 → 칸을 비움 → 저장소에 이 게이트 초안 키 없음 · 다시 그려도 빈 칸', async () => {
+    await mount(gate());
+    await type('쓰다 만 사유');
+    expect(Object.keys(window.sessionStorage).some((k) => k.includes('gate-signature') && k.includes('gate-1'))).toBe(true);
+    await type('');
+    expect(Object.keys(window.sessionStorage).some((k) => k.includes('gate-signature') && k.includes('gate-1'))).toBe(false);
+    await unmountLayer();
+    await mount(gate());
+    expect(field()!.value).toBe('');
+  });
+});
+
