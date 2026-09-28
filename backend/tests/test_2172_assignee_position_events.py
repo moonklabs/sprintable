@@ -52,6 +52,7 @@ def _story(assignee_id=None, position=None, **overrides):
         acceptance_criteria=None, position=position, success_hypothesis=None, metric_definition=None,
         measure_after=None, outcome_status="n_a", outcome_result=None, is_excluded=False,
         created_at=now, updated_at=now,
+        deleted_at=None,  # story #4299: trust 수집이 읽은 Story 행의 삭제 여부를 본다(실 Story 행과 같은 모양).
     )
     base.update(overrides)
     return SimpleNamespace(**base)

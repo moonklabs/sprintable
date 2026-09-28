@@ -88,42 +88,25 @@ _STALLED_EXCLUDED_STATUSES = ("done", "backlog")
 _STALLED_THRESHOLD_HOURS = 48
 
 
-async def _batch_story_entered_in_review_at(
+async def _batch_status_activity_maxes(
     session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, datetime]:
-    """merge_ready 신호원 — Story가 **마지막으로** in-review로 전이한 시각(StoryActivity 감사
-    로그 최신 행, #2249). best-effort — story_status_events.emit_story_status_changed가
-    actor_id 없으면 행을 안 남긴다(시스템 트리거 시 유실 가능, 알려진 한계)."""
+) -> tuple[dict[uuid.UUID, datetime], dict[uuid.UUID, datetime]]:
+    """StoryActivity 감사 로그(#2249)의 status_changed 행에서 story마다 두 시각을 한 SQL로 읽는다(story #4299 —
+    예전엔 같은 행을 두 번 훑었다).
+
+    - in-review 맵: merge_ready 신호원 — **마지막으로** in-review로 전이한 시각. best-effort —
+      story_status_events.emit_story_status_changed가 actor_id 없으면 행을 안 남긴다(시스템 트리거 시 유실 가능, 알려진 한계).
+    - 최신 변화 맵: story #2250 stalled 신호원 — `new_value` 필터 없이 "가장 최근 상태 변화" 그 자체(㉠좁은 정의,
+      #2250 §"측정 준비" 오르테가군 확定).
+
+    행이 없는 story는 맵에서 빠진다 — "언제 마지막으로 바뀌었는지 모른다"는 뜻이라 호출부가 None 취급한다
+    (created_at 등으로 대체해 추측하지 않는다 — blocked 신호와 같은 "모르면 안 준다" 원칙)."""
     if not story_ids:
-        return {}
+        return {}, {}
+    in_review_max = func.max(StoryActivity.created_at).filter(StoryActivity.new_value == "in-review")
     rows = (
         await session.execute(
-            select(StoryActivity.story_id, func.max(StoryActivity.created_at))
-            .where(
-                StoryActivity.org_id == org_id,
-                StoryActivity.story_id.in_(story_ids),
-                StoryActivity.activity_type == "status_changed",
-                StoryActivity.new_value == "in-review",
-            )
-            .group_by(StoryActivity.story_id)
-        )
-    ).all()
-    return {story_id: entered_at for story_id, entered_at in rows}
-
-
-async def _batch_latest_status_changed_at(
-    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, datetime]:
-    """story #2250 stalled 신호원 — `_batch_story_entered_in_review_at`과 동형이나 `new_value`
-    필터가 없다(어느 상태로 전이했든 "가장 최근 상태 변화" 그 자체가 관심사 — ㉠좁은 정의,
-    #2250 §"측정 준비" 오르테가군 확定). 행이 아예 없는 story는 반환 dict에서 빠진다 —
-    "그 story는 언제 마지막으로 바뀌었는지 모른다"는 뜻이라 호출부가 별도로 None 취급한다
-    (created_at 등으로 대체해 추측하지 않는다 — blocked 신호와 동일 "모르면 안 준다" 원칙)."""
-    if not story_ids:
-        return {}
-    rows = (
-        await session.execute(
-            select(StoryActivity.story_id, func.max(StoryActivity.created_at))
+            select(StoryActivity.story_id, in_review_max, func.max(StoryActivity.created_at))
             .where(
                 StoryActivity.org_id == org_id,
                 StoryActivity.story_id.in_(story_ids),
@@ -132,8 +115,9 @@ async def _batch_latest_status_changed_at(
             .group_by(StoryActivity.story_id)
         )
     ).all()
-    return {story_id: latest for story_id, latest in rows}
-
+    entered_in_review = {sid: at for sid, at, _ in rows if at is not None}
+    latest_changed = {sid: at for sid, _, at in rows}
+    return entered_in_review, latest_changed
 
 class AttentionItem(BaseModel):
     # P0-04(doc trust-pipeline-be-design §6): AQ 5신호 계약(attention-queue-fe-spec-handoff §6).
@@ -285,7 +269,22 @@ async def _compute_attention_for_project(
     verified_map = await batch_human_verified(session, review_ids, "story")
     verify_fail_ids = await batch_verify_fail(session, org_id, review_ids)
     blocked_ids = await batch_unresolved_blocker(session, org_id, review_ids)
-    entered_in_review_map = await _batch_story_entered_in_review_at(session, org_id, review_ids)
+    # ⑥ stalled 모집단(아래에서 씀)을 여기서 먼저 읽는다 — story #4299: ③의 in-review 진입 시각과 ⑥의 마지막
+    # 상태 변화가 같은 status_changed 행이라, 두 집합을 합쳐 한 SQL로 읽는다(값은 story마다 따로 읽던 것과 같다).
+    stalled_population_rows = (
+        await session.execute(
+            select(Story.id, Story.title, Story.assignee_id)
+            .where(
+                Story.org_id == org_id,
+                Story.project_id == project_id,
+                Story.status.not_in(_STALLED_EXCLUDED_STATUSES),
+                Story.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    entered_in_review_map, latest_changed_map = await _batch_status_activity_maxes(
+        session, org_id, list(dict.fromkeys([*review_ids, *(r[0] for r in stalled_population_rows)])),
+    )
     for story_id, title in review_rows:
         if story_id in verified_map and story_id not in verify_fail_ids and story_id not in blocked_ids:
             _entered_at = entered_in_review_map.get(story_id)
@@ -372,24 +371,10 @@ async def _compute_attention_for_project(
     # 위에서 이미 만든 항목의 story_id는 후보에서 뺀다 — 같은 story가 stalled와 다른 kind로
     # 동시에 뜨면 "할 일 목록"이 "사정 나열"이 된다(유나 규칙, 모듈 docstring 참조).
     _already_signaled_ids = {item.story_id for item in items if item.story_id is not None}
-    stalled_population_rows = (
-        await session.execute(
-            select(Story.id, Story.title, Story.assignee_id)
-            .where(
-                Story.org_id == org_id,
-                Story.project_id == project_id,
-                Story.status.not_in(_STALLED_EXCLUDED_STATUSES),
-                Story.deleted_at.is_(None),
-            )
-        )
-    ).all()
     stalled_candidates = [
         (story_id, title, assignee_id) for story_id, title, assignee_id in stalled_population_rows
         if story_id not in _already_signaled_ids
     ]
-    latest_changed_map = await _batch_latest_status_changed_at(
-        session, org_id, [story_id for story_id, _, _ in stalled_candidates],
-    )
     _now = datetime.now(timezone.utc)
     stalled_items: list[AttentionItem] = []
     for story_id, title, assignee_id in stalled_candidates:

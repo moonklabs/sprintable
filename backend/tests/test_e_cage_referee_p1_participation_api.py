@@ -114,7 +114,9 @@ async def test_create_story_with_assignee_auto_creates_participation():
         # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
         # allocate_story_number()(실 DB 쿼리)를 먼저 호출한다 — 서브클래스 레벨을 patch해야
         # mock 세션에 그 호출까지 안 부딪힌다(test_stories.py와 동형 수정).
+        # story #4299: org · project slug가 한 SQL(`.all()` 첫 행에 org slug) — 이 mock의 빈 `.all()`로는 org 행이 없다. slug는 이 테스트 관심 밖.
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.services.entity_slug.resolve_org_and_project_slugs", new=AsyncMock(return_value=("org", {}))), \
              patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock) as mock_upsert:
             mock_create.return_value = story
             async with client as c:

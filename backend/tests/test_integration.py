@@ -58,6 +58,8 @@ async def test_docs_list_via_conftest(test_client, mock_session, project_id, org
     # project_id query → get_project_scoped_org_id 의 project→org 조회. project 가 스코프
     # org(conftest org_id) 소속이어야 cross-org 가드(c6b82459) 통과.
     mock_result.scalar_one_or_none.return_value = org_id
+    # story #4299: project org 조회 · 접근 판정이 한 SQL(project_org_and_access) — 한 행 (org, 접근 여부).
+    mock_result.one.return_value = (org_id, True)
     mock_session.execute = AsyncMock(return_value=mock_result)
 
     # story #2459: get_project_scoped_org_id가 전용 단명 세션(async_session_factory())을
@@ -298,6 +300,8 @@ async def test_members_list_via_conftest_s6(test_client, mock_session, project_i
     # E-SECURITY SEC-S6: list_members가 먼저 project의 실 org_id를 조회해 caller org(=org_id
     # fixture)와 대조한다 — 블랑켓 목이라 이 값을 맞춰야 그 가드를 통과한다.
     mock_result.scalar_one_or_none.return_value = org_id
+    # story #4299: project org 조회 · 접근 판정이 한 SQL(project_org_and_access) — 한 행 (org, 접근 여부).
+    mock_result.one.return_value = (org_id, True)
     mock_session.execute = AsyncMock(return_value=mock_result)
 
     resp = await test_client.get(f"/api/v2/members?project_id={project_id}")

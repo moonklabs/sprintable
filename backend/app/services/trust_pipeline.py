@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.dependency import ItemDependency
+from app.models.evidence import Evidence
 from app.models.gate import Gate
 from app.models.pm import Story
 from app.models.pull_request_story_link import PullRequestStoryLink
@@ -170,7 +171,8 @@ async def batch_scope_violation(
 
 
 async def batch_trust_facts(
-    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID]
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
+    *, loaded: list[Story] | None = None, verified_map: dict[uuid.UUID, Evidence] | None = None,
 ) -> dict[uuid.UUID, TrustFacts]:
     """N개 story의 현재 trust facts를 실시간 파생(신규 쓰기 0 — 순수 조회, 고정 6쿼리 — story
     수와 무관). story #2933 H1 — `GET /stories`(보드 주경로, 최대 limit=2000)에 story별 루프로
@@ -178,17 +180,27 @@ async def batch_trust_facts(
     포함) org가 다른 story_id는 반환 dict에서 조용히 빠진다(그 자리는 呼출부가 None 취급)."""
     if not story_ids:
         return {}
-    rows = (
-        await session.execute(
-            select(Story.id, Story.status, Story.project_id).where(
-                Story.id.in_(story_ids), Story.org_id == org_id, Story.deleted_at.is_(None)
+    if loaded is not None:
+        # story #4299: 호출부가 이미 읽은 Story 행을 넘기면 같은 조건(org · 삭제 안 됨)을 여기서 걸러 쓴다 — stories 재조회 0.
+        wanted = set(story_ids)
+        rows = [
+            (s.id, s.status, s.project_id) for s in loaded
+            if s.id in wanted and s.org_id == org_id and s.deleted_at is None
+        ]
+    else:
+        rows = (
+            await session.execute(
+                select(Story.id, Story.status, Story.project_id).where(
+                    Story.id.in_(story_ids), Story.org_id == org_id, Story.deleted_at.is_(None)
+                )
             )
-        )
-    ).all()
+        ).all()
     if not rows:
         return {}
     found_ids = [row[0] for row in rows]
-    verified_map = await batch_human_verified(session, found_ids, "story")
+    if verified_map is None:
+        # story #4299: 같은 story 집합의 gate_approval evidence를 이미 읽었으면(`_attach_has_evidence`) 그 맵을 받아 쓴다.
+        verified_map = await batch_human_verified(session, found_ids, "story")
     pending_gate_ids = await batch_pending_human_gate(session, org_id, found_ids)
     verify_fail_ids = await batch_verify_fail(session, org_id, found_ids)
     blocker_ids = await batch_unresolved_blocker(session, org_id, found_ids)

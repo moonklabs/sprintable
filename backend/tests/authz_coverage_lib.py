@@ -71,6 +71,9 @@ PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "has_project_role",
     "resolve_member",
     "accessible_project_ids_in_org",
+    # story #4299 — `get_project_scoped_org_id`가 project org 조회와 has_project_access 판정을 한 SQL로 합친 헬퍼
+    # (같은 `_project_access_predicate` SSOT). 이 이름을 모르면 그 의존성만 쓰는 라우트(loops.list_loops 등)가 «미가드»로 오탐.
+    "project_org_and_access",
     "get_project_role",
     "_assert_story_link_targets_in_project",
     "_assert_doc_parent_in_project",

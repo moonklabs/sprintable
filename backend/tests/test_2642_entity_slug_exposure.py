@@ -226,13 +226,17 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
             repo = StoryRepository(s, org.id)
             org_query_count = 0
             project_query_count = 0
+            slug_statements: list[str] = []
 
             def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
                 nonlocal org_query_count, project_query_count
                 low = statement.lower()
+                if "organizations.slug" in low or "projects.slug" in low:
+                    slug_statements.append(low)
                 if "from organizations" in low and "slug" in low:
                     org_query_count += 1
-                if "from projects" in low and "slug" in low and " in " in low:
+                # story #4299: org · project slug가 한 SQL(organizations LEFT JOIN projects ON projects.id IN (...)).
+                if "projects.slug" in low:
                     project_query_count += 1
 
             event.listen(engine.sync_engine, "before_cursor_execute", _before_cursor_execute)
@@ -257,6 +261,7 @@ async def test_story_list_slug_resolution_is_not_n_plus_1():
             assert all(st.project_slug in ("proj-one", "proj-two") for st in listed)
             assert org_query_count == 1, f"org_slug 쿼리 {org_query_count}회(N+1 의심)"
             assert project_query_count == 1, f"project_slug 배치쿼리 {project_query_count}회(N+1 의심)"
+            assert len(slug_statements) == 1, f"slug를 읽는 SQL {len(slug_statements)}개 — story #4299에서 org · project를 한 SQL로 합쳤다"
     finally:
         await engine.dispose()
 

@@ -251,10 +251,10 @@ async def list_stories(
         accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
         stories = [s for s in stories if s.project_id in accessible]
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
-        await _attach_has_evidence(repo.session, stories)
+        _verified = await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
-        await _attach_trust_stage(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories, verified_map=_verified)
         if response is not None:
             response.headers["X-Result-Count"] = str(len(stories))
         return [StoryResponse.model_validate(s) for s in stories]
@@ -287,10 +287,10 @@ async def list_stories(
             response.headers["X-Total-Count"] = str(total)
             response.headers["X-Result-Count"] = str(len(stories))
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
-        await _attach_has_evidence(repo.session, stories)
+        _verified = await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
-        await _attach_trust_stage(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories, verified_map=_verified)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -318,10 +318,10 @@ async def list_stories(
             if stories:
                 response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
-        await _attach_has_evidence(repo.session, stories)
+        _verified = await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
-        await _attach_trust_stage(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories, verified_map=_verified)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -358,7 +358,7 @@ async def list_stories(
         response.headers["X-Total-Count"] = str(total)
         response.headers["X-Result-Count"] = str(len(stories))
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
-    await _attach_has_evidence(repo.session, stories)
+    _verified = await _attach_has_evidence(repo.session, stories)
     # ⛔일반 함정(2026-07-29, PO 지적 — "측정 경로 ≠ 실행 경로"): `Query(default=None, ...)`
     # 기본값은 「값」이 아니라 「센티널 객체」다 — FastAPI가 실 HTTP 요청 경유에서만 그것을
     # 실제 값(여기선 None)으로 해소한다. 이 라우터 함수를 FastAPI 경유 없이 직접 호출하는
@@ -374,7 +374,7 @@ async def list_stories(
         )
     await _attach_has_hypothesis_or_goal(repo.session, stories)
     await _attach_org_project_slugs(repo.session, repo.org_id, stories)
-    await _attach_trust_stage(repo.session, repo.org_id, stories)
+    await _attach_trust_stage(repo.session, repo.org_id, stories, verified_map=_verified)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -446,7 +446,7 @@ async def _attach_assignee_ids(
     await _attach_agent_delegate_ids(session, stories)
 
 
-async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> None:
+async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> dict | None:
     """E-VERIFY V0-S2(story 3fbd048d) + Claimed vs Verified(doc
     claimed-vs-verified-spec-handoff §3): evidence 있는 story에 has_evidence/self_reported=True
     (transient attr) — 없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정
@@ -454,7 +454,7 @@ async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> N
     human_verified=True+human_verified_by(who)·human_verified_at(when) 세팅.
     _attach_assignee_ids와 동형 배치 패턴."""
     if not stories:
-        return
+        return None
     from app.services.evidence_service import batch_has_evidence, batch_human_verified
 
     story_ids = [s.id for s in stories]
@@ -469,6 +469,8 @@ async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> N
             s.human_verified = True
             s.human_verified_by = verified.created_by
             s.human_verified_at = verified.created_at
+    # story #4299: 같은 맵을 `_attach_trust_stage`가 다시 읽지 않도록 돌려준다.
+    return verified_map
 
 
 async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[Story]) -> None:
@@ -488,7 +490,7 @@ async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[St
 
 
 async def _attach_trust_stage(
-    session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story], verified_map: dict | None = None,
 ) -> None:
     """story #2933 H1(P0-H) — Trust Pipeline 6단계 판정(transient attr, ORM 컬럼 아님·
     story-status-primary-axis 전제 유지). PO 조건①: 판정(derive_trust_stage)뿐 아니라 수집
@@ -504,7 +506,8 @@ async def _attach_trust_stage(
     from app.services.trust_pipeline import batch_trust_facts, derive_trust_stage
 
     story_ids = [s.id for s in stories]
-    facts_map = await batch_trust_facts(session, org_id, story_ids)
+    # story #4299: 이미 읽은 Story 행과(있으면) gate_approval 맵을 넘긴다 — stories 재조회 · evidence 두 번째 읽기 0.
+    facts_map = await batch_trust_facts(session, org_id, story_ids, loaded=stories, verified_map=verified_map)
     for s in stories:
         facts = facts_map.get(s.id)
         if facts is not None:
@@ -520,10 +523,12 @@ async def _attach_org_project_slugs(
     등장하는 distinct project_id 전체를 배치 조회(_attach_assignee_ids와 동형 배치 패턴)."""
     if not stories:
         return
-    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+    from app.services.entity_slug import resolve_org_and_project_slugs
 
-    org_slug = await resolve_org_slug(session, org_id)
-    project_slug_map = await resolve_project_slugs(session, {s.project_id for s in stories})
+    # story #4299: org · project slug를 한 SQL로(요청당 2 → 1).
+    org_slug, project_slug_map = await resolve_org_and_project_slugs(
+        session, org_id, {s.project_id for s in stories},
+    )
     for s in stories:
         s.org_slug = org_slug
         s.project_slug = project_slug_map.get(s.project_id)
@@ -1007,10 +1012,10 @@ async def get_story(
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
-    await _attach_has_evidence(repo.session, [story])
+    _verified = await _attach_has_evidence(repo.session, [story])
     await _attach_has_hypothesis_or_goal(repo.session, [story])
     await _attach_org_project_slugs(repo.session, repo.org_id, [story])
-    await _attach_trust_stage(repo.session, repo.org_id, [story])
+    await _attach_trust_stage(repo.session, repo.org_id, [story], verified_map=_verified)
     return StoryResponse.model_validate(story)
 
 
@@ -2020,7 +2025,7 @@ async def bulk_update_stories(
         await db.refresh(s)
     # refresh 後 transient assignee_ids 세팅(refresh 는 매핑 컬럼만 reload·transient 보존).
     await _attach_assignee_ids(db, repo.org_id, updated)
-    await _attach_has_evidence(db, updated)
+    _verified = await _attach_has_evidence(db, updated)
     await _attach_has_hypothesis_or_goal(db, updated)
     await _attach_org_project_slugs(db, repo.org_id, updated)
     # story #2933 H4 qa:changes(카디르+codex, 2026-08-22) — 이 응답이 이제 보드 드래그(교차
@@ -2030,7 +2035,7 @@ async def bulk_update_stories(
     # 스프레드로 구값 잔존 → 컬럼 판정이 틀어져 카드가 옛 컬럼에 남거나, done→비done 이동 시
     # null 유지로 어느 컬럼에도 안 걸려 보드에서 실종). flush 後·commit 前 — 방금 setattr한
     # 새 status를 그대로 읽어(같은 트랜잭션 내 read-your-writes) 새 trust_stage를 계산한다.
-    await _attach_trust_stage(db, repo.org_id, updated)
+    await _attach_trust_stage(db, repo.org_id, updated, verified_map=_verified)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -2815,7 +2820,7 @@ async def update_story_status(
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
-    await _attach_has_evidence(db, [story])
+    _verified = await _attach_has_evidence(db, [story])
     await _attach_has_hypothesis_or_goal(db, [story])
     await _attach_org_project_slugs(db, repo.org_id, [story])
     # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
@@ -2824,7 +2829,7 @@ async def update_story_status(
     # story #2933 H4 qa:changes — bulk_update_stories와 동일 이유(보드 드래그 실 소비자
     # 등장). refresh 後에도 transient attr는 보존되지만, 순서를 model_validate 直前으로
     # 맞춰 그 값이 응답에 확실히 실린다.
-    await _attach_trust_stage(db, repo.org_id, [story])
+    await _attach_trust_stage(db, repo.org_id, [story], verified_map=_verified)
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)
