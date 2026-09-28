@@ -188,19 +188,99 @@ def _sync_url(url: str) -> str:
     return url
 
 
+# story #4395 — 리셋의 잠금 대기 상한(관측 · 빠른 실패, 고침 아님). 앞 테스트가 남긴 세션이 잠금을 쥐고 있으면 DROP SCHEMA가
+# 끝없이 기다리다 CI 정지 감지(8분)에야 잘렸다 — 이름 없는 STALL. lock_timeout은 **잠금을 기다린 시간만** 센다(경합이 없으면 0).
+# 근거: 로컬 create_all 전체 스키마 리셋 20회 median 0.095s · max 0.456s(2026-09-28) → 30s는 그 60배 넘고 8분 STALL보다 한참 짧다.
+_RESET_LOCK_TIMEOUT_MS = 30_000
+
+
+def _describe_reset_blockers(engine, own_pid: int) -> str:
+    """리셋이 잠금을 못 받았을 때 이 DB에서 트랜잭션을 연 채 있는 다른 세션 — 앱 이름(전역 엔진이면 테스트 · 태스크까지,
+    아래 `_tag_global_engine_checkouts`) · 상태 · 트랜잭션 나이 · 쿼리 앞 200자."""
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT pid, COALESCE(application_name, ''), state, now() - xact_start, left(regexp_replace(query, '\\s+', ' ', 'g'), 200) "
+            "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND pid <> :own "
+            "AND xact_start IS NOT NULL ORDER BY xact_start"
+        ), {"own": own_pid}).all()
+    if not rows:
+        return "  (잠금을 쥔 세션을 못 찾음 — 조회 사이에 끝났을 수 있음)"
+    return "\n".join(f"  pid={r[0]} app={r[1]!r} state={r[2]} xact_age={r[3]} query={r[4]!r}" for r in rows)
+
+
 def _reset_public_schema(url: str) -> None:
     """대상 스키마 풀리셋 — DROP SCHEMA public CASCADE; CREATE SCHEMA public; + 필요한 extension
-    재생성(vector 등, baseline/모델이 요구). 안전가드 통과 후에만 호출."""
+    재생성(vector 등, baseline/모델이 요구). 안전가드 통과 후에만 호출.
+    잠금을 `_RESET_LOCK_TIMEOUT_MS` 안에 못 받으면 막는 세션을 이름 붙여 즉시 실패한다(조용히 끊지도, 다시 하지도 않음)."""
+    from sqlalchemy.exc import OperationalError
+
     assert_disposable_test_db(url)
     engine = create_engine(_sync_url(url))
     try:
-        with engine.begin() as conn:
-            # destructive-sql-allow: 위 assert_disposable_test_db() 이중가드 통과 후에만 도달(story #2786 정당 예외).
-            conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
-            conn.execute(text("CREATE SCHEMA public"))
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        with engine.connect() as conn:
+            own_pid = conn.execute(text("SELECT pg_backend_pid()")).scalar_one()
+            conn.commit()  # 위 조회의 autobegin을 닫고 리셋은 자기 트랜잭션에서
+            try:
+                with conn.begin():
+                    conn.execute(text(f"SET LOCAL lock_timeout = '{_RESET_LOCK_TIMEOUT_MS}ms'"))
+                    # destructive-sql-allow: 위 assert_disposable_test_db() 이중가드 통과 후에만 도달(story #2786 정당 예외).
+                    conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+                    conn.execute(text("CREATE SCHEMA public"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except OperationalError as exc:
+                if getattr(exc.orig, "pgcode", None) != "55P03":  # lock_not_available 말고는 그대로 올린다
+                    raise
+                raise RuntimeError(
+                    f"story #4395 — destructive 리셋(DROP SCHEMA)이 잠금을 {_RESET_LOCK_TIMEOUT_MS // 1000}s 안에 못 받음: "
+                    f"앞 테스트가 트랜잭션을 연 세션을 남김.\n{_describe_reset_blockers(engine, own_pid)}"
+                ) from exc
     finally:
         engine.dispose()
+
+
+# story #4395 — 전역 엔진(`app.core.database`) 커넥션을 checkout할 때마다 application_name에 지금 destructive 테스트 이름 ·
+# 태스크를 싣는다(**테스트에서만** — 제품의 `db_application_name()` 규칙은 그대로). 리셋이 막혀 위 실패 메시지에 막는 세션이
+# 찍히면 그 app 이름이 곧 «어느 테스트의 어느 태스크가 연 커넥션인가»가 된다. 서버 쪽 set_config 한 번(트랜잭션 밖 · 세션 수준).
+_DESTRUCTIVE_TAG = {"node": None, "installed": False}
+
+
+def _install_global_engine_checkout_tag() -> None:
+    if _DESTRUCTIVE_TAG["installed"]:
+        return
+    import asyncio
+
+    from sqlalchemy import event
+    from sqlalchemy.util import await_only
+
+    from app.core.database import db_application_name
+    from app.core.database import engine as global_engine
+
+    base = db_application_name()
+
+    def _tag(dbapi_connection, _record, _proxy):
+        node = _DESTRUCTIVE_TAG["node"]
+        if node is None:
+            return
+        try:
+            task = asyncio.current_task()
+            task_name = task.get_coro().__qualname__ if task is not None else "-"
+        except RuntimeError:
+            task_name = "-"
+        name = f"{base}|{node[:32]}|{task_name[:18]}"[:63]  # NAMEDATALEN 63
+        await_only(dbapi_connection.driver_connection.execute("SELECT set_config('application_name', $1, false)", name))
+
+    event.listen(global_engine.sync_engine, "checkout", _tag)
+    _DESTRUCTIVE_TAG["installed"] = True
+
+
+@pytest.fixture(autouse=True)
+def _tag_global_engine_connections_for_destructive_tests(request):
+    """destructive 테스트마다 이름을 바꿔 단다. 테스트가 끝나도 지우지 않는다 — 테스트 뒤에 뜬 태스크가 연 커넥션도 «마지막
+    destructive 테스트» 이름을 달아야 범인을 가리킬 수 있다."""
+    if request.node.get_closest_marker(_MARKER_NAME) is not None:
+        _install_global_engine_checkout_tag()
+        _DESTRUCTIVE_TAG["node"] = request.node.name
+    yield
 
 
 @pytest.fixture(autouse=True)

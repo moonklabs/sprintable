@@ -34,6 +34,30 @@ def anyio_backend():
     return "asyncio"
 
 
+async def _drain_global_background_work():
+    """story #4395 — 발행 경로(항목 B의 상태변경 프리셋 → send_message)는 커밋 뒤 배달(`mark_agent_replied` 등)을
+    `pg_pubsub.fire_and_forget`으로 **이 테스트의 이벤트 루프**에 띄우고, 그 태스크는 이 파일의 엔진이 아니라 전역 엔진
+    (`app.core.database`)을 쓴다. 테스트가 먼저 끝나면 루프가 닫히며 태스크가 SELECT 뒤 트랜잭션을 연 채 버려진다 →
+    커넥션이 idle in transaction으로 프로세스 끝까지 남고, 정리의 DROP SCHEMA가 그 잠금을 기다리다 8분 STALL(CI 샤드 10).
+    그래서 루프가 살아 있을 때 배달을 끝까지 기다리고(배달이 또 태스크를 띄울 수 있어 빌 때까지) 전역 엔진 풀을 닫는다.
+    ⚠️ 이것만으로는 다 안 닫힌다(로컬 반복: 고치기 전 1/30 · 뒤 1/30~1/100 HANG, 버려진 커넥션 경고는 29/30 → 0). 남은 몫은
+    conftest의 리셋 lock_timeout(막는 세션을 이름 붙여 빠른 실패) · 전역 엔진 app 이름 태깅으로 관측 중 — 근본 자리는 story #4395."""
+    from app.core.database import engine as _global_engine
+    from app.services import pg_pubsub
+
+    for _ in range(5):
+        if not pg_pubsub._background_tasks:
+            break
+        await pg_pubsub.drain_background_tasks()
+    await _global_engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine_after_test():
+    yield
+    await _drain_global_background_work()
+
+
 async def _session():
     """SLA 하네스(create_all + 워크플로 테이블 TRUNCATE) + 실 훅 경로(시스템 발행자·이벤트 발행)가 쓰는 raw-SQL 부분 유니크
     인덱스 둘(0258 · entity_references) — create_all이 못 세우는 것을 test_4090 하네스와 같이 보정(제품 결함 아님)."""
@@ -335,4 +359,56 @@ async def test_caller_session_returns_its_connection_before_items_so_a_two_conne
             assert await _events(Session, sr_id, "auto_approved") == 1
     finally:
         await small.dispose()
+        await engine.dispose()
+
+
+async def _idle_in_tx_on_global_engine(Session) -> int:
+    """전역 엔진(application_name이 `db_application_name()`으로 시작 — conftest가 테스트 · 태스크 이름을 뒤에 붙인다)이 이 DB에
+    남긴 idle in transaction 커넥션 수."""
+    from sqlalchemy import text
+
+    from app.core.database import db_application_name
+
+    async with Session() as s:
+        return (await s.execute(text(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+            "AND state = 'idle in transaction' AND starts_with(application_name, :app)"
+        ), {"app": db_application_name()})).scalar_one()
+
+
+async def test_story_4395_publish_path_background_work_is_drained_before_the_loop_closes(monkeypatch):
+    """story #4395 — 항목 B의 발행이 커밋 뒤 띄운 `mark_agent_replied`가 SELECT 뒤 트랜잭션을 연 채 머무는 순간(느린 배달)을
+    고정해 재현한다: `process_sla`가 돌아온 직후엔 전역 엔진에 idle in transaction이 **있고**(양성대조 — 이 재현이 실제로
+    누수 모양을 만든다), 이 파일의 정리(`_drain_global_background_work`)를 거치면 **0**이다.
+    뮤테이션: 정리에서 drain을 빼면(dispose만) 머무는 태스크의 커넥션은 풀에 없어 dispose가 못 닫는다 → 1 남음 — RED."""
+    from sqlalchemy import select
+
+    import app.services.conversation_webhook as conversation_webhook
+    from app.core.database import async_session_factory
+    from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
+    from app.services.workflow_sla_processor import process_sla
+
+    engine, Session = await _session()
+    try:
+        w = await _seed_mixed_batch(Session)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def _slow_mark_agent_replied(conversation_id):
+            async with async_session_factory() as db:  # 실 배달과 같은 전역 엔진 · 같은 SELECT
+                await db.execute(select(ConversationWebhookDelivery.id).limit(1))
+                started.set()
+                await release.wait()  # SELECT 뒤 트랜잭션을 연 채 머묾(CI 덤프의 pid 480 모양)
+
+        monkeypatch.setattr(conversation_webhook, "mark_agent_replied", _slow_mark_agent_replied)
+        with patch(_NOTIFY, new=AsyncMock()):
+            async with Session() as s:
+                counts = await process_sla(s, now=_NOW)
+        assert counts["auto_approved"] == 1, counts
+        await asyncio.wait_for(started.wait(), timeout=10)
+        assert await _idle_in_tx_on_global_engine(Session) == 1  # 양성대조: 루프가 여기서 닫히면 이 커넥션이 버려진다
+
+        asyncio.get_running_loop().call_later(0.2, release.set)  # 느린 배달이 결국 끝난다 — 정리는 그걸 기다려야 한다
+        await _drain_global_background_work()
+        assert await _idle_in_tx_on_global_engine(Session) == 0
+    finally:
         await engine.dispose()
