@@ -405,7 +405,11 @@ app.state.limiter = limiter
 # passes through it, and CORS / metering layers wrap the final status. See app/core/commit_before_response.py.
 from app.core.commit_before_response import CommitBeforeResponseMiddleware
 
-app.add_middleware(CommitBeforeResponseMiddleware)
+app.add_middleware(
+    CommitBeforeResponseMiddleware,
+    error_handler=unhandled_exception_handler,
+    replay_body_for=a2a.is_a2a_rpc_path,
+)
 
 
 app.add_middleware(

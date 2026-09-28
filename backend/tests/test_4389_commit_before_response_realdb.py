@@ -62,6 +62,7 @@ async def _env(monkeypatch):
     finally:
         async with Session() as s:
             for q in (
+                "DELETE FROM unhandled_error_events WHERE exception_class = 'InjectedCommitFailure'",
                 f"DELETE FROM docs WHERE org_id = '{org}'",
                 f"DELETE FROM org_members WHERE org_id = '{org}'",
                 f"DELETE FROM projects WHERE org_id = '{org}'",
@@ -116,6 +117,30 @@ def _doc_body(env, slug: str, **extra) -> dict:
 async def _count_docs(env, slug: str) -> int:
     async with env["engine"].connect() as conn:  # a separate connection — sees committed rows only
         return (await conn.execute(text("SELECT count(*) FROM docs WHERE slug = :s"), {"s": slug})).scalar_one()
+
+
+class InjectedCommitFailure(RuntimeError):
+    """The failure injected into the early commit (its class name marks the audit rows these tests create)."""
+
+
+async def _audit_rows(env, error_id: str) -> list[tuple]:
+    async with env["engine"].connect() as conn:
+        return list((await conn.execute(
+            text("SELECT method, path, exception_class FROM unhandled_error_events WHERE id = :i"), {"i": error_id},
+        )).all())
+
+
+def _inject_commit_failure(monkeypatch) -> list:
+    import app.core.commit_before_response as cbr
+
+    failed_sessions: list = []
+
+    async def failing_early_commit(session):
+        failed_sessions.append(session)
+        raise InjectedCommitFailure("injected commit failure")
+
+    monkeypatch.setattr(cbr, "_commit", failing_early_commit)
+    return failed_sessions
 
 
 async def test_write_is_committed_when_the_response_headers_go_out(monkeypatch):
@@ -173,32 +198,29 @@ async def test_read_request_makes_no_commit_before_its_headers(monkeypatch):
 
 
 async def test_failed_commit_becomes_a_500_and_the_teardown_rolls_back(monkeypatch):
-    """PO condition ② — the early commit fails → the client gets the standard 500 envelope (not 201), nothing is persisted, and
-    get_db's teardown rolls back instead of committing that session again."""
+    """PO condition ② — the early commit fails → the client gets the app's 500 (not 201), nothing is persisted, and get_db's
+    teardown rolls back instead of committing that session again. It goes through the app's unhandled-exception handler, like an
+    endpoint that raised: the unhandled_error_events audit row carries the same error_id as the envelope (PO 11:33Z ①)."""
     async with _env(monkeypatch) as env:
         import app.core.commit_before_response as cbr
         from app.main import app
 
         slug = f"x4389-{uuid.uuid4().hex[:10]}"
-        failed_sessions: list = []
+        failed_sessions = _inject_commit_failure(monkeypatch)
         commits_after_failure = {"n": 0}
         real_commit = AsyncSession.commit
-
-        async def failing_early_commit(session):
-            failed_sessions.append(session)
-            raise RuntimeError("injected commit failure")
 
         async def watching_commit(self):
             if self.info.get(cbr.COMMIT_FAILED_KEY):
                 commits_after_failure["n"] += 1
             return await real_commit(self)
 
-        monkeypatch.setattr(cbr, "_commit", failing_early_commit)
         monkeypatch.setattr(AsyncSession, "commit", watching_commit)
         res = await _call(app, "POST", "/api/v2/docs", token=env["token"], body=_doc_body(env, slug))
         assert res["status"] == 500
         body = json.loads(res["body"])
-        assert body["data"] is None and body["error"]["code"] == "INTERNAL_ERROR" and body["error"]["error_id"]
+        assert body["data"] is None and body["error"]["code"] == "INTERNAL_ERROR"
+        assert await _audit_rows(env, body["error"]["error_id"]) == [("POST", "/api/v2/docs", "InjectedCommitFailure")]
         assert len(failed_sessions) == 1               # the early commit ran once and failed
         assert commits_after_failure["n"] == 0         # the teardown did not commit the failed session again
         assert await _count_docs(env, slug) == 0       # rolled back — nothing persisted
@@ -253,9 +275,13 @@ async def test_cors_preflight_passes_through(monkeypatch):
 
 def test_middleware_is_the_innermost_user_middleware():
     from app.core.commit_before_response import CommitBeforeResponseMiddleware
-    from app.main import app
+    from app.main import app, unhandled_exception_handler
+    from app.routers import a2a
 
-    assert app.user_middleware[-1].cls is CommitBeforeResponseMiddleware
+    innermost = app.user_middleware[-1]
+    assert innermost.cls is CommitBeforeResponseMiddleware
+    # A failed commit is answered by the app's own handler, and /rpc bodies are replayed to it for the JSON-RPC id.
+    assert innermost.kwargs == {"error_handler": unhandled_exception_handler, "replay_body_for": a2a.is_a2a_rpc_path}
 
 
 async def test_background_task_write_after_the_response_still_commits(monkeypatch):
@@ -263,9 +289,10 @@ async def test_background_task_write_after_the_response_still_commits(monkeypatc
     A small app with the real get_db and middleware (no production route writes this way deterministically enough to test)."""
     async with _env(monkeypatch) as env:
         from app.core.commit_before_response import CommitBeforeResponseMiddleware
+        from app.main import unhandled_exception_handler
 
         mini = FastAPI()
-        mini.add_middleware(CommitBeforeResponseMiddleware)
+        mini.add_middleware(CommitBeforeResponseMiddleware, error_handler=unhandled_exception_handler)
         slug_main, slug_bg = f"m4389-{uuid.uuid4().hex[:8]}", f"b4389-{uuid.uuid4().hex[:8]}"
 
         async def insert(session: AsyncSession, slug: str) -> None:
@@ -297,12 +324,37 @@ async def test_background_task_write_after_the_response_still_commits(monkeypatc
 
 
 def _mini_app():
-    """A small app with the real get_db and the real middleware (deterministic shapes the production routes do not isolate)."""
+    """A small app with the real get_db, the real middleware and the app's own error handler, wired as main.py wires them
+    (deterministic shapes the production routes do not isolate)."""
     from app.core.commit_before_response import CommitBeforeResponseMiddleware
+    from app.main import unhandled_exception_handler
+    from app.routers import a2a
 
     mini = FastAPI()
-    mini.add_middleware(CommitBeforeResponseMiddleware)
+    mini.add_middleware(CommitBeforeResponseMiddleware, error_handler=unhandled_exception_handler, replay_body_for=a2a.is_a2a_rpc_path)
     return mini
+
+
+async def _insert_doc(env, session: AsyncSession, slug: str) -> None:
+    await session.execute(text(
+        "INSERT INTO docs (id,org_id,project_id,title,slug,doc_type) "
+        f"VALUES (gen_random_uuid(),'{env['org']}','{env['proj']}','t',:s,'page')"
+    ), {"s": slug})
+
+
+def _count_early_commits(monkeypatch) -> dict:
+    """Counts the middleware's early commits (the seam), leaving every other commit alone."""
+    import app.core.commit_before_response as cbr
+
+    calls = {"n": 0}
+    real = cbr._commit
+
+    async def counting(session):
+        calls["n"] += 1
+        await real(session)
+
+    monkeypatch.setattr(cbr, "_commit", counting)
+    return calls
 
 
 async def test_read_only_get_db_session_makes_no_commit_before_its_headers(monkeypatch):
@@ -354,4 +406,106 @@ async def test_write_then_error_response_is_not_committed(monkeypatch):
         res = await _call(mini, "POST", "/w409", body={})
         assert res["status"] == 409
         assert await _count_docs(env, slug) == 0
+
+
+async def test_failed_commit_on_the_a2a_rpc_path_is_a_json_rpc_error(monkeypatch):
+    """PO 11:33Z ① — agents read /rpc errors as JSON-RPC. A failed early commit there answers like an unhandled exception on /rpc:
+    HTTP 200 with a JSON-RPC error (-32603 · the request's id · retryable), plus the audit row. The request body was already read by
+    the route; the middleware replays it so the handler still finds the id."""
+    async with _env(monkeypatch) as env:
+        mini = _mini_app()
+        slug = f"j4389-{uuid.uuid4().hex[:8]}"
+
+        @mini.post("/api/v2/a2a/members/{member_id}/rpc")
+        async def rpc(member_id: str, payload: dict, session: Annotated[AsyncSession, Depends(get_db)]):
+            await _insert_doc(env, session, slug)
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": {"ok": True}}
+
+        _inject_commit_failure(monkeypatch)
+        res = await _call(mini, "POST", f"/api/v2/a2a/members/{uuid.uuid4()}/rpc", body={"jsonrpc": "2.0", "id": 7, "method": "message/send"})
+        assert res["status"] == 200
+        body = json.loads(res["body"])
+        assert body["jsonrpc"] == "2.0" and body["id"] == 7
+        assert body["error"]["code"] == -32603 and body["error"]["data"] == {"retryable": True}
+        assert "result" not in body or body["result"] is None
+        assert await _count_docs(env, slug) == 0
+        async with env["engine"].connect() as conn:
+            n = (await conn.execute(text(
+                "SELECT count(*) FROM unhandled_error_events WHERE exception_class = 'InjectedCommitFailure' AND path LIKE '/api/v2/a2a/members/%/rpc'"
+            ))).scalar_one()
+        assert n == 1
+
+
+async def test_route_that_commits_by_itself_gets_no_early_commit(monkeypatch):
+    """PO 11:33Z ② — a route that commits by itself (e.g. cron.py) must not be charged a second, empty COMMIT before its headers.
+    The «wrote» mark is cleared on after_commit. Mutation: not clearing it → one early commit here → RED."""
+    async with _env(monkeypatch) as env:
+        mini = _mini_app()
+        slug = f"s4389-{uuid.uuid4().hex[:8]}"
+
+        @mini.post("/self-commit", status_code=201)
+        async def self_commit(session: Annotated[AsyncSession, Depends(get_db)]):
+            await _insert_doc(env, session, slug)
+            await session.commit()
+            return {"ok": True}
+
+        early = _count_early_commits(monkeypatch)
+        seen = {}
+
+        async def at_headers(status):
+            seen["early_commits"] = early["n"]
+            seen["committed"] = await _count_docs(env, slug)
+
+        res = await _call(mini, "POST", "/self-commit", body={}, on_start=at_headers)
+        assert res["status"] == 201
+        assert seen == {"early_commits": 0, "committed": 1}
+
+
+async def test_route_that_rolls_back_by_itself_gets_no_early_commit(monkeypatch):
+    """PO 11:33Z ② — the same for after_rollback: a route that writes, rolls back and answers is not charged a COMMIT."""
+    async with _env(monkeypatch) as env:
+        mini = _mini_app()
+        slug = f"q4389-{uuid.uuid4().hex[:8]}"
+
+        @mini.post("/self-rollback")
+        async def self_rollback(session: Annotated[AsyncSession, Depends(get_db)]):
+            await _insert_doc(env, session, slug)
+            await session.rollback()
+            return {"ok": True}
+
+        early = _count_early_commits(monkeypatch)
+        res = await _call(mini, "POST", "/self-rollback", body={})
+        assert res["status"] == 200
+        assert early["n"] == 0
+        assert await _count_docs(env, slug) == 0
+
+
+@pytest.mark.parametrize("savepoint_outcome", ["release", "rollback"])
+async def test_savepoint_end_keeps_the_outer_write_marked(monkeypatch, savepoint_outcome):
+    """after_commit / after_rollback fire for the outermost transaction only. A SAVEPOINT that is released or rolled back inside
+    the request must not clear the mark of the outer write — it is still committed before the headers."""
+    async with _env(monkeypatch) as env:
+        mini = _mini_app()
+        outer, inner = f"o4389-{uuid.uuid4().hex[:8]}", f"i4389-{uuid.uuid4().hex[:8]}"
+
+        @mini.post("/savepoint", status_code=201)
+        async def with_savepoint(session: Annotated[AsyncSession, Depends(get_db)]):
+            await _insert_doc(env, session, outer)
+            nested = await session.begin_nested()
+            await _insert_doc(env, session, inner)
+            if savepoint_outcome == "release":
+                await nested.commit()
+            else:
+                await nested.rollback()
+            return {"ok": True}
+
+        seen = {}
+
+        async def at_headers(status):
+            seen["outer"] = await _count_docs(env, outer)
+            seen["inner"] = await _count_docs(env, inner)
+
+        res = await _call(mini, "POST", "/savepoint", body={}, on_start=at_headers)
+        assert res["status"] == 201
+        assert seen == {"outer": 1, "inner": 1 if savepoint_outcome == "release" else 0}
 
