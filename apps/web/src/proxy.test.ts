@@ -1505,3 +1505,74 @@ describe('proxy — 가입 출처 first-touch 캡처(story #3204)', () => {
     expect(response.cookies.get('sp_attr_medium')?.value).toBeUndefined();
   });
 });
+
+describe('[SID:4397] org hint on a notification path', () => {
+  const ORG_B = '11111111-2222-4333-8444-555555555555';
+
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  const switchCalls = () =>
+    mockFetch.mock.calls.filter((c: unknown[]) => String(c[0]).includes('/api/v2/auth/switch-org'));
+
+  function answerSwitch(ok: boolean) {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (String(url).includes('/api/v2/auth/switch-org')) {
+        return ok
+          ? { ok: true, status: 200, json: async () => ({ data: { access_token: 'at-org-b', refresh_token: 'rt-org-b', project_id: 'proj-b' } }) }
+          : { ok: false, status: 403, json: async () => ({ error: { code: 'FORBIDDEN' } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: {} }) };
+    });
+  }
+
+  it.each(['/gates/g-1', '/inbox?tab=gates', '/chats/c-1', '/organization/members', '/board?story=s-1'])(
+    'a member org hint on %s switches the session org and redirects to the same URL without the hint',
+    async (path) => {
+      answerSwitch(true);
+      const token = await makeAccessToken();
+      const sep = path.includes('?') ? '&' : '?';
+      const response = await middleware(makeRequest(`${path}${sep}org_id=${ORG_B}`, { sp_at: token }));
+      expect(response.status).toBe(307);
+      const location = new URL(response.headers.get('location') ?? '');
+      expect(location.pathname + location.search).toBe(path);
+      expect(switchCalls()).toHaveLength(1);
+      expect(JSON.parse(String((switchCalls()[0][1] as RequestInit).body))).toEqual({ org_id: ORG_B });
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain('sp_at=at-org-b');
+      expect(setCookie).toContain('sp_rt=rt-org-b');
+    },
+  );
+
+  it('a hint for an org the caller is not a member of is ignored (redirect without it, session untouched)', async () => {
+    answerSwitch(false);
+    const token = await makeAccessToken();
+    const response = await middleware(makeRequest(`/gates/g-1?org_id=${ORG_B}`, { sp_at: token }));
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get('location') ?? '').search).toBe('');
+    expect(response.headers.get('set-cookie') ?? '').not.toContain('sp_at=');
+  });
+
+  it('a malformed hint is dropped without asking the backend', async () => {
+    answerSwitch(true);
+    const token = await makeAccessToken();
+    const response = await middleware(makeRequest('/gates/g-1?org_id=not-a-uuid', { sp_at: token }));
+    expect(response.status).toBe(307);
+    expect(switchCalls()).toHaveLength(0);
+  });
+
+  it('no hint and API paths never switch', async () => {
+    answerSwitch(true);
+    const token = await makeAccessToken();
+    await middleware(makeRequest('/gates/g-1', { sp_at: token }));
+    await middleware(makeRequest(`/api/notifications?org_id=${ORG_B}`, { sp_at: token }));
+    expect(switchCalls()).toHaveLength(0);
+  });
+});

@@ -619,6 +619,47 @@ async function respondWithRefreshedToken(
 // story a539c649/8fc51517/#2212 — 유효한 accessToken이 있을 때(원 요청이든, 방금 refresh로
 // 받은 것이든) 실제로 응답을 만드는 본체. 두 호출부(정상 경로·refresh-직후 경로)가 완전히
 // 같은 해소 순서를 타야 #2212 같은 우회가 다시 안 생긴다 — 로직을 여기 하나로 모은다.
+// story #4397 — the org hint a push notification carries. The app opens a notification's path with `org_id=<uuid>` (the
+// notification's org). Without it, a notification of another org opened in the session's current org: the path-resolved
+// routes (/board …) landed in the wrong workspace, and the top-level ones (/gates/<id> · /inbox?tab=gates · /chats/<id> ·
+// /organization/members) never switched org at all. Here the session switches to the hinted org — the backend's switch-org
+// checks membership, so a hint for an org the caller is not a member of changes nothing — and the request is redirected to
+// the same URL without the hint. Page requests only (not /api/*).
+const ORG_HINT_PARAM = 'org_id';
+
+async function handleOrgHint(request: NextRequest, accessToken: string): Promise<NextResponse | null> {
+  const hint = request.nextUrl.searchParams.get(ORG_HINT_PARAM);
+  if (hint === null || request.method !== 'GET') return null;
+  const clean = request.nextUrl.clone();
+  clean.searchParams.delete(ORG_HINT_PARAM);
+  if (!UUID_RE.test(hint)) return sessionDependentRedirect(clean); // malformed → ignored
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  let switched: { access_token: string; refresh_token: string; project_id?: string } | null = null;
+  try {
+    const res = await fetch(`${fastapiUrl}/api/v2/auth/switch-org`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ org_id: hint }),
+    });
+    const json = (await res.json().catch(() => null)) as { data?: { access_token: string; refresh_token: string; project_id?: string } } | null;
+    if (res.ok && json?.data?.access_token && json.data.refresh_token) switched = json.data;
+  } catch {
+    switched = null; // network trouble → keep the current org
+  }
+  const response = sessionDependentRedirect(clean);
+  if (switched) {
+    applyTokenCookies(response, switched.access_token, switched.refresh_token);
+    // the same project cookie handling as /api/switch-org (a 0-project org clears it)
+    if (switched.project_id) {
+      response.cookies.set(CURRENT_PROJECT_COOKIE, switched.project_id, { path: '/', sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });
+    } else {
+      response.cookies.set(CURRENT_PROJECT_COOKIE, '', { path: '/', sameSite: 'lax', maxAge: 0 });
+    }
+    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, '', { ...cookieBase(), maxAge: 0 }); // resolved for the previous org
+  }
+  return response;
+}
+
 async function resolveAndRespond(
   request: NextRequest,
   pathname: string,
@@ -811,6 +852,11 @@ async function proxyImpl(incoming: NextRequest) {
       return handleUnauthenticated(request, isApiPath, false, true);
     }
     return respondWithRefreshedToken(request, pathname, outcome, isApiPath);
+  }
+
+  if (!isApiPath) {
+    const hinted = await handleOrgHint(request, accessToken);
+    if (hinted) return hinted;
   }
 
   return resolveAndRespond(request, pathname, accessToken, claims, request.headers);

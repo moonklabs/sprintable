@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
 import { fetchWithAuth } from '@/lib/db/client';
+import { notifyAccountChanged } from '@/lib/native-shell-bridge';
 
 export interface Account {
   account_id: string;
@@ -77,6 +78,7 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
         setBusy(null);
         return;
       }
+      notifyAccountChanged(); // story #4397 — the app re-registers its push device for the new account
       window.location.assign('/inbox'); // active 전환 → 풀 리로드로 전 컨텍스트 리셋
     } catch {
       setError(t('switchFailed'));
@@ -118,7 +120,11 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
         body: JSON.stringify({ scope }),
       });
       const j = (await r.json().catch(() => null)) as { data?: { next?: string | null } } | null;
-      window.location.assign(scope === 'this' && j?.data?.next ? '/inbox' : '/login');
+      const remaining = scope === 'this' && !!j?.data?.next;
+      // story #4397 — another account stays active without passing /login: the app re-registers its push device for it.
+      // (Going to /login instead, the app switches its device off itself.)
+      if (remaining) notifyAccountChanged();
+      window.location.assign(remaining ? '/inbox' : '/login');
     } catch {
       router.push('/login');
     }
