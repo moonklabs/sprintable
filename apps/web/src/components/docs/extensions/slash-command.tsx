@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import {
   forwardRef,
   useImperativeHandle,
+  useLayoutEffect,
   useState,
   useCallback,
   useRef,
@@ -108,6 +109,8 @@ export interface SlashMenuStrings {
   toggleDefaultTitle: string;
   /** story #4383 — 칼럼 항목의 찾기 전용 다른 표기(ko «컬럼» · en 빈 값). 화면엔 안 나온다. */
   columnsSearchAlias: string;
+  /** story #4380 — 목록상자 이름(화면 읽기가 «블록 넣기 목록»으로 읽는다). */
+  listLabel: string;
 }
 
 /** id/icon/command/aliases(영어 별칭)는 리터럴로 고정, title/label/description/embed
@@ -400,6 +403,12 @@ function groupByCategory(
     .filter((group) => group.items.length > 0);
 }
 
+/**
+ * story #4380 — 화면 읽기가 켜진 항목을 안다: 메뉴 = listbox(이름 = listLabel) · 분류 = 이름 붙은 group · 항목 = option(켜진 것 aria-selected).
+ * 초점은 편집기에 그대로 두고(글자를 계속 친다) 편집기 요소(tiptap이 role="textbox")에 aria-controls · aria-activedescendant를 단다 —
+ * 메뉴가 닫히면(onExit — Escape로 닫아도 suggestion이 onExit를 부른다) 뗀다. 예전엔 단추 목록뿐이라 ↑↓로 옮긴 «켜짐»이 모양(bg-brand)으로만 보였다.
+ * 항목은 단추가 아니라 div — 누르는 순간 편집기 초점을 뺏지 않게 mousedown 기본 동작을 막는다.
+ */
 const SlashMenu = forwardRef<
   SlashMenuRef,
   {
@@ -407,12 +416,19 @@ const SlashMenu = forwardRef<
     categories: SlashMenuCategory[];
     query: string;
     command: (item: SlashMenuItem) => void;
+    idPrefix: string;
+    listLabel: string;
+    editorDom: HTMLElement | null;
   }
->(function SlashMenu({ items, categories, query, command }, ref) {
+>(function SlashMenu({ items, categories, query, command, idPrefix, listLabel, editorDom }, ref) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const safeIndex = items.length > 0 ? Math.min(selectedIndex, items.length - 1) : 0;
+  const listId = `${idPrefix}-list`;
+  const optionId = (item: SlashMenuItem) => `${idPrefix}-opt-${item.id}`;
+  const activeItem = items[safeIndex];
+  const activeId = activeItem ? optionId(activeItem) : null;
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -436,6 +452,18 @@ const SlashMenu = forwardRef<
 
   useImperativeHandle(ref, () => ({ onKeyDown }), [onKeyDown]);
 
+  // 편집기 요소가 켜진 항목을 가리킨다(항목이 없으면 뗀다) · 켜진 항목이 목록 밖이면 보이게 굴린다.
+  useLayoutEffect(() => {
+    if (!editorDom) return;
+    if (activeId) {
+      editorDom.setAttribute('aria-controls', listId);
+      editorDom.setAttribute('aria-activedescendant', activeId);
+      document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+    } else {
+      clearSlashMenuAria(editorDom);
+    }
+  }, [editorDom, activeId, listId]);
+
   if (items.length === 0) return null;
 
   const grouped = query === '' ? groupByCategory(items, categories) : null;
@@ -444,15 +472,18 @@ const SlashMenu = forwardRef<
     const isActive = flatIndex === safeIndex;
     const Icon = item.icon;
     return (
-      <button
+      <div
         key={item.id}
-        type="button"
+        id={optionId(item)}
+        role="option"
+        aria-selected={isActive}
         data-active={isActive}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
+        className={`flex w-full cursor-default items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
           isActive
             ? 'bg-brand/14 text-brand-text'
             : 'text-foreground hover:bg-white/6'
         }`}
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => command(item)}
       >
         <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border/60 ${isActive ? 'border-brand/30 bg-brand/10' : 'bg-muted/40'}`}>
@@ -462,34 +493,48 @@ const SlashMenu = forwardRef<
           <span className="text-xs font-medium leading-tight">{item.title}</span>
           <span className="truncate text-[11px] text-muted-foreground">{item.description}</span>
         </span>
-      </button>
+      </div>
     );
   };
 
   return (
     <div
       ref={containerRef}
+      id={listId}
+      role="listbox"
+      aria-label={listLabel}
+      // 목록 안 빈 곳(여백 · 분류 이름)을 눌러도 초점은 편집기에 남긴다(초점 받을 수 없는 곳을 누르면 브라우저가 편집기 초점을 푼다).
+      // 목록은 탭 순서에 넣지 않는다 — 초점은 편집기에 두고 ↑↓가 켜진 항목을 보이게 굴린다(activedescendant 규약).
+      onMouseDown={(event) => event.preventDefault()}
       // story #3007(로드맵 P2·PR-E, L1) — 슬래시메뉴는 floating이라 --elev-overlay.
       className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-[var(--elev-overlay)]"
     >
       {grouped ? (
-        grouped.map((group) => (
-          <div key={group.label}>
-            <p className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-              {group.label}
-            </p>
-            {group.items.map((item) => {
-              const flatIndex = items.indexOf(item);
-              return renderItem(item, flatIndex);
-            })}
-          </div>
-        ))
+        grouped.map((group, groupIndex) => {
+          const labelId = `${idPrefix}-group-${groupIndex}`;
+          return (
+            <div key={group.label} role="group" aria-labelledby={labelId}>
+              <p id={labelId} className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                {group.label}
+              </p>
+              {group.items.map((item) => {
+                const flatIndex = items.indexOf(item);
+                return renderItem(item, flatIndex);
+              })}
+            </div>
+          );
+        })
       ) : (
         items.map((item, index) => renderItem(item, index))
       )}
     </div>
   );
 });
+
+function clearSlashMenuAria(editorDom: HTMLElement | null | undefined): void {
+  editorDom?.removeAttribute('aria-controls');
+  editorDom?.removeAttribute('aria-activedescendant');
+}
 
 /** Estimated max-height of the dropdown (matches `max-h-72` = 18rem at 16px/rem). */
 const MENU_ESTIMATED_HEIGHT = 288;
@@ -553,10 +598,15 @@ function applyPosition(
   });
 }
 
-function createSuggestionRenderer(categories: SlashMenuCategory[]) {
+let slashMenuInstance = 0;
+
+function createSuggestionRenderer(categories: SlashMenuCategory[], listLabel: string) {
   let popup: HTMLElement | null = null;
   let root: Root | null = null;
   let menuRef: SlashMenuRef | null = null;
+  // 메뉴마다 따로(한 쪽에 편집기가 둘이어도 id가 겹치지 않게).
+  const idPrefix = `slash-menu-${++slashMenuInstance}`;
+  let editorDom: HTMLElement | null = null;
 
   return {
     onStart(props: {
@@ -574,6 +624,7 @@ function createSuggestionRenderer(categories: SlashMenuCategory[]) {
 
       applyPosition(popup, props.clientRect);
 
+      editorDom = props.editor.view.dom;
       root = createRoot(popup);
       root.render(
         <SlashMenu
@@ -582,6 +633,9 @@ function createSuggestionRenderer(categories: SlashMenuCategory[]) {
           categories={categories}
           query={props.query}
           command={(item) => { item.command(props.editor, props.range); }}
+          idPrefix={idPrefix}
+          listLabel={listLabel}
+          editorDom={editorDom}
         />,
       );
     },
@@ -602,6 +656,9 @@ function createSuggestionRenderer(categories: SlashMenuCategory[]) {
           categories={categories}
           query={props.query}
           command={(item) => { item.command(props.editor, props.range); }}
+          idPrefix={idPrefix}
+          listLabel={listLabel}
+          editorDom={editorDom}
         />,
       );
     },
@@ -616,6 +673,8 @@ function createSuggestionRenderer(categories: SlashMenuCategory[]) {
       return menuRef?.onKeyDown(props.event) ?? false;
     },
     onExit() {
+      clearSlashMenuAria(editorDom);
+      editorDom = null;
       popup?.remove();
       popup = null;
       root?.unmount();
@@ -639,7 +698,7 @@ export function createSlashCommandExtension(strings: SlashMenuStrings) {
         suggestion: {
           char: '/',
           items: ({ query }: { query: string }) => items.filter((item) => matchesSlashQuery(item, query)),
-          render: () => createSuggestionRenderer(categories),
+          render: () => createSuggestionRenderer(categories, strings.listLabel),
         } satisfies Partial<SuggestionOptions<SlashMenuItem>>,
       };
     },

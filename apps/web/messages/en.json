@@ -3717,7 +3717,8 @@
         "start": "Start",
         "end": "End"
       },
-      "toggleDefaultTitle": "Toggle title"
+      "toggleDefaultTitle": "Toggle title",
+      "listLabel": "Insert a block"
     },
     "treeLoadedOfTotal": "Showing {loaded, number} of {total, number}",
     "moveTagFilterActive": "You can't reorder or move docs while a tag filter is on — turn the filter off first"
