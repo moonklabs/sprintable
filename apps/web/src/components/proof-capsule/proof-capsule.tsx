@@ -76,6 +76,10 @@ export interface ProofCapsuleProps {
    * 시각 스캐폴딩: 실 데이터(self_reported/human_verified)는 BE 계약 확정 후 배선, 지금은
    * 타입·렌더만 준비(호출부 없음 무방 — density="full"와 동일 선례). */
   trustSeal?: TrustSealClaimedProps | TrustSealVerifiedProps;
+  /** full 밀도 — claim 위 눈썹 글. 생략 = 기본 «에이전트 주장 · 완료했다고 말해요»(`claim.label`). `null` = 눈썹 없음.
+   * story #4336(PO 03:55Z) — 사람이 상신한 외부 발행 게이트처럼 «에이전트가 완료했다고 말함»이 아닌 자리에 늘 붙던 눈썹을 호출부가 끈다.
+   * 그 자리의 낱말은 유나가 정할 때까지 비워 둔다(문구 자리만 · 조건만 맞춤). */
+  claimLabel?: string | null;
   density: ProofCapsuleDensity;
   /** card·full 밀도 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지,
    * /gates/[id] 상세의 org/project 컨텍스트·상태별 액션 분기·EntityBacklinksSection) 삽입
@@ -110,7 +114,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
+  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -135,7 +139,7 @@ export function ProofCapsule({
   }
   return (
     <FullVariant
-      proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
+      proofState={proofState} stateLabel={stateLabel} claim={claim} claimLabel={claimLabel} human={human} agent={agent}
       now={now} evidence={evidence} gate={gate} trustSeal={trustSeal} className={className} footer={footer}
     />
   );
@@ -261,7 +265,7 @@ function useEvidenceSweep(evidence: ProofCapsuleEvidence | undefined) {
 }
 
 function FullVariant({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, className, footer,
+  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, className, footer,
 }: Omit<ProofCapsuleProps, 'density'>) {
   const t = useTranslations('proofCapsule');
   const sweep = useEvidenceSweep(evidence);
@@ -269,14 +273,17 @@ function FullVariant({
     <CutCornerShell state={proofState} className={className}>
       <div className="min-w-0 flex-1 px-4.5 py-4">
         <StateHeader state={proofState} label={stateLabel} />
-        <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
-          {t('claim.label')}
-        </div>
+        {claimLabel === null ? null : (
+          <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3" data-testid="proof-capsule-claim-label">
+            {claimLabel ?? t('claim.label')}
+          </div>
+        )}
         {/* story #3054(2984-S6 §3.4) — serif는 claim→Verified 전이의 최종 판정 헤드라인
             "포인트"에만(2974 규율: 본문/라벨/칩은 절대 금지) — proofState==='green'(검증됨)
             일 때만 font-serif(Source Serif 4, layout.tsx 기배선) 켠다. 다른 상태(blue/amber/
             red)는 무변경(sans 그대로). */}
-        <div className={cn('text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif')}>{claim}</div>
+        {/* 눈썹이 없으면(claimLabel=null) 눈썹이 맡던 위 간격(mt-3)을 claim이 대신 — 상태 줄과 붙지 않게. */}
+        <div className={cn('text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif', claimLabel === null && 'mt-3')}>{claim}</div>
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
           {human ? (
             <span className="inline-flex items-center gap-1.5">

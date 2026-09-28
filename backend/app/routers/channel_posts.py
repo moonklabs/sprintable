@@ -27,7 +27,7 @@ from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.publish_error_body import preflight_error_body, preflight_error_facts
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.project_auth import require_project_access, restricted_accessible_project_ids
-from app.services.publication_command import OVER_TICK_BUDGET_CODE, viewer_can_retry
+from app.services.publication_command import derive_processing_kind, viewer_can_retry
 from app.services.provider_call_mark import provider_call_marked, reset_provider_call_mark
 from app.services.channel_posts import (
     _NEWSLETTER_CHANNELS,
@@ -1456,19 +1456,8 @@ def _to_draft_list_item(
     # published_pub(마지막으로 실제 나간 것)과는 다른 질문이라 건드리면 컨테이너
     # 생성 진행 배지(processing_kind, 바로 아래)가 깨진다.
     publication_status = latest_pub.status if latest_pub else None
-    # story 620beefc(AC5·§17-15, 페드루 PO 決定) — 판정식은 이 자리 한 곳에서만.
-    processing_kind = (
-        "awaiting_container"
-        if command_status == "pending" and publication_status == "container_created"
-        # story #4336 — 즉시 발행은 이제 워커가 돌린다: 예약 없는 명령이 대기 · 진행 중이고 아직 실패가 없고(failure_kind 없음 —
-        # 실패 뒤 재시도 대기는 실패 배지가 맡는다) 이 버전이 아직 안 나갔으면 «발행 중».
-        else "publishing"
-        if latest_command is not None and latest_command.scheduled_at is None and latest_command.failure_kind is None
-        # 워커 예산 밖(`WORKER_TICK_BUDGET_TOO_SMALL`)이면 실제로 발행하지 않고 있다 — «발행 중»이라 말하지 않는다(화면이 사유 줄을 따로).
-        and latest_command.reason_code != OVER_TICK_BUDGET_CODE
-        and command_status in ("pending", "in_progress") and publication_status != "published"
-        else None
-    )
+    # story 620beefc(AC5·§17-15, 페드루 PO 決定) · #4336 — 판정식은 `derive_processing_kind` 한 곳(게이트 상세와 같은 값).
+    processing_kind = derive_processing_kind(latest_command, publication_status)
     # story #3813(Phase3·3-4 PR4, 페드루 PO 確定 2026-09-12) — 뉴스레터 채널만 이 객체를
     # 낸다(discriminator=이미 있는 channel, content_kind류 신규 필드 0). subject는
     # 최신 버전의 channel_payload(PR2 신설 공유 슬롯)에서, segment_name/send_scheduled_at은

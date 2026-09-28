@@ -20,6 +20,7 @@ import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
 import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
+import { StatusChip } from '@/components/content/status-chip';
 import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 import type { GateItem } from '@/components/kanban/types';
 import { Button } from '@/components/ui/button';
@@ -29,9 +30,21 @@ const CONNECTION_UNAVAILABLE = 'NEWSLETTER_SEND_CONNECTION_UNAVAILABLE';
 
 type View =
   | { kind: 'badge'; action: FailureAction }
-  | { kind: 'connection_blocked' };
+  | { kind: 'connection_blocked' }
+  | { kind: 'published' };
 
-function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View | null {
+type GateCommand = NonNullable<GateItem['newsletter_send_command']> & { processing_kind?: string | null };
+
+// story #4336 AC4 — 외부 발행 게이트도 같은 자리 · 같은 판정. 발송(newsletter_send)은 예전 그대로(진행 · 완료는 줄 없음 — 4262 유나 표),
+// 외부 발행은 채널 초안 목록 · 상세처럼 «발행 중»(processing_kind · 같은 deriveFailureAction) · 완료(목록의 «게시됨» 칩)도 보인다.
+function commandOf(gate: GateItem): { command: GateCommand; isPublish: boolean } | null {
+  if (gate.gate_type === 'newsletter_send' && gate.newsletter_send_command) return { command: gate.newsletter_send_command, isPublish: false };
+  if (gate.gate_type === 'external_publish' && gate.publish_command) return { command: gate.publish_command, isPublish: true };
+  return null;
+}
+
+function viewOf(command: GateCommand, isPublish: boolean): View | null {
+  if (isPublish && command.status === 'completed') return { kind: 'published' };
   if (command.status === 'blocked_unapproved') {
     if (command.reason_code === CONNECTION_UNAVAILABLE) return { kind: 'connection_blocked' };
     return { kind: 'badge', action: { kind: 'dead_letter', needsRecheck: false, reasonCode: null, reasonResetAt: null } };
@@ -43,6 +56,7 @@ function viewOf(command: NonNullable<GateItem['newsletter_send_command']>): View
     nextRetryAt: command.next_attempt_at,
     reasonCode: command.reason_code,
     reasonResetAt: command.reason_reset_at,
+    processingKind: isPublish ? command.processing_kind ?? null : undefined,
   });
   if (!action) return null;
   return { kind: 'badge', action };
@@ -66,9 +80,18 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
   const [retrying, setRetrying] = useState(false);
   const [result, setResult] = useState<PublicationRetryResult | null>(null);
 
-  const command = gate.gate_type === 'newsletter_send' ? gate.newsletter_send_command : null;
-  const view = command ? viewOf(command) : null;
+  const picked = commandOf(gate);
+  const command = picked?.command ?? null;
+  const view = picked ? viewOf(picked.command, picked.isPublish) : null;
   if (!command || !view) return <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />;
+  if (view.kind === 'published') {
+    return (
+      <section className="space-y-2" data-testid="gate-publish-status">
+        <StatusChip status="published" />
+        <PublicationRetryResultLine result={result} testId="channel-post-retry-result" />
+      </section>
+    );
+  }
 
   // story #4290 — 버튼은 서버 판정(`command_retryable`)만 본다 — 화면이 상태로 따로 가르면 서버 404와 갈라진다. 사람인지도 서버가 이미
   // 판정에 넣어 싣는다(까디르 QA ③ · `viewer_can_retry`) — 화면이 멤버 종류를 따로 보지 않는다.
@@ -95,7 +118,7 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
   };
 
   return (
-    <section className="space-y-2" data-testid="newsletter-send-status">
+    <section className="space-y-2" data-testid={picked?.isPublish ? 'gate-publish-status' : 'newsletter-send-status'}>
       {view.kind === 'connection_blocked' ? (
         <div className="space-y-1">
           <FailureActionBadge action={{ kind: 'blocked' }} displayTimezone={displayTimezone} />

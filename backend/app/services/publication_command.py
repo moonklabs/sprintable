@@ -473,6 +473,26 @@ def human_retryable(command: PublicationCommand) -> bool:
 
 
 
+def derive_processing_kind(command: PublicationCommand | None, publication_status: str | None) -> str | None:
+    """«지금 진행 중»의 한 판정(story 620beefc AC5 · #4336) — 채널 초안 목록 · 상세와 게이트 상세가 같은 값을 쓴다(두 곳에서 계산하지 않는다).
+
+    - `awaiting_container`: 명령 대기 + 이 버전 발행이 컨테이너 생성까지 옴.
+    - `publishing`: 예약 없는 명령이 대기 · 진행 중이고 아직 실패가 없고(실패 뒤 재시도 대기는 실패 배지가 맡는다) 워커 예산 밖이 아니고
+      (`OVER_TICK_BUDGET_CODE`면 실제로 발행하지 않고 있다 — 화면이 사유 줄을 따로) 이 버전이 아직 안 나감.
+    - 그 밖 None. `publication_status`를 모르는 자리(게이트 상세 등)는 None을 넘긴다 — 그때 컨테이너 대기는 «발행 중»으로 읽힌다."""
+    if command is None:
+        return None
+    if command.status == "pending" and publication_status == "container_created":
+        return "awaiting_container"
+    if (
+        command.scheduled_at is None and command.failure_kind is None
+        and command.reason_code != OVER_TICK_BUDGET_CODE
+        and command.status in ("pending", "in_progress") and publication_status != "published"
+    ):
+        return "publishing"
+    return None
+
+
 def viewer_can_retry(command: PublicationCommand, *, viewer_is_human: bool) -> bool:
     """story #4290(까디르 QA ③ · PO 06:40Z) — **이 화면을 보는 사람이** 지금 «다시 시도»할 수 있는가. 재시도 엔드포인트
     (`channel_posts._retry_publication_command`)는 사람만 받으므로(`_require_human` · 에이전트 403) 응답의 `command_retryable`도
