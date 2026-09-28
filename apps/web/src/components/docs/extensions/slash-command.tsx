@@ -53,7 +53,7 @@ export interface SlashMenuItem {
   id: string;
   /** story #4377 — 화면에 보이는 제목(로케일 · `strings.titles`). 예전엔 영어 리터럴이라 한국어 화면에 «Heading 1»이 떴다. */
   title: string;
-  /** 거르기 별칭 — 예전 영어 제목(영어로 치던 사람도 걸리게 · «/heading» · «/page»). */
+  /** 거르기 별칭 — 첫째는 예전 영어 제목(영어로 치던 사람도 걸리게 · «/heading» · «/page»). 그 뒤는 찾기 전용 다른 표기(화면엔 안 나옴 · 예: 칼럼의 «컬럼»). */
   aliases: string[];
   description: string;
   icon: FC<{ className?: string }>;
@@ -106,6 +106,8 @@ export interface SlashMenuStrings {
   mermaidDefault: { start: string; end: string };
   /** 삽입되는 문서 콘텐츠 기본값(새 토글 블록 제목) — 유일한 실 호출부가 항상 채워 넘긴다. */
   toggleDefaultTitle: string;
+  /** story #4383 — 칼럼 항목의 찾기 전용 다른 표기(ko «컬럼» · en 빈 값). 화면엔 안 나온다. */
+  columnsSearchAlias: string;
 }
 
 /** id/icon/command/aliases(영어 별칭)는 리터럴로 고정, title/label/description/embed
@@ -305,7 +307,8 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
         {
           id: 'columns',
           title: strings.titles.columns,
-          aliases: ['Columns'],
+          // story #4383(유나) — 화면 표기는 «칼럼» 하나지만 흔한 다른 표기(ko «컬럼»)로 찾아도 걸리게. 찾기 전용 · 화면엔 안 나옴 · 로케일 값(en은 빈 값).
+          aliases: ['Columns', strings.columnsSearchAlias].filter(Boolean),
           description: strings.items.columns,
           icon: Columns2,
           command: (editor, range) =>

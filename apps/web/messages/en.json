@@ -3685,7 +3685,8 @@
         },
         "columns": {
           "title": "Columns",
-          "description": "2/3-column layout"
+          "description": "2/3-column layout",
+          "searchAlias": ""
         },
         "mathBlock": {
           "title": "Math Block",

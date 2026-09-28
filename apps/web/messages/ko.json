@@ -3605,7 +3605,7 @@
     "embedUrlSelectHint": "블록을 선택해 URL을 입력하세요",
     "imageResizeHandleLeft": "왼쪽 리사이즈 핸들",
     "imageResizeHandleRight": "오른쪽 리사이즈 핸들",
-    "columnsLabel": "컬럼",
+    "columnsLabel": "칼럼",
     "columnsTwo": "2단",
     "columnsThree": "3단",
     "mathRenderFailed": "KaTeX 렌더링 실패",
@@ -3684,8 +3684,9 @@
           "description": "코드로 그리는 순서도 · 흐름도"
         },
         "columns": {
-          "title": "컬럼",
-          "description": "2단/3단 컬럼 레이아웃"
+          "title": "칼럼",
+          "description": "2단 · 3단으로 나란히 배치",
+          "searchAlias": "컬럼"
         },
         "mathBlock": {
           "title": "수식 블록",
