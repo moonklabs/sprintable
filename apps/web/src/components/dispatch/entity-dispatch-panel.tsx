@@ -60,7 +60,8 @@ export function EntityDispatchPanel({
   // story #4357(유나 공통 모양 · 4348과 같은 결) — 담당자가 없어 꺼진 까닭은 title(호버)이 아니라 **보이는 한 줄**. 버튼은
   // aria-disabled(탭 순서에 남아 초점 · 화면 읽기가 닿음) + aria-describedby로 그 줄을 가리키고, 누름은 handleDispatch 첫 줄이 막는다.
   // 전달 중(dispatching)은 잠깐 꺼지는 것이라 까닭 줄 없이 네이티브 disabled. 켜져 있을 때 title은 «무엇을 하나» 설명(f5ae74e4 · Kickoff와 구분).
-  const needsAssignee = !assigneeId;
+  // 까디르(4761 비차단 ①) — 전달 중에 고르개를 비우면 네이티브 disabled(바쁨)와 까닭 줄이 같이 섰다. 바쁨이 이긴다(«busy 줄 없음»).
+  const needsAssignee = !assigneeId && !dispatching;
   const reasonId = useId();
   const menuReasonId = useId();
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 아래
@@ -218,7 +219,8 @@ export function EntityDispatchPanel({
                   {dispatching ? t('dispatching') : t('dispatch')}
                 </button>
                 {needsAssignee && (
-                  <p id={menuReasonId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
+                  // 까디르(4761 비차단 ②) — role=menu 안의 자식은 menuitem · group · separator뿐 → 까닭 줄은 role="none"(읽기는 describedby로).
+                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
                 )}
               </AnchoredPopover>
             )}

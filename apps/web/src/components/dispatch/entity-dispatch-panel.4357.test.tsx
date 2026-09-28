@@ -56,7 +56,9 @@ async function mount(props: { currentAssigneeId?: string | null; mobileMode?: 'f
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-const dispatchBtn = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(DISPATCH))!;
+const DISPATCHING = board.dispatching as string;
+// 전달 중이면 버튼 글자가 «전달 중»으로 바뀐다 — 둘 다로 찾는다.
+const dispatchBtn = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(DISPATCH) || b.textContent?.includes(DISPATCHING))!;
 const describedText = (el: Element) => {
   const id = el.getAttribute('aria-describedby');
   return id ? document.getElementById(id)?.textContent ?? null : null;
@@ -126,5 +128,38 @@ describe('디스패치 꺼짐 까닭 — 보이는 한 줄 · aria-disabled + ar
     const rowLine = document.getElementById(dispatchBtn().getAttribute('aria-describedby')!)!;
     expect(rowLine.className).toContain('hidden');
     expect(rowLine.className).toContain('md:block');
+  });
+});
+
+describe('디스패치 까닭 줄 — 까디르 4761 비차단 메모(후속)', () => {
+  it('⭐전달 중에 고르개를 비워도 까닭 줄 · aria-disabled 없음 — 바쁨(네이티브 disabled)이 이긴다', async () => {
+    // 배정 PATCH가 끝나지 않게 붙잡아 «전달 중»에 머문다.
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).includes('/api/members')) return Promise.resolve({ ok: true, json: async () => ({ data: [{ id: 'm1', name: '홍길동', type: 'human', is_active: true }] }) });
+      return new Promise(() => {});
+    }));
+    await mount({ currentAssigneeId: 'm1' });
+    await act(async () => { dispatchBtn().click(); });
+    const select = container.querySelector('select')!;
+    await act(async () => {
+      select.value = '';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const btn = dispatchBtn();
+    expect(btn.disabled).toBe(true);
+    expect(btn.hasAttribute('aria-disabled')).toBe(false);
+    expect(btn.hasAttribute('aria-describedby')).toBe(false);
+    expect(container.textContent).not.toContain(REASON);
+  });
+
+  it('⭐«더 보기» 메뉴의 까닭 줄은 role="none"(메뉴 자식 규칙) · describedby 연결은 그대로', async () => {
+    await mount({ mobileMode: 'assignee-only' });
+    const more = container.querySelector<HTMLButtonElement>(`button[aria-label="${board.moreOptionsAria as string}"]`)!;
+    await act(async () => { more.click(); });
+    const menu = document.querySelector<HTMLElement>('[data-dropdown-panel="dispatch-more"]')!;
+    const item = menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+    const line = document.getElementById(item.getAttribute('aria-describedby')!)!;
+    expect(line.getAttribute('role')).toBe('none');
+    expect(line.textContent).toBe(REASON);
   });
 });
