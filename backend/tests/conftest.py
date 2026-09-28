@@ -205,7 +205,12 @@ def _describe_reset_blockers(engine, own_pid: int) -> str:
         ), {"own": own_pid}).all()
     if not rows:
         return "  (잠금을 쥔 세션을 못 찾음 — 조회 사이에 끝났을 수 있음)"
-    return "\n".join(f"  pid={r[0]} app={r[1]!r} state={r[2]} xact_age={r[3]} query={r[4]!r}" for r in rows)
+    lines = []
+    for pid, app, state, age, query in rows:
+        nodeid = _resolve_global_engine_test_tag(app)
+        who = f" test={nodeid}" if nodeid else ""
+        lines.append(f"  pid={pid} app={app!r}{who} state={state} xact_age={age} query={query!r}")
+    return "\n".join(lines)
 
 
 def _reset_public_schema(url: str) -> None:
@@ -238,10 +243,23 @@ def _reset_public_schema(url: str) -> None:
         engine.dispose()
 
 
-# story #4395 — 전역 엔진(`app.core.database`) 커넥션을 checkout할 때마다 application_name에 지금 destructive 테스트 이름 ·
-# 태스크를 싣는다(**테스트에서만** — 제품의 `db_application_name()` 규칙은 그대로). 리셋이 막혀 위 실패 메시지에 막는 세션이
-# 찍히면 그 app 이름이 곧 «어느 테스트의 어느 태스크가 연 커넥션인가»가 된다. 서버 쪽 set_config 한 번(트랜잭션 밖 · 세션 수준).
-_DESTRUCTIVE_TAG = {"node": None, "installed": False}
+# story #4395 — 전역 엔진(`app.core.database`) 커넥션을 checkout할 때마다 application_name에 지금 destructive 테스트 · 태스크를
+# 싣는다(**테스트에서만** — 제품의 `db_application_name()` 규칙은 그대로). 리셋이 막혀 위 실패 메시지에 막는 세션이 찍히면
+# 그 app 이름이 곧 «어느 테스트의 어느 태스크가 연 커넥션인가»가 된다. 서버 쪽 set_config 한 번(트랜잭션 밖 · 세션 수준).
+# 형식: `ge|<nodeid 해시 6자>|<함수 이름>|<태스크>` — 가르는 것부터(접두는 짧게). Postgres는 63바이트에서 자르므로
+# (NAMEDATALEN) 긴 함수 이름은 여기서 잘릴 수 있다 → 실패 메시지가 같은 프로세스의 해시 → 전체 nodeid 표로 되살린다.
+GLOBAL_ENGINE_TEST_TAG_PREFIX = "ge|"
+_APP_NAME_MAX_BYTES = 63
+_DESTRUCTIVE_TAG: dict = {"node": None, "hash": None, "installed": False, "nodeids": {}}
+
+
+def _clip_utf8(value: str, max_bytes: int) -> str:
+    """바이트 기준으로 자르되 글자 중간에서 끊지 않는다."""
+    return value.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _global_engine_test_tag(node_hash: str, function_name: str, task_name: str) -> str:
+    return _clip_utf8(f"{GLOBAL_ENGINE_TEST_TAG_PREFIX}{node_hash}|{function_name}|{task_name}", _APP_NAME_MAX_BYTES)
 
 
 def _install_global_engine_checkout_tag() -> None:
@@ -252,25 +270,29 @@ def _install_global_engine_checkout_tag() -> None:
     from sqlalchemy import event
     from sqlalchemy.util import await_only
 
-    from app.core.database import db_application_name
     from app.core.database import engine as global_engine
 
-    base = db_application_name()
-
     def _tag(dbapi_connection, _record, _proxy):
-        node = _DESTRUCTIVE_TAG["node"]
-        if node is None:
+        if _DESTRUCTIVE_TAG["node"] is None:
             return
         try:
             task = asyncio.current_task()
             task_name = task.get_coro().__qualname__ if task is not None else "-"
         except RuntimeError:
             task_name = "-"
-        name = f"{base}|{node[:32]}|{task_name[:18]}"[:63]  # NAMEDATALEN 63
+        name = _global_engine_test_tag(_DESTRUCTIVE_TAG["hash"], _DESTRUCTIVE_TAG["node"], task_name)
         await_only(dbapi_connection.driver_connection.execute("SELECT set_config('application_name', $1, false)", name))
 
     event.listen(global_engine.sync_engine, "checkout", _tag)
     _DESTRUCTIVE_TAG["installed"] = True
+
+
+def _resolve_global_engine_test_tag(app_name: str) -> str | None:
+    """`ge|<해시>|…` app 이름 → 이 프로세스에서 그 해시를 단 테스트의 전체 nodeid(잘린 함수 이름을 되살린다)."""
+    if not app_name.startswith(GLOBAL_ENGINE_TEST_TAG_PREFIX):
+        return None
+    node_hash = app_name[len(GLOBAL_ENGINE_TEST_TAG_PREFIX):].split("|", 1)[0]
+    return _DESTRUCTIVE_TAG["nodeids"].get(node_hash)
 
 
 @pytest.fixture(autouse=True)
@@ -278,8 +300,12 @@ def _tag_global_engine_connections_for_destructive_tests(request):
     """destructive 테스트마다 이름을 바꿔 단다. 테스트가 끝나도 지우지 않는다 — 테스트 뒤에 뜬 태스크가 연 커넥션도 «마지막
     destructive 테스트» 이름을 달아야 범인을 가리킬 수 있다."""
     if request.node.get_closest_marker(_MARKER_NAME) is not None:
+        import hashlib
+
         _install_global_engine_checkout_tag()
-        _DESTRUCTIVE_TAG["node"] = request.node.name
+        node_hash = hashlib.sha1(request.node.nodeid.encode("utf-8")).hexdigest()[:6]
+        _DESTRUCTIVE_TAG["nodeids"][node_hash] = request.node.nodeid
+        _DESTRUCTIVE_TAG["node"], _DESTRUCTIVE_TAG["hash"] = request.node.name, node_hash
     yield
 
 

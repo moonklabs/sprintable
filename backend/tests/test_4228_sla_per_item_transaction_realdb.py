@@ -363,17 +363,18 @@ async def test_caller_session_returns_its_connection_before_items_so_a_two_conne
 
 
 async def _idle_in_tx_on_global_engine(Session) -> int:
-    """전역 엔진(application_name이 `db_application_name()`으로 시작 — conftest가 테스트 · 태스크 이름을 뒤에 붙인다)이 이 DB에
-    남긴 idle in transaction 커넥션 수."""
+    """전역 엔진이 이 DB에 남긴 idle in transaction 커넥션 수 — destructive 테스트에선 conftest가 app 이름을
+    `GLOBAL_ENGINE_TEST_TAG_PREFIX`(ge|…)로 바꿔 달고, 태깅 전이면 `db_application_name()` 그대로다."""
     from sqlalchemy import text
 
     from app.core.database import db_application_name
+    from tests.conftest import GLOBAL_ENGINE_TEST_TAG_PREFIX
 
     async with Session() as s:
         return (await s.execute(text(
             "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-            "AND state = 'idle in transaction' AND starts_with(application_name, :app)"
-        ), {"app": db_application_name()})).scalar_one()
+            "AND state = 'idle in transaction' AND (starts_with(application_name, :tag) OR application_name = :app)"
+        ), {"tag": GLOBAL_ENGINE_TEST_TAG_PREFIX, "app": db_application_name()})).scalar_one()
 
 
 async def test_story_4395_publish_path_background_work_is_drained_before_the_loop_closes(monkeypatch):
