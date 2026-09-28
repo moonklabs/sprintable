@@ -96,6 +96,7 @@ describe('임베드 입력칸 제출 실패 — 입력칸 아래 오류 한 줄(
     await submit('plan');
     expect(alert()).toBeNull();
     expect(container.querySelector('[data-testid="page-embed-preview"]')?.textContent).toContain('기획서');
+    expect(updates).toEqual([{ docId: 'doc-b', title: '기획서', icon: null, slug: 'plan' }]);  // 입력칸 선택은 속성을 쓴다
     expect(fetchMock).toHaveBeenCalledTimes(2);  // 임베드 뒤 같은 대상을 다시 조회하지 않는다
   });
 });
@@ -117,15 +118,18 @@ describe('저장된 임베드 — 열 때 한 번 조회(story #4371 AC3 · AC5)
     expect(container.querySelector('[data-testid="page-embed-error"]')?.textContent).toContain(docs.pageEmbedCycle);
   });
 
-  it('제목이 바뀜 → 최신 제목으로 갱신(속성도)', async () => {
-    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '새 제목', icon: '📄', slug: 'plan', embedChain: [] }));
+  it('제목 · 아이콘이 바뀜 → 최신 값으로 그리되 속성(문서 내용)은 쓰지 않는다 — 열기 = 읽기(PO 4371)', async () => {
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '새 제목', icon: '🗂️', slug: 'plan-v2', embedChain: [] }));
     await mount(SAVED);
-    expect(container.querySelector('[data-testid="page-embed-preview"]')?.textContent).toContain('새 제목');
-    expect(updates).toEqual([{ docId: 'doc-b', title: '새 제목', icon: '📄', slug: 'plan' }]);
+    const card = container.querySelector('[data-testid="page-embed-preview"]')!;
+    expect(card.textContent).toContain('새 제목');
+    expect(card.textContent).toContain('🗂️');
+    expect(card.textContent).toContain('/plan-v2');
+    expect(updates).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('값이 같으면 정상 표시 그대로 · 속성은 건드리지 않는다(열기만으로 문서가 «고침»이 되지 않게) · 조회는 한 번', async () => {
+  it('값이 같으면 정상 표시 그대로 · 속성 쓰기 0 · 조회는 한 번', async () => {
     fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [] }));
     await mount(SAVED);
     const card = container.querySelector('[data-testid="page-embed-preview"]')!;

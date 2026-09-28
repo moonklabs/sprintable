@@ -77,7 +77,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
 
   const [inputSlug, setInputSlug] = useState('');
   // story #4371 — 저장된 임베드의 속성(title · icon · slug)은 첫 그림용 자리표시일 뿐. 열 때 대상 문서를 한 번 조회해
-  // 지워짐 · 접근 불가 · 순환이면 오류 줄, 성공이면 최신 값으로 바꾼다(예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
+  // 지워짐 · 접근 불가 · 순환이면 오류 줄, 성공이면 최신 값을 그린다(속성은 안 씀 · 예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
   const [doc, setDoc] = useState<DocPreview | null>(
     docId
       ? { id: docId, title: title ?? '', icon: icon ?? null, slug: slug ?? '', embedChain: [] }
@@ -122,18 +122,16 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
 
         verifiedDocId.current = d.id;
         setDoc(d);
-        // 값이 같으면 속성을 건드리지 않는다 — 문서를 열기만 해도 «고침»이 되는 일이 없게.
-        const next = { docId: d.id, title: d.title, icon: d.icon ?? null, slug: d.slug };
-        if (next.docId !== docId || next.title !== title || next.icon !== (icon ?? null) || next.slug !== slug) {
-          updateAttributes(next);
-        }
+        // 속성(= 문서 내용)은 사용자가 입력칸에서 대상을 고를 때만 쓴다. 열 때 조회('verify')는 읽기만 — 최신 제목/아이콘은
+        // 컴포넌트 상태로만 그린다(보기만 한 사람이 문서를 열어도 내용 · 저장 요청 · «고침» 표시가 생기지 않게, PO 4371).
+        if (mode === 'submit') updateAttributes({ docId: d.id, title: d.title, icon: d.icon ?? null, slug: d.slug });
       } catch {
         fail(tDocs('pageEmbedLoadFailed'));
       } finally {
         if (mode === 'submit') setLoading(false);
       }
     },
-    [updateAttributes, currentDocId, tDocs, docId, title, icon, slug],
+    [updateAttributes, currentDocId, tDocs],
   );
 
   // 저장된 임베드(docId 있음)는 열 때 대상 문서를 한 번 조회한다(story #4371).
