@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from datetime import datetime
+
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate
@@ -57,6 +59,60 @@ _ACTIVITY_ACTION_BY_OP = {
 # (신규 상수 발명 0 — 그 둘을 import하면 이 모듈의 gate_type 무관 워커 배치와
 # 우연히 같은 상수를 공유하게 돼 오히려 결합이 생긴다, 여기선 리터럴로 동형만).
 _DUE_STARTS_BATCH_SIZE = 50
+
+# story #4404 — outcome unknown: a campaign creation was started (marker committed) and never recorded its ids. Meta may have
+# created it, so it is never re-created automatically (customer ad spend) — needs_check (unmapped codes are needs_check).
+ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE = "ADS_BOOST_CREATE_OUTCOME_UNKNOWN"
+
+
+class _CreateClaimLost(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+async def _claim_campaign_creation(db: AsyncSession, run, *, now: datetime) -> bool:
+    """story #4404 — at most one campaign creation per run, across commands (two boost_start commands for one gate can be in
+    flight: commands are unique per approved version, the run per gate).
+
+    Conditional UPDATE: claimable while the ids are incomplete and the claim is free — or expired **without** the call marker
+    (the worker died before calling Meta). Committed before any provider call. Returns True when this command won.
+    Returns False when the ids became complete meanwhile (the caller re-reads them and skips creation).
+    Raises _CreateClaimLost: another command holds a live claim (transient — retry later), or the claim expired **with** the
+    marker and no ids (outcome unknown → needs_check, never re-created)."""
+    from app.models.ads_boost_run import AdsBoostRun
+    from app.services.publication_command import ADS_BOOST_CREATE_IN_PROGRESS_CODE, STUCK_IN_PROGRESS_THRESHOLD
+
+    expired_before = now - STUCK_IN_PROGRESS_THRESHOLD
+    incomplete = or_(AdsBoostRun.campaign_id.is_(None), AdsBoostRun.adset_id.is_(None), AdsBoostRun.ad_id.is_(None))
+    won = (await db.execute(
+        update(AdsBoostRun)
+        .where(
+            AdsBoostRun.id == run.id,
+            incomplete,
+            or_(
+                AdsBoostRun.create_claimed_at.is_(None),
+                and_(AdsBoostRun.create_claimed_at < expired_before, AdsBoostRun.create_call_started_at.is_(None)),
+            ),
+        )
+        .values(create_claimed_at=now, create_call_started_at=None)
+        .returning(AdsBoostRun.id)
+        .execution_options(synchronize_session=False)
+    )).first() is not None
+    await db.commit()
+    await db.refresh(run)
+    if won:
+        return True
+    if run.campaign_id and run.adset_id and run.ad_id:
+        return False
+    if run.create_call_started_at is not None and run.create_claimed_at is not None and run.create_claimed_at < expired_before:
+        raise _CreateClaimLost(
+            ADS_BOOST_CREATE_OUTCOME_UNKNOWN_CODE,
+            f"campaign creation for run {run.id} started at {run.create_call_started_at.isoformat()} and never recorded its ids "
+            "— Meta may have created it; check the ad account before retrying",
+        )
+    raise _CreateClaimLost(ADS_BOOST_CREATE_IN_PROGRESS_CODE, f"another command is creating the campaign for run {run.id}")
 
 
 class AdsBoostGateNotFoundError(Exception):
@@ -396,7 +452,14 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                 # 일부만 있으면 이어서 만든다. 중간 실패의 부분 id도 실행 행에 남긴다(이 명령의 결과와 같은 커밋 — 워커가 틱마다
                 # 명령 결과를 커밋한다).
                 existing = {"campaign_id": run.campaign_id, "adset_id": run.adset_id, "ad_id": run.ad_id}
+                if not all(existing.values()) and not await _claim_campaign_creation(db, run, now=now):
+                    # story #4404 — another command completed the ids meanwhile: no creation
+                    existing = {"campaign_id": run.campaign_id, "adset_id": run.adset_id, "ad_id": run.ad_id}
                 if not all(existing.values()):
+                    # story #4404 — the marker, committed right before the call: from here an interrupted attempt is «outcome
+                    # unknown», never re-created automatically.
+                    run.create_call_started_at = now
+                    await db.commit()
                     try:
                         result = await module.create_boost_campaign(
                             client, ad_account_id=ctx["ad_account_id"], access_token=ctx["access_token"],
@@ -410,12 +473,22 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                         run.campaign_id = partial.get("campaign_id") or run.campaign_id
                         run.adset_id = partial.get("adset_id") or run.adset_id
                         run.ad_id = partial.get("ad_id") or run.ad_id
+                        if getattr(create_exc, "code", None):
+                            # story #4404 — Meta answered with an error: known outcome (partial ids recorded above), the claim
+                            # is released so a retry may continue. A transport error / timeout keeps claim + marker (unknown).
+                            run.create_claimed_at = None
+                            run.create_call_started_at = None
                         raise
                     run.campaign_id, run.adset_id, run.ad_id = result["campaign_id"], result["adset_id"], result["ad_id"]
+                    run.create_claimed_at = None  # story #4404 — ids recorded: the claim is done
+                    run.create_call_started_at = None
                     # story #4268 AC2 — 만든 id를 ACTIVE 전환 **전에** 커밋한다. 뒤(ACTIVE · 지출 스냅샷 예약 · 활동 기록)에서 DB
                     # 오류로 이 트랜잭션이 롤백돼도 id는 남아, 재시도가 새로 만들지 않는다(롤백으로 id를 잃으면 이미 ACTIVE인
                     # 캠페인 옆에 또 만들어 이중 집행이 될 수 있었다). 세션은 expire_on_commit=False라 아래 속성 읽기는 그대로다.
                     await db.commit()
+                from app.services.external_call_tx import end_transaction_before_external_call
+
+                await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
                 )
@@ -437,6 +510,9 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                     raise AdsBoostAdapterUnavailableError(
                         "ADS_BOOST_NOT_STARTED_AT_PROVIDER", f"no campaign_id yet: {gate.id}",
                     )
+                from app.services.external_call_tx import end_transaction_before_external_call
+
+                await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="PAUSED",
                 )
@@ -453,6 +529,9 @@ async def process_one_ads_boost_command(db: AsyncSession, command: PublicationCo
                     raise AdsBoostAdapterUnavailableError(
                         "ADS_BOOST_NOT_STARTED_AT_PROVIDER", f"no campaign_id yet: {gate.id}",
                     )
+                from app.services.external_call_tx import end_transaction_before_external_call
+
+                await end_transaction_before_external_call(db)  # story #4404
                 await module.set_campaign_status(
                     client, campaign_id=run.campaign_id, access_token=ctx["access_token"], status="ACTIVE",
                 )
@@ -532,6 +611,14 @@ async def _get_or_create_run(db: AsyncSession, *, org_id: uuid.UUID, gate_id: uu
     if run is not None:
         return run
     run = AdsBoostRun(id=uuid.uuid4(), org_id=org_id, gate_id=gate_id)
-    db.add(run)
-    await db.flush()
+    # story #4404 — a concurrent first start of the same gate inserts too (uq gate_id). The claim commits the winner's row right
+    # away now, so the loser takes that row instead of failing.
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with db.begin_nested():
+            db.add(run)
+            await db.flush()
+    except IntegrityError:
+        return (await db.execute(select(AdsBoostRun).where(AdsBoostRun.gate_id == gate_id))).scalar_one()
     return run

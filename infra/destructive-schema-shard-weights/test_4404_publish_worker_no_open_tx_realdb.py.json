@@ -1,0 +1,1 @@
+{"file": "tests/test_4404_publish_worker_no_open_tx_realdb.py", "sec": 12.0, "source": "story-4404 — new file measured (local pg16, one run: 6 tests about 7.7 s wall; rounded up for the slow-upload sleeps)"}
