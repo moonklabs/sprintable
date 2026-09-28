@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { StorageAssetRow } from './storage-asset-row';
+import { StorageAssetList } from './storage-asset-list';
 
 vi.mock('./storage-uploader-avatar', () => ({ StorageUploaderAvatar: () => <span data-testid="uploader-avatar" /> }));
 
@@ -38,5 +39,28 @@ describe('파일 목록 행 초점([SID:4380])', () => {
     expect(cls).not.toContain('outline-none');
     expect(cls.some((c) => c.startsWith('focus-visible:bg-'))).toBe(false);
     expect(cls.includes('bg-info/10')).toBe(selected);
+  });
+});
+
+// 유나(eb058bc7b): 파일 검색 input은 outline-none이고 감싸는 상자에 focus-within이 없어 Tab으로 들어가도 글자 커서뿐 → 상자에 제품 링.
+describe('파일 검색칸 초점([SID:4380])', () => {
+  it('input을 감싼 상자 = focus-within 제품 링', async () => {
+    const noop = () => {};
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <StorageAssetList
+            assets={[]} viewMode="list" onViewModeChange={noop} search="" onSearchChange={noop} sort="date" onSortChange={noop}
+            selectedAssetId={null} onSelectAsset={noop} onDeleteAsset={noop} onDownloadAsset={noop} onUploadFile={noop}
+            resolveFolderLabel={() => null} loading={false} error={false} onRetry={noop}
+            isSearchActive={false} hasMore={false} loadingMore={false} onLoadMore={noop}
+          />
+        </NextIntlClientProvider>,
+      );
+    });
+    const input = container.querySelector<HTMLInputElement>(`input[placeholder="${koMessages.storage.searchPlaceholder}"]`)!;
+    const box = input.parentElement!.className.split(/\s+/);
+    expect(box).toContain('focus-within:ring-2');
+    expect(box).toContain('focus-within:ring-ring');
   });
 });

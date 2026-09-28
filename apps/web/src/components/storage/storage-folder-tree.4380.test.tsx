@@ -100,3 +100,20 @@ describe('[SID:4380] 폴더 나무 — 펼침 상태 · 키보드로 펼치고 �
     expect(cls).toContain('bg-info/10');
   });
 });
+
+// 유나(eb058bc7b): 폴더 검색 input도 outline-none · 감싸는 상자에 focus-within 없음 → 상자에 제품 링.
+describe('[SID:4380] 폴더 검색칸 초점', () => {
+  it('input을 감싼 상자 = focus-within 제품 링', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <StorageFolderTree folders={FOLDERS} selectedFolderId={null} onSelectFolder={() => {}} projectId="p1" projectName="프로젝트" folderSearch="" onFolderSearchChange={() => {}} onCreateFolder={async () => ({ ok: true })} />
+        </NextIntlClientProvider>,
+      );
+    });
+    const input = container.querySelector<HTMLInputElement>(`input[placeholder="${koMessages.storage.folderSearchPlaceholder}"]`)!;
+    const box = input.parentElement!.className.split(/\s+/);
+    expect(box).toContain('focus-within:ring-2');
+    expect(box).toContain('focus-within:ring-ring');
+  });
+});
