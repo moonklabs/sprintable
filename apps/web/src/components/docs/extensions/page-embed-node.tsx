@@ -95,7 +95,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
         if (currentDocId) params.set('currentDocId', currentDocId);
         const res = await fetchWithAuth(`/api/docs/preview?${params.toString()}`);
         if (!res.ok) {
-          setError(res.status === 404 ? 'Document not found' : 'Document unavailable');
+          setError(res.status === 404 ? tDocs('pageEmbedNotFound') : tDocs('pageEmbedUnavailable'));
           setLoading(false);
           return;
         }
@@ -104,7 +104,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
 
         // Indirect circular embed check: target doc's embedChain contains currentDocId (A→B→A)
         if (isCircularEmbed(d.id, currentDocId, d.embedChain)) {
-          setError('Circular embed detected — this would create an embed cycle.');
+          setError(tDocs('pageEmbedCycle'));
           setLoading(false);
           return;
         }
@@ -112,12 +112,12 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
         setDoc(d);
         updateAttributes({ docId: d.id, title: d.title, icon: d.icon ?? null, slug: d.slug });
       } catch {
-        setError('Failed to load document');
+        setError(tDocs('pageEmbedLoadFailed'));
       } finally {
         setLoading(false);
       }
     },
-    [updateAttributes, currentDocId],
+    [updateAttributes, currentDocId, tDocs],
   );
 
   // Auto-fetch when docId is present but doc state not yet populated
@@ -149,7 +149,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
       <NodeViewWrapper data-testid="page-embed-circular">
         <div className="flex items-center gap-2 rounded-xl border border-destructive-border bg-destructive-tint px-4 py-3 text-sm text-foreground">
           <AlertCircle className="size-4 shrink-0 text-destructive" />
-          <span>Circular embed detected — a document cannot embed itself.</span>
+          <span>{tDocs('pageEmbedSelf')}</span>
         </div>
       </NodeViewWrapper>
     );
@@ -168,7 +168,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
             type="text"
             value={inputSlug}
             onChange={(e) => setInputSlug(e.target.value)}
-            placeholder="Enter document slug or ID…"
+            placeholder={tDocs('pageEmbedPlaceholder')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />
@@ -189,7 +189,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
       <NodeViewWrapper data-testid="page-embed-loading">
         <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-muted-foreground">
           <RefreshCw className="size-4 shrink-0 animate-spin" />
-          <span>Loading document…</span>
+          <span>{tDocs('pageEmbedLoading')}</span>
         </div>
       </NodeViewWrapper>
     );

@@ -274,7 +274,7 @@ export default function AgentDetailPage() {
           return;
         }
       }
-      addToast({ type: 'success', title: 'Webhook URL saved' });
+      addToast({ type: 'success', title: t('webhookUrlSavedToast') });
       await fetchWebhookConfigs(agent.project_id);
     } finally {
       setSavingWebhook(false);
@@ -431,7 +431,7 @@ export default function AgentDetailPage() {
                 <OperatorInput
                   value={editRole}
                   onChange={(e) => setEditRole(e.target.value)}
-                  placeholder="role"
+                  placeholder={t('agentRolePlaceholder')}
                   className="max-w-32"
                 />
                 <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-success transition hover:opacity-80 disabled:opacity-50">
@@ -447,7 +447,7 @@ export default function AgentDetailPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-base font-semibold text-foreground">{agent.name}</span>
-                    {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
+                    {!agent.is_active ? <Badge variant="destructive">{ta('statusInactive')}</Badge> : null}
                   </div>
                   <div className="mt-1 flex items-center gap-2">
                     <Badge variant="secondary">{t('agentMember')}</Badge>
@@ -732,7 +732,7 @@ export default function AgentDetailPage() {
               </div>
               {freshApiKey ? (
                 <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
-                  {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />Copy export</>}
+                  {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />{ta('fakechatEnvCopyExport')}</>}
                 </Button>
               ) : null}
             </div>

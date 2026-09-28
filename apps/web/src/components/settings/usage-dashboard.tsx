@@ -2,6 +2,8 @@
 // OSS 단독 빌드에서는 "usage tracking is disabled" 안내만 표시.
 'use client';
 
+import { useTranslations } from 'next-intl';
+
 export interface UsageDashboardProps {
   orgId?: string;
   currentProjectId?: string | null;
@@ -11,9 +13,10 @@ export interface UsageDashboardProps {
 }
 
 export function UsageDashboard(_props: UsageDashboardProps) {
+  const t = useTranslations('settings'); // story #4359
   return (
     <div className="p-6 text-muted-foreground">
-      Usage tracking is disabled in OSS mode.
+      {t('usageTrackingDisabledOss')}
     </div>
   );
 }

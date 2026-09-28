@@ -70,6 +70,8 @@
     "verify:no-hardcoded-korean-ui-text": "tsx scripts/verify-no-hardcoded-korean-ui-text.ts",
     "verify:no-raw-role-jsx-text": "tsx scripts/verify-no-raw-role-jsx-text.ts",
     "verify:no-raw-ascii-jsx-text": "tsx scripts/verify-no-raw-ascii-jsx-text.ts",
+    "verify:no-hardcoded-english-ui-message": "tsx scripts/verify-no-hardcoded-english-ui-message.ts",
+    "verify:no-hardcoded-english-browser-dialog": "tsx scripts/verify-no-hardcoded-english-browser-dialog.ts",
     "verify:no-raw-ascii-jsx-attr": "tsx scripts/verify-no-raw-ascii-jsx-attr.ts",
     "verify:no-ascii-token-in-ko-value": "tsx scripts/verify-no-ascii-token-in-ko-value.ts",
     "verify:no-latin-in-uppercase-eyebrow": "tsx scripts/verify-no-latin-in-uppercase-eyebrow.ts",

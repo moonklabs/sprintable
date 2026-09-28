@@ -19,6 +19,7 @@ interface Agent {
 
 export default function ApiKeysPage() {
   const tc = useTranslations('common');
+  const t = useTranslations('settings'); // story #4359
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   // [SID:4311 PR 3] 에이전트 칸 머리 — 같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»(목록 행 규칙 한 곳).
@@ -41,9 +42,9 @@ export default function ApiKeysPage() {
   return (
     <div className="container mx-auto py-8 space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Agent API Keys</h1>
+        <h1 className="text-3xl font-bold">{t('agentApiKeysPageTitle')}</h1>
         <p className="text-muted-foreground mt-2">
-          Manage API keys for agent authentication
+          {t('agentApiKeyListDescription')}
         </p>
       </div>
 
@@ -55,7 +56,7 @@ export default function ApiKeysPage() {
         </div>
       ) : agents.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
-          <p className="text-sm text-muted-foreground">No active agent members in this project.</p>
+          <p className="text-sm text-muted-foreground">{t('agentApiKeysNoAgents')}</p>
         </div>
       ) : (
         <div className="space-y-6">
