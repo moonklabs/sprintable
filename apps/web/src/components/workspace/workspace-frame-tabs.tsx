@@ -2,8 +2,9 @@
 
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { whenFirstScreenQuiet } from '@/lib/first-screen-quiet';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -63,6 +64,18 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
   }, [active]);
   const t = useTranslations('nav');
   const params = useParams<{ ws: string; proj: string }>();
+  const router = useRouter();
+  const hrefOf = (path: string) => `/${params.ws}/${params.proj}/${path}`;
+  // [SID:4299] 탭 프리패치는 첫 화면 뒤로 — 기본 prefetch Link 여섯은 보이자마자 경로마다 tree + data 둘씩 나가, 기기 콜드에서 물결 뒤 정착을
+  // +300ms 밀고 서버 RSC 렌더를 콜드마다 +11 늘렸다(AC3 판 2026-09-28). 4291의 뜻(형제 탭 전환 무반응 없앰)은 지킨다:
+  // 첫 화면이 조용해지면 지금 탭 이웃 둘만 미리 받고, 나머지는 누르려는 기색(pointerenter · focus · touchstart) 때 받는다.
+  const activeIndex = TABS.findIndex((tab) => tab.key === active);
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const neighbors = [TABS[activeIndex - 1], TABS[activeIndex + 1]].filter((tab) => tab !== undefined);
+    return whenFirstScreenQuiet(() => { for (const tab of neighbors) router.prefetch(hrefOf(tab.path)); });
+    // router · hrefOf는 매 렌더 새 참조 — 지금 탭 · 주소 조각이 바뀔 때만 다시 건다.
+  }, [activeIndex, params.ws, params.proj]); // eslint-disable-line react-hooks/exhaustive-deps
   // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — "「지금」 탭을 열 때 여기가 보드인 것이
   // 즉시 읽히게" 시각 위계 승격. PR#3358(유나 QA)이 세운 「상위 프레임=underline·내부 뷰
   // 탭=rounded pill」구분 자체는 유효한 규율이라 유지(pill로 갈아타지 않음 — 재규격이 아니라
@@ -87,11 +100,16 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
       >
         {TABS.map((tab) => (
           // story #4291 — 탭 = 프리패치되는 <Link>(예전 router.push 버튼은 프리패치가 없어 형제 탭 이동이 응답까지 ~600ms 무반응).
+          // [SID:4299] 보일 때 자동 프리패치는 끄고(prefetch={false}) 위 훅(이웃 둘 · 첫 화면 뒤)과 누르려는 기색 때 router.prefetch로.
           // 탭 줄은 이제 `[ws]/[proj]` 레이아웃(WorkTabsFrame)에 살아 전환 때 다시 그려지지 않는다 — 두 가지는 한 묶음이다(카드 처방).
           <Link
             key={tab.key}
             ref={active === tab.key ? activeRef : undefined}
-            href={`/${params.ws}/${params.proj}/${tab.path}`}
+            href={hrefOf(tab.path)}
+            prefetch={false}
+            onPointerEnter={() => router.prefetch(hrefOf(tab.path))}
+            onFocus={() => router.prefetch(hrefOf(tab.path))}
+            onTouchStart={() => router.prefetch(hrefOf(tab.path))}
             role="tab"
             aria-selected={active === tab.key}
             className={cn(
