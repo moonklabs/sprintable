@@ -1489,7 +1489,10 @@ jobs:
             printf '%s\n' ${MIXED_TEST_FILES} >> /tmp/narrowed_test_files.txt
             echo "story #4163 narrowed(app 모듈 변경을 참조하는 테스트 + 같이 바뀐 테스트만 RED 후보):"
             cat /tmp/narrowed_test_files.txt
-            changed_files_arg=(--changed-files /tmp/narrowed_test_files.txt)
+            # story #4283(AC4 · PO 07:26Z) — 이 PR이 직접 바꾼 테스트(MIXED_TEST_FILES)만 단일 절대 판정. 나머지(import로만
+            # 들어온 테스트)는 판정선을 넘어도 샤드 RED가 아니라 import-over 파일에 적고, 서로 다른 샤드 2개 이상이면 Audit이 RED.
+            printf '%s\n' ${MIXED_TEST_FILES} > /tmp/direct_test_files.txt
+            changed_files_arg=(--changed-files /tmp/narrowed_test_files.txt --direct-files /tmp/direct_test_files.txt)
           fi
           # story #4283 — 벽시계 한 표본으로 판정하지 않는다. 7일 실측: 파일 하나가 대조군은 정상인데 혼자 중앙값의
           # 3.4~3.8배로 튀는 일이 판정 1회당 ~0.2%, narrowing 후보 65~154개 → PR당 14~26% 거짓 RED(테스트 전부 통과).
@@ -1497,8 +1500,11 @@ jobs:
           # PR이 테스트를 실제로 느리게 만들었으면 재실행에서도 넘는다(결정적). 재실행에서 내려온 파일은 두 값을
           # ::warning::으로 남긴다. 5개 초과(광범위 둔화)는 예전처럼 바로 RED.
           suspects_file=$(must_mktemp) || exit 1
+          # story #4283 — 판정선을 넘은 import 확장 테스트(샤드 RED 아님) · 아래 --elapsed-to-json이 산출물에 실어 Audit이 교차 샤드로 판정.
+          import_over_file=/tmp/import-over-${{ matrix.shard }}.txt
+          : > "$import_over_file"
           slow_exit=0
-          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}" \
+          uv run python scripts/shard_destructive_tests.py --check-elapsed "$elapsed_file" "${changed_files_arg[@]}" --import-over-out "$import_over_file" \
             --suspects-out "$suspects_file" --expected-files /tmp/shard_files.txt || slow_exit=$?
           if [ "$slow_exit" -eq 3 ]; then
             echo "러너 정규화 가드 1차 초과 $(wc -l < "$suspects_file")개 — 재실행으로 확인(story #4283):"
@@ -1527,7 +1533,7 @@ jobs:
               slow_exit=0
               uv run python scripts/shard_destructive_tests.py \
                 --confirm-elapsed "$elapsed_file" "$rerun_elapsed" "$suspects_file" "${changed_files_arg[@]}" \
-                || slow_exit=$?
+                --import-over-out "$import_over_file" || slow_exit=$?
             fi
             rm -f "$rerun_elapsed" "$rerun_failed"
           fi
@@ -1537,7 +1543,7 @@ jobs:
           # 시작하므로 이미 그 값 — 새 타이머 불요, 기존 elapsed_file을 그대로 재사용).
           # 이 변환은 위 60초 가드 판정과 무관하게 항상 시도한다(느린 러너여도 산출물은
           # 남겨야 다음 잡의 대조가 그 run을 볼 수 있다).
-          if ! uv run python scripts/shard_destructive_tests.py --elapsed-to-json "$elapsed_file" /tmp/shard-durations-${{ matrix.shard }}.json --shard ${{ matrix.shard }}; then
+          if ! uv run python scripts/shard_destructive_tests.py --elapsed-to-json "$elapsed_file" /tmp/shard-durations-${{ matrix.shard }}.json --shard ${{ matrix.shard }} --import-over "$import_over_file"; then
             # 예전엔 -e가 여기서 스텝을 죽였다 — 산출물이 조용히 빠지지 않게 같은 결과를 명시로.
             echo "::error::샤드 경과 산출물 변환 실패(story #3558 · #4283)"
             exit 1

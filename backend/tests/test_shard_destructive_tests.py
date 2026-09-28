@@ -1873,7 +1873,7 @@ def _destructive_step_run() -> str:
 
 def _run_step(
     tmp_path, *, targets, first, rerun=None, rerun_fail=None, run_text=None, uv_fail_on="", value_overrides=None,
-    drop_shard_files=False, mktemp_fail_at=None, unreadable_failed_out_call=None, rerun_exit=None,
+    drop_shard_files=False, mktemp_fail_at=None, unreadable_failed_out_call=None, rerun_exit=None, collect_files=None,
 ):
     import re
     import shutil
@@ -1896,8 +1896,13 @@ def _run_step(
     bindir = tmp_path / "bin"
     bindir.mkdir()
     uv = bindir / "uv"
+    # story #4283 — collect_files를 주면 `uv run pytest ... --collect-only`(narrowing의 discover_files)에 그 목록을 답한다.
+    collect = (
+        "if [ \"$1\" = run ] && [ \"$2\" = pytest ]; then printf '%s\\n' "
+        + " ".join(f"'{f}::t'" for f in collect_files) + "; exit 0; fi\n"
+    ) if collect_files else ""
     uv.write_text(
-        '#!/usr/bin/env bash\n[ "$1" = run ] && [ "$2" = python ] || exit 99\n'
+        '#!/usr/bin/env bash\n' + collect + '[ "$1" = run ] && [ "$2" = python ] || exit 99\n'
         'if [ -n "${UV_FAIL_ON:-}" ]; then case " $* " in *" $UV_FAIL_ON "*) exit 7;; esac; fi\n'
         f'shift 2\nexec "{sys.executable}" "$@"\n'
     )
@@ -2136,3 +2141,173 @@ def test_4283_step_harness_works_when_the_work_dir_is_under_tmp():
         assert code == 0 and calls == 2, out
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+# ─── story #4283(AC4 미달 → AC5 · PO 2026-09-28 07:26Z) — import 확장 테스트는 교차 샤드로만 RED ──────────────
+# import 확장으로만 들어온 테스트(#4163 narrowing)는 하나가 튀어도 샤드 RED가 아니다 — 재실행에서도 넘으면 산출물(import_expanded_over)에
+# 적고, 서로 다른 샤드 2개 이상에서 같이 넘었을 때만 --audit-durations가 RED. 직접 바꾼 테스트는 예전 그대로(단일 절대 + 재실행).
+
+_HUB_4656 = "app/routers/events.py"  # PR 4656이 바꾼 허브(이번 거짓 RED run 36099290855 · 샤드 11)
+_T2636 = "tests/test_2636_custom_event_registration.py"
+
+
+def test_4283_import_expanded_cross_shard_rule():
+    mod = _load()
+    assert mod.IMPORT_EXPANDED_MIN_SHARDS == 2
+    assert mod.import_expanded_cross_shard_red({}) == []
+    assert mod.import_expanded_cross_shard_red({11: [_T2636], 3: []}) == []                  # 한 샤드 = 러너 튐
+    assert mod.import_expanded_cross_shard_red({8: ["tests/a.py", "tests/b.py"]}) == []      # 같은 샤드 둘도 한 러너
+    assert mod.import_expanded_cross_shard_red({3: ["tests/a.py"], 7: ["tests/b.py"]}) == [3, 7]
+
+
+def test_4283_the_false_red_file_is_an_import_expanded_test_of_the_hub():
+    """AC5 입력 전제 — test_2636은 PR 4656이 바꾼 허브(app/routers/events.py)를 import해서 narrowing에 들어온 파일(직접 변경 아님)."""
+    mod = _load()
+    dependents = mod.test_files_depending_on_modules(mod.changed_app_files_to_modules(frozenset({_HUB_4656})), mod.discover_files())
+    assert _T2636 in dependents
+
+
+def _setup_4283(tmp_path, monkeypatch, weights):
+    mod = _load()
+    monkeypatch.setattr(mod, "load_weights", lambda: weights)
+    monkeypatch.setattr(mod, "load_raw_entries", list)
+    return mod
+
+
+def test_4283_check_mode_import_over_is_warn_and_recorded_direct_over_stays_red(tmp_path, capsys, monkeypatch):
+    """재실행 없이 판정하는 길(--suspects-out 없음): import 확장 파일 초과 → exit 0 · import-over 파일에 적힘 · ::warning:: ·
+    직접 바꾼 파일 초과 → 예전 그대로 exit 1."""
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 30.0, "tests/direct.py": 30.0}
+    mod = _setup_4283(tmp_path, monkeypatch, weights)
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/imp.py\ntests/direct.py\n")
+    direct = tmp_path / "direct.txt"
+    direct.write_text("tests/direct.py\n")
+    over = tmp_path / "over.txt"
+
+    only_import = _write_run(tmp_path, "a.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 100.0, "tests/direct.py": 30.0})
+    assert mod._check_elapsed_mode(only_import, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over) == 0
+    out = capsys.readouterr().out
+    assert over.read_text() == "tests/imp.py\n"
+    assert "::warning::러너 정규화 가드(story #4283) — tests/imp.py" in out and "::error::" not in out
+
+    both = _write_run(tmp_path, "b.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 100.0, "tests/direct.py": 100.0})
+    assert mod._check_elapsed_mode(both, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over) == 1
+    out = capsys.readouterr().out
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/direct.py" in out
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/imp.py" not in out
+    assert over.read_text() == "tests/imp.py\n"
+
+    # 뮤테이션 대조: --direct-files를 안 주면(예전) import 파일도 직접 변경 취급 → RED.
+    assert mod._check_elapsed_mode(only_import, changed_files_path=changed, import_over_out_path=over) == 1
+    capsys.readouterr()
+
+
+def test_4283_confirm_mode_import_confirmed_is_recorded_not_red(tmp_path, capsys, monkeypatch):
+    """ci.yml 순서 그대로(check --suspects-out → exit 3 → confirm): 재실행에서도 넘은 import 확장 파일 → exit 0 + import-over에 적힘 ·
+    재실행에서도 넘은 직접 변경 파일 → exit 1."""
+    weights = {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 30.0, "tests/direct.py": 30.0}
+    mod = _setup_4283(tmp_path, monkeypatch, weights)
+    changed = tmp_path / "changed.txt"
+    changed.write_text("tests/imp.py\ntests/direct.py\n")
+    direct = tmp_path / "direct.txt"
+    direct.write_text("tests/direct.py\n")
+    over = tmp_path / "over.txt"
+    suspects = tmp_path / "suspects.txt"
+    first = _write_run(tmp_path, "first.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/imp.py": 100.0})
+    assert mod._check_elapsed_mode(
+        first, changed_files_path=changed, suspects_out_path=suspects, direct_files_path=direct, import_over_out_path=over,
+    ) == mod.CONFIRM_RERUN_EXIT
+    assert suspects.read_text() == "tests/imp.py\n" and over.read_text() == ""
+    rerun = _write_run(tmp_path, "rerun.tsv", {"tests/imp.py": 98.0})
+    assert mod._confirm_elapsed_mode(
+        first, rerun, suspects, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over,
+    ) == 0
+    out = capsys.readouterr().out
+    assert over.read_text() == "tests/imp.py\n"
+    assert "재실행에서도" in out and "::error::" not in out
+
+    first_d = _write_run(tmp_path, "first_d.tsv", {f"tests/c{i}.py": 30.0 for i in range(6)} | {"tests/direct.py": 100.0})
+    assert mod._check_elapsed_mode(
+        first_d, changed_files_path=changed, suspects_out_path=suspects, direct_files_path=direct, import_over_out_path=over,
+    ) == mod.CONFIRM_RERUN_EXIT
+    rerun_d = _write_run(tmp_path, "rerun_d.tsv", {"tests/direct.py": 98.0})
+    assert mod._confirm_elapsed_mode(
+        first_d, rerun_d, suspects, changed_files_path=changed, direct_files_path=direct, import_over_out_path=over,
+    ) == 1
+    assert "::error::러너 정규화 절대 가드 초과(story #4152): tests/direct.py" in capsys.readouterr().out
+
+
+def _shard_artifact(dirpath, shard, over):
+    mod = _load()
+    mod.write_durations_json({"tests/x.py": 1.0}, dirpath / f"shard-durations-{shard}.json", shard=shard, import_over=over)
+
+
+def test_4283_durations_json_carries_import_over_and_audit_reads_it(tmp_path):
+    mod = _load()
+    _shard_artifact(tmp_path, 11, [_T2636])
+    _shard_artifact(tmp_path, 3, [])
+    mod.write_durations_json({"tests/x.py": 1.0}, tmp_path / "shard-durations-5.json", shard=5)  # 예전 모양(키 없음)
+    assert json.loads((tmp_path / "shard-durations-11.json").read_text())["import_expanded_over"] == [_T2636]
+    assert "import_expanded_over" not in json.loads((tmp_path / "shard-durations-5.json").read_text())
+    assert mod.load_import_over_by_shard(tmp_path) == {3: [], 5: [], 11: [_T2636]}
+
+
+def test_4283_ac5_the_false_red_run_is_green_across_shards(tmp_path, capsys):
+    """⭐AC5 ① — 이번 거짓 RED 입력(run 36099290855 · 샤드 11 · test_2636 import 확장 · 1차 127s · 재실행 110s)이 산출물에 실려도
+    한 샤드뿐이라 Audit exit 0 + ::warning::(예전엔 샤드 잡 RED)."""
+    mod = _load()
+    for shard in range(12):
+        _shard_artifact(tmp_path, shard, [_T2636] if shard == 11 else [])
+    assert mod._audit_durations_mode(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "::error::러너 정규화 가드 교차 샤드 초과" not in out
+    assert f"샤드 11 하나에만 있음({_T2636})" in out
+
+
+def test_4283_ac5_hub_slowdown_across_shards_is_red(tmp_path, capsys):
+    """⭐AC5 ② 양성 대조 — 허브가 정말 느려져 import 테스트가 서로 다른 샤드 둘 이상에서 같이 넘으면 Audit exit 1 + ::error::.
+    뮤테이션: IMPORT_EXPANDED_MIN_SHARDS를 올리거나 교차 샤드 검사를 빼면 이 테스트 RED."""
+    mod = _load()
+    dependents = mod.test_files_depending_on_modules(mod.changed_app_files_to_modules(frozenset({_HUB_4656})), mod.discover_files())
+    a, b = dependents[0], dependents[1]
+    for shard in range(12):
+        _shard_artifact(tmp_path, shard, [a] if shard == 3 else [b] if shard == 7 else [])
+    assert mod._audit_durations_mode(tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "::error::러너 정규화 가드 교차 샤드 초과(story #4283)" in out and f"샤드 3: {a}" in out and f"샤드 7: {b}" in out
+
+
+def test_4283_ac5_step_the_false_red_input_keeps_the_shard_green_and_carries_it(tmp_path):
+    """⭐AC5 ① 배선 — ci.yml 스텝 그대로(실 bash · 스텁 루프): 허브만 바뀐 PR(__ALL__ + app/routers/events.py · 직접 바꾼 테스트 0)에서
+    import 확장 test_2636이 1차 · 재실행 둘 다 선을 넘어도 **샤드 잡 초록**이고 산출물에 import_expanded_over로 실린다.
+    뮤테이션: ci.yml에서 --direct-files를 빼면 예전처럼 샤드 RED(아래 대조)."""
+    values = {
+        "needs.detect-changed-scope.outputs.backend_test_files_changed": "__ALL__",
+        "needs.detect-changed-scope.outputs.backend_app_files_changed": _HUB_4656,
+        "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": "",
+    }
+    code, out, calls = _run_step(tmp_path, targets=[_T2636], first=_over, rerun=_over, value_overrides=values, collect_files=[_T2636])
+    assert code == 0 and calls == 2, out
+    artifact = json.loads((tmp_path / "t" / "shard-durations-0.json").read_text())
+    assert artifact["import_expanded_over"] == [_T2636]
+
+    without_direct = _destructive_step_run().replace(" --direct-files /tmp/direct_test_files.txt", "")
+    assert without_direct != _destructive_step_run()
+    code, out, _ = _run_step(
+        tmp_path / "m", targets=[_T2636], first=_over, rerun=_over, value_overrides=values, run_text=without_direct,
+        collect_files=[_T2636],
+    )
+    assert code != 0 and "::error::러너 정규화 절대 가드 초과(story #4152)" in out, out
+
+
+def test_4283_ac5_step_directly_changed_slow_test_is_still_red(tmp_path):
+    """⭐AC5 ③ — 같은 PR 모양이어도 PR이 그 테스트를 **직접** 바꿨으면(MIXED) 예전 그대로 샤드 RED(단일 절대 + 재실행)."""
+    values = {
+        "needs.detect-changed-scope.outputs.backend_test_files_changed": "__ALL__",
+        "needs.detect-changed-scope.outputs.backend_app_files_changed": _HUB_4656,
+        "needs.detect-changed-scope.outputs.backend_mixed_test_files_changed": _T2636,
+    }
+    code, out, calls = _run_step(tmp_path, targets=[_T2636], first=_over, rerun=_over, value_overrides=values, collect_files=[_T2636])
+    assert code != 0 and calls == 2, out
+    assert f"::error::러너 정규화 절대 가드 초과(story #4152): {_T2636}" in out
