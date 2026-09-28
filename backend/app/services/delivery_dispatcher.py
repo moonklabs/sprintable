@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -244,6 +245,24 @@ async def _deliver_one(job: dict) -> None:
             logger.exception("delivery_dispatcher: job %s status update after failure also failed", job_id)
 
 
+_RECEIPT_CHECK_INTERVAL = 60.0  # story #4396 — Expo receipts are checked at most once a minute per instance
+
+
+async def _check_expo_receipts_isolated() -> None:
+    """story #4396 — one pass of Expo receipt checking, fully isolated from delivery: it uses its own Redis calls and its own
+    DB session, and any failure is logged and swallowed here, so it can never stop or roll back the tick's deliveries."""
+    try:
+        from app.core.config import settings
+
+        if not settings.is_ee_enabled:
+            return
+        from ee.services.expo_receipts import check_due_expo_receipts
+
+        await check_due_expo_receipts()
+    except Exception:
+        logger.warning("delivery_dispatcher: expo receipt check failed — deliveries unaffected", exc_info=True)
+
+
 async def delivery_dispatcher_loop() -> None:
     """reap(만료된 claimed → pending) → claim(짧은 트랜잭션) → 배달(짧은 세션, 외부 I/O) →
     상태갱신을 tick마다 반복.
@@ -257,8 +276,12 @@ async def delivery_dispatcher_loop() -> None:
         _POLL_INTERVAL, _BATCH_SIZE, _CONCURRENCY, _CLAIM_TIMEOUT_SECONDS,
     )
     delay = 1.0
+    next_receipt_check = 0.0
     while True:
         try:
+            if time.monotonic() >= next_receipt_check:
+                next_receipt_check = time.monotonic() + _RECEIPT_CHECK_INTERVAL
+                await _check_expo_receipts_isolated()
             reaped = await _reap_expired_claims()
             if reaped:
                 logger.warning("delivery_dispatcher: reaped %d expired claim(s) back to pending", reaped)
