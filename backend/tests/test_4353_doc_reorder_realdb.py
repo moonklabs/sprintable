@@ -93,7 +93,9 @@ async def _post(Session, seeded, body):
 
 
 async def _patch(Session, seeded, doc_id, body):
-    """PATCH /api/v2/docs/{id} — 부모를 쓰는 다른 길(까디르 4736 P2 ②)."""
+    """PATCH /api/v2/docs/{id} — 부모를 쓰는 다른 길(까디르 4736 P2 ②).
+    세션은 운영 `get_db`처럼 **요청 끝에 커밋**한다(story #4353 CI 경합 — 예전엔 커밋 없이 닫아 PATCH가 200을 내고도 롤백됐다:
+    PATCH가 먼저 잠금을 잡은 판은 늘 [200, 200]이었고 «순환 0» 단언도 헛돌았다). reorder는 라우트가 스스로 커밋한다."""
     from httpx import ASGITransport, AsyncClient
 
     from app.dependencies.auth import AuthContext, get_current_user
@@ -102,7 +104,12 @@ async def _patch(Session, seeded, doc_id, body):
 
     async def _db():
         async with Session() as s:
-            yield s
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
 
     async def _auth():
         return AuthContext(
@@ -119,15 +126,21 @@ async def _patch(Session, seeded, doc_id, body):
         app.dependency_overrides.clear()
 
 
-async def _wait_for_lock_waiters(Session, n: int, *, timeout: float = 10.0) -> None:
-    """결정적 장벽(까디르 4736 P3) — `sleep`으로 줄 세우지 않고, advisory lock을 **기다리는**(granted = false) 세션이 n개가 될 때까지."""
+async def _wait_for_lock_waiters(Session, n: int, *, keys: list[str], timeout: float = 10.0) -> None:
+    """결정적 장벽(까디르 4736 P3) — `sleep`으로 줄 세우지 않고, advisory lock을 **기다리는**(granted = false) 세션이 n개가 될 때까지.
+    story #4353 — **이 DB · 이 키들**의 대기만 센다. 예전엔 서버 전체 advisory 대기를 세 CI에서 남의 테스트 대기가 섞이면 요청이
+    잠금 앞에 오기 전에 풀렸다. `pg_advisory_xact_lock(hashtext(k))`는 int4 → bigint라 키는 objid(아래 32비트)에 실린다."""
     from sqlalchemy import text
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while True:
         async with Session() as s:
-            waiting = (await s.execute(text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"))).scalar_one()
+            waiting = (await s.execute(text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted "
+                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+                "AND objid::bigint IN (SELECT hashtext(k)::bigint & 4294967295 FROM unnest(CAST(:keys AS text[])) AS k)"
+            ), {"keys": keys})).scalar_one()
         if waiting >= n:
             return
         assert loop.time() < deadline, f"잠금 대기 {waiting}/{n} — 요청이 잠금 앞까지 오지 않았다"
@@ -250,7 +263,7 @@ async def test_reorder_waits_on_the_sibling_lock():
         async with Session() as holder:
             await holder.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-siblings:{seeded['pa']}:root"})
             task = asyncio.create_task(_post(Session, seeded, {"doc_id": seeded["ids"][3], "parent_id": None, "after_id": None}))
-            await _wait_for_lock_waiters(Session, 1)
+            await _wait_for_lock_waiters(Session, 1, keys=[f"doc-siblings:{seeded['pa']}:root"])
             assert not task.done(), "잠금을 쥐고 있는데 재정렬이 끝났다 — 형제 묶음 잠금이 없다"
             await holder.commit()  # 거래 끝 = 잠금 해제
         r = await asyncio.wait_for(task, timeout=10)
@@ -273,7 +286,8 @@ async def test_two_crossing_moves_cannot_make_a_cycle():
                 await holder.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-siblings:{seeded['pa']}:{parent}"})
             t1 = asyncio.create_task(_post(Session, seeded, {"doc_id": a, "parent_id": b}))
             t2 = asyncio.create_task(_post(Session, seeded, {"doc_id": b, "parent_id": a}))
-            await _wait_for_lock_waiters(Session, 1)  # 고친 코드: 하나는 프로젝트 잠금을 쥐고 묶음 잠금에서, 하나는 프로젝트 잠금에서 기다림
+            # 고친 코드: 하나는 프로젝트 잠금을 쥐고 묶음 잠금에서, 하나는 프로젝트 잠금에서 기다림
+            await _wait_for_lock_waiters(Session, 1, keys=[f"doc-tree-move:{seeded['pa']}", *(f"doc-siblings:{seeded['pa']}:{p}" for p in (a, b))])
             await holder.commit()
         r1, r2 = await asyncio.wait_for(asyncio.gather(t1, t2), timeout=15)
         assert sorted([r1.status_code, r2.status_code]) == [200, 400], (r1.text, r2.text)
@@ -297,24 +311,34 @@ async def test_patch_parent_rejects_self_and_descendant():
         assert folder_parent is None
 
 
-async def test_patch_and_reorder_crossing_cannot_make_a_cycle():
-    """까디르(4736 P2 ②) — PATCH «A를 B 밑» · reorder «B를 A 밑»이 동시에 와도 순환 0 · 하나는 400. 테스트가 프로젝트 잠금을 쥔 채 두 요청이
-    **둘 다** 그 잠금에서 기다릴 때까지(pg_locks 장벽) 기다린 뒤 풀어 준다.
-    뮤테이션: PATCH가 프로젝트 잠금 · 순환 검사를 안 거치면 둘 다 커밋돼 A ↔ B 순환으로 RED."""
+@pytest.mark.parametrize("first", ["patch", "reorder"])
+async def test_patch_and_reorder_crossing_cannot_make_a_cycle(first):
+    """까디르(4736 P2 ②) — PATCH «A를 B 밑» · reorder «B를 A 밑»이 동시에 와도 순환 0 · 먼저 잠금을 잡은 쪽 200 · 뒤쪽 400.
+    story #4353(CI run 36372676509 · [200, 200]) — 순서를 **두 가지 다 결정적으로** 만든다: 테스트가 프로젝트 잠금을 쥔 채 먼저 보낼 요청이
+    그 잠금에서 기다리는 것을 본 뒤 둘째를 보낸다(PG는 기다린 순서대로 잠금을 준다). 예전 판은 순서를 운에 맡겼고 PATCH 세션이 커밋을
+    안 해 «PATCH 먼저»면 늘 [200, 200]이었다(제품은 운영 get_db가 커밋하므로 둘째가 400 — 강제 순서 10회씩 실측).
+    뮤테이션: PATCH가 프로젝트 잠금 · 순환 검사를 안 거치면 «reorder 먼저» 판에서 둘 다 커밋돼 A ↔ B 순환으로 RED."""
     from sqlalchemy import text
 
     from app.models.doc import Doc
 
     async with _world() as (Session, seeded):
         a, b = seeded["ids"][0], seeded["ids"][1]
+        key = f"doc-tree-move:{seeded['pa']}"
+        start_patch = lambda: asyncio.create_task(_patch(Session, seeded, a, {"parent_id": b}))  # noqa: E731
+        start_reorder = lambda: asyncio.create_task(_post(Session, seeded, {"doc_id": b, "parent_id": a}))  # noqa: E731
         async with Session() as holder:
-            await holder.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"doc-tree-move:{seeded['pa']}"})
-            t1 = asyncio.create_task(_patch(Session, seeded, a, {"parent_id": b}))
-            t2 = asyncio.create_task(_post(Session, seeded, {"doc_id": b, "parent_id": a}))
-            await _wait_for_lock_waiters(Session, 2)
+            await holder.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": key})
+            t_first = start_patch() if first == "patch" else start_reorder()
+            await _wait_for_lock_waiters(Session, 1, keys=[key])
+            t_second = start_reorder() if first == "patch" else start_patch()
+            await _wait_for_lock_waiters(Session, 2, keys=[key])
             await holder.commit()
-        r1, r2 = await asyncio.wait_for(asyncio.gather(t1, t2), timeout=15)
-        assert sorted([r1.status_code, r2.status_code]) == [200, 400], (r1.text, r2.text)
+        r_first, r_second = await asyncio.wait_for(asyncio.gather(t_first, t_second), timeout=15)
+        assert (r_first.status_code, r_second.status_code) == (200, 400), (r_first.text, r_second.text)
+        assert r_second.json()["error"]["code"] == "DOC_REORDER_CYCLE", r_second.text
         async with Session() as s:
             parents = dict((await s.execute(select(Doc.id, Doc.parent_id).where(Doc.id.in_([a, b])))).all())
         assert not (parents[a] == b and parents[b] == a), f"A ↔ B 순환이 커밋됐다: {parents}"
+        # 먼저 잡은 쪽의 이동이 실제로 커밋됐다(200인데 롤백된 판을 막는다).
+        assert (parents[a], parents[b]) == ((b, None) if first == "patch" else (None, a)), parents
