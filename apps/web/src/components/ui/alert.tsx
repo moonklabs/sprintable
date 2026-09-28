@@ -70,13 +70,16 @@ Alert.displayName = 'Alert';
 // 1fr 트랙을 넘어 넘쳐흘렀다. grid/flex 아이템은 기본 min-width:auto라 트랙 크기
 // 지정만으론 안 막히고, 텍스트에 실제로 줄바꿈 여지를 줘야 한다 — break-word 대신
 // anywhere(공백 없어도 어디서나 끊음, min-content 계산에도 안전)를 쓴다.
+// story 08852117(유나) — 한국어는 낱말(어절) 단위로 줄을 바꾼다(break-keep = word-break: keep-all). 예전엔 이 기본값이 없어
+// «알림을 보내지 못했어요»가 «알림을 보내지 못했|어요»처럼 낱말 가운데서 끊겼다(쓰는 화면 52파일 중 4파일 15곳만 개별로 붙임).
+// overflow-wrap:anywhere는 그대로 — 띄어쓰기 없이 긴 글(URL · id)은 여전히 넘치지 않고 끊는다.
 const AlertTitle = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('col-start-2 font-medium leading-5 [overflow-wrap:anywhere]', className)}
+    className={cn('col-start-2 font-medium leading-5 break-keep [overflow-wrap:anywhere]', className)}
     {...props}
   />
 ));
@@ -96,7 +99,7 @@ const AlertDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('col-start-2 text-xs leading-relaxed [overflow-wrap:anywhere]', className)}
+    className={cn('col-start-2 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]', className)}
     {...props}
   />
 ));
