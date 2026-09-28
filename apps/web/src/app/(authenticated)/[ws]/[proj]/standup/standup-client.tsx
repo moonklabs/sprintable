@@ -575,7 +575,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 <button
                   type="button"
                   className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left"
-                  onClick={() => setSprintExpanded((prev) => !prev)}
+                  onClick={() => setSprintExpanded((prev) => !prev)} aria-expanded={sprintExpanded}
                 >
                   <div className="space-y-0.5">
                     <h2 className="text-sm font-semibold text-foreground">{t('currentSprint')}</h2>

@@ -286,7 +286,7 @@ export function HistoryDrilldownTrigger({
       type="button"
       variant="outline"
       size="sm"
-      onClick={() => void toggle()}
+      onClick={() => void toggle()} aria-expanded={open}
       data-testid="trust-history-toggle"
       aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
     >

@@ -96,7 +96,8 @@ export function StorageAssetList({
           }}
         />
 
-        <div className="flex min-w-0 max-w-[300px] flex-1 items-center gap-[7px] rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground">
+        {/* [SID:4380 · 유나] 안의 input은 outline-none — 초점은 감싸는 상자의 제품 링(focus-within)으로 보인다(예전엔 글자 커서뿐). */}
+        <div className="flex min-w-0 max-w-[300px] flex-1 items-center gap-[7px] rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
           <Search className="size-3.5 shrink-0 opacity-60" />
           <input
             value={search}

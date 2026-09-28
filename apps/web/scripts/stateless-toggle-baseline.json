@@ -2,7 +2,8 @@
   "_comment": [
     "story #4379 — verify-no-stateless-toggle.ts 기준선 · 허용목록.",
     "allow: 결함 아님 — 누르면 할 일(«보관 보기 ↔ 숨기기» · «편집 ↔ 완료») 또는 지금 상태(«허용됨 ↔ 차단됨»)를 이미 글자로 말하는 단추(상태 속성을 붙이면 같은 것을 두 번 말함). 파일 + onClick 글자 조각 + 개수로 요소를 가리킨다.",
-    "counts: 기준선(줄이기만) — 첫 전수 때 남은 펼침 · 접기 등 다른 부류. #4380에서 0으로. 파일별 수를 넘으면 FAIL."
+    "counts: 규칙 ① 기준선 — [SID:4380]에서 펼침 · 접기 31을 aria-expanded로 고쳐 0. 새로 생기면 FAIL.",
+    "selection: 규칙 ③(고름/지금 상태 클래스 · ③-같음 포함) 기준선(줄이기만) — 문서 «/» 명령 1은 [SID:4380] PR ②b(#4776)에서, ③-같음 50은 [SID:4388]에서 0으로. allow에서 \"rule\": \"selection-class\"인 항목 = ③ 오탐(고름이 아닌 같음 비교)."
   ],
   "allow": [
     {
@@ -96,6 +97,18 @@
       "why": "↔ «관계 유형 바꾸기»(동작 · 이름 dep.toggleType)"
     },
     {
+      "file": "components/locale-switcher.tsx",
+      "match": "handleToggle",
+      "count": 1,
+      "why": "보이는 글이 지금 언어(KO ↔ EN)를 말함 — 누르면 다른 언어로"
+    },
+    {
+      "file": "components/loops/artifact-preview.tsx",
+      "match": "handleToggle",
+      "count": 1,
+      "why": "오류 줄의 «다시 시도» 동작(같은 파일의 펼침 단추는 aria-expanded를 가짐)"
+    },
+    {
       "file": "components/retro/sprint-close-cockpit.tsx",
       "match": "setEditing((v) => !v)",
       "count": 2,
@@ -130,34 +143,50 @@
       "match": "setShowFeedbackForm((prev) => !prev)",
       "count": 1,
       "why": "«피드백 추가» ↔ «취소»"
+    },
+    {
+      "file": "components/settings/org-members-section.tsx",
+      "match": "handleCopyInviteLink(",
+      "count": 1,
+      "why": "③-같음 오탐: `copiedInviteId === invite.id`는 «복사됨» 표시(고름 아님) — 이름(aria-label)이 이미 «복사됨»을 말함",
+      "rule": "selection-class"
     }
   ],
-  "counts": {
-    "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx": 3,
-    "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx": 1,
-    "app/(authenticated)/chats/layout.tsx": 1,
-    "app/(authenticated)/organization/events/page.tsx": 1,
-    "app/(authenticated)/organization/trust/trust-utils.tsx": 1,
-    "app/(authenticated)/settings/page.tsx": 1,
-    "components/agents/agent-run-tool-calls-section.tsx": 1,
-    "components/cage/gate-evidence.tsx": 1,
-    "components/canvas/artifact-version-rail.tsx": 1,
-    "components/chat/embed-group.tsx": 2,
-    "components/chat/now-strip.tsx": 1,
-    "components/docs/extensions/toggle-block.tsx": 1,
-    "components/docs/policy-doc-browser.tsx": 1,
-    "components/epics/epic-swimlane-board.tsx": 1,
-    "components/flow/flow-map-canvas.tsx": 2,
-    "components/flow/orphan-stories-panel.tsx": 1,
-    "components/flow/unattached-bucket.tsx": 1,
-    "components/inbox/approvals-queue.tsx": 1,
-    "components/kanban/kanban-column.tsx": 2,
-    "components/kanban/kanban-list-view.tsx": 1,
-    "components/kanban/story-detail-panel.tsx": 1,
-    "components/locale-switcher.tsx": 1,
-    "components/loops/artifact-preview.tsx": 2,
-    "components/settings/org-members-section.tsx": 1,
-    "components/storage/storage-folder-tree.tsx": 1,
-    "components/verify/evidence-section.tsx": 2
+  "counts": {},
+  "selection": {
+    "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx": 1,
+    "app/(authenticated)/[ws]/[proj]/docs/docs-index.tsx": 3,
+    "app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx": 1,
+    "app/(authenticated)/[ws]/[proj]/loops/loops-client.tsx": 1,
+    "app/(authenticated)/inbox/page.tsx": 1,
+    "app/(authenticated)/organization/events/page.tsx": 2,
+    "app/(authenticated)/rewards/page.tsx": 1,
+    "app/invite/invite-client.tsx": 1,
+    "components/canvas/artifact-expand-dialog.tsx": 1,
+    "components/canvas/artifact-gallery-view.tsx": 2,
+    "components/canvas/export-dialog.tsx": 2,
+    "components/canvas/import-artifact-dialog.tsx": 1,
+    "components/chat/add-participant-modal.tsx": 1,
+    "components/docs/doc-auto-groups.tsx": 1,
+    "components/docs/doc-editor.tsx": 1,
+    "components/docs/doc-search-results.tsx": 1,
+    "components/docs/extensions/column-layout.tsx": 2,
+    "components/docs/extensions/slash-command.tsx": 1,
+    "components/docs/recents-section.tsx": 1,
+    "components/epics/hypothesis-declaration-card.tsx": 3,
+    "components/flow/guided-hypothesis-form.tsx": 1,
+    "components/hypotheses/hypothesis-form.tsx": 1,
+    "components/kanban/kanban-board.tsx": 3,
+    "components/kanban/story-detail-panel.tsx": 2,
+    "components/loops/loop-create-dialog.tsx": 4,
+    "components/nav/notification-bell.tsx": 1,
+    "components/organization/event-definer-form.tsx": 1,
+    "components/settings/org-gate-policy-section.tsx": 1,
+    "components/settings/refresh-settings.tsx": 1,
+    "components/settings/workflow-line-editor-section.tsx": 1,
+    "components/sprints/hypothesis-declaration-card.tsx": 3,
+    "components/storage/storage-detail-panel.tsx": 2,
+    "components/verify/evidence-section.tsx": 1,
+    "components/workcell/workcell.tsx": 1
   }
 }

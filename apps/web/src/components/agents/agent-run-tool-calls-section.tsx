@@ -189,7 +189,7 @@ function ToolCallRowItem({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={onToggleExpand}
+                onClick={onToggleExpand} aria-expanded={expanded}
                 className="gap-1 truncate p-0 px-1 font-mono text-sm font-normal text-foreground"
                 data-testid={`tool-call-toggle-${row.id}`}
               >

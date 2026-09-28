@@ -557,7 +557,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         if (allTags.length === 0) return null;
         return (
           <div className="border-b border-border">
-            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} aria-expanded={!tagsCollapsed} className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground">
               <span className="flex items-center gap-1.5">
                 {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
                 {t('tagFilter')}
@@ -704,7 +704,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
-              onClick={handleToggleSidebar}
+              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
               title={t('hideSidebar')}
               className="absolute right-2 top-2 z-10 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
@@ -738,7 +738,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           {sidebarCollapsed && (
             <button
               type="button"
-              onClick={handleToggleSidebar}
+              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
               title={t('openSidebar')}
               className="absolute left-2 top-2 z-10 hidden rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
             >

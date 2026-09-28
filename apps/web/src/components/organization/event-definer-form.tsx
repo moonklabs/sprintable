@@ -112,6 +112,8 @@ export function EventDefinerForm({
 
         {/* ④ 받는 사람 */}
         <Section title={t('definerRoutingSectionTitle')} badge={t('definerDerivedBadge')} hint={t('definerRoutingSectionHint')}>
+          {/* [SID:4380] 하나 고르기 — 동그라미가 색으로만 고름을 보였다 → radiogroup · radio + aria-checked. */}
+          <div role="radiogroup" aria-label={t('definerRoutingSectionTitle')}>
           <RadioRow
             selected={state.routing === 'assign_on_publish'}
             onSelect={() => set('routing', 'assign_on_publish')}
@@ -124,6 +126,7 @@ export function EventDefinerForm({
             title={t('definerRoutingRecordTitle')}
             desc={t('definerRoutingRecordDesc')}
           />
+          </div>
           <div className="flex items-start gap-2 rounded-lg border border-border p-2.5 opacity-50">
             <span className="mt-0.5 size-4 shrink-0 rounded-full border-2 border-border" />
             <div>
@@ -204,6 +207,8 @@ function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSe
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={selected}
       onClick={onSelect}
       className={`mb-1.5 flex w-full items-start gap-2 rounded-lg border p-2.5 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border'}`}
     >

@@ -51,20 +51,30 @@ function FolderNode({
         role="button"
         tabIndex={0}
         aria-pressed={selected}
+        // [SID:4380] 하위 폴더 펼침은 화살표(마우스 전용)에만 있어 키보드로 못 펼쳤고 상태도 안 알렸다 → 행이 펼침 상태를 알리고 → / ← 로 펼치고 접는다.
+        aria-expanded={hasChildren ? expanded : undefined}
         onClick={() => onSelectFolder(folder.id)}
         onKeyDown={(e) => {
+          if (hasChildren && ((e.key === 'ArrowRight' && !expanded) || (e.key === 'ArrowLeft' && expanded))) {
+            e.preventDefault();
+            toggleExpanded(folder.id);
+            return;
+          }
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onSelectFolder(folder.id);
           }
         }}
         className={cn(
-          'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-foreground outline-none focus-visible:bg-muted',
+          // [SID:4380 · 유나] 초점은 제품 링(안쪽으로 그려 사이드바 스크롤에 안 잘림) — 배경만 바꾸던 초점은 대비 1.05~1.15로 안 보였고
+          // 고른 행의 고름 색(bg-info/10)을 덮어 키보드로 서 있으면 고름이 사라졌다.
+          'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-foreground focus-visible:-outline-offset-2',
           selected ? 'bg-info/10 font-semibold text-foreground' : 'hover:bg-muted',
         )}
       >
         <span
           className="grid w-[14px] place-items-center text-[10px] opacity-55"
+          aria-hidden="true"
           onClick={(e) => {
             if (hasChildren) {
               e.stopPropagation();
@@ -187,7 +197,8 @@ export function StorageFolderTree({
 
       {/* 폴더 검색 + 새 폴더 */}
       <div className="mx-3 mb-1.5 flex items-center gap-1.5">
-        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-[0.5rem] bg-muted/60 px-[9px] py-[7px] text-[12px] text-muted-foreground">
+        {/* [SID:4380 · 유나] 안의 input은 outline-none — 초점은 감싸는 상자의 제품 링(focus-within)으로 보인다(예전엔 글자 커서뿐). */}
+        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-[0.5rem] bg-muted/60 px-[9px] py-[7px] text-[12px] text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
           <Search className="size-3.5 shrink-0 opacity-60" />
           <input
             value={folderSearch}
@@ -258,8 +269,9 @@ export function StorageFolderTree({
               onSelectFolder(null);
             }
           }}
+          // [SID:4380 · PO] 나무 행과 같은 초점 규칙(제품 링 안쪽 · 고름 색 유지) — 아래 평면 목록 행도 같다.
           className={cn(
-            'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] outline-none focus-visible:bg-muted',
+            'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] focus-visible:-outline-offset-2',
             selectedFolderId === null ? 'bg-info/10 font-semibold text-foreground' : 'text-foreground hover:bg-muted',
           )}
         >
@@ -285,7 +297,7 @@ export function StorageFolderTree({
                   }
                 }}
                 className={cn(
-                  'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] outline-none focus-visible:bg-muted',
+                  'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] focus-visible:-outline-offset-2',
                   selectedFolderId === f.id ? 'bg-info/10 font-semibold text-foreground' : 'text-foreground hover:bg-muted',
                 )}
               >

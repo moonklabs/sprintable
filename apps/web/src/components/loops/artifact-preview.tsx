@@ -138,7 +138,7 @@ function TextPreview({
       {isLong ? (
         <button
           type="button"
-          onClick={handleToggle}
+          onClick={handleToggle} aria-expanded={expanded}
           disabled={loadingFull}
           className="text-[10px] font-semibold text-primary hover:underline disabled:opacity-50"
         >

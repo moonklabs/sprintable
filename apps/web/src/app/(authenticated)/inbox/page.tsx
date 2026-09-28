@@ -753,6 +753,7 @@ export default function InboxPage() {
                           key={notification.id}
                           type="button"
                           onClick={() => void selectNotification(notification)}
+                          aria-current={isSelected ? 'true' : undefined}
                           className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
                         >
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}

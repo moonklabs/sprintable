@@ -860,7 +860,7 @@ export default function SettingsPage() {
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
             <button
               type="button"
-              onClick={() => setLnbOpen((v) => !v)}
+              onClick={() => setLnbOpen((v) => !v)} aria-expanded={lnbOpen}
               className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label={tNav('toggleSidebar')}
             >

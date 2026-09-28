@@ -380,6 +380,7 @@ function TreeNode({
         <button
           data-doc-id={doc.id}
           onClick={handleClick}
+          aria-current={isSelected ? 'page' : undefined}
           onContextMenu={handleContextMenu}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}

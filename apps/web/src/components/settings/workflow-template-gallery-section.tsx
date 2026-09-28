@@ -269,6 +269,7 @@ export function WorkflowTemplateGallerySection({
             <button
               key={def.id}
               onClick={() => void handleSelectDefinition(def)}
+              aria-pressed={selected?.id === def.id}
               disabled={loadingBindings}
               // story #3010(로드맵 P3, L1) — 선택 가능한 인라인 카드는 --elev-card.
               className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-[var(--elev-card)] disabled:opacity-60 ${

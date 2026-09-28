@@ -628,7 +628,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                   <div className="border-b border-border/60 py-1">
                     <button
                       type="button"
-                      onClick={() => setOverflowOpen((v) => !v)}
+                      onClick={() => setOverflowOpen((v) => !v)} aria-expanded={overflowOpen}
                       className="flex items-center gap-1.5 px-1 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                     >
                       {overflowOpen ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}

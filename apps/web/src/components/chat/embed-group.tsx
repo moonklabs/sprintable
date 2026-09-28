@@ -64,7 +64,7 @@ function GateGroup({ refs, eventDefinitionsByKey }: { refs: EmbedGroupProps['ref
     <div className="rounded-lg border border-border bg-muted/20">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground transition hover:bg-muted/40"
       >
         <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
@@ -123,7 +123,7 @@ function ConciseList({ entityType, refs, onOpenReadingPanel }: { entityType: str
       {hiddenCount > 0 && (
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
           className="text-xs font-medium text-primary hover:underline"
         >
           {expanded ? tChats('reportCollapse') : `+${hiddenCount} 더보기`}
