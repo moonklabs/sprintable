@@ -138,3 +138,24 @@ describe('GateSignatureApproval — 확인 체크는 다른 게이트로 옮기�
   });
 });
 
+describe('GateSignatureApproval — onCancel(보이는 «취소»)는 사유 초안을 지우고 부른다(story #4370 · 까디르 P3)', () => {
+  it('onCancel이 있으면 «취소»가 보이고, 누르면 초안이 지워지고 onCancel이 불린다 · 없으면 버튼이 없다', async () => {
+    const cancelLabel = (koMessages.cage as unknown as Record<string, string>).cancel;
+    let cancelled = 0;
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <GateSignatureApproval gate={gate({ risk_grade: 'low' })} resolving={false} onApprove={() => undefined} onReject={() => undefined} onCancel={() => { cancelled += 1; }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await type('버릴 사유');
+    await act(async () => { btn(cancelLabel).click(); });
+    expect(cancelled).toBe(1);
+    await unmountLayer();
+    await mount(gate({ risk_grade: 'low' }));
+    expect(field()!.value).toBe('');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.trim() === cancelLabel)).toBe(false);
+  });
+});
+

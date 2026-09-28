@@ -628,16 +628,11 @@ export default function GateDetailPage() {
                   onApprove={(reason) => transition('approved', reason, true)}
                   onReject={(reason) => transition('rejected', reason)}
                   onDiscuss={(reason) => discuss(reason)}
+                  // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) —
+                  // 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(isSigFlowGate)은 이 패널이 유일한 경로라 취소 없음.
+                  // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
+                  onCancel={!isSigFlowGate ? () => setRejectPanelOpen(false) : undefined}
                 />
-                {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
-                    (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로
-                    되돌아갈 길을 남긴다. 고위험(isSigFlowGate) 게이트는 이 패널이 유일한
-                    경로라 취소 버튼 자체가 무의미(숨김).*/}
-                {!isSigFlowGate ? (
-                  <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
-                    {t('cancel')}
-                  </Button>
-                ) : null}
               </div>
             );
 

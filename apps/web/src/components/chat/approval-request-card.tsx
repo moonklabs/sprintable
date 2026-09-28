@@ -806,16 +806,11 @@ function ApprovalRequestBody({
             onReject={onReject}
             onDiscuss={onDiscuss}
             compact
+            // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) — 잘못
+            // 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(needsFullFlow)은 이 패널이 유일한 경로라 취소 없음.
+            // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
+            onCancel={!needsFullFlow ? () => { setRejectPanelOpen(false); setSignPanelOpen(false); } : undefined}
           />
-          {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래
-              근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈
-              길을 남긴다. 고위험(needsFullFlow) 게이트는 이 패널이 유일한 경로라 취소
-              버튼이 무의미(숨김). */}
-          {!needsFullFlow ? (
-            <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => { setRejectPanelOpen(false); setSignPanelOpen(false); }}>
-              {tCage('cancel')}
-            </Button>
-          ) : null}
         </div>
       ) : (
         <>

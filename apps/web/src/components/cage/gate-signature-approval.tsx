@@ -26,6 +26,7 @@ export function GateSignatureApproval({
   onReject,
   onDiscuss,
   compact = false,
+  onCancel,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -46,6 +47,9 @@ export function GateSignatureApproval({
    * 아이콘-only는 금지(중대 액션 라벨 온전 필수, PO 확定) — 대신 세로 스택으로 각 버튼이
    * full-width를 갖게 한다. 컴포넌트를 포크하지 않고 이 prop 하나로 컨텍스트만 분기한다. */
   compact?: boolean;
+  /** story #4370(까디르 P3) — 보이는 «취소»(저위험 게이트의 «변경 요청» 패널에서 원탭 승인 화면으로 되돌아가기). 사유 초안을 지우고
+   * 부른다(유나 규칙: 버림은 보이는 «취소»로만). 없으면 버튼을 안 그린다(고위험은 이 패널이 유일한 길이라 취소 없음). */
+  onCancel?: () => void;
 }) {
   const t = useTranslations('cage');
   // story #3813(Phase3·3-4 PR4, 페드루 PO CHANGES 2026-09-12, 라이브 캡처 실측) — 이
@@ -151,6 +155,18 @@ export function GateSignatureApproval({
             onClick={() => act(onDiscuss)}
           >
             {t('gateDiscussSubmit')}
+          </Button>
+        ) : null}
+        {onCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-muted-foreground"
+            disabled={resolving}
+            onClick={() => { clearReason(); onCancel(); }}
+          >
+            {t('cancel')}
           </Button>
         ) : null}
       </div>
