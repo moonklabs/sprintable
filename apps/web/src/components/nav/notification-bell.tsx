@@ -302,6 +302,7 @@ function NotificationPanel({
           <button
             type="button"
             onClick={() => setShowUnreadOnly((v) => !v)}
+            aria-pressed={showUnreadOnly}
             className={cn(
               // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
               // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).

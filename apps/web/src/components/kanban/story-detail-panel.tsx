@@ -1840,6 +1840,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         type="button"
                         variant="ghost"
                         onClick={() => void handleToggleAssignee(m.id)}
+                        aria-pressed={selected}
                         className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">

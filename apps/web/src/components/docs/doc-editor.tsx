@@ -683,7 +683,6 @@ export function DocEditor({
         >
           <div className="flex overflow-x-auto items-center gap-1 px-2 py-2" onMouseDown={(e) => e.preventDefault()}>
             <ToolbarButton
-              active={false}
               disabled={!editor.can().undo()}
               ariaLabel={labels.undo}
               onClick={() => editor.chain().focus().undo().run()}
@@ -691,7 +690,6 @@ export function DocEditor({
               <Undo2 className="size-3.5" />
             </ToolbarButton>
             <ToolbarButton
-              active={false}
               disabled={!editor.can().redo()}
               ariaLabel={labels.redo}
               onClick={() => editor.chain().focus().redo().run()}
@@ -744,7 +742,7 @@ export function DocEditor({
               {labels.code}
             </ToolbarButton>
             <Sep />
-            <ToolbarButton active={false} onClick={addLink}>
+            <ToolbarButton onClick={addLink}>
               {labels.link}
             </ToolbarButton>
           </div>
@@ -754,7 +752,8 @@ export function DocEditor({
   );
 }
 
-function BubbleButton({
+// [SID:4379] 눌림 상태(aria-pressed)를 부품 테스트로 잠그려 내보낸다.
+export function BubbleButton({
   active,
   onClick,
   title,
@@ -770,6 +769,8 @@ function BubbleButton({
       type="button"
       onClick={onClick}
       title={title}
+      // [SID:4379] 서식은 켜고 끄는 것 — 켜짐을 색으로만 보이던 것을 보조기기에도(눌림 상태).
+      aria-pressed={active}
       className={`rounded-md p-1.5 transition-colors ${
         active
           ? 'bg-primary/14 text-primary'
@@ -781,14 +782,15 @@ function BubbleButton({
   );
 }
 
-function ToolbarButton({
+export function ToolbarButton({
   active,
   onClick,
   disabled,
   ariaLabel,
   children,
 }: {
-  active: boolean;
+  /** [SID:4379] 켜고 끄는 서식이면 켜짐 여부 — 동작 단추(실행 취소 · 다시 실행 · 링크 넣기)는 생략(눌림 상태를 안 알림). */
+  active?: boolean;
   onClick: () => void;
   disabled?: boolean;
   ariaLabel?: string;
@@ -800,6 +802,7 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-pressed={active}
       className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
         disabled
           ? 'cursor-not-allowed border-border/40 bg-card text-muted-foreground opacity-50'

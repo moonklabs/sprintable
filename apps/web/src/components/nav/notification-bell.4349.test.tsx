@@ -125,3 +125,16 @@ describe('NotificationBell — 열린 채 초점이 벨일 때 Esc(4355)', () =>
     } finally { document.removeEventListener('keydown', trap); }
   });
 });
+
+// [SID:4379] «안읽음만»은 켜고 끄는 거르개 — 켜짐을 색으로만 보이던 것을 보조기기에도(aria-pressed).
+describe('NotificationBell — «안읽음만» 눌림 상태([SID:4379])', () => {
+  it('«안읽음만»은 aria-pressed — 누르면 true · 다시 누르면 false', async () => {
+    await openBell();
+    const toggle = () => [...panel()!.querySelectorAll('button')].find((b) => b.textContent === koMessages.inbox.unreadOnly)!;
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { toggle().click(); });
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { toggle().click(); });
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+  });
+});

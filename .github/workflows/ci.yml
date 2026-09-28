@@ -2359,6 +2359,10 @@ jobs:
       # story #4359 — 화면에 뜨는 문자열 상태(오류 · 안내 setter · toast)에 영어 문장이 t() 없이 박히는 클래스.
       - name: "Verify no hardcoded English in UI messages (story #4359 regression guard)"
         run: pnpm --filter web verify:no-hardcoded-english-ui-message
+      # story #4379 — 켜고 끄는 컨트롤이 상태(aria-pressed · role=switch + aria-checked)를 보조기기에 안 알리는 클래스
+      # (설정 알림 «앱 내» 토글 · 서식 단추 · 여럿 고르기). 기준선 = 펼침 등 다른 부류(#4380에서 0으로) · 허용목록 = 동작/상태를 글자로 말하는 단추.
+      - name: "Verify no stateless toggles (story #4379 regression guard)"
+        run: pnpm --filter web verify:no-stateless-toggle
       # story #4372 — 훅이 돌려주는 오류(error · loadError · loadFailed · …Failed)를 호출처가 버려 실패가 «없음»으로 보이는 클래스.
       - name: "Verify hook error results are read by callers (story #4372 regression guard)"
         run: pnpm --filter web verify:no-dropped-hook-error

@@ -1055,6 +1055,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                           key={project.id}
                           type="button"
                           onClick={() => toggleScopeProject(project.id)}
+                          aria-pressed={selected}
                           className={cn(
                             'rounded-md border px-4 py-4 text-left transition',
                             selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
