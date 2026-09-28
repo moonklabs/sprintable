@@ -312,14 +312,15 @@ describe('isOutsidePress', () => {
   });
 });
 
-// story #4373(까디르 실측 · 부류) — 모달 팝업(role=dialog) 안 트리거면 포털 대상이 그 팝업(Base UI 모달이 팝업 밖 body 자식을 aria-hidden으로
-// 숨기므로). 팝업에 transform이 걸린 동안(시트가 열리거나 닫히는 200ms)은 fixed의 담는 블록이 그 팝업 — 팝업 안쪽 왼쪽 위만큼 되민다.
+// story #4373(까디르 실측 · 유나 4757 반려 · 부류) — Base UI 모달 팝업(우리 래퍼 data-slot="sheet-content" · "dialog-content") 안 트리거면
+// 포털 대상이 그 팝업(Base UI 모달이 팝업 밖 body 자식을 aria-hidden으로 숨기므로). 스스로 그린 role="dialog" 패널(스토리 상세)은 밖을
+// 숨기지 않으니 예전처럼 body. 팝업이 fixed의 담는 블록이 되면(transform · translate · backdrop-filter …) 둔 뒤 재서 차이만큼 되민다.
 describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
-  function ModalHarness({ transform }: { transform?: string }) {
+  function ModalHarness({ slot, blockOffset }: { slot?: string; blockOffset?: { left: number; top: number } }) {
     const [open, setOpen] = useState(false);
     const anchorRef = useRef<HTMLDivElement>(null);
     return (
-      <div role="dialog" id="modal" style={transform ? { transform } : undefined}>
+      <div role="dialog" id="modal" data-slot={slot} data-block-offset={blockOffset ? JSON.stringify(blockOffset) : undefined}>
         <div id="anchor" ref={open ? anchorRef : undefined}>
           <button type="button" id="trigger" onClick={() => setOpen((v) => !v)}>열기</button>
           {open && <AnchoredPopover anchorRef={anchorRef} id="pop" className="w-56">안내</AnchoredPopover>}
@@ -327,29 +328,52 @@ describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
       </div>
     );
   }
+  // 브라우저처럼: 팝오버 자리는 style.left/top에서 나오고, 담는 블록(팝업)이 있으면 그 왼쪽 위만큼 밀려 보인다 — 어떤 CSS가 그 블록을
+  // 만들었는지(transform이든 backdrop-filter든)는 재는 쪽이 모른다. 예전 되밂(transform 읽기)은 이 경우를 못 봤다.
+  function mockBrowserLikeRects() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      let r = { left: 0, top: 0, width: 0, height: 0 };
+      if (this.id === 'anchor') r = { left: anchorRect.left, top: anchorRect.top, width: anchorRect.right - anchorRect.left, height: 20 };
+      if (this.id === 'pop') {
+        const offset = JSON.parse(this.parentElement?.getAttribute('data-block-offset') ?? '{"left":0,"top":0}') as { left: number; top: number };
+        r = { left: parseFloat(this.style.left || '0') + offset.left, top: parseFloat(this.style.top || '0') + offset.top, width: 224, height: 80 };
+      }
+      const full = { ...r, right: r.left + r.width, bottom: r.top + r.height };
+      return { ...full, x: full.left, y: full.top, toJSON: () => full } as DOMRect;
+    });
+  }
+  const visible = () => pop().getBoundingClientRect();
 
-  it('포털 대상 = 트리거가 든 role=dialog 팝업 · 모달 밖 트리거는 예전처럼 body', () => {
-    act(() => { root.render(<ModalHarness />); });
+  it('포털 대상 = Base UI 모달 팝업(sheet-content) · 스스로 그린 role=dialog 패널(스토리 상세)은 body', () => {
+    act(() => { root.render(<ModalHarness slot="sheet-content" />); });
     act(() => { document.getElementById('trigger')!.click(); });
     expect(pop().parentElement).toBe(document.getElementById('modal'));
-    expect(pop().style.position).toBe('fixed');
-    // transform 없는 팝업이면 fixed 기준 = 뷰포트 → 트리거 기준 좌표 그대로(아래 8px)
+    act(() => { document.getElementById('trigger')!.click(); });
+    act(() => { root.render(<ModalHarness />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().parentElement).toBe(document.body);
     expect(pop().style.left).toBe('100px');
     expect(pop().style.top).toBe('68px');
   });
 
-  it('팝업에 transform이 걸린 동안엔 팝업 안쪽 왼쪽 위만큼 되민다(시트 여는 도중 translate)', () => {
-    const base = HTMLElement.prototype.getBoundingClientRect as unknown as { getMockImplementation: () => (this: HTMLElement) => DOMRect };
-    const prev = base.getMockImplementation();
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.id === 'modal') return { left: 40, top: 10, right: 440, bottom: 610, width: 400, height: 600, x: 40, y: 10, toJSON: () => ({}) } as DOMRect;
-      return prev.call(this);
-    });
-    act(() => { root.render(<ModalHarness transform="translateX(40px)" />); });
+  it('모달 팝업이 담는 블록이면(transform 없이 backdrop-filter 등이어도) 재서 되밀어 트리거 아래에 보인다 — 예전 transform 되밂이면 RED', () => {
+    mockBrowserLikeRects();
+    act(() => { root.render(<ModalHarness slot="sheet-content" blockOffset={{ left: 451, top: 12 }} />); });
     act(() => { document.getElementById('trigger')!.click(); });
     expect(pop().parentElement).toBe(document.getElementById('modal'));
-    expect(pop().style.left).toBe('60px');  // 뷰포트 100 − 팝업 왼쪽 40
-    expect(pop().style.top).toBe('58px');   // 뷰포트 68 − 팝업 위 10
+    expect(visible().left).toBe(100);  // 트리거 왼쪽
+    expect(visible().top).toBe(68);    // 트리거 아래 8px
+  });
+
+  it('시트 미끄러짐(여는 도중) — 담는 블록이 움직여도 매 프레임 재서 트리거에 붙는다', async () => {
+    mockBrowserLikeRects();
+    act(() => { root.render(<ModalHarness slot="sheet-content" blockOffset={{ left: 40, top: 0 }} />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(visible().left).toBe(100);
+    // 다음 프레임에 시트가 제자리로(담는 블록 0) — 창 크기 · 스크롤 이벤트로 다시 둘 때도 같은 식.
+    document.getElementById('modal')!.setAttribute('data-block-offset', JSON.stringify({ left: 0, top: 0 }));
+    act(() => { window.dispatchEvent(new Event('resize')); });
+    expect(visible().left).toBe(100);
+    expect(visible().top).toBe(68);
   });
 });
-
