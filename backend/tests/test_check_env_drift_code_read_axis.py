@@ -347,7 +347,8 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     assert len(highest) == 1, highest
     assert len(high) == 1, high
     assert len(low) == 9, low
-    assert len(exempt) == 34
+    # story #4398 — EDGE_CLIENT_IP_SECRET(프런트가 정한 사용자 IP의 공유 비밀 · 없으면 헤더를 안 실음) 미배선 동안 exempt 34→35.
+    assert len(exempt) == 35
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────
