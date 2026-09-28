@@ -1505,3 +1505,23 @@ describe('proxy — 가입 출처 first-touch 캡처(story #3204)', () => {
     expect(response.cookies.get('sp_attr_medium')?.value).toBeUndefined();
   });
 });
+
+describe('[SID:4397] a page GET with an org hint never switches the session', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: {} }) });
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it('switching revokes the person\'s refresh tokens on every device (#3649), so the proxy leaves `org_id` to the page card', async () => {
+    const token = await makeAccessToken();
+    await middleware(makeRequest('/gates/g-1?org_id=11111111-2222-4333-8444-555555555555', { sp_at: token }));
+    const switchCalls = mockFetch.mock.calls.filter((c: unknown[]) => String(c[0]).includes('/switch-org'));
+    expect(switchCalls).toHaveLength(0);
+  });
+});

@@ -34,6 +34,7 @@ import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-g
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { OrgHintBanner } from '@/components/nav/org-hint-banner';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { withProjectParam } from '@/lib/with-project-param';
 import { usePendingProjectTarget } from '@/lib/pending-project-switch';
@@ -267,6 +268,10 @@ function ScrollShell({
         )}
         <div className="px-3 pt-3 empty:hidden">
           <ActivationChecklistBanner />
+        </div>
+        {/* story #4397 — a notification of another of the person's orgs: offer the switch (never automatic). */}
+        <div className="px-3 pt-3 empty:hidden">
+          <OrgHintBanner />
         </div>
         {/* story #4130(PO 라이브 실측, 2026-09-21 23:23~23:31Z) — 이 아래 `min-h-0`를 뺐다.
             바깥 스크롤러(위 :199 `overflow-y-auto`) 「안」에서 다시 `min-h-0`+`flex-1`을 쓰면
