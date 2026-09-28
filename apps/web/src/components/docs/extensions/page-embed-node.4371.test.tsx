@@ -6,7 +6,7 @@
  *  ② 저장된 임베드는 속성으로 채운 상태로 시작해 조회가 안 돎 → 열 때 한 번 조회 · 실패면 오류 · 성공이면 최신 값(같으면 속성 무접촉).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, useState, type ReactNode } from 'react';
+import { act, StrictMode, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
@@ -43,7 +43,7 @@ const ok = (data: Record<string, unknown>) => ({ ok: true, status: 200, json: as
 const status = (code: number) => ({ ok: false, status: code, json: async () => ({}) });
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); };
 
-async function mount(initial: Attrs) {
+async function mount(initial: Attrs, { strict = false }: { strict?: boolean } = {}) {
   function Host() {
     const [attrs, setAttrs] = useState<Attrs>(initial);
     const updateAttributes = (next: Partial<Attrs>) => { updates.push(next); setAttrs((a) => ({ ...a, ...next })); };
@@ -54,7 +54,7 @@ async function mount(initial: Attrs) {
       </NextIntlClientProvider>
     );
   }
-  await act(async () => { root.render(<Host />); });
+  await act(async () => { root.render(strict ? <StrictMode><Host /></StrictMode> : <Host />); });
   await settle();
 }
 const input = () => container.querySelector<HTMLInputElement>(`input[placeholder="${docs.pageEmbedPlaceholder}"]`);
@@ -149,4 +149,12 @@ describe('저장된 임베드 — 열 때 한 번 조회(story #4371 AC3 · AC5)
     await act(async () => { release(ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [] })); });
     await settle();
   });
+
+  it('StrictMode(효과 두 번)에서도 열 때 조회는 한 번 — 같은 대상 이중 조회를 막는 ref(PR 설명 고정 · 까디르)', async () => {
+    fetchMock.mockImplementation(async () => ok({ id: 'doc-b', title: '옛 제목', icon: '📄', slug: 'plan', embedChain: [] }));
+    await mount(SAVED, { strict: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="page-embed-preview"]')?.textContent).toContain('옛 제목');
+  });
 });
+
