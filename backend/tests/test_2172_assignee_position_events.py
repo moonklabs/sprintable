@@ -74,6 +74,7 @@ def _mock_db(story_by_id: dict):
 
 def _patch_common(monkeypatch):
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.services.project_auth.has_project_access", AsyncMock(return_value=True)

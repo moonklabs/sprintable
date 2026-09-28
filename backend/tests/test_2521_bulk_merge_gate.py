@@ -62,6 +62,7 @@ def _common_patches():
     """bulk_update_stories 본문이 거치는 project-scope/actor 해소 등 무관 의존성 공용 스텁."""
     return (
         patch.object(stories_mod, "_attach_assignee_ids", AsyncMock()),
+        patch.object(stories_mod, "_attach_list_fields", AsyncMock()),  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
         patch.object(stories_mod, "_attach_has_evidence", AsyncMock()),
         patch.object(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None)),
         patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)),

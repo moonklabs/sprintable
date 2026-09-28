@@ -195,12 +195,11 @@ class StoryRepository(BaseRepository[Story]):
             cutoff = datetime.now(timezone.utc) - timedelta(days=done_within_days)
             query = query.where(or_(Story.status != "done", Story.created_at >= cutoff))
 
-        count_q = select(func.count()).select_from(query.subquery())
-        total = (await self.session.execute(count_q)).scalar_one()
-
-        query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
-        result = await self.session.execute(query)
-        return list(result.scalars().all()), total
+        # story #4299 ① — 전체 수를 따로 세던 count 문장 대신 같은 문장의 창 함수로(요청당 왕복 하나 덜 · 같은 WHERE라 값도 같다).
+        # count(*) over()는 LIMIT 전의 걸러진 행 수 — 페이지가 비는 건 걸러진 행이 0일 때뿐이라 그땐 0.
+        query = query.add_columns(func.count().over()).order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
+        rows = (await self.session.execute(query)).all()
+        return [row[0] for row in rows], (rows[0][1] if rows else 0)
 
     async def list_by_ids(self, ids: list[uuid.UUID], *, unattached: bool = False) -> list[Story]:
         """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).

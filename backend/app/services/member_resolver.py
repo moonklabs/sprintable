@@ -389,6 +389,28 @@ async def _resolve_member_anchor(
     )
 
 
+def is_agent_member_expr(member_id_col):
+    """story #4299 — `lookup_members_by_ids(ids)[mid].type == "agent"`를 SQL 한 식으로(목록 한 문장 `story_list_facts`가
+    member id마다 따로 묻지 않게). 같은 AC2-3 shadow 플래그로 두 갈래를 그대로 따른다:
+    - 레거시: team_members(뷰) 행이 있으면 그 type. 없으면 OrgMember · orphan 폴백 = 둘 다 human → agent 아님.
+    - 앵커: members 직접 행이 있으면 그 type, 없으면 alias(alias_id는 PK라 하나)가 가리키는 member의 type. 둘 다 없으면 맵에 없음 → agent 아님.
+    두 판정이 같은지는 test_4299_story_list_facts_realdb가 섞인 시드로 대조한다."""
+    from sqlalchemy import and_, exists, not_
+
+    if settings.member_ssot_resolver_shadow:
+        direct = select(Member.id).where(Member.id == member_id_col)
+        return or_(
+            exists().where(Member.id == member_id_col, Member.type == "agent"),
+            and_(
+                not_(direct.exists()),
+                exists()
+                .where(MemberIdentityAlias.alias_id == member_id_col)
+                .where(Member.id == MemberIdentityAlias.member_id, Member.type == "agent"),
+            ),
+        )
+    return exists().where(TeamMember.id == member_id_col, TeamMember.type == "agent")
+
+
 async def lookup_members_by_ids(
     ids: set[uuid.UUID],
     session: AsyncSession,

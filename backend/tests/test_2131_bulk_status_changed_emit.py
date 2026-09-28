@@ -65,6 +65,8 @@ async def test_bulk_status_change_calls_emit_story_status_changed(monkeypatch):
     repo.org_id = story.org_id
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.services.project_auth.has_project_access", AsyncMock(return_value=True)
@@ -91,6 +93,8 @@ async def test_bulk_no_status_change_does_not_call_emit(monkeypatch):
     repo.org_id = story.org_id
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.services.project_auth.has_project_access", AsyncMock(return_value=True)
@@ -113,6 +117,8 @@ async def test_bulk_status_unchanged_value_does_not_call_emit(monkeypatch):
     repo.org_id = story.org_id
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.services.project_auth.has_project_access", AsyncMock(return_value=True)
@@ -135,6 +141,8 @@ async def test_bulk_emit_failure_isolated_per_item(monkeypatch):
     repo.org_id = story.org_id
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+
+    monkeypatch.setattr(stories_mod, "_attach_list_fields", AsyncMock())  # story #4299: 목록 · 단건 붙이기 칸은 한 SQL(_attach_list_fields) — mock 세션엔 없음
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.services.project_auth.has_project_access", AsyncMock(return_value=True)
