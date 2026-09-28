@@ -401,14 +401,18 @@ describe('옮기기 항목 = 디자인 Button(ghost) · 같은 메뉴 줄 모양
 
 // story #4376(유나 4766 반려 · PO 확정) — 태그 필터 중 «⋮» 옮기기 끔 · 부모가 목록에 없는 문서는 뿌리 형제로.
 describe('«⋮» 옮기기 — 태그 필터 · 부모가 목록에 없는 문서(story #4376)', () => {
-  it('태그 필터 중: 위로 · 아래로 꺼지고 까닭 = 태그 필터 문구 하나 · 폴더로 이동 없음 · 눌러도 옮기지 않음', () => {
+  it('태그 필터 중: 위로 · 아래로 · 폴더로 이동… 셋 다 꺼진 채 보이고 까닭 = 태그 필터 문구 하나 · 눌러도 옮기지 않음(고르개도 안 열림)', () => {
     mount([...THREE, doc('f', 40, { is_folder: true })], { filtered: true, hasMore: true, sortMode: 'title' });
     open('b');
     expect(moveItem('up').getAttribute('aria-disabled')).toBe('true');
     expect(moveItem('down').getAttribute('aria-disabled')).toBe('true');
     expect(describedText(moveItem('up'))).toBe(KO.moveTagFilterActive);
     expect(notes().map((p) => p.textContent)).toEqual([KO.moveTagFilterActive]);  // 정렬 · 더 보기 까닭보다 먼저 · 하나만
-    expect(menu()!.querySelector('[data-move="into"]')).toBeNull();
+    // 유나 4766 — 사라지지 않고 꺼진 채 같은 까닭(메뉴 모양이 안 바뀜).
+    expect(moveItem('into').getAttribute('aria-disabled')).toBe('true');
+    expect(describedText(moveItem('into'))).toBe(KO.moveTagFilterActive);
+    click(moveItem('into'));
+    expect(menu()!.querySelector('[data-move-target]')).toBeNull();  // 고르개가 안 열림(폴더 줄 0)
     click(moveItem('up'));
     expect(calls).toHaveLength(0);
   });

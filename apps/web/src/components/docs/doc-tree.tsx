@@ -467,8 +467,10 @@ function TreeNode({
                   <>
                     <Button type="button" variant="ghost" role="menuitem" data-move="up" aria-disabled={!moveState.up || undefined} aria-describedby={moveState.filterLocked ? filterNoteId : moveState.sortLocked ? sortNoteId : undefined} onClick={() => runMove({ kind: 'up' }, moveState.up)} className={DOC_MENU_ITEM}>{t('docTreeMoveUp')}</Button>
                     <Button type="button" variant="ghost" role="menuitem" data-move="down" aria-disabled={!moveState.down || undefined} aria-describedby={moveState.filterLocked ? filterNoteId : moveState.sortLocked ? sortNoteId : moveState.downUnloaded ? unloadedNoteId : undefined} onClick={() => runMove({ kind: 'down' }, moveState.down)} className={DOC_MENU_ITEM}>{t('docTreeMoveDown')}</Button>
-                    {moveState.targets.some((x) => !x.current) && (
-                      <Button type="button" variant="ghost" role="menuitem" data-move="into" onClick={() => setPickerOpen(true)} className={DOC_MENU_ITEM}>{t('docTreeMoveInto')}</Button>
+                    {/* 유나 4766(비차단) — 태그 필터 중엔 «폴더로 이동…»도 사라지지 않고 위/아래처럼 꺼진 채 같은 까닭 줄(메뉴 모양이 안 바뀜).
+                        필터가 아니면 예전대로: 옮길 폴더가 지금 자리뿐이면 항목 없음. */}
+                    {(moveState.filterLocked || moveState.targets.some((x) => !x.current)) && (
+                      <Button type="button" variant="ghost" role="menuitem" data-move="into" aria-disabled={moveState.filterLocked || undefined} aria-describedby={moveState.filterLocked ? filterNoteId : undefined} onClick={() => { if (!moveState.filterLocked) setPickerOpen(true); }} className={DOC_MENU_ITEM}>{t('docTreeMoveInto')}</Button>
                     )}
                   </>
                 ) : null}
