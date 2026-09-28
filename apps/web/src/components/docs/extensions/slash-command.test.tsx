@@ -120,7 +120,7 @@ describe('calculatePopupPosition', () => {
 // This helper mirrors the exact same flattening so the test exercises the real shape.
 interface RawSlashMenuMessages {
   categories: SlashMenuStrings['categories'];
-  items: Record<keyof SlashMenuStrings['items'], { title: string; description: string }>;
+  items: Record<keyof SlashMenuStrings['items'], { title: string; description: string; searchAlias?: string }>;
   embedPrompt: string;
   mermaidDefault: { start: string; end: string };
   toggleDefaultTitle: string;
@@ -141,6 +141,7 @@ function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages
     embedPrompt: raw.embedPrompt,
     mermaidDefault: raw.mermaidDefault,
     toggleDefaultTitle: raw.toggleDefaultTitle,
+    columnsSearchAlias: raw.items.columns.searchAlias ?? '',
   };
 }
 
@@ -196,11 +197,13 @@ describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () =
   // 상수 자체가 테스트 전용 죽은 export라 걷었다. title이 로케일 무관 검색 키라는 게 본래
   // 불변식이므로, en/ko 두 로케일 결과를 서로 비교해도 같은 불변식을 고정할 수 있다.
   // story #4377 — 예전 불변식(«제목은 로케일 무관 영어 검색 키»)을 뒤집는다: 제목은 로케일, 고정은 id · 영어 별칭.
-  it('item ids and English aliases stay identical across locales; EN title = its alias', () => {
+  it('item ids and English aliases stay identical across locales; EN title = the first alias (the rest are search-only variants)', () => {
     const en = enCategories.flatMap((c) => c.items);
     const ko = koCategories.flatMap((c) => c.items);
-    expect(ko.map((i) => [i.id, i.aliases])).toEqual(en.map((i) => [i.id, i.aliases]));
+    expect(ko.map((i) => [i.id, i.aliases[0]])).toEqual(en.map((i) => [i.id, i.aliases[0]]));
     for (const item of en) expect(item.aliases).toEqual([item.title]);
+    // story #4383 — 찾기 전용 다른 표기는 ko 칼럼의 «컬럼» 하나뿐(별칭이 조용히 늘지 않게 · en은 빈 값이라 없음).
+    expect(ko.filter((i) => i.aliases.length > 1).map((i) => [i.id, i.aliases.slice(1)])).toEqual([['columns', ['컬럼']]]);
   });
 
   it('produces the same category/item counts across locales', () => {
@@ -279,15 +282,16 @@ describe('«칼럼» 한 표기(story #4383)', () => {
     expect((koMessages as unknown as { docs: { columnsLabel: string } }).docs.columnsLabel).toBe('칼럼');
   });
 
-  it('«/칼럼» · «/column» 둘 다 다단 항목에 걸린다', () => {
+  it('«/칼럼» · «/컬럼» · «/column» 셋 다 다단 항목에 걸린다(«컬럼»은 찾기 전용 · 화면 표기는 «칼럼» 하나)', () => {
     expect(matchesSlashQuery(columnsItem(), '칼럼')).toBe(true);
+    expect(matchesSlashQuery(columnsItem(), '컬럼')).toBe(true);
     expect(matchesSlashQuery(columnsItem(), 'column')).toBe(true);
   });
 
-  it('ko.json 사람용 문장에 «컬럼» 표기가 없다', () => {
+  it('ko.json 사람용 문장에 «컬럼» 표기가 없다(찾기 전용 searchAlias만 예외 · 화면엔 안 나옴)', () => {
     const found: string[] = [];
     const walk = (node: unknown, path: string) => {
-      if (typeof node === 'string') { if (node.includes('컬럼')) found.push(`${path} = ${node}`); return; }
+      if (typeof node === 'string') { if (node.includes('컬럼') && !path.endsWith('.searchAlias')) found.push(`${path} = ${node}`); return; }
       if (node && typeof node === 'object') for (const [k, v] of Object.entries(node)) walk(v, path ? `${path}.${k}` : k);
     };
     walk(koMessages, '');

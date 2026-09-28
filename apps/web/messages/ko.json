@@ -3685,7 +3685,8 @@
         },
         "columns": {
           "title": "칼럼",
-          "description": "2단 · 3단으로 나란히 배치"
+          "description": "2단 · 3단으로 나란히 배치",
+          "searchAlias": "컬럼"
         },
         "mathBlock": {
           "title": "수식 블록",

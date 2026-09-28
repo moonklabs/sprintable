@@ -167,6 +167,7 @@ export function DocEditor({
     embedPrompt: tSlash('embedPrompt'),
     mermaidDefault: { start: tSlash('mermaidDefault.start'), end: tSlash('mermaidDefault.end') },
     toggleDefaultTitle: tSlash('toggleDefaultTitle'),
+    columnsSearchAlias: tSlash('items.columns.searchAlias'),
   };
   const suppressUpdateRef = useRef(false);
   // 편집기 콜백은 처음 만든 때의 prop을 붙잡으므로 최신 값은 ref로 읽는다.
