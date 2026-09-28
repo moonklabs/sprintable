@@ -18,8 +18,9 @@ Storage (PO 17:20Z): Redis only, no table / migration.
 Checking runs beside the in-process delivery dispatcher loop (every backend instance). A ticket is taken with ZREM: only the
 instance whose ZREM removed it processes it, so instances never check the same ticket twice.
 
-Delivery guarantee: **best-effort, at most once.** A ticket taken by ZREM and lost before its receipt is handled (the instance
-crashes in between) is not checked again. That is acceptable: this is observation plus dead-token cleanup, and the next send to
+Delivery guarantee: **best-effort — at most once per pass that takes the ticket** (a ticket whose result is unknown is re-queued
+and may be read in several passes). A ticket taken by ZREM and lost before its receipt is handled (the instance crashes in
+between) is not checked again. That is acceptable: this is observation plus dead-token cleanup, and the next send to
 that device records a new ticket.
 
 A late DeviceNotRegistered never switches off a device registered again after the push: deactivation requires
@@ -75,14 +76,19 @@ def _hash_key(ticket_id: str) -> str:
     return f"{_HASH_PREFIX}{ticket_id}"
 
 
-async def record_expo_tickets(org_id: uuid.UUID, tickets: list[tuple[str, uuid.UUID, str | None]]) -> None:
+async def record_expo_tickets(
+    org_id: uuid.UUID, tickets: list[tuple[str, uuid.UUID, str | None]], *, sent_at: float | None = None,
+) -> None:
     """Remember ok tickets (ticket id · push_device id · platform) so their receipts are checked later. Best-effort and
     bounded: it runs on the send path, so a Redis failure — or a Redis that stops answering — is logged and skipped within
-    RECORD_TIMEOUT_SECONDS. Sending already happened and must not fail or wait because of this."""
+    RECORD_TIMEOUT_SECONDS. Sending already happened and must not fail or wait because of this.
+
+    sent_at: when the push went out — the sender takes it **before** sending (the re-registration check compares against it).
+    """
     r = _redis()
     if r is None or not tickets:
         return
-    now = time.time()
+    now = time.time() if sent_at is None else sent_at
     try:
         await asyncio.wait_for(_record(r, org_id, tickets, now), RECORD_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -117,20 +123,23 @@ async def _fetch_receipts(ids: list[str]) -> dict[str, dict]:
     return data if isinstance(data, dict) else {}
 
 
-async def _deactivate_devices(org_id: uuid.UUID, devices: list[tuple[uuid.UUID, float]]) -> None:
+async def _deactivate_devices(org_id: uuid.UUID, devices: list[tuple[uuid.UUID, float]]) -> int:
     """DeviceNotRegistered → is_active=false, in its **own** session (never the dispatcher's): a failure here must not expire
     another step's ORM objects or roll back anything else.
 
     Only a device **not registered again since the push** (last_seen_at <= sent_at): the receipt can arrive up to 24 h later,
     and in between the app may have registered the same token again, which turns the row back on. Switching that row off
     would silence the user's notifications.
+
+    Returns how many rows were actually switched off (rowcount) — not the number of candidates.
     """
     from app.core.database import async_session_factory
     from app.models.push_device import PushDevice
 
+    switched_off = 0
     async with async_session_factory() as session:
         for device_id, sent_at in devices:
-            await session.execute(
+            result = await session.execute(
                 update(PushDevice)
                 .where(
                     PushDevice.org_id == org_id,
@@ -139,7 +148,9 @@ async def _deactivate_devices(org_id: uuid.UUID, devices: list[tuple[uuid.UUID, 
                 )
                 .values(is_active=False)
             )
+            switched_off += result.rowcount or 0
         await session.commit()
+    return switched_off
 
 
 async def check_due_expo_receipts(now: float | None = None, limit: int = MAX_IDS_PER_REQUEST) -> None:
@@ -216,13 +227,17 @@ async def check_due_expo_receipts(now: float | None = None, limit: int = MAX_IDS
                 "event": "expo_receipt_error", "error": error, "org_id": org_id, "platform": platform or None, "count": count,
             }},
         )
+    deactivated = 0
     for org_id, device_ids in dead.items():
-        await _deactivate_devices(org_id, device_ids)
-        logger.info("expo receipts: deactivated %d DeviceNotRegistered device(s) org=%s", len(device_ids), org_id)
+        switched_off = await _deactivate_devices(org_id, device_ids)
+        deactivated += switched_off
+        logger.info(
+            "expo receipts: deactivated %d of %d DeviceNotRegistered device(s) org=%s",
+            switched_off, len(device_ids), org_id,
+        )
     ok = sum(1 for r in receipts.values() if isinstance(r, dict) and r.get("status") == "ok")
     _log_pass(
-        checked=len(ids), ok=ok, error=sum(errors.values()), requeued=len(not_ready),
-        deactivated=sum(len(v) for v in dead.values()),
+        checked=len(ids), ok=ok, error=sum(errors.values()), requeued=len(not_ready), deactivated=deactivated,
     )
 
 

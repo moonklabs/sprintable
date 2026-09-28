@@ -69,7 +69,7 @@ async def test_device_not_registered_again_is_switched_off(monkeypatch):
     async with _env(monkeypatch) as (Session, org):
         device = await _register(Session, org, f"ExponentPushToken[a-{uuid.uuid4().hex[:8]}]")
         sent_at = device.last_seen_at.timestamp() + 1  # the push went out after the registration
-        await er._deactivate_devices(org, [(device.id, sent_at)])
+        assert await er._deactivate_devices(org, [(device.id, sent_at)]) == 1  # rows actually switched off
         assert (await _row(Session, device.id)).is_active is False
 
 
@@ -82,5 +82,5 @@ async def test_device_registered_again_after_the_push_stays_on(monkeypatch):
         again = await _register(Session, org, token)  # the app registers the same token again
         assert again.id == device.id
         assert again.last_seen_at.timestamp() > sent_at  # the upsert moved last_seen_at
-        await er._deactivate_devices(org, [(device.id, sent_at)])  # the late receipt says DeviceNotRegistered
+        assert await er._deactivate_devices(org, [(device.id, sent_at)]) == 0  # the late receipt says DeviceNotRegistered
         assert (await _row(Session, device.id)).is_active is True

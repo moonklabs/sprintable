@@ -60,6 +60,7 @@ def deactivated(monkeypatch):
 
     async def fake_deactivate(org_id, device_ids):
         calls.append((org_id, sorted(device_ids)))
+        return len(device_ids)
 
     monkeypatch.setattr(er, "_deactivate_devices", fake_deactivate)
     return calls
@@ -222,14 +223,55 @@ async def test_send_records_ok_tickets_by_device_not_error_ones(monkeypatch):
 
     recorded: list = []
 
-    async def fake_record(org_id, tickets):
-        recorded.append((org_id, tickets))
+    async def fake_record(org_id, tickets, *, sent_at=None):
+        recorded.append((org_id, tickets, sent_at))
 
     monkeypatch.setattr(expo_push, "_expo_send_chunk", fake_send)
     monkeypatch.setattr(er, "record_expo_tickets", fake_record)
     dead = await expo_push._send_expo_push_targets(devices, title="t", body="b", event_type="e", org_id=ORG)
     assert dead == ["ExponentPushToken[b]"]
-    assert recorded == [(ORG, [("tk-ok", d_ok, "ios")])]
+    assert [(o, t) for o, t, _ in recorded] == [(ORG, [("tk-ok", d_ok, "ios")])]
+
+
+@pytest.mark.anyio
+async def test_sent_at_is_taken_before_sending_not_after_the_loop(monkeypatch):
+    """PO 17:58Z ① — a device registered again while the chunks were going out counts as registered after the push."""
+    from ee.services import expo_push
+
+    clock = {"now": NOW}
+    monkeypatch.setattr(expo_push.time, "time", lambda: clock["now"])
+
+    async def slow_send(_chunk):
+        clock["now"] += 10  # sending takes a while
+        return [{"status": "ok", "id": "tk-ok"}]
+
+    recorded: list = []
+
+    async def fake_record(org_id, tickets, *, sent_at=None):
+        recorded.append(sent_at)
+
+    monkeypatch.setattr(expo_push, "_expo_send_chunk", slow_send)
+    monkeypatch.setattr(er, "record_expo_tickets", fake_record)
+    devices = [{"expo_push_token": "ExponentPushToken[a]", "id": uuid.uuid4(), "platform": "ios"}]
+    await expo_push._send_expo_push_targets(devices, title="t", body="b", event_type="e", org_id=ORG)
+    assert recorded == [NOW]
+
+
+@pytest.mark.anyio
+async def test_the_count_line_reports_rows_actually_switched_off(redis, fetched, caplog, monkeypatch):
+    """PO 17:58Z ② — two DeviceNotRegistered receipts, but one device was registered again → deactivated=1, not 2."""
+    caplog.set_level(logging.INFO, logger=er.logger.name)
+
+    async def one_of_them(org_id, devices):
+        return 1
+
+    monkeypatch.setattr(er, "_deactivate_devices", one_of_them)
+    await _record(monkeypatch, [("tk-1", uuid.uuid4(), "android"), ("tk-2", uuid.uuid4(), "android")])
+    gone = {"status": "error", "details": {"error": "DeviceNotRegistered"}}
+    fetched.answer = {"tk-1": gone, "tk-2": gone}
+    await er.check_due_expo_receipts(now=NOW + 16 * 60)
+    passes = [r.structured for r in caplog.records if getattr(r, "structured", {}).get("event") == "expo_receipt_check"]
+    assert passes[-1]["deactivated"] == 1 and passes[-1]["error"] == 2
 
 
 @pytest.mark.anyio

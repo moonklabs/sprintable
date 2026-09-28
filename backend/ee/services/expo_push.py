@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+import time
 import uuid
 
 import httpx
@@ -275,6 +276,9 @@ async def _send_expo_push_targets(
 
     dead_tokens: list[str] = []
     ok_tickets: list[tuple[str, uuid.UUID, str | None]] = []  # story #4396 — (ticket id · device id · platform) for receipts
+    # story #4396 (PO 17:58Z ①) — «sent at» is taken before the first chunk goes out, not after the loop: a device registered
+    # again while the chunks were being sent must count as registered after the push (a late DeviceNotRegistered leaves it on).
+    sent_at = time.time()
     ok_count = 0
     error_count = 0
     error_reasons: dict[str, int] = {}
@@ -306,7 +310,7 @@ async def _send_expo_push_targets(
     if ok_tickets:
         from ee.services.expo_receipts import record_expo_tickets
 
-        await record_expo_tickets(org_id, ok_tickets)  # best-effort (swallows its own failures)
+        await record_expo_tickets(org_id, ok_tickets, sent_at=sent_at)  # best-effort (swallows its own failures)
     return dead_tokens
 
 
