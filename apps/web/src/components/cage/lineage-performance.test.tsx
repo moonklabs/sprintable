@@ -229,6 +229,7 @@ describe('LineagePerformancePanel — 성과 조회 실패 표시(story #4372)',
     expect(container.querySelector('[data-testid="lineage-material-performance-load-error"]')).toBeNull();
     // 열 때 저절로 도는 조회의 실패 = live role 없이 글만(4754 규칙).
     expect(line?.getAttribute('role')).toBeNull();
+    expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
   });
 
   it('⭐소재 성과 조회 실패 → 계보 트리 카드에 실패 줄', async () => {
@@ -237,6 +238,8 @@ describe('LineagePerformancePanel — 성과 조회 실패 표시(story #4372)',
     await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
     await flush(10);
     expect(container.querySelector('[data-testid="lineage-material-performance-load-error"]')?.textContent).toBe(koMessages.cage.lineagePerformanceLoadFailed);
+    expect(container.querySelector('[data-testid="lineage-material-performance-load-error"]')?.getAttribute('role')).toBeNull();
+    expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
     expect(container.querySelector('[data-testid="lineage-hook-performance-load-error"]')).toBeNull();
   });
 });
