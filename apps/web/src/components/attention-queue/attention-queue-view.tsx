@@ -10,7 +10,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { cn } from '@/lib/utils';
 import {
-  parseAttentionQueueSignals, parseAttentionTruncated, buildAttentionQueueFromBe,
+  parseAttentionQueueSignals, parseAttentionTruncatedKinds, buildAttentionQueueFromBe,
   buildAttentionQueue, diffAttentionQueueItemIds,
   type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
@@ -30,14 +30,14 @@ const HIGHLIGHT_MS = 900;
  * BE 신호 하나만 소비한다(gate_pending dedup·memo slug 해소 등 inbox 전용 로직도 전부 제거). */
 async function fetchAttentionQueue(
   projectId: string, t: AttentionQueueTranslator,
-): Promise<{ items: AttentionQueueItem[]; truncated: boolean }> {
+): Promise<{ items: AttentionQueueItem[]; truncatedKinds: string[] }> {
   const beJson = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`)
     .then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const signals = parseAttentionQueueSignals(beJson);
   return {
     items: buildAttentionQueueFromBe(signals, t, (href) => withProjectParam(href, projectId)),
     // story #4382 — BE가 한 신호를 100건에서 잘랐으면 남은 수는 «이상»으로만 말한다.
-    truncated: parseAttentionTruncated(beJson),
+    truncatedKinds: parseAttentionTruncatedKinds(beJson),
   };
 }
 
@@ -121,9 +121,10 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const t = useTranslations('attentionQueue');
+  const tCage = useTranslations('cage');
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<AttentionQueueItem[]>([]);
-  const [truncated, setTruncated] = useState(false);
+  const [truncatedKinds, setTruncatedKinds] = useState<string[]>([]);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,10 +132,10 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   useEffect(() => { itemsRef.current = items; }, [items]);
 
   const refetchAndDiff = useCallback(async () => {
-    const { items: result, truncated: nextTruncated } = await fetchAttentionQueue(projectId, t);
+    const { items: result, truncatedKinds: nextTruncatedKinds } = await fetchAttentionQueue(projectId, t);
     const changed = diffAttentionQueueItemIds(itemsRef.current, result);
     setItems(result);
-    setTruncated(nextTruncated);
+    setTruncatedKinds(nextTruncatedKinds);
     if (changed.size > 0) {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
       setHighlightedIds(changed);
@@ -146,10 +147,10 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const { items: result, truncated: nextTruncated } = await fetchAttentionQueue(projectId, t);
+      const { items: result, truncatedKinds: nextTruncatedKinds } = await fetchAttentionQueue(projectId, t);
       if (cancelled) return;
       setItems(result);
-      setTruncated(nextTruncated);
+      setTruncatedKinds(nextTruncatedKinds);
       setLoading(false);
     }
     void load();
@@ -178,6 +179,16 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   });
 
   const { shown, overflow, overflowHasGate } = buildAttentionQueue(items, CAP);
+  // story #4382(유나 CHANGES) — 넘침 줄 «{수} — {자리}». 숨은 행도 보이는 것과 같은 예외라 «흐르는 중»이 아니다. 자리: 숨은 행에 게이트가 있으면
+  // 결재함(단추), 아니면 «처리되는 대로 여기 차례로». BE가 gate_pending을 잘랐으면 넘침이 0이어도 숨은 게이트가 있다.
+  const truncated = truncatedKinds.length > 0;
+  const hiddenGate = overflowHasGate || truncatedKinds.includes('gate_pending');
+  const overflowLine = overflow > 0 || truncated
+    ? t('flowOverflowLine', {
+      count: overflow > 0 ? t(truncated ? 'flowOverflowAtLeast' : 'flowOverflowCount', { overflow }) : t('flowOverflowMaybe'),
+      place: hiddenGate ? t('flowOverflowPlaceGate', { tab: tCage('gateTabLabel') }) : t('flowOverflowPlaceQueue'),
+    })
+    : null;
 
   return (
     // story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path) 폐지, proof-surface(13px 균일
@@ -233,24 +244,21 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
               비내비게이션 텍스트로 정직하게 폴백(「거기 전부 있다」로 과장 안 함). 착지 탭
               기본값 변경(B3 보류)은 스코프 밖(PO 확定) — 이 앵커는 명시적 tab=gates 링크일
               뿐 기본 착지를 바꾸지 않는다. */}
-          {overflow > 0 && overflowHasGate ? (
+          {overflowLine && hiddenGate ? (
             <button
               type="button"
               onClick={() => router.push(flatHref('/inbox?tab=gates'))}
               className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-[12.5px] text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
             >
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              <span className="flex-1">{t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })}</span>
+              <span className="flex-1 break-keep">{overflowLine}</span>
               <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
             </button>
-          ) : overflow > 0 || truncated ? (
-            // story #4382(까디르 메모 ①) — gate_pending · needs_input은 스토리로 묶여 서버 100행이 7개 미만이 될 수 있다. 그래도 BE가 자른
-            // 신호가 있으면(truncated_kinds) 줄을 보인다 — 남은 수를 모를 땐 수 없이 «더 있을 수 있어요».
+          ) : overflowLine ? (
+            // story #4382(까디르 메모 ①) — 스토리로 묶여 넘침이 0이어도 BE가 잘랐으면 줄이 선다(수는 «더 있을 수 있어요»).
             <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              {overflow > 0
-                ? t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })
-                : t('flowDemotedMore')}
+              <span className="break-keep">{overflowLine}</span>
             </div>
           ) : null}
         </div>
