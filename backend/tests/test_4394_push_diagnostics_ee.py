@@ -160,6 +160,34 @@ def test_per_member_hourly_cap_is_429_with_retry_after_and_other_members_are_una
     assert _post(_client(MEMBER_B), VALID).status_code == 204
 
 
+def _over_cap_client(monkeypatch, *, window_stats):
+    """The next report is over the cap (hit → False); the window lookup behaves as given."""
+    monkeypatch.setattr(push_devices._diagnostics_limiter, "hit", lambda *_a, **_k: False)
+    monkeypatch.setattr(push_devices._diagnostics_limiter, "get_window_stats", window_stats)
+    return _client()
+
+
+def test_window_lookup_failure_after_an_over_cap_hit_is_still_429_with_a_whole_window(monkeypatch):
+    """PO 17:15Z ① — storage dropping between the over-cap hit and the Retry-After lookup must not become a 500."""
+    def broken_stats(*_a, **_k):
+        raise StorageError(ConnectionError("redis down"))
+
+    res = _post(_over_cap_client(monkeypatch, window_stats=broken_stats), VALID)
+    assert res.status_code == 429
+    assert res.headers["Retry-After"] == "3600"
+
+
+def test_retry_after_rounds_up(monkeypatch):
+    """PO 17:15Z ② — 10.2 s left is Retry-After 11, not 10 (retrying a second early is another 429)."""
+    import time
+
+    now = time.time()
+    monkeypatch.setattr(push_devices.time, "time", lambda: now)
+    res = _post(_over_cap_client(monkeypatch, window_stats=lambda *_a, **_k: (now + 10.2, 0)), VALID)
+    assert res.status_code == 429
+    assert res.headers["Retry-After"] == "11"
+
+
 def test_limiter_storage_failure_still_accepts_the_report(caplog, monkeypatch):
     caplog.set_level(logging.INFO, logger=LOGGER)
 

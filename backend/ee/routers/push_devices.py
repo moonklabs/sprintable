@@ -9,6 +9,7 @@ auth context 에서 산출(타 멤버 디바이스 등록 불가). webhook_confi
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from typing import Annotated
@@ -36,6 +37,7 @@ _logger = logging.getLogger(__name__)
 # story #4394 — per-member cap on diagnostics reports (the app sends one per launch, plus one from the web view after
 # registering). Redis when configured (shared across instances), memory otherwise (single-instance dev).
 DIAGNOSTICS_PER_HOUR = 30
+_DIAGNOSTICS_WINDOW_SECONDS = 3600
 _diagnostics_rate = RateLimitItemPerHour(DIAGNOSTICS_PER_HOUR)
 _diagnostics_limiter = MovingWindowRateLimiter(
     storage_from_string(settings.redis_url or "memory://", wrap_exceptions=True),
@@ -135,11 +137,18 @@ async def report_push_diagnostics(
         _logger.warning("push diagnostics rate-limit storage unavailable — accepting the report")
         allowed = True
     if not allowed:
-        reset_at, _remaining = _diagnostics_limiter.get_window_stats(_diagnostics_rate, key)
+        # Retry-After rounds up: rounding down tells the app to retry up to a second early, into another 429. If the window
+        # lookup fails (storage dropped right after the over-cap hit), it is still a 429, never a 500, with the whole window.
+        try:
+            reset_at, _remaining = _diagnostics_limiter.get_window_stats(_diagnostics_rate, key)
+            retry_after = max(1, math.ceil(reset_at - time.time()))
+        except StorageError:
+            _logger.warning("push diagnostics rate-limit storage unavailable after an over-cap hit — Retry-After = one window")
+            retry_after = _DIAGNOSTICS_WINDOW_SECONDS
         raise HTTPException(
             status_code=429,
             detail="Too many push diagnostics reports",
-            headers={"Retry-After": str(max(1, int(reset_at - time.time())))},
+            headers={"Retry-After": str(retry_after)},
         )
     _logger.info(
         "push diagnostics",
