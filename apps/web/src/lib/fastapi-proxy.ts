@@ -138,15 +138,12 @@ async function proxyToFastapiImpl(
 
   let res: Response;
   try {
-    const init: RequestInit = {
-      method: request.method,
-      headers,
-      body,
-      // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
-      signal: backendSignal(options.timeLimitOnly ? null : request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS),
-    };
+    // story #4320 — 원 요청 취소(브라우저가 끊음)를 백엔드까지 전하고 · 백엔드가 멈추면 제한 시간에 끊는다.
+    const signal = backendSignal(options.timeLimitOnly ? null : request, options.timeoutMs ?? BFF_BACKEND_TIMEOUT_MS);
     // story #4398 — 비밀을 실었으면 리다이렉트를 직접 따라간다(다른 origin으로는 안 감 · client-ip.ts).
-    res = carriesEdgeSecret ? await fetchCarryingEdgeSecret(targetUrl, init) : await fetch(targetUrl, init);
+    res = carriesEdgeSecret
+      ? await fetchCarryingEdgeSecret(targetUrl, { method: request.method, headers, body }, (to, init) => fetch(to, { ...init, signal }))
+      : await fetch(targetUrl, { method: request.method, headers, body, signal });
   } catch (err) {
     // story #4320 — 시간 초과는 «연결 못 함»과 다른 코드(같은 503 계열 · 사용자 문장은 «응답이 늦다»).
     const kind = classifyBackendAbort(err);

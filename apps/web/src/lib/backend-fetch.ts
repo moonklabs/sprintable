@@ -65,7 +65,7 @@ export async function backendFetch(url: string, init: BackendFetchInit = {}): Pr
     // story #4398 — 비밀을 실었으면 리다이렉트를 직접 따라간다(다른 origin으로는 안 감 · client-ip.ts).
     const res = requestHeaders === rest.headers
       ? await fetch(url, { ...rest, signal })
-      : await fetchCarryingEdgeSecret(url, { ...rest, headers: requestHeaders, signal });
+      : await fetchCarryingEdgeSecret(url, { ...rest, headers: requestHeaders }, (to, init) => fetch(to, { ...init, signal }));
     const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.arrayBuffer();
     const headers = new Headers(res.headers);
     for (const h of DROP_HEADERS) headers.delete(h);

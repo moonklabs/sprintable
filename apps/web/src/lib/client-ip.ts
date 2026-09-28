@@ -96,12 +96,15 @@ const MAX_REDIRECTS = 5;
  * 비밀 헤더를 실은 요청 전용 fetch — 리다이렉트를 **직접** 따라간다. 백엔드 origin 안의 이동(예: 끝 슬래시 307)만 같은 헤더로
  * 따라가고, 다른 origin으로 가라는 3xx는 따라가지 않고 그대로 돌려준다(undici는 표준 민감 헤더만 떼고 `X-Sprintable-*`는
  * 그대로 실어 보낸다). 방법 · 본문 바꿈은 fetch 표준대로(303 · POST의 301/302 → GET · 본문 없음).
+ * 실제 요청은 `send`(공용 두 곳의 제한 있는 신호를 단 fetch)로만 한다 — 맨 fetch는 그 두 곳에만(story #4320 가드).
  */
-export async function fetchCarryingEdgeSecret(url: string, init: RequestInit): Promise<Response> {
+export type BackendSend = (url: string, init: RequestInit) => Promise<Response>;
+
+export async function fetchCarryingEdgeSecret(url: string, init: RequestInit, send: BackendSend): Promise<Response> {
   let current = url;
   let step: RequestInit = { ...init, redirect: 'manual' };
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const res = await fetch(current, step);
+    const res = await send(current, step);
     const location = res.headers.get('location');
     if (!REDIRECT_STATUSES.has(res.status) || !location) return res;
     const next = new URL(location, current).toString();
