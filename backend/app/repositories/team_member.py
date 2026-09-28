@@ -92,6 +92,22 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         if user_id is not None:
             sql += " AND om.user_id = :uid"
             params["uid"] = user_id
+        elif include_departed:
+            # story #4303(C안) — 0075가 빠뜨린 떠난 사람의 이름 행(마이그 0414: user_id NULL · deleted_at 있음 · id = 옛 legacy id).
+            # 옛 기록이 그 id를 담고 있어 여기서 같은 id로 이름을 싣는다. org_members 행이 없거나 떠난 뒤라 위 갈래엔 안 잡힌다.
+            # 까디르 codex · PO 04:03Z — 모양만 보면 계정 삭제 뒤 users가 지워진 행(name에 이메일 · uuid 가능)도 잡힌다 → **옛 사람 id**인
+            # 행만(0414 업 · 다운 술어와 같은 출처 · resolver의 legacy_human_member_ids와 같은 기준). 옛 테이블이 없는 DB(create_all)는 이 갈래 없음.
+            from app.services.member_resolver import LEGACY_HUMAN_TABLE, legacy_table_exists
+
+            if await legacy_table_exists(self.session):
+                sql += (
+                    " UNION ALL "
+                    "SELECT m.id AS id, NULL::uuid AS user_id, 'member' AS role, m.created_at AS created_at, "
+                    "       NULLIF(m.name, '') AS name, NULL AS avatar_url, true AS departed "
+                    "FROM members m "
+                    "WHERE m.org_id = :org AND m.type = 'human' AND m.user_id IS NULL AND m.deleted_at IS NOT NULL "
+                    f"  AND EXISTS (SELECT 1 FROM {LEGACY_HUMAN_TABLE} tl WHERE tl.id = m.id AND tl.type = 'human')"
+                )
         sql += " ORDER BY name"
         rows = await self.session.execute(text(sql), params)
         return [dict(row._mapping) for row in rows]

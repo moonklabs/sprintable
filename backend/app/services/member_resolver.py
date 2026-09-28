@@ -467,6 +467,30 @@ async def _lookup_members_by_ids_legacy(
     return result
 
 
+LEGACY_HUMAN_TABLE = "team_members_legacy"
+
+
+async def legacy_table_exists(session: AsyncSession) -> bool:
+    """`team_members_legacy`(0088 rename의 실 테이블 · ORM 모델 없음)가 있는가. 마이그 DB엔 늘 있고, create_all로 지은 테스트 DB엔 없다."""
+    from sqlalchemy import text as sa_text
+
+    return (await session.execute(sa_text(f"SELECT to_regclass('public.{LEGACY_HUMAN_TABLE}') IS NOT NULL"))).scalar_one()
+
+
+async def legacy_human_member_ids(session: AsyncSession, ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story #4303(까디르 codex · PO 04:03Z) — `ids` 중 **옛 사람 id**(team_members_legacy 휴먼 행 id)인 것. 마이그 0414가 이름 행을 만든
+    그 기준(업 · 다운 술어와 같은 출처)이라, «user_id NULL · deleted_at 있음» 모양이어도 옛 사람 id가 아니면(계정 삭제 뒤 users가 지워져
+    FK SET NULL이 된 행 등 — name에 이메일 · uuid가 있을 수 있음) 이름을 내지 않는다. 테이블이 없으면 빈 집합."""
+    from sqlalchemy import text as sa_text
+
+    if not ids or not await legacy_table_exists(session):
+        return set()
+    rows = await session.execute(
+        sa_text(f"SELECT id FROM {LEGACY_HUMAN_TABLE} WHERE type = 'human' AND id = ANY(:ids)"), {"ids": list(ids)},
+    )
+    return {r[0] for r in rows}
+
+
 async def _lookup_members_by_ids_anchor(
     ids: set[uuid.UUID],
     session: AsyncSession,
@@ -536,6 +560,12 @@ async def _lookup_members_by_ids_anchor(
         )).all():
             display_name_by_user[uid_] = display_name
 
+    # story #4303 — 이름 행 후보(휴먼 · user_id NULL · deleted_at 있음) 중 옛 사람 id인 것만 members.name을 쓴다(0414가 만든 행만).
+    departed_candidates = {
+        m.id for m in resolved_member_for.values() if m.type == "human" and m.user_id is None and m.deleted_at is not None
+    }
+    departed_name_ids = await legacy_human_member_ids(session, departed_candidates)
+
     for orig_id, m in resolved_member_for.items():
         if m.type == "agent":
             result[orig_id] = ResolvedMember(
@@ -546,9 +576,13 @@ async def _lookup_members_by_ids_anchor(
             )
         else:
             # story #3755 — display_name 없으면(또는 user_id 자체가 없으면) None(id 문자열 0).
+            # story #4303 — 떠난 사람 이름 행(마이그 0414: user_id NULL · deleted_at 있음)은 users가 없어 members.name이 유일한 이름.
+            # 그 모양 **이고 옛 사람 id**일 때만 members.name을 쓴다(0075가 사용자 없는 옛 행에 id 문자열을 name으로 넣은 적이 있고, 계정 삭제
+            # 뒤 users가 지워지면 같은 모양의 행 name에 이메일 · uuid가 남을 수 있어 넓히지 않음 — 까디르 codex · PO 04:03Z).
+            departed_name_row = m.id in departed_name_ids
             result[orig_id] = ResolvedMember(
                 id=m.id, user_id=m.user_id,
-                name=display_name_by_user.get(m.user_id) if m.user_id else None,
+                name=display_name_by_user.get(m.user_id) if m.user_id else (m.name if departed_name_row else None),
                 type="human", role=m.org_role or "member", org_id=m.org_id, project_id=None,
                 avatar_url=m.avatar_url,
             )
