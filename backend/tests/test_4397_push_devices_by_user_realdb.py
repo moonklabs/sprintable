@@ -152,6 +152,50 @@ async def test_a_muted_member_is_still_filtered_out(monkeypatch):
         assert await _targets(Session, ids["org_b"], [ids["om_u_b"]], muted={ids["om_u_b"]}) == []
 
 
+async def test_targets_carry_device_id_and_platform_for_receipts(monkeypatch):
+    """PO 18:42Z ① — the selection returns rows, so the sender still records its ok tickets by device (4396)."""
+    async with _env(monkeypatch) as (Session, ids):
+        token = _token()
+        device = await _register(Session, ids["org_a"], ids["om_u_a"], ids["u"], token)
+        monkeypatch.setattr(settings, "push_devices_by_user", True)
+        async with Session() as s:
+            found = await expo_push._fetch_expo_push_targets(s, ids["org_b"], [ids["om_u_b"]])
+        assert found == [{"expo_push_token": token, "id": device.id, "platform": "android"}]
+
+
+async def test_a_late_receipt_for_another_orgs_notification_switches_off_the_device(monkeypatch):
+    """PO 18:42Z ① — switch on: an org B notification reached U's device homed in org A. Its DeviceNotRegistered receipt
+    must switch that device off (the receipt's org is B); a device registered again since the push stays on."""
+    from ee.services import expo_receipts
+
+    async with _env(monkeypatch) as (Session, ids):
+        monkeypatch.setattr(settings, "push_devices_by_user", True)
+        gone = await _register(Session, ids["org_a"], ids["om_u_a"], ids["u"], _token())
+        sent_at = gone.last_seen_at.timestamp() + 1
+        assert await expo_receipts._deactivate_devices(ids["org_b"], [(gone.id, sent_at)]) == 1
+        token = _token()
+        back = await _register(Session, ids["org_a"], ids["om_u_a"], ids["u"], token)
+        push_time = back.last_seen_at.timestamp() + 0.001
+        import asyncio
+        await asyncio.sleep(0.05)
+        await _register(Session, ids["org_a"], ids["om_u_a"], ids["u"], token)  # registered again after the push
+        assert await expo_receipts._deactivate_devices(ids["org_b"], [(back.id, push_time)]) == 0
+
+
+async def test_even_with_the_switch_off_rows_without_an_expo_token_are_never_selected(monkeypatch):
+    """PO 18:42Z ② — the one change that applies with the switch off too: a macOS row (APNs token, no Expo token) used to be
+    selected by the Expo sender and became a `"to": null` message. The Expo selection now requires an Expo token."""
+    async with _env(monkeypatch) as (Session, ids):
+        monkeypatch.setattr(settings, "push_devices_by_user", False)
+        async with Session() as s:
+            await PushDeviceRepository(s, ids["org_a"]).upsert(
+                member_id=ids["om_u_a"], user_id=ids["u"], expo_push_token=None,
+                apns_device_token=uuid.uuid4().hex + uuid.uuid4().hex, platform="macos", device_id=None, app_version="1.0",
+            )
+            await s.commit()
+        assert await _targets(Session, ids["org_a"], [ids["om_u_a"]]) == []
+
+
 async def test_a_dead_token_is_switched_off_whichever_org_the_row_is_homed_in(monkeypatch):
     async with _env(monkeypatch) as (Session, ids):
         token = _token()
@@ -243,6 +287,8 @@ def test_client_ip_prefers_cf_then_first_forwarded_entry():
 
 
 async def test_backfill_resolves_the_person_from_all_four_sources_and_leaves_agents_empty(monkeypatch):
+    """PO 18:42Z ③ — the backfill does not require the device's org to match the member's org: the column is the *person*
+    (member → user), and a person's device may be homed in any of their orgs, so member → user is all it needs."""
     import importlib.util
     import pathlib
 
