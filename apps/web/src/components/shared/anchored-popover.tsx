@@ -68,14 +68,15 @@ export function isOutsidePress(root: Element | null | undefined, target: EventTa
 }
 
 /**
- * story #4373(까디르 실측 · 부류) — 포털 대상. **Base UI 모달 팝업**(우리 래퍼 `components/ui/sheet.tsx` · `dialog.tsx` =
- * `data-slot="sheet-content"` · `"dialog-content"`) 안의 트리거면 **그 팝업 안**, 아니면 body. Base UI 모달은 열려 있는 동안 팝업(과 자기가
- * 아는 포털) 밖의 body 자식을 전부 `aria-hidden`으로 숨긴다(floating-ui-react markOthers) — body 끝에 붙은 포털은 그 «밖»이라 보조기기에서
- * 칸 · 단추가 사라졌고(390 작업 목록 시트 안 산출물 댓글 칸), 시트 쪽 바깥 누름 판정에서도 «밖»이었다. 팝업 안이면 둘 다 «안».
+ * story #4373(까디르 실측 · 부류) — 포털 대상. **Base UI 모달 팝업**(표지 `data-modal-popup` — 래퍼 `components/ui/sheet.tsx` · `dialog.tsx`와
+ * 래퍼 밖에서 `@base-ui/react/dialog`를 바로 쓰는 artifact-expand-dialog · image-lightbox · command-palette의 Popup 다섯 곳) 안의 트리거면
+ * **그 팝업 안**, 아니면 body. Base UI 모달은 열려 있는 동안 팝업(과 자기가 아는 포털) 밖의 body 자식을 전부 `aria-hidden`으로 숨긴다
+ * (floating-ui-react markOthers) — body 끝에 붙은 포털은 그 «밖»이라 보조기기에서 칸 · 단추가 사라졌고(390 작업 목록 시트 안 산출물 댓글 칸),
+ * 시트 쪽 바깥 누름 판정에서도 «밖»이었다. 팝업 안이면 둘 다 «안».
  * `role="dialog"`만으로 고르지 않는다(유나 4757 반려): 스토리 상세처럼 스스로 그린 비모달 패널도 그 역할을 달고, 그런 패널은 밖을 숨기지
- * 않으니 body로 두는 게 예전 그대로다 — 모달을 가르는 믿을 만한 표지는 우리 Base UI 래퍼의 data-slot뿐(래퍼 밖 Base UI 모달은 없음 · grep).
+ * 않으니 body로 두는 게 예전 그대로다. 표지는 한 이름 — 새 Base UI 모달 Popup이 표지를 빠뜨리면 modal-popup-marker.guard.test.ts가 RED.
  */
-export const MODAL_POPUP_SELECTOR = '[data-slot="sheet-content"], [data-slot="dialog-content"]';
+export const MODAL_POPUP_SELECTOR = '[data-modal-popup]';
 
 export function portalContainerFor(anchor: Element | null): Element | null {
   if (typeof document === 'undefined') return null;

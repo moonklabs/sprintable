@@ -312,7 +312,7 @@ describe('isOutsidePress', () => {
   });
 });
 
-// story #4373(까디르 실측 · 유나 4757 반려 · 부류) — Base UI 모달 팝업(우리 래퍼 data-slot="sheet-content" · "dialog-content") 안 트리거면
+// story #4373(까디르 실측 · 유나 4757 반려 · 부류) — Base UI 모달 팝업(표지 data-modal-popup — 래퍼 둘 + 래퍼 밖 직접 사용 셋) 안 트리거면
 // 포털 대상이 그 팝업(Base UI 모달이 팝업 밖 body 자식을 aria-hidden으로 숨기므로). 스스로 그린 role="dialog" 패널(스토리 상세)은 밖을
 // 숨기지 않으니 예전처럼 body. 팝업이 fixed의 담는 블록이 되면(transform · translate · backdrop-filter …) 둔 뒤 재서 차이만큼 되민다.
 describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
@@ -320,7 +320,7 @@ describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
     const [open, setOpen] = useState(false);
     const anchorRef = useRef<HTMLDivElement>(null);
     return (
-      <div role="dialog" id="modal" data-slot={slot} data-block-offset={blockOffset ? JSON.stringify(blockOffset) : undefined}>
+      <div role="dialog" id="modal" data-modal-popup={slot ? "" : undefined} data-block-offset={blockOffset ? JSON.stringify(blockOffset) : undefined}>
         <div id="anchor" ref={open ? anchorRef : undefined}>
           <button type="button" id="trigger" onClick={() => setOpen((v) => !v)}>열기</button>
           {open && <AnchoredPopover anchorRef={anchorRef} id="pop" className="w-56">안내</AnchoredPopover>}
@@ -344,8 +344,8 @@ describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
   }
   const visible = () => pop().getBoundingClientRect();
 
-  it('포털 대상 = Base UI 모달 팝업(sheet-content) · 스스로 그린 role=dialog 패널(스토리 상세)은 body', () => {
-    act(() => { root.render(<ModalHarness slot="sheet-content" />); });
+  it('포털 대상 = Base UI 모달 팝업(data-modal-popup) · 스스로 그린 role=dialog 패널(스토리 상세)은 body', () => {
+    act(() => { root.render(<ModalHarness slot="modal" />); });
     act(() => { document.getElementById('trigger')!.click(); });
     expect(pop().parentElement).toBe(document.getElementById('modal'));
     act(() => { document.getElementById('trigger')!.click(); });
@@ -358,7 +358,7 @@ describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
 
   it('모달 팝업이 담는 블록이면(transform 없이 backdrop-filter 등이어도) 재서 되밀어 트리거 아래에 보인다 — 예전 transform 되밂이면 RED', () => {
     mockBrowserLikeRects();
-    act(() => { root.render(<ModalHarness slot="sheet-content" blockOffset={{ left: 451, top: 12 }} />); });
+    act(() => { root.render(<ModalHarness slot="modal" blockOffset={{ left: 451, top: 12 }} />); });
     act(() => { document.getElementById('trigger')!.click(); });
     expect(pop().parentElement).toBe(document.getElementById('modal'));
     expect(visible().left).toBe(100);  // 트리거 왼쪽
@@ -367,7 +367,7 @@ describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
 
   it('시트 미끄러짐(여는 도중) — 담는 블록이 움직여도 매 프레임 재서 트리거에 붙는다', async () => {
     mockBrowserLikeRects();
-    act(() => { root.render(<ModalHarness slot="sheet-content" blockOffset={{ left: 40, top: 0 }} />); });
+    act(() => { root.render(<ModalHarness slot="modal" blockOffset={{ left: 40, top: 0 }} />); });
     act(() => { document.getElementById('trigger')!.click(); });
     expect(visible().left).toBe(100);
     // 다음 프레임에 시트가 제자리로(담는 블록 0) — 창 크기 · 스크롤 이벤트로 다시 둘 때도 같은 식.

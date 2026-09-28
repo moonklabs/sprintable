@@ -356,7 +356,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
         <DialogPrimitive.Backdrop
           className="fixed inset-0 z-50 bg-black/20 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
         />
-        <DialogPrimitive.Popup
+        <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
             'fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2',
             // story #3007(로드맵 P2·PR-E, L1) — cmd palette 다이얼로그는 floating이라 --elev-overlay.
