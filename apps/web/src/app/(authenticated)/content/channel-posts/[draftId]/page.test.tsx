@@ -3361,6 +3361,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(container.querySelector('[data-testid="channel-post-image-upload-error"] p')?.classList.contains('break-keep')).toBe(true); // 유나 CHANGES(PR 4773)
     expect(errorText).toContain('image/gif');
     expect(errorText).toContain('image/jpeg');
     expect(container.querySelector('[data-testid="channel-post-image-attachment-preview"]')).toBeNull();
@@ -5838,6 +5839,8 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
       expect(line()).toBe(K.channelPostsImageConfirming);
       await act(async () => { vi.advanceTimersByTime(1_500); });
       expect(line()).toBe(`${K.channelPostsImageConfirming} ${K.channelPostsVideoConfirmSlow}`);
+      // 유나 CHANGES(PR 4773) — 360에서 «…계속 처리돼 / 요»로 끊기지 않게.
+      expect(container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.classList.contains('break-keep')).toBe(true);
       await act(async () => { release(); });
       await flush();
       await flush();
@@ -6070,6 +6073,8 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    // 유나 CHANGES(PR 4773 · 5865894914) — 오류 문장이 낱말 가운데서 끊기지 않게.
+    expect(container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.classList.contains('break-keep')).toBe(true);
     expect(errorText).toBe('비율이 9:16을 벗어납니다(서버 메시지 예시)');
   });
 

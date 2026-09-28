@@ -3459,7 +3459,7 @@ export default function ChannelPostEditPage() {
             </p>
           ) : null}
           {videoUploadInProgress ? (
-            <p className="text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
+            <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
               {videoUploadStatus.phase === 'requesting_url'
                 ? t('channelPostsImageUploadRequestingUrl')
                 : videoUploadStatus.phase === 'uploading'
@@ -3471,7 +3471,7 @@ export default function ChannelPostEditPage() {
           ) : null}
           {videoUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-video-upload-error">
-              <AlertDescription>{videoUploadStatus.text}</AlertDescription>
+              <AlertDescription className="break-keep">{videoUploadStatus.text}</AlertDescription>
               <RawDetailsToggle raw={videoUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
@@ -3614,7 +3614,7 @@ export default function ChannelPostEditPage() {
           ) : null}
           {imageUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-image-upload-error">
-              <AlertDescription>{imageUploadStatus.text}</AlertDescription>
+              <AlertDescription className="break-keep">{imageUploadStatus.text}</AlertDescription>
               <RawDetailsToggle raw={imageUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
