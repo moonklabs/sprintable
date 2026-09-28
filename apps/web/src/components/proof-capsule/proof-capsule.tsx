@@ -78,7 +78,7 @@ export interface ProofCapsuleProps {
   trustSeal?: TrustSealClaimedProps | TrustSealVerifiedProps;
   /** full 밀도 — claim 위 눈썹 글. 생략 = 기본 «에이전트 주장 · 완료했다고 말해요»(`claim.label`). `null` = 눈썹 없음.
    * story #4336(PO 03:55Z) — 사람이 상신한 외부 발행 게이트처럼 «에이전트가 완료했다고 말함»이 아닌 자리에 늘 붙던 눈썹을 호출부가 끈다.
-   * 그 자리의 낱말은 유나가 정할 때까지 비워 둔다(문구 자리만 · 조건만 맞춤). */
+   * 외부 발행 게이트는 «발행 승인 · 이대로 발행할지 결정해요»(`claim.publishApprovalLabel` · 유나 04:47Z)를 넘긴다. */
   claimLabel?: string | null;
   density: ProofCapsuleDensity;
   /** card·full 밀도 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지,

@@ -580,6 +580,13 @@ describe('ProofCapsule full — claim 눈썹(claimLabel)', () => {
     expect(html).toContain('data-testid="proof-capsule-claim-label"');
   });
 
+  it('⭐글을 넘기면 그 눈썹(외부 발행 게이트 «발행 승인 · 이대로 발행할지 결정해요») · 기본 눈썹은 없음', () => {
+    const label = (koMessages.proofCapsule as { claim: { publishApprovalLabel: string } }).claim.publishApprovalLabel;
+    const html = renderWithIntl(<ProofCapsule {...BASE} claimLabel={label} />);
+    expect(html).toContain(label);
+    expect(html).not.toContain(EYEBROW);
+  });
+
   it('⭐null이면 눈썹 없음 · claim 본문은 그대로', () => {
     const html = renderWithIntl(<ProofCapsule {...BASE} claimLabel={null} />);
     expect(html).not.toContain(EYEBROW);

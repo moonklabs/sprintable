@@ -366,6 +366,7 @@
   "proofCapsule": {
     "claim": {
       "label": "Claim · Agent says done",
+      "publishApprovalLabel": "Publish approval · Decide whether to publish as is",
       "executor": "By {name}",
       "now": "Now: <b>{now}</b>",
       "running": "Running"

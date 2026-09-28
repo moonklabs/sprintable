@@ -80,6 +80,7 @@ export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('cage');
+  const tProof = useTranslations('proofCapsule');
   // story #3565 — ccGateType*/ccGateGeneric 키는 'dashboard' 네임스페이스에 산다
   // (공용 헬퍼로 옮긴 것은 로직뿐, 키 위치는 그대로) — 이 화면 자체 t는 'cage'.
   const tDashboard = useTranslations('dashboard');
@@ -743,9 +744,9 @@ export default function GateDetailPage() {
                   return statusKey ? t(statusKey) : gate.status;
                 })()}
                 claim={decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
-                // story #4336(PO 03:55Z) — 외부 발행 게이트는 «에이전트가 완료했다고 말함»이 아니라 발행 승인 요청이다(사람이 상신하기도 함) →
-                // «에이전트 주장» 눈썹을 끈다. 이 자리의 낱말은 유나가 정할 때까지 비워 둔다.
-                claimLabel={gate.gate_type === 'external_publish' ? null : undefined}
+                // story #4336(PO 03:55Z · 유나 낱말 04:47Z) — 외부 발행 게이트는 «에이전트가 완료했다고 말함»이 아니라 발행 승인 요청이다(사람이
+                // 상신하기도 함 · 승인된 뒤에도 참인 문장) → 눈썹을 «발행 승인 · 이대로 발행할지 결정해요»로.
+                claimLabel={gate.gate_type === 'external_publish' ? tProof('claim.publishApprovalLabel') : undefined}
                 className="max-w-none"
                 footer={
                   showActionColumn ? (
