@@ -123,7 +123,7 @@ class AgentPersonaRepository:
             AgentPersona.project_id == project_id,
             AgentPersona.agent_id == agent_id,
             AgentPersona.deleted_at.is_(None),
-        ).order_by(AgentPersona.is_default.desc(), AgentPersona.created_at.asc())
+        ).order_by(AgentPersona.is_default.desc(), AgentPersona.created_at.asc(), AgentPersona.id)
         if not include_builtin:
             q = q.where(AgentPersona.is_builtin.is_(False))
         r = await self.session.execute(q)

@@ -30,6 +30,7 @@ from app.models.organization import Organization
 from app.models.pm import Story
 from app.models.project import Project
 from app.models.story_assignee import StoryAssignee
+from app.repositories.story_assignee import assignee_display_order
 from app.services.evidence_service import gate_approval_filter
 from app.services.member_resolver import is_agent_member_expr
 from app.services.trust_pipeline import (
@@ -71,7 +72,8 @@ async def batch_story_list_facts(
     sid = page.c.sid
 
     assignees = (
-        select(func.array_agg(aggregate_order_by(StoryAssignee.member_id, StoryAssignee.created_at)))
+        # story #4382 — 대표 담당 맨 앞 · (created_at, member_id) — 저장소 목록 · 단건과 같은 한 규칙.
+        select(func.array_agg(aggregate_order_by(StoryAssignee.member_id, *assignee_display_order(page.c.fallback_assignee))))
         .where(StoryAssignee.org_id == org_id, StoryAssignee.story_id == sid)
         .scalar_subquery()
     )
@@ -83,7 +85,7 @@ async def batch_story_list_facts(
     verified = (
         select(Evidence.created_by, Evidence.created_at)
         .where(*gate_approval_filter("story"), Evidence.work_item_id == sid)
-        .order_by(Evidence.created_at.desc())
+        .order_by(Evidence.created_at.desc(), Evidence.id.desc())  # story #4382 — 동률이면 id로
         .limit(1)
         .lateral("verified")
     )

@@ -1528,7 +1528,7 @@ async def list_conversations(
     convs = (await db.execute(
         select(Conversation)
         .where(*conv_filter)
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(limit).offset(offset)
     )).scalars().all()
 

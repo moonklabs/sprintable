@@ -28,7 +28,7 @@ class WebhookConfigRepository:
         if project_ids is not None:
             # story #4350 PR 3(까디르 MEDIUM) — 접근 가능 프로젝트의 config + 프로젝트에 안 매인 org 수준 config만(웹훅 URL 노출 차단).
             q = q.where(or_(WebhookConfig.project_id.is_(None), WebhookConfig.project_id.in_(project_ids)))
-        q = q.order_by(WebhookConfig.created_at.desc())
+        q = q.order_by(WebhookConfig.created_at.desc(), WebhookConfig.id.desc())
         result = await self.session.execute(q)
         return list(result.scalars().all())
 

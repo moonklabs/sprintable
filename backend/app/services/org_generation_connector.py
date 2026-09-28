@@ -110,7 +110,7 @@ async def list_org_generation_connectors(
     stmt = select(OrgGenerationConnector).where(OrgGenerationConnector.org_id == org_id)
     if active_only:
         stmt = stmt.where(OrgGenerationConnector.status == "active")
-    stmt = stmt.order_by(OrgGenerationConnector.created_at.desc())
+    stmt = stmt.order_by(OrgGenerationConnector.created_at.desc(), OrgGenerationConnector.id.desc())
     return list((await session.execute(stmt)).scalars().all())
 
 

@@ -243,7 +243,7 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
                 HypothesisEpicLink.epic_id == epic_id,
                 HypothesisEpicLink.link_type == "primary",
             )
-            .order_by(desc(Hypothesis.status == "active"), Hypothesis.created_at.desc())
+            .order_by(desc(Hypothesis.status == "active"), Hypothesis.created_at.desc(), Hypothesis.id.desc())
             .limit(1)
         )
         return row.scalar_one_or_none()
@@ -257,7 +257,7 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
                 HypothesisStoryLink.story_id == story_id,
                 HypothesisStoryLink.link_type == "primary",
             )
-            .order_by(desc(Hypothesis.status == "active"), Hypothesis.created_at.desc())
+            .order_by(desc(Hypothesis.status == "active"), Hypothesis.created_at.desc(), Hypothesis.id.desc())
             .limit(1)
         )
         return row.scalar_one_or_none()

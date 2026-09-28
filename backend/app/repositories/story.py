@@ -355,7 +355,9 @@ class StoryRepository(BaseRepository[Story]):
         count_q = select(func.count()).select_from(query.subquery())
         total = (await self.session.execute(count_q)).scalar_one()
 
-        result = await self.session.execute(query.limit(limit))
+        # story #4382 — 순서 없는 LIMIT이면 limit을 넘는 백로그에서 어느 스토리가 빠질지 요청마다 달라질 수 있었다. 예전에 보이던 순서
+        # (대개 넣은 순)에 가장 가깝게 생성 시각 오름차순 + id.
+        result = await self.session.execute(query.order_by(Story.created_at, Story.id).limit(limit))
         return list(result.scalars().all()), total
 
     async def transition_status(self, id: uuid.UUID) -> Story:

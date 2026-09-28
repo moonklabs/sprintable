@@ -49,7 +49,7 @@ class ProjectApiKeyRepository:
         result = await self.session.execute(
             select(ProjectApiKey)
             .where(ProjectApiKey.project_id == project_id)
-            .order_by(ProjectApiKey.created_at.desc())
+            .order_by(ProjectApiKey.created_at.desc(), ProjectApiKey.id.desc())
         )
         return list(result.scalars().all())
 

@@ -40,7 +40,7 @@ async def get_owner_org_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | 
     return (await db.execute(
         select(OrgMember.org_id)
         .where(OrgMember.user_id == user_id, OrgMember.role == "owner")
-        .order_by(OrgMember.created_at.asc())
+        .order_by(OrgMember.created_at.asc(), OrgMember.id)
         .limit(1)
     )).scalar_one_or_none()
 
@@ -196,7 +196,7 @@ async def get_first_instruction_conversation_id(
             TeamMember.type == "agent",
             requester_is_participant,
         )
-        .order_by(Conversation.created_at.asc())
+        .order_by(Conversation.created_at.asc(), Conversation.id)
         .limit(1)
     )).scalar_one_or_none()
 

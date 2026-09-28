@@ -84,6 +84,20 @@ function unwrapEnvelope(json: unknown): unknown {
  * 항목은 claim/href를 지어낼 수 없으니 제외(no-fiction). `gate_pending`과 미지 kind는
  * KNOWN_KINDS 밖이라 자동 생략(exception-stream의 동일 원칙 재사용).
  */
+/** story #4382 — BE가 신호 kind별 100건에서 자른 kind 목록(`truncated_kinds`). 비어 있지 않으면 받은 목록이 전부가 아니다 — 남은 수를
+ * 정확한 수로 말하지 않는다(«N건 이상»). 필드가 없거나 모양이 다르면 false(예전 BE · 무회귀). */
+export function parseAttentionTruncated(json: unknown): boolean {
+  return parseAttentionTruncatedKinds(json).length > 0;
+}
+
+/** BE가 자른 신호 kind 목록(문자열만). 필드가 없거나 모양이 다르면 빈 목록(예전 BE · 무회귀). */
+export function parseAttentionTruncatedKinds(json: unknown): string[] {
+  const inner = unwrapEnvelope(json);
+  if (!isRecord(inner)) return [];
+  const kinds = inner['truncated_kinds'];
+  return Array.isArray(kinds) ? kinds.filter((k): k is string => typeof k === 'string') : [];
+}
+
 export function parseAttentionQueueSignals(json: unknown): BeAttentionItem[] {
   const inner = unwrapEnvelope(json);
   const rawItems = Array.isArray(inner) ? inner : isRecord(inner) ? inner['items'] : null;

@@ -101,7 +101,7 @@ class RetroItemRepository:
 
     async def list_by_session(self, session_id: uuid.UUID) -> list[RetroItem]:
         result = await self.session.execute(
-            select(RetroItem).where(RetroItem.session_id == session_id).order_by(RetroItem.created_at)
+            select(RetroItem).where(RetroItem.session_id == session_id).order_by(RetroItem.created_at, RetroItem.id)
         )
         return list(result.scalars().all())
 
@@ -247,7 +247,7 @@ class RetroActionRepository:
 
     async def list_by_session(self, session_id: uuid.UUID) -> list[RetroAction]:
         result = await self.session.execute(
-            select(RetroAction).where(RetroAction.session_id == session_id).order_by(RetroAction.created_at)
+            select(RetroAction).where(RetroAction.session_id == session_id).order_by(RetroAction.created_at, RetroAction.id)
         )
         return list(result.scalars().all())
 

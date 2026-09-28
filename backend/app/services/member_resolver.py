@@ -305,11 +305,11 @@ async def _resolve_member_anchor(
         # ORDER BY created_at: 1:1 위반(미래 데이터) 시에도 결정적 — parity 안정성.
         role = (await session.execute(
             select(ProjectAccess.role).where(ProjectAccess.member_id == m.id)
-            .order_by(ProjectAccess.created_at.asc()).limit(1)
+            .order_by(ProjectAccess.created_at.asc(), ProjectAccess.id).limit(1)
         )).scalar_one_or_none()
         proj = (await session.execute(
             select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == m.id)
-            .order_by(AgentProjectProfile.created_at.asc()).limit(1)
+            .order_by(AgentProjectProfile.created_at.asc(), AgentProjectProfile.id).limit(1)
         )).scalar_one_or_none()
         # 까심 QA CRITICAL(#1814 S3 QA) — legacy 분기와 동일 갭(agent가 project_id 검증 없이 통과).
         # anchor 경로도 동일하게 봉인(shadow 플래그로 어느 쪽이 active여도 안전).
@@ -562,13 +562,13 @@ async def _lookup_members_by_ids_anchor(
         for mid_, role in (await session.execute(
             select(ProjectAccess.member_id, ProjectAccess.role)
             .where(ProjectAccess.member_id.in_(agent_ids))
-            .order_by(ProjectAccess.created_at.asc())
+            .order_by(ProjectAccess.created_at.asc(), ProjectAccess.id)
         )).all():
             role_by_member.setdefault(mid_, role)
         for mid_, pid in (await session.execute(
             select(AgentProjectProfile.member_id, AgentProjectProfile.project_id)
             .where(AgentProjectProfile.member_id.in_(agent_ids))
-            .order_by(AgentProjectProfile.created_at.asc())
+            .order_by(AgentProjectProfile.created_at.asc(), AgentProjectProfile.id)
         )).all():
             proj_by_member.setdefault(mid_, pid)
 

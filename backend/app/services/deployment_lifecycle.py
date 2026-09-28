@@ -831,7 +831,7 @@ class DeploymentLifecycleService:
                 AgentDeployment.project_id == project_id,
                 AgentDeployment.deleted_at.is_(None),
                 AgentDeployment.status.in_(["DEPLOYING", "ACTIVE", "SUSPENDED", "DEPLOY_FAILED"]),
-            ).order_by(AgentDeployment.updated_at.desc())
+            ).order_by(AgentDeployment.updated_at.desc(), AgentDeployment.id.desc())
         )
         deployments = list(r.scalars().all())
         if not deployments:
@@ -873,7 +873,7 @@ class DeploymentLifecycleService:
         latest_runs_r = await self.session.execute(
             select(AgentRun.deployment_id, AgentRun.finished_at, AgentRun.started_at, AgentRun.created_at)
             .where(AgentRun.deployment_id.in_(dep_ids))
-            .order_by(AgentRun.created_at.desc())
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         )
         last_run_by_dep: dict[uuid.UUID, str | None] = {}
         for row in latest_runs_r.all():
@@ -887,7 +887,7 @@ class DeploymentLifecycleService:
         latest_success_r = await self.session.execute(
             select(AgentRun.deployment_id, AgentRun.finished_at, AgentRun.started_at, AgentRun.created_at)
             .where(AgentRun.deployment_id.in_(dep_ids), AgentRun.status == "completed")
-            .order_by(AgentRun.created_at.desc())
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         )
         latest_success_by_dep: dict[uuid.UUID, str | None] = {}
         for row in latest_success_r.all():
@@ -907,7 +907,7 @@ class DeploymentLifecycleService:
                 AgentRun.finished_at, AgentRun.started_at, AgentRun.created_at,
             )
             .where(AgentRun.deployment_id.in_(dep_ids), AgentRun.status == "failed")
-            .order_by(AgentRun.created_at.desc())
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         )
         latest_failed_by_dep: dict[uuid.UUID, DeploymentFailureSignal] = {}
         for row in latest_failed_r.all():

@@ -505,7 +505,7 @@ async def _build_app_metadata(
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
-        member = (await session.execute(q.limit(1))).scalar_one_or_none()
+        member = (await session.execute(q.order_by(TeamMember.id).limit(1))).scalar_one_or_none()
 
     if not member and not settings.build_app_metadata_defallback:
         # fallback: 가장 오래된 team_member (ASC) — 최초 가입 project 우선.
@@ -519,7 +519,7 @@ async def _build_app_metadata(
         )
         if org_id is not None:
             q = q.where(TeamMember.org_id == org_id)
-        member = (await session.execute(q.order_by(TeamMember.created_at.asc()).limit(1))).scalar_one_or_none()
+        member = (await session.execute(q.order_by(TeamMember.created_at.asc(), TeamMember.id).limit(1))).scalar_one_or_none()
 
     # 0746: org_id 지정 + 그 org에 team_member 없음(grant-only/0-project/owner-admin) →
     # cross-org invite/Path4 폴백 금지. 그 org의 first_accessible(없으면 null)로 스코프 해소.
@@ -564,7 +564,7 @@ async def _build_app_metadata(
                 OrgInvite.email == user.email.lower(),
                 OrgInvite.status == "pending",
                 OrgInvite.expires_at > now,
-            ).order_by(OrgInvite.created_at.asc()).limit(1)
+            ).order_by(OrgInvite.created_at.asc(), OrgInvite.id).limit(1)
         )
         org_inv = org_inv_result.scalar_one_or_none()
         if org_inv:
@@ -589,7 +589,7 @@ async def _build_app_metadata(
         org_member_result = await session.execute(
             select(OrgMember)
             .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
-            .order_by(OrgMember.created_at.asc())
+            .order_by(OrgMember.created_at.asc(), OrgMember.id)
             .limit(1)
         )
         org_member = org_member_result.scalar_one_or_none()

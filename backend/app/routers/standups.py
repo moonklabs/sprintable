@@ -358,7 +358,7 @@ async def list_standup_history(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid cursor format")
         q = q.where(StandupEntry.created_at < cursor_dt)
-    q = q.order_by(StandupEntry.created_at.desc()).limit(limit + 1)
+    q = q.order_by(StandupEntry.created_at.desc(), StandupEntry.id.desc()).limit(limit + 1)
     result = await repo.session.execute(q)
     rows = list(result.scalars())
     has_more = len(rows) > limit

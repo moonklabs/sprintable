@@ -80,7 +80,7 @@ class GoalRepository(BaseRepository[Goal]):
 
         q = (
             select(Goal).where(*conds)
-            .order_by(Goal.position.is_(None).asc(), Goal.position.asc(), Goal.created_at.desc())
+            .order_by(Goal.position.is_(None).asc(), Goal.position.asc(), Goal.created_at.desc(), Goal.id.desc())
             .limit(limit if limit is not None else 1000)
         )
         result = await self.session.execute(q)
@@ -242,7 +242,7 @@ class GoalRepository(BaseRepository[Goal]):
                 select(Gate.work_item_id, Gate.gate_type, Gate.requires_human).where(
                     Gate.work_item_id.in_(story_ids), Gate.work_item_type == "story",
                     Gate.org_id == self.org_id, Gate.status == "pending",
-                ).order_by(Gate.created_at.desc())
+                ).order_by(Gate.created_at.desc(), Gate.id.desc())
             )
             for row in gate_rows.all():
                 pending_gate_by_story.setdefault(row.work_item_id, row)
@@ -285,7 +285,7 @@ class GoalRepository(BaseRepository[Goal]):
             select(Gate.work_item_id, Gate.evidence_status).where(
                 Gate.org_id == self.org_id, Gate.work_item_id.in_(focal_ids),
                 Gate.work_item_type == "story", Gate.gate_type == "merge",
-            ).order_by(Gate.created_at.desc())
+            ).order_by(Gate.created_at.desc(), Gate.id.desc())
         )
         merge_status_by_story: dict[uuid.UUID, str | None] = {}
         for story_id, evidence_status in merge_rows.all():
@@ -296,7 +296,7 @@ class GoalRepository(BaseRepository[Goal]):
             select(Evidence.work_item_id, Evidence.created_by, Evidence.created_at).where(
                 Evidence.org_id == self.org_id, Evidence.work_item_id.in_(focal_ids),
                 Evidence.work_item_type == "story", Evidence.type == "gate_approval",
-            ).order_by(Evidence.created_at.desc())
+            ).order_by(Evidence.created_at.desc(), Evidence.id.desc())
         )
         hv_by_story: dict[uuid.UUID, Any] = {}
         for row in hv_rows.all():

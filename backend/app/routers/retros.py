@@ -231,7 +231,7 @@ async def get_or_create_session_by_sprint(
                 RetroSession.org_id == org_id,
                 RetroSession.sprint_id == body.sprint_id,
             )
-            .order_by(RetroSession.created_at.desc())
+            .order_by(RetroSession.created_at.desc(), RetroSession.id.desc())
             .limit(1)
         )
     ).scalar_one_or_none()

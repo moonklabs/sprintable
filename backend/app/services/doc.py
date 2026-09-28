@@ -240,7 +240,7 @@ async def transition_doc(
         _latest_revision_content = (await session.execute(
             select(DocRevision.content)
             .where(DocRevision.doc_id == doc.id, DocRevision.org_id == org_id)
-            .order_by(DocRevision.created_at.desc())
+            .order_by(DocRevision.created_at.desc(), DocRevision.id.desc())
             .limit(1)
         )).scalar_one_or_none()
         if isinstance(_latest_revision_content, str) and isinstance(doc.content, str):

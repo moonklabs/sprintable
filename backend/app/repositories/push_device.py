@@ -20,7 +20,7 @@ class PushDeviceRepository:
         q = (
             select(PushDevice)
             .where(PushDevice.org_id == self.org_id, PushDevice.member_id == member_id)
-            .order_by(PushDevice.last_seen_at.desc())
+            .order_by(PushDevice.last_seen_at.desc(), PushDevice.id.desc())
         )
         result = await self.session.execute(q)
         return list(result.scalars().all())

@@ -171,7 +171,7 @@ async def latest_stage_gate(db: AsyncSession, *, org_id: uuid.UUID, work_item_id
     return (await db.execute(
         select(Gate)
         .where(Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == gate["type"])
-        .order_by(Gate.created_at.desc())
+        .order_by(Gate.created_at.desc(), Gate.id.desc())
         .limit(1)
     )).scalar_one_or_none()
 

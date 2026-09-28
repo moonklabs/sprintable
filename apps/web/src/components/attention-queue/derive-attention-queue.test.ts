@@ -339,3 +339,15 @@ describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => 
     expect(items[0]!.bucket).toBe('GATE');
   });
 });
+
+describe('parseAttentionTruncated (story #4382)', () => {
+  it('truncated_kinds가 비어 있지 않을 때만 true — 봉투 · 맨 본문 둘 다 · 모양이 다르면 false', async () => {
+    const { parseAttentionTruncated } = await import('./derive-attention-queue');
+    expect(parseAttentionTruncated({ data: { items: [], truncated_kinds: ['merge_ready'] } })).toBe(true);
+    expect(parseAttentionTruncated({ items: [], truncated_kinds: ['blocked'] })).toBe(true);
+    expect(parseAttentionTruncated({ data: { items: [], truncated_kinds: [] } })).toBe(false);
+    expect(parseAttentionTruncated({ data: { items: [] } })).toBe(false);
+    expect(parseAttentionTruncated({ data: { items: [], truncated_kinds: 'merge_ready' } })).toBe(false);
+    expect(parseAttentionTruncated(null)).toBe(false);
+  });
+});

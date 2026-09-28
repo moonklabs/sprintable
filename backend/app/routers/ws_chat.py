@@ -136,7 +136,7 @@ async def _get_or_create_conversation(
                 Conversation.org_id == org_id,
                 Conversation.status != "deleted",
             )
-            .order_by(Conversation.created_at)  # 다중 DM 공존 시 최古=canonical(결정적)
+            .order_by(Conversation.created_at, Conversation.id)  # 다중 DM 공존 시 최古=canonical(결정적)
             .limit(1)
         )).scalar_one_or_none()
 

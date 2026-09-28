@@ -347,7 +347,7 @@ async def _resolve_agent_progress(
             select(AgentRunToolCall.run_id, AgentRunToolCall.tool)
             .distinct(AgentRunToolCall.run_id)
             .where(AgentRunToolCall.run_id.in_(run_ids))
-            .order_by(AgentRunToolCall.run_id, AgentRunToolCall.started_at.desc())
+            .order_by(AgentRunToolCall.run_id, AgentRunToolCall.started_at.desc(), AgentRunToolCall.id.desc())
         )).all()
         current_steps = {rid: tool for rid, tool in last_call_rows}
 
@@ -420,7 +420,7 @@ async def _resolve_completed_today(
             AgentRun.finished_at >= since,
             (Story.assignee_id == member.id) | (Story.human_owner_member_id == member.id),
         )
-        .order_by(AgentRun.finished_at.desc())
+        .order_by(AgentRun.finished_at.desc(), AgentRun.id.desc())
         .limit(_COMPLETED_TODAY_LIMIT)
     )).all()
 

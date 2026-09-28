@@ -87,7 +87,7 @@ async def resolve_implementation_participation(
         select(ParticipationRole).where(
             ParticipationRole.org_id == org_id,
             ParticipationRole.is_default.is_(True),
-        ).limit(1)
+        ).order_by(ParticipationRole.created_at, ParticipationRole.id).limit(1)
     )
     default_role = role_r.scalar_one_or_none()
     if default_role is None:
@@ -98,7 +98,7 @@ async def resolve_implementation_participation(
             Participation.org_id == org_id,
             Participation.story_id == story_id,
             Participation.role_id == default_role.id,
-        ).limit(1)
+        ).order_by(Participation.created_at, Participation.id).limit(1)
     )
     return p_r.scalar_one_or_none()
 

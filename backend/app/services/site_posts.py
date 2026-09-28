@@ -228,7 +228,7 @@ async def _resolve_approved_gate(
             Gate.org_id == org_id, Gate.work_item_id == work_item_id, Gate.gate_type == "external_publish",
             Gate.scope_key == HOSTED_SITE_SCOPE_KEY,
         )
-        .order_by(Gate.created_at.desc())
+        .order_by(Gate.created_at.desc(), Gate.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if gate is None or gate.status not in _APPROVED_STATUSES:
@@ -300,7 +300,7 @@ async def list_published_site_posts(db: AsyncSession, *, org_id: uuid.UUID, lang
     stmt = (
         select(SitePost)
         .where(SitePost.org_id == org_id, SitePost.lang == lang, SitePost.unpublished_at.is_(None))
-        .order_by(SitePost.published_at.desc())
+        .order_by(SitePost.published_at.desc(), SitePost.id.desc())
     )
     return list((await db.execute(stmt)).scalars().all())
 
@@ -692,7 +692,7 @@ async def find_ready_recipe_site_drafts(
         select(SitePostDraft).where(
             SitePostDraft.org_id == org_id, SitePostDraft.work_item_id == work_item_id,
             SitePostDraft.deleted_at.is_(None),
-        ).order_by(SitePostDraft.created_at.desc())
+        ).order_by(SitePostDraft.created_at.desc(), SitePostDraft.id.desc())
     )).scalars().all()
     if not drafts:
         return [], False
@@ -811,7 +811,7 @@ async def list_site_post_drafts(
             & (origin.version == origin_version_ids.c.min_version),
         )
         .where(SitePostDraft.org_id == org_id)
-        .order_by(latest.created_at.desc())
+        .order_by(latest.created_at.desc(), latest.id.desc())
         .limit(limit)
         .offset(offset)
     )
@@ -847,7 +847,7 @@ async def list_site_post_drafts(
     gate_rows = (await db.execute(
         select(Gate)
         .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
-        .order_by(Gate.created_at.desc())
+        .order_by(Gate.created_at.desc(), Gate.id.desc())
     )).scalars().all()
     for g in gate_rows:
         gates_by_scope.setdefault((g.work_item_id, g.scope_key), g)
@@ -1629,7 +1629,7 @@ async def request_site_post_external_unpublish(
             ChannelPublication.status == "published",
             ChannelPublication.version_id.in_(own_version_ids),
         )
-        .order_by(ChannelPublication.created_at.desc())
+        .order_by(ChannelPublication.created_at.desc(), ChannelPublication.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if published is None:
@@ -1741,7 +1741,7 @@ async def publish_site_post_external_command(db: AsyncSession, command: "Publica
             ChannelPublication.external_id.isnot(None),
             ChannelPublication.version_id.in_(own_version_ids),
         )
-        .order_by(ChannelPublication.created_at.desc())
+        .order_by(ChannelPublication.created_at.desc(), ChannelPublication.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     prior_external_id = existing_pub.external_id if existing_pub is not None else None
@@ -2043,7 +2043,7 @@ async def get_site_post_external_publication_state(
     publication = (await db.execute(
         select(ChannelPublication)
         .where(ChannelPublication.org_id == org_id, ChannelPublication.version_id.in_(own_version_ids))
-        .order_by(ChannelPublication.created_at.desc())
+        .order_by(ChannelPublication.created_at.desc(), ChannelPublication.id.desc())
         .limit(1)
     )).scalar_one_or_none()
 

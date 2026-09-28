@@ -126,7 +126,7 @@ async def _publish_next_collect_event(db: AsyncSession, *, org_id: uuid.UUID, de
             EventDefinition.key == definition_key,
             EventDefinition.enabled.is_(True),
             or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
-        ).limit(1)
+        ).order_by(EventDefinition.org_id.is_(None), EventDefinition.id).limit(1)
     )).scalars().first()
     if definition_row is None:
         raise ValueError(f"definition not found/disabled at publish time: {definition_key!r}")

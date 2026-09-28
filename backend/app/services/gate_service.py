@@ -174,7 +174,7 @@ def apply_gate_urgency_sort(query, *, now: Any | None = None):
         (and_(Gate.held_until.isnot(None), Gate.held_until > now_expr), 1), else_=0,
     )
     overdue_rank = case((overdue_exists, 0), else_=1)
-    return query.order_by(held_rank.asc(), overdue_rank.asc(), Gate.created_at.asc())
+    return query.order_by(held_rank.asc(), overdue_rank.asc(), Gate.created_at.asc(), Gate.id)
 
 
 async def _resolve_gate_notification_targets(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
@@ -740,7 +740,7 @@ async def _gate_publication_is_live(session: AsyncSession, *, gate_id: uuid.UUID
     from app.models.site_post import SitePost
 
     site_post_row = (await session.execute(
-        select(SitePost.unpublished_at).where(SitePost.gate_id == gate_id).limit(1)
+        select(SitePost.unpublished_at).where(SitePost.gate_id == gate_id).order_by(SitePost.created_at.desc(), SitePost.id.desc()).limit(1)
     )).first()
     if site_post_row is not None:
         return site_post_row[0] is None
@@ -748,7 +748,7 @@ async def _gate_publication_is_live(session: AsyncSession, *, gate_id: uuid.UUID
     latest_channel_pub_status = (await session.execute(
         select(ChannelPublication.status)
         .where(ChannelPublication.gate_id == gate_id)
-        .order_by(ChannelPublication.created_at.desc())
+        .order_by(ChannelPublication.created_at.desc(), ChannelPublication.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if latest_channel_pub_status is None:
@@ -2685,7 +2685,7 @@ async def resolve_gate_from_verdict(
             Gate.work_item_type == work_item_type,
             Gate.gate_type == gate_type,
             Gate.status == "pending",
-        ).limit(1)
+        ).order_by(Gate.created_at.desc(), Gate.id.desc()).limit(1)
     )
     gate = gate_r.scalar_one_or_none()
     if gate is None:

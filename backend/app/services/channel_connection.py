@@ -28,7 +28,7 @@ async def list_channel_connections(db: AsyncSession, *, org_id: uuid.UUID) -> li
     stmt = (
         select(ChannelConnection)
         .where(ChannelConnection.org_id == org_id)
-        .order_by(ChannelConnection.created_at.desc())
+        .order_by(ChannelConnection.created_at.desc(), ChannelConnection.id.desc())
     )
     return list((await db.execute(stmt)).scalars().all())
 

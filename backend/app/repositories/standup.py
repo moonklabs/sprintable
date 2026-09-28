@@ -108,7 +108,7 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
                     StandupEntryProject.project_id == project_id,
                 )
             )
-        q = q.order_by(StandupEntry.date.desc(), StandupEntry.created_at.desc())
+        q = q.order_by(StandupEntry.date.desc(), StandupEntry.created_at.desc(), StandupEntry.id.desc())
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 

@@ -253,7 +253,7 @@ async def _default_role_id(session: AsyncSession, org_id: uuid.UUID) -> uuid.UUI
     r = await session.execute(
         select(ParticipationRole.id).where(
             ParticipationRole.org_id == org_id, ParticipationRole.is_default.is_(True)
-        ).limit(1)
+        ).order_by(ParticipationRole.created_at, ParticipationRole.id).limit(1)
     )
     return r.scalar_one_or_none()
 

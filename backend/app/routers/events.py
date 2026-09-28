@@ -1074,7 +1074,7 @@ async def _get_or_create_event_conversation(
     existing = (await db.execute(
         select(Conversation)
         .where(Conversation.org_id == org_id, Conversation.id.in_(exact))
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(1)
     )).scalars().first()
     if existing is not None:
@@ -1489,7 +1489,7 @@ async def _latest_published_permalink(
             ChannelPublication.status == "published",
             Gate.work_item_id == work_item_id,
         )
-        .order_by(ChannelPublication.published_at.desc().nulls_last())
+        .order_by(ChannelPublication.published_at.desc().nulls_last(), ChannelPublication.id.desc())
         .limit(1)
     )).scalar_one_or_none()
 
@@ -3195,7 +3195,7 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
     existing = (await db.execute(
         select(Member).where(
             Member.org_id == org_id, Member.runtime_type == "system-publisher", Member.type == "agent",
-        ).limit(1)
+        ).order_by(Member.created_at, Member.id).limit(1)
     )).scalars().first()
     if existing is not None:
         return existing
@@ -3203,7 +3203,7 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
     anchor_project_id = (await db.execute(
         select(Project.id)
         .where(Project.org_id == org_id, Project.deleted_at.is_(None))
-        .order_by(Project.created_at.asc())
+        .order_by(Project.created_at.asc(), Project.id)
         .limit(1)
     )).scalar_one_or_none()
     if anchor_project_id is None:
@@ -3272,7 +3272,7 @@ async def publish_preset_event(
             EventDefinition.key == definition_key,
             EventDefinition.enabled.is_(True),
             or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
-        )
+        ).order_by(EventDefinition.org_id.is_(None), EventDefinition.id)
         .limit(1)
     )).scalars().first()
     if definition is None:

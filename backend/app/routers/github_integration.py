@@ -282,7 +282,7 @@ async def list_links(
                 PullRequestStoryLink.story_id == story_id,
                 PullRequestStoryLink.deleted_at.is_(None),
             )
-            .order_by(PullRequestStoryLink.created_at.desc())
+            .order_by(PullRequestStoryLink.created_at.desc(), PullRequestStoryLink.id.desc())
         )
     ).scalars().all()
     return JSONResponse(content={"links": [_link_view(link) for link in links]})

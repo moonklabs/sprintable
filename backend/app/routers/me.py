@@ -381,7 +381,7 @@ async def update_me(
 
     # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
     result = await session.execute(
-        select(TeamMember).where(where_clause).limit(1)
+        select(TeamMember).where(where_clause).order_by(TeamMember.project_id, TeamMember.id).limit(1)
     )
     member = result.scalars().first()
 

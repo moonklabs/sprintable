@@ -165,7 +165,7 @@ class AnalyticsRepository:
         stories_r = await self.session.execute(
             select(Story.id, Story.title, Story.status, Story.updated_at)
             .where(Story.project_id == project_id, Story.org_id == self.org_id, Story.deleted_at.is_(None))
-            .order_by(Story.updated_at.desc())
+            .order_by(Story.updated_at.desc(), Story.id.desc())
             .limit(limit)
         )
         story_rows = stories_r.all()
@@ -583,7 +583,7 @@ class AnalyticsRepository:
     async def get_project_health(self, project_id: uuid.UUID) -> dict:
         sprint_r = await self.session.execute(
             select(Sprint.id, Sprint.title, Sprint.start_date, Sprint.end_date, Sprint.duration)
-            .where(Sprint.project_id == project_id, Sprint.org_id == self.org_id, Sprint.status == "active")
+            .where(Sprint.project_id == project_id, Sprint.org_id == self.org_id, Sprint.status == "active").order_by(Sprint.start_date.desc(), Sprint.id.desc())
             .limit(1)
         )
         sprint_row = sprint_r.first()

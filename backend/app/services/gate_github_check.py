@@ -58,7 +58,7 @@ async def resolve_pr_link(
                 PullRequestStoryLink.story_id == story_id,
                 PullRequestStoryLink.deleted_at.is_(None),
             )
-            .order_by(PullRequestStoryLink.updated_at.desc())
+            .order_by(PullRequestStoryLink.updated_at.desc(), PullRequestStoryLink.id.desc())
             .limit(1)
         )
     ).scalar_one_or_none()

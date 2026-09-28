@@ -111,7 +111,7 @@ class AgentRoutingRuleRepository:
                 AgentRoutingRule.project_id == project_id,
                 AgentRoutingRule.deleted_at.is_(None),
             )
-            .order_by(AgentRoutingRule.priority.asc(), AgentRoutingRule.created_at.asc())
+            .order_by(AgentRoutingRule.priority.asc(), AgentRoutingRule.created_at.asc(), AgentRoutingRule.id)
         )
         return [_to_response(rule) for rule in r.scalars().all()]
 

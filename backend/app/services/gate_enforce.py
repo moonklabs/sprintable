@@ -202,7 +202,7 @@ async def enforce_gate(
                 HitlRequest.deleted_at.is_(None),
                 HitlRequest.hitl_metadata["work_item_id"].astext == wi,
                 HitlRequest.hitl_metadata["work_type"].astext == work_type,
-            ).order_by(HitlRequest.created_at.desc()).limit(1)
+            ).order_by(HitlRequest.created_at.desc(), HitlRequest.id.desc()).limit(1)
         )
     ).first()
 

@@ -407,7 +407,7 @@ async def get_doc_preview(
     except ValueError:
         stmt = select(Doc).where(Doc.slug == q, Doc.org_id == repo.org_id, Doc.deleted_at.is_(None))
 
-    result = await db.execute(stmt.limit(1))
+    result = await db.execute(stmt.order_by(Doc.created_at, Doc.id).limit(1))
     doc = result.scalar_one_or_none()
 
     if doc is not None:
@@ -428,7 +428,7 @@ async def get_doc_preview(
             fallback_stmt = select(Doc).where(Doc.id == doc_uuid2, Doc.deleted_at.is_(None))
         except ValueError:
             fallback_stmt = select(Doc).where(Doc.slug == q, Doc.deleted_at.is_(None))
-        fallback = await db.execute(fallback_stmt.limit(1))
+        fallback = await db.execute(fallback_stmt.order_by(Doc.created_at, Doc.id).limit(1))
         doc = fallback.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -809,7 +809,7 @@ async def update_doc(
         cutoff_sq = (
             select(DocRevision.created_at)
             .where(DocRevision.doc_id == id)
-            .order_by(DocRevision.created_at.desc())
+            .order_by(DocRevision.created_at.desc(), DocRevision.id.desc())
             .offset(50)
             .limit(1)
             .scalar_subquery()
@@ -1034,7 +1034,7 @@ async def list_doc_comments(
     q = select(DocComment).where(
         DocComment.doc_id == id,
         DocComment.org_id == repo.org_id,
-    ).order_by(DocComment.created_at.asc()).limit(limit)
+    ).order_by(DocComment.created_at.asc(), DocComment.id).limit(limit)
     result = await db.execute(q)
     return [DocCommentResponse.model_validate(r) for r in result.scalars()]
 
@@ -1082,7 +1082,7 @@ async def list_doc_revisions(
     q = select(DocRevision).where(
         DocRevision.doc_id == id,
         DocRevision.org_id == repo.org_id,
-    ).order_by(DocRevision.created_at.desc()).limit(limit)
+    ).order_by(DocRevision.created_at.desc(), DocRevision.id.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
 

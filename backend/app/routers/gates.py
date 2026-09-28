@@ -1333,7 +1333,7 @@ async def list_gates(
             # 의존)이었던 기존 동작을, 페이지네이션을 실제로 쓰는 호출에서만 created_at desc(최신
             # 우선, 다른 목록 API들과 동형)로 명시. limit/offset 둘 다 안 쓰면 기존 무정렬 그대로
             # (list_gate_inbox 등 기존 호출부 회귀 0).
-            q = q.order_by(Gate.created_at.desc())
+            q = q.order_by(Gate.created_at.desc(), Gate.id.desc())
         if limit is not None:
             q = q.limit(limit)
         if offset:
@@ -2210,7 +2210,7 @@ async def list_gate_activity_endpoint(
             ActivityLog.entity_type == "gate", ActivityLog.entity_id == id,
             ActivityLog.org_id == org_id,
         )
-        .order_by(ActivityLog.created_at.desc())
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
     )).scalars().all()
 
     actor_ids = {r.actor_id for r in rows if r.actor_id}

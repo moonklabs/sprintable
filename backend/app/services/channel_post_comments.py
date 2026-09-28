@@ -636,7 +636,7 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
             ChannelPublication.published_at >= now - _ACTIVE_PUBLISHED_WITHIN,
             has_open_row_due_soon == 0,
             or_(last_actionable_activity_at.is_(None), last_actionable_activity_at < freshness_cutoff),
-        ).order_by(ChannelPublication.published_at.desc())
+        ).order_by(ChannelPublication.published_at.desc(), ChannelPublication.id.desc())
         .limit(_SELF_RECOVERY_SWEEP_SEED_LIMIT)
     )).scalars().all()
 
