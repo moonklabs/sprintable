@@ -160,5 +160,53 @@ describe('[SID:4397] OrgHintBanner', () => {
       expect(block.className.split(/\s+/)).toContain('col-start-2');
     }
   });
+
+  describe('the shell stays mounted: a second notification lands on its own path (Qadir 01a0e9d9)', () => {
+    const rerender = async (search: string, pathname: string) => {
+      nav.search = search;
+      nav.pathname = pathname;
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><OrgHintBanner /></NextIntlClientProvider>);
+      });
+    };
+    const press = async () => {
+      await act(async () => { button(koMessages.nav.switcherSwitchToOrg).click(); });
+      await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    };
+    const ORG_C = '22222222-2222-4333-8444-555555555555';
+
+    beforeEach(() => {
+      ctx.orgMemberships = [...ctx.orgMemberships, { orgId: ORG_C, orgName: 'Third', orgSlug: 'third' }];
+    });
+
+    it('A closed, then B switched → lands on B', async () => {
+      await mount(`org_id=${ORG_B}`, '/gates/g-a');
+      await act(async () => { button(koMessages.common.close).click(); });
+      await rerender('', '/gates/g-a'); // the close removed the hint
+      await rerender(`tab=chats&org_id=${ORG_C}`, '/inbox'); // notification B
+      nav.replace.mockClear();
+      await press();
+      expect(nav.replace).toHaveBeenCalledWith('/inbox?tab=chats');
+    });
+
+    it('A switched, then B switched → lands on B', async () => {
+      await mount(`org_id=${ORG_B}`, '/gates/g-a');
+      await press();
+      expect(nav.replace).toHaveBeenCalledWith('/gates/g-a');
+      await rerender('', '/gates/g-a');
+      ctx.orgId = ORG_B; // now in A's org
+      await rerender(`org_id=${ORG_C}`, '/chats/c-b');
+      nav.replace.mockClear();
+      await press();
+      expect(nav.replace).toHaveBeenCalledWith('/chats/c-b');
+    });
+
+    it('B of the same org opened straight after A (no step without a hint) → lands on B', async () => {
+      await mount(`org_id=${ORG_B}`, '/gates/g-a');
+      await rerender(`org_id=${ORG_B}`, '/gates/g-b');
+      await press();
+      expect(nav.replace).toHaveBeenCalledWith('/gates/g-b');
+    });
+  });
 });
 

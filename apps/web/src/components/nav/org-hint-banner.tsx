@@ -37,10 +37,19 @@ export function OrgHintBanner() {
     return query ? `${pathname}?${query}` : pathname;
   };
 
-  // The notification's own path (without the hint), taken when the hint first appears. The shell may add its own query
-  // (`?p=` …) before the person presses switch; the switch still lands where the notification pointed.
-  const landing = useRef<string | null>(null);
-  if (hint !== null && landing.current === null) landing.current = cleanUrl();
+  // The notification's own path (without the hint), taken when this notification first appears. The shell may add its
+  // project (`?p=`, the only query it writes) before the person presses switch; the switch still lands where the
+  // notification pointed. The shell stays mounted, so it is kept per notification — the hint plus its address apart from
+  // `p` — and no hint clears it: the next notification (another org, or the same org elsewhere) takes its own path.
+  const landing = useRef<{ key: string; path: string } | null>(null);
+  if (hint === null) {
+    landing.current = null;
+  } else {
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete('p');
+    const key = `${pathname}?${rest.toString()}`;
+    if (landing.current?.key !== key) landing.current = { key, path: cleanUrl() };
+  }
 
   useEffect(() => {
     // not an org of theirs, already the current org, malformed or empty → just drop the hint
@@ -64,7 +73,7 @@ export function OrgHintBanner() {
         // same as the org switcher: the previous org's tab project would be sent as X-Project-Id to the new org
         window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
         // land on the notification's own path (Yuna: «전환하면 이어서 열려요» holds only if the switch continues there)
-        router.replace(landing.current ?? cleanUrl());
+        router.replace(landing.current?.path ?? cleanUrl());
         router.refresh();
         return;
       }
