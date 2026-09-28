@@ -36,4 +36,4 @@ async def get_background_job(
     )).scalar_one_or_none()
     if job is None or job.requested_by_member_id != member.id:
         raise HTTPException(status_code=404, detail={"code": "BACKGROUND_JOB_NOT_FOUND", "message": str(job_id)})
-    return await render_background_job(db, job)
+    return await render_background_job(db, job, auth)

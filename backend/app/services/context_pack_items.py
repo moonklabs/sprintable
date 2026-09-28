@@ -55,9 +55,15 @@ _RESOLVED_HYPOTHESIS_STATUSES = frozenset({"verified", "falsified"})
 _ENTITY_TYPE_DISPLAY = {"hypothesis": "hypothesis", "loop": "loop", "loop_artifact": "decision"}
 
 
+class ContextPackCacheMiss(Exception):
+    """story #4336 PR2 ②(PO 04:32Z) — `generate_on_miss=False`인데 종합/추천 캐시가 없다(LLM 사슬 25s × 2가 필요) — 호출부가 작업으로 넘긴다."""
+
+
 async def build_loop_context_pack(
-    session: AsyncSession, org_id: uuid.UUID, loop: LoopRun,
+    session: AsyncSession, org_id: uuid.UUID, loop: LoopRun, *, generate_on_miss: bool = True,
 ) -> ContextPackResponse:
+    """`generate_on_miss=False`(요청 경로): 임베드 · 검색 · 캐시 확인(최악 ≈ 임베드 10s)까지만 하고, 캐시 미스면 LLM을 부르지 않고
+    `ContextPackCacheMiss`. 워커(작업)는 True로 불러 끝까지 만들고 캐시를 채운다(둘 다 성공했을 때만 — 아래 기존 규칙)."""
     vector = None
     try:
         from app.services.embedding_client import embed_text
@@ -93,6 +99,8 @@ async def build_loop_context_pack(
     hyp_statement = await _load_loop_hypothesis_statement(session, org_id, loop)
     cache_key = _compute_cache_key(items, loop, hyp_statement)
 
+    if loop.context_pack_cache_key != cache_key and not generate_on_miss:
+        raise ContextPackCacheMiss()
     if loop.context_pack_cache_key == cache_key:
         # S28 AC④ — 회수 items+새 loop 맥락+모델/프롬프트 버전이 전부 이전과 동일 → gen-LLM
         # (Claude, 비용 높음) 재호출 없이 캐시 재사용("같은 입력=1회만 호출").

@@ -96,3 +96,70 @@ def test_standup_tools_core_promoted_ssot_and_vendored():
         assert vendored_allowed(tool, ["stories", "tasks"])
         assert ssot_allowed(tool, [])
         assert vendored_allowed(tool, [])
+
+
+# ── story #4336 PR2 ②(PO 05:23Z) — 캐시 미스면 BE가 202 + 작업. 도구는 에이전트에게 202를 넘기지 않고 안에서 2초마다 최대 30초 기다린다 ──
+
+_QUEUED = {"id": "job-1", "kind": "loop_context_pack", "status": "pending", "result": None, "error": None}
+_PACK = {"items": [{"entity_type": "loop", "similarity": 0.9}], "embed_available": True, "synthesis": "배운 것"}
+
+
+def _fake_clock(monkeypatch):
+    now = {"t": 0.0}
+    sleeps: list[float] = []
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+        now["t"] += seconds
+
+    monkeypatch.setattr(l, "_sleep", _sleep)
+    monkeypatch.setattr(l, "_monotonic", lambda: now["t"])
+    return sleeps
+
+
+async def test_get_loop_context_cache_hit_answers_at_once_without_polling(monkeypatch):
+    sleeps = _fake_clock(monkeypatch)
+    client = _client(get=_PACK)
+    with patch.object(l, "client", client):
+        out = await l.get_loop_context(l.GetLoopContextInput(loop_id="loop-1"))
+    assert json.loads(out[0].text) == _PACK
+    assert client.get.await_count == 1 and sleeps == []
+
+
+async def test_get_loop_context_miss_finished_within_30s_returns_the_same_shape(monkeypatch):
+    sleeps = _fake_clock(monkeypatch)
+    client = _client()
+    client.org_id = "org-1"
+    client.get = AsyncMock(side_effect=[
+        _QUEUED,
+        {**_QUEUED, "status": "in_progress"},
+        {**_QUEUED, "status": "completed", "result": {"pack": _PACK}},
+    ])
+    with patch.object(l, "client", client):
+        out = await l.get_loop_context(l.GetLoopContextInput(loop_id="loop-1"))
+    assert json.loads(out[0].text) == _PACK  # 에이전트가 받는 모양은 캐시 적중 때와 같다
+    assert client.get.await_args_list[1].args[0] == "/api/v2/organizations/org-1/background-jobs/job-1"
+    assert sleeps == [2.0, 2.0]
+
+
+async def test_get_loop_context_past_30s_returns_preparing_with_the_job_id(monkeypatch):
+    sleeps = _fake_clock(monkeypatch)
+    client = _client()
+    client.org_id = "org-1"
+    client.get = AsyncMock(side_effect=[_QUEUED] + [{**_QUEUED, "status": "in_progress"}] * 50)
+    with patch.object(l, "client", client):
+        out = await l.get_loop_context(l.GetLoopContextInput(loop_id="loop-1"))
+    data = json.loads(out[0].text)
+    assert (data["status"], data["job_id"]) == ("preparing", "job-1")
+    assert "sprintable_get_loop_context" in data["message"]
+    assert sum(sleeps) == 30.0 and len(sleeps) == 15  # 2초마다 · 30초에서 멈춘다
+
+
+async def test_get_loop_context_failed_job_is_an_error(monkeypatch):
+    _fake_clock(monkeypatch)
+    client = _client()
+    client.org_id = "org-1"
+    client.get = AsyncMock(side_effect=[_QUEUED, {**_QUEUED, "status": "failed", "error": {"status_code": 404, "detail": "Loop not found"}}])
+    with patch.object(l, "client", client):
+        out = await l.get_loop_context(l.GetLoopContextInput(loop_id="loop-1"))
+    assert out[0].text.startswith("Error: ")

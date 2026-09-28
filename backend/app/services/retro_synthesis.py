@@ -327,3 +327,49 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
         # 빈 배열을 "정답"으로 저장하지 않는다(기존 캐시 보존).
         return None
     return candidates
+
+
+# ─── story #4336 PR2 ②(PO 04:32Z) — 회고 종합/추천은 늘 LLM(25s × 2 · 순차)이라 요청에서 떼어 작업(retro_synthesis)으로 ───────────
+# 라우트는 권한 · «종합 먼저»(409)만 요청 안에서 보고 작업을 넣는다. 아래가 워커가 하는 일 — 예전 라우트 본문 그대로(실패 본문 · 저장 규칙 같음).
+
+RETRO_GENERATION_MODES = ("synthesis", "synthesize", "recommend_next")
+
+
+class RetroGenerationError(Exception):
+    """요청이 받았을 상태 · 본문 그대로(작업 실패 본문)."""
+
+    def __init__(self, status_code: int, detail: dict) -> None:
+        super().__init__(detail.get("code"))
+        self.status_code = status_code
+        self.detail = detail
+
+
+async def run_retro_generation(db: AsyncSession, *, org_id: uuid.UUID, session_id: uuid.UUID, mode: str) -> None:
+    """mode: synthesis(종합 → 추천 · 추천 실패는 종합을 살림) · synthesize(종합만) · recommend_next(추천만 · 종합 선행 필수).
+    생성이 None이면 저장하지 않고(좋은 캐시를 빈 결과로 덮지 않음 — #1863) 예전과 같은 502 본문을 던진다."""
+    from app.repositories.retro import RetroSessionRepository
+    # 실패 본문은 라우트 파일의 한 정본(예전 요청이 받던 그 본문 · 요청 안 409도 같은 것을 씀).
+    from app.routers.retros import RECOMMENDATION_FAILED_DETAIL, SYNTHESIS_FAILED_DETAIL, SYNTHESIS_REQUIRED_DETAIL
+
+    repo = RetroSessionRepository(db, org_id)
+    session = await repo.get(session_id)
+    if session is None:
+        raise RetroGenerationError(404, {"code": "RETRO_SESSION_NOT_FOUND", "message": str(session_id)})
+    if mode == "recommend_next":
+        from app.routers.retros import _has_valid_synthesis  # 라우트와 같은 한 판정(아이템 모양까지)
+
+        if not _has_valid_synthesis(session.synthesis):
+            raise RetroGenerationError(409, SYNTHESIS_REQUIRED_DETAIL)
+        result = await recommend_next(session.synthesis)
+        if result is None:
+            raise RetroGenerationError(502, RECOMMENDATION_FAILED_DETAIL)
+        await repo.update(session_id, next_hypotheses=result)
+        return
+    sresult = await synthesize(db, session)
+    if sresult is None:
+        raise RetroGenerationError(502, SYNTHESIS_FAILED_DETAIL)
+    updated = await repo.update(session_id, synthesis=sresult)
+    if mode == "synthesis" and updated is not None:
+        nresult = await recommend_next(updated.synthesis)
+        if nresult is not None:
+            await repo.update(session_id, next_hypotheses=nresult)

@@ -10,6 +10,8 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { AiAttributionRow, AiTransparencyLine, type AiConfidence } from '@/components/loops/ai-attribution';
 import { fetchWithAuth } from '@/lib/db/client';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { SLOW_JOB_NOTICE_MS, asQueuedJob, waitForBackgroundJob } from '@/lib/background-job';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 /** E-LOOP-LEDGER S13 — GET /loops/{id}/context-pack 응답 shape(handoff §3, PO-locked). */
 interface ContextPackDecision {
@@ -135,29 +137,45 @@ function ContextPackCard({ item }: { item: ContextPackItem }) {
  */
 export function ContextPackPanel({ loopId }: { loopId: string }) {
   const t = useTranslations('loops');
+  const tCommon = useTranslations('common');
+  const { orgId } = useDashboardContext();
   const [data, setData] = useState<ContextPackResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    let slowTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setUnavailable(false);
+    setSlow(false);
     void (async () => {
       try {
         const res = await fetchWithAuth(`/api/loops/${loopId}/context-pack`, { timeoutMs: LONG_ROUTES.loopContextPack.browserMs });
         if (cancelled) return;
         if (!res.ok) { setUnavailable(true); return; }
-        const json = (await res.json()) as ContextPackResponse;
-        setData(json);
+        const json = (await res.json()) as unknown;
+        // story #4336 PR2 ②(PO 04:32Z) — 종합/추천 캐시 미스면 BE가 202 + 작업(loop_context_pack). 워커가 만들 때까지 스켈레톤을 두고 기다린다
+        // (10초 넘으면 «창을 닫아도 계속 처리돼요») — 워커가 캐시를 채워 다음 방문은 곧바로 온다.
+        const queued = asQueuedJob(json, 'loop_context_pack');
+        if (!queued) { setData(json as ContextPackResponse); return; }
+        if (!orgId) { setUnavailable(true); return; }
+        slowTimer = setTimeout(() => { if (!cancelled) setSlow(true); }, SLOW_JOB_NOTICE_MS);
+        const finished = await waitForBackgroundJob<{ pack?: ContextPackResponse }>(orgId, queued.id, { signal: controller.signal });
+        if (cancelled || finished === null) return;
+        const pack = finished.status === 'completed' ? finished.result?.pack : undefined;
+        if (pack) setData(pack); else setUnavailable(true);
       } catch {
         if (!cancelled) setUnavailable(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        clearTimeout(slowTimer);
+        if (!cancelled) { setLoading(false); setSlow(false); }
       }
     })();
-    return () => { cancelled = true; };
-  }, [loopId]);
+    return () => { cancelled = true; controller.abort(); clearTimeout(slowTimer); };
+  }, [loopId, orgId]);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -171,7 +189,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
             <Badge variant="outline">{t('contextPackCount', { count: data.items.length })}</Badge>
           ) : null}
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('contextPackSubtitle')}</p>
+        <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('contextPackSubtitle')}</p>
       </div>
 
       <div className="space-y-2.5 p-3">
@@ -179,6 +197,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
           <>
             <Skeleton className="h-20 rounded-xl" />
             <Skeleton className="h-20 rounded-xl" />
+            {slow ? <p className="break-keep text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
           </>
         ) : unavailable || (data && !data.embed_available) ? (
           <p className="py-4 text-center text-sm text-muted-foreground">{t('contextPackEmbedUnavailable')}</p>

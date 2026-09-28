@@ -8,7 +8,7 @@ import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await params;
   return proxyToFastapi(request, `/api/v2/loops/${id}/context-pack`, {
-    // story #4320(까디르 QA ①) — 캐시 미스면 임베드 + LLM 두 번 — 시한은 표 한 곳(bff-route-timeouts · 근거 백엔드 파일:줄).
+    // story #4336 PR2 ② — 임베드 · 검색 · 캐시 확인까지만 요청 안(미스면 BE가 202 + 작업 · 상태코드 그대로 통과) — 시한은 표 한 곳(bff-route-timeouts).
     timeoutMs: LONG_ROUTES.loopContextPack.bffMs,
   });
 }

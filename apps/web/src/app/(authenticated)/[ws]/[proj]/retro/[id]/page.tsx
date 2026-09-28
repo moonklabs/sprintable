@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
@@ -16,6 +16,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { requestRetroSynthesis } from '@/lib/retro-synthesis-request';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useRetroRoute } from '../retro-context';
 import {
@@ -39,7 +40,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { copyTextSafely } from '@/lib/clipboard';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
-import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -285,20 +285,25 @@ export default function RetroSessionPage() {
   const [synthesis, setSynthesis] = useState<RetroSynthesis | null>(null);
   const [nextHypotheses, setNextHypotheses] = useState<RetroNextHypothesis[]>([]);
 
+  // story #4336 PR2 ②(PO 04:32Z) — 종합은 늘 작업(requestRetroSynthesis가 202 + 작업을 끝까지 기다림). 화면을 떠나면 묻기만 멈춘다.
+  const synthesisJobAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => synthesisJobAbortRef.current?.abort(), []);
+
   const handleGenerateSynthesis = useCallback(async (): Promise<boolean> => {
     if (!projectId) return false;
+    synthesisJobAbortRef.current?.abort();
+    const controller = new AbortController();
+    synthesisJobAbortRef.current = controller;
     try {
-      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { timeoutMs: LONG_ROUTES.retroSynthesis.browserMs, method: 'POST' });
-      if (!res.ok) return false;
-      const json = await res.json() as { data?: { synthesis?: RetroSynthesis; next_hypotheses?: RetroNextHypothesis[] } };
-      if (!json.data?.synthesis) return false;
-      setSynthesis(json.data.synthesis);
-      setNextHypotheses(json.data.next_hypotheses ?? []);
+      const result = await requestRetroSynthesis({ sessionId, projectId, orgId, signal: controller.signal });
+      if (!result) return false;
+      setSynthesis(result.synthesis);
+      setNextHypotheses(result.next_hypotheses);
       return true;
     } catch {
       return false;
     }
-  }, [projectId, sessionId]);
+  }, [orgId, projectId, sessionId]);
 
   const handleAdoptRecommendation = useCallback(async (rec: RetroNextHypothesis, statement: string): Promise<boolean> => {
     if (!projectId) return false;

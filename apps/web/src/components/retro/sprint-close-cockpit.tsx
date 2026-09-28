@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { DeltaTrack, fmt } from '@/components/outcome/outcome-result-card';
 import { AiGenerationLoading, type AiGenerationLoadingStep } from '@/components/ai/ai-generation-loading';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { SLOW_JOB_NOTICE_MS } from '@/lib/background-job';
 import type {
   RetroHypothesisResult,
   RetroNextHypothesis,
@@ -353,7 +354,10 @@ export function SprintCloseCockpit({
   onAdoptRecommendation: (rec: RetroNextHypothesis, statement: string) => Promise<boolean>;
 }) {
   const t = useTranslations('retro');
+  const tCommon = useTranslations('common');
   const [generating, setGenerating] = useState(false);
+  // story #4336 PR2 ②(PO 05:22Z) — 종합 작업을 SLOW_JOB_NOTICE_MS 넘게 기다리면 로딩 아래 «창을 닫아도 계속 처리돼요».
+  const [slow, setSlow] = useState(false);
   const [generateError, setGenerateError] = useState(false);
   const [seededIndexes, setSeededIndexes] = useState<Set<number>>(new Set());
   const [ignoredIndexes, setIgnoredIndexes] = useState<Set<number>>(new Set());
@@ -367,10 +371,13 @@ export function SprintCloseCockpit({
   async function handleGenerate() {
     setGenerating(true);
     setGenerateError(false);
+    const slowTimer = setTimeout(() => setSlow(true), SLOW_JOB_NOTICE_MS);
     try {
       const ok = await onGenerateSynthesis();
       if (!ok) setGenerateError(true);
     } finally {
+      clearTimeout(slowTimer);
+      setSlow(false);
       setGenerating(false);
     }
   }
@@ -405,13 +412,16 @@ export function SprintCloseCockpit({
       </div>
 
       {generating ? (
-        <AiGenerationLoading
-          headline={t('loadingHeadlineSynthesis')}
-          steps={loadingSteps}
-          activeIndex={activeStepIndex}
-          skeleton="synthesis"
-          transline={t('loadingTranslineSynthesis')}
-        />
+        <div className="space-y-2">
+          <AiGenerationLoading
+            headline={t('loadingHeadlineSynthesis')}
+            steps={loadingSteps}
+            activeIndex={activeStepIndex}
+            skeleton="synthesis"
+            transline={t('loadingTranslineSynthesis')}
+          />
+          {slow ? <p className="break-keep text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
+        </div>
       ) : synthesis ? (
         <SynthesisBlock synthesis={synthesis} onRegenerate={() => void handleGenerate()} />
       ) : (

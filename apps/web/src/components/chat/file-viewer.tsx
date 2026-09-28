@@ -8,6 +8,8 @@ import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
 import { MdBody } from '@/components/chat/embed-card';
 import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
+import { asQueuedJob, waitForBackgroundJob } from '@/lib/background-job';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 // story #4320 — 화면 상한은 브라우저 fetch 시한보다 조금 길게(fetch가 먼저 끝나 오류 봉투를 읽고 · 이 타이머는 무한 로딩 방지 백스톱).
 const CONVERT_SCREEN_TIMEOUT_MS = LONG_ROUTES.attachmentConvert.browserMs + 2_000;
@@ -602,7 +604,11 @@ function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
  */
 function PptxBody({ assetId, label }: { assetId: string; label: string }) {
   const t = useTranslations('chats');
+  const tCommon = useTranslations('common');
+  const { orgId } = useDashboardContext();
   const [status, setStatus] = useState<'converting' | 'ready' | 'failed'>('converting');
+  // story #4336 PR2 ②(PO 04:32Z) — 요청 예산(40초)을 넘겨 작업으로 넘어간 큰 파일 — 문구를 바꾸고 작업이 끝날 때까지 기다린다.
+  const [preparingLarge, setPreparingLarge] = useState(false);
   const [failMessage, setFailMessage] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -645,14 +651,29 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     (async () => {
       try {
         // story #4320(까디르 QA ①) — 예전 130초는 프런트 Cloud Run 한도(60초)에서 실제로 잘렸다(봉투 없는 504). 표 한 곳(bff-route-timeouts)의
-        // 브라우저 시한 — BFF가 한도 안에서 503 봉투로 먼저 답한다. 백엔드 변환(120초+)은 동기로 못 기다림(후속 카드: 비동기화).
+        // 브라우저 시한 — BFF가 한도 안에서 503 봉투로 먼저 답한다. 백엔드는 요청 안 40초까지만 변환하고 넘으면 작업으로(#4336 PR2 ②).
         const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
           method: 'POST', signal: controller.signal, timeoutMs: LONG_ROUTES.attachmentConvert.browserMs,
         });
         const convertJson = (await convertRes.json().catch(() => null)) as
           | { data?: { asset_id?: string }; error?: { message?: string } }
           | null;
-        const convertedAssetId = convertJson?.data?.asset_id;
+        let convertedAssetId = convertJson?.data?.asset_id;
+        // story #4336 PR2 ②(PO 04:32Z) — 백엔드가 40초 안에 못 끝내면 202 + 작업(attachment_convert). 워커(1분 틱)가 이어서 변환하니
+        // 요청용 백스톱 타이머는 내리고 작업 상태로 끝까지 기다린다(뷰어를 닫으면 묻기만 멈춤 — 변환은 계속돼 다음에 열면 캐시로 바로).
+        const queued = convertRes.ok ? asQueuedJob(convertJson?.data, 'attachment_convert') : null;
+        if (queued) {
+          clearTimeout(timeoutId);
+          setPreparingLarge(true);
+          if (!orgId) throw new Error('org context missing');
+          const finished = await waitForBackgroundJob<{ asset_id?: string }>(orgId, queued.id, { signal: controller.signal });
+          if (finished === null) return;
+          if (finished.status === 'failed') {
+            const detail = finished.error?.detail as { message?: string } | string | undefined;
+            throw new Error((typeof detail === 'string' ? detail : detail?.message) ?? String(finished.error?.status_code ?? 'failed'));
+          }
+          convertedAssetId = finished.result?.asset_id;
+        }
         if (!convertRes.ok || !convertedAssetId) {
           throw new Error(convertJson?.error?.message ?? String(convertRes.status));
         }
@@ -689,7 +710,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
       clearTimeout(timeoutId);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [assetId, t]);
+  }, [assetId, orgId, t]);
 
   if (status === 'failed') {
     return (
@@ -708,8 +729,10 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">{t('converting')}</p>
-        <p className="text-xs text-muted-foreground">{t('firstViewSlowNotice', { elapsed: elapsedSec })}</p>
+        <p className="text-sm text-foreground">{preparingLarge ? t('convertingContinues') : t('converting')}</p>
+        <p className="break-keep text-xs text-muted-foreground">
+          {preparingLarge ? tCommon('backgroundJobSlow') : t('firstViewSlowNotice', { elapsed: elapsedSec })}
+        </p>
       </div>
     );
   }

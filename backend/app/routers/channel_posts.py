@@ -1023,6 +1023,7 @@ async def post_channel_post_video_confirm(
             "draft_id": str(draft_id), "object_path": body.object_path,
             "member_id": str(member_id), "member_kind": actor_type, "locale": request_locale,
         },
+        dedup_key=f"video:{draft_id}:{body.object_path}",  # story #4336 PR2 ② — 같은 영상 확인을 다시 불러도 작업 하나
     )
     await db.commit()
     # 프록시(BFF)가 {data: …}로 감싼다 — 백엔드는 작업 모양 그대로(다른 채널 라우트와 같은 관례).

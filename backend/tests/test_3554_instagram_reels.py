@@ -233,14 +233,19 @@ async def run_background_jobs_once(app) -> dict:
         await agen.aclose()
 
 
-async def confirm_video_and_wait(client, org_id, draft_id, object_path: str, app=None):
-    """영상 확정 요청(202) → 작업 한 번 처리 → 작업 상태를 예전 응답 모양으로. 요청 안 검사 거부(404/413 등)는 그대로 돌려준다."""
+async def confirm_video_and_wait(client, org_id, draft_id, object_path: str, app=None, *, in_request_status: int | None = None):
+    """영상 확정 요청(202) → 작업 한 번 처리 → 작업 상태를 예전 응답 모양으로.
+
+    story #4336 PR2 ②(까디르 codex) — 예전엔 202가 아니면 무엇이든 그대로 돌려줘, 작업으로 가야 할 거부가 요청 안에서 나도 테스트가 통과했다.
+    이제 기본은 **202 필수**. 요청 안 검사(DB · HEAD) 거부를 보는 테스트만 `in_request_status=`로 그 상태를 밝힌다."""
     r = await client.post(
         f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
         json={"object_path": object_path},
     )
-    if r.status_code != 202:
+    if in_request_status is not None:
+        assert r.status_code == in_request_status, r.text
         return r
+    assert r.status_code == 202, f"영상 확정은 작업(202)으로 가야 한다 — 받은 {r.status_code}: {r.text}"
     if app is None:
         from app.main import app
     job_id = r.json()["id"]

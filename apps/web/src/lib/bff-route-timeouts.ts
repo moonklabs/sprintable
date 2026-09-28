@@ -68,12 +68,12 @@ export const LONG_ROUTES = {
   channelDraftSubmit: dbOnlyRoute('services/channel_posts.py publish_recipe_approved_draft — 명령을 대기열에만(publish_outcome=publishing) · 발행과 레시피 published 이벤트는 워커'),
   /** 게이트 전이 · 대신 결재 — 레시피 external_publish 게이트 승인이어도 발행은 대기열에만(story #4336). */
   gateTransition: dbOnlyRoute('gates.py transition · override → gate_service.py transition_gate → publish_recipe_approved_draft — 대기열에만(publish_outcome=publishing) · 발행은 워커'),
-  /** 첨부 변환 — GCS 받기(라이브러리 기본) + Gotenberg 120초(스트림 · 읽기 단위) + GCS 올리기. 예전 130초 상수는 Cloud Run 60초에서 실제로 잘리던 잠복. */
-  attachmentConvert: route(125_000, 'office_conversion.py:32(httpx.Timeout 120) · attachments.py:202'),
-  /** 루프 컨텍스트 팩(캐시 미스) — 임베드 10 + LLM 25 × 2. */
-  loopContextPack: route(60_000, 'context_pack_items.py:68,105,106 · embedding_client.py:26(10) · llm_client.py:53(25)'),
-  /** 회고 종합 — LLM 25 × 2(종합 · 다음 가설). */
-  retroSynthesis: route(50_000, 'retro_synthesis.py:204,273 · llm_client.py:53(25 each)'),
+  /** 첨부 변환(story #4336 PR2 ②) — 요청 안 예산 40초(작은 파일 · 캐시 적중은 바로). 넘으면 202 + 작업 — 받기 30 · Gotenberg 120 · 올리기 30은 워커. */
+  attachmentConvert: route(40_000, 'routers/attachments.py convert_attachment(asyncio.timeout CONVERT_REQUEST_BUDGET_SECONDS 40 · 넘으면 202 작업 attachment_convert)'),
+  /** 루프 컨텍스트 팩(story #4336 PR2 ②) — 요청 안은 임베드(10) · 검색 · 캐시 확인까지. 캐시 미스(LLM 25 × 2)는 202 + 작업(loop_context_pack). */
+  loopContextPack: route(10_000, 'context_pack_items.py build_loop_context_pack(generate_on_miss=False) · embedding_client.py:26(10)'),
+  /** 회고 종합(story #4336 PR2 ②) — 늘 작업(retro_synthesis): 요청은 권한 · 409 확인 · 작업 넣기(DB만) · 202. LLM은 워커. */
+  retroSynthesis: dbOnlyRoute('routers/retros.py _queue_retro_generation'),
   /** 채널 게시물 이미지 확정(story #4336 PR2 · PO 04:32Z 요청 안 유지) — 요청 총 예산 40초(`IMAGE_REQUEST_BUDGET_SECONDS`) · 스토리지 호출마다
    * 시한(HEAD 10 · 받기 20 · 올리기 20 · `with_storage_deadline`) · 넘으면 504 CHANNEL_ASSET_STORAGE_TIMEOUT. 근거 dev 14일 349건 최대 9.3초. */
   channelAssetConfirm: route(40_000, 'routers/channel_posts.py _confirm_image_upload_or_raise(asyncio.timeout 40) · channel_post_images.py IMAGE_*_SECONDS'),

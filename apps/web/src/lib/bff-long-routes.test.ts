@@ -62,10 +62,8 @@ describe('긴 라우트 표(bff-route-timeouts · 까디르 QA ①②)', () => {
       expect(r.basis.length, `${key} 근거(백엔드 파일:줄)`).toBeGreaterThan(10);
     }
     // 동기로 못 기다리는 줄 — 후속 카드(제공자 긴 작업: 비동기화). 결제는 story #4335(시도 + 조회), 채널 발행 · 제출 · 게이트 전이는
-    // story #4336 PR1(공급자 호출 = 워커)로 이 목록에서 빠졌다. 남은 셋은 4336 PR2.
-    expect(Object.entries(LONG_ROUTES).filter(([, r]) => r.syncImpossible).map(([k]) => k).sort()).toEqual(
-      ['attachmentConvert', 'loopContextPack'],
-    );
+    // story #4336 PR1(공급자 호출 = 워커)로, 첨부 변환 · 컨텍스트 팩 · 회고 종합은 4336 PR2 ②(요청 예산 · 캐시 미스 · 늘 작업 → 202 + 작업)로 빠졌다.
+    expect(Object.entries(LONG_ROUTES).filter(([, r]) => r.syncImpossible).map(([k]) => k).sort()).toEqual([]);
   });
 
   it('⭐#4336 — 공급자 호출이 워커로 나간 세 줄은 다른 DB 라우트와 같은 기본 시한(BFF = backend-signal 기본값)', async () => {
@@ -203,5 +201,42 @@ describe('시간 초과는 봉투로 — 본문 읽기 중에도 · 직접 fetch
     expect(res.headers.get('content-encoding')).toBeNull();
     expect(res.headers.get('content-length')).toBeNull();
     expect(res.headers.getSetCookie()).toEqual(['a=1', 'b=2']);
+  });
+});
+
+describe('#4336 PR2 ② — 202 + 작업은 상태코드째 화면까지(첨부 변환 · 컨텍스트 팩 · 회고 종합)', () => {
+  const queuedJob = (kind: string) => ({ id: 'job-1', kind, status: 'pending', result: null, error: null });
+  const backendQueues = (body: unknown) => fetchMock.mockResolvedValue(
+    new Response(JSON.stringify(body), { status: 202, headers: { 'content-type': 'application/json' } }),
+  );
+
+  it('⭐첨부 변환 프록시 — BE 202 → 202 + 봉투 data = 작업 · 200(바로 변환)은 그대로 200', async () => {
+    getServerSessionMock.mockResolvedValue({ access_token: 'tok' });
+    const { POST } = await import('@/app/api/attachments/convert/route');
+    const assetId = '11111111-2222-3333-4444-555555555555';
+    backendQueues(queuedJob('attachment_convert'));
+    let res = await POST(authed(`/api/attachments/convert?asset_id=${assetId}`));
+    expect(res.status).toBe(202);
+    expect((await res.json()).data).toEqual(queuedJob('attachment_convert'));
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ asset_id: 'pdf-1', name: 'a.pdf', content_type: 'application/pdf' }), { status: 200 }));
+    res = await POST(authed(`/api/attachments/convert?asset_id=${assetId}`));
+    expect([res.status, (await res.json()).data.asset_id]).toEqual([200, 'pdf-1']);
+  });
+
+  it('⭐회고 종합 프록시 — BE 202 → 202 + 봉투 data = 작업', async () => {
+    const { POST } = await import('@/app/api/retro-sessions/[id]/synthesis/route');
+    backendQueues(queuedJob('retro_synthesis'));
+    const res = await POST(authed('/api/retro-sessions/s-1/synthesis'), { params: Promise.resolve({ id: 's-1' }) });
+    expect(res.status).toBe(202);
+    expect((await res.json()).data).toEqual(queuedJob('retro_synthesis'));
+  });
+
+  it('⭐컨텍스트 팩 프록시 — BE 202 → 202 + 작업 본문 그대로(이 라우트는 예전부터 봉투 없이 통과)', async () => {
+    const { GET } = await import('@/app/api/loops/[id]/context-pack/route');
+    backendQueues(queuedJob('loop_context_pack'));
+    const res = await GET(authed('/api/loops/l-1/context-pack', { method: 'GET', body: undefined }), { params: Promise.resolve({ id: 'l-1' }) });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual(queuedJob('loop_context_pack'));
   });
 });

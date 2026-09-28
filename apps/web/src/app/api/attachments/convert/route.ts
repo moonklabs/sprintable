@@ -1,7 +1,7 @@
 import { getServerSession } from '@/lib/db/server';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
-import { backendSignal, BFF_BACKEND_CONVERT_TIMEOUT_MS } from '@/lib/backend-signal';
+import { BFF_BACKEND_CONVERT_TIMEOUT_MS } from '@/lib/backend-signal';
 import { backendFetch } from '@/lib/backend-fetch';
 
 // story #2803 — pptx 인앱 미리보기: BE 변환 파이프(office_conversion.py, story #2771)로
@@ -42,7 +42,8 @@ export async function POST(request: Request) {
     if (!beRes.ok) return ApiErrors.badRequest('conversion request failed');
 
     const body = (await beRes.json()) as { asset_id?: string; name?: string; content_type?: string };
-    return apiSuccess(body);
+    // story #4336 PR2 ②(PO 04:32Z) — 요청 예산(40초)을 넘기면 BE가 202 + 작업(attachment_convert) — 상태코드를 그대로 싣는다.
+    return apiSuccess(body, undefined, beRes.status === 202 ? 202 : 200);
   } catch (err: unknown) {
     return handleApiError(err);
   }
