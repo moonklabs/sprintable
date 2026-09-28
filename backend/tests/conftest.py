@@ -246,7 +246,7 @@ def _reset_public_schema(url: str) -> None:
 # story #4395 — 전역 엔진(`app.core.database`) 커넥션을 checkout할 때마다 application_name에 지금 destructive 테스트 · 태스크를
 # 싣는다(**테스트에서만** — 제품의 `db_application_name()` 규칙은 그대로). 리셋이 막혀 위 실패 메시지에 막는 세션이 찍히면
 # 그 app 이름이 곧 «어느 테스트의 어느 태스크가 연 커넥션인가»가 된다. 서버 쪽 set_config 한 번(트랜잭션 밖 · 세션 수준).
-# 형식: `ge|<nodeid 해시 6자>|<함수 이름>|<태스크>` — 가르는 것부터(접두는 짧게). Postgres는 63바이트에서 자르므로
+# 형식: `ge|<nodeid 해시 6자>|<태스크>|<함수 이름>` — 가르는 것부터(접두는 짧게). Postgres는 63바이트에서 자르므로
 # (NAMEDATALEN) 긴 함수 이름은 여기서 잘릴 수 있다 → 실패 메시지가 같은 프로세스의 해시 → 전체 nodeid 표로 되살린다.
 GLOBAL_ENGINE_TEST_TAG_PREFIX = "ge|"
 _APP_NAME_MAX_BYTES = 63
@@ -259,7 +259,8 @@ def _clip_utf8(value: str, max_bytes: int) -> str:
 
 
 def _global_engine_test_tag(node_hash: str, function_name: str, task_name: str) -> str:
-    return _clip_utf8(f"{GLOBAL_ENGINE_TEST_TAG_PREFIX}{node_hash}|{function_name}|{task_name}", _APP_NAME_MAX_BYTES)
+    # 태스크가 함수 이름보다 앞 — 함수는 해시로 되살아나지만 태스크는 여기서만 보인다(story #4395 첫 표본에서 긴 함수 이름에 잘려 안 보였음).
+    return _clip_utf8(f"{GLOBAL_ENGINE_TEST_TAG_PREFIX}{node_hash}|{task_name}|{function_name}", _APP_NAME_MAX_BYTES)
 
 
 def _install_global_engine_checkout_tag() -> None:
@@ -503,6 +504,51 @@ async def _dispose_global_engine_for_non_destructive_tests():
     await _global_engine.dispose()
 
 
+# story #4395 — destructive async 테스트의 **배경 작업 drain → 전역 엔진 dispose**를 conftest 한 곳에서. 발행 경로(send_message ·
+# 이벤트 dispatch 등)는 커밋 뒤 배달을 `pg_pubsub.fire_and_forget`으로 테스트 루프에 띄우고, 그 작업은 전역 엔진을 쓴다. 테스트가 먼저
+# 끝나면 작업이 SELECT 뒤 트랜잭션을 연 채 얼어붙어 다음 테스트 리셋(DROP SCHEMA)을 막았다(test_4228 · test_4258 — 파일마다 기억에
+# 기대던 fixture를 걷고 여기로). 상한 안에 안 끝나면 **삼키지 않고** 남은 작업 이름을 박아 실패한다(삼키면 경합 창만 넓어진다).
+DESTRUCTIVE_DRAIN_TIMEOUT_S = 10.0
+_DRAIN_ROUNDS = 5  # 배달이 또 배달을 띄울 수 있어(after_commit 사슬) 빌 때까지 몇 번
+
+
+async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOUT_S) -> None:
+    """이 루프에 뜬 `fire_and_forget` 작업을 끝까지 기다린 뒤 전역 엔진 풀을 닫는다. 상한을 넘기면 남은 작업을 취소하고 이름과 함께 실패."""
+    import asyncio
+
+    from app.core.database import engine as _global_engine
+    from app.services import pg_pubsub
+
+    loop = asyncio.get_running_loop()
+    leftover: list[str] = []
+    for _ in range(_DRAIN_ROUNDS):
+        pending = [t for t in pg_pubsub._background_tasks if not t.done() and t.get_loop() is loop]
+        if not pending:
+            break
+        _done, still = await asyncio.wait(pending, timeout=timeout)
+        if still:
+            leftover = sorted(t.get_coro().__qualname__ for t in still)
+            for t in still:
+                t.cancel()
+            await asyncio.gather(*still, return_exceptions=True)
+            break
+    await _global_engine.dispose()
+    if leftover:
+        pytest.fail(
+            f"story #4395 — 테스트가 끝났는데 배경 작업이 {timeout:g}s 안에 안 끝남(취소함): {', '.join(leftover)} — "
+            "트랜잭션을 연 채 멈춘 작업은 다음 테스트 리셋을 막는다",
+            pytrace=False,
+        )
+
+
+@pytest.fixture
+async def _drain_and_dispose_global_engine_for_destructive_tests():
+    """story #4395 — autouse가 아니다: 아래 `pytest_collection_modifyitems`가 destructive **async** 테스트에만 주입한다(비파괴 쪽
+    `_dispose_global_engine_for_non_destructive_tests`와 같은 까닭 — sync 테스트는 async fixture를 몰라야 한다)."""
+    yield
+    await drain_global_background_work()
+
+
 # story 8236bbc3: destructive_schema 마커 drift 자기표면화 가드(PO crux 게이트②, 2026-07-03).
 # 마커 부여 자체는 수동이라(하드코딩 파일리스트와 동일 클래스의 drift 위험) 이 가드가 없으면
 # "새 create_all/drop_all 테스트가 마커 없이 들어오면?" 질문에 "alembic-fresh-db job에서 공유
@@ -667,6 +713,11 @@ def pytest_collection_modifyitems(items: list) -> None:
         test_func = getattr(item, "function", None)
         if inspect.iscoroutinefunction(test_func):
             item.fixturenames.append("_dispose_global_engine_for_non_destructive_tests")
+    # story #4395 — destructive async 테스트엔 drain → dispose(위 fixture). 파일별 `_dispose_global_engine_after_test`에 기대지 않는다.
+    for item in destructive_items:
+        test_func = getattr(item, "function", None)
+        if inspect.iscoroutinefunction(test_func):
+            item.fixturenames.append("_drain_and_dispose_global_engine_for_destructive_tests")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -34,28 +34,8 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _drain_global_background_work():
-    """story #4395 — 발행 경로(항목 B의 상태변경 프리셋 → send_message)는 커밋 뒤 배달(`mark_agent_replied` 등)을
-    `pg_pubsub.fire_and_forget`으로 **이 테스트의 이벤트 루프**에 띄우고, 그 태스크는 이 파일의 엔진이 아니라 전역 엔진
-    (`app.core.database`)을 쓴다. 테스트가 먼저 끝나면 루프가 닫히며 태스크가 SELECT 뒤 트랜잭션을 연 채 버려진다 →
-    커넥션이 idle in transaction으로 프로세스 끝까지 남고, 정리의 DROP SCHEMA가 그 잠금을 기다리다 8분 STALL(CI 샤드 10).
-    그래서 루프가 살아 있을 때 배달을 끝까지 기다리고(배달이 또 태스크를 띄울 수 있어 빌 때까지) 전역 엔진 풀을 닫는다.
-    ⚠️ 이것만으로는 다 안 닫힌다(로컬 반복: 고치기 전 1/30 · 뒤 1/30~1/100 HANG, 버려진 커넥션 경고는 29/30 → 0). 남은 몫은
-    conftest의 리셋 lock_timeout(막는 세션을 이름 붙여 빠른 실패) · 전역 엔진 app 이름 태깅으로 관측 중 — 근본 자리는 story #4395."""
-    from app.core.database import engine as _global_engine
-    from app.services import pg_pubsub
-
-    for _ in range(5):
-        if not pg_pubsub._background_tasks:
-            break
-        await pg_pubsub.drain_background_tasks()
-    await _global_engine.dispose()
-
-
-@pytest.fixture(autouse=True)
-async def _dispose_global_engine_after_test():
-    yield
-    await _drain_global_background_work()
+# story #4395 — 전역 엔진 배경 작업 drain → dispose는 conftest(`drain_global_background_work`)가 destructive async 테스트 전부에
+# 주입한다 — 이 파일에만 두던 fixture는 걷었다(파일마다 기억에 기대지 않게).
 
 
 async def _session():
@@ -380,7 +360,7 @@ async def _idle_in_tx_on_global_engine(Session) -> int:
 async def test_story_4395_publish_path_background_work_is_drained_before_the_loop_closes(monkeypatch):
     """story #4395 — 항목 B의 발행이 커밋 뒤 띄운 `mark_agent_replied`가 SELECT 뒤 트랜잭션을 연 채 머무는 순간(느린 배달)을
     고정해 재현한다: `process_sla`가 돌아온 직후엔 전역 엔진에 idle in transaction이 **있고**(양성대조 — 이 재현이 실제로
-    누수 모양을 만든다), 이 파일의 정리(`_drain_global_background_work`)를 거치면 **0**이다.
+    누수 모양을 만든다), conftest 정리(`drain_global_background_work`)를 거치면 **0**이다.
     뮤테이션: 정리에서 drain을 빼면(dispose만) 머무는 태스크의 커넥션은 풀에 없어 dispose가 못 닫는다 → 1 남음 — RED."""
     from sqlalchemy import select
 
@@ -409,7 +389,9 @@ async def test_story_4395_publish_path_background_work_is_drained_before_the_loo
         assert await _idle_in_tx_on_global_engine(Session) == 1  # 양성대조: 루프가 여기서 닫히면 이 커넥션이 버려진다
 
         asyncio.get_running_loop().call_later(0.2, release.set)  # 느린 배달이 결국 끝난다 — 정리는 그걸 기다려야 한다
-        await _drain_global_background_work()
+        from tests.conftest import drain_global_background_work
+
+        await drain_global_background_work()
         assert await _idle_in_tx_on_global_engine(Session) == 0
     finally:
         await engine.dispose()
