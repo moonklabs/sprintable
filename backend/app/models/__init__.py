@@ -19,6 +19,7 @@ from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.event import Event
 from app.models.event_outbox import EventOutbox
+from app.models.background_job import BackgroundJob
 from app.models.delivery_job import DeliveryJob
 from app.models.channel_connection import ChannelConnection
 from app.models.org_generation_connector import OrgGenerationConnector
@@ -192,6 +193,7 @@ __all__ = [
     "BridgeUserMapping",
     "Embedding",
     "EventOutbox",
+    "BackgroundJob",
     "DeliveryJob",
     "Gate",
     "GateGithubCheckEvent",

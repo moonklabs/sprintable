@@ -77,9 +77,59 @@ def test_every_route_that_writes_a_draft_version_goes_through_the_shared_mapping
             found[f"{path.name}::{name}"] = ok
     missing = sorted(k for k, ok in found.items() if not ok)
     assert not missing, f"초안 버전을 쓰는데 `except DRAFT_VERSION_VALIDATION_ERRORS`가 없는 라우트: {missing}"
-    # 대조 — 스캐너가 실제 라우트를 본다(저장 · 영상 확정 · 이미지 확정 · 이미지 가져오기 · 이미지 삭제 · 순서 바꿈).
+    # 대조 — 스캐너가 실제 라우트를 본다(저장 · 이미지 확정 · 이미지 가져오기 · 이미지 삭제 · 순서 바꿈). story #4336 PR2 — 영상 확정은
+    # 작업화돼 라우트가 writer에 닿지 않는다(검사만 하고 작업을 넣음) — writer에 닿는 곳은 워커 처리기라 아래 테스트가 따로 본다.
     assert "channel_posts.py::post_channel_post_image_import" in found, "가져오기 → 확정 → writer(두 겹) 사슬을 못 모은다"
-    assert len(found) >= 6, found
+    assert "channel_posts.py::post_channel_post_video_confirm" not in found, "영상 확정 라우트가 다시 writer에 닿는다 — 작업화가 풀렸는지"
+    assert len(found) >= 5, found
+
+
+def _router_mappers_checking_shared_errors() -> set[str]:
+    """라우터 모듈의 함수 중 `isinstance(exc, DRAFT_VERSION_VALIDATION_ERRORS)`로 같은 매핑을 거치는 것(워커 처리기가 빌려 쓰는 자리)."""
+    out: set[str] = set()
+    for path in (_BACKEND / "app" / "routers").glob("*.py"):
+        for node in ast.parse(path.read_text()).body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for c in ast.walk(node):
+                if (
+                    isinstance(c, ast.Call) and getattr(c.func, "id", None) == "isinstance" and len(c.args) == 2
+                    and isinstance(c.args[1], ast.Name) and c.args[1].id == "DRAFT_VERSION_VALIDATION_ERRORS"
+                ):
+                    out.add(node.name)
+    return out
+
+
+def _worker_handlers_unmapped(source: str, writers: set[str], mappers: set[str]) -> dict[str, bool]:
+    """워커 처리기(`_run_<종류>`)가 writer에 닿으면 짝 `_<종류>_error_body`가 매핑 함수를 불러야 한다. 이름 → 덮였는지."""
+    fns = {n.name: n for n in ast.parse(source).body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    out: dict[str, bool] = {}
+    for name, fn in fns.items():
+        if not name.startswith("_run_") or not (_called_names(fn) & writers):
+            continue
+        body_fn = fns.get(f"_{name[len('_run_'):]}_error_body")
+        out[name] = body_fn is not None and bool(_called_names(body_fn) & mappers)
+    return out
+
+
+def test_background_job_handlers_that_write_a_draft_version_map_errors_the_same_way():
+    """story #4336 PR2 — 작업화된 영상 확정: writer에 닿는 곳이 워커 처리기다. 실패 본문이 라우트와 같은 매핑(`_video_confirm_http_error` →
+    `DRAFT_VERSION_VALIDATION_ERRORS`)을 거쳐야 화면이 같은 문장을 고른다."""
+    writers = _service_writers()
+    mappers = _router_mappers_checking_shared_errors()
+    assert "_video_confirm_http_error" in mappers
+    handlers = _worker_handlers_unmapped((_BACKEND / "app" / "services" / "background_jobs.py").read_text(), writers, mappers)
+    assert handlers.get("_run_channel_video_confirm") is True, handlers
+    assert all(handlers.values()), handlers
+
+
+def test_worker_handler_guard_positive_control():
+    writers = {"finish_x"}
+    mappers = {"_map"}
+    bare = "async def _run_k(db, job):\n    return await finish_x()\ndef _k_error_body(exc, job):\n    return None\n"
+    mapped = "async def _run_k(db, job):\n    return await finish_x()\ndef _k_error_body(exc, job):\n    return _map(exc)\n"
+    assert _worker_handlers_unmapped(bare, writers, mappers) == {"_run_k": False}
+    assert _worker_handlers_unmapped(mapped, writers, mappers) == {"_run_k": True}
 
 
 def test_guard_positive_control():

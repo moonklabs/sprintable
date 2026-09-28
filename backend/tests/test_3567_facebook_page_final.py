@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tests.test_3554_instagram_reels import confirm_video_and_wait
+
 from tests.publish_worker_helpers import draft_detail, publication_body, publish_and_run_worker, run_worker_tick  # noqa: F401
 
 from tests.test_620beefc_channel_post_image_upload import (
@@ -179,10 +181,7 @@ async def _upload_and_confirm_video(client, org_id, draft_id, raw: bytes, *, con
     ext = {"video/mp4": "mp4", "video/quicktime": "mov"}.get(content_type, "bin")
     object_path = f"channel-media/{org_id}/{draft_id}/{uuid.uuid4().hex}.{ext}"
     await _put_raw_object(object_path, raw, content_type=content_type)
-    return await client.post(
-        f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-        json={"object_path": object_path},
-    )
+    return await confirm_video_and_wait(client, org_id, draft_id, object_path)
 
 
 _VALID_9_16 = {"width": 720, "height": 1280}

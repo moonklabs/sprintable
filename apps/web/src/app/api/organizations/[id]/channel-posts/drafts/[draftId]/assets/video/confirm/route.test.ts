@@ -26,7 +26,7 @@ describe('/api/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/co
       '/api/v2/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/confirm',
       { id: 'org-1', draftId: 'd1' },
       // story #4320 — 긴 라우트 시한은 표 한 곳(bff-route-timeouts).
-      expect.objectContaining({ timeoutMs: LONG_ROUTES.channelAssetConfirm.bffMs }),
+      expect.objectContaining({ timeoutMs: LONG_ROUTES.channelVideoConfirm.bffMs }),
     );
     expect(resp.status).toBe(201);
   });

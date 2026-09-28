@@ -343,6 +343,11 @@ _ORG_SCOPED_PATH_GROUP_SEGMENTS: tuple[tuple[str, str], ...] = (
 # 별도 갭)과 최소한 "새로 벌어지지는" 않는다는 뜻 — 이 갭 자체를 정당화하지 않는다(이
 # 스토리 범위 밖일 뿐, 후속 후보로 남긴다).
 _ORG_SCOPED_UNMAPPED_SEGMENTS_WITH_REASON: dict[str, str] = {
+    # story #4336 PR2 — 공용 작업 줄 상태 보기. 종류가 여럿으로 늘어나는 공용 표면(영상 확정 · 첨부 변환 · 컨텍스트팩 · 회고)이라 한 도구 묶음에
+    # 붙이지 않는다 — 행 단위 권한(요청한 본인만 · 다른 사람 · 다른 조직 404)이 이 경로의 문지기다.
+    "background-jobs": "shared job status view (many kinds; routers/background_jobs.py scopes to org_id + the requester only) — "
+                       "no single tool-group mapping fits. Gatekeepers: tests/test_4336_background_jobs_realdb.py::"
+                       "test_another_org_cannot_see_the_job, ::test_only_the_requester_can_read_the_job",
     "campaigns": "MCP 도구/키워드 0건(REST·MCP 양쪽 다 core 취급 — 이 스토리가 새로 벌리는 격차 아님)",
     "connectors": "MCP 도구/키워드 0건(connectors.py, 위와 동형)",
     # story #3769(2026-09-10): "content-rules"는 sprintable_get_content_rules 신설로

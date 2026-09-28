@@ -16,11 +16,11 @@ export async function POST(request: Request, { params }: RouteParams) {
     '/api/v2/organizations/[id]/channel-posts/drafts/[draftId]/assets/video/confirm',
     { id, draftId },
     {
-      // story #4320(까디르 QA ①) — 영상 전체를 받아 파생물을 올린다 — 시한은 표 한 곳(bff-route-timeouts · 근거 백엔드 파일:줄).
-      timeoutMs: LONG_ROUTES.channelAssetConfirm.bffMs,
+      // story #4336 PR2 — 영상 확정은 작업화: 요청은 검사 + HEAD 한 번까지 · 202(작업) — 시한은 표 한 곳(bff-route-timeouts).
+      timeoutMs: LONG_ROUTES.channelVideoConfirm.bffMs,
     },
   );
   if (!_r.ok) return _r;
-  // 백엔드가 201로 새 버전 생성을 알린다(assets/confirm/route.ts와 동일 이유).
+  // story #4336 PR2 — 백엔드가 202 + 작업(id · 상태)을 돌려준다. 화면은 작업 상태 보기(background-jobs/{jobId})로 결과를 받는다.
   return apiSuccess(await _r.json(), undefined, _r.status);
 }

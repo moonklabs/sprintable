@@ -23,6 +23,7 @@ import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { blockedByConnection, blockedReason, deriveFailureAction, WORKER_TICK_BUDGET_TOO_SMALL, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { isAwaitingPublishWorker, PUBLISH_WORKER_POLL_MS } from '@/lib/publish-worker-poll';
+import { SLOW_JOB_NOTICE_MS, waitForBackgroundJob, type BackgroundJob } from '@/lib/background-job';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 import { InsightSnapshotBlock, type InsightSnapshot } from '@/components/content/insight-snapshot-block';
 import { BoostRequestDialog } from '@/components/content/boost-request-dialog';
@@ -923,11 +924,19 @@ export default function ChannelPostEditPage() {
   // ③(PO 確定 2026-09-06) — uploading 단계는 XHR upload.onprogress로 % 표시(서명
   // PUT은 XHR로 보낸다, fetch는 업로드 진행률 이벤트가 없다). 나머지 단계는 이미지와
   // 동형 텍스트 라벨.
+  // story #4336 PR2 — 영상 확정 작업을 기다리는 동안 화면을 떠나면 묻기를 멈춘다.
+  const videoJobAbortRef = useRef(new AbortController());
+  useEffect(() => {
+    const controller = new AbortController();
+    videoJobAbortRef.current = controller;
+    return () => controller.abort();
+  }, []);
   const [videoUploadStatus, setVideoUploadStatus] = useState<
     | { phase: 'idle' }
     | { phase: 'requesting_url' }
     | { phase: 'uploading'; progress: number }
-    | { phase: 'confirming' }
+    // story #4336 PR2 — slow = 작업을 SLOW_JOB_NOTICE_MS 넘게 기다리는 중(같은 줄에 «창을 닫아도 계속 처리돼요»).
+    | { phase: 'confirming'; slow?: boolean }
     | { phase: 'error'; text: string; raw?: string }
   >({ phase: 'idle' });
   const videoFileInputRef = useRef<HTMLInputElement>(null);
@@ -1681,8 +1690,24 @@ export default function ChannelPostEditPage() {
         setVideoUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
         return;
       }
-      const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: ChannelPostVideoResponse } | null;
-      const uploaded = confirmJson?.data;
+      // story #4336 PR2(PO 04:32Z) — 영상 확정은 작업화: 202 + 작업(id). 워커(1분 틱)가 받기 · MP4 파싱 · 새 버전을 마치면 작업 상태 보기로
+      // 결과(영상)를 받는다. 실패 본문은 예전 확정 응답과 같은 모양이라 같은 문장을 고른다. 화면을 떠나면 묻기를 멈춘다(워커는 계속 — 다시 오면 초안에 반영돼 있음).
+      const confirmJson = (await confirmRes.json().catch(() => null)) as { data?: BackgroundJob<{ video?: ChannelPostVideoResponse }> } | null;
+      const queued = confirmJson?.data;
+      const slowTimer = setTimeout(() => {
+        setVideoUploadStatus((prev) => (prev.phase === 'confirming' ? { phase: 'confirming', slow: true } : prev));
+      }, SLOW_JOB_NOTICE_MS);
+      const finished = queued?.id
+        ? await waitForBackgroundJob<{ video?: ChannelPostVideoResponse }>(orgId, queued.id, { signal: videoJobAbortRef.current.signal })
+            .finally(() => clearTimeout(slowTimer))
+        : (clearTimeout(slowTimer), null);
+      if (queued?.id && finished === null) return;
+      if (finished?.status === 'failed') {
+        const info = parseSitePostApiError({ detail: finished.error?.detail });
+        setVideoUploadStatus({ phase: 'error', text: describeChannelImageError(info, t), raw: info.raw });
+        return;
+      }
+      const uploaded = finished?.result?.video;
       if (!uploaded) {
         // story #3575(⑤ 조건 1) — confirmRes.ok=true인데 본문에 .data가 없다 —
         // 마찬가지로 "응답 있음" 갈래.
@@ -3434,17 +3459,19 @@ export default function ChannelPostEditPage() {
             </p>
           ) : null}
           {videoUploadInProgress ? (
-            <p className="text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
+            <p className="break-keep text-xs text-muted-foreground" data-testid="channel-post-video-upload-progress">
               {videoUploadStatus.phase === 'requesting_url'
                 ? t('channelPostsImageUploadRequestingUrl')
                 : videoUploadStatus.phase === 'uploading'
                   ? t('channelPostsVideoUploading', { pct: videoUploadStatus.progress })
-                  : t('channelPostsImageConfirming')}
+                  : videoUploadStatus.phase === 'confirming' && videoUploadStatus.slow
+                    ? `${t('channelPostsImageConfirming')} ${t('channelPostsVideoConfirmSlow')}`
+                    : t('channelPostsImageConfirming')}
             </p>
           ) : null}
           {videoUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-video-upload-error">
-              <AlertDescription>{videoUploadStatus.text}</AlertDescription>
+              <AlertDescription className="break-keep">{videoUploadStatus.text}</AlertDescription>
               <RawDetailsToggle raw={videoUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}
@@ -3587,7 +3614,7 @@ export default function ChannelPostEditPage() {
           ) : null}
           {imageUploadStatus.phase === 'error' ? (
             <Alert variant="destructive" role="alert" data-testid="channel-post-image-upload-error">
-              <AlertDescription>{imageUploadStatus.text}</AlertDescription>
+              <AlertDescription className="break-keep">{imageUploadStatus.text}</AlertDescription>
               <RawDetailsToggle raw={imageUploadStatus.raw} label={t('errorRawDetailsToggle')} />
             </Alert>
           ) : null}

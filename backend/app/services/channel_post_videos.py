@@ -50,6 +50,7 @@ from app.services.channel_posts import (
     get_channel_post_draft,
 )
 from app.services.storage import get_storage_provider
+from app.services.storage.deadline import StorageCallTimeoutError, with_storage_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,61 @@ async def create_channel_post_video_upload_url(
     }
 
 
+# story #4336 PR2(PO 04:32Z) — 영상 확인은 작업화(크기 상한이 어댑터 최대라 시간 근거 없음). 요청은 `precheck_channel_post_video_confirm`
+# (DB · HEAD만)까지 하고 작업을 넣는다. 내려받기 · MP4 파싱 · 새 버전은 워커의 `finish_channel_post_video_confirm`.
+VIDEO_HEAD_SECONDS = 15.0
+# 워커 틱 예산(240s) 안 · 같은 리전 GCS에서 어댑터 최대 영상도 넉넉한 값. 넘으면 일시 실패로 다음 틱에 다시.
+VIDEO_DOWNLOAD_SECONDS = 180.0
+VIDEO_DELETE_SECONDS = 15.0
+# 워커가 이 일을 시작할 때 남은 틱 예산이 이보다 적으면 다음 틱으로 미룬다(HEAD + 내려받기 + 정리 · DB 여유).
+VIDEO_CONFIRM_WORST_SECONDS = VIDEO_HEAD_SECONDS + VIDEO_DOWNLOAD_SECONDS + VIDEO_DELETE_SECONDS + 15.0
+
+
+async def precheck_channel_post_video_confirm(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, object_path: str,
+) -> int:
+    """요청 안의 싼 검사(DB · HEAD 한 번) — 초안 · 채널이 영상을 받는지 · 경로 범위 · 객체가 있는지 · 크기 상한. 크기를 돌려준다.
+    크기 초과면 객체를 지우고(고아 방지 · #3589) 거부한다."""
+    draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+    if draft is None:
+        raise ChannelPostDraftNotFoundError(draft_id)
+    adapter = get_channel_adapter(draft.channel)
+    if adapter is None or adapter.video_max_bytes <= 0:
+        raise ChannelVideoUnsupportedError(channel=draft.channel)
+    bucket = _require_bucket()
+    expected_prefix = f"channel-media/{org_id}/{draft_id}/"
+    if not object_path.startswith(expected_prefix) or "/" in object_path[len(expected_prefix):]:
+        raise ChannelVideoPathNotScopedError(object_path=object_path)
+    provider = get_storage_provider()
+    size = await with_storage_deadline(provider.head_object(bucket, object_path), seconds=VIDEO_HEAD_SECONDS, what="head")
+    if size is None:
+        raise ChannelVideoObjectNotFoundError(object_path=object_path)
+    if size > adapter.video_max_bytes:
+        await _delete_quietly(provider, bucket, object_path)
+        raise ChannelVideoTooLargeError(size_bytes=size, max_bytes=adapter.video_max_bytes)
+    return size
+
+
+async def _delete_quietly(provider, bucket: str, object_path: str) -> None:
+    try:
+        await with_storage_deadline(provider.delete_object(bucket, object_path), seconds=VIDEO_DELETE_SECONDS, what="delete")
+    except Exception:
+        logger.exception("영상 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+
+
 async def confirm_channel_post_video_upload(
+    db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, object_path: str,
+    member_id: uuid.UUID, member_kind: str,
+) -> tuple[ChannelPostVersion, ChannelPostVideo]:
+    """확인 전체를 한 번에(검사 → 마무리). 요청 라우트는 이제 작업을 넣고(`precheck` 뒤) 워커가 `finish`를 부른다 — 이 합성은 워커 밖
+    호출부(테스트 · 도구)가 예전 계약 그대로 쓰는 자리."""
+    await precheck_channel_post_video_confirm(db, org_id=org_id, draft_id=draft_id, object_path=object_path)
+    return await finish_channel_post_video_confirm(
+        db, org_id=org_id, draft_id=draft_id, object_path=object_path, member_id=member_id, member_kind=member_kind,
+    )
+
+
+async def finish_channel_post_video_confirm(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, object_path: str,
     member_id: uuid.UUID, member_kind: str,
 ) -> tuple[ChannelPostVersion, ChannelPostVideo]:
@@ -354,7 +409,7 @@ async def confirm_channel_post_video_upload(
         raise ChannelVideoPathNotScopedError(object_path=object_path)
 
     provider = get_storage_provider()
-    size = await provider.head_object(bucket, object_path)
+    size = await with_storage_deadline(provider.head_object(bucket, object_path), seconds=VIDEO_HEAD_SECONDS, what="head")
     if size is None:
         raise ChannelVideoObjectNotFoundError(object_path=object_path)
 
@@ -369,7 +424,9 @@ async def confirm_channel_post_video_upload(
         if size > adapter.video_max_bytes:
             raise ChannelVideoTooLargeError(size_bytes=size, max_bytes=adapter.video_max_bytes)
 
-        raw = await provider.download_object(bucket, object_path)
+        raw = await with_storage_deadline(
+            provider.download_object(bucket, object_path), seconds=VIDEO_DOWNLOAD_SECONDS, what="download",
+        )
         original_sha256 = hashlib.sha256(raw).hexdigest()
 
         metadata = parse_mp4_metadata(raw)
@@ -405,11 +462,11 @@ async def confirm_channel_post_video_upload(
         existing_images = await list_channel_post_images_for_version(db, version_id=latest.id)
         if len(existing_images) >= 2:
             raise ChannelVideoRequiresSingleCoverError()
+    except StorageCallTimeoutError:
+        # 시한 초과는 거부가 아니라 일시 실패 — 객체를 지우면 다시 시도할 수 없다(워커가 다음 틱에 다시).
+        raise
     except Exception:
-        try:
-            await provider.delete_object(bucket, object_path)
-        except Exception:
-            logger.exception("영상 confirm 거부 후 GCS 객체 정리 실패 object_path=%s", object_path)
+        await _delete_quietly(provider, bucket, object_path)
         raise
 
     existing_cover = await get_channel_post_image_for_version(db, version_id=latest.id)

@@ -5,6 +5,7 @@ All endpoints require CRON_SECRET via Authorization: Bearer header.
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 import os
 import uuid
@@ -1325,6 +1326,8 @@ async def publication_commands_tick(
     session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     verify_cron(request)
+    # story #4336 PR2 — 공용 작업 줄이 이 틱의 남은 예산을 쓰도록 틱 시작 시각을 잡아 둔다.
+    tick_started = time.monotonic()
     try:
         from app.services.publication_command import process_due_publication_commands
         counts = await process_due_publication_commands(session)
@@ -1431,6 +1434,18 @@ async def publication_commands_tick(
         except Exception as exc:
             logger.exception("operator-alerts retry tick error: %s", exc)
             counts["operator_alerts"] = {"error": "unhandled"}
+        # story #4336 PR2(PO 04:32Z) — 요청 한도를 넘을 수 있는 일(영상 확인 등)의 공용 작업 줄. 같은 피기백 사상(새 Cloud Scheduler 잡 0) ·
+        # 독립 try. 발행 명령이 먼저 쓰고 **남은 틱 예산**(틱 예산 = worker_tick_budget_seconds() · 4716과 같은 식) 안에서만 — 종류마다 최악
+        # 소요가 남은 예산보다 크면 그 틱엔 시작하지 않고 다음 틱으로.
+        try:
+            from app.services.background_jobs import process_due_background_jobs
+            from app.services.publication_command import worker_tick_budget_seconds
+            counts["background_jobs"] = await process_due_background_jobs(
+                session, deadline_monotonic=tick_started + worker_tick_budget_seconds(),
+            )
+        except Exception as exc:
+            logger.exception("background-jobs tick error: %s", exc)
+            counts["background_jobs"] = {"error": "unhandled"}
         return _ok(counts)
     except Exception as exc:
         logger.exception("publication-commands cron error: %s", exc)

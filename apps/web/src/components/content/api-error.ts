@@ -168,6 +168,10 @@ interface KnownError {
 // 화면과 같은 문구를 쓴다.
 const KNOWN_ERRORS: Record<string, KnownError> = {
   MEDIA_NOT_SUPPORTED_PHASE0: { labelKey: 'errorMediaNotSupported', kind: 'unknown' },
+  // story #4336 PR2 — 채널 자산 확인의 스토리지 호출이 시한을 넘김(504 · 이미지 요청 · 영상 요청 안 HEAD) · 영상 확정 작업이 되풀이 실패.
+  // 서버 원문(영어 기술 문장)이 화면에 새지 않게 코드로 받는다. 낱말은 유나 확정 전 잠정.
+  CHANNEL_ASSET_STORAGE_TIMEOUT: { labelKey: 'errorChannelAssetStorageTimeout', kind: 'unknown' },
+  BACKGROUND_JOB_FAILED: { labelKey: 'errorBackgroundJobFailed', kind: 'unknown' },
   SITE_POST_PUBLISH_HUMAN_ONLY: { labelKey: 'errorPublishHumanOnly', kind: 'permission' },
   EXTERNAL_PUBLISH_APPROVAL_REQUIRED: { labelKey: 'errorApprovalRequired', kind: 'approval_required' },
   // story #3953(블루프린트 §1-5, 페드루 PO 정정 2026-09-17) — 조직 owner가 외부

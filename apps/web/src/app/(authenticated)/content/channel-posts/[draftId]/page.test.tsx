@@ -19,6 +19,19 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useChatsHref: () => '/chats',
   useConnectRulesHref: (fallback: string) => fallback,
 }));
+// story #4336 PR2 — 영상 확정 작업 기다리기: 이 파일은 고정 횟수 flush(마이크로태스크)로 진행을 맞춘다 → 타이머(매크로태스크) 없이 작업 상태를
+// 곧바로 한 번 묻는 대역(같은 주소 · 같은 목 응답). 폴링 간격 · 멈춤 규칙은 lib/background-job.test.ts가 따로 본다.
+vi.mock('@/lib/background-job', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/background-job')>();
+  return {
+    ...actual,
+    waitForBackgroundJob: async (orgId: string, jobId: string) => {
+      const res = await fetch(`/api/organizations/${orgId}/background-jobs/${jobId}`);
+      const json = (await res.json()) as { data?: unknown };
+      return json.data ?? null;
+    },
+  };
+});
 vi.mock('next/navigation', () => ({
   useParams: () => useParamsMock(),
 }));
@@ -248,6 +261,8 @@ function stubFetch(opts: {
   videoCodecs?: string[];
   onVideoUploadUrl?: (body: unknown) => { status: number; body: unknown };
   onVideoConfirm?: (body: unknown) => { status: number; body: unknown };
+  /** story #4336 PR2 — 영상 확정 작업 상태 보기를 이 약속이 풀릴 때까지 붙잡는다(느린 작업 흉내). */
+  videoJobGate?: Promise<void>;
   // story #3808(Phase3·3-3 PR5b-2, 페드루 PO 確定 2026-09-12) — 스레드 이어쓰기
   // 상한(image_max_count와 동형 관례). 기본값 0=미지원(기존 시나리오 전부 회귀
   // 0 — 목록 UI 자체가 안 뜬다).
@@ -277,6 +292,7 @@ function stubFetch(opts: {
   let rejectNextDraftRefetch = false;
   let commentReplyRetried = false;
   let currentImages = opts.initialImages ?? [];
+  const confirmedVideoJobs = new Map<string, unknown>();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -452,8 +468,20 @@ function stubFetch(opts: {
         if (ok) {
           const confirmed = result.body as { version?: number; video_url?: string | null };
           currentDraftDetail = { ...currentDraftDetail, current_version: confirmed.version, video_url: confirmed.video_url };
+          // story #4336 PR2 — 영상 확정은 작업화: 202 + 작업. 끝난 작업(아래 GET)이 이 영상을 결과로 돌려준다.
+          confirmedVideoJobs.set('job-video-1', result.body);
+          return { ok: true, status: 202, json: async () => ({ data: { id: 'job-video-1', kind: 'channel_video_confirm', status: 'pending', result: null, error: null }, error: null, meta: null }) };
         }
         return { ok, status: result.status, json: async () => (ok ? { data: result.body, error: null, meta: null } : result.body) };
+      }
+      const jobMatch = url.match(new RegExp(`^/api/organizations/${ORG_ID}/background-jobs/([^/]+)$`));
+      if (jobMatch && (!init || init.method === undefined || init.method === 'GET')) {
+        if (opts.videoJobGate) await opts.videoJobGate;
+        const video = confirmedVideoJobs.get(jobMatch[1] as string);
+        return {
+          ok: true, status: 200,
+          json: async () => ({ data: { id: jobMatch[1], kind: 'channel_video_confirm', status: 'completed', result: { video }, error: null }, error: null, meta: null }),
+        };
       }
       const assetsListMatch = url.match(/\/versions\/([^/]+)\/assets$/);
       if (assetsListMatch && (!init || init.method === undefined || init.method === 'GET')) {
@@ -3333,6 +3361,7 @@ describe('ChannelPostEditPage — 이미지 첨부(T3-M, story #3428)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-image-upload-error"]')?.textContent ?? '';
+    expect(container.querySelector('[data-testid="channel-post-image-upload-error"] p')?.classList.contains('break-keep')).toBe(true); // 유나 CHANGES(PR 4773)
     expect(errorText).toContain('image/gif');
     expect(errorText).toContain('image/jpeg');
     expect(container.querySelector('[data-testid="channel-post-image-attachment-preview"]')).toBeNull();
@@ -5789,6 +5818,39 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     expect(container.querySelector('[data-testid="channel-post-image-attach"] span')?.textContent).toBe('이미지 첨부');
   });
 
+  // story #4336 PR2(PO 05:22Z · 유나) — 영상 확정 작업을 10초 넘게 기다리면 같은 진행 줄에 «시간이 걸리고 있어요 — 창을 닫아도 계속 처리돼요».
+  it('⭐영상 확인을 10초 넘게 기다리면 같은 줄에 «창을 닫아도 계속 처리돼요» · 10초 전엔 없음 · 끝나면 줄째 사라짐', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let release: () => void = () => {};
+      const videoJobGate = new Promise<void>((resolve) => { release = resolve; });
+      stubXhrForVideoUpload();
+      stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1, videoJobGate });
+      await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+      await flush();
+      const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: [new File(['x'], 'a.mp4', { type: 'video/mp4' })] });
+      await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+      await flush();
+      const K = koMessages.content as Record<string, string>;
+      const line = () => container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.textContent ?? null;
+      expect(line()).toBe(K.channelPostsImageConfirming);
+      await act(async () => { vi.advanceTimersByTime(9_000); });
+      expect(line()).toBe(K.channelPostsImageConfirming);
+      await act(async () => { vi.advanceTimersByTime(1_500); });
+      expect(line()).toBe(`${K.channelPostsImageConfirming} ${K.channelPostsVideoConfirmSlow}`);
+      // 유나 CHANGES(PR 4773) — 360에서 «…계속 처리돼 / 요»로 끊기지 않게.
+      expect(container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.classList.contains('break-keep')).toBe(true);
+      await act(async () => { release(); });
+      await flush();
+      await flush();
+      expect(line()).toBeNull();
+      expect(container.querySelector('[data-testid="channel-post-video-preview"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('⭐업로드 왕복 — requesting_url→uploading(%)→confirming→성공, video 상태 반영+커버 라벨 전환', async () => {
     stubXhrForVideoUpload();
     stubFetch({ videoMaxBytes: 100 * 1024 * 1024, imageMaxCount: 1 });
@@ -6011,6 +6073,8 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
     await flush();
 
     const errorText = container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.textContent ?? '';
+    // 유나 CHANGES(PR 4773 · 5865894914) — 오류 문장이 낱말 가운데서 끊기지 않게.
+    expect(container.querySelector('[data-testid="channel-post-video-upload-error"] p')?.classList.contains('break-keep')).toBe(true);
     expect(errorText).toBe('비율이 9:16을 벗어납니다(서버 메시지 예시)');
   });
 

@@ -20,6 +20,8 @@ import uuid
 
 import pytest
 
+from tests.test_3554_instagram_reels import confirm_video_and_wait
+
 from tests.test_620beefc_channel_post_image_upload import (
     _client_for,
     _create_draft,
@@ -168,10 +170,7 @@ async def test_agent_api_key_can_confirm_video_upload_and_is_recorded_as_agent_a
         object_path = _object_path_for_video(org_id, draft_id)
         await _put_raw_object(object_path, raw, content_type="video/mp4")
         async with _client_for(app) as client:
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 201, r.text
         body = r.json()
 
@@ -220,10 +219,7 @@ async def test_agent_from_other_org_gets_403_on_video_confirm():
                 f"/api/v2/organizations/{org_a_id}/channel-posts/drafts/{draft_a_id}/assets/video/upload-url",
                 json={"content_type": "video/mp4"},
             )
-            r_confirm = await client.post(
-                f"/api/v2/organizations/{org_a_id}/channel-posts/drafts/{draft_a_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r_confirm = await confirm_video_and_wait(client, org_a_id, draft_a_id, object_path)
         assert r_upload_url.status_code == 403, r_upload_url.text
         assert r_confirm.status_code == 403, r_confirm.text
     finally:
@@ -255,10 +251,7 @@ async def test_agent_video_over_size_limit_rejected_413():
         object_path = _object_path_for_video(org_id, draft_id)
         await _put_raw_object(object_path, oversized, content_type="video/mp4")
         async with _client_for(app) as client:
-            r = await client.post(
-                f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-                json={"object_path": object_path},
-            )
+            r = await confirm_video_and_wait(client, org_id, draft_id, object_path)
         assert r.status_code == 413, r.text
         assert r.json()["error"]["code"] == "CHANNEL_VIDEO_TOO_LARGE", r.text
     finally:

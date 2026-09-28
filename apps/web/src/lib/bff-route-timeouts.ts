@@ -74,8 +74,13 @@ export const LONG_ROUTES = {
   loopContextPack: route(60_000, 'context_pack_items.py:68,105,106 · embedding_client.py:26(10) · llm_client.py:53(25)'),
   /** 회고 종합 — LLM 25 × 2(종합 · 다음 가설). */
   retroSynthesis: route(50_000, 'retro_synthesis.py:204,273 · llm_client.py:53(25 each)'),
-  /** 채널 게시물 첨부 확정 — GCS 받기 · 올리기(코드에 timeout 없음 · 라이브러리 기본 — 근거 미확인). */
-  channelAssetConfirm: route(null, 'channel_post_images.py:419,434,515 · channel_post_videos.py:357,372 · services/storage/gcs.py(timeout 없음 — 라이브러리 기본 · 미확인)'),
+  /** 채널 게시물 이미지 확정(story #4336 PR2 · PO 04:32Z 요청 안 유지) — 요청 총 예산 40초(`IMAGE_REQUEST_BUDGET_SECONDS`) · 스토리지 호출마다
+   * 시한(HEAD 10 · 받기 20 · 올리기 20 · `with_storage_deadline`) · 넘으면 504 CHANNEL_ASSET_STORAGE_TIMEOUT. 근거 dev 14일 349건 최대 9.3초. */
+  channelAssetConfirm: route(40_000, 'routers/channel_posts.py _confirm_image_upload_or_raise(asyncio.timeout 40) · channel_post_images.py IMAGE_*_SECONDS'),
+  /** 채널 게시물 영상 확정(story #4336 PR2) — 작업화: 요청은 DB + HEAD 한 번(15초)까지 하고 202 · 받기 · MP4 파싱 · 새 버전은 워커(background_jobs). */
+  channelVideoConfirm: route(15_000, 'channel_post_videos.py precheck_channel_post_video_confirm(VIDEO_HEAD_SECONDS 15) → enqueue_background_job · 나머지는 워커'),
+  /** 공용 작업 상태 보기(story #4336 PR2) — DB 읽기뿐(끝난 영상이면 서명 URL 하나). */
+  backgroundJobStatus: dbOnlyRoute('routers/background_jobs.py get_background_job → render_background_job(DB 읽기 · 서명 URL)'),
   /** 외부 호출 사슬(OAuth 콜백) — 채널 최대 3 × 15 · 로그인 코드 교환 + 사용자 정보 2 × 15. */
   externalChain: route(45_000, 'channel_connections.py:746,812,883(15 each) · auth.py:1522,1686(15 each)'),
 } as const satisfies Record<string, LongRoute>;

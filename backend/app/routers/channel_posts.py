@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,7 @@ from app.models.pm import Story
 from app.services.content_rules import get_org_content_rules, lint_content
 from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.publish_error_body import preflight_error_body, preflight_error_facts
+from app.services.background_jobs import background_job_view, enqueue_background_job
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
 from app.services.project_auth import require_project_access, restricted_accessible_project_ids
 from app.services.publication_command import derive_processing_kind, viewer_can_retry
@@ -124,6 +126,7 @@ from app.services.channel_post_videos import (
     ChannelVideoUnsupportedFormatError,
     ChannelVideoUploadFailedError,
     confirm_channel_post_video_upload,
+    precheck_channel_post_video_confirm,
     create_channel_post_video_upload_url,
     get_channel_post_video_for_version,
 )
@@ -906,9 +909,78 @@ async def post_channel_post_video_upload_url(
     return ChannelPostVideoUploadUrlResponse(**result)
 
 
+def _video_confirm_http_error(exc: Exception, locale: str) -> HTTPException | None:
+    """영상 확인 예외 → 요청이 받았을 상태 · 본문(한 자리). 라우트(요청 안 검사)와 워커(작업 실패 본문 · story #4336 PR2)가 같이 쓴다.
+    모르는 예외면 None(호출부가 그대로 올린다)."""
+    from app.services.storage.deadline import StorageCallTimeoutError
+
+    if isinstance(exc, StorageCallTimeoutError):
+        return HTTPException(status_code=504, detail={"code": ASSET_STORAGE_TIMEOUT_CODE, "message": str(exc)})
+    if isinstance(exc, DRAFT_VERSION_VALIDATION_ERRORS):
+        return _draft_version_validation_http_error(exc, locale)
+    if isinstance(exc, ChannelPostDraftNotFoundError):
+        return HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)})
+    if isinstance(exc, ChannelVideoUnsupportedError):
+        return HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
+        )
+    if isinstance(exc, ChannelVideoPathNotScopedError):
+        return HTTPException(status_code=403, detail={"code": "CHANNEL_VIDEO_PATH_NOT_SCOPED", "message": str(exc)})
+    if isinstance(exc, ChannelVideoObjectNotFoundError):
+        return HTTPException(status_code=404, detail={"code": "CHANNEL_VIDEO_OBJECT_NOT_FOUND", "message": str(exc)})
+    if isinstance(exc, ChannelVideoTooLargeError):
+        return HTTPException(
+            status_code=413,
+            detail={
+                "code": "CHANNEL_VIDEO_TOO_LARGE", "message": str(exc),
+                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
+            },
+        )
+    if isinstance(exc, ChannelVideoUnparsableError):
+        return HTTPException(status_code=422, detail={"code": "CHANNEL_VIDEO_UNPARSABLE", "message": str(exc)})
+    if isinstance(exc, ChannelVideoDurationExceededError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_DURATION_EXCEEDED", "message": str(exc),
+                "duration_seconds": exc.duration_seconds, "max_seconds": exc.max_seconds,
+            },
+        )
+    if isinstance(exc, ChannelVideoDurationTooShortError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_DURATION_TOO_SHORT", "message": str(exc),
+                "duration_seconds": exc.duration_seconds, "min_seconds": exc.min_seconds,
+            },
+        )
+    if isinstance(exc, ChannelVideoAspectRatioError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_ASPECT_RATIO_REJECTED", "message": str(exc),
+                "aspect_ratio": exc.aspect_ratio, "target": exc.target, "tolerance": exc.tolerance,
+            },
+        )
+    if isinstance(exc, ChannelVideoCodecUnsupportedError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "CHANNEL_VIDEO_CODEC_UNSUPPORTED", "message": str(exc),
+                "codec": exc.codec, "allowed_codecs": list(exc.allowed),
+            },
+        )
+    if isinstance(exc, ChannelVideoUploadFailedError):
+        return HTTPException(status_code=503, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)})
+    if isinstance(exc, ChannelVideoRequiresSingleCoverError):
+        return HTTPException(
+            status_code=422, detail={"code": "CHANNEL_VIDEO_REQUIRES_SINGLE_COVER", "message": str(exc)},
+        )
+    return None
+
+
 @router.post(
-    "/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm",
-    response_model=ChannelPostVideoResponse, status_code=201,
+    "/{org_id}/channel-posts/drafts/{draft_id}/assets/video/confirm", status_code=202,
 )
 async def post_channel_post_video_confirm(
     org_id: uuid.UUID, draft_id: uuid.UUID, body: ConfirmChannelPostVideoUploadRequest,
@@ -918,7 +990,7 @@ async def post_channel_post_video_confirm(
     # story #4352 — 초안 버전 검사 예외 본문을 요청 언어로(저장 라우트와 같은 locale DI).
     locale: str | None = None,
     accept_language: str | None = Header(None, alias="Accept-Language"),
-) -> ChannelPostVideoResponse:
+) -> JSONResponse:
     """story #3554(Phase2, 페드루 PO 確定 2026-09-06①~④) — 업로드 확인+MP4 규격
     검증(순수 파이썬 박스 파서, ffmpeg 없음)+계보. 이 호출도 새 버전을 만든다
     (이미지 confirm과 동형 — 텍스트 편집과 같은 불변 버전 축)."""
@@ -934,72 +1006,32 @@ async def post_channel_post_video_confirm(
     )
     member_id, actor_type = resolved.id, resolved.type
 
+    # story #4336 PR2(PO 04:32Z) — 영상 확인은 작업화: 요청은 싼 검사(DB · HEAD)까지 하고 작업을 넣은 뒤 곧바로 202. 내려받기 · MP4 파싱 ·
+    # 새 버전은 워커(`background_jobs` · channel_video_confirm)가 한다. 화면은 작업 id로 상태를 다시 묻고, 실패면 이 라우트가 예전에 냈을
+    # 같은 본문(`_video_confirm_http_error`)을 받는다.
+    request_locale = resolve_locale_from_request(locale, accept_language)
     try:
-        version, video_row = await confirm_channel_post_video_upload(
-            db, org_id=org_id, draft_id=draft_id, object_path=body.object_path,
-            member_id=member_id, member_kind=actor_type,
-        )
-    except DRAFT_VERSION_VALIDATION_ERRORS as exc:
-        raise _draft_version_validation_http_error(exc, resolve_locale_from_request(locale, accept_language)) from exc
-    except ChannelPostDraftNotFoundError as exc:
-        raise HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(exc)}) from exc
-    except ChannelVideoUnsupportedError as exc:
-        raise HTTPException(
-            status_code=422, detail={"code": "CHANNEL_VIDEO_UNSUPPORTED", "message": str(exc), "channel": exc.channel},
-        ) from exc
-    except ChannelVideoPathNotScopedError as exc:
-        raise HTTPException(status_code=403, detail={"code": "CHANNEL_VIDEO_PATH_NOT_SCOPED", "message": str(exc)}) from exc
-    except ChannelVideoObjectNotFoundError as exc:
-        raise HTTPException(status_code=404, detail={"code": "CHANNEL_VIDEO_OBJECT_NOT_FOUND", "message": str(exc)}) from exc
-    except ChannelVideoTooLargeError as exc:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "code": "CHANNEL_VIDEO_TOO_LARGE", "message": str(exc),
-                "size_bytes": exc.size_bytes, "max_bytes": exc.max_bytes,
-            },
-        ) from exc
-    except ChannelVideoUnparsableError as exc:
-        raise HTTPException(status_code=422, detail={"code": "CHANNEL_VIDEO_UNPARSABLE", "message": str(exc)}) from exc
-    except ChannelVideoDurationExceededError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "CHANNEL_VIDEO_DURATION_EXCEEDED", "message": str(exc),
-                "duration_seconds": exc.duration_seconds, "max_seconds": exc.max_seconds,
-            },
-        ) from exc
-    except ChannelVideoDurationTooShortError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "CHANNEL_VIDEO_DURATION_TOO_SHORT", "message": str(exc),
-                "duration_seconds": exc.duration_seconds, "min_seconds": exc.min_seconds,
-            },
-        ) from exc
-    except ChannelVideoAspectRatioError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "CHANNEL_VIDEO_ASPECT_RATIO_REJECTED", "message": str(exc),
-                "aspect_ratio": exc.aspect_ratio, "target": exc.target, "tolerance": exc.tolerance,
-            },
-        ) from exc
-    except ChannelVideoCodecUnsupportedError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "CHANNEL_VIDEO_CODEC_UNSUPPORTED", "message": str(exc),
-                "codec": exc.codec, "allowed_codecs": list(exc.allowed),
-            },
-        ) from exc
-    except ChannelVideoUploadFailedError as exc:
-        raise HTTPException(status_code=503, detail={"code": "CHANNEL_VIDEO_UPLOAD_FAILED", "message": str(exc)}) from exc
-    except ChannelVideoRequiresSingleCoverError as exc:
-        raise HTTPException(
-            status_code=422, detail={"code": "CHANNEL_VIDEO_REQUIRES_SINGLE_COVER", "message": str(exc)},
-        ) from exc
-    return _video_response(version, video_row)
+        await precheck_channel_post_video_confirm(db, org_id=org_id, draft_id=draft_id, object_path=body.object_path)
+    except Exception as exc:  # noqa: BLE001 — 아는 예외만 본문으로, 나머지는 그대로
+        http_error = _video_confirm_http_error(exc, request_locale)
+        if http_error is None:
+            raise
+        raise http_error from exc
+    job = await enqueue_background_job(
+        db, org_id=org_id, kind="channel_video_confirm", requested_by_member_id=member_id,
+        payload={
+            "draft_id": str(draft_id), "object_path": body.object_path,
+            "member_id": str(member_id), "member_kind": actor_type, "locale": request_locale,
+        },
+    )
+    await db.commit()
+    # 프록시(BFF)가 {data: …}로 감싼다 — 백엔드는 작업 모양 그대로(다른 채널 라우트와 같은 관례).
+    return JSONResponse(status_code=202, content=background_job_view(job))
+
+
+# story #4336 PR2 — 채널 이미지 확인 · 가져오기 요청의 총 예산(BFF 55s 아래 · dev 349건 최대 9.3s).
+IMAGE_REQUEST_BUDGET_SECONDS = 40.0
+ASSET_STORAGE_TIMEOUT_CODE = "CHANNEL_ASSET_STORAGE_TIMEOUT"
 
 
 async def _confirm_image_upload_or_raise(
@@ -1009,9 +1041,23 @@ async def _confirm_image_upload_or_raise(
     마지막 걸음)과 `post_channel_post_image_import`(#3666 신규, 에이전트 원콜 base64 입구)
     둘 다 `confirm_channel_post_image_upload`가 던지는 같은 예외 집합을 같은 HTTP 코드/
     바디로 매핑해야 한다 — 그 매핑을 한 곳에만 두고(들쭉날쭉 금지 원칙) 호출부는 아직
-    await 안 된 코루틴만 넘긴다."""
+    await 안 된 코루틴만 넘긴다.
+
+    story #4336 PR2(PO 04:32Z) — 요청 안에 두되 총 예산 40s(`IMAGE_REQUEST_BUDGET_SECONDS`) · 스토리지 호출마다 시한
+    (`channel_post_images.IMAGE_*_SECONDS`). 넘으면 504 `CHANNEL_ASSET_STORAGE_TIMEOUT`(코드 있는 본문 · 문장은 화면 카탈로그).
+    근거 = dev 14일 349건 최대 9.3s."""
+    import asyncio
+
+    from app.services.storage.deadline import StorageCallTimeoutError
+
     try:
-        return await coro
+        async with asyncio.timeout(IMAGE_REQUEST_BUDGET_SECONDS):
+            return await coro
+    except (TimeoutError, StorageCallTimeoutError) as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={"code": ASSET_STORAGE_TIMEOUT_CODE, "message": str(exc) or "channel asset confirm exceeded its time budget"},
+        ) from exc
     except DRAFT_VERSION_VALIDATION_ERRORS as exc:
         # story #4352(까디르 P1) — confirm은 새 버전을 쓰며 초안 버전 검사를 탄다. 매핑을 이 도우미 안에 둬 확정 · 가져오기 두 라우트가
         # 한 자리를 쓴다(예전엔 확정 라우트만 바깥에서 잡아 가져오기는 코드 없는 500).
