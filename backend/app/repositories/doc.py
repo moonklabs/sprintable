@@ -147,6 +147,16 @@ class DocRepository(BaseRepository[Doc]):
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
+    async def count_live(self, project_id: uuid.UUID, tags: list[str] | None = None) -> int:
+        """story #4376 — 트리 총량: 프로젝트의 살아 있는 문서 수(태그를 주면 그 태그를 모두 가진 문서 수 · search_by_tags와 같은 조건)."""
+        from sqlalchemy import Text, cast, func
+        from sqlalchemy.dialects.postgresql import ARRAY
+
+        q = select(func.count()).select_from(Doc).where(self._org_filter(), Doc.project_id == project_id, Doc.deleted_at.is_(None))
+        if tags:
+            q = q.where(Doc.tags.contains(cast(tags, ARRAY(Text))))
+        return (await self.session.execute(q)).scalar_one()
+
     async def search_by_tags(
         self, project_id: uuid.UUID, tags: list[str], limit: int = 500, cursor: str | None = None,
     ) -> list[Doc]:

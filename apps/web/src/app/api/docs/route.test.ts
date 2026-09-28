@@ -117,6 +117,28 @@ describe('GET /api/docs', () => {
     expect(body.data).toEqual({ id: 'doc-1', slug: 'my-doc' });
   });
 
+  // story #4376 — 사이드바 트리는 한 번에: tree=true면 limit 없이 list({ tree: true }) · BE가 낸 total을 meta에 그대로.
+  it('tree=true는 limit 없이 list({ tree: true, tags, cursor })를 타고 총량을 meta.totalCount(#3761 정본)로 전달한다', async () => {
+    listMock.mockResolvedValue({ items: [{ id: 'doc-1' }, { id: 'doc-2' }], hasMore: false, nextCursor: null, total: 2 });
+
+    const response = await GET(new Request('http://localhost/api/docs?project_id=project-1&tree=true&tags=spec'));
+    const body = await response.json();
+
+    expect(listMock).toHaveBeenCalledWith('project-1', { tree: true, cursor: null, tags: ['spec'] });
+    expect(body.data).toHaveLength(2);
+    expect(body.meta).toEqual({ hasMore: false, nextCursor: null, totalCount: 2 });
+  });
+
+  it('tree=true 상한을 넘는 프로젝트 — hasMore · nextCursor · totalCount를 그대로(«받은 수 / 총량»의 원천)', async () => {
+    listMock.mockResolvedValue({ items: [{ id: 'doc-1' }], hasMore: true, nextCursor: '0:doc-1', total: 6001 });
+
+    const response = await GET(new Request('http://localhost/api/docs?project_id=project-1&tree=true&cursor=0:doc-0'));
+    const body = await response.json();
+
+    expect(listMock).toHaveBeenCalledWith('project-1', { tree: true, cursor: '0:doc-0', tags: undefined });
+    expect(body.meta).toEqual({ hasMore: true, nextCursor: '0:doc-1', totalCount: 6001 });
+  });
+
   it('returns 401 when not authenticated', async () => {
     getAuthContext.mockResolvedValue(null);
     const response = await GET(new Request('http://localhost/api/docs?project_id=project-1'));

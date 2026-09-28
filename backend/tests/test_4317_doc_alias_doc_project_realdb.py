@@ -99,7 +99,7 @@ async def test_slug_detail_404_shape_for_alias_whose_doc_is_elsewhere(anyio_back
         async with Session() as session:
             await _seed(session)
             repo = DocRepository(session, ORG)
-            kwargs = dict(project_id=PROJ, parent_id=None, doc_type=None, tags=None, q=None, ids=None, limit=500, cursor=None, repo=repo)
+            kwargs = dict(project_id=PROJ, parent_id=None, doc_type=None, tags=None, q=None, ids=None, limit=500, cursor=None, tree=False, repo=repo)
             moved = await list_docs(slug="old-plan", **kwargs)
             assert moved["data"] == []  # FE getBySlug → «Doc not found» → 404
             same = await list_docs(slug="spec-v1", **kwargs)

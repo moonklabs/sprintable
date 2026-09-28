@@ -3718,7 +3718,8 @@
         "end": "끝"
       },
       "toggleDefaultTitle": "토글 제목"
-    }
+    },
+    "treeLoadedOfTotal": "전체 {total}개 중 {loaded}개"
   },
   "rewards": {
     "title": "리워드",

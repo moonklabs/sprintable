@@ -40,6 +40,18 @@ export async function GET(request: Request) {
     // 일반 list() 분기로 떨어지고 있었다("tree 분기"는 실재하지 않았다) — 사이드바 문서
     // 트리(기본 진입)도 태그 필터와 완전히 같은 커서 경로를 탄다. limit='20' 죽은
     // 파라미터도 여기서 함께 정리(BE가 이제 실제로 cursor/limit을 받는다).
+    // story #4376 — 사이드바 트리는 한 번에(BE 상한까지 · limit 무시) + total. 20개씩 층 구분 없이 받아 방금 만든 문서 · 폴더가
+    // 뒤 쪽에 떨어지면 새로고침 뒤 트리에서 사라졌다. 상한을 넘는 프로젝트만 hasMore · nextCursor로 이어 받는다.
+    if (searchParams.get('tree') === 'true') {
+      const tagsParam = searchParams.get('tags');
+      const result = await service.list(projectId, {
+        tree: true,
+        cursor: searchParams.get('cursor'),
+        tags: tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
+      });
+      return apiSuccess(result.items, { hasMore: result.hasMore, nextCursor: result.nextCursor, totalCount: result.total ?? null });
+    }
+
     const pageInput = parseCursorPageInput({
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),

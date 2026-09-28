@@ -3718,7 +3718,8 @@
         "end": "End"
       },
       "toggleDefaultTitle": "Toggle title"
-    }
+    },
+    "treeLoadedOfTotal": "{loaded} of {total} loaded"
   },
   "rewards": {
     "title": "Rewards",

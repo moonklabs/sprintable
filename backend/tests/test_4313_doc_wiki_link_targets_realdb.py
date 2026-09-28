@@ -170,7 +170,7 @@ async def test_slug_detail_response_carries_wiki_link_targets_and_other_paths_do
             repo = DocRepository(session, ORG)
             detail = await list_docs(
                 project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug="main-doc", q=None, ids=None,
-                limit=500, cursor=None, repo=repo,
+                limit=500, cursor=None, tree=False, repo=repo,
             )
             assert [d.slug for d in detail["data"]] == ["main-doc"]
             assert detail["data"][0].wiki_link_targets == {
@@ -180,14 +180,14 @@ async def test_slug_detail_response_carries_wiki_link_targets_and_other_paths_do
 
             no_links = await list_docs(
                 project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug="onboarding", q=None, ids=None,
-                limit=500, cursor=None, repo=repo,
+                limit=500, cursor=None, tree=False, repo=repo,
             )
             assert no_links["data"][0].wiki_link_targets == {}
 
             # 다건 경로(목록)는 필드를 채우지 않는다(additive · None).
             listing = await list_docs(
                 project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug=None, q=None, ids=None,
-                limit=500, cursor=None, repo=repo,
+                limit=500, cursor=None, tree=False, repo=repo,
             )
             assert listing["data"] and all(d.wiki_link_targets is None for d in listing["data"])
             await _cleanup(session)

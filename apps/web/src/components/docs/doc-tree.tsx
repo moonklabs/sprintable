@@ -585,7 +585,10 @@ export const pointerRowCollision: CollisionDetection = ({ droppableContainers, d
 
 export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual', onMenuMove, hasMore = false }: DocTreeProps) {
   const tDocs = useTranslations('docs');
-  const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => compareDocsForSort(a, b, sortMode));
+  // story #4376 — 부모가 이 목록에 없는 문서(부모가 지워짐 · 태그 필터로 부모가 빠짐)도 뿌리에 보인다. 예전엔 아무 데도 안 그려져
+  // 트리에서 사라졌다(dev: 부모가 목록에 없는 자식 1개). 트리를 한 번에 받으니 «부모가 아직 안 옴»은 이제 상한을 넘는 프로젝트에서만.
+  const docIds = new Set(docs.map((entry) => entry.id));
+  const rootDocs = docs.filter((entry) => !entry.parent_id || !docIds.has(entry.parent_id)).sort((a, b) => compareDocsForSort(a, b, sortMode));
   // story #2167: 이름순/수정일순 보기에서는 드래그 재정렬을 막는다 — sort_order 기반 드롭
   // 위치 계산이 화면 순서와 안 맞아 엉뚱한 곳에 꽂히는 것을 막기 위함(수동 순서 자체는
   // 안전하게 보존되지만, 사용자가 보는 순서와 실제 재정렬 결과가 어긋나는 혼란을 원천 차단).
