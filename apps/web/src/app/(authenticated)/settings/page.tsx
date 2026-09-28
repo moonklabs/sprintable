@@ -949,7 +949,8 @@ export default function SettingsPage() {
                       <div className="mb-3 flex items-center overflow-x-auto border-b pb-2">
                         <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('notifications')}</span>
                         <div className="ml-auto flex shrink-0 gap-6 pl-4 text-center text-xs font-medium text-muted-foreground">
-                          <span className="w-14">{t('notification_channel_in_app')}</span>
+                          {/* [SID:4375] 행마다 «앱 내» 토글의 이름 = 행 이름(이벤트) + 이 열 머리(aria-labelledby) */}
+                          <span id="notif-col-in-app" className="w-14">{t('notification_channel_in_app')}</span>
                           <span className="w-14 opacity-40">{t('notification_channel_webhook')}</span>
                           <span className="w-14 opacity-40">{t('notification_channel_email')}</span>
                         </div>
@@ -965,6 +966,7 @@ export default function SettingsPage() {
                               type="button"
                               disabled={savingPreferenceLevel}
                               onClick={() => void handleSetGlobalPreferenceLevel(level)}
+                              aria-pressed={globalPreferenceLevel === level}
                               className={`rounded px-2 py-1 text-xs font-medium transition disabled:opacity-50 ${globalPreferenceLevel === level ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                             >
                               {t(`notificationLevel_${level}`)}
@@ -1002,15 +1004,19 @@ export default function SettingsPage() {
                                       key={eventType}
                                       className="flex items-center px-3 py-2.5"
                                     >
-                                      <span className="min-w-0 flex-1 text-sm text-foreground">
+                                      <span id={`notif-event-${eventType}`} className="min-w-0 flex-1 text-sm text-foreground">
                                         {t(`event_${eventType}`)}
                                       </span>
                                       <div className="ml-auto flex shrink-0 items-center gap-6">
                                         {/* in_app 토글 */}
                                         <div className="flex w-14 justify-center">
+                                          {/* [SID:4379] 스위치 모양 켜고 끄기 — 화면 읽기가 «스위치 · 켬/끔»으로 읽게(예전엔 «단추»만 · 켜짐 모름). */}
                                           <button
                                             type="button"
+                                            role="switch"
+                                            aria-checked={enabled}
                                             onClick={() => void toggleSetting(eventType, enabled)}
+                                            aria-labelledby={`notif-event-${eventType} notif-col-in-app`}
                                             className={`relative h-6 w-11 rounded-full transition ${enabled ? 'bg-primary' : 'bg-muted'}`}
                                           >
                                             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />

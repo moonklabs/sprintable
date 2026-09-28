@@ -266,3 +266,20 @@ describe('NewConversationModal — 안내는 스크롤 목록 밖(story #4193)',
     assertAlertOutsideScroll(koMessages.chats.create);
   });
 });
+
+// [SID:4379] 구성원 고르기는 여럿 고르기(켜고 끄기) — 고름을 색으로만 보이던 것을 보조기기에도(aria-pressed).
+describe('NewConversationModal — 구성원 단추 눌림 상태([SID:4379])', () => {
+  it('구성원 단추는 aria-pressed — 누르면 true · 다시 누르면 false', async () => {
+    vi.stubGlobal('fetch', mockFetches(() => ({ ok: true, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(<NewConversationModal projectId={PROJECT_ID} onClose={() => {}} onCreated={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const bot = () => [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('점검봇'))!;
+    expect(bot().getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { bot().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(bot().getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { bot().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(bot().getAttribute('aria-pressed')).toBe('false');
+  });
+});

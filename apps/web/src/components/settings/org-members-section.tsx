@@ -329,6 +329,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                             <button
                               type="button"
                               onClick={() => toggleInviteProject(p.id)}
+                              aria-pressed={selected}
                               className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition ${
                                 selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
                               }`}

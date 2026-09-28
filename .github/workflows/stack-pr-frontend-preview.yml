@@ -148,6 +148,9 @@ jobs:
       - name: "Verify MIGRATED_RESOURCES sync (story #1971 regression guard)"
         run: pnpm --filter web verify:migrated-resources-sync
 
+      - name: "Verify no stateless toggles (story #4379 regression guard)"
+        run: pnpm --filter web verify:no-stateless-toggle
+
       - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
         run: pnpm --filter web verify:no-new-raw-fetch-api
 

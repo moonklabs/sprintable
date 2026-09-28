@@ -147,6 +147,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                   <button
                     type="button"
                     onClick={() => toggle(m.id)}
+                    aria-pressed={selected.includes(m.id)}
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${
                       selected.includes(m.id)
                         ? 'bg-primary/10 text-primary'

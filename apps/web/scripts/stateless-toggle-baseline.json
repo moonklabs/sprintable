@@ -1,0 +1,163 @@
+{
+  "_comment": [
+    "story #4379 — verify-no-stateless-toggle.ts 기준선 · 허용목록.",
+    "allow: 결함 아님 — 누르면 할 일(«보관 보기 ↔ 숨기기» · «편집 ↔ 완료») 또는 지금 상태(«허용됨 ↔ 차단됨»)를 이미 글자로 말하는 단추(상태 속성을 붙이면 같은 것을 두 번 말함). 파일 + onClick 글자 조각 + 개수로 요소를 가리킨다.",
+    "counts: 기준선(줄이기만) — 첫 전수 때 남은 펼침 · 접기 등 다른 부류. #4380에서 0으로. 파일별 수를 넘으면 FAIL."
+  ],
+  "allow": [
+    {
+      "file": "app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx",
+      "match": "setIsEditing((v) => !v)",
+      "count": 1,
+      "why": "«편집» ↔ «취소»를 글자로 말함"
+    },
+    {
+      "file": "app/(authenticated)/[ws]/[proj]/retro/page.tsx",
+      "match": "setShowCreateForm((v) => !v)",
+      "count": 1,
+      "why": "«새 회고» ↔ «취소»"
+    },
+    {
+      "file": "app/(authenticated)/content/channel-posts/page.tsx",
+      "match": "setShowArchived((v) => !v)",
+      "count": 1,
+      "why": "«보관 보기» ↔ «보관 숨기기»"
+    },
+    {
+      "file": "app/(authenticated)/content/channel-posts/page.tsx",
+      "match": "handleArchiveToggle(",
+      "count": 1,
+      "why": "행 메뉴 «보관» ↔ «보관 해제»"
+    },
+    {
+      "file": "app/(authenticated)/content/page.tsx",
+      "match": "setShowArchived((v) => !v)",
+      "count": 1,
+      "why": "«보관 보기» ↔ «보관 숨기기»"
+    },
+    {
+      "file": "app/(authenticated)/content/page.tsx",
+      "match": "handleArchiveToggle(",
+      "count": 1,
+      "why": "행 메뉴 «보관» ↔ «보관 해제»"
+    },
+    {
+      "file": "app/(authenticated)/inbox/page.tsx",
+      "match": "toggleRead(",
+      "count": 1,
+      "why": "«읽음으로 표시» ↔ «안 읽음으로 표시»"
+    },
+    {
+      "file": "app/(authenticated)/organization/insights-board/page.tsx",
+      "match": "setShowArchived((v) => !v)",
+      "count": 1,
+      "why": "«보관 보기» ↔ «보관 숨기기»"
+    },
+    {
+      "file": "app/(authenticated)/organization/workforce/[id]/page.tsx",
+      "match": "handleToggleActive(",
+      "count": 1,
+      "why": "«비활성화» ↔ «활성화»"
+    },
+    {
+      "file": "app/(authenticated)/settings/page.tsx",
+      "match": "toggleCategory(",
+      "count": 1,
+      "why": "«모두 켜기» ↔ «모두 끄기»"
+    },
+    {
+      "file": "components/agents/access-matrix-tab.tsx",
+      "match": "handleToggle(agent.id, project)",
+      "count": 1,
+      "why": "이름이 지금 상태(«허용됨» ↔ «차단됨»)를 말함"
+    },
+    {
+      "file": "components/agents/agent-management-tab.tsx",
+      "match": "requestToggle(agent)",
+      "count": 1,
+      "why": "«비활성화» ↔ «활성화»(이름에 순번 + 보이는 글)"
+    },
+    {
+      "file": "components/channel-connect/external-publish-pause-card.tsx",
+      "match": "handleToggle(",
+      "count": 2,
+      "why": "«재개» · «일시 정지» — 따로 있는 동작 단추 둘"
+    },
+    {
+      "file": "components/kanban/story-detail-panel.tsx",
+      "match": "setShowLabelPicker((v) => !v)",
+      "count": 1,
+      "why": "«추가» ↔ «닫기»"
+    },
+    {
+      "file": "components/kanban/story-detail-panel.tsx",
+      "match": "handleToggleDepType(d)",
+      "count": 4,
+      "why": "↔ «관계 유형 바꾸기»(동작 · 이름 dep.toggleType)"
+    },
+    {
+      "file": "components/retro/sprint-close-cockpit.tsx",
+      "match": "setEditing((v) => !v)",
+      "count": 2,
+      "why": "«편집» ↔ «편집 완료»(종합 · 추천 두 칸)"
+    },
+    {
+      "file": "components/settings/agent-project-access-section.tsx",
+      "match": "handleToggle(project.id)",
+      "count": 1,
+      "why": "보이는 글이 지금 상태(«허용» ↔ «차단»)를 말함"
+    },
+    {
+      "file": "components/settings/project-access-section.tsx",
+      "match": "handleToggle(member)",
+      "count": 1,
+      "why": "보이는 글이 지금 상태(«허용» ↔ «차단»)를 말함"
+    },
+    {
+      "file": "components/settings/two-factor-section.tsx",
+      "match": "setDisableWithPassword((v) => !v)",
+      "count": 1,
+      "why": "«기기를 잃었어요» ↔ «코드로 대신» — 방식 바꾸기를 글자로 말함"
+    },
+    {
+      "file": "components/settings/workflow-trigger-types-section.tsx",
+      "match": "handleToggle(tt)",
+      "count": 1,
+      "why": "«끄기» ↔ «켜기»(이름에 순번 + 동작)"
+    },
+    {
+      "file": "components/standup/standup-feedback-dialog.tsx",
+      "match": "setShowFeedbackForm((prev) => !prev)",
+      "count": 1,
+      "why": "«피드백 추가» ↔ «취소»"
+    }
+  ],
+  "counts": {
+    "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx": 3,
+    "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx": 1,
+    "app/(authenticated)/chats/layout.tsx": 1,
+    "app/(authenticated)/organization/events/page.tsx": 1,
+    "app/(authenticated)/organization/trust/trust-utils.tsx": 1,
+    "app/(authenticated)/settings/page.tsx": 1,
+    "components/agents/agent-run-tool-calls-section.tsx": 1,
+    "components/cage/gate-evidence.tsx": 1,
+    "components/canvas/artifact-version-rail.tsx": 1,
+    "components/chat/embed-group.tsx": 2,
+    "components/chat/now-strip.tsx": 1,
+    "components/docs/extensions/toggle-block.tsx": 1,
+    "components/docs/policy-doc-browser.tsx": 1,
+    "components/epics/epic-swimlane-board.tsx": 1,
+    "components/flow/flow-map-canvas.tsx": 2,
+    "components/flow/orphan-stories-panel.tsx": 1,
+    "components/flow/unattached-bucket.tsx": 1,
+    "components/inbox/approvals-queue.tsx": 1,
+    "components/kanban/kanban-column.tsx": 2,
+    "components/kanban/kanban-list-view.tsx": 1,
+    "components/kanban/story-detail-panel.tsx": 1,
+    "components/locale-switcher.tsx": 1,
+    "components/loops/artifact-preview.tsx": 2,
+    "components/settings/org-members-section.tsx": 1,
+    "components/storage/storage-folder-tree.tsx": 1,
+    "components/verify/evidence-section.tsx": 2
+  }
+}

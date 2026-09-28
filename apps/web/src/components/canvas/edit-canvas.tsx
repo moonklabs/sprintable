@@ -136,6 +136,7 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
         <button
           type="button"
           onClick={() => setPinToolActive((v) => !v)}
+          aria-pressed={pinToolActive}
           disabled={!artifactId}
           title={artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}
           className={cn(
