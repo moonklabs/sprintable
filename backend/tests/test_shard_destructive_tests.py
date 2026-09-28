@@ -2311,3 +2311,32 @@ def test_4283_ac5_step_directly_changed_slow_test_is_still_red(tmp_path):
     code, out, calls = _run_step(tmp_path, targets=[_T2636], first=_over, rerun=_over, value_overrides=values, collect_files=[_T2636])
     assert code != 0 and calls == 2, out
     assert f"::error::러너 정규화 절대 가드 초과(story #4152): {_T2636}" in out
+
+
+# story #4283(까디르 QA 07:56Z) — 이 PR이 CI 실측 중앙값으로 고친 다섯 weight는 절대 판정 **대상**이어야 한다(provisional이면
+# provisional_files_in()이 판정에서 아예 빼 표의 «선 70 → 125»가 안 먹는다 — test_4190에 provisional:true가 남았던 결함).
+_WEIGHTS_4283 = {
+    "tests/test_3808_x_publish_budget.py": 29.0,
+    "tests/test_4264_failure_classification_realdb.py": 26.0,
+    "tests/test_4190_site_post_recipe_hooks_realdb.py": 50.0,
+    "tests/test_4258_stop_notice_outbox_realdb.py": 28.0,
+    "tests/test_3734_post_archive.py": 27.0,
+}
+
+
+@pytest.mark.parametrize("path", sorted(_WEIGHTS_4283))
+def test_4283_updated_weights_are_judged_at_the_new_line(path):
+    mod = _load()
+    weights = mod.load_weights()
+    provisional = mod.provisional_files_in(mod.load_raw_entries())
+    assert weights[path] == _WEIGHTS_4283[path]
+    assert path not in provisional
+    line = mod.absolute_slow_threshold_sec(weights[path])
+    red, _ = mod.slow_files_absolute(
+        {path: line + 5}, weights, provisional_files=provisional, changed_files=frozenset({path}),
+    )
+    assert red == [path]
+    red, _ = mod.slow_files_absolute(
+        {path: line - 5}, weights, provisional_files=provisional, changed_files=frozenset({path}),
+    )
+    assert red == []
