@@ -47,7 +47,8 @@ describe('CommandPalette — 앵커 목적지는 현재 프로젝트(?p=)를 싣
       );
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(label));
+    // story #4380 — 항목 = Autocomplete option(div role="option" · 버튼이면 입력칸 초점을 뺏는다).
+    const btn = [...document.querySelectorAll('[role="option"]')].find((b) => b.textContent?.includes(label));
     expect(btn).toBeDefined();
     await act(async () => { btn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith(href);
