@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -57,8 +57,12 @@ export function EntityDispatchPanel({
   const moreKeys = usePortalMenuKeys({ open: moreOpen, onClose: closeMore, popoverRef: moreMenuRef, triggerRef: moreBtnRef, kind: 'menu' });
   const { addToast } = useToast();
   const t = useTranslations('board');
-  // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
-  const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
+  // story #4357(유나 공통 모양 · 4348과 같은 결) — 담당자가 없어 꺼진 까닭은 title(호버)이 아니라 **보이는 한 줄**. 버튼은
+  // aria-disabled(탭 순서에 남아 초점 · 화면 읽기가 닿음) + aria-describedby로 그 줄을 가리키고, 누름은 handleDispatch 첫 줄이 막는다.
+  // 전달 중(dispatching)은 잠깐 꺼지는 것이라 까닭 줄 없이 네이티브 disabled. 켜져 있을 때 title은 «무엇을 하나» 설명(f5ae74e4 · Kickoff와 구분).
+  const needsAssignee = !assigneeId;
+  const reasonId = useId();
+  const menuReasonId = useId();
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 아래
   // members 로드 effect가 재요청되게 얹는다(다른 opt-in 컴포넌트와 동일 패턴).
   const orgSyncVersion = useOrgSyncVersion();
@@ -145,71 +149,87 @@ export function EntityDispatchPanel({
   }, [assigneeId, dispatching, entityType, entityId, projectId, onAssigneePatched, addToast, t]);
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <select
-        value={assigneeId}
-        onChange={(e) => setAssigneeId(e.target.value)}
-        className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-      >
-        <option value="">{t('assigneeSelectPlaceholder')}</option>
-        {members.map((m) => (
-          <option key={m.id} value={m.id}>
-            {rowLabels.get(m.id)}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        disabled={!assigneeId || dispatching}
-        onClick={() => void handleDispatch()}
-        title={dispatchTitle}
-        className={cn(
-          'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
-          mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
-          assigneeId && !dispatching
-            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-            : 'cursor-not-allowed bg-muted text-muted-foreground',
-        )}
-      >
-        <Zap className="size-3.5" />
-        {dispatching ? t('dispatching') : t('dispatch')}
-      </button>
-      {mobileMode === 'assignee-only' && (
-        <div ref={moreRef} className="relative md:hidden">
-          <button
-            ref={moreBtnRef}
-            {...moreKeys.triggerProps}
-            type="button"
-            onClick={() => setMoreOpen((o) => !o)}
-            // story #4355 — 열린 채 초점이 트리거에 남아도(포인터로 연 뒤 등) Esc로 닫힘 · Tab은 메뉴로(공용 훅).
-            onKeyDown={moreKeys.onTriggerKeyDown}
-            className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
-            aria-label={t('moreOptionsAria')}
-          >
-            <MoreHorizontal className="size-4" />
-          </button>
-          {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
-          {moreOpen && (
-            <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!assigneeId || dispatching}
-                onClick={() => { void handleDispatch(); setMoreOpen(false); }}
-                title={dispatchTitle}
-                className={cn(
-                  'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
-                  assigneeId && !dispatching
-                    ? 'text-foreground hover:bg-muted'
-                    : 'cursor-not-allowed text-muted-foreground',
-                )}
-              >
-                <Zap className="size-3.5" />
-                {dispatching ? t('dispatching') : t('dispatch')}
-              </button>
-            </AnchoredPopover>
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={assigneeId}
+          onChange={(e) => setAssigneeId(e.target.value)}
+          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">{t('assigneeSelectPlaceholder')}</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {rowLabels.get(m.id)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={dispatching}
+          aria-disabled={needsAssignee || undefined}
+          aria-describedby={needsAssignee ? reasonId : undefined}
+          onClick={() => void handleDispatch()}
+          title={needsAssignee ? undefined : t('dispatchTooltip')}
+          className={cn(
+            'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+            mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
+            assigneeId && !dispatching
+              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+              : 'cursor-not-allowed bg-muted text-muted-foreground',
           )}
-        </div>
+        >
+          <Zap className="size-3.5" />
+          {dispatching ? t('dispatching') : t('dispatch')}
+        </button>
+        {mobileMode === 'assignee-only' && (
+          <div ref={moreRef} className="relative md:hidden">
+            <button
+              ref={moreBtnRef}
+              {...moreKeys.triggerProps}
+              type="button"
+              onClick={() => setMoreOpen((o) => !o)}
+              // story #4355 — 열린 채 초점이 트리거에 남아도(포인터로 연 뒤 등) Esc로 닫힘 · Tab은 메뉴로(공용 훅).
+              onKeyDown={moreKeys.onTriggerKeyDown}
+              className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
+              aria-label={t('moreOptionsAria')}
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+            {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
+            {moreOpen && (
+              <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={dispatching}
+                  aria-disabled={needsAssignee || undefined}
+                  aria-describedby={needsAssignee ? menuReasonId : undefined}
+                  // 꺼진 채 누르면 메뉴를 닫지 않는다 — 까닭 줄을 읽을 수 있게(4348 메뉴 항목과 같게).
+                  onClick={() => { if (needsAssignee) return; void handleDispatch(); setMoreOpen(false); }}
+                  title={needsAssignee ? undefined : t('dispatchTooltip')}
+                  className={cn(
+                    'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
+                    assigneeId && !dispatching
+                      ? 'text-foreground hover:bg-muted'
+                      : 'cursor-not-allowed text-muted-foreground',
+                  )}
+                >
+                  <Zap className="size-3.5" />
+                  {dispatching ? t('dispatching') : t('dispatch')}
+                </button>
+                {needsAssignee && (
+                  <p id={menuReasonId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
+                )}
+              </AnchoredPopover>
+            )}
+          </div>
+        )}
+      </div>
+      {/* 고르개+버튼 줄 아래 한 줄 · 꺼져 있는 동안만. «담당자만» 모드의 좁은 화면은 버튼이 숨고 «더 보기» 메뉴 안 줄이 대신한다. */}
+      {needsAssignee && (
+        <p id={reasonId} className={cn('mt-1 break-keep text-xs text-muted-foreground', mobileMode === 'assignee-only' && 'hidden md:block')}>
+          {t('dispatchNeedsAssignee')}
+        </p>
       )}
     </div>
   );

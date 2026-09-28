@@ -13,7 +13,6 @@
     "components/chat/file-viewer.tsx::button::{tChats('fullscreen')}": 1,
     "components/chat/file-viewer.tsx::button::{tChats('mediaDownload')}": 1,
     "components/chat/reading-panel.tsx::button::{targetLabel(item)}": 1,
-    "components/dispatch/entity-dispatch-panel.tsx::button::{dispatchTitle}": 2,
     "components/hypotheses/story-hypotheses-section.tsx::button::{t('unlink')}": 1,
     "components/kanban/story-card.tsx::button::{t('kickoff')}": 1,
     "components/kanban/story-detail-panel.tsx::Button::{t('dep.toggleType')}": 4,
