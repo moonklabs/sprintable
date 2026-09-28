@@ -108,7 +108,11 @@ function pointerAt(y: number) {
 }
 const rowTop = (id: string) => rowButtons().findIndex((b) => b.dataset.docId === id) * ROW;
 async function move(activeId: string, overId: string, y: number, scrolled = 0) { await act(async () => { pointerAt(y); handlers.move?.(dragEvent(activeId, overId, y, scrolled)); }); }
-async function drop(activeId: string, overId: string, y: number, scrolled = 0) { await act(async () => { pointerAt(y); await handlers.end?.(dragEvent(activeId, overId, y, scrolled)); }); }
+// 실 끌기처럼 그 자리로 움직여(표시가 그려진 뒤) 놓는다 — 놓을 때는 마지막으로 그린 표시를 쓴다(까디르 4752).
+async function drop(activeId: string, overId: string, y: number, scrolled = 0) {
+  await move(activeId, overId, y, scrolled);
+  await act(async () => { pointerAt(y); await handlers.end?.(dragEvent(activeId, overId, y, scrolled)); });
+}
 const zones = () => Array.from(container.querySelectorAll<HTMLElement>('[data-drop-zone]')).map((b) => `${b.dataset.docId}:${b.dataset.dropZone}`);
 const lines = () => Array.from(container.querySelectorAll<HTMLElement>('[data-drop-line]'));
 
@@ -242,6 +246,27 @@ describe('DocTree 끌어 떨굼 — 상자 = 행 · 표시 = 결과(story #4366)
     expect(onMove).toHaveBeenLastCalledWith({ docId: 'a', parentId: 'F' });
     await drop('a', 'F', rowTop('F') + 4, 36);
     expect(onReorder).toHaveBeenLastCalledWith({ docId: 'a', parentId: null, afterId: null });
+  });
+
+  // 까디르(4752 실물 하네스) — 자동 스크롤이 도는 중에 놓으면 놓는 순간 over.rect는 그 순간의 스크롤, 화면 표시는 직전 렌더 것. 놓을 때 다시 판정하면
+  // 표시(«안으로»)와 저장(«뒤»)이 갈렸다. 놓을 때는 마지막으로 그린 표시를 그대로 쓴다(옛 코드: 다시 판정 → RED).
+  it('⭐표시 뒤 over.rect만 바뀐(스크롤) 채 놓아도 저장 = 마지막으로 그린 표시', async () => {
+    const { onMove, onReorder } = await mount();
+    const y = rowTop('F') + ROW / 2;
+    await move('a', 'F', y);
+    expect(zones()).toEqual(['F:into']);
+    // 놓는 순간: 행이 스크롤로 14px 올라가 같은 포인터가 행 아래 가장자리(«뒤»)로 읽히는 상태 — 그 사이 표시는 다시 그려지지 않았다.
+    const shifted = { ...dragEvent('a', 'F', y), over: { id: 'F', rect: { ...dropBoxRect('F'), top: dropBoxRect('F').top - 14, bottom: dropBoxRect('F').bottom - 14 } } };
+    await act(async () => { pointerAt(y); await handlers.end?.(shifted); });
+    expect(onMove).toHaveBeenCalledWith({ docId: 'a', parentId: 'F' });
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('⭐표시가 없었으면(그린 표시 없음) 놓아도 무동작', async () => {
+    const { onMove, onReorder } = await mount();
+    await act(async () => { pointerAt(rowTop('F') + ROW / 2); await handlers.end?.(dragEvent('a', 'F', rowTop('F') + ROW / 2)); });
+    expect(onMove).not.toHaveBeenCalled();
+    expect(onReorder).not.toHaveBeenCalled();
   });
 });
 

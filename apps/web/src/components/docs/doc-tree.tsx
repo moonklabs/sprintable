@@ -2,7 +2,7 @@
 
 import { dropZoneFor, planDrop, type DocMovePlan, type DropZone } from './doc-move-plan';
 import { DocRenameDialog } from './doc-rename-dialog';
-import { createContext, useContext, useId, useState, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useId, useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
@@ -634,6 +634,11 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   const moveCtxValue = onMenuMove ? { requestMove, hasMore } : null;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  // 까디르(4752) — 자동 스크롤이 도는 중에 놓으면, 놓는 순간 다시 판정할 때 over.rect는 그 순간의 스크롤인데 화면의 표시는 직전 렌더 것이라
+  // 표시와 저장이 갈렸다(30회 중 2회). 놓을 때는 다시 판정하지 않고 **마지막으로 그린 표시**를 그대로 쓴다 — 표시 = 결과. 표시가 없었으면 무동작.
+  // useLayoutEffect — DOM이 바뀌는 그 커밋 안에서 ref도 바뀐다. useEffect(그린 뒤)면 그 사이 놓을 때 한 걸음 전 표시로 저장했다(실 브라우저 30회 중 2회).
+  const drawnTargetRef = useRef<DropTarget | null>(null);
+  useLayoutEffect(() => { drawnTargetRef.current = dropTarget; }, [dropTarget]);
 
   // story #4366 — 끄는 동안의 표시와 떨군 뒤의 결과가 같은 판정에서 나온다(dropZoneFor → planDrop).
   // 판정 상자 = over.rect = 끌 대상으로 등록된 **행**(TreeNode dropTargetProps). 순환 · 자기 자신이면 표시 없음.
@@ -665,6 +670,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     pointerRef.current = null;
+    drawnTargetRef.current = null;
     setActiveId(String(event.active.id));
   }, []);
 
@@ -682,6 +688,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   }, []);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const target = drawnTargetRef.current;
     clearDrag();
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -689,13 +696,12 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
 
     const activeDoc = docs.find((d) => d.id === active.id);
     if (!activeDoc) return;
-    const resolved = resolveDrop(event);
-    if (!resolved) {
-      // 자기 하위로(순환) — 표시가 없던 자리 · 무동작 + 기존 알림.
+    const plan = target ? planDrop(docs, activeDoc.id, target.overId, target.zone) : null;
+    if (!target || !plan) {
+      // 표시가 없던 자리(자기 하위 = 순환 포함) — 무동작 + 순환이면 기존 알림.
       if (isDescendant(docs, activeDoc.id, String(over.id))) onMoveDenied?.('circular');
       return;
     }
-    const { plan, target } = resolved;
     // story #4353 — 서버(`POST /api/v2/docs/reorder`)가 형제 번호를 한 번에 다시 매긴다. 같은 부모 안 = onReorder · 부모가 바뀜 = onMove.
     const handler = plan.parentId === activeDoc.parent_id ? onReorder : onMove;
     if (!handler) {
@@ -706,7 +712,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     // 접힌 폴더 «안으로» 떨구면 그 폴더를 펼친다 — 옮긴 문서가 폴더 끝에 보이게(예전엔 접힌 채라 트리에서 그냥 사라졌다).
     // 저장이 실패하면(문서는 제자리) 펼치지 않는다 — 까디르(4752).
     if (saved && target.zone === 'into' && !isExpanded(target.overId)) expandFolders([target.overId]);
-  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled, resolveDrop, clearDrag, isExpanded, expandFolders]);
+  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled, clearDrag, isExpanded, expandFolders]);
 
   const activeDoc = activeId ? docs.find((d) => d.id === activeId) ?? null : null;
 
