@@ -11,6 +11,7 @@
  * Node 런타임 전용(`node:net`) — BFF 라우트 핸들러에서만 쓴다.
  */
 import { BlockList, isIP } from 'node:net';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 /**
  * Cloudflare가 공개한 자기 대역. 출처: https://www.cloudflare.com/ips-v4 · https://www.cloudflare.com/ips-v6 (2026-09-28 조회).
@@ -71,4 +72,45 @@ export function edgeClientIpHeaders(
   const ip = resolveClientIp(incoming);
   if (!ip) return {};
   return { [CLIENT_IP_HEADER]: ip, [EDGE_KEY_HEADER]: secret };
+}
+
+/**
+ * 비밀을 실어도 되는 곳 = 백엔드 origin(스킴 · 호스트 · 포트)과 **정확히 같은** 주소. 문자열 앞머리 비교는
+ * `https://<백엔드 호스트>.evil…` · `https://<백엔드 호스트>@다른곳` 모양에 속으므로 URL을 파싱해 origin으로 가른다.
+ * 주소에 사용자 정보(`user@`)가 붙어 있으면 그것만으로 거절한다.
+ */
+export function isBackendOrigin(url: string, base: string = fastapiBaseUrl()): boolean {
+  try {
+    const target = new URL(url);
+    if (target.username || target.password) return false;
+    return target.origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+/**
+ * 비밀 헤더를 실은 요청 전용 fetch — 리다이렉트를 **직접** 따라간다. 백엔드 origin 안의 이동(예: 끝 슬래시 307)만 같은 헤더로
+ * 따라가고, 다른 origin으로 가라는 3xx는 따라가지 않고 그대로 돌려준다(undici는 표준 민감 헤더만 떼고 `X-Sprintable-*`는
+ * 그대로 실어 보낸다). 방법 · 본문 바꿈은 fetch 표준대로(303 · POST의 301/302 → GET · 본문 없음).
+ */
+export async function fetchCarryingEdgeSecret(url: string, init: RequestInit): Promise<Response> {
+  let current = url;
+  let step: RequestInit = { ...init, redirect: 'manual' };
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const res = await fetch(current, step);
+    const location = res.headers.get('location');
+    if (!REDIRECT_STATUSES.has(res.status) || !location) return res;
+    const next = new URL(location, current).toString();
+    if (!isBackendOrigin(next) || hop === MAX_REDIRECTS) return res;
+    const method = (step.method ?? 'GET').toUpperCase();
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+      step = { ...step, method: 'GET', body: undefined };
+    }
+    current = next;
+  }
+  throw new Error('unreachable');
 }

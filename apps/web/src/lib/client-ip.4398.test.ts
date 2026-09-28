@@ -9,7 +9,7 @@ const { getServerSessionMock, getLocaleMock } = vi.hoisted(() => ({ getServerSes
 vi.mock('@/lib/db/server', () => ({ getServerSession: getServerSessionMock }));
 vi.mock('@/i18n/request', () => ({ getLocale: getLocaleMock }));
 
-import { CLIENT_IP_HEADER, EDGE_KEY_HEADER, edgeClientIpHeaders, isCloudflareAddress, resolveClientIp } from './client-ip';
+import { CLIENT_IP_HEADER, EDGE_KEY_HEADER, edgeClientIpHeaders, isBackendOrigin, isCloudflareAddress, resolveClientIp } from './client-ip';
 import { backendFetch } from './backend-fetch';
 import { proxyToFastapi } from './fastapi-proxy';
 import { fastapiBaseUrl } from './fastapi-url';
@@ -109,5 +109,79 @@ describe('BFF 두 헬퍼가 백엔드로 싣는다', () => {
     await proxyToFastapi(forged, '/api/v2/auth/resend-verification');
     expect(sent().get(CLIENT_IP_HEADER)).toBe(DIRECT); // 직통이라 CF 헤더 무시 → 접속 주소
     expect(sent().get(EDGE_KEY_HEADER)).toBe('s3cret');
+  });
+});
+
+describe('isBackendOrigin — 비밀은 백엔드 origin에만(문자열 앞머리 비교 X)', () => {
+  const base = 'https://backend.example.run.app';
+  it('같은 origin만 참', () => {
+    expect(isBackendOrigin(`${base}/api/v2/auth/token`, base)).toBe(true);
+    expect(isBackendOrigin('https://backend.example.run.app:8443/x', base)).toBe(false);
+    expect(isBackendOrigin('http://backend.example.run.app/x', base)).toBe(false);
+  });
+  it('앞머리만 같은 딴 호스트 · 사용자 정보로 가린 딴 호스트 · 깨진 주소는 거짓', () => {
+    expect(isBackendOrigin('https://backend.example.run.app.evil.com/x', base)).toBe(false);
+    expect(isBackendOrigin('https://backend.example.run.app@evil.com/x', base)).toBe(false);
+    expect(isBackendOrigin('https://user:pw@backend.example.run.app/x', base)).toBe(false);
+    expect(isBackendOrigin('not a url', base)).toBe(false);
+  });
+});
+
+describe('비밀을 실은 요청의 리다이렉트 — 다른 origin으로 따라가지 않는다', () => {
+  beforeEach(() => {
+    process.env['EDGE_CLIENT_IP_SECRET'] = 's3cret';
+    getLocaleMock.mockResolvedValue('en');
+    getServerSessionMock.mockResolvedValue({ access_token: 't', org_id: 'o', project_id: 'p' });
+  });
+  afterEach(() => {
+    delete process.env['EDGE_CLIENT_IP_SECRET'];
+  });
+  const browser = () => new Request('http://localhost/api/x', {
+    method: 'POST', headers: { 'x-forwarded-for': `${USER}, ${CF_EDGE}`, 'cf-connecting-ip': USER },
+  });
+  const calls = () => (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+
+  it('앞머리만 같은 딴 호스트로 가는 backendFetch엔 비밀을 안 싣는다', async () => {
+    global.fetch = vi.fn(async () => new Response('{}', { status: 200 }));
+    await backendFetch(`${fastapiBaseUrl()}.evil.com/steal`, { request: browser() });
+    const base = new URL(fastapiBaseUrl());
+    await backendFetch(`${base.protocol}//${base.host}@evil.com/steal`, { request: browser() }); // 백엔드 호스트를 사용자 정보로 가린 딴 곳
+    for (const [, init] of calls()) expect(new Headers(init.headers).get(EDGE_KEY_HEADER)).toBeNull();
+  });
+
+  it('다른 origin으로 가라는 307은 따라가지 않고 그대로 돌려준다(비밀이 새지 않음)', async () => {
+    global.fetch = vi.fn(async () => new Response(null, { status: 307, headers: { location: 'https://evil.com/collect' } }));
+    const res = await backendFetch(`${fastapiBaseUrl()}/api/v2/auth/token`, { method: 'POST', body: '{}', request: browser() });
+    expect(res.status).toBe(307);
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0]![1].redirect).toBe('manual');
+  });
+
+  it('백엔드 안의 307(끝 슬래시 등)은 같은 헤더 · 같은 방법으로 따라간다', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 307, headers: { location: '/api/v2/auth/token/' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    const res = await backendFetch(`${fastapiBaseUrl()}/api/v2/auth/token`, { method: 'POST', body: '{}', request: browser() });
+    expect(res.status).toBe(200);
+    expect(calls()).toHaveLength(2);
+    expect(calls()[1]![0]).toBe(`${fastapiBaseUrl()}/api/v2/auth/token/`);
+    expect(calls()[1]![1].method).toBe('POST');
+    expect(new Headers(calls()[1]![1].headers).get(EDGE_KEY_HEADER)).toBe('s3cret');
+  });
+
+  it('303은 GET · 본문 없음으로 따라간다(fetch 표준)', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 303, headers: { location: `${fastapiBaseUrl()}/done` } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    await backendFetch(`${fastapiBaseUrl()}/api/v2/x`, { method: 'POST', body: '{}', request: browser() });
+    expect(calls()[1]![1].method).toBe('GET');
+    expect(calls()[1]![1].body).toBeUndefined();
+  });
+
+  it('proxyToFastapi도 다른 origin 307을 따라가지 않는다', async () => {
+    global.fetch = vi.fn(async () => new Response(null, { status: 307, headers: { location: 'https://evil.com/collect' } }));
+    await proxyToFastapi(browser(), '/api/v2/auth/resend-verification');
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0]![1].redirect).toBe('manual');
   });
 });

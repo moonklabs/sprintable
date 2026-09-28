@@ -14,8 +14,7 @@
  */
 import { backendSignal, BFF_BACKEND_TIMEOUT_MS, classifyBackendAbort } from '@/lib/backend-signal';
 import { bffEnvelopeError } from '@/lib/bff-envelope-error';
-import { edgeClientIpHeaders } from '@/lib/client-ip';
-import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { edgeClientIpHeaders, fetchCarryingEdgeSecret, isBackendOrigin } from '@/lib/client-ip';
 
 export interface BackendFetchInit extends Omit<RequestInit, 'signal'> {
   /** 원 요청 — 브라우저가 끊으면 백엔드 호출도 끊는다(`timeLimitOnly`면 안 넘긴다). 요청 스코프가 없으면 null. */
@@ -37,7 +36,7 @@ const DROP_HEADERS = ['content-encoding', 'content-length', 'transfer-encoding']
 async function withEdgeClientIp(
   url: string, headers: HeadersInit | undefined, request: Request | null,
 ): Promise<HeadersInit | undefined> {
-  if (!url.startsWith(fastapiBaseUrl())) return headers;
+  if (!isBackendOrigin(url)) return headers;
   let incoming: Pick<Headers, 'get'> | null = request?.headers ?? null;
   if (!incoming) {
     try {
@@ -63,7 +62,10 @@ export async function backendFetch(url: string, init: BackendFetchInit = {}): Pr
   const signal = backendSignal(timeLimitOnly ? null : request, timeoutMs);
   try {
     const requestHeaders = await withEdgeClientIp(url, rest.headers, request);
-    const res = await fetch(url, { ...rest, ...(requestHeaders === rest.headers ? {} : { headers: requestHeaders }), signal });
+    // story #4398 — 비밀을 실었으면 리다이렉트를 직접 따라간다(다른 origin으로는 안 감 · client-ip.ts).
+    const res = requestHeaders === rest.headers
+      ? await fetch(url, { ...rest, signal })
+      : await fetchCarryingEdgeSecret(url, { ...rest, headers: requestHeaders, signal });
     const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.arrayBuffer();
     const headers = new Headers(res.headers);
     for (const h of DROP_HEADERS) headers.delete(h);
