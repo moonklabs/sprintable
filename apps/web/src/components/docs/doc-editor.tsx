@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useId, useRef, useState } from 'react';
 import React, { type RefObject } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { usePortalMenuKeys } from '@/components/shared/anchored-popover';
@@ -168,6 +168,7 @@ export function DocEditor({
     mermaidDefault: { start: tSlash('mermaidDefault.start'), end: tSlash('mermaidDefault.end') },
     toggleDefaultTitle: tSlash('toggleDefaultTitle'),
     columnsSearchAlias: tSlash('items.columns.searchAlias'),
+    listLabel: tSlash('listLabel'),
   };
   const suppressUpdateRef = useRef(false);
   // 편집기 콜백은 처음 만든 때의 prop을 붙잡으므로 최신 값은 ref로 읽는다.
@@ -238,6 +239,23 @@ export function DocEditor({
     onFocus: () => setIsFocused(true),
     onBlur: () => setIsFocused(false),
   });
+
+  // story #4380(PO) — 편집기(tiptap role="textbox")에 이름이 없었다(axe aria-input-field-name). 제목 칸에 글자가 있으면 그 칸을
+  // 이름으로(aria-labelledby — 제목을 고치면 따라감), 제목이 비었거나 제목 칸이 없으면 로케일 이름(빈 labelledby는 이름 0이 된다).
+  const titleId = useId();
+  const hasTitleName = title !== undefined && title.trim() !== '';
+  const bodyLabel = tEditor('editorBodyLabel');
+  useEffect(() => {
+    const el = editor?.view.dom;
+    if (!el) return;
+    if (hasTitleName) {
+      el.setAttribute('aria-labelledby', titleId);
+      el.removeAttribute('aria-label');
+    } else {
+      el.setAttribute('aria-label', bodyLabel);
+      el.removeAttribute('aria-labelledby');
+    }
+  }, [editor, hasTitleName, titleId, bodyLabel]);
 
   useEffect(() => {
     if (!editor) return;
@@ -398,6 +416,7 @@ export function DocEditor({
           /* 인라인 제목 1줄(editable textarea·whitespace-nowrap·flex-1 min-w-0·편집 기능 보존) */
           <textarea
             ref={titleRef}
+            id={titleId}
             value={title}
             onChange={(e) => {
               onTitleChange?.(e.target.value);

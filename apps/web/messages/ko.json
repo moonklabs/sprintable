@@ -3717,10 +3717,12 @@
         "start": "시작",
         "end": "끝"
       },
-      "toggleDefaultTitle": "토글 제목"
+      "toggleDefaultTitle": "토글 제목",
+      "listLabel": "블록 추가"
     },
     "treeLoadedOfTotal": "{total, number}개 중 {loaded, number}개 표시 중",
-    "moveTagFilterActive": "태그 필터를 켠 동안에는 순서를 바꾸거나 옮길 수 없어요 — 필터를 끄고 옮겨 주세요"
+    "moveTagFilterActive": "태그 필터를 켠 동안에는 순서를 바꾸거나 옮길 수 없어요 — 필터를 끄고 옮겨 주세요",
+    "editorBodyLabel": "문서 본문"
   },
   "rewards": {
     "title": "리워드",

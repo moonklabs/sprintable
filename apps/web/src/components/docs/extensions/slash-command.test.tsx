@@ -124,6 +124,7 @@ interface RawSlashMenuMessages {
   embedPrompt: string;
   mermaidDefault: { start: string; end: string };
   toggleDefaultTitle: string;
+  listLabel: string;
 }
 
 function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages } }): SlashMenuStrings {
@@ -142,6 +143,7 @@ function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages
     mermaidDefault: raw.mermaidDefault,
     toggleDefaultTitle: raw.toggleDefaultTitle,
     columnsSearchAlias: raw.items.columns.searchAlias ?? '',
+    listLabel: raw.listLabel,
   };
 }
 
