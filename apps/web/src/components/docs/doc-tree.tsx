@@ -8,7 +8,7 @@ import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
 import { DndContext, DragOverlay, type CollisionDetection, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent, type Modifier } from '@dnd-kit/core';
-import { getEventCoordinates } from '@dnd-kit/utilities';
+import type { Coordinates } from '@dnd-kit/utilities';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { cn } from '@/lib/utils';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
@@ -639,15 +639,22 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   // 판정 상자 = over.rect = 끌 대상으로 등록된 **행**(TreeNode dropTargetProps). 순환 · 자기 자신이면 표시 없음.
   // 유나(4752 실 브라우저) — 판정은 **포인터**로만 한다. 예전엔 끄는 사각형(active.rect.current.translated)의 가운데를 썼는데, DragOverlay가
   // 있으면 dnd-kit이 그 사각형을 **그린 복제**에서 잰다(core.esm.js:2948 · 오버레이 칸의 한 자식까지 재는 getMeasurableNode :2413) —
-  // 복제를 한 행 아래로 그리자 판정도 한 행 밀렸다. 포인터 y = 끌기 시작 좌표 + delta, 겨눈 행은 pointerRowCollision(포인터 기준).
+  // 복제를 한 행 아래로 그리자 판정도 한 행 밀렸다. 겨눈 행 · 행 안 구역 둘 다 충돌 함수가 받은 pointerCoordinates 하나로 정한다.
+  // 「끌기 시작 좌표 + delta」는 안 쓴다 — dnd-kit의 delta는 끌기 시작 뒤 스크롤 이동량까지 더한 값(core.esm.js:2983)인데 over.rect는
+  // 스크롤을 뺀 지금의 화면 좌표(Rect 게터 :970)라, aside가 자동 스크롤되면 그만큼 구역이 밀렸다. pointerCoordinates는 시작 + 이동(:2977)으로 over.rect와 같은 화면 좌표.
+  const pointerRef = useRef<Coordinates | null>(null);
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    pointerRef.current = args.pointerCoordinates;
+    return pointerRowCollision(args);
+  }, []);
   const resolveDrop = useCallback((event: DragMoveEvent | DragOverEvent | DragEndEvent): { target: DropTarget; plan: DocMovePlan } | null => {
     const { active, over } = event;
     if (!over || active.id === over.id) return null;
     const overDoc = docs.find((d) => d.id === over.id);
     if (!overDoc) return null;
-    const start = event.activatorEvent ? getEventCoordinates(event.activatorEvent) : null;
-    if (!start) return null;
-    const pointerY = start.y + event.delta.y;
+    const pointer = pointerRef.current;
+    if (!pointer) return null;
+    const pointerY = pointer.y;
     const overRect = over.rect;
     const relativeY = overRect.height > 0 ? (pointerY - overRect.top) / overRect.height : 0.5;
     const isFolderRow = Boolean(overDoc.is_folder || docs.some((d) => d.parent_id === overDoc.id));
@@ -657,6 +664,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   }, [docs]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    pointerRef.current = null;
     setActiveId(String(event.active.id));
   }, []);
 
@@ -704,7 +712,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
 
   return (
     <DocMoveCtx.Provider value={moveCtxValue}>
-    <DndContext sensors={sensors} collisionDetection={pointerRowCollision} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragOver={handleDragMove} onDragEnd={handleDragEnd} onDragCancel={clearDrag}>
+    <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragOver={handleDragMove} onDragEnd={handleDragEnd} onDragCancel={clearDrag}>
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <div data-doc-move-live="" aria-live="polite" role="status" className="sr-only">{announcement}</div>
         <nav ref={navRef} className="space-y-1">

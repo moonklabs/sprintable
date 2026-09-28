@@ -15,15 +15,16 @@ import { DocTree, pointerRowCollision } from './doc-tree';
 import type { DocMovePlan } from './doc-move-plan';
 
 type Handler = (event: unknown) => unknown;
-const handlers: { move?: Handler; end?: Handler } = {};
+const handlers: { move?: Handler; end?: Handler; collide?: Handler } = {};
 // 유나(4752) — 복제 그림만 아래로. DragOverlay가 받은 props(특히 modifiers)를 쥔다.
 const overlay: { modifiers?: unknown; className?: string } = {};
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragStart, onDragMove, onDragEnd, children }: { onDragStart?: Handler; onDragMove?: Handler; onDragEnd?: Handler; children?: React.ReactNode }) => {
+    DndContext: ({ onDragStart, onDragMove, onDragEnd, collisionDetection, children }: { onDragStart?: Handler; onDragMove?: Handler; onDragEnd?: Handler; collisionDetection?: Handler; children?: React.ReactNode }) => {
       (handlers as { start?: Handler }).start = onDragStart;
+      handlers.collide = collisionDetection;
       handlers.move = onDragMove;
       handlers.end = onDragEnd;
       return <>{children}</>;
@@ -90,20 +91,24 @@ function dropBoxRect(id: string) {
   const top = all.indexOf(inside[0]!) * ROW;
   return { top, height: inside.length * ROW, left: 0, width: 264, bottom: top + inside.length * ROW, right: 264 };
 }
-/** 포인터를 화면 y에 두고 over 행 위로(유나 4752 — 판정은 포인터로만: 끌기 시작 좌표 + delta).
+/** 포인터를 화면 y에 두고 over 행 위로(유나 4752 — 판정은 포인터로만). dnd-kit처럼 충돌 함수가 먼저 pointerCoordinates(화면 좌표)를 받고,
+ * 그 뒤 move/end 이벤트가 온다. delta는 dnd-kit 그대로 «이동 + 끌기 시작 뒤 스크롤 이동량(scrolled)»(core.esm.js:2983) — 판정이 delta를 읽으면 스크롤 때 깨진다.
  * translated(그린 복제의 사각형)는 일부러 엉뚱한 곳(아래로 500px)에 둔다 — 판정이 그것을 읽으면 테스트가 깨진다. */
 const START_Y = 5;
-function dragEvent(activeId: string, overId: string, y: number, translatedTop = y + 500) {
+function dragEvent(activeId: string, overId: string, y: number, scrolled = 0, translatedTop = y + 500) {
   return {
     active: { id: activeId, rect: { current: { translated: { top: translatedTop, height: ROW } } } },
     over: { id: overId, rect: dropBoxRect(overId) },
     activatorEvent: new MouseEvent('pointerdown', { clientX: 10, clientY: START_Y }),
-    delta: { x: 0, y: y - START_Y },
+    delta: { x: 0, y: y - START_Y + scrolled },
   };
 }
+function pointerAt(y: number) {
+  handlers.collide?.({ pointerCoordinates: { x: 10, y }, droppableRects: new Map(), droppableContainers: [], active: null, collisionRect: null });
+}
 const rowTop = (id: string) => rowButtons().findIndex((b) => b.dataset.docId === id) * ROW;
-async function move(activeId: string, overId: string, y: number) { await act(async () => { handlers.move?.(dragEvent(activeId, overId, y)); }); }
-async function drop(activeId: string, overId: string, y: number) { await act(async () => { await handlers.end?.(dragEvent(activeId, overId, y)); }); }
+async function move(activeId: string, overId: string, y: number, scrolled = 0) { await act(async () => { pointerAt(y); handlers.move?.(dragEvent(activeId, overId, y, scrolled)); }); }
+async function drop(activeId: string, overId: string, y: number, scrolled = 0) { await act(async () => { pointerAt(y); await handlers.end?.(dragEvent(activeId, overId, y, scrolled)); }); }
 const zones = () => Array.from(container.querySelectorAll<HTMLElement>('[data-drop-zone]')).map((b) => `${b.dataset.docId}:${b.dataset.dropZone}`);
 const lines = () => Array.from(container.querySelectorAll<HTMLElement>('[data-drop-line]'));
 
@@ -214,11 +219,29 @@ describe('DocTree 끌어 떨굼 — 상자 = 행 · 표시 = 결과(story #4366)
     const { onMove } = await mount();
     const y = rowTop('F') + ROW / 2;
     for (const translatedTop of [y - 200, y + 36, y + 500]) {
-      await act(async () => { handlers.move?.(dragEvent('a', 'F', y, translatedTop)); });
+      await act(async () => { pointerAt(y); handlers.move?.(dragEvent('a', 'F', y, 0, translatedTop)); });
       expect(zones()).toEqual(['F:into']);
     }
-    await act(async () => { await handlers.end?.(dragEvent('a', 'F', y, y + 36)); });
+    await act(async () => { pointerAt(y); await handlers.end?.(dragEvent('a', 'F', y, 0, y + 36)); });
     expect(onMove).toHaveBeenCalledWith({ docId: 'a', parentId: 'F' });
+  });
+
+  // 페드루(4752 렌즈) — 끄는 중 aside가 자동 스크롤되면 dnd-kit delta에는 스크롤 이동량이 더해지지만 over.rect는 화면 좌표. 구역은 화면 포인터로만.
+  // 옛 「끌기 시작 좌표 + delta」면 폴더 가운데가 스크롤만큼 아래로 읽혀 «뒤»/«안»이 틀어진다(RED).
+  it('⭐끄는 중 스크롤돼도(delta에 스크롤 이동량 포함) 구역은 화면 포인터 기준 — 표시 = 요청', async () => {
+    const { onMove, onReorder } = await mount();
+    for (const scrolled of [0, 12, 36, 200]) {
+      await move('a', 'F', rowTop('F') + ROW / 2, scrolled);
+      expect(zones()).toEqual(['F:into']);
+      await move('a', 'F', rowTop('F') + 4, scrolled);
+      expect(zones()).toEqual(['F:before']);
+      await move('a', 'F', rowTop('F') + ROW - 4, scrolled);
+      expect(zones()).toEqual(['F:after']);
+    }
+    await drop('a', 'F', rowTop('F') + ROW / 2, 36);
+    expect(onMove).toHaveBeenLastCalledWith({ docId: 'a', parentId: 'F' });
+    await drop('a', 'F', rowTop('F') + 4, 36);
+    expect(onReorder).toHaveBeenLastCalledWith({ docId: 'a', parentId: null, afterId: null });
   });
 });
 
