@@ -85,6 +85,31 @@ async def _captured_story_scans(run) -> list[tuple[str, tuple]]:
         await eng.dispose()
 
 
+def _outer_from_table(statement: str) -> str | None:
+    """문장의 **바깥**(괄호 깊이 0) FROM 뒤 첫 표 이름. SELECT 목록의 스칼라 부질의(`(SELECT … FROM trust_…)`) 안 FROM은 건너뛴다 —
+    4763(목록 · attention 한 문장 접기)처럼 SELECT 목록에 부질의가 있어도 «FROM stories로 도는 문장»을 가려내게."""
+    low = " ".join(statement.split()).lower()
+    depth = 0
+    i = 0
+    while i < len(low):
+        ch = low[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and low.startswith(" from ", i):
+            rest = low[i + 6:].lstrip("( ")
+            return rest.split(" ", 1)[0].strip('"')
+        i += 1
+    return None
+
+
+def test_outer_from_table_skips_select_list_subqueries():
+    assert _outer_from_table("SELECT a, (SELECT 1 FROM trust_x WHERE y) AS z FROM stories WHERE stories.project_id = $1") == "stories"
+    assert _outer_from_table("SELECT gates.id FROM gates JOIN stories ON stories.id = gates.story_id WHERE stories.project_id = $1") == "gates"
+    assert _outer_from_table("SELECT count(*) FROM stories") == "stories"
+
+
 def _assert_uses_index(plans):
     assert plans, "잡힌 문장이 없다 — 가드가 헛돈다(조회 모양이 바뀌었으면 필터를 맞출 것)"
     for statement, plan in plans:
@@ -110,4 +135,4 @@ async def test_glance_attention_project_filters_can_use_the_project_index():
 
     plans = await _captured_story_scans(run)
     # attention의 `FROM stories … project_id = …`(in-review · stalled 모집단 등)만 — 게이트 · 의존성에서 stories를 JOIN하는 문장은 별개.
-    _assert_uses_index([(st, pl) for st, pl in plans if " ".join(st.split()).lower().split(" from ", 1)[1].startswith("stories")])
+    _assert_uses_index([(st, pl) for st, pl in plans if _outer_from_table(st) == "stories"])
