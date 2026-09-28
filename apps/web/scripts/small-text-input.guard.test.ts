@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { baseFontPx, scanSource, scanTree } from './small-text-input-scan';
+import { baseFontPx, scanSource, scanTree, wrapperSizes } from './small-text-input-scan';
 import { measureFsReads } from './test-utils/fs-work';
 
 // story #4406 — 모바일 폭에서 글자가 16px 미만인 입력칸(iOS WebKit이 초점 때 화면을 확대)을 새로 만들지 않는다.
@@ -41,6 +41,27 @@ describe('scanSource — 셀프테스트', () => {
   it('상태에 따라 붙는 클래스(삼항)는 크기 판정에 안 섞는다', () => {
     const src = `export const C = ({ bad }) => <input className={\`w-full text-base lg:text-sm \${bad ? 'border-destructive text-xs' : 'border-border'}\`} />;`;
     expect(scanSource(src, 'c.tsx').sites).toEqual([]);
+  });
+
+  it('⭐공용 래퍼 호출부 — 래퍼 크기를 받는다 · 호출부가 크기를 덮으면 그 크기(PR 4807: onboarding-form의 OperatorInput 6칸)', () => {
+    const src = `
+      export const D = () => (<>
+        <OperatorInput value={a} />
+        <OperatorInput className="h-10 text-base lg:text-sm" />
+        <OperatorTextarea className="text-xs" />
+      </>);`;
+    expect(scanSource(src, 'd.tsx', new Map([['OperatorInput', 14], ['OperatorTextarea', 16]])).sites.map((s) => [s.tag, s.px]))
+      .toEqual([['OperatorInput', 14], ['OperatorTextarea', 12]]);
+    expect(scanSource(src, 'd.tsx', new Map([['OperatorInput', 16], ['OperatorTextarea', 16]])).sites.map((s) => [s.tag, s.px]))
+      .toEqual([['OperatorTextarea', 12]]);
+  });
+
+  it('래퍼 크기는 정의 파일에서 읽는다 — 정의가 없거나 입력칸을 안 그리면 던진다(표가 헛돌지 않게)', () => {
+    const def = `const cls = 'px-3 text-sm'; export function OperatorInput(p) { return <Input className={cn(cls, p.className)} />; }
+      export function OperatorTextarea(p) { return <textarea className={cn(cls, 'min-h-24')} />; }
+      export function OperatorSelect(p) { return <select className={cn(cls)} />; }`;
+    expect([...wrapperSizes(() => def)]).toEqual([['OperatorInput', 14], ['OperatorTextarea', 14], ['OperatorSelect', 14]]);
+    expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
   });
 
   it('baseFontPx — 접두사 있는 크기(lg: · placeholder:)는 모바일 기본값이 아니다', () => {
