@@ -118,4 +118,31 @@ describe('[SID:4397] OrgHintBanner', () => {
     expect(nav.replace).toHaveBeenCalledWith('/gates/g-1');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('valid markup: nothing block-level inside the <p> title and description (PO 20:30Z ①)', async () => {
+    await mount(`org_id=${ORG_B}`);
+    expect(banner()!.querySelectorAll('p p, p div, p button').length).toBe(0);
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: {} }), { status: 403 }));
+    await act(async () => { button(koMessages.nav.switcherSwitchToOrg).click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(banner()!.querySelectorAll('p p, p div, p button').length).toBe(0); // with the error line too
+  });
+
+  it('an empty `?org_id=` is removed quietly (PO 20:30Z ②)', async () => {
+    await mount('org_id=');
+    expect(banner()).toBeNull();
+    expect(nav.replace).toHaveBeenCalledWith('/gates/g-1');
+  });
+
+  it('the switch lands on the path the notification gave, even if the shell added its own query since (PO 20:30Z ③)', async () => {
+    await mount(`tab=gates&org_id=${ORG_B}`, '/inbox');
+    nav.search = `tab=gates&p=proj-x&org_id=${ORG_B}`; // the shell adds ?p= before the press
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><OrgHintBanner /></NextIntlClientProvider>);
+    });
+    await act(async () => { button(koMessages.nav.switcherSwitchToOrg).click(); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    expect(nav.replace).toHaveBeenCalledWith('/inbox?tab=gates');
+  });
 });
+
