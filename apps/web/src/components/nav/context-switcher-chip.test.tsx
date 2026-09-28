@@ -399,3 +399,17 @@ describe('ContextSwitcherChip — 조직 전환 실패 표시(story #4372)', () 
     await expectSwitchError();
   });
 });
+
+// [SID:4380] 시트의 지금 프로젝트가 색으로만 보이던 것을 보조기기에도(aria-current).
+describe('ContextSwitcherChip — 지금 프로젝트 aria-current([SID:4380])', () => {
+  it('시트를 열면 지금 프로젝트만 aria-current="true"', async () => {
+    await act(async () => {
+      root.render(wrap(<ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />));
+    });
+    const trigger = container.querySelector('button');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const current = [...document.body.querySelectorAll('button[aria-current="true"]')].map((b) => b.textContent ?? '');
+    expect(current.some((t) => t.includes('Sprintable'))).toBe(true);
+    expect(current.some((t) => t.includes('Landing'))).toBe(false);
+  });
+});

@@ -611,7 +611,7 @@ export function ApprovalsQueue() {
           <div className="w-full">
             <button
               type="button"
-              onClick={() => toggleDecisionExpanded(gate.id)}
+              onClick={() => toggleDecisionExpanded(gate.id)} aria-expanded={decisionExpanded}
               className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
             >
               {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}

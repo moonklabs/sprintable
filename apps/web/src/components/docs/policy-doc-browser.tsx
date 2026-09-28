@@ -142,6 +142,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
               return (
                 <button
                   key={sprint.id}
+                  aria-current={isSelected ? 'true' : undefined}
                   onClick={() => {
                     setSelectedSprintId(sprint.id);
                     if (shouldClosePolicyPanelAfterSelection(mode)) closePanel();
@@ -167,7 +168,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="glass" size="sm" onClick={togglePolicyPanel}>
+        <Button variant="glass" size="sm" onClick={togglePolicyPanel} aria-expanded={policyPanelInlineOpen || policyPanelDrawerOpen}>
           <Menu />
           {policyPanelToggleLabel}
         </Button>
@@ -216,6 +217,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                     return (
                       <button
                         key={doc.id}
+                        aria-current={isSelected ? 'true' : undefined}
                         onClick={() => {
                           setSelectedDocId(doc.id);
                           setPolicyPanelDrawerOpen(false);

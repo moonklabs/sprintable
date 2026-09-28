@@ -171,6 +171,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     variant="ghost"
                     disabled={s.pending}
                     onClick={() => void s.switchProject(project.projectId)}
+                    aria-current={isCurrent ? 'true' : undefined}
                     className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isCurrent ? 'bg-brand/10' : ''}`}
                   >
                     <OrgInitial
@@ -284,6 +285,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                       variant="ghost"
                       disabled={acc.busy !== null || isActive}
                       onClick={() => void acc.handleSwitch(account)}
+                      aria-current={isActive ? 'true' : undefined}
                       className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isActive ? 'bg-brand/10' : ''}`}
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">

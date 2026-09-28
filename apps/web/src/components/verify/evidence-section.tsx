@@ -105,7 +105,7 @@ function VerificationSheetRow({
     <li className="rounded-md px-1.5 py-1 hover:bg-muted/40">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 text-left"
         data-testid="evidence-verification-sheet-summary"
       >
@@ -304,7 +304,7 @@ export function EvidenceSection({
   return (
     <div className={className}>
       <div className="rounded-lg border border-border p-2.5">
-        <button type="button" onClick={handleToggle} className="flex w-full items-center gap-2 text-left">
+        <button type="button" onClick={handleToggle} aria-expanded={expanded} className="flex w-full items-center gap-2 text-left">
           <Check
             className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning-strong')}
             strokeWidth={2.6}

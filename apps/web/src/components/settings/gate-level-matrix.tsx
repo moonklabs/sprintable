@@ -263,6 +263,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   disabled={floorDisabled || busy}
                                   title={floorDisabled ? t('floorDisabledHint') : undefined}
                                   onClick={() => void handleSet(wt, at, lv)}
+                                  aria-pressed={selected}
                                   className={cn(
                                     'min-w-[60px] gap-1 transition-colors',
                                     selected ? LEVEL_META[lv].selected : 'border-border text-muted-foreground hover:bg-muted/40',

@@ -58,7 +58,8 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
       }}
       className={cn(
         ASSET_ROW_GRID,
-        'group relative h-[52px] cursor-pointer border-b border-border outline-none focus-visible:bg-muted/55',
+        // [SID:4380 · PO] 초점 = 제품 링(안쪽) — 배경만 바꾸던 초점은 안 보였고 고른 행의 고름 색을 덮었다(폴더 나무 행과 같은 규칙).
+        'group relative h-[52px] cursor-pointer border-b border-border focus-visible:-outline-offset-2',
         selected ? 'bg-info/10' : 'hover:bg-muted/55',
       )}
     >

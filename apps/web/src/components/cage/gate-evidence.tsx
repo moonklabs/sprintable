@@ -1118,7 +1118,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
         <div>
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
             className="text-muted-foreground underline underline-offset-2"
           >
             {expanded ? t('recipeApprovalSummaryCollapse') : t('recipeApprovalSummaryExpand')}

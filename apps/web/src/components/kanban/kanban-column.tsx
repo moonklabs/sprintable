@@ -153,7 +153,7 @@ export function KanbanColumn({
               <button
                 type="button"
                 aria-label={t('expandDoneColumn')}
-                onClick={onToggleCollapse}
+                onClick={onToggleCollapse} aria-expanded={!collapsed}
                 className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
@@ -214,7 +214,7 @@ export function KanbanColumn({
                   <button
                     type="button"
                     aria-label={t('collapseDoneColumn')}
-                    onClick={onToggleCollapse}
+                    onClick={onToggleCollapse} aria-expanded={!collapsed}
                     className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
                     <ChevronUp className="h-3.5 w-3.5" />

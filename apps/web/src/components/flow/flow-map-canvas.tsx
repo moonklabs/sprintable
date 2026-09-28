@@ -926,7 +926,7 @@ export function FlowMapCanvas({
                   {lane.pastTotal > 0 && lane.pastNodes.length === 0 ? (
                     <button
                       type="button"
-                      onClick={() => onTogglePastBundle(lane.epicId)}
+                      onClick={() => onTogglePastBundle(lane.epicId)} aria-expanded={lane.pastNodes.length > 0}
                       className="focus-inset absolute z-10 cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left hover:border-brand/60"
                       style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
@@ -992,7 +992,7 @@ export function FlowMapCanvas({
                       </span>
                       <button
                         type="button"
-                        onClick={() => onTogglePastBundle(lane.epicId)}
+                        onClick={() => onTogglePastBundle(lane.epicId)} aria-expanded={lane.pastNodes.length > 0}
                         className="focus-inset absolute right-1 top-1 text-[9px] text-muted-foreground underline"
                       >
                         {t('flowMapPastCollapseHint')}

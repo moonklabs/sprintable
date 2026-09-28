@@ -447,7 +447,7 @@ function EventDefRow({
                 낱말 안에서 끊고, lg:truncate도 실제로 말줄임한다. */}
             <button
               type="button"
-              onClick={onToggleExpand}
+              onClick={onToggleExpand} aria-expanded={expanded}
               className="min-w-0 break-words text-left text-sm text-foreground hover:underline lg:truncate"
               data-testid={`event-def-toggle-${def.key}`}
             >

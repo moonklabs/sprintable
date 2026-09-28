@@ -32,6 +32,7 @@ function NodeBox({ node, selectedId, onSelect }: { node: ResolvedNode; selectedI
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onSelect(node.id); }}
+      aria-current={selected ? 'true' : undefined}
       className={cn(
         'block w-full rounded-md border p-2 text-left text-xs transition-colors',
         selected ? 'border-primary ring-1 ring-primary/40' : 'border-border hover:border-primary/30',

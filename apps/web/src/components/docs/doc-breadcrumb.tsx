@@ -40,6 +40,7 @@ export function DocBreadcrumb({ currentDocId, tree, onExpandFolder, ariaLabel }:
             <button
               type="button"
               onClick={() => handleSegmentClick(doc, isCurrent)}
+              aria-current={isCurrent ? 'page' : undefined}
               disabled={isCurrent}
               className={cn(
                 'max-w-[160px] truncate rounded px-1 py-0.5 transition-colors',

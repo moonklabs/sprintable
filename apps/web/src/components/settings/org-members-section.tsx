@@ -310,7 +310,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 <>
                   <button
                     type="button"
-                    onClick={() => setShowProjectPicker((v) => !v)}
+                    onClick={() => setShowProjectPicker((v) => !v)} aria-expanded={showProjectPicker}
                     className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 md:max-w-sm"
                   >
                     <span className={inviteProjectIds.length === 0 ? 'text-muted-foreground' : ''}>

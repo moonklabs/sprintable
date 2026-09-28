@@ -2249,7 +2249,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => setShowAddDep((v) => !v)}
+                  onClick={() => setShowAddDep((v) => !v)} aria-expanded={showAddDep}
                   className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
                   <Plus className="size-3" />{t('dep.add')}

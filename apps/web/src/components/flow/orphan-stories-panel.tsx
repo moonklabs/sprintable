@@ -29,7 +29,7 @@ export function OrphanStoriesPanel({ orphanStories, activeGoals, onSelectStory, 
     <div className="rounded-lg border border-dashed border-border">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
       >
         <span className="text-[13px] text-foreground">
