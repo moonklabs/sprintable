@@ -155,7 +155,7 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
     ids = list((await session.execute(
         select(WorkflowLineStepRun.id).where(
             WorkflowLineStepRun.status.in_(_SLA_GATE_STATUSES),
-        ).order_by(WorkflowLineStepRun.started_at.asc(), WorkflowLineStepRun.id)
+        ).order_by(WorkflowLineStepRun.started_at.asc())
         .limit(_SLA_BATCH_SIZE)
     )).scalars().all())
     # 호출자 세션의 트랜잭션을 여기서 끝내 커넥션을 풀에 돌려준다(쓰기 0이라 무해). 열어 두면 항목 세션 · 항목 안 격리 세션과

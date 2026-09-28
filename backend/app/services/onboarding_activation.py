@@ -180,7 +180,7 @@ async def get_first_instruction_conversation_id(
             human_before,
             requester_is_participant,
         )
-        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id)
+        .order_by(ConversationMessage.created_at.asc())
         .limit(1)
     )).scalar_one_or_none()
     if roundtrip_conv_id is not None:

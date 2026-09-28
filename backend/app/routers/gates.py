@@ -2152,7 +2152,7 @@ async def list_gate_github_check_events_endpoint(
     rows = (await session.execute(
         select(GateGithubCheckEvent)
         .where(GateGithubCheckEvent.gate_id == id, GateGithubCheckEvent.org_id == org_id)
-        .order_by(GateGithubCheckEvent.created_at.desc(), GateGithubCheckEvent.id.desc())
+        .order_by(GateGithubCheckEvent.created_at.desc())
     )).scalars().all()
     return [GateGithubCheckEventResponse.model_validate(r) for r in rows]
 
@@ -3170,7 +3170,7 @@ async def _enrich_approvers(session, org_id, rows) -> list[GateApproverResponse]
                     WorkflowLineStepRunEvent.step_run_id == r.step_run_id,
                     WorkflowLineStepRunEvent.event_type == "approver_reassigned",
                     WorkflowLineStepRunEvent.target_member_id == r.approver_member_id,
-                ).order_by(WorkflowLineStepRunEvent.created_at.desc(), WorkflowLineStepRunEvent.id.desc()).limit(1)
+                ).order_by(WorkflowLineStepRunEvent.created_at.desc()).limit(1)
             )).scalar_one_or_none()
             if ev is not None:
                 resp.reassigned_by_member_id = ev.actor_member_id

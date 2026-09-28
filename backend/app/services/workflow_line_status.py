@@ -186,7 +186,7 @@ async def build_workflow_line_status(
         appr_rows = (await session.execute(
             select(WorkflowLineStepApproval).where(
                 WorkflowLineStepApproval.approval_group_id == active.approval_group_id,
-            ).order_by(WorkflowLineStepApproval.created_at.asc(), WorkflowLineStepApproval.id)
+            ).order_by(WorkflowLineStepApproval.created_at.asc())
         )).scalars().all()
         approvers = [
             ApproverView(

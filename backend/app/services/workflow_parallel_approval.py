@@ -260,7 +260,7 @@ async def list_gate_approvers(
         select(WorkflowLineStepApproval).where(
             WorkflowLineStepApproval.gate_id == gate_id,
             WorkflowLineStepApproval.org_id == org_id,
-        ).order_by(WorkflowLineStepApproval.created_at.asc(), WorkflowLineStepApproval.id)
+        ).order_by(WorkflowLineStepApproval.created_at.asc())
     )
     return list(r.scalars().all())
 

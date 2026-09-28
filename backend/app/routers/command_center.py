@@ -110,7 +110,7 @@ async def my_actions(
                 WorkflowLineStepApproval.blocking.is_(True),
                 WorkflowLineStepRun.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
-            .order_by(WorkflowLineStepApproval.created_at.asc(), WorkflowLineStepApproval.id)
+            .order_by(WorkflowLineStepApproval.created_at.asc())
             .limit(50)
         )
     ).all()
@@ -373,7 +373,7 @@ async def my_actions(
                 WorkflowLineStepRun.started_at < now - timedelta(minutes=_AGENT_STUCK_MINUTES),
                 WorkflowLineStepRun.resolved_member_type == "agent",  # HIGH2: agent run 만.
             )
-            .order_by(WorkflowLineStepRun.started_at.asc(), WorkflowLineStepRun.id)
+            .order_by(WorkflowLineStepRun.started_at.asc())
             .limit(20)
         )
     ).scalars().all()

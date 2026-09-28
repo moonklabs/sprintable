@@ -2054,7 +2054,7 @@ async def get_site_post_external_publication_state(
             PublicationCommand.content_kind == "site_post",
             PublicationCommand.approved_version.in_(own_version_ids),
         )
-        .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+        .order_by(PublicationCommand.created_at.desc())
         .limit(1)
     )).scalar_one_or_none()
 

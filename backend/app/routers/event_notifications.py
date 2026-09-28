@@ -193,7 +193,7 @@ async def list_notifications(
             Event.recipient_id == member_id,
             ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
         )
-        .order_by(Event.created_at.desc(), Event.id.desc())
+        .order_by(Event.created_at.desc())
         .limit(limit)
         .offset(offset)
     )

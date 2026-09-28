@@ -1529,7 +1529,7 @@ async def _recover_interrupted_commands(db: AsyncSession, *, now: datetime) -> i
         select(PublicationCommand.id).where(
             PublicationCommand.status == "in_progress",
             func.coalesce(PublicationCommand.claimed_at, PublicationCommand.updated_at) < threshold,
-        ).order_by(PublicationCommand.created_at.asc(), PublicationCommand.id).limit(BATCH_SIZE)
+        ).order_by(PublicationCommand.created_at.asc()).limit(BATCH_SIZE)
     )).scalars().all()
     await db.commit()
     recovered = 0
@@ -1623,7 +1623,7 @@ async def process_due_publication_commands(
                 (PublicationCommand.scheduled_at.is_(None)) | (PublicationCommand.scheduled_at <= claim_now),
                 (PublicationCommand.next_attempt_at.is_(None)) | (PublicationCommand.next_attempt_at <= claim_now),
                 PublicationCommand.id.not_in(over_budget_ids) if over_budget_ids else true(),
-            ).order_by(PublicationCommand.created_at.asc(), PublicationCommand.id)
+            ).order_by(PublicationCommand.created_at.asc())
             .limit(1)
             .with_for_update(skip_locked=True)
         )).scalar_one_or_none()

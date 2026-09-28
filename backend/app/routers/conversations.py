@@ -1551,7 +1551,7 @@ async def list_conversations(
         latest_msg = (await db.execute(
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conv.id)
-            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+            .order_by(ConversationMessage.created_at.desc())
             .limit(1)
         )).scalar_one_or_none()
 

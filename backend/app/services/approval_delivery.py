@@ -231,7 +231,7 @@ async def dispatch_approval_request_cards(
                         == str(work_item_id),
                         ConversationMessage.msg_metadata["approval_target"]["gate_type"].astext == gate_type,
                     )
-                    .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+                    .order_by(ConversationMessage.created_at.desc())
                     .limit(1)
                 )).scalar_one_or_none()
 
@@ -890,7 +890,7 @@ async def notify_gate_delegated_to_old_approver(
         select(ConversationMessage.conversation_id).where(
             ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
             ConversationMessage.mentioned_ids.contains([old_approver_id]),
-        ).order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc()).limit(1)
+        ).order_by(ConversationMessage.created_at.desc()).limit(1)
     )).first()
     if row is None:
         return []

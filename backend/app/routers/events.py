@@ -555,7 +555,7 @@ async def agent_event_stream(
                     result = await db.execute(
                         select(Event)
                         .where(*exceed_clauses)
-                        .order_by(Event.created_at.desc(), Event.id.desc())
+                        .order_by(Event.created_at.desc())
                         .limit(limit)
                     )
                     pending_events = list(reversed(result.scalars().all()))
@@ -580,7 +580,7 @@ async def agent_event_stream(
                     result = await db.execute(
                         select(Event)
                         .where(*where_clauses)
-                        .order_by(Event.created_at.asc(), Event.id)
+                        .order_by(Event.created_at.asc())
                         .limit(100)
                     )
                     pending_events = result.scalars().all()
@@ -896,7 +896,7 @@ async def get_pending_events(
     total = int(count_result.scalar_one() or 0)
 
     q = (
-        select(Event).where(*conds).order_by(Event.created_at.asc(), Event.id)
+        select(Event).where(*conds).order_by(Event.created_at.asc())
         .limit(limit if limit is not None else _PENDING_EVENTS_DEFAULT_LIMIT)
     )
     result = await db.execute(q)
@@ -2484,7 +2484,7 @@ async def _find_existing_stage_publish(
             event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
             event_lookup_work_item_id=work_item_id, event_lookup_stage=stage,
         )
-        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+        .order_by(ConversationMessage.created_at.desc())
         .limit(1)
     )).scalars().first()
 
@@ -2573,7 +2573,7 @@ async def _find_latest_stage_publish(
             event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
             event_lookup_work_item_id=work_item_id,
         )
-        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+        .order_by(ConversationMessage.created_at.desc())
         .limit(1)
     )).scalars().first()
 
@@ -4864,7 +4864,7 @@ async def get_event_publish_history(
             text("conversation_messages.metadata->'event'->>'event_key' = :event_lookup_definition_key"),
         )
         .params(event_lookup_definition_key=definition_key)
-        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+        .order_by(ConversationMessage.created_at.desc())
         .limit(limit)
     )).scalars().all()
 

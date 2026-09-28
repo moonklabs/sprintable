@@ -77,7 +77,7 @@ async def sweep_evidence_references(session: AsyncSession, *, batch_size: int = 
                 Evidence.payload["kind"].astext.isnot(None),
             ),
         )
-        .order_by(Evidence.created_at.asc(), Evidence.id)
+        .order_by(Evidence.created_at.asc())
         .limit(batch_size)
     )
     rows = (await session.execute(stmt)).scalars().all()
@@ -145,7 +145,7 @@ async def sweep_artifact_references(session: AsyncSession, *, batch_size: int = 
                 has_described_node,
             ),
         )
-        .order_by(VisualArtifact.created_at.asc(), VisualArtifact.id)
+        .order_by(VisualArtifact.created_at.asc())
         .limit(batch_size)
     )
     artifacts = (await session.execute(stmt)).scalars().all()

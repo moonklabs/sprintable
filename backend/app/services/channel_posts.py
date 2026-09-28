@@ -1214,7 +1214,7 @@ async def list_channel_post_drafts(
         command_rows = (await db.execute(
             select(PublicationCommand)
             .where(PublicationCommand.gate_id.in_(gate_ids))
-            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+            .order_by(PublicationCommand.created_at.desc())
         )).scalars().all()
         for c in command_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
@@ -3188,7 +3188,7 @@ async def cancel_unstarted_publication(
     command = (await db.execute(
         select(PublicationCommand)
         .where(PublicationCommand.gate_id == gate.id)
-        .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+        .order_by(PublicationCommand.created_at.desc())
         .limit(1)
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -3254,7 +3254,7 @@ async def cancel_scheduled_publication(
     command = (await db.execute(
         select(PublicationCommand)
         .where(PublicationCommand.gate_id == gate.id)
-        .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+        .order_by(PublicationCommand.created_at.desc())
         .limit(1)
         .with_for_update()
     )).scalar_one_or_none()
@@ -3505,7 +3505,7 @@ async def withdraw_channel_post_draft(
         command = (await db.execute(
             select(PublicationCommand)
             .where(PublicationCommand.gate_id == gate.id)
-            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
+            .order_by(PublicationCommand.created_at.desc())
             .limit(1)
             .with_for_update()
         )).scalar_one_or_none()

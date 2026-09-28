@@ -840,7 +840,7 @@ async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid
         reply = (await session.execute(
             select(ConversationMessage)
             .where(ConversationMessage.thread_id == task.root_message_id)
-            .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id)
+            .order_by(ConversationMessage.created_at.asc())
             .limit(1)
         )).scalar_one_or_none()
 
@@ -879,7 +879,7 @@ async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid
             deliveries = (await session.execute(
                 select(ConversationWebhookDelivery)
                 .where(ConversationWebhookDelivery.message_id == task.root_message_id)
-                .order_by(ConversationWebhookDelivery.created_at.desc(), ConversationWebhookDelivery.id.desc())
+                .order_by(ConversationWebhookDelivery.created_at.desc())
             )).scalars().all()
             if deliveries and all(d.status == "failed" for d in deliveries):
                 latest = deliveries[0]

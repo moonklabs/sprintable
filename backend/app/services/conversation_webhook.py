@@ -473,7 +473,7 @@ async def mark_agent_replied(conversation_id: uuid.UUID) -> None:
         msg_ids = (await db.execute(
             select(ConversationMessage.id)
             .where(ConversationMessage.conversation_id == conversation_id)
-            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+            .order_by(ConversationMessage.created_at.desc())
             .limit(20)
         )).scalars().all()
 
@@ -486,7 +486,7 @@ async def mark_agent_replied(conversation_id: uuid.UUID) -> None:
                 ConversationWebhookDelivery.message_id.in_(msg_ids),
                 ConversationWebhookDelivery.status == "gateway_accepted",
             )
-            .order_by(ConversationWebhookDelivery.created_at.desc(), ConversationWebhookDelivery.id.desc())
+            .order_by(ConversationWebhookDelivery.created_at.desc())
             .limit(1)
         )).scalar_one_or_none()
 

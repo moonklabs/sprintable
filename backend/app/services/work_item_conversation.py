@@ -67,7 +67,7 @@ async def derive_conversation_ids_for_tagged_work_items(
             tag_id.in_(wi_ids),
         )
         .distinct(tag_type, tag_id)
-        .order_by(tag_type, tag_id, ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+        .order_by(tag_type, tag_id, ConversationMessage.created_at.desc())
     )).all()
     for wi_type, wi_id, conv_id in tag_rows:
         conversation_by_work_item[(wi_type, uuid.UUID(wi_id))] = conv_id

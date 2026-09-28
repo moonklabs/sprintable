@@ -214,7 +214,7 @@ async def deliver_pending_stop_notices(db: AsyncSession, *, limit: int = 50) -> 
     ids = (await db.execute(
         select(PublicationCommand.id)
         .where(PublicationCommand.stop_notice_state == STOP_NOTICE_PENDING)
-        .order_by(PublicationCommand.updated_at.asc(), PublicationCommand.id)
+        .order_by(PublicationCommand.updated_at.asc())
         .limit(limit)
     )).scalars().all()
     await db.commit()  # 읽기만 한 트랜잭션을 닫는다(아래는 전부 별도 세션).
