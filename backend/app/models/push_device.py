@@ -44,6 +44,9 @@ class PushDevice(Base):
     # webhook_configs(0079) 선례: member_id FK 완화(grant-only write 500 해소). 소유 스코프는 쿼리시점
     # org_id AND member_id 필터로 강제(repo list/get_owned/delete).
     member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    # story #4397 — the person (users.id) behind the registering member; NULL for agents and rows not backfilled (0418).
+    # Sending by person (settings.push_devices_by_user) selects on this column.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     expo_push_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # ExponentPushToken[...] (UNIQUE, ios/android)
     apns_device_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # raw hex APNs 토큰(UNIQUE, macos)
     platform: Mapped[str | None] = mapped_column(Text, nullable=True)  # ios | android | macos | 미보고(CHECK)

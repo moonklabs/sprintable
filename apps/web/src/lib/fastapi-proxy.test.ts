@@ -499,3 +499,23 @@ describe('fastapi-proxy — 백엔드 fetch 취소 · 시간 제한(story #4320)
     expect([a.status, b.status]).toEqual([503, 503]);
   });
 });
+
+describe('fastapi-proxy — the caller real IP reaches FastAPI (story #4397)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue(null); // the session-less push unregister call
+    global.fetch = vi.fn(async () => new Response(null, { status: 204 }));
+  });
+
+  it('forwards cf-connecting-ip (per-IP caps key on it behind Cloudflare)', async () => {
+    const request = new Request('http://localhost/api/push/devices/unregister', {
+      method: 'POST', body: '{}', headers: { 'cf-connecting-ip': '203.0.113.5', 'x-forwarded-for': '203.0.113.5, 10.0.0.1' },
+    });
+    const res = await proxyToFastapi(request, '/api/v2/push/devices/unregister', { public: true });
+    expect(res.status).toBe(204); // reached FastAPI without a session
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['cf-connecting-ip']).toBe('203.0.113.5');
+    expect(headers['x-forwarded-for']).toBe('203.0.113.5, 10.0.0.1');
+  });
+});

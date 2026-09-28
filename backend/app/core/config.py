@@ -200,6 +200,11 @@ class Settings(BaseSettings):
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
+    # story #4397 — send push notifications to a person's devices across their orgs (push_devices.user_id), instead of only
+    # the devices last registered in the notification's org. Env PUSH_DEVICES_BY_USER. Default off; dev on; prod on only after
+    # the app build that re-registers on account switch (and opens a notification of another org in that org) is out.
+    push_devices_by_user: bool = False
+
     # E-ARCH S1(2026-07-21, 선생님 "가자" 승인 — 채팅 5초 지연/#2074 근본): REST(api)와
     # 실시간(SSE/LISTEN)이 같은 Cloud Run 서비스에 있어 인스턴스 기아(콜드스타트 경합)로
     # 서로를 굶기던 구조를 분리하는 1단계. 이 플래그를 끄면 이 인스턴스는 pg_pubsub LISTEN을

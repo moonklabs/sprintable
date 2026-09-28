@@ -132,6 +132,12 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('lets the session-less push unregister call through (story #4397 — the app calls it after logout · with an expired session)', async () => {
+    const response = await middleware(makeRequest('/api/push/devices/unregister'));
+    expect(response.status).toBe(200); // passed to the route handler — no /login redirect
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('passes all /api/* paths without JWT check', async () => {
     const apiPaths = [
       '/api/v1/bridge/slack/interactions',

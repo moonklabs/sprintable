@@ -52,6 +52,7 @@ class PushDeviceRepository:
         apns_device_token: str | None = None,
         device_id: str | None = None,
         app_version: str | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> PushDevice:
         """디바이스 등록 — 플랫폼별 토큰 UNIQUE 기준 upsert(재등록 자연 멱등).
 
@@ -86,6 +87,7 @@ class PushDeviceRepository:
             device_id=device_id,
             app_version=app_version,
             is_active=True,
+            user_id=user_id,
         )
         stmt = (
             insert_stmt
@@ -99,6 +101,8 @@ class PushDeviceRepository:
                     "app_version": app_version,
                     "is_active": True,
                     "last_seen_at": now,
+                    # story #4397 — the person follows the registration like org/member (account switch → new person)
+                    "user_id": user_id,
                 },
             )
             .returning(PushDevice.id)
