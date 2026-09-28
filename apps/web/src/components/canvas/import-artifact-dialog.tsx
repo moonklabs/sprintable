@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArtifactStage } from './artifact-stage';
 import { newNodeId, type ArtifactNode } from '@/services/canvas-nodes';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
@@ -90,23 +90,16 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
           <DialogTitle>{t('importDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div role="tablist" className="flex items-center gap-0.5 border-b border-border pb-2">
-          {(['image', 'html'] as const).map((tabKey) => (
-            <button
-              key={tabKey}
-              type="button"
-              role="tab"
-              aria-selected={tab === tabKey}
-              onClick={() => setTab(tabKey)}
-              className={cn(
-                'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                tab === tabKey ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tabKey === 'image' ? t('importTabImage') : t('importTabHtml')}
-            </button>
-          ))}
-        </div>
+        {/* [SID:4388] shared tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. */}
+        <Tabs value={tab} onValueChange={(v) => setTab(v as ImportTab)}>
+          <TabsList variant="line" activateOnFocus>
+            {(['image', 'html'] as const).map((tabKey) => (
+              <TabsTrigger key={tabKey} value={tabKey}>
+                {tabKey === 'image' ? t('importTabImage') : t('importTabHtml')}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
         {tab === 'image' ? (
           <div className="space-y-2">

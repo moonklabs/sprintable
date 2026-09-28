@@ -590,9 +590,13 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     expect(dialogContent().textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
     // 고급 탭이 강제로 열려 JSON textarea가 보인다(기존 #3070 편집기 기능 유지 — 손실 0).
     expect(dialogContent().querySelector('#event-payload-schema')).not.toBeNull();
-    // 기본 탭 버튼은 비활성(disabled) — 표현 못 하는 정의를 폼으로 잘못 편집하게 두지 않는다.
+    // 기본 탭 버튼은 비활성 — 표현 못 하는 정의를 폼으로 잘못 편집하게 두지 않는다.
+    // [SID:4388] 공용 탭(base-ui)은 비활성 탭을 aria-disabled로 두고(초점은 받되 고를 수 없음) 누름을 무시한다.
     const basicTabBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.definerTabBasic) as HTMLButtonElement;
-    expect(basicTabBtn.disabled).toBe(true);
+    expect(basicTabBtn.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { basicTabBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(basicTabBtn.getAttribute('aria-selected')).toBe('false');
+    expect(dialogContent().querySelector('#event-payload-schema')).not.toBeNull();
   });
 });
 
@@ -986,7 +990,7 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
   });
 });
 
-describe('[SID:4388] event definer dialog — «기본 · 고급» is a tablist that announces the chosen tab', () => {
+describe('[SID:4388] event definer dialog — «기본 · 고급» uses the shared tabs (announced · arrow keys)', () => {
   it('«기본» starts selected; switching to «고급» moves aria-selected', async () => {
     mockFetches([]);
     await mount();
@@ -999,5 +1003,22 @@ describe('[SID:4388] event definer dialog — «기본 · 고급» is a tablist 
     expect(tabs()).toEqual(['basic:true', 'advanced:false']);
     await act(async () => { switchToAdvancedTab(); });
     expect(tabs()).toEqual(['basic:false', 'advanced:true']);
+  });
+
+  it('arrow keys move the selection between «기본» and «고급»', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    const tab = (i: number) => dialog.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]')[i];
+    const selected = () => [tab(0), tab(1)].map((el) => el.getAttribute('aria-selected'));
+
+    await act(async () => { tab(0).focus(); tab(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(selected()).toEqual(['false', 'true']);
+    expect(document.body.querySelector('#event-payload-schema')).not.toBeNull(); // the advanced editor is shown
+
+    await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(selected()).toEqual(['true', 'false']);
   });
 });

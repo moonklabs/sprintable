@@ -10,6 +10,7 @@ import { fileExtLabel, formatDate, formatRelativeTime } from '@/lib/storage/form
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StorageUploaderAvatar } from './storage-uploader-avatar';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import { StorageFileGlyph } from './storage-file-glyph';
@@ -89,35 +90,17 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
         </div>
       </div>
 
-      {/* tabs (line, active border-info) */}
-      <div role="tablist" className="flex gap-0.5 border-b border-border px-[14px] pt-[6px]">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'detail'}
-          onClick={() => setTab('detail')}
-          className={cn(
-            '-mb-px border-b-2 px-[11px] py-2 text-[12.5px] font-semibold',
-            tab === 'detail' ? 'border-info text-foreground' : 'border-transparent text-muted-foreground',
-          )}
-        >
-          {t('tabDetail')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'usage'}
-          onClick={() => setTab('usage')}
-          className={cn(
-            '-mb-px flex items-center gap-[5px] border-b-2 px-[11px] py-2 text-[12.5px] font-semibold',
-            tab === 'usage' ? 'border-info text-foreground' : 'border-transparent text-muted-foreground',
-          )}
-        >
-          {t('tabUsage')}
-          {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-          <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
-        </button>
-      </div>
+      {/* tabs — [SID:4388] shared line tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'detail' | 'usage')} className="border-b border-border px-[14px] pt-[6px] pb-[5px]">
+        <TabsList variant="line" activateOnFocus>
+          <TabsTrigger value="detail">{t('tabDetail')}</TabsTrigger>
+          <TabsTrigger value="usage">
+            {t('tabUsage')}
+            {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+            <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* body */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-[14px]">

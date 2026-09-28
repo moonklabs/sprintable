@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// [SID:4388] The detail panel's «상세 · 사용처» switch showed the chosen one only by its underline. It is now a tablist: each
-// button is role="tab" with aria-selected, so a screen reader says «tab, selected».
+// [SID:4388] The detail panel's «상세 · 사용처» switch showed the chosen one only by its underline. It now uses the shared tabs
+// (@/components/ui/tabs · base-ui): role="tab" with aria-selected, and arrow keys · Home/End move the selection.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -42,24 +42,42 @@ const ASSET: Asset = {
   source_links: [],
 };
 
+async function mount() {
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <StorageDetailPanel asset={ASSET} folderLabel={null} onDownload={vi.fn()} onRequestDelete={vi.fn()} />
+      </NextIntlClientProvider>,
+    );
+  });
+  // The shared tabs (base-ui) register their tabs in an effect after the first render — a click in that same tick is ignored.
+  // Let it settle, as a real browser does before anyone can click.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+
 function tabs() {
   return Array.from(container.querySelectorAll('[role="tab"]')).map((el) => `${el.textContent?.trim()}:${el.getAttribute('aria-selected')}`);
 }
 
 describe('[SID:4388] StorageDetailPanel tabs announce the chosen tab', () => {
   it('«상세» starts selected; clicking «사용처» (with its count) moves aria-selected', async () => {
-    await act(async () => {
-      root.render(
-        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-          <StorageDetailPanel asset={ASSET} folderLabel={null} onDownload={vi.fn()} onRequestDelete={vi.fn()} />
-        </NextIntlClientProvider>,
-      );
-    });
+    await mount();
     expect(container.querySelector('[role="tablist"]')).not.toBeNull();
     expect(tabs()).toEqual(['상세:true', '사용처0:false']);
 
     const usage = Array.from(container.querySelectorAll('[role="tab"]')).find((el) => el.textContent?.includes('사용처')) as HTMLElement;
     await act(async () => { usage.click(); });
     expect(tabs()).toEqual(['상세:false', '사용처0:true']);
+  });
+
+  it('arrow keys move the selection (and Home goes back to the first tab)', async () => {
+    await mount();
+    const tab = (i: number) => container.querySelectorAll<HTMLElement>('[role="tab"]')[i];
+    await act(async () => { tab(0).focus(); tab(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(tabs()).toEqual(['상세:false', '사용처0:true']);
+    expect(document.activeElement).toBe(tab(1));
+
+    await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); });
+    expect(tabs()).toEqual(['상세:true', '사용처0:false']);
   });
 });

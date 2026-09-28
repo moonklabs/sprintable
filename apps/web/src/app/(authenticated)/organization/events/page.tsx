@@ -836,28 +836,18 @@ function EventFormDialog({
         <DialogHeader>
           <div className="flex items-center justify-between gap-3">
             <DialogTitle>{mode === 'create' ? t('eventCreateDialogTitle') : t('eventEditDialogTitle')}</DialogTitle>
-            <div role="tablist" className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'basic'}
-                disabled={advancedOnly}
-                onClick={() => setTab('basic')}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tab === 'basic' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
-              >
-                {t('definerTabBasic')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'advanced'}
-                onClick={() => setTab('advanced')}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${tab === 'advanced' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
-              >
-                {t('definerTabAdvanced')}
-                {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
-              </button>
-            </div>
+            {/* [SID:4388] shared tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. */}
+            <Tabs value={tab} onValueChange={(v) => setTab(v as 'basic' | 'advanced')} className="shrink-0">
+              <TabsList activateOnFocus>
+                <TabsTrigger value="basic" disabled={advancedOnly}>
+                  {t('definerTabBasic')}
+                </TabsTrigger>
+                <TabsTrigger value="advanced">
+                  {t('definerTabAdvanced')}
+                  {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           {/* story #2666(발견) — 원래 문구가 "org.{조직 slug}."처럼 한글 자리표시자를 ICU
               변수 자리에 그대로 박아 놔 next-intl이 MALFORMED_ARGUMENT로 파싱 실패하던

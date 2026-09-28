@@ -27,6 +27,9 @@ function wrap(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // The form is a sessionStorage draft keyed by targetId (story #4370) — clear it so one test's upload or tab does not
+  // leak into the next (the sibling 4370 test file does the same).
+  window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -41,6 +44,11 @@ afterEach(async () => {
 async function mount(onImport: (nodes: ArtifactNode[]) => Promise<boolean> = vi.fn(async () => true)) {
   await act(async () => {
     root.render(wrap(<ImportArtifactDialog open onOpenChange={vi.fn()} onImport={onImport} targetId="story-1" />));
+  });
+  // [SID:4388] The dialog moves focus into itself shortly after opening — onto the chosen tab, which the shared tabs
+  // (activateOnFocus) select. Wait for that, as a person cannot click before it: a click earlier than that focus would be undone.
+  await vi.waitFor(() => {
+    expect(document.body.querySelector('[data-slot="dialog-content"]')?.contains(document.activeElement)).toBe(true);
   });
   return onImport;
 }
@@ -144,5 +152,17 @@ describe('[SID:4388] ImportArtifactDialog tabs announce the chosen tab', () => {
     await act(async () => { htmlTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(tabs()[0]).toMatch(/:false$/);
     expect(tabs()[1]).toBe('HTML 붙여넣기:true');
+  });
+
+  it('arrow keys move the selection between «이미지» and «HTML 붙여넣기»', async () => {
+    await mount();
+    const tabs = () => [...document.body.querySelectorAll('[role="tab"]')].map((el) => el.getAttribute('aria-selected'));
+    const tab = (i: number) => document.body.querySelectorAll<HTMLElement>('[role="tab"]')[i];
+    await act(async () => { tab(0).focus(); tab(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    expect(tabs()).toEqual(['false', 'true']);
+    expect(document.body.querySelector('textarea')).not.toBeNull(); // the HTML tab's body is shown
+
+    await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(tabs()).toEqual(['true', 'false']);
   });
 });
