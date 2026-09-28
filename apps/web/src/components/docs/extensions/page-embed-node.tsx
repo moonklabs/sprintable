@@ -2,7 +2,7 @@
 
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -64,7 +64,8 @@ type NodeAttrs = {
   slug: string | null;
 };
 
-function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps) {
+/** Exported for component tests (story #4371). */
+export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps) {
   // story #3880(§⑤ 낱말 드리프트, 유나 §⑤ 3880-c 확定) — "Embed"/"Change" 원시 영문
   // 정본화. Embed는 chats.embedFormEmbed 기존 키 재사용, Change는 docs 네임스페이스
   // 신규 키(이 파일이 docs 에디터 확장이라 도메인 일치).
@@ -75,6 +76,8 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
   const { currentDocId, onNavigate } = extension.options as PageEmbedOptions;
 
   const [inputSlug, setInputSlug] = useState('');
+  // story #4371 — 저장된 임베드의 속성(title · icon · slug)은 첫 그림용 자리표시일 뿐. 열 때 대상 문서를 한 번 조회해
+  // 지워짐 · 접근 불가 · 순환이면 오류 줄, 성공이면 최신 값으로 바꾼다(예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
   const [doc, setDoc] = useState<DocPreview | null>(
     docId
       ? { id: docId, title: title ?? '', icon: icon ?? null, slug: slug ?? '', embedChain: [] }
@@ -82,21 +85,30 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  // 이미 조회로 확인한 docId — 같은 대상을 두 번 조회하지 않는다(입력칸 성공 뒤 속성 갱신 · StrictMode 이중 효과).
+  const verifiedDocId = useRef<string | null>(null);
 
   // Direct circular embed check (A embeds A) — caught from node attrs immediately.
   const circular = isCircularEmbed(docId, currentDocId);
 
+  // mode 'submit' = 입력칸 제출(불러오는 동안 로딩 표시 · 실패면 입력칸 아래 오류 줄 · 초점은 입력칸),
+  // mode 'verify' = 저장된 임베드를 열 때 한 번(자리표시 카드를 그대로 두고 조용히 조회 · 실패면 오류 줄).
   const fetchDoc = useCallback(
-    async (slugOrId: string) => {
-      setLoading(true);
+    async (slugOrId: string, mode: 'submit' | 'verify') => {
+      if (mode === 'submit') setLoading(true);
       setError(null);
+      const fail = (message: string) => {
+        setError(message);
+        if (mode === 'submit') inputRef.current?.focus();
+      };
       try {
         const params = new URLSearchParams({ q: slugOrId });
         if (currentDocId) params.set('currentDocId', currentDocId);
         const res = await fetchWithAuth(`/api/docs/preview?${params.toString()}`);
         if (!res.ok) {
-          setError(res.status === 404 ? tDocs('pageEmbedNotFound') : tDocs('pageEmbedUnavailable'));
-          setLoading(false);
+          fail(res.status === 404 ? tDocs('pageEmbedNotFound') : tDocs('pageEmbedUnavailable'));
           return;
         }
         const json = (await res.json()) as { data: DocPreview };
@@ -104,33 +116,38 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
 
         // Indirect circular embed check: target doc's embedChain contains currentDocId (A→B→A)
         if (isCircularEmbed(d.id, currentDocId, d.embedChain)) {
-          setError(tDocs('pageEmbedCycle'));
-          setLoading(false);
+          fail(tDocs('pageEmbedCycle'));
           return;
         }
 
+        verifiedDocId.current = d.id;
         setDoc(d);
-        updateAttributes({ docId: d.id, title: d.title, icon: d.icon ?? null, slug: d.slug });
+        // 값이 같으면 속성을 건드리지 않는다 — 문서를 열기만 해도 «고침»이 되는 일이 없게.
+        const next = { docId: d.id, title: d.title, icon: d.icon ?? null, slug: d.slug };
+        if (next.docId !== docId || next.title !== title || next.icon !== (icon ?? null) || next.slug !== slug) {
+          updateAttributes(next);
+        }
       } catch {
-        setError(tDocs('pageEmbedLoadFailed'));
+        fail(tDocs('pageEmbedLoadFailed'));
       } finally {
-        setLoading(false);
+        if (mode === 'submit') setLoading(false);
       }
     },
-    [updateAttributes, currentDocId, tDocs],
+    [updateAttributes, currentDocId, tDocs, docId, title, icon, slug],
   );
 
-  // Auto-fetch when docId is present but doc state not yet populated
+  // 저장된 임베드(docId 있음)는 열 때 대상 문서를 한 번 조회한다(story #4371).
   useEffect(() => {
-    if (docId && !doc) {
-      void fetchDoc(docId);
-    }
-  }, [docId, doc, fetchDoc]);
+    if (!docId || verifiedDocId.current === docId || isCircularEmbed(docId, currentDocId)) return;
+    verifiedDocId.current = docId;
+    void fetchDoc(docId, 'verify');
+  }, [docId, currentDocId, fetchDoc]);
 
   const handleReset = useCallback(() => {
     setDoc(null);
     setError(null);
     setInputSlug('');
+    verifiedDocId.current = null;
     updateAttributes({ docId: null, title: null, icon: null, slug: null });
   }, [updateAttributes]);
 
@@ -138,7 +155,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
     (e: React.FormEvent) => {
       e.preventDefault();
       const val = inputSlug.trim();
-      if (val) void fetchDoc(val);
+      if (val) void fetchDoc(val, 'submit');
     },
     [inputSlug, fetchDoc],
   );
@@ -156,6 +173,8 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
   }
 
   // --- No doc selected — show picker ---
+  // story #4371 — 제출 실패(찾을 수 없음/불가 · 순환 · 불러오기 실패)는 입력칸 아래 오류 한 줄로(예전엔 이 갈래가 오류 갈래보다
+  // 먼저 반환해 오류가 영영 안 그려졌다). 입력값은 그대로 · 초점은 입력칸(fetchDoc).
   if (!docId) {
     return (
       <NodeViewWrapper data-testid="page-embed-picker">
@@ -165,20 +184,30 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
         >
           <FileText className="size-4 shrink-0 text-muted-foreground" />
           <input
+            ref={inputRef}
             type="text"
             value={inputSlug}
             onChange={(e) => setInputSlug(e.target.value)}
             placeholder={tDocs('pageEmbedPlaceholder')}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             autoFocus
           />
           <button
             type="submit"
+            disabled={loading}
             className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-brand-text hover:bg-brand/24"
           >
             {tChats('embedFormEmbed')}
           </button>
         </form>
+        {error ? (
+          <p id={errorId} role="alert" className="mt-1.5 flex items-start gap-1.5 break-keep px-1 text-xs text-destructive [overflow-wrap:anywhere]">
+            <AlertCircle className="mt-px size-3.5 shrink-0" />
+            <span>{error}</span>
+          </p>
+        ) : null}
       </NodeViewWrapper>
     );
   }
