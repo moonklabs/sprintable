@@ -346,25 +346,39 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
   });
 
   // 축 (a) 객체 맵 — doc-gate-section.tsx의 AUDIT_META(status→{dot,Icon,labelKey}) 프로퍼티
-  // 조회가 className에 들어가는 실 자리(440행 `${am.dot}` span). 그 span의 유일한 자식
+  // 조회가 className에 들어가는 실 자리(`${am.dot}` span). 그 span의 유일한 자식
   // (AIcon)을 건드리지 않고 muted 텍스트를 하나 더 끼워 넣는다 — 원래 있던 AIcon 아이콘은
   // 그대로 두고 "실수로 muted 텍스트를 추가했다"를 재현.
   describe('축 (a) 객체 맵 — doc-gate-section.tsx (AUDIT_META)', () => {
     const REL_FILE = 'components/docs/doc-gate-section.tsx';
     const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
     const original = readFileSync(ABS_FILE, 'utf8');
+    // story #4370(까디르) — 줄 번호를 못박지 않고 내용으로 줄을 찾는다(이 파일을 만지는 PR마다 번호가 밀려 깨지던 것).
+    // 조각은 파일에 정확히 한 번 있어야 한다(없거나 둘 이상이면 이 전제부터 RED — 조각을 고쳐 준다).
+    const lineOf = (snippet: string) => {
+      const hits = original.split('\n').flatMap((text, i) => (text.includes(snippet) ? [i + 1] : []));
+      expect(hits, `doc-gate-section.tsx에서 «${snippet}» 줄이 정확히 하나여야 한다`).toHaveLength(1);
+      return hits[0]!;
+    };
+    // 반려 사유 상자(bg-destructive-tint) 안 muted 글 줄 — 기존 #3839 GRANDFATHER 위반 자리. 조각은 위반 클래스
+    // (text-muted-foreground)를 빼고 잡는다 — 클래스를 지우면 줄은 그대로 찾히고 «위반 없음»으로 RED가 나야 하므로.
+    const DESTRUCTIVE_MUTED_SNIPPET = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]';
+    // AUDIT_META 조회(`${am.dot}`) span — #3865 정밀화로 더 이상 위반 아닌 자리.
+    const AUDIT_DOT_SNIPPET = 'place-items-center rounded-full ${am.dot}';
 
-    // 전제 확인 — story #3865(AC1 정밀화, PO 조건①②) 뒤로는 440행이 더 이상 위반이 아니다.
+    // 전제 확인 — story #3865(AC1 정밀화, PO 조건①②) 뒤로는 `${am.dot}` 줄이 더 이상 위반이 아니다.
     // am.dot 바인딩이 AUDIT_META 4개 항목의 class 후보를 하나의 그룹으로 모으는데, 그 그룹의
     // 어느 «한» 후보 문자열도 tint+muted를 동시에 담지 않는다(resubmit 항목은 순수
     // bg-muted+text-muted-foreground, 나머지 3항목은 순수 tint) — 같은 그룹=상호배타라
-    // 실제 공존 0(sameElementCoOccurs, story #3865). 남은 위반은 410행(기존 #3839
+    // 실제 공존 0(sameElementCoOccurs, story #3865). 남은 위반은 반려 사유 상자 안 muted 줄(기존 #3839
     // GRANDFATHER_BASELINE 등재분)뿐이다.
-    it('전제: 원본은 410행(destructive)만 위반 — 440행은 #3865 정밀화로 더 이상 위반 아님', () => {
+    it('전제: 원본은 반려 사유 상자 안 muted 줄(destructive)만 위반 — AUDIT_META `${am.dot}` 줄은 #3865 정밀화로 더 이상 위반 아님', () => {
+      const destructiveMutedLine = lineOf(DESTRUCTIVE_MUTED_SNIPPET);
+      const auditDotLine = lineOf(AUDIT_DOT_SNIPPET);
       const violations = scanContent(original, REL_FILE, componentMap);
       expect(violations).toHaveLength(1);
-      expect(violations.find((v) => v.line === 440)).toBeUndefined();
-      expect(violations.find((v) => v.line === 410)?.family).toBe('destructive');
+      expect(violations.find((v) => v.line === auditDotLine)).toBeUndefined();
+      expect(violations.find((v) => v.line === destructiveMutedLine)?.family).toBe('destructive');
     });
 
     it('AIcon 옆에 muted 텍스트를 끼워 넣으면(객체 맵으로 조회된 tint가 조상으로 인식돼) 위반이 +1 된다', () => {
