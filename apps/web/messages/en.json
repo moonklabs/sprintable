@@ -210,7 +210,9 @@
     "createOrgSlugPlaceholder": "e.g. moonklabs",
     "createOrgSlugError": "Only lowercase letters, numbers, and hyphens are allowed (must start/end with a letter or number)",
     "createOrgSlugTaken": "This slug is already taken.",
-    "createOrgGenericError": "Couldn't create the organization. Please try again in a moment."
+    "createOrgGenericError": "Couldn't create the organization. Please try again in a moment.",
+    "orgHintTitle": "Notification from another organization",
+    "orgHintBody": "This notification belongs to {org}. Switch to open it."
   },
   "storage": {
     "title": "Storage",

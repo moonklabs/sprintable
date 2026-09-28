@@ -210,7 +210,9 @@
     "createOrgSlugPlaceholder": "예: moonklabs",
     "createOrgSlugError": "영소문자, 숫자, 하이픈만 사용 가능해요 (시작/끝은 영소문자 또는 숫자)",
     "createOrgSlugTaken": "이미 사용 중인 슬러그예요.",
-    "createOrgGenericError": "조직을 만들지 못했어요. 잠시 후 다시 시도해 주세요."
+    "createOrgGenericError": "조직을 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
+    "orgHintTitle": "다른 조직의 알림",
+    "orgHintBody": "이 알림은 {org} 조직의 알림이에요. 전환하면 이어서 열려요."
   },
   "storage": {
     "title": "스토리지",
