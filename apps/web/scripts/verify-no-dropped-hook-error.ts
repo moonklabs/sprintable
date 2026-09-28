@@ -6,12 +6,18 @@
  * 1. 훅 = `function useX` · `const useX = (…) =>` 로 정의되고, 자기 본문의 `return { … }`(안쪽 함수 제외)에 오류 키가 있는 것.
  *    오류 키 = 이름이 error · Error · failed · Failed 로 끝나는 키. 동작 함수(dismiss… · set… · clear… · reset… · on… · handle… · retry…)는 제외.
  * 2. 호출처 = `const { … } = useX(…)` 또는 `const x = useX(…)`.
- *    - 구조분해: 오류 키가 없고 나머지(…rest)도 없으면 걸림.
- *    - 이름 하나로 받기: 그 파일에서 `x.키` · `x?.키` 로 안 읽고, x를 통째로 넘기지도 않으면(JSX 속성 값 · 호출 인자 · 펼침) 걸림.
+ *    «읽음»은 그 호출이 만든 **바인딩**을 **호출을 품은 함수 범위 안에서** 값으로 쓴 것만(까디르 4755 ② — 파일 전체 이름 검색이면
+ *    같은 파일 다른 컴포넌트의 같은 이름 `error` · `loadFailed`가 버린 자리를 가렸다).
+ *    - 구조분해: 오류 키를 꺼낸 지역 이름(별칭 포함)을 그 범위에서 써야 함. …rest면 rest를 써야 함.
+ *    - 이름 하나로 받기: 그 범위에서 `x.키` · `x?.키` · 통째로 넘김(JSX 속성 값 · 호출 인자 · 펼침) · 뒤 구조분해로 꺼내 쓴 것.
  * 3. 의도된 저하는 ALLOWLIST에 이유와 함께(파일 · 훅 · 키). 목록에 있는데 더는 안 걸리면 stale로 FAIL(줄이기만).
  *
- * 못 보는 것: 훅 결과를 다른 이름으로 옮겨 담은 뒤 읽는 모양(`const r = useX(); const e = r;`) · 오류 키를 읽기만 하고 그리지 않는 모양
- * (읽었는지까지만 본다 — 그렸는지는 자리마다 테스트) · 컴포넌트가 아닌 곳에서 부르는 훅(규칙상 없음).
+ * **아직 못 보는 자리**(범위를 밝혀 둔다 · 까디르 4755):
+ *   - index.ts 재수출로 들여온 훅 — import 경로가 정의 파일이 아니면 해소하지 않고 건너뛴다.
+ *   - 식 본문(`=> ({ … })`) · 배열/튜플을 돌려주는 훅 — `return { … }` 객체 리터럴의 키만 뽑는다.
+ *   - 훅 결과를 다른 이름으로 옮겨 담은 뒤 읽는 모양(`const r = useX(); const e = r;`).
+ *   - 같은 함수 안 안쪽 블록의 같은 이름 가림(shadowing) — 범위는 함수 단위.
+ *   - 읽었는지까지만 본다 — 그렸는지는 자리마다 테스트.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -64,18 +70,54 @@ function hookErrorKeys(sources: Src[]): Map<string, string[]> {
   return hooks;
 }
 
-function passedWhole(sf: ts.SourceFile, id: string, decl: ts.Node): boolean {
-  let found = false;
+/** 이 선언을 품은 가장 가까운 함수의 본문(없으면 파일) — «읽음»은 이 범위 안에서만 찾는다(같은 파일 다른 함수의 같은 이름에 속지 않게 · 까디르 4755 ②). */
+function scopeOf(decl: ts.Node): ts.Node {
+  let p: ts.Node | undefined = decl.parent;
+  while (p && !ts.isSourceFile(p)) {
+    if (ts.isFunctionLike(p) && (p as ts.FunctionLikeDeclaration).body) return (p as ts.FunctionLikeDeclaration).body!;
+    p = p.parent;
+  }
+  return decl.getSourceFile();
+}
+
+/** 이름이 «값으로» 쓰인 자리들(선언 자리 · 속성 이름 자리는 뺌). */
+function valueRefs(scope: ts.Node, name: string, declName: ts.Node): ts.Identifier[] {
+  const out: ts.Identifier[] = [];
   const visit = (n: ts.Node): void => {
-    if (found) return;
-    if (ts.isIdentifier(n) && n.text === id && n !== (decl as ts.VariableDeclaration).name) {
+    if (ts.isIdentifier(n) && n.text === name && n !== declName) {
       const p = n.parent;
-      if ((ts.isJsxExpression(p) && ts.isJsxAttribute(p.parent)) || (ts.isCallExpression(p) && p.arguments.includes(n)) || ts.isSpreadElement(p) || ts.isSpreadAssignment(p) || ts.isJsxSpreadAttribute(p)) found = true;
+      const isPropName = (ts.isPropertyAccessExpression(p) && p.name === n) || (ts.isPropertyAssignment(p) && p.name === n)
+        || (ts.isBindingElement(p) && (p.propertyName === n || p.name === n)) || ts.isJsxAttribute(p) || (ts.isVariableDeclaration(p) && p.name === n)
+        || (ts.isParameter(p) && p.name === n);
+      if (!isPropName) out.push(n);
     }
     n.forEachChild(visit);
   };
-  visit(sf);
-  return found;
+  visit(scope);
+  return out;
+}
+
+/** 이름 하나로 받은 훅 결과 x에서 키를 읽었는가 — x.키 · x?.키 · 통째로 넘김(JSX 속성 값 · 호출 인자 · 펼침) · 뒤 구조분해로 꺼내 쓴 것. */
+function readsFromWhole(scope: ts.Node, x: string, declName: ts.Node, key: string): boolean {
+  for (const ref of valueRefs(scope, x, declName)) {
+    const p = ref.parent;
+    if (ts.isPropertyAccessExpression(p) && p.expression === ref && p.name.text === key) return true;
+    if ((ts.isJsxExpression(p) && ts.isJsxAttribute(p.parent)) || (ts.isCallExpression(p) && p.arguments.includes(ref)) || ts.isSpreadElement(p) || ts.isSpreadAssignment(p) || ts.isJsxSpreadAttribute(p)) return true;
+    if (ts.isVariableDeclaration(p) && p.initializer === ref && ts.isObjectBindingPattern(p.name) && readsFromPattern(scope, p.name, key)) return true;
+  }
+  return false;
+}
+
+/** 구조분해에서 키를 꺼내 그 지역 이름을 실제로 썼는가(…rest면 rest를 쓴 것). */
+function readsFromPattern(scope: ts.Node, pattern: ts.ObjectBindingPattern, key: string): boolean {
+  for (const el of pattern.elements) {
+    if (el.dotDotDotToken && ts.isIdentifier(el.name)) return valueRefs(scope, el.name.text, el.name).length > 0;
+    const prop = (el.propertyName ?? el.name).getText();
+    if (prop !== key) continue;
+    if (ts.isIdentifier(el.name)) return valueRefs(scope, el.name.text, el.name).length > 0;
+    return true; // 안쪽 구조분해({ error: { message } }) — 꺼냈으면 읽은 것
+  }
+  return false;
 }
 
 const EXTS = ['.ts', '.tsx', '/index.ts', '/index.tsx'];
@@ -98,26 +140,11 @@ function resolveHook(rel: string, sf: ts.SourceFile, name: string, hooks: Map<st
   return undefined;
 }
 
-/** `const { … } = x` 로 나중에 구조분해해 키를 꺼내면 읽은 것(connect-step:236 — rail을 통째로 받고 이어서 풀어 씀). */
-function destructuredLater(sf: ts.SourceFile, id: string, key: string): boolean {
-  let found = false;
-  const visit = (n: ts.Node): void => {
-    if (found) return;
-    if (ts.isVariableDeclaration(n) && n.initializer && ts.isIdentifier(n.initializer) && n.initializer.text === id && ts.isObjectBindingPattern(n.name)) {
-      if (n.name.elements.some((e) => e.dotDotDotToken || (e.propertyName ?? e.name).getText(sf) === key)) found = true;
-    }
-    n.forEachChild(visit);
-  };
-  visit(sf);
-  return found;
-}
-
 export function scanSources(sources: Src[]): DroppedRef[] {
   const hooks = hookErrorKeys(sources);
   const files = new Set(sources.map((x) => x.rel));
   const out: DroppedRef[] = [];
   for (const { rel, sf } of sources) {
-    const text = sf.getText();
     const visit = (n: ts.Node): void => {
       const callee = n.kind === ts.SyntaxKind.VariableDeclaration && (n as ts.VariableDeclaration).initializer && ts.isCallExpression((n as ts.VariableDeclaration).initializer!) && ts.isIdentifier(((n as ts.VariableDeclaration).initializer as ts.CallExpression).expression)
         ? (((n as ts.VariableDeclaration).initializer as ts.CallExpression).expression as ts.Identifier).text : undefined;
@@ -125,16 +152,11 @@ export function scanSources(sources: Src[]): DroppedRef[] {
       if (ts.isVariableDeclaration(n) && hookId) {
         const hook = callee!;
         const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+        const scope = scopeOf(n);
         for (const key of hooks.get(hookId)!) {
           let read = true;
-          if (ts.isObjectBindingPattern(n.name)) {
-            const names = n.name.elements.map((e) => (e.propertyName ?? e.name).getText(sf));
-            const rest = n.name.elements.some((e) => e.dotDotDotToken);
-            read = rest || names.includes(key);
-          } else if (ts.isIdentifier(n.name)) {
-            const id = n.name.text;
-            read = new RegExp(`\\b${id}\\??\\.${key}\\b`).test(text) || passedWhole(sf, id, n) || destructuredLater(sf, id, key);
-          }
+          if (ts.isObjectBindingPattern(n.name)) read = readsFromPattern(scope, n.name, key);
+          else if (ts.isIdentifier(n.name)) read = readsFromWhole(scope, n.name.text, n.name, key);
           if (!read) out.push({ file: rel, line, hook, key });
         }
       }

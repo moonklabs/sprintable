@@ -40,4 +40,19 @@ describe('verify-no-dropped-hook-error', () => {
   it('ALLOWLIST에 있는데 더는 안 걸리면 stale', () => {
     expect(judge([]).stale).toEqual([...ALLOWLIST.keys()]);
   });
+
+  // 까디르(4755 ②) — «읽음»이 파일 전체 이름 검색이면 같은 파일 다른 컴포넌트의 같은 이름이 버린 자리를 가린다. 범위는 호출을 품은 함수.
+  it('⭐한 파일에 컴포넌트 둘 — 꺼내 놓고 안 쓴 쪽은 걸림(옆 컴포넌트가 같은 이름을 써도)', () => {
+    const f = src('c/two.tsx', `import { useThing } from '@/hooks/use-thing';
+      export function Uses() { const { data, loadFailed } = useThing(); return loadFailed ? null : data; }
+      export function Drops() { const { data, loadFailed } = useThing(); return data; }`);
+    expect(scanSources([HOOK, f]).map((r) => `${r.line}:${r.key}`)).toEqual(['3:loadFailed']);
+  });
+
+  it('⭐한 파일에 컴포넌트 둘 — 같은 이름 t로 받아 한쪽만 t.loadFailed를 읽으면 다른 쪽은 걸림', () => {
+    const f = src('c/two-whole.tsx', `import { useThing } from '@/hooks/use-thing';
+      export function Reads() { const t = useThing(); return t.loadFailed ? null : t.data; }
+      export function Drops() { const t = useThing(); return t.data; }`);
+    expect(scanSources([HOOK, f]).map((r) => `${r.line}:${r.key}`)).toEqual(['3:loadFailed']);
+  });
 });
