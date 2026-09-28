@@ -15,6 +15,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { cn } from '../src/lib/utils';
 
 const NON_TEXT_TYPES = new Set(['checkbox', 'radio', 'hidden', 'file', 'range', 'color', 'submit', 'button', 'image', 'reset']);
 const RAW_TAGS = new Set(['input', 'textarea', 'select']);
@@ -27,6 +28,21 @@ export const WRAPPERS: Readonly<Record<string, string>> = {
   OperatorTextarea: 'components/ui/operator-control.tsx',
   OperatorSelect: 'components/ui/operator-control.tsx',
 };
+
+/** 래퍼 정의에서 읽은 것 — 입력칸의 클래스 문자열(호출부와 병합할 원본)과 모바일 크기. */
+export interface WrapperInfo {
+  classes: string;
+  px: number;
+}
+
+/** 래퍼 호출부가 스스로 준 크기가 병합 뒤 데스크톱(lg 이상)에서 달라지는 자리 — 4406의 «데스크톱 무변» 약속을 깨는 것. */
+export interface DesktopDrift {
+  file: string;
+  line: number;
+  tag: string;
+  intendedPx: number;
+  mergedPx: number;
+}
 
 export interface SmallTextInputSite {
   file: string;
@@ -45,6 +61,12 @@ export function baseFontPx(classes: string): number | null {
     if (arbitrary) px = arbitrary[2] === 'rem' ? parseFloat(arbitrary[1]!) * 16 : parseFloat(arbitrary[1]!);
   }
   return px;
+}
+
+/** lg 이상(데스크톱)에서의 크기 — `lg:` 크기 클래스가 있으면 그것(마지막이 이김), 없으면 모바일 기본값. */
+export function desktopFontPx(classes: string): number | null {
+  const lg = classes.split(/\s+/).filter((t) => t.startsWith('lg:')).map((t) => t.slice(3)).join(' ');
+  return baseFontPx(lg) ?? baseFontPx(classes);
 }
 
 function stringConstants(sf: ts.SourceFile): Map<string, string> {
@@ -84,20 +106,29 @@ function attr(el: ts.JsxOpeningLikeElement, name: string): ts.JsxAttribute | und
 export function scanSource(
   content: string,
   file: string,
-  wrapperPx: ReadonlyMap<string, number> = new Map(),
-): { sites: SmallTextInputSite[]; inherits: number } {
+  wrappers: ReadonlyMap<string, WrapperInfo> = new Map(),
+): { sites: SmallTextInputSite[]; inherits: number; drift: DesktopDrift[] } {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const constants = stringConstants(sf);
   const sites: SmallTextInputSite[] = [];
+  const drift: DesktopDrift[] = [];
   let inherits = 0;
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(sf);
-      const wrapped = wrapperPx.get(tag);
-      if (wrapped !== undefined) {
+      const wrapper = wrappers.get(tag);
+      if (wrapper !== undefined) {
+        // 호출부 className은 래퍼 안에서 cn()(tailwind-merge)으로 래퍼 클래스 뒤에 합쳐진다 — 같은 수식자끼리만 지우므로
+        // 호출부 `text-xs`는 래퍼 `text-base`만 지우고 `lg:text-sm`은 남긴다(유나 4807 실측). 그래서 최종 병합 결과로 판정한다.
         const init = attr(node, 'className')?.initializer;
-        const px = (init ? baseFontPx(classText(init, constants)) : null) ?? wrapped;
-        if (px < 16) sites.push({ file, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, tag, px });
+        const own = init ? classText(init, constants) : '';
+        const merged = cn(wrapper.classes, own);
+        const px = baseFontPx(merged) ?? wrapper.px;
+        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+        if (px < 16) sites.push({ file, line, tag, px });
+        const intendedPx = desktopFontPx(own);
+        const mergedPx = desktopFontPx(merged) ?? px;
+        if (intendedPx !== null && intendedPx !== mergedPx) drift.push({ file, line, tag, intendedPx, mergedPx });
       } else if (RAW_TAGS.has(tag) || SHARED_TAGS.has(tag)) {
         const type = attr(node, 'type')?.initializer;
         const typeText = type && ts.isStringLiteral(type) ? type.text : null;
@@ -114,7 +145,7 @@ export function scanSource(
     node.forEachChild(visit);
   };
   visit(sf);
-  return { sites, inherits };
+  return { sites, inherits, drift };
 }
 
 function tsxFiles(dir: string, out: string[] = []): string[] {
@@ -131,8 +162,8 @@ function tsxFiles(dir: string, out: string[] = []): string[] {
  * 래퍼 이름 → 모바일 글자 크기(px). 정의 파일에서 그 이름의 함수가 그리는 입력칸 하나의 크기를 같은 규칙으로 읽는다
  * (날 칸이면 접두사 없는 크기 · 공용 Input/Textarea면 준 크기 없을 때 16). 정의나 입력칸을 못 찾으면 던진다(표가 헛돌지 않게).
  */
-export function wrapperSizes(contentOf: (rel: string) => string): Map<string, number> {
-  const out = new Map<string, number>();
+export function wrapperSizes(contentOf: (rel: string) => string): Map<string, WrapperInfo> {
+  const out = new Map<string, WrapperInfo>();
   for (const [name, rel] of Object.entries(WRAPPERS)) {
     const content = contentOf(rel);
     const sf = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -144,14 +175,15 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, nu
     });
     if (!body) throw new Error(`래퍼 ${name}의 정의가 ${rel}에 없다 — WRAPPERS 표를 고칠 것`);
     let px: number | null | undefined;
+    let classes = '';
     const visit = (node: ts.Node) => {
       if (px !== undefined) return;
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
         const tag = node.tagName.getText(sf);
         if (RAW_TAGS.has(tag) || SHARED_TAGS.has(tag)) {
           const init = attr(node, 'className')?.initializer;
-          const own = init ? baseFontPx(classText(init, constants)) : null;
-          px = own ?? (SHARED_TAGS.has(tag) ? 16 : null);
+          classes = init ? classText(init, constants) : '';
+          px = baseFontPx(classes) ?? (SHARED_TAGS.has(tag) ? 16 : null);
           return;
         }
       }
@@ -160,7 +192,7 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, nu
     visit(body);
     if (px === undefined) throw new Error(`래퍼 ${name}(${rel})가 입력칸을 그리지 않는다 — WRAPPERS 표를 고칠 것`);
     if (px === null) throw new Error(`래퍼 ${name}(${rel})의 글자 크기를 정적으로 못 정한다(부모를 물려받음) — 래퍼에 크기를 줄 것`);
-    out.set(name, px);
+    out.set(name, { classes, px });
   }
   return out;
 }
@@ -170,12 +202,13 @@ export function scanTree(srcRoot: string): {
   perFile: Record<string, number>;
   sites: SmallTextInputSite[];
   fileCount: number;
-  wrapperPx: Map<string, number>;
+  wrappers: Map<string, WrapperInfo>;
+  drift: DesktopDrift[];
 } {
   const files = tsxFiles(srcRoot);
   const contents = new Map<string, string>();
   for (const abs of files) contents.set(path.relative(srcRoot, abs).split(path.sep).join('/'), readFileSync(abs, 'utf8'));
-  const wrapperPx = wrapperSizes((rel) => {
+  const wrappers = wrapperSizes((rel) => {
     const c = contents.get(rel);
     if (c === undefined) throw new Error(`래퍼 정의 파일 ${rel}이 트리에 없다 — WRAPPERS 표를 고칠 것`);
     return c;
@@ -183,10 +216,12 @@ export function scanTree(srcRoot: string): {
   const tagPattern = new RegExp(`<(input|textarea|select|Input|Textarea|${Object.keys(WRAPPERS).join('|')})\\b`);
   const perFile: Record<string, number> = {};
   const sites: SmallTextInputSite[] = [];
+  const drift: DesktopDrift[] = [];
   for (const [rel, content] of contents) {
     if (!tagPattern.test(content)) continue;
-    const found = scanSource(content, rel, wrapperPx).sites;
-    if (found.length) { perFile[rel] = found.length; sites.push(...found); }
+    const found = scanSource(content, rel, wrappers);
+    if (found.sites.length) { perFile[rel] = found.sites.length; sites.push(...found.sites); }
+    drift.push(...found.drift);
   }
-  return { perFile, sites, fileCount: files.length, wrapperPx };
+  return { perFile, sites, fileCount: files.length, wrappers, drift };
 }

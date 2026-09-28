@@ -43,24 +43,36 @@ describe('scanSource — 셀프테스트', () => {
     expect(scanSource(src, 'c.tsx').sites).toEqual([]);
   });
 
-  it('⭐공용 래퍼 호출부 — 래퍼 크기를 받는다 · 호출부가 크기를 덮으면 그 크기(PR 4807: onboarding-form의 OperatorInput 6칸)', () => {
+  it('⭐공용 래퍼 호출부 — 래퍼 클래스와 호출부 className을 cn()(tailwind-merge)으로 합친 최종값으로 판정(PR 4807: onboarding-form의 OperatorInput 6칸)', () => {
     const src = `
       export const D = () => (<>
         <OperatorInput value={a} />
         <OperatorInput className="h-10 text-base lg:text-sm" />
-        <OperatorTextarea className="text-xs" />
+        <OperatorTextarea className="text-base lg:text-xs" />
       </>);`;
-    expect(scanSource(src, 'd.tsx', new Map([['OperatorInput', 14], ['OperatorTextarea', 16]])).sites.map((s) => [s.tag, s.px]))
-      .toEqual([['OperatorInput', 14], ['OperatorTextarea', 12]]);
-    expect(scanSource(src, 'd.tsx', new Map([['OperatorInput', 16], ['OperatorTextarea', 16]])).sites.map((s) => [s.tag, s.px]))
-      .toEqual([['OperatorTextarea', 12]]);
+    const small = new Map([['OperatorInput', { classes: 'px-3 text-sm', px: 14 }], ['OperatorTextarea', { classes: 'px-3 text-sm', px: 14 }]]);
+    expect(scanSource(src, 'd.tsx', small).sites.map((s) => [s.tag, s.px])).toEqual([['OperatorInput', 14]]);
+    const fixed = new Map([['OperatorInput', { classes: 'px-3 text-base lg:text-sm', px: 16 }], ['OperatorTextarea', { classes: 'px-3 text-base lg:text-sm', px: 16 }]]);
+    const r = scanSource(src, 'd.tsx', fixed);
+    expect(r.sites).toEqual([]);
+    expect(r.drift).toEqual([]);
+  });
+
+  it('⭐데스크톱이 바뀌는 자리 — 호출부 text-xs는 래퍼 text-base만 지우고 lg:text-sm은 남긴다(유나 4807 실측): 모바일 12 그대로 + 데스크톱 12 → 14', () => {
+    const wrappers = new Map([['OperatorInput', { classes: 'px-3 text-base lg:text-sm', px: 16 }]]);
+    const r = scanSource('export const E = () => <OperatorInput className="flex-1 font-mono text-xs" />;', 'e.tsx', wrappers);
+    expect(r.sites.map((s) => s.px)).toEqual([12]);
+    expect(r.drift.map((d) => [d.intendedPx, d.mergedPx])).toEqual([[12, 14]]);
+    // 처방 모양(text-base lg:text-xs)은 모바일 16 · 데스크톱 12 그대로.
+    const ok = scanSource('export const F = () => <OperatorInput className="flex-1 font-mono text-base lg:text-xs" />;', 'f.tsx', wrappers);
+    expect([ok.sites, ok.drift]).toEqual([[], []]);
   });
 
   it('래퍼 크기는 정의 파일에서 읽는다 — 정의가 없거나 입력칸을 안 그리면 던진다(표가 헛돌지 않게)', () => {
     const def = `const cls = 'px-3 text-sm'; export function OperatorInput(p) { return <Input className={cn(cls, p.className)} />; }
       export function OperatorTextarea(p) { return <textarea className={cn(cls, 'min-h-24')} />; }
       export function OperatorSelect(p) { return <select className={cn(cls)} />; }`;
-    expect([...wrapperSizes(() => def)]).toEqual([['OperatorInput', 14], ['OperatorTextarea', 14], ['OperatorSelect', 14]]);
+    expect([...wrapperSizes(() => def)].map(([n, w]) => [n, w.px])).toEqual([['OperatorInput', 14], ['OperatorTextarea', 14], ['OperatorSelect', 14]]);
     expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
   });
 
@@ -75,7 +87,8 @@ describe('실 트리(apps/web/src)', () => {
   it('인증 전 · 첫 진입 화면은 0 · 나머지는 baseline과 파일별로 정확히 일치(신규 0 · stale 0)', () => {
     const { result, maxPerFile } = measureFsReads(() => scanTree(SRC_ROOT));
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음`).toBeLessThanOrEqual(1);
-    const { perFile, sites, fileCount } = result;
+    const { perFile, sites, fileCount, drift } = result;
+    expect(drift.map((d) => `${d.file}:${d.line} <${d.tag}> 데스크톱 ${d.intendedPx} → ${d.mergedPx}px`), '래퍼와 합쳐져 데스크톱 크기가 바뀐 호출부 — text-base lg:text-<원래 크기>로').toEqual([]);
     expect(fileCount).toBeGreaterThan(300);
 
     const zeroHits = sites.filter((s) => ZERO_PREFIXES.some((p) => s.file.startsWith(p)));
