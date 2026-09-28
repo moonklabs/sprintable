@@ -204,3 +204,37 @@ describe('LineagePerformancePanel', () => {
     expect(panel.textContent).toContain('집계 대기');
   });
 });
+
+// story #4372 — 성과 두 조회의 실패(loadFailed)를 버려 값이 null로 그려지면 «측정 없음»과 같아 보였다 → 카드마다 실패 줄.
+describe('LineagePerformancePanel — 성과 조회 실패 표시(story #4372)', () => {
+  function stubWithFailures(edges: unknown[], fail: { hook?: boolean; material?: boolean }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/material-lineage/hook-performance')) {
+        return fail.hook ? { ok: false, status: 500, json: async () => ({}) } : { ok: true, json: async () => ({ hook_key: 'h1', sample_size: 0 }) };
+      }
+      if (url.startsWith('/api/material-lineage/material-performance')) {
+        return fail.material ? { ok: false, status: 500, json: async () => ({}) } : { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => edges };
+    }));
+  }
+  const EDGES = [EDGE({ id: 'e1', derived_kind: 'channel_publication', derived_id: 'pub-1', hook_key: 'h1' })];
+
+  it('⭐훅 성과 조회 실패 → 훅 카드에 실패 줄(«측정 없음»과 구분)', async () => {
+    stubWithFailures(EDGES, { hook: true });
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush(10);
+    const line = container.querySelector('[data-testid="lineage-hook-performance-load-error"]');
+    expect(line?.textContent).toBe(koMessages.cage.lineagePerformanceLoadFailed);
+    expect(container.querySelector('[data-testid="lineage-material-performance-load-error"]')).toBeNull();
+  });
+
+  it('⭐소재 성과 조회 실패 → 계보 트리 카드에 실패 줄', async () => {
+    // 훅 키 없는 edge — 훅 카드 자체가 없어(훅 조회 0) 소재 조회 실패만 본다.
+    stubWithFailures([EDGE({ id: 'e1', derived_kind: 'channel_publication', derived_id: 'pub-1', hook_key: null })], { material: true });
+    await act(async () => { root.render(wrap(<LineagePerformancePanel workItemId="story-1" />)); });
+    await flush(10);
+    expect(container.querySelector('[data-testid="lineage-material-performance-load-error"]')?.textContent).toBe(koMessages.cage.lineagePerformanceLoadFailed);
+    expect(container.querySelector('[data-testid="lineage-hook-performance-load-error"]')).toBeNull();
+  });
+});

@@ -1214,3 +1214,34 @@ describe('MarketingRecipeApplyDialog — story #4243', () => {
     expect(slot.textContent).toContain(koMessages.organization.recipeApplyV2EitherBadge);
   });
 });
+
+// story #4372 — 멤버 조회 실패(useRecipeMemberOptions loadFailed)를 안 읽어 선택칸이 자리표시만 남아 «멤버 없음»처럼 보였다.
+describe('멤버 조회 실패 표시(story #4372)', () => {
+  it('⭐멤버 조회가 실패하면 멤버 칸마다 실패 줄 + 다시 시도 · 다시 시도는 다시 조회한다', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/team-members')) { calls += 1; return { ok: false, status: 500, json: async () => ({}) }; }
+      if (url.startsWith('/api/organizations/org-1/channel-connections')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.startsWith('/api/organizations/org-1/generation-connectors')) return { ok: true, json: async () => ({ data: { connectors: [] } }) };
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    await mountDialog(VIDEO_PRODUCTION_RECIPE);
+    expect(document.body.querySelector('[data-testid="marketing-apply-members-load-error"]')).toBeNull(); // 프로젝트 고르기 전 = 조회 전
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    const lines = document.body.querySelectorAll('[data-testid="marketing-apply-members-load-error"]');
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]!.getAttribute('role')).toBe('alert');
+    expect(lines[0]!.textContent).toContain(ORG.recipeApplyV2MembersLoadFailed);
+    const before = calls;
+    await act(async () => { lines[0]!.querySelector('button')!.click(); });
+    await flush();
+    expect(calls).toBeGreaterThan(before);
+  });
+
+  it('멤버 조회가 성공하면 실패 줄 0', async () => {
+    stubAll();
+    await mountDialog(VIDEO_PRODUCTION_RECIPE);
+    await choose('#marketing-recipe-apply-project', 'proj-1');
+    expect(document.body.querySelector('[data-testid="marketing-apply-members-load-error"]')).toBeNull();
+  });
+});

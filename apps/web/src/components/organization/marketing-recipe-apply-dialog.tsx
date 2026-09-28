@@ -103,7 +103,8 @@ export function MarketingRecipeApplyDialog({
   // 닫지 않고(적용은 이미 성공) 결과 영역에 목록을 보여준다.
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  const { options, loading: loadingMembers } = useRecipeMemberOptions(projectId || null);
+  // story #4372 — 멤버 조회 실패(loadFailed)를 안 읽어 선택칸이 자리표시만 남아 «멤버 없음»처럼 보였다 → 멤버 칸마다 실패 줄 + 다시 시도.
+  const { options, loading: loadingMembers, loadFailed: membersLoadFailed, refresh: refreshMembers } = useRecipeMemberOptions(projectId || null);
 
   const loadChannelConnections = useCallback(() => {
     if (!orgId) { setChannelConnectionsStatus('loaded'); return; }
@@ -323,6 +324,12 @@ export function MarketingRecipeApplyDialog({
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
             {gateNote ? <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="member-gate-note">{gateNote}</p> : null}
+            {membersLoadFailed ? (
+              <div role="alert" className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-members-load-error">
+                <span>{t('recipeApplyV2MembersLoadFailed')}</span>
+                <Button variant="outline" size="sm" onClick={refreshMembers}>{t('eventApplyAgentsRetry')}</Button>
+              </div>
+            ) : null}
           </div>
           <select
             className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"

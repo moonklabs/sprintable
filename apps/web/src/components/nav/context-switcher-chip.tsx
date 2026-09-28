@@ -200,6 +200,11 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                 {t('switcherOtherOrgsLabel')}
               </div>
             )}
+            {/* story #4372 — 조직 전환이 실패하면 선택이 말없이 원래대로 돌아갔다(훅의 switchOrgError를 안 읽음). 사이드바 UnifiedSwitcher와
+                같은 문구 · 같은 알림. 시트는 전환 중에도 열려 있으니, 누른 자리(다른 조직 목록) 바로 위에 둔다. */}
+            {s.switchOrgError && (
+              <p role="alert" className="px-3.5 py-1 text-xs text-destructive" data-testid="context-switcher-chip-switch-org-error">{s.switchOrgError}</p>
+            )}
             {s.otherOrgs.map((org) => {
               const orgProjects = s.otherOrgProjects[org.orgId];
               const isLoading = s.loadingOrgIds.has(org.orgId);

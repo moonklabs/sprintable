@@ -620,6 +620,7 @@
   },
   "organization": {
     "rolesTitle": "권한",
+    "recipeApplyV2MembersLoadFailed": "멤버 목록을 불러오지 못했어요.",
     "rolesDescription": "조직 구성원의 역할을 그룹별로 확인하고 변경해요.",
     "roleGroupOwner": "소유자",
     "roleGroupAdmin": "관리자",
@@ -5483,6 +5484,7 @@
   },
   "cage": {
     "gatePending": "게이트 대기",
+    "lineagePerformanceLoadFailed": "성과를 불러오지 못했어요.",
     "gateStatusPending": "결재 대기",
     "gateStatusApproved": "승인됨",
     "gateStatusRejected": "반려됨",

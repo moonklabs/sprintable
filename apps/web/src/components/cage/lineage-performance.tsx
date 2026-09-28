@@ -214,11 +214,12 @@ export function LineagePerformancePanel({ workItemId }: LineagePerformancePanelP
   const t = useTranslations('cage');
   const { edges, loading, loadFailed } = useMaterialLineage(workItemId);
   const hookKeys = [...new Set(edges.map((e) => e.hook_key).filter((k): k is string => k !== null))].sort();
-  const { summaries } = useHookPerformances(hookKeys);
+  // story #4372 — 두 성과 조회의 실패(loadFailed)를 버려 값이 null로 그려지면 «측정 없음»과 같아 보였다 → 카드마다 실패 줄.
+  const { summaries, loadFailed: hookPerformancesLoadFailed } = useHookPerformances(hookKeys);
   const publicationDerivedIds = [...new Set(
     edges.filter((e) => e.derived_kind === 'channel_publication').map((e) => e.derived_id),
   )].sort();
-  const { snapshotsByDerivedId } = useMaterialPerformances(publicationDerivedIds);
+  const { snapshotsByDerivedId, loadFailed: materialPerformancesLoadFailed } = useMaterialPerformances(publicationDerivedIds);
 
   if (loading || loadFailed) return null;
   if (edges.length === 0) return null;
@@ -228,11 +229,17 @@ export function LineagePerformancePanel({ workItemId }: LineagePerformancePanelP
       <p className="text-[11px] font-semibold text-muted-foreground">{t('lineagePerformanceSectionTitle')}</p>
       <Card className="space-y-2 p-3">
         <p className="text-[11px] font-semibold text-muted-foreground">{t('lineageTreeTitle')}</p>
+        {materialPerformancesLoadFailed ? (
+          <p role="alert" className="text-[11px] text-muted-foreground" data-testid="lineage-material-performance-load-error">{t('lineagePerformanceLoadFailed')}</p>
+        ) : null}
         <LineageTree edges={edges} snapshotsByDerivedId={snapshotsByDerivedId} />
       </Card>
       {hookKeys.length > 0 ? (
         <Card className="space-y-2 p-3">
           <p className="text-[11px] font-semibold text-muted-foreground">{t('rankedHooksTitle')}</p>
+          {hookPerformancesLoadFailed ? (
+            <p role="alert" className="text-[11px] text-muted-foreground" data-testid="lineage-hook-performance-load-error">{t('lineagePerformanceLoadFailed')}</p>
+          ) : null}
           <RankedHookList hookKeys={hookKeys} summaries={summaries} />
           <HookPerformanceSummaryStrip hookKeys={hookKeys} summaries={summaries} />
         </Card>

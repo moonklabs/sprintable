@@ -19,6 +19,7 @@ import { createFirstInstructionConversation } from '@/lib/onboarding/first-instr
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { copyTextSafely } from '@/lib/clipboard';
 import { withProjectParam } from '@/hooks/use-flat-href';
+import { VerifyPromptCopyFailedPanel } from './verify-prompt-copy-failed-panel';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
@@ -125,7 +126,6 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
   const [copyFailedRawConfig, setCopyFailedRawConfig] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
-  const verifyPromptFailedPanelRef = useRef<HTMLDivElement>(null);
 
   // story #3986 CHANGES(페드루 PO C4) — 실패 시 뜬 raw config는 그 transport/키 것이다.
   // transport를 바꾸거나 키가 갱신되는데 리셋을 안 하면 이전 transport의 raw config가
@@ -235,26 +235,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
   });
   const { displaySteps, verified, verifying, awaitingVerification, timedOut, copyVerifyPromptFailed: railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed } = rail;
 
-  // story #3986 CHANGES(페드루 PO 2회차) — 검증 예시 프롬프트 실패 패널도 더는
-  // 3초 뒤 자동으로 안 꺼진다(verify-rail.tsx 쪽 처방). 대신 바깥 클릭·Esc로
-  // 닫는다(다음 성공은 훅 안에서 이미 리셋).
-  useEffect(() => {
-    if (!railCopyVerifyPromptFailed) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (verifyPromptFailedPanelRef.current && !verifyPromptFailedPanelRef.current.contains(e.target as Node)) {
-        dismissCopyVerifyPromptFailed();
-      }
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dismissCopyVerifyPromptFailed();
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [railCopyVerifyPromptFailed, dismissCopyVerifyPromptFailed]);
+  // story #3986 CHANGES(페드루 PO 2회차) — 실패 패널의 바깥 클릭 · Esc 닫기는 VerifyPromptCopyFailedPanel 안으로(story #4372 · 채용 화면과 공용).
 
   // unload(탭닫기/이탈) best-effort — 미검증 시 abandoned_explicit 보조 신호(SoT는 BE 파생).
   useEffect(() => {
@@ -630,30 +611,12 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
                 truncate라 좁은 화면에선 말줄임표로 잘린다. 실패했을 때만 안 잘린
                 전체 문구를 선택 가능하게 새로 보여준다 — 3초로 안 자르고 다음
                 성공·바깥 클릭·Esc·닫기까지 유지한다. */}
-            {railCopyVerifyPromptFailed ? (
-              <div ref={verifyPromptFailedPanelRef} className="space-y-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={dismissCopyVerifyPromptFailed}
-                    aria-label={tc('close')}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                  >
-                    ✕
-                  </Button>
-                </div>
-                <input
-                  readOnly
-                  value={t('verifyExamplePrompt')}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
-                  data-testid="connect-step-verify-prompt-raw"
-                />
-              </div>
-            ) : null}
+            <VerifyPromptCopyFailedPanel
+              failed={railCopyVerifyPromptFailed}
+              onDismiss={dismissCopyVerifyPromptFailed}
+              promptText={t('verifyExamplePrompt')}
+              rawTestId="connect-step-verify-prompt-raw"
+            />
           </div>
         )}
         {verified && (

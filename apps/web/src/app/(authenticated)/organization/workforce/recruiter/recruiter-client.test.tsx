@@ -531,3 +531,12 @@ describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽"
     }
   });
 });
+
+// story #4372 — 같은 훅(useVerificationRail)의 copyVerifyPromptFailed를 이 표면만 안 읽어 복사가 실패해도 버튼이 «복사» 그대로였다(무표시).
+// 이 위저드는 STEP5까지 마운트가 불가해(위 #4cdad425 관례) 소스로 pin — 패널의 실제 렌더는 verify-prompt-copy-failed-panel.test.tsx가 DOM으로 덮는다.
+describe('recruiter-client — 검증 프롬프트 복사 실패 패널(story #4372)', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+  it('⭐복사 버튼 아래에 connect-step과 같은 실패 패널을 훅 값으로 그린다', () => {
+    expect(source).toMatch(/data-testid="recruiter-verify-prompt-copy"[\s\S]{0,600}<VerifyPromptCopyFailedPanel\s+failed=\{rail\.copyVerifyPromptFailed\}\s+onDismiss=\{rail\.dismissCopyVerifyPromptFailed\}/);
+  });
+});
