@@ -169,6 +169,17 @@ describe('비밀을 실은 요청의 리다이렉트 — 다른 origin으로 따
     expect(new Headers(calls()[1]![1].headers).get(EDGE_KEY_HEADER)).toBe('s3cret');
   });
 
+  it('같은 origin 3xx를 따라가기 전에 중간 응답 본문을 비운다(연결 점유 없음)', async () => {
+    const cancel = vi.fn(async () => undefined);
+    const intermediate = new Response('redirecting', { status: 307, headers: { location: '/api/v2/auth/token/' } });
+    Object.defineProperty(intermediate, 'body', { value: { cancel } });
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(intermediate)
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    await backendFetch(`${fastapiBaseUrl()}/api/v2/auth/token`, { method: 'POST', body: '{}', request: browser() });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('303은 GET · 본문 없음으로 따라간다(fetch 표준)', async () => {
     global.fetch = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 303, headers: { location: `${fastapiBaseUrl()}/done` } }))

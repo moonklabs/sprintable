@@ -109,6 +109,8 @@ export async function fetchCarryingEdgeSecret(url: string, init: RequestInit, se
     if (!REDIRECT_STATUSES.has(res.status) || !location) return res;
     const next = new URL(location, current).toString();
     if (!isBackendOrigin(next) || hop === MAX_REDIRECTS) return res;
+    // 따라가기 전에 중간 3xx의 본문을 비운다 — 안 비우면 그 응답이 연결을 쥔 채 남는다(까디르 2선 곁 기록).
+    await res.body?.cancel().catch(() => undefined);
     const method = (step.method ?? 'GET').toUpperCase();
     if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {
       step = { ...step, method: 'GET', body: undefined };
