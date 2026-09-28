@@ -354,9 +354,11 @@ export function WorkListShell({ projectId }: { projectId: string }) {
           </aside>
         ) : null}
       </div>
-      {/* 모바일 Sheet — detailPanel이 있을 때만 open. */}
+      {/* 모바일 Sheet — detailPanel이 있을 때만 open.
+          [SID:4374] 닫기는 하나 — 안쪽 상세 패널 머리의 «닫기»(선택 해제 → open 거짓 → 시트도 닫힘)만 남기고 시트 기본 «✕»(절대 위치 · 같은 자리)는 끈다.
+          Esc 한 번 = 같은 동작(시트 onOpenChange(false) → 선택 해제). 1440 aside는 이 시트를 안 거쳐 그대로. */}
       <Sheet open={!!detailPanel && isMobile} onOpenChange={(open) => { if (!open) setSelectedRowId(null); }}>
-        <SheetContent side="right" className="w-full p-0 sm:max-w-sm">
+        <SheetContent side="right" className="w-full p-0 sm:max-w-sm" showCloseButton={false}>
           {detailPanel}
         </SheetContent>
       </Sheet>
