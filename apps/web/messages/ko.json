@@ -3627,63 +3627,83 @@
       },
       "items": {
         "heading1": {
+          "title": "제목 1",
           "description": "큰 제목"
         },
         "heading2": {
+          "title": "제목 2",
           "description": "중간 제목"
         },
         "heading3": {
+          "title": "제목 3",
           "description": "작은 제목"
         },
         "bulletList": {
+          "title": "글머리 목록",
           "description": "순서 없는 목록"
         },
         "orderedList": {
+          "title": "번호 목록",
           "description": "순서 있는 목록"
         },
         "checklist": {
+          "title": "체크리스트",
           "description": "체크리스트"
         },
         "codeBlock": {
+          "title": "코드 블록",
           "description": "코드 블록"
         },
         "blockquote": {
+          "title": "인용",
           "description": "인용구"
         },
         "callout": {
+          "title": "강조 박스",
           "description": "강조 박스"
         },
         "table": {
+          "title": "표",
           "description": "표 삽입"
         },
         "image": {
+          "title": "이미지",
           "description": "이미지 삽입"
         },
         "file": {
+          "title": "파일",
           "description": "파일 첨부"
         },
         "embed": {
+          "title": "임베드",
           "description": "외부 URL 임베드"
         },
         "mermaidDiagram": {
+          "title": "머메이드 다이어그램",
           "description": "다이어그램 삽입"
         },
         "columns": {
+          "title": "다단",
           "description": "2단/3단 컬럼 레이아웃"
         },
         "mathBlock": {
+          "title": "수식 블록",
           "description": "LaTeX 블록 수식"
         },
         "mathInline": {
+          "title": "인라인 수식",
           "description": "LaTeX 인라인 수식"
         },
         "toggle": {
+          "title": "토글",
           "description": "접기/펼치기 블록"
         },
         "pageEmbed": {
+          "title": "문서 임베드",
           "description": "다른 문서 임베드"
         },
         "horizontalRule": {
+          "title": "구분선",
           "description": "구분선"
         }
       },

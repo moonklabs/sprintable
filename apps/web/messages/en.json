@@ -3627,63 +3627,83 @@
       },
       "items": {
         "heading1": {
+          "title": "Heading 1",
           "description": "Big heading"
         },
         "heading2": {
+          "title": "Heading 2",
           "description": "Medium heading"
         },
         "heading3": {
+          "title": "Heading 3",
           "description": "Small heading"
         },
         "bulletList": {
+          "title": "Bullet List",
           "description": "Unordered list"
         },
         "orderedList": {
+          "title": "Ordered List",
           "description": "Ordered list"
         },
         "checklist": {
+          "title": "Checklist",
           "description": "Checklist"
         },
         "codeBlock": {
+          "title": "Code Block",
           "description": "Code block"
         },
         "blockquote": {
+          "title": "Blockquote",
           "description": "Quote block"
         },
         "callout": {
+          "title": "Callout",
           "description": "Highlighted box"
         },
         "table": {
+          "title": "Table",
           "description": "Insert table"
         },
         "image": {
+          "title": "Image",
           "description": "Insert image"
         },
         "file": {
+          "title": "File",
           "description": "Attach file"
         },
         "embed": {
+          "title": "Embed",
           "description": "Embed external URL"
         },
         "mermaidDiagram": {
+          "title": "Mermaid Diagram",
           "description": "Insert diagram"
         },
         "columns": {
+          "title": "Columns",
           "description": "2/3-column layout"
         },
         "mathBlock": {
+          "title": "Math Block",
           "description": "LaTeX block formula"
         },
         "mathInline": {
+          "title": "Math Inline",
           "description": "LaTeX inline formula"
         },
         "toggle": {
+          "title": "Toggle",
           "description": "Collapsible block"
         },
         "pageEmbed": {
+          "title": "Page Embed",
           "description": "Embed another doc"
         },
         "horizontalRule": {
+          "title": "Horizontal Rule",
           "description": "Divider"
         }
       },
