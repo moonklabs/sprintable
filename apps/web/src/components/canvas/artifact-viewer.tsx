@@ -81,6 +81,8 @@ export function ArtifactViewer({
   // story d72db00a — ArtifactStage의 콘텐츠 레이어에 직접 꽂힌다(contentRef prop 경유),
   // 뷰어 크롬 wrapper가 아니다 — PNG export가 크롬 없이 아트보드 전체 프레임만 캡처하도록.
   const captureTargetRef = useRef<HTMLDivElement>(null);
+  // story #4373 — 쓰기 칸이 붙을 draft 핀.
+  const draftPinRef = useRef<HTMLElement | null>(null);
   // story #4343 — 레일 · 고르개로 고른 이전 버전은 목록 요약뿐(`contentLoaded: false`)이라, 처음 고르는 순간 실물을 받아 둔다(한 번만).
   // 받는 중은 따로 적지 않는다(«실물이 필요한데 아직 없음»이 곧 받는 중) — 한 번만 부르게 부른 버전은 ref에 적는다.
   const [fetchedVersions, setFetchedVersions] = useState<Record<number, ArtifactVersion | 'failed'>>({});
@@ -332,24 +334,28 @@ export function ArtifactViewer({
                        * 항상 노출(핀 추가 자체가 항상 latest 버전 대상이라 selectedVersion과
                        * 무관 — BE CREATE는 버전 개념 없이 artifact 스코프, spec pin과 다른 계약). */}
                       {draftPin ? (
-                        <>
-                          <AnchorPin
-                            number={null}
-                            state="draft"
-                            className="absolute z-10"
-                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                          />
-                          <CommentComposePopover
-                            onSubmit={handleComposeSubmit}
-                            onCancel={handleComposeCancel}
-                            draftTargetId={artifact.id}
-                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                          />
-                        </>
+                        <AnchorPin
+                          ref={draftPinRef}
+                          number={null}
+                          state="draft"
+                          className="absolute z-10"
+                          style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
+                        />
                       ) : null}
                     </>
                   }
                 />
+                {/* story #4373 — 쓰기 칸은 무대(확대 변환 · 잘라내기 조상) 밖: body 포털 + fixed로 핀 사각형 아래(모자라면 위)에 붙고
+                  * 창 안으로 민다 · pan/zoom으로 핀이 움직이면 따라간다. 예전엔 변환 안에 그려 무대 10%면 22×10px로 작아졌고,
+                  * 무대 크기 층에 두면 좁은 곁 패널(무대 61px)에서 칸이 잘려 단추가 안 눌렸다. */}
+                {draftPin ? (
+                  <CommentComposePopover
+                    onSubmit={handleComposeSubmit}
+                    onCancel={handleComposeCancel}
+                    draftTargetId={artifact.id}
+                    anchorRef={draftPinRef}
+                  />
+                ) : null}
               </div>
             ) : null}
             {/* story #3377 — 인라인 스테이지는 pan/드래그 설계 보존을 위해 클릭을 안 받는다

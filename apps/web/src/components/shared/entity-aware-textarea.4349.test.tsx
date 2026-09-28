@@ -93,3 +93,17 @@ describe('EntityAwareTextarea `#` 후보 — 스크롤 면 밖(body)에 · 모�
     expect(pop()).toBeNull();
   });
 });
+
+// story #4373(유나 4757 반려 · 실측 자리) — 1440 스토리 상세 패널(스스로 그린 role="dialog" · backdrop-blur-xl = fixed의 담는 블록) 안의
+// `#` 후보가 2cb0d448c에서 패널 안으로 포털되며 x 693 → 1144로 밀렸다. 그 패널은 Base UI 모달이 아니라(밖을 숨기지 않음) 예전처럼 body.
+describe('EntityAwareTextarea `#` 후보 — 스스로 그린 dialog 패널(스토리 상세) 안에서도 body · 입력칸 왼쪽 아래(story #4373)', () => {
+  it('role="dialog" · backdrop-blur 패널 안이어도 후보는 body 직속 · 입력칸 왼쪽(16) · 아래 4px(284)', async () => {
+    container.setAttribute('role', 'dialog');
+    container.className = 'fixed inset-0 overflow-y-auto backdrop-blur-xl';
+    await typeHash();
+    expect(pop()!.parentElement).toBe(document.body);
+    expect(pop()!.style.left).toBe('16px');
+    expect(pop()!.style.top).toBe('284px');
+  });
+});
+

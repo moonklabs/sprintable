@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { clampIntoViewX, VIEWPORT_GUTTER_PX } from '@/hooks/use-viewport-clamp';
 
 /**
- * story #4349 — 트리거에 붙는 팝오버를 **부모 밖(body)**에 그린다.
+ * story #4349 — 트리거에 붙는 팝오버를 **부모 밖(body · 모달 안이면 그 모달 팝업 — 아래 `portalContainerFor`)**에 그린다.
  * 왜: 축척 사다리 안내 팝오버(`absolute top-full`)는 담는 블록이 짧은 띠(칩 줄 `overflow-x-auto` · 사다리 `overflow-hidden`) 안이라,
  *   그 띠가 팝오버 90px를 통째로 잘랐다 — 어떤 폭에서도 안 보였다(유나 실측). 부모 overflow를 풀면 칩 줄 가로 스크롤이 죽는다.
  * 처방: body로 포털 → `position: fixed`로 트리거 사각형 바로 아래(트리거 왼쪽 + offsetX, 아래 gap)에 둔다.
@@ -28,6 +28,12 @@ export interface AnchoredPopoverProps extends HTMLAttributes<HTMLDivElement> {
   align?: 'start' | 'end';
   /** 바깥 클릭 판정용 — 포털된 팝오버 요소. */
   popoverRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * story #4373 — 기준이 스크롤 · 창 크기 말고도 움직이는 자리(캔버스 pan/zoom = CSS 변환만 바뀌어 이벤트가 없다): 열린 동안 매 프레임
+   * 기준 사각형과 팝오버 자기 크기를 재서 둘 중 하나가 바뀐 프레임에만 다시 둔다(글꼴이 늦게 붙거나 내용으로 칸 크기가 바뀌면 뒤집기 ·
+   * 밀어넣기가 낡은 크기로 남던 것 — 까디르 4757 리뷰).
+   */
+  trackAnchor?: boolean;
 }
 
 /**
@@ -61,8 +67,35 @@ export function isOutsidePress(root: Element | null | undefined, target: EventTa
   return !el?.closest('[data-anchored-popover]');
 }
 
-export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, style, children, ...rest }: AnchoredPopoverProps) {
+/**
+ * story #4373(까디르 실측 · 부류) — 포털 대상. **Base UI 모달 팝업**(표지 `data-modal-popup` — 래퍼 `components/ui/sheet.tsx` · `dialog.tsx`와
+ * 래퍼 밖에서 `@base-ui/react/dialog`를 바로 쓰는 artifact-expand-dialog · image-lightbox · command-palette의 Popup 다섯 곳) 안의 트리거면
+ * **그 팝업 안**, 아니면 body. Base UI 모달은 열려 있는 동안 팝업(과 자기가 아는 포털) 밖의 body 자식을 전부 `aria-hidden`으로 숨긴다
+ * (floating-ui-react markOthers) — body 끝에 붙은 포털은 그 «밖»이라 보조기기에서 칸 · 단추가 사라졌고(390 작업 목록 시트 안 산출물 댓글 칸),
+ * 시트 쪽 바깥 누름 판정에서도 «밖»이었다. 팝업 안이면 둘 다 «안».
+ * `role="dialog"`만으로 고르지 않는다(유나 4757 반려): 스토리 상세처럼 스스로 그린 비모달 패널도 그 역할을 달고, 그런 패널은 밖을 숨기지
+ * 않으니 body로 두는 게 예전 그대로다. 표지는 한 이름 — 새 Base UI 모달 Popup이 표지를 빠뜨리면 modal-popup-marker.guard.test.ts가 RED.
+ */
+export const MODAL_POPUP_SELECTOR = '[data-modal-popup]';
+
+export function portalContainerFor(anchor: Element | null): Element | null {
+  if (typeof document === 'undefined') return null;
+  return anchor?.closest(MODAL_POPUP_SELECTOR) ?? document.body;
+}
+
+export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, trackAnchor = false, style, children, ...rest }: AnchoredPopoverProps) {
   const elRef = useRef<HTMLDivElement | null>(null);
+  // story #4373(까디르 실측) — 마지막으로 둔 뒤 실제로 보인 자리. trackAnchor가 «트리거는 그대로인데 담는 블록만 바뀐»(시트 애니 끝 프레임에
+  // translate가 빠짐) 경우를 이 값과의 어긋남으로 잡는다.
+  const shownRef = useRef<{ left: number; top: number } | null>(null);
+  // 여는 순간엔 트리거가 이미 붙어 있다(열림 = 트리거를 누른 뒤) — 첫 그림부터 제자리(팝업 안)에 그려야 연 뒤 한 번 도는 효과
+  // (첫 항목 초점 · 칸 휠 리스너)가 요소를 본다. 같은 커밋에 트리거가 늦게 붙는 드문 순서면 body로 먼저 그리고 레이아웃 단계에서 바로잡는다.
+  const [container, setContainer] = useState<Element | null>(() => portalContainerFor(anchorRef.current));
+  // 레이아웃 효과는 부모(트리거 wrapper) ref가 붙기 전에 돌 수 있다(자식 먼저) — ref가 다 붙은 뒤인 passive 효과에서 바로잡는다(아래 place()와 같은 까닭).
+  useEffect(() => {
+    const next = portalContainerFor(anchorRef.current);
+    setContainer((cur) => (cur === next ? cur : next));
+  }, [anchorRef]);
 
   const place = useCallback(() => {
     const el = elRef.current;
@@ -72,11 +105,27 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
     el.style.transform = '';
     const own = el.getBoundingClientRect();
     const v = placeVertical(a, own.height, window.innerHeight, gap);
-    el.style.top = `${Math.round(v.top)}px`;
-    el.style.left = `${Math.round(align === 'end' ? a.right - own.width - offsetX : a.left + offsetX)}px`;
+    const top = Math.round(v.top);
+    const left = Math.round(align === 'end' ? a.right - own.width - offsetX : a.left + offsetX);
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
+    // story #4373(유나 4757 반려) — 모달 팝업 안에 포털되면 fixed의 담는 블록이 뷰포트가 아닐 수 있다: 팝업(이나 그 조상)의 transform ·
+    // translate(시트 미끄러짐 200ms) · filter · backdrop-filter · contain · will-change · container-type 등 무엇이든. CSS 속성으로 짐작하지
+    // 않고 **둔 뒤 재서** 목표와의 차이만큼 되민다(한 식). body 직속이면 담는 블록 = 뷰포트(html · body에 그런 속성 없음)라 재지 않는다.
+    if (el.parentElement !== document.body) {
+      const placed = el.getBoundingClientRect();
+      const dx = placed.left - left;
+      const dy = placed.top - top;
+      if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+        el.style.left = `${Math.round(left - dx)}px`;
+        el.style.top = `${Math.round(top - dy)}px`;
+      }
+    }
     el.dataset.side = v.side;
     el.style.visibility = '';
     clampIntoViewX(el);
+    const shown = el.getBoundingClientRect();
+    shownRef.current = { left: shown.left, top: shown.top };
   }, [anchorRef, gap, offsetX, align]);
 
   // 같은 커밋에서 트리거 wrapper의 ref가 이 요소보다 **늦게** 붙을 수 있다(자식 ref가 먼저) → 붙는 순간엔 숨겨 두고,
@@ -100,12 +149,31 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
     };
   }, [place]);
 
-  if (typeof document === 'undefined') return null;
+  useEffect(() => {
+    if (!trackAnchor) return;
+    let last = '';
+    let frame = requestAnimationFrame(function tick() {
+      const r = anchorRef.current?.getBoundingClientRect();
+      const own = elRef.current;
+      const key = r ? `${r.left},${r.top},${r.width},${r.height}|${own?.offsetWidth ?? 0},${own?.offsetHeight ?? 0}` : '';
+      // 트리거 · 자기 크기가 그대로여도, 담는 블록이 움직이면(시트 여는 도중 translate가 붙었다 빠짐) 실제 자리가 어긋난다 — 재서 다시 둔다.
+      const shown = own && shownRef.current ? own.getBoundingClientRect() : null;
+      const drifted = !!shown && (Math.abs(shown.left - shownRef.current!.left) >= 0.5 || Math.abs(shown.top - shownRef.current!.top) >= 0.5);
+      if (key !== last || drifted) {
+        last = key;
+        place();
+      }
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [trackAnchor, anchorRef, place]);
+
+  if (typeof document === 'undefined' || !container) return null;
   return createPortal(
     <div ref={setRef} data-anchored-popover="" {...rest} style={{ ...style, position: 'fixed' }}>
       {children}
     </div>,
-    document.body,
+    container,
   );
 }
 

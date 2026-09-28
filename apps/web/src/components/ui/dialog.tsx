@@ -67,7 +67,7 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay />
-      <DialogPrimitive.Popup
+      <DialogPrimitive.Popup data-modal-popup=""
         data-slot="dialog-content"
         // story #4210(유나 390 실측) — 닫기(X)가 떠 있으면 머리 줄이 그 자리를 비우도록 표지(DialogHeader · DialogTitle).
         data-close-button={showCloseButton ? "" : undefined}

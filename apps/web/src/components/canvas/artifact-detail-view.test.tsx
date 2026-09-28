@@ -139,13 +139,13 @@ describe('ArtifactDetailView — 새 좌표 코멘트 생성(story #2725, standa
       viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 128, clientY: 80 }));
     });
 
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
       setter.call(textarea, '여기 확인 부탁');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '코멘트')!;
+    const submitButton = [...document.querySelectorAll('button')].find((b) => b.textContent === '코멘트')!;
     await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 

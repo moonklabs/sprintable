@@ -10,16 +10,19 @@ interface AnchorPinProps {
   onClick?: () => void;
   className?: string;
   style?: React.CSSProperties;
+  /** story #4373 — 쓰기 칸이 이 핀 사각형에 붙는다(React 19 ref prop). */
+  ref?: React.Ref<HTMLElement>;
 }
 
 /**
  * E-CANVAS C2 — 요소 앵커 핀. 헤더 배지·스테이지 오버레이 양쪽에서 재사용(§1-2 anatomy).
  * 클릭 가능하면 버튼, 아니면 순수 표시(스테이지 오버레이는 항상 클릭 가능하게 쓸 예정).
  */
-export function AnchorPin({ number, state, active, onClick, className, style }: AnchorPinProps) {
+export function AnchorPin({ number, state, active, onClick, className, style, ref }: AnchorPinProps) {
   const Tag = onClick ? 'button' : 'span';
   return (
     <Tag
+      ref={ref as React.Ref<HTMLButtonElement & HTMLSpanElement>}
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       style={style}

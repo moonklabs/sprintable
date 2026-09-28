@@ -311,3 +311,91 @@ describe('isOutsidePress', () => {
     }
   });
 });
+
+// story #4373(까디르 실측 · 유나 4757 반려 · 부류) — Base UI 모달 팝업(표지 data-modal-popup — 래퍼 둘 + 래퍼 밖 직접 사용 셋) 안 트리거면
+// 포털 대상이 그 팝업(Base UI 모달이 팝업 밖 body 자식을 aria-hidden으로 숨기므로). 스스로 그린 role="dialog" 패널(스토리 상세)은 밖을
+// 숨기지 않으니 예전처럼 body. 팝업이 fixed의 담는 블록이 되면(transform · translate · backdrop-filter …) 둔 뒤 재서 차이만큼 되민다.
+describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
+  function ModalHarness({ slot, blockOffset }: { slot?: string; blockOffset?: { left: number; top: number } }) {
+    const [open, setOpen] = useState(false);
+    const anchorRef = useRef<HTMLDivElement>(null);
+    return (
+      <div role="dialog" id="modal" data-modal-popup={slot ? "" : undefined} data-block-offset={blockOffset ? JSON.stringify(blockOffset) : undefined}>
+        <div id="anchor" ref={open ? anchorRef : undefined}>
+          <button type="button" id="trigger" onClick={() => setOpen((v) => !v)}>열기</button>
+          {open && <AnchoredPopover anchorRef={anchorRef} id="pop" className="w-56">안내</AnchoredPopover>}
+        </div>
+      </div>
+    );
+  }
+  // 브라우저처럼: 팝오버 자리는 style.left/top에서 나오고, 담는 블록(팝업)이 있으면 그 왼쪽 위만큼 밀려 보인다 — 어떤 CSS가 그 블록을
+  // 만들었는지(transform이든 backdrop-filter든)는 재는 쪽이 모른다. 예전 되밂(transform 읽기)은 이 경우를 못 봤다.
+  function mockBrowserLikeRects() {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      let r = { left: 0, top: 0, width: 0, height: 0 };
+      if (this.id === 'anchor') r = { left: anchorRect.left, top: anchorRect.top, width: anchorRect.right - anchorRect.left, height: 20 };
+      if (this.id === 'pop') {
+        const offset = JSON.parse(this.parentElement?.getAttribute('data-block-offset') ?? '{"left":0,"top":0}') as { left: number; top: number };
+        r = { left: parseFloat(this.style.left || '0') + offset.left, top: parseFloat(this.style.top || '0') + offset.top, width: 224, height: 80 };
+      }
+      const full = { ...r, right: r.left + r.width, bottom: r.top + r.height };
+      return { ...full, x: full.left, y: full.top, toJSON: () => full } as DOMRect;
+    });
+  }
+  const visible = () => pop().getBoundingClientRect();
+
+  it('포털 대상 = Base UI 모달 팝업(data-modal-popup) · 스스로 그린 role=dialog 패널(스토리 상세)은 body', () => {
+    act(() => { root.render(<ModalHarness slot="modal" />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().parentElement).toBe(document.getElementById('modal'));
+    act(() => { document.getElementById('trigger')!.click(); });
+    act(() => { root.render(<ModalHarness />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().parentElement).toBe(document.body);
+    expect(pop().style.left).toBe('100px');
+    expect(pop().style.top).toBe('68px');
+  });
+
+  it('모달 팝업이 담는 블록이면(transform 없이 backdrop-filter 등이어도) 재서 되밀어 트리거 아래에 보인다 — 예전 transform 되밂이면 RED', () => {
+    mockBrowserLikeRects();
+    act(() => { root.render(<ModalHarness slot="modal" blockOffset={{ left: 451, top: 12 }} />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().parentElement).toBe(document.getElementById('modal'));
+    expect(visible().left).toBe(100);  // 트리거 왼쪽
+    expect(visible().top).toBe(68);    // 트리거 아래 8px
+  });
+
+  it('trackAnchor: 트리거는 그대로인데 담는 블록만 바뀌어도(시트 애니 끝 translate 0 → none) 다음 프레임에 재서 다시 둔다', async () => {
+    mockBrowserLikeRects();
+    function TrackHarness() {
+      const anchorRef = useRef<HTMLDivElement>(null);
+      return (
+        <div role="dialog" id="modal" data-modal-popup="" data-block-offset={JSON.stringify({ left: 40, top: 0 })}>
+          <div id="anchor" ref={anchorRef} />
+          <AnchoredPopover anchorRef={anchorRef} trackAnchor id="pop" className="w-56">안내</AnchoredPopover>
+        </div>
+      );
+    }
+    act(() => { root.render(<TrackHarness />); });
+    await act(async () => { for (let i = 0; i < 2; i += 1) await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    expect(visible().left).toBe(100);
+    // 담는 블록이 사라짐(팝업 translate none) — 트리거 rect · 자기 크기는 그대로라 예전 trackAnchor(키 = 트리거 · 크기)는 다시 두지 않았다.
+    document.getElementById('modal')!.setAttribute('data-block-offset', JSON.stringify({ left: 0, top: 0 }));
+    expect(visible().left).toBe(60);  // 되민 값(100 − 40)이 그대로 남아 40px 어긋남
+    await act(async () => { for (let i = 0; i < 2; i += 1) await new Promise((r) => requestAnimationFrame(() => r(null))); });
+    expect(visible().left).toBe(100);
+    expect(visible().top).toBe(68);
+  });
+
+  it('시트 미끄러짐(여는 도중) — 담는 블록이 움직여도 매 프레임 재서 트리거에 붙는다', async () => {
+    mockBrowserLikeRects();
+    act(() => { root.render(<ModalHarness slot="modal" blockOffset={{ left: 40, top: 0 }} />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(visible().left).toBe(100);
+    // 다음 프레임에 시트가 제자리로(담는 블록 0) — 창 크기 · 스크롤 이벤트로 다시 둘 때도 같은 식.
+    document.getElementById('modal')!.setAttribute('data-block-offset', JSON.stringify({ left: 0, top: 0 }));
+    act(() => { window.dispatchEvent(new Event('resize')); });
+    expect(visible().left).toBe(100);
+    expect(visible().top).toBe(68);
+  });
+});

@@ -64,7 +64,7 @@ function SheetContent({
   return (
     <SheetPortal>
       <SheetOverlay />
-      <SheetPrimitive.Popup
+      <SheetPrimitive.Popup data-modal-popup=""
         data-slot="sheet-content"
         data-side={side}
         // story #2969 §2 PR-4(doc proofline-system-layer-2969) — shadow-lg→--elev-overlay.

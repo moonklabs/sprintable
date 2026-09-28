@@ -74,7 +74,7 @@ export function ArtifactExpandDialog({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <DialogPrimitive.Popup
+        <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
             'fixed top-1/2 left-1/2 z-50 flex h-[85vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden',
             // story #3007(로드맵 P2·PR-E, L1) — 다이얼로그는 floating이라 --elev-overlay.
