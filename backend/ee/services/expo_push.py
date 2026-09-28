@@ -6,13 +6,15 @@ API 발송. 파이프라인 무변경(발송기는 별개 채널·best-effort). 
 
 crux §2 계약: POST exp.host/--/api/v2/push/send · 배치 ≤100/req · 메시지 ≤4096B · 신규 패키지 0
 (httpx JSON POST) · 재시도/백오프 = dispatch_router 패턴 재사용 · DeviceNotRegistered → is_active=false.
-receipt(getReceipts) 기반 지연 확인은 M1(관측)로 미룸 — M0은 send 응답 ticket 의 즉시 에러로 만료 판정.
+receipt(getReceipts) 지연 확인은 story #4396에서 붙음(ee/services/expo_receipts.py) — ok ticket을 Redis에 적어 두고 15분 뒤
+배달 루프가 영수증을 읽어 DeviceNotRegistered를 끈다. send 응답 ticket의 즉시 에러 판정은 그대로.
 """
 from __future__ import annotations
 
 import asyncio
 import json as _json
 import logging
+import time
 import uuid
 
 import httpx
@@ -222,7 +224,11 @@ async def _fetch_expo_push_targets(
             PushDevice.is_active.is_(True),
         )
     )
-    return [{"expo_push_token": d.expo_push_token} for d in rows.scalars().all()]
+    # story #4396 — id · platform: an ok ticket is remembered by device (not token) for the later receipt check.
+    return [
+        {"expo_push_token": d.expo_push_token, "id": d.id, "platform": d.platform}
+        for d in rows.scalars().all()
+    ]
 
 
 async def _send_expo_push_targets(
@@ -269,6 +275,10 @@ async def _send_expo_push_targets(
     ]
 
     dead_tokens: list[str] = []
+    ok_tickets: list[tuple[str, uuid.UUID, str | None]] = []  # story #4396 — (ticket id · device id · platform) for receipts
+    # story #4396 (PO 17:58Z ①) — «sent at» is taken before the first chunk goes out, not after the loop: a device registered
+    # again while the chunks were being sent must count as registered after the push (a late DeviceNotRegistered leaves it on).
+    sent_at = time.time()
     ok_count = 0
     error_count = 0
     error_reasons: dict[str, int] = {}
@@ -286,6 +296,8 @@ async def _send_expo_push_targets(
                     dead_tokens.append(dev["expo_push_token"])
             elif isinstance(ticket, dict) and ticket.get("status") == "ok":
                 ok_count += 1
+                if ticket.get("id") and dev.get("id"):
+                    ok_tickets.append((str(ticket["id"]), dev["id"], dev.get("platform")))
 
     # 2026-07-28(#2289): 성공 티켓은 이전까지 어디에도 안 남아 "서버가 쐈는데 실패" vs
     # "서버가 아예 안 쐈다"를 로그만으로 못 갈랐다(둘 다 조용함) — 매 발송마다 요약을 남긴다.
@@ -295,6 +307,10 @@ async def _send_expo_push_targets(
         "expo push: sent org=%s event=%s devices=%d ok=%d error=%d reasons=%s",
         org_id, event_type, len(devices), ok_count, error_count, error_reasons or None,
     )
+    if ok_tickets:
+        from ee.services.expo_receipts import record_expo_tickets
+
+        await record_expo_tickets(org_id, ok_tickets, sent_at=sent_at)  # best-effort (swallows its own failures)
     return dead_tokens
 
 
