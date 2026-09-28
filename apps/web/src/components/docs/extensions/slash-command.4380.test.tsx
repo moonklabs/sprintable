@@ -17,6 +17,7 @@ const koStrings: SlashMenuStrings = {
   ...raw,
   items: Object.fromEntries(Object.entries(raw.items).map(([k, v]) => [k, v.description])) as SlashMenuStrings['items'],
   titles: Object.fromEntries(Object.entries(raw.items).map(([k, v]) => [k, v.title])) as SlashMenuStrings['titles'],
+  columnsSearchAlias: (raw.items.columns as { searchAlias?: string }).searchAlias ?? '',
 };
 
 let host: HTMLDivElement;
@@ -44,11 +45,13 @@ const type = (text: string) => act(async () => { editor.chain().focus().insertCo
 const key = (k: string) => act(async () => { dom().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); await flush(); });
 
 describe('문서 «/» 메뉴 — 목록상자 · 켜진 항목 알림(story #4380)', () => {
-  it('«/»로 열면 listbox(이름 = 블록 넣기) · 분류마다 이름 붙은 group · 항목 = option', async () => {
+  it('«/»로 열면 listbox(이름 = 블록 추가) · 분류마다 이름 붙은 group(이름 줄 role=presentation) · 항목 = option', async () => {
     await type('/');
     expect(listbox()?.getAttribute('aria-label')).toBe(koStrings.listLabel);
     const groups = [...listbox()!.querySelectorAll('[role="group"]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby') ?? '')?.textContent);
     expect(groups).toEqual(Object.values(koStrings.categories));
+    // 까디르 · PO 07:56Z — 분류 이름 줄은 WAI 묶음 listbox 예처럼 role=presentation(group의 이름으로만 쓰임).
+    expect([...listbox()!.querySelectorAll('[role="group"]')].every((g) => document.getElementById(g.getAttribute('aria-labelledby') ?? '')?.getAttribute('role') === 'presentation')).toBe(true);
     expect(options()).toHaveLength(Object.keys(koStrings.items).length);
     expect(options().every((o) => listbox()!.contains(o) && o.tagName === 'DIV')).toBe(true);
   });
@@ -103,3 +106,70 @@ describe('문서 «/» 메뉴 — 목록상자 · 켜진 항목 알림(story #43
     expect(listbox()!.hasAttribute('tabindex')).toBe(false);  // 탭 순서에 안 듦(초점은 편집기)
   });
 });
+
+// story #4380(까디르 · PO 07:56Z) — 바깥을 누르거나 편집기에서 초점이 나가면 메뉴가 닫히고 편집기의 aria-controls ·
+// aria-activedescendant도 떨어진다. 예전엔(develop부터) 메뉴가 떠 있는 채 남아, 4380 뒤로는 편집기가 보이지 않는 선택지를 계속
+// 가리키는 거짓 상태가 됐다.
+describe('문서 «/» 메뉴 — 바깥으로 초점이 나가면 닫힘(story #4380)', () => {
+  // tiptap의 focus() 명령은 다음 프레임(rAF)에 초점을 준다 — 곧바로 초점을 옮기면 편집기가 아직 초점을 안 가진 채라 blur가 안 난다.
+  // 그래서 편집기 요소에 바로 초점을 주고 그게 들어갔는지부터 확인한다(결정적).
+  const focusEditorNow = () => act(() => { dom().focus(); });
+  it('다른 입력칸(제목 칸 등)으로 초점이 옮겨 가면 메뉴가 닫히고 편집기 속성이 떨어진다', async () => {
+    const other = document.createElement('textarea');
+    document.body.appendChild(other);
+    await type('/');
+    expect(listbox()).not.toBeNull();
+    focusEditorNow();
+    expect(document.activeElement).toBe(dom());
+    await act(async () => { other.focus(); await Promise.resolve(); await Promise.resolve(); });
+    expect(listbox()).toBeNull();
+    expect(dom().hasAttribute('aria-activedescendant')).toBe(false);
+    expect(dom().hasAttribute('aria-controls')).toBe(false);
+    other.remove();
+  });
+
+  it('빈 곳을 눌러 초점이 아무 데도 없어져도(blur) 닫힌다', async () => {
+    await type('/');
+    expect(listbox()).not.toBeNull();
+    focusEditorNow();
+    expect(document.activeElement).toBe(dom());
+    await act(async () => { dom().blur(); await Promise.resolve(); await Promise.resolve(); });
+    expect(listbox()).toBeNull();
+    expect(dom().hasAttribute('aria-activedescendant')).toBe(false);
+  });
+});
+
+// story #4380(까디르 실측 07:43Z) — 넣는 자리: «/»를 친 빈 줄 자리에 블록이 들어간다 = 캐럿이 있던 줄의 바로 앞 블록이 넣은 블록의
+// 바로 앞 블록(Enter 길 · 누름 길 둘 다). 명령이 다른 자리(끝 · 처음)로 넣게 되돌아가면 RED.
+describe('문서 «/» 메뉴 — 넣는 자리(story #4380)', () => {
+  const blocks = () => editor.getJSON().content!.map((n) => ({ type: n.type, text: (n.content ?? []).map((c) => (c as { text?: string }).text ?? '').join('') }));
+  const caretOnEmptyLineAfterB = () => act(() => {
+    editor.commands.setContent('<p>A</p><p>B</p><p></p><p>C</p>');
+    // 셋째 줄(빈 문단) 안: A(3) + B(3) → 빈 문단 여는 자리 6, 그 안 7.
+    editor.commands.setTextSelection(7);
+    editor.commands.focus();
+  });
+
+  it('Enter 길 — 넣은 제목 1의 바로 앞 블록 = «B»(캐럿이 있던 줄 앞) · 뒤 = «C»', async () => {
+    caretOnEmptyLineAfterB();
+    await type('/');
+    await key('Enter');
+    const b = blocks();
+    const at = b.findIndex((x) => x.type === 'heading');
+    expect(at).toBeGreaterThan(0);
+    expect(b[at - 1]).toEqual({ type: 'paragraph', text: 'B' });
+    expect(b[at + 1]).toEqual({ type: 'paragraph', text: 'C' });
+  });
+
+  it('누름 길 — 둘째 항목(제목 2)을 눌러도 같은 자리', async () => {
+    caretOnEmptyLineAfterB();
+    await type('/');
+    await act(async () => { options()[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    const b = blocks();
+    const at = b.findIndex((x) => x.type === 'heading');
+    expect(at).toBeGreaterThan(0);
+    expect(b[at - 1]).toEqual({ type: 'paragraph', text: 'B' });
+    expect(b[at + 1]).toEqual({ type: 'paragraph', text: 'C' });
+  });
+});
+

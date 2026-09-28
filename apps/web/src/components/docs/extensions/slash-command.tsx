@@ -1,7 +1,8 @@
 'use client';
 
 import { Extension } from '@tiptap/core';
-import Suggestion, { type SuggestionOptions } from '@tiptap/suggestion';
+import Suggestion, { exitSuggestion, type SuggestionOptions } from '@tiptap/suggestion';
+import { PluginKey } from '@tiptap/pm/state';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   forwardRef,
@@ -109,7 +110,7 @@ export interface SlashMenuStrings {
   toggleDefaultTitle: string;
   /** story #4383 — 칼럼 항목의 찾기 전용 다른 표기(ko «컬럼» · en 빈 값). 화면엔 안 나온다. */
   columnsSearchAlias: string;
-  /** story #4380 — 목록상자 이름(화면 읽기가 «블록 넣기 목록»으로 읽는다). */
+  /** story #4380 — 목록상자 이름(화면 읽기가 «블록 추가 목록»으로 읽는다). */
   listLabel: string;
 }
 
@@ -514,7 +515,7 @@ const SlashMenu = forwardRef<
           const labelId = `${idPrefix}-group-${groupIndex}`;
           return (
             <div key={group.label} role="group" aria-labelledby={labelId}>
-              <p id={labelId} className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              <p id={labelId} role="presentation" className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
                 {group.label}
               </p>
               {group.items.map((item) => {
@@ -600,6 +601,9 @@ function applyPosition(
 
 let slashMenuInstance = 0;
 
+// story #4380(까디르 · PO 07:56Z) — 메뉴 닫기에 쓰는 이 메뉴만의 키(wiki-link · story-mention처럼). 기본 키를 두 suggestion이 나눠 쓰지 않게.
+const SLASH_SUGGESTION_KEY = new PluginKey('slashCommandSuggestion');
+
 function createSuggestionRenderer(categories: SlashMenuCategory[], listLabel: string) {
   let popup: HTMLElement | null = null;
   let root: Root | null = null;
@@ -607,6 +611,7 @@ function createSuggestionRenderer(categories: SlashMenuCategory[], listLabel: st
   // 메뉴마다 따로(한 쪽에 편집기가 둘이어도 id가 겹치지 않게).
   const idPrefix = `slash-menu-${++slashMenuInstance}`;
   let editorDom: HTMLElement | null = null;
+  let offBlur: (() => void) | null = null;
 
   return {
     onStart(props: {
@@ -625,6 +630,17 @@ function createSuggestionRenderer(categories: SlashMenuCategory[], listLabel: st
       applyPosition(popup, props.clientRect);
 
       editorDom = props.editor.view.dom;
+      // story #4380(까디르 · PO 07:56Z) — 바깥을 누르거나(제목 칸 · 빈 곳) 편집기에서 초점이 나가면 메뉴를 닫는다. 예전엔 메뉴가 떠 있는
+      // 채 남아(develop부터) 편집기 aria-activedescendant가 보이지 않는 선택지를 계속 가리켰다 — 보조기기에 거짓 상태. 메뉴 안
+      // 누르기는 mousedown을 막아 초점이 안 나가므로 여기 안 온다. 닫기는 suggestion을 통해(onExit이 속성을 뗀다).
+      const editor = props.editor;
+      const onBlur = ({ event }: { event: FocusEvent }) => {
+        const next = event.relatedTarget as Node | null;
+        if (next && popup?.contains(next)) return;
+        exitSuggestion(editor.view, SLASH_SUGGESTION_KEY);
+      };
+      editor.on('blur', onBlur);
+      offBlur = () => editor.off('blur', onBlur);
       root = createRoot(popup);
       root.render(
         <SlashMenu
@@ -673,6 +689,8 @@ function createSuggestionRenderer(categories: SlashMenuCategory[], listLabel: st
       return menuRef?.onKeyDown(props.event) ?? false;
     },
     onExit() {
+      offBlur?.();
+      offBlur = null;
       clearSlashMenuAria(editorDom);
       editorDom = null;
       popup?.remove();
@@ -697,6 +715,7 @@ export function createSlashCommandExtension(strings: SlashMenuStrings) {
       return {
         suggestion: {
           char: '/',
+          pluginKey: SLASH_SUGGESTION_KEY,
           items: ({ query }: { query: string }) => items.filter((item) => matchesSlashQuery(item, query)),
           render: () => createSuggestionRenderer(categories, strings.listLabel),
         } satisfies Partial<SuggestionOptions<SlashMenuItem>>,
