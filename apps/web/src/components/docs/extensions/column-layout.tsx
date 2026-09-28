@@ -60,6 +60,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground mr-1">{t('columnsLabel')}</span>
         <button
           type="button"
+          aria-pressed={cols === 2}
           onClick={() => switchTo(2)}
           className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 2
@@ -71,6 +72,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         </button>
         <button
           type="button"
+          aria-pressed={cols === 3}
           onClick={() => switchTo(3)}
           className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 3

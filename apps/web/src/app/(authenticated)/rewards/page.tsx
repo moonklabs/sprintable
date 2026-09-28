@@ -133,6 +133,7 @@ export default function RewardsPage() {
                   <button
                     key={opt.value}
                     type="button"
+                    aria-pressed={period === opt.value}
                     onClick={() => setPeriod(opt.value)}
                     className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                       period === opt.value

@@ -131,6 +131,7 @@ export function ArtifactExpandDialog({
                 <button
                   key={bp}
                   type="button"
+                  aria-pressed={breakpoint === bp}
                   onClick={() => setBreakpoint(bp)}
                   className={cn(
                     'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',

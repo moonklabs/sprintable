@@ -1333,6 +1333,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               key={id || 'all'}
               type="button"
               variant="ghost"
+              aria-pressed={assigneeTypeFilter === id}
               onClick={() => setAssigneeTypeFilter(id)}
               className={`h-auto min-h-0 min-w-0 rounded-md px-3 py-1.5 text-xs font-medium ${
                 assigneeTypeFilter === id
@@ -1653,6 +1654,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             <Button
               type="button"
               variant="ghost"
+              aria-pressed={viewMode === 'board'}
               onClick={() => setViewMode('board')}
               aria-label={t('boardViewLabel')}
               title={t('boardViewLabel')}
@@ -1665,6 +1667,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             <Button
               type="button"
               variant="ghost"
+              aria-pressed={viewMode === 'list'}
               onClick={() => setViewMode('list')}
               aria-label={t('listViewLabel')}
               title={t('listViewLabel')}

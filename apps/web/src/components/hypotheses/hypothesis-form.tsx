@@ -91,6 +91,7 @@ export function HypothesisForm({
               <button
                 key={dir}
                 type="button"
+                aria-pressed={md.direction === dir}
                 onClick={() => setMd({ direction: dir })}
                 className={cn(
                   'px-3 py-2 text-xs font-medium transition',

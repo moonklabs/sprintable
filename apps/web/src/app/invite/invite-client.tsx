@@ -250,6 +250,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
                 <button
                   key={mode}
                   type="button"
+                  aria-pressed={authMode === mode}
                   onClick={() => { setAuthMode(mode); setErrorMsg(''); }}
                   className={cn(
                     'relative -mb-px px-3 py-2 text-sm font-medium transition-colors',

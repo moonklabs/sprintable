@@ -408,6 +408,7 @@ export function EvidenceSection({
                     <button
                       key={ty}
                       type="button"
+                      aria-pressed={addType === ty}
                       onClick={() => setAddType(ty)}
                       className={cn(
                         'rounded px-2 py-0.5 text-[10px] font-medium transition',

@@ -2208,6 +2208,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                               key={hex}
                               type="button"
                               variant="ghost"
+                              aria-pressed={newLabelColor === hex}
                               onClick={() => setNewLabelColor(hex)}
                               className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
                               style={{ backgroundColor: hex }}
@@ -2385,6 +2386,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         key={type}
                         type="button"
                         variant="ghost"
+                        aria-pressed={depType === type}
                         onClick={() => setDepType(type)}
                         className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-[10px] font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                       >
