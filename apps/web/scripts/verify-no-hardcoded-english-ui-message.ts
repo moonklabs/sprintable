@@ -77,9 +77,7 @@ export const OBJECT_PROP_ALLOWLIST: ReadonlyMap<string, string> = new Map([
 ]);
 /** 객체 속성 축 — 알고 남긴 자리(줄이기만 · 새로 생기면 FAIL · 고치면 빼야 초록). */
 export const OBJECT_PROP_BASELINE: ReadonlyMap<string, string> = new Map([
-  ['app/privacy/page.tsx::Privacy Policy — Sprintable', '법무 문서 탭 제목(metadata) — 본문은 한국어 · 로케일 metadata 경로 없음(별건)'],
-  ['app/refund-policy/page.tsx::Refund Policy — Sprintable', '법무 문서 탭 제목(metadata) — 위와 같음'],
-  ['app/terms/page.tsx::Terms of Service — Sprintable', '법무 문서 탭 제목(metadata) — 위와 같음'],
+  // 첫 전수의 셋(법무 문서 탭 제목 metadata)은 이 PR에서 generateMetadata + getTranslations('legal')로 고쳤다(PO 04:37Z) — 비어 있음.
 ]);
 
 /** 템플릿 글자 조각을 잇는다(치환 자리는 공백). 한글이 있으면 번역된 문장. 없으면 ASCII 밖 기호를 걷고 판정. */
