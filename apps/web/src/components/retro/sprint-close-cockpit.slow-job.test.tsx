@@ -44,6 +44,7 @@ describe('SprintCloseCockpit — 종합 작업 대기 줄(#4336 PR2 ②)', () =>
     expect(container.textContent).not.toContain('창을 닫아도 계속 처리돼요');
     await act(async () => { vi.advanceTimersByTime(1); });
     expect(container.textContent).toContain('창을 닫아도 계속 처리돼요');
+    expect([...container.querySelectorAll('p')].find((p) => p.textContent?.includes('창을 닫아도'))?.classList.contains('break-keep')).toBe(true);
 
     await act(async () => { finish(false); });
     expect(container.textContent).not.toContain('창을 닫아도 계속 처리돼요');

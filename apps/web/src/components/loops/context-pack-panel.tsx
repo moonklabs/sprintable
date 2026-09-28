@@ -189,7 +189,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
             <Badge variant="outline">{t('contextPackCount', { count: data.items.length })}</Badge>
           ) : null}
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('contextPackSubtitle')}</p>
+        <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('contextPackSubtitle')}</p>
       </div>
 
       <div className="space-y-2.5 p-3">
@@ -197,7 +197,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
           <>
             <Skeleton className="h-20 rounded-xl" />
             <Skeleton className="h-20 rounded-xl" />
-            {slow ? <p className="text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
+            {slow ? <p className="break-keep text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
           </>
         ) : unavailable || (data && !data.embed_available) ? (
           <p className="py-4 text-center text-sm text-muted-foreground">{t('contextPackEmbedUnavailable')}</p>

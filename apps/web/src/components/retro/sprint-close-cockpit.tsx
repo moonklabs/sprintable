@@ -420,7 +420,7 @@ export function SprintCloseCockpit({
             skeleton="synthesis"
             transline={t('loadingTranslineSynthesis')}
           />
-          {slow ? <p className="text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
+          {slow ? <p className="break-keep text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
         </div>
       ) : synthesis ? (
         <SynthesisBlock synthesis={synthesis} onRegenerate={() => void handleGenerate()} />

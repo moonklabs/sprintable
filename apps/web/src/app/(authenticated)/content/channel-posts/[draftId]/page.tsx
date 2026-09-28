@@ -3466,7 +3466,7 @@ export default function ChannelPostEditPage() {
                 : videoUploadStatus.phase === 'uploading'
                   ? t('channelPostsVideoUploading', { pct: videoUploadStatus.progress })
                   : videoUploadStatus.phase === 'confirming' && videoUploadStatus.slow
-                    ? `${t('channelPostsImageConfirming')} ${t('channelPostsVideoConfirmSlow')}`
+                    ? `${t('channelPostsImageConfirming')} ${tc('backgroundJobSlow')}`
                     : t('channelPostsImageConfirming')}
             </p>
           ) : null}

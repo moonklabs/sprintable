@@ -258,7 +258,7 @@ describe('FileViewer pptx (story #2803)', () => {
     expect(container.querySelector('iframe')).toBeNull();
   });
 
-  it('⭐#4336 PR2 ② — 변환이 요청 예산(40초)을 넘겨 202 + 작업이면 «큰 파일이라 미리보기를 준비하고 있어요» → 작업이 끝나면 그 PDF를 렌더', async () => {
+  it('⭐#4336 PR2 ② — 변환이 요청 예산(40초)을 넘겨 202 + 작업이면 «아직 변환 중이에요…» → 작업이 끝나면 그 PDF를 렌더', async () => {
     let release: (job: unknown) => void = () => {};
     waitForBackgroundJobMock.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
     fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -278,7 +278,10 @@ describe('FileViewer pptx (story #2803)', () => {
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:job-pdf'), revokeObjectURL: vi.fn() }));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
-    await waitFor(() => container.textContent!.includes('큰 파일이라 미리보기를 준비하고 있어요'));
+    await waitFor(() => container.textContent!.includes('아직 변환 중이에요…'));
+    // 유나 CHANGES(PR 4780) — 느림 줄이 낱말 가운데서 끊기지 않게.
+    const slowLine = [...container.querySelectorAll('p')].find((p) => p.textContent?.includes('창을 닫아도 계속 처리돼요'));
+    expect(slowLine?.classList.contains('break-keep')).toBe(true);
     expect(container.textContent).toContain('창을 닫아도 계속 처리돼요');
     expect(waitForBackgroundJobMock.mock.calls[0].slice(0, 2)).toEqual(['org-1', 'job-1']);
 

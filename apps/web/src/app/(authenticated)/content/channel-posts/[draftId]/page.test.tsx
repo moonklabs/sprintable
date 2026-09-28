@@ -5845,7 +5845,7 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
       await act(async () => { vi.advanceTimersByTime(9_000); });
       expect(line()).toBe(K.channelPostsImageConfirming);
       await act(async () => { vi.advanceTimersByTime(1_500); });
-      expect(line()).toBe(`${K.channelPostsImageConfirming} ${K.channelPostsVideoConfirmSlow}`);
+      expect(line()).toBe(`${K.channelPostsImageConfirming} ${(koMessages.common as Record<string, string>).backgroundJobSlow}`);
       // 유나 CHANGES(PR 4773) — 360에서 «…계속 처리돼 / 요»로 끊기지 않게.
       expect(container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.classList.contains('break-keep')).toBe(true);
       await act(async () => { release(); });

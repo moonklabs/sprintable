@@ -729,8 +729,8 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
-        <p className="text-sm text-foreground">{preparingLarge ? t('previewPreparingLarge') : t('converting')}</p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-foreground">{preparingLarge ? t('convertingContinues') : t('converting')}</p>
+        <p className="break-keep text-xs text-muted-foreground">
           {preparingLarge ? tCommon('backgroundJobSlow') : t('firstViewSlowNotice', { elapsed: elapsedSec })}
         </p>
       </div>

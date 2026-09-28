@@ -67,6 +67,10 @@ describe('ContextPackPanel — 캐시 미스 작업(#4336 PR2 ②)', () => {
     expect(container.textContent).not.toContain('창을 닫아도 계속 처리돼요');
     await act(async () => { vi.advanceTimersByTime(SLOW_JOB_NOTICE_MS); });
     expect(container.textContent).toContain('창을 닫아도 계속 처리돼요');
+    // 유나 CHANGES(PR 4780) — 느림 줄 · 부제가 360에서 낱말 가운데서 끊기지 않게.
+    const ps = [...container.querySelectorAll('p')];
+    expect(ps.find((p) => p.textContent?.includes('창을 닫아도'))?.classList.contains('break-keep')).toBe(true);
+    expect(ps.find((p) => p.textContent === koMessages.loops.contextPackSubtitle)?.classList.contains('break-keep')).toBe(true);
 
     await act(async () => { release({ ...QUEUED, status: 'completed', result: { pack: PACK } }); });
     await flush();
