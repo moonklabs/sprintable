@@ -13,6 +13,9 @@
 //   - 파일 단위다. 이미 초안 훅을 부르는 파일에 초안 없는 여러 줄 칸을 하나 더 넣어도 통과한다(표면별 4370 테스트가 그 몫).
 //   - 제어형 부품(value/onChange를 부모가 줌)은 EXEMPT다. 새 창이 그 부품을 초안 없이 얹어도, 그 창 파일이 여러 줄 태그를 직접 그리지 않으면 못 잡는다.
 //   - contentEditable · 리치 에디터(Tiptap 등)는 태그 목록에 없어 안 본다.
+//   - 파일 안 칸 단위 제외는 못 가른다 — 예: 이벤트 «시험 발행» payload(임의 JSON이라 토큰류가 들 수 있어 초안에서 뺌, PO 처분)는
+//     같은 파일의 정의 폼이 초안 훅을 불러 파일이 drafted로 통과한다. 그 제외는 표면 테스트(events page.test «초안에서 뺀다»)가 고정.
+//   - 확인 조작 이름 검사는 surface가 글자 그대로('…')일 때만 본다 — 변수 · 템플릿 문자열로 만든 surface는 못 본다.
 //   - «닫히는 창 안인가»는 판정하지 않는다 — 여러 줄 칸 전부를 대상으로 삼고, 창 밖인 것은 EXEMPT 사유로 사람이 가른다.
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';

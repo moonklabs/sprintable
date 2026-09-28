@@ -33,7 +33,6 @@ import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
 import { presetAction, presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { useFieldDraft } from '@/hooks/use-field-draft';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
@@ -982,14 +981,14 @@ function TestPublishDialog({
   tc: ReturnType<typeof useTranslations>;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
-  // story #4370 — 시험 발행 payload(여러 줄 JSON · 이 폼의 유일한 칸)는 정의별 초안: 창이 닫혀도 남고(예전엔 열 때마다 '{}'로
-  // 되돌렸다) «취소» · 발행 성공에서만 지운다. 처음 값 = '{}'(같으면 초안 없음).
-  const [payload, setPayload, clearPayloadDraft] = useFieldDraft({ surface: 'event-test-publish', targetId: target?.key ?? null, field: 'form' }, '{}');
+  // story #4370(PO 처분) — 시험 발행 payload는 초안에서 뺀다: 임의 JSON이라 토큰류가 들 수 있어 sessionStorage에 남기지 않는다.
+  // 열 때마다 '{}'로 새로 시작(예전 그대로).
+  const [payload, setPayload] = useState('{}');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) setError(null);
+    if (open) { setPayload('{}'); setError(null); }
   }, [open]);
 
   const submit = async () => {
@@ -1008,7 +1007,6 @@ function TestPublishDialog({
         throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
       }
       addToast({ type: 'success', title: t('eventTestPublishSuccessToast') });
-      clearPayloadDraft();
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof JsonFieldParseError ? t('eventJsonParseError', { field: e.field }) : e instanceof Error ? e.message : String(e));
@@ -1031,7 +1029,7 @@ function TestPublishDialog({
           </p>
         ) : null}
         <DialogFooter>
-          <Button variant="outline" onClick={() => { clearPayloadDraft(); onOpenChange(false); }} disabled={sending}>{tc('cancel')}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>{tc('cancel')}</Button>
           <Button onClick={() => void submit()} disabled={sending}>{sending ? '...' : t('eventTestPublishSubmit')}</Button>
         </DialogFooter>
       </DialogContent>
