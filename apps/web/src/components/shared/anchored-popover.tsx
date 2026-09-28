@@ -30,7 +30,8 @@ export interface AnchoredPopoverProps extends HTMLAttributes<HTMLDivElement> {
   popoverRef?: RefObject<HTMLDivElement | null>;
   /**
    * story #4373 — 기준이 스크롤 · 창 크기 말고도 움직이는 자리(캔버스 pan/zoom = CSS 변환만 바뀌어 이벤트가 없다): 열린 동안 매 프레임
-   * 기준 사각형을 재서 바뀐 프레임에만 다시 둔다.
+   * 기준 사각형과 팝오버 자기 크기를 재서 둘 중 하나가 바뀐 프레임에만 다시 둔다(글꼴이 늦게 붙거나 내용으로 칸 크기가 바뀌면 뒤집기 ·
+   * 밀어넣기가 낡은 크기로 남던 것 — 까디르 4757 리뷰).
    */
   trackAnchor?: boolean;
 }
@@ -110,7 +111,8 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
     let last = '';
     let frame = requestAnimationFrame(function tick() {
       const r = anchorRef.current?.getBoundingClientRect();
-      const key = r ? `${r.left},${r.top},${r.width},${r.height}` : '';
+      const own = elRef.current;
+      const key = r ? `${r.left},${r.top},${r.width},${r.height}|${own?.offsetWidth ?? 0},${own?.offsetHeight ?? 0}` : '';
       if (key !== last) {
         last = key;
         place();

@@ -18,7 +18,7 @@ import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const canvas = koMessages.canvas as unknown as Record<string, string>;
-const BOX = { w: 224, h: 120 };
+let BOX = { w: 224, h: 120 };
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 let rectSpy: ReturnType<typeof vi.spyOn>;
@@ -39,6 +39,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   pinRect = { left: 600, top: 390, width: 20, height: 20 };
+  BOX = { w: 224, h: 120 };
   setWindow(1280, 800);
   rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.hasAttribute('data-anchored-popover')) {
@@ -131,6 +132,18 @@ describe('산출물 댓글 쓰기 칸은 무대 밖 — body 포털 + fixed로 �
     pinRect = { left: 200, top: 100, width: 20, height: 20 };
     await nextFrames();
     expect(boxAt()).toMatchObject({ left: 200, top: 128 });
+  });
+
+  it('핀은 그대로인데 쓰기 칸 자기 크기가 바뀌면(글꼴 · 내용) 다시 둔다 — 낡은 크기로 뒤집기 판정이 남지 않게(까디르 4757 리뷰 ⓑ)', async () => {
+    pinRect = { left: 40, top: 560, width: 20, height: 20 };
+    await mountWithDraftPin();
+    await nextFrames();
+    expect(composeBox().dataset.side).toBe('bottom');  // 아래 여유 800 − 8 − 588 = 204 ≥ 120
+    BOX = { w: 224, h: 300 };
+    Object.defineProperty(composeBox(), 'offsetHeight', { configurable: true, value: 300 });
+    await nextFrames();
+    expect(composeBox().dataset.side).toBe('top');  // 300은 아래에 안 들어가고 위(552)가 더 넓다
+    expect(boxAt().bottom).toBe(560 - 8);
   });
 
   it('쓰기 칸 위에서 시작한 드래그는 캔버스를 움직이지 않는다(뷰포트 pan · 픽 처리 밖 — 단추 누름이 새던 원인)', async () => {
