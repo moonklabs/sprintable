@@ -249,7 +249,7 @@ describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
 
 
 // story #4359(까디르 4740 ①②) — 이 파일에 남아 있던 보이는 영어: 실패 toast가 영어 `error.message`를 그대로 보여 줌 ·
-// 목록 줄(마지막 사용 · 폐기 · 만료 · N일 뒤 만료) · 생성 창 복사 버튼 — 모두 ko 키로.
+// 목록 줄(마지막 사용 · 무효화 · 만료 · N일 뒤 만료) · 생성 창 복사 버튼 — 모두 ko 키로.
 describe('AgentApiKeyManager — 보이는 영어 0(story #4359)', () => {
   async function render(keys: unknown[] | null) {
     addToast.mockClear();
@@ -274,7 +274,7 @@ describe('AgentApiKeyManager — 보이는 영어 0(story #4359)', () => {
     expect(console.error).toHaveBeenCalled();
   });
 
-  it('⭐목록 줄 — 마지막 사용 · 폐기 · 만료 날짜가 ko 문구 · 영어 낱말 0', async () => {
+  it('⭐목록 줄 — 마지막 사용 · 무효화 · 만료 날짜가 ko 문구 · 영어 낱말 0', async () => {
     const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     const later = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
     const past = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
