@@ -4897,6 +4897,7 @@
     "statusActive": "In progress",
     "statusClosed": "Closed",
     "activateError": "Failed to start sprint.",
+    "quickDeclareError": "Couldn't save the hypothesis declarations. The unsaved ones are kept.",
     "closeError": "Failed to close sprint.",
     "assignError": "Failed to assign story.",
     "unassignError": "Failed to unassign story.",

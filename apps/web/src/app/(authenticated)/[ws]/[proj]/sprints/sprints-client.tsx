@@ -645,17 +645,27 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     const completed = quickDeclarations.filter(isDeclarationComplete);
     if (completed.length === 0) return;
     setActivating(true);
+    setActionError(null);
     try {
+      // story #4370(까디르 P2) — fetchWithAuth는 4xx/5xx에도 던지지 않는다. 응답마다 ok를 보고, 저장 못 한 선언은 초안에 남긴다
+      // (예전엔 실패해도 초안을 지워 쓴 선언이 사라졌다). 전부 저장됐을 때만 초안을 지운다.
+      const failed: HypothesisDeclarationValue[] = [];
       for (const d of completed) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
-        await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
+        const res = await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }).catch(() => {});
+        }).catch(() => null);
+        if (!res?.ok) failed.push(d);
       }
       await loadHypotheses(selected.id);
+      if (failed.length > 0) {
+        setQuickDeclarations(failed);
+        setActionError(t('quickDeclareError'));
+        return;
+      }
       setActivateGateBlocked(false);
       setAddingHypothesis(false);
       clearQuickDeclarationsDraft();
