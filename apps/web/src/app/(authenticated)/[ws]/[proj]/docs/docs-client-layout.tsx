@@ -507,6 +507,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             <button
               key={mode}
               type="button"
+              aria-pressed={viewMode === mode}
               onClick={() => setViewMode(mode)}
               className={cn(
                 // story #2963 §2 — 언더라인 탭(I3 정본, docs-index.tsx 카테고리 탭과 동일 클래스

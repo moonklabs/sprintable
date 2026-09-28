@@ -52,6 +52,7 @@ export function EventDefinerForm({
               <button
                 key={value}
                 type="button"
+                aria-pressed={state.format === value}
                 onClick={() => set('format', value)}
                 className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:bg-muted/40'}`}
               >

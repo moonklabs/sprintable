@@ -131,6 +131,7 @@ export function HypothesisDeclarationCard({
         <div className="inline-flex overflow-hidden rounded-lg border border-border text-[10px] font-semibold">
           <button
             type="button"
+            aria-pressed={value.mode === 'new'}
             onClick={() => onChange({ ...value, mode: 'new' })}
             className={cn('px-2.5 py-1 transition', value.mode === 'new' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground')}
           >
@@ -138,6 +139,7 @@ export function HypothesisDeclarationCard({
           </button>
           <button
             type="button"
+            aria-pressed={value.mode === 'link'}
             onClick={() => onChange({ ...value, mode: 'link' })}
             className={cn('px-2.5 py-1 transition', value.mode === 'link' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground')}
           >
@@ -322,6 +324,7 @@ export function HypothesisDeclarationCard({
                 <button
                   key={h.id}
                   type="button"
+                  aria-pressed={value.linkedHypothesisId === h.id}
                   onClick={() => onChange({
                     ...value,
                     linkedHypothesisId: h.id,

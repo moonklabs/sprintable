@@ -440,6 +440,7 @@ export function DocEditor({
               <button
                 key={mode}
                 type="button"
+                aria-pressed={viewMode === mode}
                 onClick={() => setViewMode(mode)}
                 className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
                   viewMode === mode

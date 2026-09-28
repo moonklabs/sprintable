@@ -160,6 +160,7 @@ export function GuidedHypothesisForm({
               <button
                 key={dir}
                 type="button"
+                aria-pressed={value.direction === dir}
                 onClick={() => { setActiveExample(null); setValue((v) => ({ ...v, direction: dir })); }}
                 className={cn(
                   'whitespace-nowrap px-3 py-2 text-xs font-medium transition',

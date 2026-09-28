@@ -213,6 +213,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                       variant="glass"
                       size="sm"
                       disabled={saving}
+                      aria-pressed={posture === p}
                       onClick={() => setPosture(p)}
                       className={cn(
                         'min-w-[80px]',

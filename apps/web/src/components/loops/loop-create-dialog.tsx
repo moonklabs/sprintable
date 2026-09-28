@@ -375,6 +375,7 @@ export function LoopCreateDialog({
               <div className="flex overflow-hidden rounded-lg border border-border text-[10.5px] font-semibold">
                 <button
                   type="button"
+                  aria-pressed={mode === 'new'}
                   onClick={() => setMode('new')}
                   className={cn('px-2.5 py-1 transition', mode === 'new' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground')}
                 >
@@ -382,6 +383,7 @@ export function LoopCreateDialog({
                 </button>
                 <button
                   type="button"
+                  aria-pressed={mode === 'link'}
                   onClick={() => setMode('link')}
                   className={cn('px-2.5 py-1 transition', mode === 'link' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground')}
                 >
@@ -459,6 +461,7 @@ export function LoopCreateDialog({
                         <button
                           key={dir}
                           type="button"
+                          aria-pressed={metric.direction === dir}
                           onClick={() => setMetricPatch({ direction: dir })}
                           className={cn(
                             'px-3 py-2 text-xs font-medium transition',
@@ -541,6 +544,7 @@ export function LoopCreateDialog({
                       <button
                         key={h.id}
                         type="button"
+                        aria-pressed={linkedId === h.id}
                         onClick={() => setLinkedId(h.id)}
                         className={cn(
                           'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',

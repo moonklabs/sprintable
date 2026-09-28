@@ -188,6 +188,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
             <button
               key={key}
               type="button"
+              aria-pressed={mode === key}
               onClick={() => setMode(key)}
               className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${mode === key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
             >

@@ -153,28 +153,5 @@
     }
   ],
   "counts": {},
-  "selection": {
-    "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx": 1,
-    "app/(authenticated)/rewards/page.tsx": 1,
-    "app/invite/invite-client.tsx": 1,
-    "components/canvas/artifact-expand-dialog.tsx": 1,
-    "components/canvas/artifact-gallery-view.tsx": 2,
-    "components/canvas/export-dialog.tsx": 2,
-    "components/docs/doc-editor.tsx": 1,
-    "components/docs/extensions/column-layout.tsx": 2,
-    "components/docs/extensions/slash-command.tsx": 1,
-    "components/epics/hypothesis-declaration-card.tsx": 3,
-    "components/flow/guided-hypothesis-form.tsx": 1,
-    "components/hypotheses/hypothesis-form.tsx": 1,
-    "components/kanban/kanban-board.tsx": 3,
-    "components/kanban/story-detail-panel.tsx": 2,
-    "components/loops/loop-create-dialog.tsx": 4,
-    "components/organization/event-definer-form.tsx": 1,
-    "components/settings/org-gate-policy-section.tsx": 1,
-    "components/settings/refresh-settings.tsx": 1,
-    "components/settings/workflow-line-editor-section.tsx": 1,
-    "components/sprints/hypothesis-declaration-card.tsx": 3,
-    "components/verify/evidence-section.tsx": 1,
-    "components/workcell/workcell.tsx": 1
-  }
+  "selection": {}
 }
