@@ -33,7 +33,7 @@ for (const kind of ['Sheet', 'Dialog'] as const) {
         const change = (next: boolean) => { onOpenChange(next); setOpen(next); };
         const inner = (
           <div data-testid="body">
-            {compose ? <CommentComposePopover onSubmit={() => {}} onCancel={() => { onCancel(); setCompose(false); }} /> : <button type="button" data-testid="plain">plain</button>}
+            {compose ? <CommentComposePopover onSubmit={async () => true} draftTargetId="a1" onCancel={() => { onCancel(); setCompose(false); }} /> : <button type="button" data-testid="plain">plain</button>}
           </div>
         );
         return (

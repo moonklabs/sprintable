@@ -212,7 +212,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     return unsub;
   }, [mux, target.gate_id, fetchGate]);
 
-  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
+  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean): Promise<boolean | void> => {
     setResolving(true);
     setTransitionError(null);
     try {
@@ -232,7 +232,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           reviewedDraft: state.kind === 'ready' ? reviewedDraftOf(state.gate) : null,
         })),
       });
-      if (res.ok) { await fetchGate(); return; }
+      if (res.ok) { await fetchGate(); return true; }  // story #4370 — 서명 사유 초안을 지우는 신호
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
       const code = body?.error?.code;
       // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문) 대신 사람
@@ -260,7 +260,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
   const [discussSubmitting, setDiscussSubmitting] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
-  const discuss = async (reason: string) => {
+  const discuss = async (reason: string): Promise<boolean> => {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -277,12 +277,14 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
         // 3연발 재현 — 눌러도 반응이 안 보여 반복 클릭). 즉시 토스트로 "보냈다"는 사실 자체를
         // 확인시킨다 — 지속 신호(누가 봐도 남는 배너)는 아래 discussion_requested 렌더가 맡는다.
         addToast({ type: 'success', title: t('approvalRequestDiscussSuccessToast') });
-        return;
+        return true;
       }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? `HTTP ${res.status}`);
+      return false;
     } catch {
       setDiscussError(t('hitlSendFailed'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -362,8 +364,8 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
-            onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
-            onReject={(reason) => void transition('rejected', reason)}
+            onApprove={(reason, evidenceViewed) => transition('approved', reason, evidenceViewed)}
+            onReject={(reason) => transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
             onDiscussClick={() => setDiscussDialogOpen(true)}
             onUndone={() => void fetchGate()}
@@ -375,9 +377,10 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
       <GateDiscussDialog
         open={discussDialogOpen}
         onOpenChange={setDiscussDialogOpen}
-        onSubmit={(reason) => void discuss(reason)}
+        onSubmit={discuss}
         submitting={discussSubmitting}
         error={discussError}
+        targetId={target.gate_id}
       />
       {!readingPanel && showPreview && (
         <EntityPreviewModal
@@ -400,8 +403,8 @@ function ApprovalRequestBody({
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
-  onApprove: (reason?: string, evidenceViewed?: boolean) => void;
-  onReject: (reason?: string) => void;
+  onApprove: (reason?: string, evidenceViewed?: boolean) => void | Promise<boolean | void>;
+  onReject: (reason?: string) => void | Promise<boolean | void>;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
   onDiscuss: (reason: string) => void;
   /** story #2631 — 저위험 플로우엔 사유 입력창이 없어 별도 다이얼로그를 연다. */
@@ -793,7 +796,7 @@ function ApprovalRequestBody({
         <div className="space-y-1.5">
           <GateSignatureApproval
             // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌어도 같은 리셋(새 버전을 다시 보고 서명).
-            key={`${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
+            key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
             gate={gate}
             resolving={resolving}
             error={transitionError}
@@ -803,16 +806,11 @@ function ApprovalRequestBody({
             onReject={onReject}
             onDiscuss={onDiscuss}
             compact
+            // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) — 잘못
+            // 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(needsFullFlow)은 이 패널이 유일한 경로라 취소 없음.
+            // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
+            onCancel={!needsFullFlow ? () => { setRejectPanelOpen(false); setSignPanelOpen(false); } : undefined}
           />
-          {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래
-              근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈
-              길을 남긴다. 고위험(needsFullFlow) 게이트는 이 패널이 유일한 경로라 취소
-              버튼이 무의미(숨김). */}
-          {!needsFullFlow ? (
-            <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => { setRejectPanelOpen(false); setSignPanelOpen(false); }}>
-              {tCage('cancel')}
-            </Button>
-          ) : null}
         </div>
       ) : (
         <>

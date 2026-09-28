@@ -224,7 +224,7 @@ export function ApprovalsQueue() {
     });
   };
 
-  const discuss = async (id: string, reason: string) => {
+  const discuss = async (id: string, reason: string): Promise<boolean> => {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -233,13 +233,15 @@ export function ApprovalsQueue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (res.ok) { setDiscussTargetId(null); return; }
+      if (res.ok) { setDiscussTargetId(null); return true; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+      return false;
     } catch {
       // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
       // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
       setDiscussError(t('gateTransitionErrorGeneric'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -371,7 +373,7 @@ export function ApprovalsQueue() {
   // 동일 엔드포인트·body. story 22affaf2 — 고위험 서명 플로우(GateSignatureApproval)도
   // 이제 이 함수를 그대로 쓴다(note=서명 사유) — 별도 함수를 새로 짓지 않는다(canonical
   // 상세의 transition()과 body shape을 1:1로 맞춘 이유이기도 함).
-  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null, evidenceViewed?: boolean) => {
+  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null, evidenceViewed?: boolean): Promise<boolean | void> => {
     setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
@@ -398,6 +400,7 @@ export function ApprovalsQueue() {
         // story 22affaf2 — 서명 모달을 거친 성공이면 그 자리서 닫는다(다른 gate의 모달을
         // 잘못 닫지 않도록 대상 id 일치 확認).
         setSignatureTargetId((cur) => (cur === id ? null : cur));
+        return true;  // story #4370 — 서명 사유 초안을 지우는 신호(finally는 그대로 돈다)
       } else {
         const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string; current_status?: string } } | null;
         const code = body?.error?.code;
@@ -852,9 +855,10 @@ export function ApprovalsQueue() {
       <GateDiscussDialog
         open={discussTargetId !== null}
         onOpenChange={(open) => { if (!open) setDiscussTargetId(null); }}
-        onSubmit={(reason) => { if (discussTargetId) void discuss(discussTargetId, reason); }}
+        onSubmit={(reason) => (discussTargetId ? discuss(discussTargetId, reason) : Promise.resolve(false))}
         submitting={discussSubmitting}
         error={discussError}
+        targetId={discussTargetId}
       />
       {/* story 22affaf2(유나 design③) — 고위험 인라인 서명 모달. canonical 상세와 동일
           컴포넌트(GateSignatureApproval)를 nav 없이 Dialog로 연다 — 어휘·게이팅(canSign)
@@ -884,12 +888,14 @@ export function ApprovalsQueue() {
             // 변경 시 evidenceViewed/reason 강제 리셋). page.tsx만 #2975에서 고쳐졌었다.
             // story #4190 — 초안 버전이 바뀌어도(409 뒤 행 재조회) 같은 리셋: 새 버전을 다시 보고 서명하게.
             <GateSignatureApproval
-              key={`${signatureGate.github_check_run_sha ?? ''}:${reviewedDraftOf(signatureGate)?.version ?? ''}`}
+              key={`${signatureGate.id}:${signatureGate.github_check_run_sha ?? ''}:${reviewedDraftOf(signatureGate)?.version ?? ''}`}
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
-              onApprove={(reason) => void resolveGate(signatureGate.id, 'approved', reason, true)}
-              onReject={(reason) => void resolveGate(signatureGate.id, 'rejected', reason)}
+              onApprove={(reason) => resolveGate(signatureGate.id, 'approved', reason, true)}
+              onReject={(reason) => resolveGate(signatureGate.id, 'rejected', reason)}
+              // story #4370(까디르 P3) — 창을 닫아도(✕ · 바깥 · Esc) 사유 초안은 남는다. 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+              onCancel={() => setSignatureTargetId(null)}
             />
           ) : null}
         </DialogContent>

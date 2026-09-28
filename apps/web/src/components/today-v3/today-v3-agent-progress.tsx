@@ -46,7 +46,7 @@ function AgentProgressRow({ item, onDone }: { item: TodayAgentProgressItem; onDo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (reason: string) => {
+  const submit = async (reason: string): Promise<boolean> => {
     setBusy(true);
     setError(null);
     const result = await postCancelRun(item.runId, reason);
@@ -54,16 +54,19 @@ function AgentProgressRow({ item, onDone }: { item: TodayAgentProgressItem; onDo
     if (result.ok) {
       setDialogOpen(false);
       onDone();
+      return true;
     } else if (result.status === 409) {
       // story #3970 — 이미 종결됐거나 이미 요청됨(서버 진실 반영) — 실패가 아니라
       // 재조회로 흡수한다(#3964 gate_already_resolved와 같은 결).
       setDialogOpen(false);
       onDone();
+      return true;
     } else if (result.status === 403) {
       setError(t('stopActionForbidden'));
     } else {
       setError(t('decisionActionFailed'));
     }
+    return false;
   };
 
   const isCancellable = item.cancel === null && CANCELLABLE_STATUSES.has(item.status);
@@ -104,6 +107,7 @@ function AgentProgressRow({ item, onDone }: { item: TodayAgentProgressItem; onDo
         submitting={busy}
         error={error}
         onSubmit={submit}
+        draftKey={{ surface: 'today-v3-stop', targetId: item.runId }}
       />
     </div>
   );

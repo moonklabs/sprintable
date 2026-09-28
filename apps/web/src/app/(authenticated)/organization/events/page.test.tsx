@@ -930,3 +930,58 @@ describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metad
     expect(applyBtn).not.toBeUndefined();
   });
 });
+
+// story #4370(유나 판정 (가)) — 정의 만들기/고치기 창은 여러 줄 칸(고급 JSON)이 든 폼이라 폼 전체가 초안(만들기 = 조직 · 고치기 = 정의).
+// 창이 Esc로 닫혀도 다시 열면 그대로 · 보이는 «취소»와 성공에서만 지운다. 시험 발행 payload는 초안 제외(PO 처분).
+describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
+  const dialog = () => document.body.querySelector('[data-slot="dialog-content"]') as HTMLElement | null;
+  const btn = (scope: ParentNode, label: string) => [...scope.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement;
+  const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
+  function setValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  async function closeByEsc(field: HTMLElement) {
+    const esc = (t: EventTarget) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await act(async () => { field.focus(); });
+    await act(async () => { esc(field); });
+    await act(async () => { esc(document.activeElement ?? document.body); });
+    await settle();
+  }
+
+  it('만들기: 고급 탭 JSON · 이름을 쓰고 Esc로 닫았다 열면 그대로(탭 포함) · «취소»는 지운다', async () => {
+    mockFetches([]);
+    await mount();
+    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    await act(async () => { switchToAdvancedTab(); });
+    await act(async () => {
+      fillName('릴리즈 흐름');
+      setValue(document.body.querySelector('#event-block-template') as HTMLTextAreaElement, '{\n  "title": "릴리즈"\n}');
+    });
+    await closeByEsc(document.body.querySelector('#event-block-template') as HTMLTextAreaElement);
+    expect(dialog()).toBeNull();
+    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    expect((document.body.querySelector('#event-name') as HTMLInputElement).value).toBe('릴리즈 흐름');
+    expect((document.body.querySelector('#event-block-template') as HTMLTextAreaElement).value).toBe('{\n  "title": "릴리즈"\n}');
+    await act(async () => { btn(dialog()!, koMessages.common.cancel).click(); });
+    await settle();
+    await act(async () => { btn(container, koMessages.organization.eventCreateCta).click(); });
+    expect((document.body.querySelector('#event-name') as HTMLInputElement).value).toBe('');
+    expect(document.body.querySelector('#event-block-template')).toBeNull();  // 기본 탭으로 새로 시작
+  });
+
+  it('시험 발행 payload는 초안에서 뺀다(PO 처분 · 임의 JSON이라 토큰류가 들 수 있음) — 닫았다 열면 {} · 저장소에 안 남는다', async () => {
+    mockFetches([customWithId({ id: 'def-7', key: 'org.moonklabs.my_event' })]);
+    await mount();
+    const payload = () => document.body.querySelector('#event-test-publish-payload') as HTMLTextAreaElement;
+    await act(async () => { btn(container, koMessages.organization.eventTestPublishCta).click(); });
+    await act(async () => { setValue(payload(), '{\n  "token": "secret-like"\n}'); });
+    await closeByEsc(payload());
+    expect(dialog()).toBeNull();
+    expect(Object.keys(window.sessionStorage).filter((k) => k.includes('event-test-publish'))).toEqual([]);
+    expect(JSON.stringify(Object.values(window.sessionStorage))).not.toContain('secret-like');
+    await act(async () => { btn(container, koMessages.organization.eventTestPublishCta).click(); });
+    expect(payload().value).toBe('{}');
+  });
+});

@@ -102,13 +102,14 @@ export function ArtifactDetailView({ artifactId, projectId }: { artifactId: stri
 
   /** story #2725 — 새 좌표 스레드 생성. artifact-section.tsx의 handleCreateThread와 동형(같은
    * CREATE 엔드포인트 재사용, BE 신규 0). */
-  async function handleCreateThread(nodes: ArtifactNode[], anchorXPercent: number, anchorYPercent: number, body: string) {
-    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+  async function handleCreateThread(nodes: ArtifactNode[], anchorXPercent: number, anchorYPercent: number, body: string): Promise<boolean> {
+    const created = await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: body, anchor_x: anchorXPercent, anchor_y: anchorYPercent }),
     });
     await refreshThreads(nodes);
+    return created !== null;  // story #4370 — 성공일 때만 작성 칸 초안을 지운다
   }
 
   async function handleProposeCanonical(versionNumber: number) {
@@ -152,7 +153,7 @@ export function ArtifactDetailView({ artifactId, projectId }: { artifactId: stri
         specPins={specPins}
         onResolveThread={(threadId) => void handleResolve(nodes, threadId)}
         onReplyThread={(threadId, body) => void handleReply(nodes, threadId, body)}
-        onCreateThread={(x, y, body) => void handleCreateThread(nodes, x, y, body)}
+        onCreateThread={(x, y, body) => handleCreateThread(nodes, x, y, body)}
         pendingCanonicalizeVersion={pendingCanonicalizeVersion}
         onProposeCanonical={(versionNumber) => void handleProposeCanonical(versionNumber)}
       />

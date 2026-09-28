@@ -4897,6 +4897,7 @@
     "statusActive": "진행 중",
     "statusClosed": "종료됨",
     "activateError": "스프린트 시작에 실패했어요.",
+    "quickDeclareError": "가설 선언을 저장하지 못했어요. 남은 선언은 그대로 두었어요.",
     "closeError": "스프린트 종료에 실패했어요.",
     "assignError": "스토리 배정에 실패했어요.",
     "unassignError": "스토리 해제에 실패했어요.",

@@ -303,7 +303,7 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
   it('clicking the header comment badge toggles pin-add mode (crosshair cursor)', async () => {
     await act(async () => {
       root.render(wrap(
-        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={() => {}} />,
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={async () => true} />,
       ));
     });
     const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
@@ -319,7 +319,7 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
   it('picking a coordinate in add-mode shows a draft pin + compose popover, and turns add-mode back off', async () => {
     await act(async () => {
       root.render(wrap(
-        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={() => {}} />,
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={async () => true} />,
       ));
     });
     const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;

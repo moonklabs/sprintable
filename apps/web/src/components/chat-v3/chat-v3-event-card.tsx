@@ -50,7 +50,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (reason: string) => {
+  const submit = async (reason: string): Promise<boolean> => {
     setBusy(true);
     setError(null);
     const res = await fetchWithAuth(`/api/gates/${approvalTarget.gate_id}/transition`, { timeoutMs: LONG_ROUTES.gateTransition.browserMs,
@@ -58,7 +58,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildGateTransitionBody({ status: 'rejected', note: reason })),
     });
-    if (res.ok) { setBusy(false); setDialogOpen(false); onDone(); return; }
+    if (res.ok) { setBusy(false); setDialogOpen(false); onDone(); return true; }
     // 페드루 PO CHANGES C3(2026-09-17 00:04Z, PR #4370) — gate_already_resolved(남이
     // 먼저 처리)는 실패가 아니라 재조회로 흡수한다(#3964/#3970과 같은 결).
     const body = await res.json().catch(() => null) as { error?: { code?: string } } | null;
@@ -66,9 +66,10 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
     if (classifyGateTransitionErrorCode(body?.error?.code) === 'already_resolved') {
       setDialogOpen(false);
       onDone();
-    } else {
-      setError(t('eventCardActionFailed'));
+      return true;
     }
+    setError(t('eventCardActionFailed'));
+    return false;
   };
 
   return (
@@ -111,6 +112,7 @@ export function ChatV3EventCard({ approvalTarget, content, isInTodayQueue, today
         submitting={busy}
         error={error}
         onSubmit={submit}
+        draftKey={{ surface: 'chat-v3-request-changes', targetId: approvalTarget.gate_id }}
       />
     </Card>
   );

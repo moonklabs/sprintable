@@ -1303,3 +1303,26 @@ describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
     expect(singleCol.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
   });
 });
+
+// story #4370(까디르 P3) — 저위험 게이트 «변경 요청» 패널의 보이는 «취소»는 사유 초안을 버린다(예전엔 패널만 닫고 초안은 남아,
+// 다시 열면 버렸다고 생각한 사유가 돌아왔다).
+describe('GateDetailPage — 저위험 «변경 요청» 패널의 «취소»는 사유 초안을 지운다(story #4370)', () => {
+  it('사유를 쓰고 «취소» → 다시 열면 빈 칸', async () => {
+    window.sessionStorage.clear();
+    await mount(gate({ can_approve: true }));
+    const cage = koMessages.cage as unknown as Record<string, string>;
+    const btn = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label)!;
+    const reason = () => document.body.querySelector<HTMLTextAreaElement>('#gate-sig-reason');
+    await act(async () => { btn(cage.gateReject).click(); });
+    const el = reason()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '버릴 사유');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { btn(cage.cancel).click(); });
+    expect(reason()).toBeNull();
+    await act(async () => { btn(cage.gateReject).click(); });
+    expect(reason()!.value).toBe('');
+  });
+});
+

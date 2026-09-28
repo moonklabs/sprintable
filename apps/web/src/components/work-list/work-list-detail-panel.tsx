@@ -386,7 +386,7 @@ export function WorkListDetailPanel({
   // `currentMemberType === 'human'` 게이팅과 동일 SSOT — DashboardContext #2103).
   const canShowPrimaryAction = currentMemberType === 'human' && !!gate && !approved;
 
-  const submitTransition = useCallback(async (status: 'approved' | 'rejected', evidenceViewed: boolean, note?: string) => {
+  const submitTransition = useCallback(async (status: 'approved' | 'rejected', evidenceViewed: boolean, note?: string): Promise<boolean | void> => {
     if (!gate) return;
     const reviewedDraft = reviewedDraftOf(gate);
     setTransitioning(true);
@@ -422,6 +422,7 @@ export function WorkListDetailPanel({
       }
       if (status === 'approved') setApproved(true);
       await loadGate();
+      return true;  // story #4370 — 서명 사유 초안을 지우는 신호
     } catch {
       setTransitionError('other');
     } finally {
@@ -432,12 +433,12 @@ export function WorkListDetailPanel({
   // 저위험(평문) 경로 — evidence_viewed 없이(=false) 호출.
   const handlePlainApprove = useCallback(() => { void submitTransition('approved', false); }, [submitTransition]);
   // 고위험(서명) 경로 — GateSignatureApproval의 onApprove만 이 경로를 부른다.
-  const handleSignedApprove = useCallback((reason: string) => { void submitTransition('approved', true, reason); }, [submitTransition]);
+  const handleSignedApprove = useCallback((reason: string) => submitTransition('approved', true, reason), [submitTransition]);
   // GateSignatureApproval은 onReject를 필수로 요구한다(그 컴포넌트의 「변경 요청」 버튼이
   // 항상 그려지므로) — 이 패널이 반려 흐름을 새로 설계하지 않되, 눌러도 아무 일도 안
   // 일어나는 죽은 버튼을 남기지 않도록 gates/[id]/page.tsx와 동일한 실 transition으로
   // 잇는다(evidence_viewed는 반려엔 의미 없어 false 고정).
-  const handleReject = useCallback((reason: string) => { void submitTransition('rejected', false, reason); }, [submitTransition]);
+  const handleReject = useCallback((reason: string) => submitTransition('rejected', false, reason), [submitTransition]);
 
   const retryPublications = useCallback(() => {
     if (!orgId) {
@@ -563,7 +564,7 @@ export function WorkListDetailPanel({
               <div data-testid="panel-signature-flow">
                 <GateSignatureApproval
                   // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌면 열람 체크·사유를 리셋(새 버전을 다시 보고 서명).
-                  key={`${gate!.github_check_run_sha ?? ''}:${reviewedDraftOf(gate!)?.version ?? ''}`}
+                  key={`${gate!.id}:${gate!.github_check_run_sha ?? ''}:${reviewedDraftOf(gate!)?.version ?? ''}`}
                   gate={gate!}
                   resolving={transitioning}
                   error={transitionError

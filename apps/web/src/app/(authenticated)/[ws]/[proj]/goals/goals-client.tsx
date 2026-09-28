@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
@@ -52,6 +52,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { GoalsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -233,14 +234,25 @@ interface GoalCreateFormProps {
   onCancel: () => void;
 }
 
+interface GoalEditDraft { title: string; description: string; priority: GoalPriority; targetDate: string; targetSp: string }
+interface GoalCreateDraft extends GoalEditDraft { declarations: HypothesisDeclarationValue[] }
+/** 목표 만들기 폼 초안의 빈 값(안정 참조 — 같은 값이면 초안 없음). */
+const EMPTY_GOAL_CREATE: GoalCreateDraft = { title: '', description: '', priority: 'medium', targetDate: '', targetSp: '', declarations: [] };
+
 function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFormProps) {
   const t = useTranslations('goals');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<GoalPriority>('medium');
-  const [targetDate, setTargetDate] = useState('');
-  const [targetSp, setTargetSp] = useState('');
-  const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(설명 · 가설 문장)이 든 폼이라 **폼 전체**가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로
+  // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 키 = 표면 + 대상(새로 만들기라 프로젝트) + form.
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<GoalCreateDraft>(
+    { surface: 'goal-create', targetId: projectId, field: 'form' }, EMPTY_GOAL_CREATE,
+  );
+  const { title, description, priority, targetDate, targetSp, declarations } = form;
+  const setTitle = (v: string) => setForm({ ...form, title: v });
+  const setDescription = (v: string) => setForm({ ...form, description: v });
+  const setPriority = (v: GoalPriority) => setForm({ ...form, priority: v });
+  const setTargetDate = (v: string) => setForm({ ...form, targetDate: v });
+  const setTargetSp = (v: string) => setForm({ ...form, targetSp: v });
+  const setDeclarations = (v: HypothesisDeclarationValue[]) => setForm({ ...form, declarations: v });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -302,13 +314,14 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
 
       const { data } = await res.json() as { data: Goal };
       await wireDeclarations(data.id);
+      clearFormDraft();
       onCreated(data);
     } catch {
       setError(t('createError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations, t]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations, t, clearFormDraft]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -384,7 +397,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
       {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onCancel(); }}>
           {t('cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || !title.trim()}>
@@ -405,11 +418,24 @@ interface GoalEditFormProps {
 
 function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
   const t = useTranslations('goals');
-  const [title, setTitle] = useState(epic.title);
-  const [description, setDescription] = useState(epic.description ?? '');
-  const [priority, setPriority] = useState<GoalPriority>(epic.priority);
-  const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
-  const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined ? String(epic.target_sp) : '');
+  // story #4370(유나 판정 (가)) — 설명(여러 줄)이 든 폼이라 폼 전체가 목표별 초안 하나 · 서버 값이 처음 값(같아지면 초안 없음) ·
+  // 저장 성공과 «취소»에서만 지운다.
+  const serverForm = useMemo<GoalEditDraft>(() => ({
+    title: epic.title,
+    description: epic.description ?? '',
+    priority: epic.priority,
+    targetDate: epic.target_date?.slice(0, 10) ?? '',
+    targetSp: epic.target_sp !== undefined ? String(epic.target_sp) : '',
+  }), [epic.title, epic.description, epic.priority, epic.target_date, epic.target_sp]);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<GoalEditDraft>(
+    { surface: 'goal-edit', targetId: epic.id, field: 'form' }, serverForm,
+  );
+  const { title, description, priority, targetDate, targetSp } = form;
+  const setTitle = (v: string) => setForm({ ...form, title: v });
+  const setDescription = (v: string) => setForm({ ...form, description: v });
+  const setPriority = (v: GoalPriority) => setForm({ ...form, priority: v });
+  const setTargetDate = (v: string) => setForm({ ...form, targetDate: v });
+  const setTargetSp = (v: string) => setForm({ ...form, targetSp: v });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -439,13 +465,14 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       if (!res.ok) throw new Error('Failed to update epic');
 
       const { data } = await res.json() as { data: Goal };
+      clearFormDraft();
       onSaved({ ...data, stories: epic.stories });
     } catch {
       setError(t('updateError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t]);
+  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t, clearFormDraft]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -512,7 +539,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onCancel(); }}>
           {t('cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || !title.trim()}>

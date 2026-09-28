@@ -46,6 +46,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { prefetchSprintScreen, sprintScreenUrls, takeSprintScreenOrFetch } from '@/components/sprints/sprint-screen-prefetch';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -158,17 +159,35 @@ function localDateISO(offsetDays = 0): string {
 }
 
 // story #2755 테스트 접근용 export(내부 사용 불변) — «침묵 금지» 렌더 검증(loud validation) 대상.
+/** 옆 패널 빠른 선언의 빈 값(빈 카드 하나 · 안정 참조). */
+const QUICK_DECLARATIONS_EMPTY: HypothesisDeclarationValue[] = [EMPTY_DECLARATION];
+
+interface SprintCreateDraft {
+  title: string; startDate: string; endDate: string; goal: string; capacity: string; teamSize: string;
+  declarations: HypothesisDeclarationValue[];
+}
+
 export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const t = useTranslations('sprints');
-  const [title, setTitle] = useState('');
-  const [startDate, setStartDate] = useState(() => localDateISO(0));
-  const [endDate, setEndDate] = useState(() => localDateISO(SPRINT_DEFAULT_SPAN_DAYS));
-  const [goal, setGoal] = useState('');
-  const [capacity, setCapacity] = useState('');
-  const [teamSize, setTeamSize] = useState('');
-  // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 단일 optional success_hypothesis는 N-선언으로
-  // 흡수(핸드오프 §7 KEEP). 임시저장(planning)은 0개도 허용, 활성화(定)만 ≥1(완결된) 선언 요구.
-  const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(목표 · 가설 문장)이 든 폼이라 **폼 전체**가 프로젝트별 초안 하나: 창이 ✕ · 바깥 · Esc로
+  // 닫혀도 남고 보이는 «취소»와 만들기 성공에서만 지운다. 빈 값의 기본 날짜는 이 창이 열린 날 기준(마운트마다 한 번).
+  const emptyForm = useMemo<SprintCreateDraft>(() => ({
+    title: '', startDate: localDateISO(0), endDate: localDateISO(SPRINT_DEFAULT_SPAN_DAYS), goal: '', capacity: '', teamSize: '',
+    // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 단일 optional success_hypothesis는 N-선언으로
+    // 흡수(핸드오프 §7 KEEP). 임시저장(planning)은 0개도 허용, 활성화(定)만 ≥1(완결된) 선언 요구.
+    declarations: [],
+  }), []);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<SprintCreateDraft>(
+    { surface: 'sprint-create', targetId: projectId, field: 'form' }, emptyForm,
+  );
+  const { title, startDate, endDate, goal, capacity, teamSize, declarations } = form;
+  const setTitle = (v: string) => setForm((f) => ({ ...f, title: v }));
+  const setStartDate = (v: string) => setForm((f) => ({ ...f, startDate: v }));
+  const setEndDate = (v: string) => setForm((f) => ({ ...f, endDate: v }));
+  const setGoal = (v: string) => setForm((f) => ({ ...f, goal: v }));
+  const setCapacity = (v: string) => setForm((f) => ({ ...f, capacity: v }));
+  const setTeamSize = (v: string) => setForm((f) => ({ ...f, teamSize: v }));
+  const setDeclarations = (v: HypothesisDeclarationValue[]) => setForm((f) => ({ ...f, declarations: v }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -215,6 +234,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
       if (activateAfterCreate) {
         await fetchWithAuth(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
       }
+      clearFormDraft();
       onCreated(data);
     } catch {
       setError(t('createError'));
@@ -335,7 +355,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
               ) : t('activateBlocked')}
             </span>
             <div className="flex gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onClose(); }}>{t('cancel')}</Button>
               {/* story #2755 — disabled를 submitting만으로 좁혀 «클릭이 항상 handleSubmit을 실행»
                   하게 한다(무설명 disabled 제거). 미충족 필드는 handleSubmit이 setError로 사유를
                   띄운다. 연타/중복 제출은 submitting 가드로 커버. */}
@@ -444,7 +464,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [hypotheses, setHypotheses] = useState<RetroHypothesisResult[]>([]);
   const [activateGateBlocked, setActivateGateBlocked] = useState(false);
   const [addingHypothesis, setAddingHypothesis] = useState(false);
-  const [quickDeclarations, setQuickDeclarations] = useState<HypothesisDeclarationValue[]>([EMPTY_DECLARATION]);
+  // story #4370 — 옆 패널 «가설 빠르게 선언»(여러 줄 가설 문장이 든 카드 목록)은 스프린트별 폼 초안: 패널을 닫거나(✕) 다른 스프린트로
+  // 옮겨도 그 스프린트로 돌아오면 쓰던 선언이 그대로 · 추가 성공에서만 지운다. 스프린트가 바뀌면 키가 바뀌어 그 스프린트의 초안.
+  const [quickDeclarations, setQuickDeclarations, clearQuickDeclarationsDraft] = useJsonFieldDraft<HypothesisDeclarationValue[]>(
+    { surface: 'sprint-quick-hypotheses', targetId: selected?.id ?? null, field: 'form' }, QUICK_DECLARATIONS_EMPTY,
+  );
 
   const loadHypotheses = useCallback(async (sprintId: string) => {
     try {
@@ -573,7 +597,6 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setSelected(sprint);
     setActivateGateBlocked(false);
     setAddingHypothesis(false);
-    setQuickDeclarations([EMPTY_DECLARATION]);
     await Promise.all([loadSprintDetail(sprint), loadHypotheses(sprint.id)]);
   }, [loadSprintDetail, loadHypotheses]);
 
@@ -622,20 +645,30 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     const completed = quickDeclarations.filter(isDeclarationComplete);
     if (completed.length === 0) return;
     setActivating(true);
+    setActionError(null);
     try {
+      // story #4370(까디르 P2) — fetchWithAuth는 4xx/5xx에도 던지지 않는다. 응답마다 ok를 보고, 저장 못 한 선언은 초안에 남긴다
+      // (예전엔 실패해도 초안을 지워 쓴 선언이 사라졌다). 전부 저장됐을 때만 초안을 지운다.
+      const failed: HypothesisDeclarationValue[] = [];
       for (const d of completed) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
-        await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
+        const res = await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }).catch(() => {});
+        }).catch(() => null);
+        if (!res?.ok) failed.push(d);
       }
       await loadHypotheses(selected.id);
+      if (failed.length > 0) {
+        setQuickDeclarations(failed);
+        setActionError(t('quickDeclareError'));
+        return;
+      }
       setActivateGateBlocked(false);
       setAddingHypothesis(false);
-      setQuickDeclarations([EMPTY_DECLARATION]);
+      clearQuickDeclarationsDraft();
     } finally {
       setActivating(false);
     }
@@ -938,9 +971,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                 declarations={quickDeclarations}
                 onChange={setQuickDeclarations}
               />
-              <Button size="sm" className="w-full" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
-                {activating ? '...' : t('declareSectionTitle')}
-              </Button>
+              <div className="flex gap-2">
+                {/* story #4370 — 선언 초안을 버릴 보이는 길(패널을 닫거나 옮겨도 초안은 남는다). */}
+                <Button size="sm" variant="ghost" onClick={() => { clearQuickDeclarationsDraft(); setAddingHypothesis(false); }} disabled={activating}>
+                  {t('cancel')}
+                </Button>
+                <Button size="sm" className="flex-1" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
+                  {activating ? '...' : t('declareSectionTitle')}
+                </Button>
+              </div>
             </div>
           )}
         </div>

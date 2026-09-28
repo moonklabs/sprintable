@@ -343,6 +343,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           open
           onOpenChange={(next) => { if (!next) setImporting(null); }}
           onImport={(nodes) => handleImportCommit(importing.storyId, nodes)}
+          targetId={importing.storyId}
         />
       ) : loading ? (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">

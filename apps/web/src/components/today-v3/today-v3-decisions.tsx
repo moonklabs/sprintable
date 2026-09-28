@@ -91,14 +91,16 @@ function GateSignatureCard({ item, isAdminOrOwner, onDone }: {
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
-  const submitDialog = async (reason: string) => {
+  const submitDialog = async (reason: string): Promise<boolean> => {
     setBusy(true);
     setDialogError(null);
     const result = dialogKind === 'hold'
       ? await postGateHold(item.id, reason)
       : await postGateTransition(item.id, 'rejected', reason);
     setBusy(false);
-    if (result.ok || result.alreadyResolved) { setDialogKind(null); onDone(); } else { setDialogError(t('decisionActionFailed')); }
+    if (result.ok || result.alreadyResolved) { setDialogKind(null); onDone(); return true; }
+    setDialogError(t('decisionActionFailed'));
+    return false;
   };
 
   return (
@@ -142,6 +144,7 @@ function GateSignatureCard({ item, isAdminOrOwner, onDone }: {
         submitting={busy}
         error={dialogError}
         onSubmit={submitDialog}
+        draftKey={{ surface: `today-v3-${dialogKind ?? 'none'}`, targetId: item.id }}
       />
     </Card>
   );

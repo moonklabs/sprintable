@@ -263,7 +263,7 @@ export default function GateDetailPage() {
   const [rejectPanelOpen, setRejectPanelOpen] = useState(false);
   useEffect(() => { setRejectPanelOpen(false); }, [gate?.id]);
 
-  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
+  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean): Promise<boolean | void> => {
     if (!gate) return;
     setResolving(true);
     setTransitionError(null);
@@ -295,7 +295,7 @@ export default function GateDetailPage() {
       // '?tab=gates'로 명시해 실제 결재함(게이트 탭)으로 돌아간다.
       if (res.ok) {
         router.replace(flatHref('/inbox?tab=gates'));
-        return;
+        return true;  // story #4370 — 서명 사유 초안을 지우는 신호
       }
       // story #2043 AC3: 서버 거부(예: #2027 — 고위험 승인은 note 필수, 422)를 사람이 읽을
       // 문구로 보여준다. story #2500 — `body.detail`은 실 envelope({data,error,meta})에
@@ -338,8 +338,8 @@ export default function GateDetailPage() {
   // (형제)가 스스로 알 방법이 없어 이 숫자를 부모가 다리 놓는다 — 증가할 때마다
   // GateActivityHistory가 재조회(그 컴포넌트의 refreshKey prop 참고).
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
-  const discuss = useCallback(async (reason: string) => {
-    if (!gate) return;
+  const discuss = useCallback(async (reason: string): Promise<boolean> => {
+    if (!gate) return false;
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
@@ -348,13 +348,15 @@ export default function GateDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
-      if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return; }
+      if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return true; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+      return false;
     } catch {
       // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
       // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
       setDiscussError(t('gateTransitionErrorGeneric'));
+      return false;
     } finally {
       setDiscussSubmitting(false);
     }
@@ -619,23 +621,18 @@ export default function GateDetailPage() {
               <div className="space-y-2">
                 <GateSignatureApproval
                   // story #4190 — 초안 버전이 바뀌어도(409 gate_draft_changed 뒤 재조회) 같은 리셋.
-                  key={`${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
+                  key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
                   gate={gate}
                   resolving={resolving}
                   error={transitionError}
-                  onApprove={(reason) => void transition('approved', reason, true)}
-                  onReject={(reason) => void transition('rejected', reason)}
-                  onDiscuss={(reason) => void discuss(reason)}
+                  onApprove={(reason) => transition('approved', reason, true)}
+                  onReject={(reason) => transition('rejected', reason)}
+                  onDiscuss={(reason) => discuss(reason)}
+                  // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) —
+                  // 잘못 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(isSigFlowGate)은 이 패널이 유일한 경로라 취소 없음.
+                  // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
+                  onCancel={!isSigFlowGate ? () => setRejectPanelOpen(false) : undefined}
                 />
-                {/* story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다
-                    (원래 근거열람+사유 요구가 없는 등급) — 잘못 눌렀을 때 원탭 승인 화면으로
-                    되돌아갈 길을 남긴다. 고위험(isSigFlowGate) 게이트는 이 패널이 유일한
-                    경로라 취소 버튼 자체가 무의미(숨김).*/}
-                {!isSigFlowGate ? (
-                  <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={resolving} onClick={() => setRejectPanelOpen(false)}>
-                    {t('cancel')}
-                  </Button>
-                ) : null}
               </div>
             );
 
@@ -798,9 +795,10 @@ export default function GateDetailPage() {
         <GateDiscussDialog
           open={discussDialogOpen}
           onOpenChange={setDiscussDialogOpen}
-          onSubmit={(reason) => void discuss(reason)}
+          onSubmit={discuss}
           submitting={discussSubmitting}
           error={discussError}
+          targetId={gate.id}
         />
       ) : null}
     </>

@@ -22,7 +22,7 @@ function mount() {
   act(() => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <ArtifactViewer artifact={{ ...MOCK_ARTIFACT, format: 'html' }} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} onProposeCanonical={() => {}} onCreateThread={() => {}} />
+        <ArtifactViewer artifact={{ ...MOCK_ARTIFACT, format: 'html' }} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} onProposeCanonical={() => {}} onCreateThread={async () => true} />
       </NextIntlClientProvider>,
     );
   });

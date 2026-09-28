@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -33,6 +33,7 @@ import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
 import { presetAction, presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -623,6 +624,12 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
   );
 }
 
+/** story #4370 — 이벤트 정의 폼 초안(폼 전체). */
+interface EventFormDraft {
+  name: string; keySuffix: string; payloadSchema: string; routing: string; blockTemplate: string;
+  humanOnly: boolean; rolesCsv: string; definerState: DefinerFormState; tab: 'basic' | 'advanced'; advancedOnly: boolean;
+}
+
 function EventFormDialog({
   mode, target, open, onOpenChange, orgSlug, onSaved, t, tc, addToast,
 }: {
@@ -640,22 +647,52 @@ function EventFormDialog({
   const { currentTeamMemberId } = useDashboardContext();
   const prefix = `org.${orgSlug || '{org}'}.`;
   // story #3745(페드루 PO 決) — 정의 편집 폼에 이름 필드(옛 화면엔 자리 자체가 없었다).
-  const [name, setName] = useState('');
-  const [keySuffix, setKeySuffix] = useState('');
-  const [payloadSchema, setPayloadSchema] = useState(DEFAULT_PAYLOAD_SCHEMA);
-  const [routing, setRouting] = useState(DEFAULT_ROUTING);
-  const [blockTemplate, setBlockTemplate] = useState('');
-  const [humanOnly, setHumanOnly] = useState(false);
-  const [rolesCsv, setRolesCsv] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   // story #2670(A층) — 「기본」(3서식 폼) / 「고급」(JSON, #3070 원안) 탭. create=항상 기본
   // 시작. edit=기존 JSON을 tryReverseParse로 되돌려 성공하면 기본, 실패(폼이 못 만드는
   // 모양)하면 고급 전용(배지+기본 탭 비활성) — AC3 그대로.
-  const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
-  const [definerState, setDefinerState] = useState<DefinerFormState>(emptyFormState());
-  const [advancedOnly, setAdvancedOnly] = useState(false);
+  // story #4370(유나 판정 (가)) — 여러 줄 칸(고급 JSON)이 든 폼이라 폼 전체가 초안 하나: 만들기 = 조직 키 · 고치기 = 정의 키
+  // (저장된 정의가 처음 값 · 같으면 초안 없음). 창이 ✕ · 바깥 · Esc로 닫혀도 남고 «취소» · 고치기 저장 성공 · 만들기 뒤 닫기에서 지운다.
+  const initialForm = useMemo<EventFormDraft>(() => {
+    if (mode === 'edit' && target) {
+      const auth = target.action_auth as { human_only?: boolean; role?: string[] } | null | undefined;
+      const parsed = orgSlug ? tryReverseParse(target.key, target.payload_schema, target.routing, target.action_auth ?? null, orgSlug, target.block_template) : null;
+      return {
+        name: target.name ?? '',
+        keySuffix: target.key.startsWith(`org.${orgSlug}.`) ? target.key.slice(`org.${orgSlug}.`.length) : target.key,
+        payloadSchema: JSON.stringify(target.payload_schema, null, 2),
+        routing: JSON.stringify(target.routing, null, 2),
+        blockTemplate: target.block_template ? JSON.stringify(target.block_template, null, 2) : '',
+        humanOnly: auth?.human_only ?? false,
+        rolesCsv: (auth?.role ?? []).join(', '),
+        definerState: parsed ?? emptyFormState(),
+        tab: parsed ? 'basic' : 'advanced',
+        advancedOnly: !parsed,
+      };
+    }
+    return {
+      name: '', keySuffix: '', payloadSchema: DEFAULT_PAYLOAD_SCHEMA, routing: DEFAULT_ROUTING, blockTemplate: '',
+      humanOnly: false, rolesCsv: '', definerState: emptyFormState(), tab: 'basic', advancedOnly: false,
+    };
+  }, [mode, target, orgSlug]);
+  const [form, setForm, clearFormDraft] = useJsonFieldDraft<EventFormDraft>(
+    mode === 'edit' && target
+      ? { surface: 'event-definition-edit', targetId: target.id, field: 'form' }
+      : { surface: 'event-definition-create', targetId: orgSlug || null, field: 'form' },
+    initialForm,
+  );
+  const { name, keySuffix, payloadSchema, routing, blockTemplate, humanOnly, rolesCsv, definerState, tab, advancedOnly } = form;
+  const setName = (v: string) => setForm((f) => ({ ...f, name: v }));
+  const setKeySuffix = (v: string) => setForm((f) => ({ ...f, keySuffix: v }));
+  const setPayloadSchema = (v: string) => setForm((f) => ({ ...f, payloadSchema: v }));
+  const setRouting = (v: string) => setForm((f) => ({ ...f, routing: v }));
+  const setBlockTemplate = (v: string) => setForm((f) => ({ ...f, blockTemplate: v }));
+  const setHumanOnly = (v: boolean) => setForm((f) => ({ ...f, humanOnly: v }));
+  const setRolesCsv = (v: string) => setForm((f) => ({ ...f, rolesCsv: v }));
+  const setDefinerState = (v: DefinerFormState) => setForm((f) => ({ ...f, definerState: v }));
+  const setTab = (v: 'basic' | 'advanced') => setForm((f) => ({ ...f, tab: v }));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   // 새로 저장한 정의의 실 key(발행 테스트가 필요로 하는 서버측 실체) — create 저장 성공
   // 직후에도 다이얼로그를 닫지 않고 이 값을 채워 그 자리에서 바로 테스트 발행까지 잇는다
   // (스펙 §4 "정의→미리보기→테스트 발행"이 한 세션 안에서 끊기지 않아야 함).
@@ -665,36 +702,11 @@ function EventFormDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (mode === 'edit' && target) {
-      setName(target.name ?? '');
-      setKeySuffix(target.key.startsWith(`org.${orgSlug}.`) ? target.key.slice(`org.${orgSlug}.`.length) : target.key);
-      setPayloadSchema(JSON.stringify(target.payload_schema, null, 2));
-      setRouting(JSON.stringify(target.routing, null, 2));
-      setBlockTemplate(target.block_template ? JSON.stringify(target.block_template, null, 2) : '');
-      const auth = target.action_auth as { human_only?: boolean; role?: string[] } | null | undefined;
-      setHumanOnly(auth?.human_only ?? false);
-      setRolesCsv((auth?.role ?? []).join(', '));
-
-      const parsed = orgSlug ? tryReverseParse(target.key, target.payload_schema, target.routing, target.action_auth ?? null, orgSlug, target.block_template) : null;
-      if (parsed) { setDefinerState(parsed); setTab('basic'); setAdvancedOnly(false); }
-      else { setDefinerState(emptyFormState()); setTab('advanced'); setAdvancedOnly(true); }
-      setSavedKey(target.key);
-    } else {
-      setName('');
-      setKeySuffix('');
-      setPayloadSchema(DEFAULT_PAYLOAD_SCHEMA);
-      setRouting(DEFAULT_ROUTING);
-      setBlockTemplate('');
-      setHumanOnly(false);
-      setRolesCsv('');
-      setDefinerState(emptyFormState());
-      setTab('basic');
-      setAdvancedOnly(false);
-      setSavedKey(null);
-    }
+    // 폼 글은 초안 훅이 채운다(남은 초안 · 없으면 저장된 정의/기본값) — 여기선 화면 상태만.
+    setSavedKey(mode === 'edit' && target ? target.key : null);
     setTestPublishResult(null);
     setError(null);
-  }, [open, mode, target, orgSlug]);
+  }, [open, mode, target]);
 
   const definerKeyError = tab === 'basic' && mode === 'create' ? validateKeySuffix(definerState.keySuffix) : null;
   // story #2666 — 「고급」탭도 「기본」탭과 같은 key 규격(_ORG_KEY_RE 접미 [a-z0-9_]+)이라
@@ -768,6 +780,7 @@ function EventFormDialog({
         // 테스트 발행" 한 흐름이 끊기지 않는다(재오픈 왕복 없음).
         setSavedKey(savedKeyValue);
       } else {
+        clearFormDraft();
         onOpenChange(false);
       }
     } catch (e) {
@@ -810,7 +823,12 @@ function EventFormDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}>
+    <Dialog open={open} onOpenChange={(next) => {
+      if (saving) return;
+      // 만들기가 이미 저장된 뒤(테스트 발행용으로 열어 둔 창) 닫힘은 초안을 남길 까닭이 없다.
+      if (!next && mode === 'create' && savedKey) clearFormDraft();
+      onOpenChange(next);
+    }}>
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3">
@@ -918,7 +936,7 @@ function EventFormDialog({
           ) : null}
         </div>
         <DialogFooter className="shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button variant="outline" onClick={() => { clearFormDraft(); onOpenChange(false); }} disabled={saving}>
             {mode === 'create' && savedKey ? tc('close') /* 저장 후엔 닫기만 남는다(재저장=중복 POST·409 방지) */ : tc('cancel')}
           </Button>
           {mode === 'create' && savedKey ? null : (
@@ -963,6 +981,8 @@ function TestPublishDialog({
   tc: ReturnType<typeof useTranslations>;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  // story #4370(PO 처분) — 시험 발행 payload는 초안에서 뺀다: 임의 JSON이라 토큰류가 들 수 있어 sessionStorage에 남기지 않는다.
+  // 열 때마다 '{}'로 새로 시작(예전 그대로).
   const [payload, setPayload] = useState('{}');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useFieldDraft } from '@/hooks/use-field-draft';
 import { useTranslations } from 'next-intl';
 import {
   Dialog,
@@ -90,7 +91,9 @@ export function CommentReplyDialog({
 }: CommentReplyDialogProps) {
   const t = useTranslations('content');
   const tc = useTranslations('common');
-  const [text, setText] = useState(initialText ?? '');
+  // story #4370 — 서버 초안을 만들기 전 쓰는 답글(여러 줄 · 이 단계 폼의 유일한 칸)은 댓글별 로컬 초안: ✕ · 바깥 · Esc로 닫혀도 남고
+  // 보이는 «취소»와 서버 초안 만들기 성공(또는 이미 있던 서버 초안으로 이어감)에서 지운다 — 그 뒤는 서버가 초안을 들고 있다.
+  const [text, setText, clearTextDraft] = useFieldDraft({ surface: 'comment-reply', targetId: comment.id, field: 'form' }, initialText ?? '');
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(initialDraft ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -108,6 +111,7 @@ export function CommentReplyDialog({
     try {
       const result = await onCreateDraft(text.trim());
       if (result.ok) {
+        clearTextDraft();
         setDraft({ id: result.reply.id, text: result.reply.text });
       } else if (result.existingReplyId) {
         // story #3596 — 이 댓글에 안 보낸 초안이 이미 있다(레이스): 새로 만들지
@@ -115,6 +119,7 @@ export function CommentReplyDialog({
         // 「안 다룬다」는 막아야 한다는 §3596 처방 그대로 — 재시도로 우회하지
         // 않는다).
         const fetchedText = onFetchReplyText ? await onFetchReplyText(result.existingReplyId) : undefined;
+        clearTextDraft();
         setDraft({ id: result.existingReplyId, text: fetchedText ?? '' });
         setDraftPrefillFailedAfterConflict(fetchedText === undefined);
       } else {
@@ -248,7 +253,7 @@ export function CommentReplyDialog({
             ) : null}
 
             <DialogFooter className="shrink-0">
-              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onClose}>{t('commentsConvertCancel')}</Button>} />
+              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { clearTextDraft(); onClose(); }}>{t('commentsConvertCancel')}</Button>} />
               <Button type="submit" disabled={submitting || !text.trim()} data-testid="comments-reply-draft-button">
                 {submitting ? tc('saving') : t('commentsReplySaveDraftCta')}
               </Button>
