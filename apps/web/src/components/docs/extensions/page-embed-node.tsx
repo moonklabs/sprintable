@@ -66,7 +66,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
 
   const [inputSlug, setInputSlug] = useState('');
   // story #4371 — 저장된 임베드의 속성(title · icon · slug)은 첫 그림용 자리표시일 뿐. 열 때 대상 문서를 한 번 조회해
-  // 지워짐 · 접근 불가 · 순환이면 오류 줄, 성공이면 최신 값을 그린다(속성은 안 씀 · 예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
+  // 지워짐 · 접근 불가면 오류 줄, 성공이면 최신 값을 그린다(속성은 안 씀 · 예전엔 이 상태가 채워져 있어 조회가 영영 안 돌았다).
   const [doc, setDoc] = useState<DocPreview | null>(
     docId
       ? { id: docId, title: title ?? '', icon: icon ?? null, slug: slug ?? '' }
@@ -161,7 +161,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
   }
 
   // --- No doc selected — show picker ---
-  // story #4371 — 제출 실패(찾을 수 없음/불가 · 순환 · 불러오기 실패)는 입력칸 아래 오류 한 줄로(예전엔 이 갈래가 오류 갈래보다
+  // story #4371 — 제출 실패(찾을 수 없음/불가 · 자기 자신 · 불러오기 실패)는 입력칸 아래 오류 한 줄로(예전엔 이 갈래가 오류 갈래보다
   // 먼저 반환해 오류가 영영 안 그려졌다). 입력값은 그대로 · 초점은 입력칸(fetchDoc).
   if (!docId) {
     return (
@@ -212,7 +212,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
     );
   }
 
-  // --- Error / unavailable / circular (indirect) ---
+  // --- Error / unavailable ---
   if (error) {
     return (
       <NodeViewWrapper data-testid="page-embed-error">
