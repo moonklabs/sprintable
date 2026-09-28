@@ -199,3 +199,30 @@ describe('쓰기 칸 위 휠은 캔버스로 넘긴다(story #4373 · 까디르 
     expect(forwarded).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('쓰기 칸 바깥 누름 닫기는 isOutsidePress(story #4373 · #4349 부류 가드)', () => {
+  const press = (target: Element) => act(async () => { target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+
+  it('칸 안 누름은 안 닫힘 · 칸 위에 뜬 다른 포털 팝오버 안 누름도 안 닫힘 · 진짜 바깥 누름은 닫힘', async () => {
+    await mountWithDraftPin();
+    await nextFrames();  // 바깥 누름 리스너는 연 다음 프레임에 붙는다
+    await press(compose()!);
+    expect(compose()).not.toBeNull();
+
+    const otherPortal = document.createElement('div');
+    otherPortal.setAttribute('data-anchored-popover', '');
+    const item = document.createElement('button');
+    otherPortal.appendChild(item);
+    document.body.appendChild(otherPortal);
+    try {
+      await press(item);
+      expect(compose()).not.toBeNull();  // 예전 contains 판정이면 여기서 닫혔다
+    } finally {
+      otherPortal.remove();
+    }
+
+    await press(document.body);
+    expect(compose()).toBeNull();
+  });
+});
+

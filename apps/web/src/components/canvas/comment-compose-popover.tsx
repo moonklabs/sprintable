@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
-import { AnchoredPopover } from '@/components/shared/anchored-popover';
+import { AnchoredPopover, isOutsidePress } from '@/components/shared/anchored-popover';
 import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 
@@ -39,8 +39,10 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
 
   useEffect(() => {
     let raf = 0;
+    // story #4373 — 바깥 누름 판정은 공용 `isOutsidePress`(#4349): 쓰기 칸이 body 포털이라 칸 안 누름은 contains로 «안»이지만,
+    // 칸 위에 또 뜬 포털 팝오버(`[data-anchored-popover]`) 안 누름도 «안»으로 세야 칸이 먼저 닫혀 그 메뉴 click을 삼키지 않는다.
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) onCancel();
+      if (isOutsidePress(containerRef.current, e.target)) onCancel();
     };
     raf = requestAnimationFrame(() => document.addEventListener('mousedown', handler));
     return () => {
