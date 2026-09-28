@@ -17,6 +17,7 @@ import {
 } from '@/lib/route-resolve';
 import { formatServerTiming, isServerTimingEnabled, logServerTiming, MW_T0_HEADER, withServerTiming } from '@/lib/server-timing';
 import { resolveLocale } from '@/i18n/locale-negotiation';
+import { logXffProbe } from '@/lib/xff-probe';
 
 // story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고, i18n/request.ts의 getLocale()
 // (next-intl RSC config · 비동기 cookies()/headers())을 못 부른다 — 이 파일(proxy)은 NextRequest 동기 API로 도는 별개
@@ -731,6 +732,8 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
  * 재사용 여부를 `Server-Timing` 헤더와 로그 한 줄로 — 이름·시간만(경로·id 0). 꺼져 있으면 그대로 통과(동작 변화 0).
  */
 export async function proxy(request: NextRequest) {
+  // story #4398 ④ — 임시 관측(XFF 칸 모양 · dev만 · XFF_PROBE_ENABLED) — ④ 판정 뒤 걷음.
+  logXffProbe(request.headers);
   if (!isServerTimingEnabled()) return proxyImpl(request);
   // story #4299 — 미들웨어 시작 시각을 요청 헤더로(route handler가 «미들웨어 + 라우터 대기»를 잰다). 클라이언트가 보낸 같은 이름은 덮어씀.
   const stamped = withMiddlewareStart(request);

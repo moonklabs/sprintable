@@ -192,6 +192,9 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
 deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐다 — 같은 처방
 (서사 외부화, 값/로직 무변경). 원문(요약 없이 옮김):
 
+- **story #4398 ④(PO 결정 2026-09-28)**: `XFF_PROBE_ENABLED=true`는 **dev에서만** — 요청마다 X-Forwarded-For 칸 수 · 맨 오른쪽 ·
+  소켓 주소 · trace 한 줄(app/core/xff_probe.py · 주소만, 헤더 원문 0). «XFF 오른쪽 끝 = 접속 주소» 판정용 **임시 관측**이라 판정 뒤
+  걷는다. `--update-env-vars`가 추가형이라 dev 밖에선 DB_TIMING과 같이 명시 제거한다(같은 분기 한 줄로 합쳐 바이트 여유 유지).
 - **⛔fail-fast(오르테가군 PO 2026-07-23)**: `_REALTIME_URL` 기본값을 dev URL에서 빈
   문자열로 내렸다(substitutions 주석 — prod 프론트가 dev realtime을 가리킬 여지 제거).
   frontend 쪽은 빈 값이 곧 "FASTAPI_URL로 폴백"이라 안전하지만, **여기서는 빈 값이
@@ -820,6 +823,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SANDBOX_CHANNEL_ENABLED=true,"
         # story #4332 — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml 삽입 순서 그대로 · dev만).
         "DB_TIMING_LOG_ENABLED=true,"
+        # story #4398 ④ — 같은 dev 분기에서 이어 붙는 임시 관측 스위치(판정 뒤 걷음).
+        "XFF_PROBE_ENABLED=true,"
         # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
@@ -832,10 +837,13 @@ def test_deploy_backend_removes_db_timing_flag_outside_dev():
     dev_remove = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="REMOVE_ENV_VARS").split(",")
     prod_remove = _run_env_vars_assembly("prod", "", var="REMOVE_ENV_VARS").split(",")
     assert dev_remove == ["REDIS_CONSUME_ENABLED"]
-    assert prod_remove == ["REDIS_CONSUME_ENABLED", "DB_TIMING_LOG_ENABLED"]
+    # story #4398 ④ — XFF_PROBE_ENABLED(임시 관측)도 같은 규칙: dev만 켜고 · 밖에선 명시 제거.
+    assert prod_remove == ["REDIS_CONSUME_ENABLED", "DB_TIMING_LOG_ENABLED", "XFF_PROBE_ENABLED"]
     dev_env = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert "DB_TIMING_LOG_ENABLED=true" in dev_env.split(",")
+    assert "XFF_PROBE_ENABLED=true" in dev_env.split(",")
     assert "DB_TIMING_LOG_ENABLED" not in _run_env_vars_assembly("prod", "")
+    assert "XFF_PROBE_ENABLED" not in _run_env_vars_assembly("prod", "")
 
 
 def test_deploy_backend_gcloud_uses_assembled_remove_list():
