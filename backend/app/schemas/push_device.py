@@ -101,3 +101,20 @@ class PushDiagnosticsReport(BaseModel):
     # a code, never a raw message (e.g. E_REGISTRATION_FAILED · FIS_AUTH_ERROR · HTTP_401 · UNKNOWN)
     error_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z0-9_:.-]+$")
 
+
+class UnregisterPushDevice(BaseModel):
+    """story #4397 — the app switches its own device off when it lands on /login (logout · expired session) or starts
+    without a session. No session is needed: only whoever knows the token can switch that device off, and only off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expo_push_token: str
+
+    @field_validator("expo_push_token")
+    @classmethod
+    def token_must_be_expo_format(cls, v: str) -> str:
+        v = v.strip()
+        if not _EXPO_TOKEN_RE.match(v):
+            raise ValueError("expo_push_token must be ExponentPushToken[...] or ExpoPushToken[...]")
+        return v
+

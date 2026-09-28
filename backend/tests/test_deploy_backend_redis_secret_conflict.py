@@ -325,6 +325,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_SUPPORT_ESCALATION_TARGET_ORG_SLUG", "_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG",
     # story #4341 — 운영 알림 받는 곳(운영 대화 id). deploy-backend ENV_VARS가 직접 참조.
     "_OPS_ALERT_CONVERSATION_ID",
+    # story #4397 — push by person across orgs (settings.push_devices_by_user). deploy-backend ENV_VARS가 직접 참조.
+    "_PUSH_DEVICES_BY_USER",
     # story #3279(지원v1·후속) — 운영자 회신 배달 착지 URL. _NEXT_PUBLIC_SUPPORT_GATEWAY_URL은
     # 이전엔 deploy-frontend(순수 gcloud args 리스트 — 이 가드가 스캔하는 4개 bash 스텝 밖)
     # 에서만 쓰여 이 목록에 없어도 무해했으나(_APPLE_TEAM_ID와 동형 선례), deploy-backend
@@ -447,6 +449,8 @@ def _run_env_vars_assembly(
         "_PUBLIC_SITE_BASE_URL": "https://sprintable.ai",
         # story #4336 — deploy-backend ENV_VARS가 `--timeout`과 같은 값을 BACKEND_REQUEST_TIMEOUT_SECONDS로 싣는다(set -u).
         "_BACKEND_TIMEOUT": "1800" if deploy_env == "prod" else "3600",
+        # story #4397 — GHA sets prod 'false' · dev 'true' (set -u).
+        "_PUSH_DEVICES_BY_USER": "false" if deploy_env == "prod" else "true",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -803,6 +807,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story #4341 — 베이스 문자열 맨 끝(PUBLIC_SITE_BASE_URL 다음). 빈 값 = 운영 알림 미설정(not_configured).
         "OPS_ALERT_CONVERSATION_ID=,"
         "BACKEND_REQUEST_TIMEOUT_SECONDS=3600,"  # story #4336 — `--timeout`과 같은 값(워커 틱 예산)
+        "PUSH_DEVICES_BY_USER=true,"  # story #4397 — dev: push by person across orgs
         "REDIS_URL=redis://10.164.120.243:6379,RATE_LIMIT_BACKEND=redis,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"

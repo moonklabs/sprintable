@@ -110,7 +110,7 @@ async def test_register_forces_caller_member_id():
     repo.upsert = AsyncMock(return_value=_device_ns(caller))
     body = RegisterPushDevice(expo_push_token="ExponentPushToken[abc]", platform="ios")
 
-    out = await register_push_device(body, repo=repo, caller_member_id=caller, _ee=None)
+    out = await register_push_device(body, repo=repo, caller_member_id=caller, caller_user_id=None, _ee=None)
 
     # member_id 는 caller 로 강제(body 에 member_id 아예 없음).
     assert repo.upsert.await_args.kwargs["member_id"] == caller
@@ -131,7 +131,7 @@ async def test_register_passes_apns_token_through_for_macos():
     repo.upsert = AsyncMock(return_value=device)
     body = RegisterPushDevice(apns_device_token="AB" * 32, platform="macos")
 
-    await register_push_device(body, repo=repo, caller_member_id=caller, _ee=None)
+    await register_push_device(body, repo=repo, caller_member_id=caller, caller_user_id=None, _ee=None)
 
     assert repo.upsert.await_args.kwargs["member_id"] == caller
     assert repo.upsert.await_args.kwargs["apns_device_token"] == "ab" * 32

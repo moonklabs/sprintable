@@ -141,8 +141,9 @@ async def _deactivate_devices(org_id: uuid.UUID, devices: list[tuple[uuid.UUID, 
         for device_id, sent_at in devices:
             result = await session.execute(
                 update(PushDevice)
+                # story #4397 — device id (the primary key) + not registered again, no org condition: with sending by person
+                # a notification of org B reaches a device homed in org A, and its receipt must still switch that device off.
                 .where(
-                    PushDevice.org_id == org_id,
                     PushDevice.id == device_id,
                     PushDevice.last_seen_at <= datetime.fromtimestamp(sent_at, tz=UTC),
                 )

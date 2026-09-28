@@ -14,7 +14,7 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from limits import RateLimitItemPerHour
 from limits.errors import StorageError
 from limits.storage import storage_from_string
@@ -29,6 +29,7 @@ from app.schemas.push_device import (
     PushDeviceResponse,
     PushDiagnosticsReport,
     RegisterPushDevice,
+    UnregisterPushDevice,
 )
 
 router = APIRouter(tags=["push-devices-ee"])
@@ -42,6 +43,26 @@ _diagnostics_rate = RateLimitItemPerHour(DIAGNOSTICS_PER_HOUR)
 _diagnostics_limiter = MovingWindowRateLimiter(
     storage_from_string(settings.redis_url or "memory://", wrap_exceptions=True),
 )
+
+# story #4397 — per-client-IP cap on the session-less unregister endpoint.
+UNREGISTER_PER_HOUR = 30
+_unregister_rate = RateLimitItemPerHour(UNREGISTER_PER_HOUR)
+_unregister_limiter = MovingWindowRateLimiter(
+    storage_from_string(settings.redis_url or "memory://", wrap_exceptions=True),
+)
+
+
+def client_ip(request: Request) -> str:
+    """The caller's real IP behind Cloudflare → Cloud Run (and the web BFF, which forwards these headers): CF-Connecting-IP
+    (set by Cloudflare), else the first X-Forwarded-For entry, else the socket peer. `request.client.host` alone is the front
+    end's address there, which would put every caller in one bucket."""
+    cf = (request.headers.get("cf-connecting-ip") or "").strip()
+    if cf:
+        return cf
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if xff:
+        return xff
+    return request.client.host if request.client else "unknown"
 
 
 def _require_ee() -> None:
@@ -73,16 +94,31 @@ async def _get_caller_member_id(
     return resolved.id
 
 
+async def _get_caller_user_id(
+    auth: Annotated[AuthContext, Depends(get_current_user)],
+    org_id: Annotated[uuid.UUID, Depends(get_verified_org_id)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> uuid.UUID | None:
+    """story #4397 — the person behind the caller (users.id for a human · None for an agent), stored on the device row so
+    sending by person reaches it from every org they belong to. Same resolution as _get_caller_member_id."""
+    from app.services.member_resolver import resolve_member
+    resolved = await resolve_member(auth, org_id, session)
+    return resolved.user_id
+
+
 @router.post("/devices", response_model=PushDeviceResponse, status_code=200)
 async def register_push_device(
     body: RegisterPushDevice,
+    caller_user_id: Annotated[uuid.UUID | None, Depends(_get_caller_user_id)],
     repo: PushDeviceRepository = Depends(_get_repo),
     caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
     _ee: None = Depends(_require_ee),
 ) -> PushDeviceResponse:
-    """디바이스 등록/재등록(upsert) — 플랫폼별 토큰 UNIQUE 멱등. member_id 는 caller 로 강제."""
+    """디바이스 등록/재등록(upsert) — 플랫폼별 토큰 UNIQUE 멱등. member_id 는 caller 로 강제.
+    story #4397 — user_id(the person) too, so sending by person reaches this device from every org they belong to."""
     device = await repo.upsert(
         member_id=caller_member_id,
+        user_id=caller_user_id,
         expo_push_token=body.expo_push_token,
         apns_device_token=body.apns_device_token,
         platform=body.platform,
@@ -158,6 +194,38 @@ async def report_push_diagnostics(
             "org_id": str(org_id),
             **body.model_dump(),
         }},
+    )
+    return Response(status_code=204)
+
+
+@router.post("/devices/unregister", status_code=204)
+async def unregister_push_device(
+    body: UnregisterPushDevice,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    _ee: Annotated[None, Depends(_require_ee)],
+) -> Response:
+    """story #4397 — switch a device off by its token, **without a session** (the app calls it on /login · after logout ·
+    when it starts with an expired session; an authenticated DELETE is impossible then).
+
+    Only off — never on, never read. Always 204, whether the token exists, is already off, or is unknown, so the endpoint
+    does not reveal which tokens exist. Per-client-IP hourly cap → 429. Registering again after the next login turns the
+    device back on (upsert).
+    """
+    key = f"push-unregister:{client_ip(request)}"
+    try:
+        allowed = _unregister_limiter.hit(_unregister_rate, key)
+    except StorageError:
+        _logger.warning("push unregister rate-limit storage unavailable — accepting the request")
+        allowed = True
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many unregister requests", headers={"Retry-After": "3600"})
+    from sqlalchemy import update
+
+    from app.models.push_device import PushDevice
+
+    await session.execute(
+        update(PushDevice).where(PushDevice.expo_push_token == body.expo_push_token).values(is_active=False)
     )
     return Response(status_code=204)
 

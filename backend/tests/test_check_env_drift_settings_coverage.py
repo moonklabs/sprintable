@@ -277,7 +277,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "OPS_ALERT_CONVERSATION_ID" in keys
     # story #4336 — 발행 명령 워커 틱 예산의 두 입력(요청 시한 · 스케줄러 시한) 신설로 129→131.
     assert "BACKEND_REQUEST_TIMEOUT_SECONDS" in keys and "PUBLICATION_WORKER_SCHEDULER_DEADLINE_SECONDS" in keys
-    assert len(keys) == 131
+    # story #4397 — push_devices_by_user(push by person across orgs · dev on, prod off) 1필드 신설로 131→132.
+    assert "PUSH_DEVICES_BY_USER" in keys
+    assert len(keys) == 132
 
 
 def test_settings_field_regex_handles_underscore_int_literal_bool_and_trailing_comment():
