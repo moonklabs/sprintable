@@ -28,6 +28,11 @@ export interface AnchoredPopoverProps extends HTMLAttributes<HTMLDivElement> {
   align?: 'start' | 'end';
   /** 바깥 클릭 판정용 — 포털된 팝오버 요소. */
   popoverRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * story #4373 — 기준이 스크롤 · 창 크기 말고도 움직이는 자리(캔버스 pan/zoom = CSS 변환만 바뀌어 이벤트가 없다): 열린 동안 매 프레임
+   * 기준 사각형을 재서 바뀐 프레임에만 다시 둔다.
+   */
+  trackAnchor?: boolean;
 }
 
 /**
@@ -61,7 +66,7 @@ export function isOutsidePress(root: Element | null | undefined, target: EventTa
   return !el?.closest('[data-anchored-popover]');
 }
 
-export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, style, children, ...rest }: AnchoredPopoverProps) {
+export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, trackAnchor = false, style, children, ...rest }: AnchoredPopoverProps) {
   const elRef = useRef<HTMLDivElement | null>(null);
 
   const place = useCallback(() => {
@@ -99,6 +104,21 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
       document.removeEventListener('scroll', place, true);
     };
   }, [place]);
+
+  useEffect(() => {
+    if (!trackAnchor) return;
+    let last = '';
+    let frame = requestAnimationFrame(function tick() {
+      const r = anchorRef.current?.getBoundingClientRect();
+      const key = r ? `${r.left},${r.top},${r.width},${r.height}` : '';
+      if (key !== last) {
+        last = key;
+        place();
+      }
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [trackAnchor, anchorRef, place]);
 
   if (typeof document === 'undefined') return null;
   return createPortal(

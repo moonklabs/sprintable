@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 /**
  * story #4373 — 산출물 댓글 쓰기 칸이 캔버스 확대/축소 변환 **안**(overlay)에 그려져 무대 10%면 22×10px로 작아지고(글 안 보임)
- * 단추 누름이 뷰포트의 pan · 픽 처리로 새던 결함. 이제 쓰기 칸은 변환 **밖** 화면 층(`data-artifact-screen-overlay`, 뷰포트의
- * 형제)에 그려지고 자리만 핀을 따라간다 · 층 밖으로 넘치면 반대쪽 · 안쪽으로 붙는다.
- * jsdom엔 배치가 없어 px 크기를 잴 수 없다 — 대신 «어떤 조상도 scale 변환을 걸지 않는다» · «변환 층 밖» · «뷰포트 포인터 처리 밖»을 단언한다.
+ * 단추 누름이 뷰포트의 pan · 픽 처리로 새던 결함.
+ * 1차(무대 크기 화면 층)는 좁은 곁 패널(무대 61px)에서 칸이 잘려 단추가 안 눌렸다(유나 실측) → 이제 쓰기 칸은 **body 포털 + fixed**
+ * (`AnchoredPopover`): 핀 사각형 아래(모자라면 위)에 붙고 창 안으로 밀리며 · pan/zoom으로 핀이 움직이면 따라간다.
+ * 칸 위 휠은 핀의 뷰포트로 넘긴다(까디르 실측 — 포털이라 무대의 네이티브 wheel 리스너를 안 거쳐 ctrl+휠이 페이지 줌으로 샜다).
+ * jsdom엔 배치가 없어 getBoundingClientRect를 요소별로 흉내 낸다(핀 · 쓰기 칸 · 나머지 = 1280×800 무대).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -11,29 +13,48 @@ import { createRoot } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
-import { placeComposeBox } from './comment-compose-popover';
 import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const canvas = koMessages.canvas as unknown as Record<string, string>;
+const BOX = { w: 224, h: 120 };
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 let rectSpy: ReturnType<typeof vi.spyOn>;
+let pinRect = { left: 600, top: 390, width: 20, height: 20 };
+const win = { w: window.innerWidth, h: window.innerHeight };
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return { x: left, y: top, left, top, right: left + width, bottom: top + height, width, height, toJSON() { return {}; } } as DOMRect;
+}
+function setWindow(w: number, h: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: h });
+  Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: w });
+}
 
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  // artifact-viewer.test.tsx와 같은 기법 — bounds(DEFAULT_BOUNDS 1280x800) 1:1 매핑 rect(scale=1 · jsdom은 clientWidth 0이라 자동 맞춤 없음).
-  rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-    x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON() { return {}; },
-  } as DOMRect);
+  pinRect = { left: 600, top: 390, width: 20, height: 20 };
+  setWindow(1280, 800);
+  rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.hasAttribute('data-anchored-popover')) {
+      const shift = Number(/translateX\((-?[\d.]+)px\)/.exec(this.style.transform)?.[1] ?? 0);
+      return rect(parseFloat(this.style.left || '0') + shift, parseFloat(this.style.top || '0'), BOX.w, BOX.h);
+    }
+    if (this.className.includes('border-dashed')) return rect(pinRect.left, pinRect.top, pinRect.width, pinRect.height);
+    // artifact-viewer.test.tsx와 같은 기법 — 무대 bounds(1280x800) 1:1(scale=1 · jsdom은 clientWidth 0이라 자동 맞춤 없음).
+    return rect(0, 0, 1280, 800);
+  });
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   rectSpy.mockRestore();
+  setWindow(win.w, win.h);
 });
 
 async function mountWithDraftPin(clientX = 640, clientY = 400) {
@@ -46,43 +67,70 @@ async function mountWithDraftPin(clientX = 640, clientY = 400) {
   });
   const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
   await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-  const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
   await act(async () => {
-    viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX, clientY, button: 0 }));
-    viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX, clientY }));
+    viewport().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX, clientY, button: 0 }));
+    viewport().dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX, clientY }));
   });
 }
-const compose = () => container.querySelector<HTMLTextAreaElement>(`textarea[placeholder="${canvas.newThreadComposePlaceholder}"]`);
-const composeBox = () => compose()!.closest<HTMLElement>('[tabindex="-1"]')!;
+const nextFrames = () => act(async () => { for (let i = 0; i < 3; i += 1) await new Promise((r) => requestAnimationFrame(() => r(null))); });
+const compose = () => document.querySelector<HTMLTextAreaElement>(`textarea[placeholder="${canvas.newThreadComposePlaceholder}"]`);
+const composeBox = () => compose()!.closest<HTMLElement>('[data-anchored-popover]')!;
+const viewport = () => container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
 const content = () => container.querySelector('[data-artifact-canvas-content]') as HTMLElement;
+const boxAt = () => {
+  const r = composeBox().getBoundingClientRect();
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+};
 
-describe('산출물 댓글 쓰기 칸은 캔버스 변환 밖 화면 층에(story #4373)', () => {
-  it('쓰기 칸 · 단추는 변환 층(data-artifact-canvas-content) 밖 · 화면 층 안 — 어떤 조상도 scale 변환을 걸지 않는다', async () => {
+describe('산출물 댓글 쓰기 칸은 무대 밖 — body 포털 + fixed로 핀 사각형에 붙는다(story #4373)', () => {
+  it('쓰기 칸은 무대(뷰포트 · 변환 층)의 자손이 아니다 — body 포털 · fixed · 어떤 조상도 scale 변환을 걸지 않는다', async () => {
     await mountWithDraftPin();
     expect(compose()).not.toBeNull();
-    expect(content().contains(compose())).toBe(false);
-    expect(compose()!.closest('[data-artifact-screen-overlay]')).not.toBeNull();
-    for (let el: HTMLElement | null = compose(); el && el !== container; el = el.parentElement) {
+    expect(container.contains(compose())).toBe(false);
+    expect(viewport().contains(compose())).toBe(false);
+    expect(composeBox().parentElement).toBe(document.body);
+    expect(composeBox().style.position).toBe('fixed');
+    for (let el: HTMLElement | null = compose(); el; el = el.parentElement) {
       expect(el.style.transform ?? '').not.toMatch(/scale\(/);
     }
-    // 핀 자체는 변환 층 안에서 캔버스를 따라간다(자리 기준).
-    expect(content().querySelector('[data-artifact-canvas-overlay]')).not.toBeNull();
+    // 핀 자체는 변환 층 안에서 캔버스를 따라간다(붙는 기준).
+    expect(content().querySelector('.border-dashed')).not.toBeNull();
   });
 
-  it('쓰기 칸 자리는 핀의 화면 점을 따라간다 — pan/zoom이 바뀌면 함께 움직인다', async () => {
-    await mountWithDraftPin(640, 400);  // 50% · 50% → 화면 점 (640, 400) · 층 크기 0(jsdom)이면 넘침 맞춤 없이 +8
-    expect(composeBox().style.left).toBe('648px');
-    expect(composeBox().style.top).toBe('408px');
-    const sizeBefore = { className: composeBox().className, transform: composeBox().style.transform };
-    const actual = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === canvas.viewerActualSizeAction)!;
-    await act(async () => { actual.click(); });  // 뷰포트 0 → tx = -640 · ty = -400 → 핀 화면 점 (0, 0)
-    expect(composeBox().style.left).toBe('8px');
-    expect(composeBox().style.top).toBe('8px');
-    // AC3 — 배율이 바뀌어도 쓰기 칸 크기를 정하는 것(클래스 · 자기 변환)은 그대로, 조상 어디에도 scale이 없다.
-    expect({ className: composeBox().className, transform: composeBox().style.transform }).toEqual(sizeBefore);
-    for (let el: HTMLElement | null = compose(); el && el !== container; el = el.parentElement) {
-      expect(el.style.transform ?? '').not.toMatch(/scale\(/);
-    }
+  it('핀 사각형 아래에 붙는다(핀을 덮지 않음) — 1440 넓은 창', async () => {
+    await mountWithDraftPin();
+    await nextFrames();
+    expect(boxAt()).toMatchObject({ left: 600, top: 390 + 20 + 8 });
+    expect(composeBox().dataset.side).toBe('bottom');
+  });
+
+  it('좁은 창(390)에서 핀이 오른쪽 끝이면 쓰기 칸을 창 안으로 민다 — 잘리는 칸 0(유나 실측: 곁 패널 무대 61px · 390 오른쪽 7px)', async () => {
+    setWindow(390, 844);
+    pinRect = { left: 372, top: 300, width: 20, height: 20 };
+    await mountWithDraftPin();
+    await nextFrames();
+    const b = boxAt();
+    expect(b.left).toBeGreaterThanOrEqual(8);
+    expect(b.right).toBeLessThanOrEqual(390 - 8);
+    expect(b.top).toBe(328);
+  });
+
+  it('핀 아래 자리가 모자라면 위로 뒤집는다', async () => {
+    setWindow(390, 844);
+    pinRect = { left: 40, top: 800, width: 20, height: 20 };
+    await mountWithDraftPin();
+    await nextFrames();
+    expect(composeBox().dataset.side).toBe('top');
+    expect(boxAt().bottom).toBe(800 - 8);
+  });
+
+  it('pan/zoom으로 핀이 움직이면 쓰기 칸도 따라간다(스크롤 · 창 크기 이벤트 없이 CSS 변환만 바뀌는 자리)', async () => {
+    await mountWithDraftPin();
+    await nextFrames();
+    expect(boxAt().top).toBe(418);
+    pinRect = { left: 200, top: 100, width: 20, height: 20 };
+    await nextFrames();
+    expect(boxAt()).toMatchObject({ left: 200, top: 128 });
   });
 
   it('쓰기 칸 위에서 시작한 드래그는 캔버스를 움직이지 않는다(뷰포트 pan · 픽 처리 밖 — 단추 누름이 새던 원인)', async () => {
@@ -95,24 +143,46 @@ describe('산출물 댓글 쓰기 칸은 캔버스 변환 밖 화면 층에(stor
       box.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 2, clientX: 780, clientY: 520 }));
     });
     expect(content().style.transform).toBe(before);
+    expect(compose()).not.toBeNull();
   });
 });
 
-describe('placeComposeBox — 핀 곁 자리 · 넘치면 반대쪽 · 안쪽으로 붙임(story #4373 AC2)', () => {
-  const SIZE = { w: 224, h: 120 };
-  const AREA = { w: 390, h: 320 };
-  it('기본은 핀 오른쪽 아래(+8)', () => {
-    expect(placeComposeBox({ x: 50, y: 40 }, SIZE, AREA)).toEqual({ left: 58, top: 48 });
+describe('쓰기 칸 위 휠은 캔버스로 넘긴다(story #4373 · 까디르 실측)', () => {
+  it('ctrl+휠 = 캔버스 줌 · 원래 휠은 preventDefault(브라우저 페이지 줌 누출 0)', async () => {
+    await mountWithDraftPin();
+    const before = content().style.transform;
+    const wheel = new WheelEvent('wheel', { deltaY: -100, clientX: 640, clientY: 400, ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => { compose()!.dispatchEvent(wheel); });
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(content().style.transform).not.toBe(before);
+    expect(content().style.transform).toMatch(/scale\(/);
   });
-  it('오른쪽 · 아래로 넘치면 반대쪽(왼쪽 · 위)', () => {
-    expect(placeComposeBox({ x: 360, y: 300 }, SIZE, AREA)).toEqual({ left: 360 - 8 - 224, top: 300 - 8 - 120 });
+
+  it('그냥 휠(글 칸에 스크롤할 내용 없음) = 캔버스 pan · preventDefault', async () => {
+    await mountWithDraftPin();
+    const forwarded = vi.fn();
+    viewport().addEventListener('wheel', forwarded);
+    const wheel = new WheelEvent('wheel', { deltaY: 40, clientX: 640, clientY: 400, bubbles: true, cancelable: true });
+    await act(async () => { composeBox().dispatchEvent(wheel); });
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(forwarded).toHaveBeenCalledTimes(1);
+    expect((forwarded.mock.calls[0]![0] as WheelEvent).deltaY).toBe(40);
   });
-  it('반대쪽으로도 넘치면 층 안쪽 가장자리(8)에 붙인다', () => {
-    expect(placeComposeBox({ x: 200, y: 100 }, { w: 380, h: 300 }, AREA)).toEqual({ left: 8, top: 8 });
-  });
-  it('핀이 층 밖(음수)이어도 쓰기 칸은 층 안', () => {
-    const p = placeComposeBox({ x: -500, y: -500 }, SIZE, AREA);
-    expect(p.left).toBeGreaterThanOrEqual(8);
-    expect(p.top).toBeGreaterThanOrEqual(8);
+
+  it('글 칸이 스스로 스크롤할 내용이 있으면 그냥 휠은 글 칸 몫(캔버스로 안 넘김) — ctrl+휠은 그래도 캔버스', async () => {
+    await mountWithDraftPin();
+    const field = compose()!;
+    Object.defineProperty(field, 'scrollHeight', { configurable: true, value: 200 });
+    Object.defineProperty(field, 'clientHeight', { configurable: true, value: 40 });
+    const forwarded = vi.fn();
+    viewport().addEventListener('wheel', forwarded);
+    const plain = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
+    await act(async () => { field.dispatchEvent(plain); });
+    expect(plain.defaultPrevented).toBe(false);
+    expect(forwarded).not.toHaveBeenCalled();
+    const zoom = new WheelEvent('wheel', { deltaY: -40, ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => { field.dispatchEvent(zoom); });
+    expect(zoom.defaultPrevented).toBe(true);
+    expect(forwarded).toHaveBeenCalledTimes(1);
   });
 });

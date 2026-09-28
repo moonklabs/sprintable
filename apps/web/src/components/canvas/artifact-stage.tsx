@@ -152,17 +152,6 @@ interface ArtifactStageProps {
   /** 콘텐츠 좌표계 % (0~100, `AnchorPin` 오버레이가 이미 쓰는 것과 같은 단위 — CommentThread.anchor.x/y
    * 컨벤션 그대로, canvas.ts:artifact-viewer.tsx의 `${x}%` 소비와 정합). */
   onPickCoordinate?: (xPercent: number, yPercent: number) => void;
-  /** story #4373 — 화면 좌표 층(캔버스 변환 **밖**). 쓰기 칸 · 단추처럼 배율과 무관하게 화면 크기 그대로여야 하는 것을
-   * 그린다(`overlay`는 변환 안이라 무대 10%면 함께 10%로 작아진다). `place(x%, y%)`는 콘텐츠 % 좌표를 지금의 pan/zoom으로
-   * 이 층의 px 좌표로 바꾼다(핀을 따라 움직임) · `area`는 층(= 뷰포트) 크기(넘침 맞춤용). 이 층은 뷰포트의 형제라
-   * 뷰포트의 pan · 픽 포인터 처리를 받지 않는다(층 자체는 pointer-events:none · 그린 것만 받음). */
-  screenOverlay?: (api: ScreenOverlayApi) => React.ReactNode;
-}
-
-/** story #4373 — `screenOverlay`가 받는 좌표 도구. */
-export interface ScreenOverlayApi {
-  place: (xPercent: number, yPercent: number) => { x: number; y: number };
-  area: { w: number; h: number };
 }
 
 /**
@@ -175,7 +164,7 @@ export interface ScreenOverlayApi {
  */
 function CanvasViewport({
   format, content, title, canvasBounds, overlay, mode = 'view', contentRef, previewWidth,
-  pinAddMode, onPickCoordinate, htmlInteractive = false, screenOverlay,
+  pinAddMode, onPickCoordinate, htmlInteractive = false,
 }: {
   format: ArtifactFormat; content: string; title: string;
   canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode; mode?: 'view' | 'edit';
@@ -184,7 +173,6 @@ function CanvasViewport({
   pinAddMode?: boolean;
   onPickCoordinate?: (xPercent: number, yPercent: number) => void;
   htmlInteractive?: boolean;
-  screenOverlay?: (api: ScreenOverlayApi) => React.ReactNode;
 }) {
   const t = useTranslations('canvas');
   // story 70a06b22 — 어제(74d6047e) 만든 터치 핀치/더블탭이 힌트 카피에 반영 안 된 발견성 갭
@@ -474,73 +462,60 @@ function CanvasViewport({
     return () => el.removeEventListener('wheel', listener);
   }, []);
 
-  // story #4373 — 콘텐츠 % → 화면 층 px(지금의 translate · scale 그대로 — overlay 안 핀이 그려지는 자리와 같은 점).
-  const place = (xPercent: number, yPercent: number) => ({
-    x: transform.tx + (xPercent / 100) * bounds.w * transform.scale,
-    y: transform.ty + (yPercent / 100) * bounds.h * transform.scale,
-  });
-
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="relative flex min-h-0 w-full flex-1 flex-col">
+      <div
+        ref={viewportRef}
+        data-artifact-canvas-viewport
+        className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
+        style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
         <div
-          ref={viewportRef}
-          data-artifact-canvas-viewport
-          className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
-          style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          ref={contentRef}
+          data-artifact-canvas-content
+          className="absolute top-0 left-0"
+          style={{
+            width: bounds.w, height: bounds.h,
+            transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
+            transformOrigin: '0 0',
+          }}
         >
-          <div
-            ref={contentRef}
-            data-artifact-canvas-content
-            className="absolute top-0 left-0"
-            style={{
-              width: bounds.w, height: bounds.h,
-              transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
-              transformOrigin: '0 0',
-            }}
-          >
-            {format === 'html' ? (
-              <iframe
-                title={title}
-                srcDoc={content}
-                sandbox="allow-scripts"
-                className={htmlInteractive ? 'rounded-lg bg-background' : 'pointer-events-none rounded-lg bg-background'}
-                style={{ width: bounds.w, height: bounds.h }}
-              />
-            ) : format === 'image' ? (
-              // eslint-disable-next-line @next/next/no-img-element -- artifact content는 외부/동적 URL이라 next/image 화이트리스트와 안 맞음.
-              <img
-                src={content}
-                alt={title}
-                className="pointer-events-none block h-full w-full rounded-lg object-contain"
-                onLoad={(e) => {
-                  const img = e.currentTarget;
-                  if (img.naturalWidth > 0 && img.naturalHeight > 0) setImageBounds({ w: img.naturalWidth, h: img.naturalHeight });
-                }}
-              />
-            ) : mode === 'edit' ? null : (
-              <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} emptyPlaceholder={t('canvasEmptyContent')} />
-            )}
-            {overlay ? (
-              <div
-                data-artifact-canvas-overlay
-                className="absolute inset-0"
-                style={{ pointerEvents: isDragging ? 'none' : 'auto' }}
-              >
-                {overlay}
-              </div>
-            ) : null}
-          </div>
+          {format === 'html' ? (
+            <iframe
+              title={title}
+              srcDoc={content}
+              sandbox="allow-scripts"
+              className={htmlInteractive ? 'rounded-lg bg-background' : 'pointer-events-none rounded-lg bg-background'}
+              style={{ width: bounds.w, height: bounds.h }}
+            />
+          ) : format === 'image' ? (
+            // eslint-disable-next-line @next/next/no-img-element -- artifact content는 외부/동적 URL이라 next/image 화이트리스트와 안 맞음.
+            <img
+              src={content}
+              alt={title}
+              className="pointer-events-none block h-full w-full rounded-lg object-contain"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                if (img.naturalWidth > 0 && img.naturalHeight > 0) setImageBounds({ w: img.naturalWidth, h: img.naturalHeight });
+              }}
+            />
+          ) : mode === 'edit' ? null : (
+            <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} emptyPlaceholder={t('canvasEmptyContent')} />
+          )}
+          {overlay ? (
+            <div
+              data-artifact-canvas-overlay
+              className="absolute inset-0"
+              style={{ pointerEvents: isDragging ? 'none' : 'auto' }}
+            >
+              {overlay}
+            </div>
+          ) : null}
         </div>
-        {screenOverlay ? (
-          <div data-artifact-screen-overlay className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg [&>*]:pointer-events-auto">
-            {screenOverlay({ place, area: viewportSize })}
-          </div>
-        ) : null}
       </div>
       {/* [SID:4362] 좁은 폭에서 안내 글과 도구 버튼이 한 줄에 다 안 들어가면 도구 줄을 넘긴다 — 예전엔 «전체 보기» · «실제 크기»가 낱말 중간에서 꺾였다. */}
       <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
@@ -591,13 +566,13 @@ function TreeStageContent(
  */
 export function ArtifactStage({
   format, content, title, canvasBounds, overlay, mode, contentRef, previewWidth, pinAddMode, onPickCoordinate,
-  htmlInteractive, screenOverlay,
+  htmlInteractive,
 }: ArtifactStageProps) {
   return (
     <CanvasViewport
       format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode}
       contentRef={contentRef} previewWidth={previewWidth} pinAddMode={pinAddMode} onPickCoordinate={onPickCoordinate}
-      htmlInteractive={htmlInteractive} screenOverlay={screenOverlay}
+      htmlInteractive={htmlInteractive}
     />
   );
 }

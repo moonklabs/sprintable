@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
+import { AnchoredPopover } from '@/components/shared/anchored-popover';
 import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 
@@ -14,51 +15,25 @@ interface CommentComposePopoverProps {
   draftTargetId: string | null;
   style?: React.CSSProperties;
   className?: string;
-  /** story #4373 — 화면 좌표 층에서 뜰 때: 핀의 화면 점(px)과 층 크기. 주면 핀 곁(오른쪽 아래)에 붙고, 층 밖으로 넘치면
-   * 반대쪽으로 넘긴 뒤 안쪽으로 붙인다. 없으면 `style`을 그대로 쓴다. */
-  anchor?: { x: number; y: number };
-  area?: { w: number; h: number };
-}
-
-const COMPOSE_GAP_PX = 8;
-const COMPOSE_EDGE_PX = 8;
-
-/** story #4373 — 핀 곁 자리: 오른쪽 아래가 기본 · 넘치면 반대쪽 · 그래도 넘치면 안쪽 가장자리에 붙인다(층 크기를 모르면 그대로). */
-export function placeComposeBox(
-  anchor: { x: number; y: number },
-  size: { w: number; h: number },
-  area: { w: number; h: number },
-): { left: number; top: number } {
-  const axis = (at: number, len: number, room: number) => {
-    let pos = at + COMPOSE_GAP_PX;
-    if (room <= 0) return pos;
-    if (pos + len > room - COMPOSE_EDGE_PX) pos = at - COMPOSE_GAP_PX - len;
-    const max = Math.max(COMPOSE_EDGE_PX, room - len - COMPOSE_EDGE_PX);
-    return Math.min(Math.max(pos, COMPOSE_EDGE_PX), max);
-  };
-  return { left: axis(anchor.x, size.w, area.w), top: axis(anchor.y, size.h, area.h) };
+  /**
+   * story #4373 — 붙을 핀 요소. 주면 body로 포털해 `position: fixed`로 핀 사각형 아래(모자라면 위)에 두고, 창 안으로 민다
+   * (`AnchoredPopover` · 핀이 pan/zoom으로 움직이면 따라감). 캔버스 무대는 확대 변환 · 잘라내기(overflow) 조상이라 그 안에 그리면
+   * 무대 10%에서 칸이 22×10px로 작아지고, 좁은 곁 패널(무대 61px)에선 칸이 잘려 단추가 안 눌렸다. 없으면 `style` 자리에 그대로.
+   */
+  anchorRef?: RefObject<HTMLElement | null>;
 }
 
 /**
- * story #2725 — 새 좌표 코멘트 작성 팝오버. draft 핀 옆에 뜬다(호출부가 draft 핀과 같은 %
- * 좌표로 style을 넘긴다 — 좌표 계산은 이 컴포넌트 책임 밖). Esc·바깥 클릭·취소 버튼 셋 다
+ * story #2725 — 새 좌표 코멘트 작성 팝오버. draft 핀 옆에 뜬다. Esc·바깥 클릭·취소 버튼 셋 다
  * onCancel(폐기, API 호출 0) — asset-picker-popover.tsx와 동형 바깥클릭 패턴(다음 프레임에
  * 리스너 등록 — 팝오버를 여는 그 클릭 자체가 바깥클릭으로 오인돼 즉시 닫히는 것 방지).
  */
-export function CommentComposePopover({ onSubmit, onCancel, style, className, draftTargetId, anchor, area }: CommentComposePopoverProps) {
+export function CommentComposePopover({ onSubmit, onCancel, style, className, draftTargetId, anchorRef }: CommentComposePopoverProps) {
   const t = useTranslations('canvas');
   // story #4370 — 쓴 글은 산출물별 초안: Esc · 바깥 누름으로 닫혀도 남고 보이는 «취소» · 보내기 성공에서만 지운다(유나 규칙).
   const [body, setBody, clearBody] = useFieldDraft({ surface: 'artifact-comment-compose', targetId: draftTargetId, field: 'form' });
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  // story #4373 — 자기 크기를 재서 넘침 맞춤에 쓴다(첫 그림은 w-56 기준 추정 · 잰 뒤 바로 다시 맞춤).
-  const [size, setSize] = useState({ w: 224, h: 120 });
-  const measureRef = useCallback((el: HTMLDivElement | null) => {
-    containerRef.current = el;
-    if (!el || el.offsetWidth === 0) return;
-    setSize((cur) => (cur.w === el.offsetWidth && cur.h === el.offsetHeight ? cur : { w: el.offsetWidth, h: el.offsetHeight }));
-  }, []);
-  const placed = anchor && area ? placeComposeBox(anchor, size, area) : null;
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -74,31 +49,47 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
     };
   }, [onCancel]);
 
+  // story #4373(까디르 실측) — 쓰기 칸이 무대 밖(body 포털)이라 휠이 무대 뷰포트의 네이티브 wheel 리스너(passive:false)를 안 거친다:
+  // ctrl+휠이 캔버스 줌 대신 브라우저 페이지 줌으로, 그냥 휠이 캔버스 pan 대신 페이지 스크롤로 샜다. 칸 위 휠을 핀의 뷰포트로 넘긴다
+  // (무대의 handleWheel이 그대로 pan/줌 · preventDefault) — 글 칸이 스스로 스크롤할 내용이 있는 그냥 휠만 칸 몫으로 둔다.
+  useEffect(() => {
+    const box = containerRef.current;
+    if (!anchorRef || !box) return;
+    const forward = (e: WheelEvent) => {
+      const field = (e.target as HTMLElement | null)?.closest?.('textarea');
+      if (!(e.ctrlKey || e.metaKey) && field && field.scrollHeight > field.clientHeight) return;
+      e.preventDefault();
+      const viewport = anchorRef.current?.closest('[data-artifact-canvas-viewport]');
+      viewport?.dispatchEvent(new WheelEvent('wheel', {
+        deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, clientX: e.clientX, clientY: e.clientY,
+        ctrlKey: e.ctrlKey, metaKey: e.metaKey, bubbles: true, cancelable: true,
+      }));
+    };
+    box.addEventListener('wheel', forward, { passive: false });
+    return () => box.removeEventListener('wheel', forward);
+  }, [anchorRef]);
+
   function handleSubmit() {
     const trimmed = body.trim();
     if (!trimmed) return;
     void onSubmit(trimmed).then((ok) => { if (ok) clearBody(); });
   }
 
-  return (
-    <div
-      ref={measureRef}
-      style={placed ? { left: placed.left, top: placed.top } : style}
-      // story #3007(로드맵 P2·PR-E, L1) — 팝오버는 floating이라 --elev-overlay.
-      className={`absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] outline-none ${className ?? ''}`}
-      // [SID:4369] 유나 규칙의 층 뿌리 — 글 있는 칸에서 빠져나온 초점이 여기로(tabIndex=-1).
-      tabIndex={-1}
-      // [SID:4367] Esc = 이 칸만 닫음(폐기)·«썼다»고 표시 — 스토리 패널 안 산출물 카드에서 이 Esc가 패널 window Esc로 흘러 패널째 닫혔다.
-      // [SID:4369] 유나 규칙 — 글이 있으면 첫 Esc는 칸에서만 빠져나옴(글 유지 · 초점 = 이 틀) · 조합 중 Esc는 조합만 · 둘째 Esc(또는 빈 칸) = 닫기.
-      // story #4370 — 둘째 Esc도 글을 버리지 않는다(닫기만 · 초안으로 남음) · 버림은 보이는 «취소»로만.
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          if (leaveMultilineFieldOnEsc(e.nativeEvent, containerRef.current)) return;
-          e.preventDefault();
-          onCancel();
-        }
-      }}
-    >
+  // story #3007(로드맵 P2·PR-E, L1) — 팝오버는 floating이라 --elev-overlay.
+  const frameClass = `w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] outline-none ${className ?? ''}`;
+  // [SID:4367] Esc = 이 칸만 닫음(폐기)·«썼다»고 표시 — 스토리 패널 안 산출물 카드에서 이 Esc가 패널 window Esc로 흘러 패널째 닫혔다.
+  // [SID:4369] 유나 규칙 — 글이 있으면 첫 Esc는 칸에서만 빠져나옴(글 유지 · 초점 = 이 틀) · 조합 중 Esc는 조합만 · 둘째 Esc(또는 빈 칸) = 닫기.
+  // story #4370 — 둘째 Esc도 글을 버리지 않는다(닫기만 · 초안으로 남음) · 버림은 보이는 «취소»로만.
+  function handleFrameKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === 'Escape') {
+      if (leaveMultilineFieldOnEsc(e.nativeEvent, containerRef.current)) return;
+      e.preventDefault();
+      onCancel();
+    }
+  }
+
+  const fields = (
+    <>
       <textarea
         ref={inputRef}
         value={body}
@@ -128,6 +119,20 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
           {t('newThreadSubmitAction')}
         </button>
       </div>
+    </>
+  );
+
+  if (anchorRef) {
+    return (
+      // [SID:4369] 유나 규칙의 층 뿌리 — 글 있는 칸에서 빠져나온 초점이 여기로(tabIndex=-1).
+      <AnchoredPopover anchorRef={anchorRef} popoverRef={containerRef} trackAnchor tabIndex={-1} onKeyDown={handleFrameKeyDown} className={`z-50 ${frameClass}`}>
+        {fields}
+      </AnchoredPopover>
+    );
+  }
+  return (
+    <div ref={containerRef} style={style} tabIndex={-1} onKeyDown={handleFrameKeyDown} className={`absolute z-20 ${frameClass}`}>
+      {fields}
     </div>
   );
 }
