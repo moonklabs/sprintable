@@ -60,7 +60,7 @@ async def _inbound_to_conversation(
                 ConversationMessage.conversation_id == conversation_id,
                 ConversationMessage.thread_id.is_(None),
                 ConversationMessage.msg_metadata["external_message_ts"].as_string() == external_thread_ts,
-            ).limit(1)
+            ).order_by(ConversationMessage.created_at, ConversationMessage.id).limit(1)
         )).scalar_one_or_none()
         if root_candidate:
             thread_id = root_candidate.id

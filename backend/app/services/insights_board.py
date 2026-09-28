@@ -488,7 +488,7 @@ async def list_insights_board(
         cmd_rows = (await db.execute(
             select(PublicationCommand)
             .where(PublicationCommand.gate_id.in_(gate_ids))
-            .order_by(PublicationCommand.created_at.desc())
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
         )).scalars().all()
         for c in cmd_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)

@@ -99,7 +99,7 @@ async def resolve_accounts(
                         select(Organization.name).where(Organization.id == user.last_org_id)
                     )).scalar_one_or_none()
                 avatar_url = (await session.execute(
-                    select(TeamMember.avatar_url).where(TeamMember.user_id == uid).limit(1)
+                    select(TeamMember.avatar_url).where(TeamMember.user_id == uid).order_by(TeamMember.project_id, TeamMember.id).limit(1)
                 )).scalar_one_or_none()
                 meta = AccountMeta(
                     account_id=str(sub),

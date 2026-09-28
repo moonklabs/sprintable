@@ -40,7 +40,7 @@ async def find_active_step_run_for_gate(
             WorkflowLineStepRun.org_id == org_id,
             (WorkflowLineStepRun.gate_id == gate_id) | (WorkflowLineStepRun.h1_gate_id == gate_id),
             WorkflowLineStepRun.status.in_(_OPEN_STEP_RUN_STATUSES),
-        ).order_by(WorkflowLineStepRun.started_at.desc()).limit(1)
+        ).order_by(WorkflowLineStepRun.started_at.desc(), WorkflowLineStepRun.id.desc()).limit(1)
     )
     return r.scalar_one_or_none()
 

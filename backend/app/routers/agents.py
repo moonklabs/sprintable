@@ -60,7 +60,7 @@ async def _resolve_org_project_ids(
             await session.execute(
                 select(Project.id)
                 .where(Project.org_id == org_id, Project.deleted_at.is_(None))
-                .order_by(Project.created_at.asc())
+                .order_by(Project.created_at.asc(), Project.id)
             )
         ).all()
     ]

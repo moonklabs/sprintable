@@ -10,7 +10,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { cn } from '@/lib/utils';
 import {
-  parseAttentionQueueSignals, buildAttentionQueueFromBe,
+  parseAttentionQueueSignals, parseAttentionTruncated, buildAttentionQueueFromBe,
   buildAttentionQueue, diffAttentionQueueItemIds,
   type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
@@ -28,11 +28,17 @@ const HIGHLIGHT_MS = 900;
 /** story #1969(2026-08-30) — inbox_items(외부 producer, /api/inbox) 기반 흡수(#2923)는 PO
  * 최종 판정으로 inbox_items 기능 자체가 완전 은퇴되며 함께 걷혔다. 이제 `/glance/attention`
  * BE 신호 하나만 소비한다(gate_pending dedup·memo slug 해소 등 inbox 전용 로직도 전부 제거). */
-async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslator): Promise<AttentionQueueItem[]> {
+async function fetchAttentionQueue(
+  projectId: string, t: AttentionQueueTranslator,
+): Promise<{ items: AttentionQueueItem[]; truncated: boolean }> {
   const beJson = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`)
     .then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const signals = parseAttentionQueueSignals(beJson);
-  return buildAttentionQueueFromBe(signals, t, (href) => withProjectParam(href, projectId));
+  return {
+    items: buildAttentionQueueFromBe(signals, t, (href) => withProjectParam(href, projectId)),
+    // story #4382 — BE가 한 신호를 100건에서 잘랐으면 남은 수는 «이상»으로만 말한다.
+    truncated: parseAttentionTruncated(beJson),
+  };
 }
 
 function RowSkeleton() {
@@ -117,6 +123,7 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   const t = useTranslations('attentionQueue');
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<AttentionQueueItem[]>([]);
+  const [truncated, setTruncated] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,9 +131,10 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   useEffect(() => { itemsRef.current = items; }, [items]);
 
   const refetchAndDiff = useCallback(async () => {
-    const result = await fetchAttentionQueue(projectId, t);
+    const { items: result, truncated: nextTruncated } = await fetchAttentionQueue(projectId, t);
     const changed = diffAttentionQueueItemIds(itemsRef.current, result);
     setItems(result);
+    setTruncated(nextTruncated);
     if (changed.size > 0) {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
       setHighlightedIds(changed);
@@ -138,9 +146,10 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const result = await fetchAttentionQueue(projectId, t);
+      const { items: result, truncated: nextTruncated } = await fetchAttentionQueue(projectId, t);
       if (cancelled) return;
       setItems(result);
+      setTruncated(nextTruncated);
       setLoading(false);
     }
     void load();
@@ -231,13 +240,13 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
               className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-[12.5px] text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
             >
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              <span className="flex-1">{t('flowDemoted', { overflow })}</span>
+              <span className="flex-1">{t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })}</span>
               <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
             </button>
           ) : overflow > 0 ? (
             <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              {t('flowDemoted', { overflow })}
+              {t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })}
             </div>
           ) : null}
         </div>

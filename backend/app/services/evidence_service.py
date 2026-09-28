@@ -52,7 +52,7 @@ async def batch_human_verified(
         select(Evidence).where(
             *gate_approval_filter(work_item_type),
             Evidence.work_item_id.in_(work_item_ids),
-        ).order_by(Evidence.created_at.desc())
+        ).order_by(Evidence.created_at.desc(), Evidence.id.desc())
     )
     latest: dict[uuid.UUID, Evidence] = {}
     for ev in result.scalars().all():

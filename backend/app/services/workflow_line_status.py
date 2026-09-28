@@ -146,14 +146,14 @@ async def build_workflow_line_status(
     # active = 미해소(open) run 중 가장 최근 1건(LIMIT 1).
     active = (await session.execute(
         _story_runs.where(WorkflowLineStepRun.status.in_(_OPEN_STEP_RUN_STATUSES))
-        .order_by(WorkflowLineStepRun.started_at.desc()).limit(1)
+        .order_by(WorkflowLineStepRun.started_at.desc(), WorkflowLineStepRun.id.desc()).limit(1)
     )).scalar_one_or_none()
 
     if active is None:
         # active 없음 → terminal run 5개 history(LIMIT 5·AC③). open 이 없으니 최근 run 들은 terminal.
         rows = (await session.execute(
             _story_runs.where(WorkflowLineStepRun.status.not_in(_OPEN_STEP_RUN_STATUSES))
-            .order_by(WorkflowLineStepRun.started_at.desc()).limit(_HISTORY_LIMIT)
+            .order_by(WorkflowLineStepRun.started_at.desc(), WorkflowLineStepRun.id.desc()).limit(_HISTORY_LIMIT)
         )).scalars().all()
         history = [
             HistoryItem(
@@ -186,7 +186,7 @@ async def build_workflow_line_status(
         appr_rows = (await session.execute(
             select(WorkflowLineStepApproval).where(
                 WorkflowLineStepApproval.approval_group_id == active.approval_group_id,
-            ).order_by(WorkflowLineStepApproval.created_at.asc())
+            ).order_by(WorkflowLineStepApproval.created_at.asc(), WorkflowLineStepApproval.id)
         )).scalars().all()
         approvers = [
             ApproverView(
@@ -253,7 +253,7 @@ async def build_workflow_line_status_batch(
             WorkflowLineStepRun.entity_type == entity_type,  # S21: 파라미터화(기본 story=back-compat)
             WorkflowLineStepRun.entity_id.in_(story_ids),
             WorkflowLineStepRun.status.in_(_OPEN_STEP_RUN_STATUSES),
-        ).order_by(WorkflowLineStepRun.started_at.desc())
+        ).order_by(WorkflowLineStepRun.started_at.desc(), WorkflowLineStepRun.id.desc())
     )).scalars().all()
 
     latest: dict[uuid.UUID, WorkflowLineStepRun] = {}

@@ -64,7 +64,7 @@ async def _circuit_open(session: AsyncSession, org_id: uuid.UUID, now: datetime)
             WorkflowLineStepRun.org_id == org_id,
             WorkflowLineStepRun.status.in_(_ENGINE_FAILURE_STATUSES),
             WorkflowLineStepRun.started_at > now - timedelta(minutes=_CB_LOOKBACK_MIN),
-        ).order_by(WorkflowLineStepRun.started_at.asc())
+        ).order_by(WorkflowLineStepRun.started_at.asc(), WorkflowLineStepRun.id)
     )).scalars().all()
     if len(rows) < _CB_THRESHOLD:
         return False

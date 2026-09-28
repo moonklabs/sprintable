@@ -96,7 +96,7 @@ async def list_material_lineage(
         select(MaterialLineage).where(
             MaterialLineage.org_id == org_id,
             MaterialLineage.work_item_id == work_item_id,
-        ).order_by(MaterialLineage.created_at.asc())
+        ).order_by(MaterialLineage.created_at.asc(), MaterialLineage.id)
     )).scalars().all()
     if not rows:
         return []
@@ -181,7 +181,7 @@ async def get_material_performance(
             MaterialLineage.org_id == org_id,
             MaterialLineage.derived_id == derived_id,
             MaterialLineage.derived_kind == "channel_publication",
-        ).limit(1)
+        ).order_by(MaterialLineage.created_at, MaterialLineage.id).limit(1)
     )).scalar_one_or_none()
     if owns is None:
         return []

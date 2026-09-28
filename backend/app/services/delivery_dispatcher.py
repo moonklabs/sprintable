@@ -61,7 +61,7 @@ async def _claim_batch(limit: int = _BATCH_SIZE) -> list[dict]:
         candidate_ids = (
             select(DeliveryJob.id)
             .where(DeliveryJob.status == "pending")
-            .order_by(DeliveryJob.created_at.asc())
+            .order_by(DeliveryJob.created_at.asc(), DeliveryJob.id)
             .limit(limit)
             .with_for_update(skip_locked=True)
         )

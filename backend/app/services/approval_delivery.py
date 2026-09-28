@@ -76,7 +76,7 @@ async def _get_or_create_approval_dm(
                 Conversation.type == "dm",
                 Conversation.id.in_(exactly_two_participants),
             )
-            .order_by(Conversation.updated_at.desc())
+            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
             .limit(1)
         )
     ).scalars().first()
@@ -231,7 +231,7 @@ async def dispatch_approval_request_cards(
                         == str(work_item_id),
                         ConversationMessage.msg_metadata["approval_target"]["gate_type"].astext == gate_type,
                     )
-                    .order_by(ConversationMessage.created_at.desc())
+                    .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
                     .limit(1)
                 )).scalar_one_or_none()
 
@@ -437,7 +437,7 @@ async def _maybe_auto_seed_designated_secondary_conversation(
             Conversation.id != exclude_conversation_id,
             ConversationParticipant.member_id == designated_approver_id,
         )
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(1)
     )).first()
     if candidate is None:
@@ -890,7 +890,7 @@ async def notify_gate_delegated_to_old_approver(
         select(ConversationMessage.conversation_id).where(
             ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
             ConversationMessage.mentioned_ids.contains([old_approver_id]),
-        ).limit(1)
+        ).order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc()).limit(1)
     )).first()
     if row is None:
         return []

@@ -555,7 +555,7 @@ async def agent_event_stream(
                     result = await db.execute(
                         select(Event)
                         .where(*exceed_clauses)
-                        .order_by(Event.created_at.desc())
+                        .order_by(Event.created_at.desc(), Event.id.desc())
                         .limit(limit)
                     )
                     pending_events = list(reversed(result.scalars().all()))
@@ -580,7 +580,7 @@ async def agent_event_stream(
                     result = await db.execute(
                         select(Event)
                         .where(*where_clauses)
-                        .order_by(Event.created_at.asc())
+                        .order_by(Event.created_at.asc(), Event.id)
                         .limit(100)
                     )
                     pending_events = result.scalars().all()
@@ -896,7 +896,7 @@ async def get_pending_events(
     total = int(count_result.scalar_one() or 0)
 
     q = (
-        select(Event).where(*conds).order_by(Event.created_at.asc())
+        select(Event).where(*conds).order_by(Event.created_at.asc(), Event.id)
         .limit(limit if limit is not None else _PENDING_EVENTS_DEFAULT_LIMIT)
     )
     result = await db.execute(q)
@@ -1074,7 +1074,7 @@ async def _get_or_create_event_conversation(
     existing = (await db.execute(
         select(Conversation)
         .where(Conversation.org_id == org_id, Conversation.id.in_(exact))
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(1)
     )).scalars().first()
     if existing is not None:
@@ -1489,7 +1489,7 @@ async def _latest_published_permalink(
             ChannelPublication.status == "published",
             Gate.work_item_id == work_item_id,
         )
-        .order_by(ChannelPublication.published_at.desc().nulls_last())
+        .order_by(ChannelPublication.published_at.desc().nulls_last(), ChannelPublication.id.desc())
         .limit(1)
     )).scalar_one_or_none()
 
@@ -2484,7 +2484,7 @@ async def _find_existing_stage_publish(
             event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
             event_lookup_work_item_id=work_item_id, event_lookup_stage=stage,
         )
-        .order_by(ConversationMessage.created_at.desc())
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
         .limit(1)
     )).scalars().first()
 
@@ -2573,7 +2573,7 @@ async def _find_latest_stage_publish(
             event_lookup_definition_key=definition_key, event_lookup_work_item_type=work_item_type,
             event_lookup_work_item_id=work_item_id,
         )
-        .order_by(ConversationMessage.created_at.desc())
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
         .limit(1)
     )).scalars().first()
 
@@ -3195,7 +3195,7 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
     existing = (await db.execute(
         select(Member).where(
             Member.org_id == org_id, Member.runtime_type == "system-publisher", Member.type == "agent",
-        ).limit(1)
+        ).order_by(Member.created_at, Member.id).limit(1)
     )).scalars().first()
     if existing is not None:
         return existing
@@ -3203,7 +3203,7 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
     anchor_project_id = (await db.execute(
         select(Project.id)
         .where(Project.org_id == org_id, Project.deleted_at.is_(None))
-        .order_by(Project.created_at.asc())
+        .order_by(Project.created_at.asc(), Project.id)
         .limit(1)
     )).scalar_one_or_none()
     if anchor_project_id is None:
@@ -3272,7 +3272,7 @@ async def publish_preset_event(
             EventDefinition.key == definition_key,
             EventDefinition.enabled.is_(True),
             or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
-        )
+        ).order_by(EventDefinition.org_id.is_(None), EventDefinition.id)
         .limit(1)
     )).scalars().first()
     if definition is None:
@@ -4864,7 +4864,7 @@ async def get_event_publish_history(
             text("conversation_messages.metadata->'event'->>'event_key' = :event_lookup_definition_key"),
         )
         .params(event_lookup_definition_key=definition_key)
-        .order_by(ConversationMessage.created_at.desc())
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
         .limit(limit)
     )).scalars().all()
 

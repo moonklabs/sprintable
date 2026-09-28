@@ -148,7 +148,7 @@ async def _top_voted_item_texts(session: AsyncSession, session_id: uuid.UUID) ->
     rows = (await session.execute(
         select(RetroItem)
         .where(RetroItem.session_id == session_id, RetroItem.parent_item_id.is_(None))
-        .order_by(RetroItem.vote_count.desc(), RetroItem.created_at.desc())
+        .order_by(RetroItem.vote_count.desc(), RetroItem.created_at.desc(), RetroItem.id.desc())
         .limit(_TOP_ITEMS_LIMIT)
     )).scalars().all()
     return [f"[{i.category}] {i.text} ({i.vote_count}표)" for i in rows]

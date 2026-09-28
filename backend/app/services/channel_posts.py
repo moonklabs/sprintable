@@ -1091,7 +1091,7 @@ async def list_channel_post_drafts(
             select(ChannelPublication.id, ChannelPublication.gate_id)
             .where(ChannelPublication.status == "published")
             .distinct(ChannelPublication.gate_id)
-            .order_by(ChannelPublication.gate_id, ChannelPublication.published_at.desc())
+            .order_by(ChannelPublication.gate_id, ChannelPublication.published_at.desc(), ChannelPublication.id.desc())
             .subquery()
         )
         newsletter_filter_gate = aliased(Gate)
@@ -1116,9 +1116,9 @@ async def list_channel_post_drafts(
                 stmt = stmt.where(effective_scheduled_at <= scheduled_to)
         # AC2 — 필터가 활성일 때만 정렬을 예약 시각 기준으로 바꾼다(미정은 NULLS LAST
         # 뒤 created_at으로 2차 정렬). 필터 없는 기본 목록의 정렬(최근 편집순)은 안 건드린다.
-        stmt = stmt.order_by(effective_scheduled_at.asc().nulls_last(), latest.created_at.desc())
+        stmt = stmt.order_by(effective_scheduled_at.asc().nulls_last(), latest.created_at.desc(), latest.id.desc())
     else:
-        stmt = stmt.order_by(latest.created_at.desc())
+        stmt = stmt.order_by(latest.created_at.desc(), latest.id.desc())
 
     stmt = stmt.limit(limit).offset(offset)
     if draft_id is not None:
@@ -1145,7 +1145,7 @@ async def list_channel_post_drafts(
     gate_rows = (await db.execute(
         select(Gate)
         .where(Gate.org_id == org_id, Gate.work_item_id.in_(work_item_ids), Gate.gate_type == "external_publish")
-        .order_by(Gate.created_at.desc())
+        .order_by(Gate.created_at.desc(), Gate.id.desc())
     )).scalars().all()
     for g in gate_rows:
         gates_by_scope.setdefault((g.work_item_id, g.scope_key), g)
@@ -1190,7 +1190,7 @@ async def list_channel_post_drafts(
         published_rows = (await db.execute(
             select(ChannelPublication)
             .where(ChannelPublication.gate_id.in_(gate_ids), ChannelPublication.status == "published")
-            .order_by(ChannelPublication.published_at.desc())
+            .order_by(ChannelPublication.published_at.desc(), ChannelPublication.id.desc())
         )).scalars().all()
         for p in published_rows:
             published_pub_by_gate.setdefault(p.gate_id, p)
@@ -1214,7 +1214,7 @@ async def list_channel_post_drafts(
         command_rows = (await db.execute(
             select(PublicationCommand)
             .where(PublicationCommand.gate_id.in_(gate_ids))
-            .order_by(PublicationCommand.created_at.desc())
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
         )).scalars().all()
         for c in command_rows:
             latest_command_by_gate.setdefault(c.gate_id, c)
@@ -1232,7 +1232,7 @@ async def list_channel_post_drafts(
                 Gate.org_id == org_id, Gate.gate_type == _NEWSLETTER_SEND_GATE_TYPE,
                 Gate.scope_key.in_([str(pid) for pid in publication_ids]),
             )
-            .order_by(Gate.created_at.desc())
+            .order_by(Gate.created_at.desc(), Gate.id.desc())
         )).scalars().all()
         for ng in newsletter_gate_rows:
             newsletter_gate_by_publication_id.setdefault(uuid.UUID(ng.scope_key), ng)
@@ -1692,7 +1692,7 @@ async def _maybe_record_material_lineage_for_publication(
             Evidence.org_id == org_id, Evidence.work_item_id == work_item_id,
             Evidence.work_item_type == "story", Evidence.type == "url",
             Evidence.ref == "live-run:master-cut",
-        ).order_by(Evidence.created_at.desc()).limit(1)
+        ).order_by(Evidence.created_at.desc(), Evidence.id.desc()).limit(1)
     )).scalar_one_or_none()
     if master_evidence_id is None:
         return
@@ -2554,7 +2554,7 @@ async def find_ready_recipe_channel_drafts(
         select(ChannelPostDraft).where(
             ChannelPostDraft.org_id == org_id, ChannelPostDraft.work_item_id == work_item_id,
             ChannelPostDraft.status != "withdrawn",
-        ).order_by(ChannelPostDraft.created_at.desc())
+        ).order_by(ChannelPostDraft.created_at.desc(), ChannelPostDraft.id.desc())
     )).scalars().all()
     if not drafts:
         return [], False
@@ -3188,7 +3188,7 @@ async def cancel_unstarted_publication(
     command = (await db.execute(
         select(PublicationCommand)
         .where(PublicationCommand.gate_id == gate.id)
-        .order_by(PublicationCommand.created_at.desc())
+        .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
         .limit(1)
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -3254,7 +3254,7 @@ async def cancel_scheduled_publication(
     command = (await db.execute(
         select(PublicationCommand)
         .where(PublicationCommand.gate_id == gate.id)
-        .order_by(PublicationCommand.created_at.desc())
+        .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
         .limit(1)
         .with_for_update()
     )).scalar_one_or_none()
@@ -3300,7 +3300,7 @@ async def unpublish_channel_post(
     pub = (await db.execute(
         select(ChannelPublication)
         .where(ChannelPublication.gate_id == gate.id, ChannelPublication.status == "published")
-        .order_by(ChannelPublication.published_at.desc())
+        .order_by(ChannelPublication.published_at.desc(), ChannelPublication.id.desc())
         .limit(1)
         .with_for_update()
     )).scalar_one_or_none()
@@ -3505,7 +3505,7 @@ async def withdraw_channel_post_draft(
         command = (await db.execute(
             select(PublicationCommand)
             .where(PublicationCommand.gate_id == gate.id)
-            .order_by(PublicationCommand.created_at.desc())
+            .order_by(PublicationCommand.created_at.desc(), PublicationCommand.id.desc())
             .limit(1)
             .with_for_update()
         )).scalar_one_or_none()

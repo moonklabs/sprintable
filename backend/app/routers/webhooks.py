@@ -257,7 +257,7 @@ async def list_webhook_deliveries(
         rows = (await db.execute(
             select(ConversationWebhookDelivery)
             .where(ConversationWebhookDelivery.message_id == message_id)
-            .order_by(ConversationWebhookDelivery.created_at.desc())
+            .order_by(ConversationWebhookDelivery.created_at.desc(), ConversationWebhookDelivery.id.desc())
             .limit(limit)
         )).scalars().all()
     else:
@@ -271,13 +271,13 @@ async def list_webhook_deliveries(
         msg_ids = (await db.execute(
             select(ConversationMessage.id)
             .where(ConversationMessage.conversation_id == conversation_id)
-            .order_by(ConversationMessage.created_at.desc())
+            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
             .limit(limit)
         )).scalars().all()
         rows = (await db.execute(
             select(ConversationWebhookDelivery)
             .where(ConversationWebhookDelivery.message_id.in_(msg_ids))
-            .order_by(ConversationWebhookDelivery.created_at.desc())
+            .order_by(ConversationWebhookDelivery.created_at.desc(), ConversationWebhookDelivery.id.desc())
             .limit(limit)
         )).scalars().all() if msg_ids else []
 

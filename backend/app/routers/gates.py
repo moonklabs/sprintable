@@ -1333,7 +1333,7 @@ async def list_gates(
             # 의존)이었던 기존 동작을, 페이지네이션을 실제로 쓰는 호출에서만 created_at desc(최신
             # 우선, 다른 목록 API들과 동형)로 명시. limit/offset 둘 다 안 쓰면 기존 무정렬 그대로
             # (list_gate_inbox 등 기존 호출부 회귀 0).
-            q = q.order_by(Gate.created_at.desc())
+            q = q.order_by(Gate.created_at.desc(), Gate.id.desc())
         if limit is not None:
             q = q.limit(limit)
         if offset:
@@ -2152,7 +2152,7 @@ async def list_gate_github_check_events_endpoint(
     rows = (await session.execute(
         select(GateGithubCheckEvent)
         .where(GateGithubCheckEvent.gate_id == id, GateGithubCheckEvent.org_id == org_id)
-        .order_by(GateGithubCheckEvent.created_at.desc())
+        .order_by(GateGithubCheckEvent.created_at.desc(), GateGithubCheckEvent.id.desc())
     )).scalars().all()
     return [GateGithubCheckEventResponse.model_validate(r) for r in rows]
 
@@ -2210,7 +2210,7 @@ async def list_gate_activity_endpoint(
             ActivityLog.entity_type == "gate", ActivityLog.entity_id == id,
             ActivityLog.org_id == org_id,
         )
-        .order_by(ActivityLog.created_at.desc())
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
     )).scalars().all()
 
     actor_ids = {r.actor_id for r in rows if r.actor_id}
@@ -3170,7 +3170,7 @@ async def _enrich_approvers(session, org_id, rows) -> list[GateApproverResponse]
                     WorkflowLineStepRunEvent.step_run_id == r.step_run_id,
                     WorkflowLineStepRunEvent.event_type == "approver_reassigned",
                     WorkflowLineStepRunEvent.target_member_id == r.approver_member_id,
-                ).order_by(WorkflowLineStepRunEvent.created_at.desc()).limit(1)
+                ).order_by(WorkflowLineStepRunEvent.created_at.desc(), WorkflowLineStepRunEvent.id.desc()).limit(1)
             )).scalar_one_or_none()
             if ev is not None:
                 resp.reassigned_by_member_id = ev.actor_member_id

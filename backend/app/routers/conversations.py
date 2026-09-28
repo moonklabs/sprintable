@@ -1528,7 +1528,7 @@ async def list_conversations(
     convs = (await db.execute(
         select(Conversation)
         .where(*conv_filter)
-        .order_by(Conversation.updated_at.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .limit(limit).offset(offset)
     )).scalars().all()
 
@@ -1551,7 +1551,7 @@ async def list_conversations(
         latest_msg = (await db.execute(
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conv.id)
-            .order_by(ConversationMessage.created_at.desc())
+            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
             .limit(1)
         )).scalar_one_or_none()
 

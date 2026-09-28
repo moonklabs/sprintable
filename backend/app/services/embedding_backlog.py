@@ -69,7 +69,7 @@ async def process_embedding_backlog(session: AsyncSession, limit: int = _BATCH_S
             Embedding.status == "pending",
             and_(Embedding.status == "failed", Embedding.retry_count < _MAX_RETRY_COUNT),
         ))
-        .order_by(Embedding.created_at.asc())
+        .order_by(Embedding.created_at.asc(), Embedding.id)
         .limit(limit)
         .with_for_update(skip_locked=True)
     )).scalars().all()

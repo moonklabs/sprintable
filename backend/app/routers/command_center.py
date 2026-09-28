@@ -110,7 +110,7 @@ async def my_actions(
                 WorkflowLineStepApproval.blocking.is_(True),
                 WorkflowLineStepRun.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
-            .order_by(WorkflowLineStepApproval.created_at.asc())
+            .order_by(WorkflowLineStepApproval.created_at.asc(), WorkflowLineStepApproval.id)
             .limit(50)
         )
     ).all()
@@ -178,7 +178,7 @@ async def my_actions(
                 ~exists(_blocked_by_open_dependency),
                 Story.project_id.in_(_accessible_project_ids),  # story #4351(PO 09-27 · action queue) — 접근 가능 프로젝트만(SEC-S8)
             )
-            .order_by(Story.updated_at.desc())
+            .order_by(Story.updated_at.desc(), Story.id.desc())
             .limit(50)
         )
     ).scalars().all()
@@ -213,7 +213,7 @@ async def my_actions(
                 Story.org_id == org_id,
                 Story.deleted_at.is_(None),
             )
-            .order_by(Task.updated_at.desc())
+            .order_by(Task.updated_at.desc(), Task.id.desc())
             .limit(50)
         )
     ).all()
@@ -342,7 +342,7 @@ async def my_actions(
                 WorkflowLineStepApproval.approver_member_id != member_id,
                 ~exists(_my_pending_approval_on_step),
             )
-            .order_by(_WaitingStory.updated_at.desc())
+            .order_by(_WaitingStory.updated_at.desc(), _WaitingStory.id.desc())
             .limit(100)
         )
     ).all()
@@ -373,7 +373,7 @@ async def my_actions(
                 WorkflowLineStepRun.started_at < now - timedelta(minutes=_AGENT_STUCK_MINUTES),
                 WorkflowLineStepRun.resolved_member_type == "agent",  # HIGH2: agent run 만.
             )
-            .order_by(WorkflowLineStepRun.started_at.asc())
+            .order_by(WorkflowLineStepRun.started_at.asc(), WorkflowLineStepRun.id)
             .limit(20)
         )
     ).scalars().all()
@@ -446,7 +446,7 @@ async def my_actions(
                 _BlockedU.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 _BlockedU.deleted_at.is_(None),
             )
-            .order_by(ItemDependency.created_at.asc())
+            .order_by(ItemDependency.created_at.asc(), ItemDependency.id)
             .limit(20)
         )
     ).all()
@@ -472,7 +472,7 @@ async def my_actions(
                 Hypothesis.status == "falsified",
                 Hypothesis.updated_at >= now - timedelta(days=_HYPOTHESIS_FALSIFIED_DAYS),
             )
-            .order_by(Hypothesis.updated_at.desc())
+            .order_by(Hypothesis.updated_at.desc(), Hypothesis.id.desc())
             .limit(20)
         )
     ).all()
@@ -548,7 +548,7 @@ async def my_actions(
                 Goal.status == "done",
                 Goal.outcome_status.in_(("n_a", "unmeasured")),
             )
-            .order_by(Goal.updated_at.asc())
+            .order_by(Goal.updated_at.asc(), Goal.id)
             .limit(20)
         )
     ).all()
@@ -736,7 +736,7 @@ async def overview(
         await session.execute(
             select(ActivityEvent)
             .where(ActivityEvent.org_id == org_id, *_in_scope(ActivityEvent.project_id))
-            .order_by(ActivityEvent.occurred_at.desc())
+            .order_by(ActivityEvent.occurred_at.desc(), ActivityEvent.activity_id.desc())
             .limit(40)
         )
     ).scalars().all()

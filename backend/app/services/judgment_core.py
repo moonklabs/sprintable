@@ -148,7 +148,7 @@ async def list_judgments(
         await session.execute(
             select(Judgment)
             .where(*filters, Judgment.kind.in_(TARGET_LINKABLE_KINDS))
-            .order_by(Judgment.created_at.desc())
+            .order_by(Judgment.created_at.desc(), Judgment.id.desc())
         )
     ).scalars().all()
 
@@ -158,7 +158,7 @@ async def list_judgments(
     ).scalar_one()
     active_rows = (
         await session.execute(
-            select(Judgment).where(*active_filters).order_by(Judgment.created_at.desc()).limit(limit)
+            select(Judgment).where(*active_filters).order_by(Judgment.created_at.desc(), Judgment.id.desc()).limit(limit)
         )
     ).scalars().all()
 

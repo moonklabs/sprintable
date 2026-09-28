@@ -177,7 +177,7 @@ async def create_comment_reply_draft(
             ChannelPostCommentReply.comment_id == comment_id,
             ChannelPostCommentReply.status.in_(("draft", "pending")),
         )
-        .order_by(ChannelPostCommentReply.created_at.desc())
+        .order_by(ChannelPostCommentReply.created_at.desc(), ChannelPostCommentReply.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if existing_open is not None:

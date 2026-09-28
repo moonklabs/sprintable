@@ -251,7 +251,7 @@ async def list_agent_run_tool_calls(
     q = select(AgentRunToolCall).where(AgentRunToolCall.run_id == id)
     if cursor_dt is not None:
         q = q.where(AgentRunToolCall.created_at < cursor_dt)
-    q = q.order_by(AgentRunToolCall.created_at.desc()).limit(limit)
+    q = q.order_by(AgentRunToolCall.created_at.desc(), AgentRunToolCall.id.desc()).limit(limit)
     rows = list((await session.execute(q)).scalars().all())
     return [AgentRunToolCallResponse.model_validate(r) for r in rows]
 

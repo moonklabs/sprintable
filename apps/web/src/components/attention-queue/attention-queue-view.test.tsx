@@ -229,3 +229,34 @@ describe('AttentionQueueView — story #3099 빈 상태(모두 처리됨) 텍스
     expect(icon?.getAttribute('class')).toContain('text-proof-green');
   });
 });
+
+describe('AttentionQueueView — story #4382 BE 잘림 신호(truncated_kinds)', () => {
+  async function mountWith(truncatedKinds: string[] | undefined) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/glance/attention')) {
+        const data: Record<string, unknown> = { items: manySignals(10) };
+        if (truncatedKinds) data['truncated_kinds'] = truncatedKinds;
+        return { ok: true, json: async () => ({ data }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { AttentionQueueView } = await import('./attention-queue-view');
+    await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐BE가 한 신호를 100건에서 잘랐으면 남은 수를 «3건 이상»으로만 말한다(정확한 수로 단정하지 않음)', async () => {
+    await mountWith(['needs_input']);
+    expect(container.textContent).toContain('3건 이상은 여기 안 올림');
+  });
+
+  it('잘림이 없거나(빈 목록) 필드가 없으면(예전 BE) 예전 문장 그대로 «3건은»', async () => {
+    await mountWith([]);
+    expect(container.textContent).toContain('3건은 여기 안 올림');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.resetModules();
+    await mountWith(undefined);
+    expect(container.textContent).toContain('3건은 여기 안 올림');
+  });
+});

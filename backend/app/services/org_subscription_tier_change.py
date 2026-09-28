@@ -75,7 +75,7 @@ async def latest_confirmed_subscription_order(session: AsyncSession, org_id: uui
         await session.execute(
             select(BillingOrder)
             .where(BillingOrder.org_id == org_id, BillingOrder.status == "confirmed", BillingOrder.purpose == "charge")
-            .order_by(BillingOrder.created_at.desc())
+            .order_by(BillingOrder.created_at.desc(), BillingOrder.id.desc())
             .limit(1)
         )
     ).scalar_one_or_none()

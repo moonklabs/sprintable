@@ -69,7 +69,7 @@ def test_backfill_source_contains_threshold_logic():
     # agent_event_stream은 헬퍼를 호출하고 desc 쿼리를 직접 사용
     stream_src = inspect.getsource(ev_module.agent_event_stream)
     assert "_compute_backfill_mode" in stream_src
-    assert "order_by(Event.created_at.desc())" in stream_src
+    assert "order_by(Event.created_at.desc(), Event.id.desc())" in stream_src
 
 
 def test_backfill_source_contains_since_filter():
@@ -144,7 +144,7 @@ def test_threshold_exceeded_source_uses_desc_limit():
     import inspect
     from app.routers import events as ev_module
     source = inspect.getsource(ev_module.agent_event_stream)
-    assert "order_by(Event.created_at.desc())" in source
+    assert "order_by(Event.created_at.desc(), Event.id.desc())" in source
     assert ".limit(limit)" in source
 
 

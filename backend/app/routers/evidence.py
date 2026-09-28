@@ -519,7 +519,7 @@ async def list_evidence(
             Evidence.org_id == org_id,
             Evidence.work_item_id == work_item_id,
             Evidence.work_item_type == work_item_type,
-        ).order_by(Evidence.created_at.asc())
+        ).order_by(Evidence.created_at.asc(), Evidence.id)
     )
     items = list(result.scalars().all())
     return await _attach_artifact_denorm(session, items)

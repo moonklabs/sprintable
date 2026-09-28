@@ -105,7 +105,7 @@ class BridgeInboundRepository:
                     TeamMember.type == member_type,
                     TeamMember.is_active.is_(True),
                 )
-                .order_by(TeamMember.created_at.asc())
+                .order_by(TeamMember.created_at.asc(), TeamMember.id)
                 .limit(1)
             )
             found = result.scalar_one_or_none()

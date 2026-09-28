@@ -59,7 +59,7 @@ class AgentRunRepository:
         )
         total = int(count_result.scalar_one() or 0)
 
-        q = select(AgentRun).where(*conds).order_by(AgentRun.created_at.desc()).limit(min(limit, 200))
+        q = select(AgentRun).where(*conds).order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(min(limit, 200))
         result = await self.session.execute(q)
         return list(result.scalars().all()), total
 

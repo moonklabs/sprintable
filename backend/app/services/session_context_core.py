@@ -59,7 +59,7 @@ async def _recent_activity_for_one(
     ).scalar_one()
     rows = (
         await session.execute(
-            select(ActivityLog).where(*base_filters).order_by(ActivityLog.created_at.desc()).limit(limit)
+            select(ActivityLog).where(*base_filters).order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc()).limit(limit)
         )
     ).scalars().all()
     return {

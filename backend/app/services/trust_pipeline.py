@@ -175,7 +175,7 @@ async def batch_scope_violation(
         select(PullRequestStoryLink.story_id, PullRequestStoryLink.evidence)
         .distinct(PullRequestStoryLink.story_id)
         .where(*confident_pr_link_filter(org_id), PullRequestStoryLink.story_id.in_(story_ids))
-        .order_by(PullRequestStoryLink.story_id, PullRequestStoryLink.updated_at.desc())
+        .order_by(PullRequestStoryLink.story_id, PullRequestStoryLink.updated_at.desc(), PullRequestStoryLink.id.desc())
         .subquery()
     )
     result = await session.execute(

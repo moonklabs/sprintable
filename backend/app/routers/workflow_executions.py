@@ -79,7 +79,7 @@ async def story_execution_summary(
             WorkflowExecutionLog.org_id == org_id,
             WorkflowExecutionLog.project_id == project_id,
         )
-        .order_by(WorkflowExecutionLog.created_at.desc())
+        .order_by(WorkflowExecutionLog.created_at.desc(), WorkflowExecutionLog.id.desc())
         .limit(len(story_ids) * 10)
     )
     logs = list(rows_result.scalars().all())
@@ -185,7 +185,7 @@ async def list_executions(
     total: int = total_result.scalar_one() or 0
 
     rows_result = await db.execute(
-        base.order_by(WorkflowExecutionLog.created_at.desc()).offset(offset).limit(limit)
+        base.order_by(WorkflowExecutionLog.created_at.desc(), WorkflowExecutionLog.id.desc()).offset(offset).limit(limit)
     )
     logs = list(rows_result.scalars().all())
 

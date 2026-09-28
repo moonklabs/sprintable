@@ -318,7 +318,7 @@ async def get_hypothesis_lifecycle(
         gate_rows = (await session.execute(
             select(Gate.work_item_id, Gate.status, Gate.created_at)
             .where(Gate.org_id == org_id, Gate.work_item_type == "story", Gate.work_item_id.in_(story_ids))
-            .order_by(Gate.work_item_id, Gate.created_at.desc())
+            .order_by(Gate.work_item_id, Gate.created_at.desc(), Gate.id.desc())
         )).all()
         for wid, status, _created_at in gate_rows:
             gate_map.setdefault(wid, status)  # 정렬상 첫 행 = 그 story의 최신 gate
@@ -858,7 +858,7 @@ async def resolve_dispatch_context_pack(
             LoopRun.status != "abandoned",
             LoopRun.deleted_at.is_(None),
         )
-        .order_by(LoopRun.created_at.desc())
+        .order_by(LoopRun.created_at.desc(), LoopRun.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if loop is None or loop.brief_doc_id is None:

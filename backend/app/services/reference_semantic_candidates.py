@@ -253,7 +253,7 @@ async def list_candidates_for_epic_stories(
             ReferenceSemanticCandidate.source_type == "story",
             Story.epic_id == epic_id,
         )
-        .order_by(ReferenceSemanticCandidate.created_at.asc())
+        .order_by(ReferenceSemanticCandidate.created_at.asc(), ReferenceSemanticCandidate.id)
     )
     return list(result.scalars().all())
 
@@ -350,7 +350,7 @@ async def list_candidates_for_source(
             ReferenceSemanticCandidate.org_id == org_id,
             ReferenceSemanticCandidate.source_type == source_type,
             ReferenceSemanticCandidate.source_id == source_id,
-        ).order_by(ReferenceSemanticCandidate.created_at.asc())
+        ).order_by(ReferenceSemanticCandidate.created_at.asc(), ReferenceSemanticCandidate.id)
     )
     return list(result.scalars().all())
 

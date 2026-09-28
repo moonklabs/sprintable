@@ -62,6 +62,10 @@ class BaseRepository(Generic[T]):
             q = q.where(self.model.deleted_at.is_(None))  # type: ignore[attr-defined]
         for attr, val in filters.items():
             q = q.where(getattr(self.model, attr) == val)
+        # story #4382 — LIMIT에 순서가 없으면 limit을 넘는 목록에서 어느 행이 빠질지 · 행 순서가 요청마다 달라질 수 있었다. 예전에 보이던
+        # 순서(대개 넣은 순)에 가장 가깝게 생성 시각 오름차순 + 기본 키(동률 보조 키).
+        order = [self.model.created_at] if hasattr(self.model, "created_at") else []
+        q = q.order_by(*order, *self.model.__mapper__.primary_key)  # type: ignore[attr-defined]
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 

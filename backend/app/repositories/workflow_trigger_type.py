@@ -44,7 +44,7 @@ class WorkflowTriggerTypeRepository:
         result = await self.session.execute(
             select(WorkflowTriggerType)
             .where(WorkflowTriggerType.org_id == self.org_id, WorkflowTriggerType.deleted_at.is_(None))
-            .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc())
+            .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc(), WorkflowTriggerType.id)
         )
         items = list(result.scalars().all())
         if not items:
@@ -53,7 +53,7 @@ class WorkflowTriggerTypeRepository:
             result2 = await self.session.execute(
                 select(WorkflowTriggerType)
                 .where(WorkflowTriggerType.org_id == self.org_id, WorkflowTriggerType.deleted_at.is_(None))
-                .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc())
+                .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc(), WorkflowTriggerType.id)
             )
             items = list(result2.scalars().all())
         return items

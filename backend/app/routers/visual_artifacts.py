@@ -596,7 +596,7 @@ async def list_artifacts(
         q = q.where(VisualArtifact.doc_id == doc_id)
     if cursor_dt is not None:
         q = q.where(VisualArtifact.created_at < cursor_dt)
-    q = q.order_by(VisualArtifact.created_at.desc()).limit(limit + 1)
+    q = q.order_by(VisualArtifact.created_at.desc(), VisualArtifact.id.desc()).limit(limit + 1)
     fetched = (await session.execute(q)).scalars().all()
     has_more = len(fetched) > limit
     rows = fetched[:limit]
@@ -676,7 +676,7 @@ async def list_artifact_comments(
     q = select(ArtifactComment).where(ArtifactComment.artifact_id == id)
     if cursor_dt is not None:
         q = q.where(ArtifactComment.created_at > cursor_dt)
-    q = q.order_by(ArtifactComment.created_at.asc()).limit(limit + 1)
+    q = q.order_by(ArtifactComment.created_at.asc(), ArtifactComment.id).limit(limit + 1)
     fetched = (await session.execute(q)).scalars().all()
     has_more = len(fetched) > limit
     rows = fetched[:limit]
@@ -810,7 +810,7 @@ async def list_spec_pins(
         return _err("NOT_FOUND", "Artifact version not found", 404)
     rows = (await session.execute(
         select(ArtifactSpecPin).where(ArtifactSpecPin.version_id == latest.id)
-        .order_by(ArtifactSpecPin.created_at.asc())
+        .order_by(ArtifactSpecPin.created_at.asc(), ArtifactSpecPin.id)
     )).scalars().all()
     return _ok([SpecPinResponse.model_validate(r).model_dump(mode="json") for r in rows])
 
@@ -1222,7 +1222,7 @@ async def list_artifact_exports(
 
     q = select(ArtifactExport, ArtifactVersion.version_number).join(
         ArtifactVersion, ArtifactExport.version_id == ArtifactVersion.id,
-    ).where(ArtifactExport.artifact_id == artifact.id).order_by(ArtifactExport.created_at.desc())
+    ).where(ArtifactExport.artifact_id == artifact.id).order_by(ArtifactExport.created_at.desc(), ArtifactExport.id.desc())
     if version_number is not None:
         q = q.where(ArtifactVersion.version_number == version_number)
     rows = (await session.execute(q)).all()

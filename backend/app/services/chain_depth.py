@@ -46,7 +46,7 @@ async def compute_agent_chain_depth(
         await db.execute(
             select(ConversationMessage.sender_id)
             .where(ConversationMessage.conversation_id == conversation_id)
-            .order_by(ConversationMessage.created_at.desc())
+            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
             .limit(max_scan + 1)
         )
     ).scalars().all()

@@ -78,7 +78,7 @@ async def resolve_stage_evidence_entries(
             Evidence.work_item_type == work_item_type,
             Evidence.type == "report",
         )
-        .order_by(Evidence.created_at.desc())
+        .order_by(Evidence.created_at.desc(), Evidence.id.desc())
     )).all()
 
     entries: list[dict] = []
@@ -335,7 +335,7 @@ async def _resolve_org_owner(db: AsyncSession, *, org_id: uuid.UUID) -> uuid.UUI
     member_id = (await db.execute(
         select(OrgMember.id)
         .where(OrgMember.org_id == org_id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None))
-        .order_by(OrgMember.created_at.asc())
+        .order_by(OrgMember.created_at.asc(), OrgMember.id)
         .limit(1)
     )).scalar_one_or_none()
     if member_id is None:
@@ -432,7 +432,7 @@ async def _latest_linked_draft_doc(
                 ),
             ),
         )
-        .order_by(Reference.created_at.desc())
+        .order_by(Reference.created_at.desc(), Reference.id.desc())
         .limit(1)
     )).first()
     if row is None:

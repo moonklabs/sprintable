@@ -41,7 +41,7 @@ async def list_policy_documents(
         stmt = stmt.where(
             or_(PolicyDocument.title.ilike(search), PolicyDocument.content.ilike(search))
         )
-    stmt = stmt.order_by(PolicyDocument.updated_at.desc())
+    stmt = stmt.order_by(PolicyDocument.updated_at.desc(), PolicyDocument.id.desc())
     result = await session.execute(stmt)
     docs = result.scalars().all()
     return [PolicyDocumentResponse.model_validate(d) for d in docs]

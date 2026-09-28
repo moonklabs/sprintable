@@ -163,7 +163,7 @@ async def list_activity_logs(
     total = total_result.scalar_one()
 
     items_result = await db.execute(
-        q.order_by(ActivityLog.created_at.desc()).limit(limit).offset(offset)
+        q.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc()).limit(limit).offset(offset)
     )
     items = items_result.scalars().all()
 
