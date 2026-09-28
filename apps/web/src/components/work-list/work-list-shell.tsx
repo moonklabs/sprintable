@@ -360,7 +360,8 @@ export function WorkListShell({ projectId }: { projectId: string }) {
           창 접근 이름 = 열린 항목 제목(화면 읽기 전용 SheetTitle → 창 aria-labelledby · 보이는 제목은 패널 머리 h2) · 제목이 비면 페이지 이름. */}
       <Sheet open={!!detailPanel && isMobile} onOpenChange={(open) => { if (!open) setSelectedRowId(null); }}>
         <SheetContent side="right" className="w-full p-0 sm:max-w-sm" showCloseButton={false}>
-          {selectedContext ? <SheetTitle className="sr-only">{selectedContext.row.title || t('title')}</SheetTitle> : null}
+          {/* story #4386 — 선택이 비는 순간에도 창 이름이 남게 늘 그린다(제목이 비면 페이지 이름 — 위 주석 그대로). */}
+          <SheetTitle className="sr-only">{selectedContext?.row.title || t('title')}</SheetTitle>
           {detailPanel}
         </SheetContent>
       </Sheet>

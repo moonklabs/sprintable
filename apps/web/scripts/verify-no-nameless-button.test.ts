@@ -38,6 +38,7 @@ function A({ t }) {
 function A({ t, label, onClose, props }) {
   return (<div>
     <button aria-label={t('close')} onClick={onClose}><X /></button>
+    <h2 id="h">제목</h2>
     <button aria-labelledby="h" onClick={onClose}><X /></button>
     <button title={label} onClick={onClose}><X /></button>
     <button onClick={onClose}><X />닫기</button>
@@ -79,3 +80,45 @@ describe('verify-no-nameless-button — 창', () => {
     expect(hits(src)).toEqual([]);
   });
 });
+
+// [SID:4386] PO 실측 표(PR 4765 head 3322f673f의 scanContent) — 칸마다 합성 입력. 옛 가드: A · B · D · E · G 통과(빈틈) · F 걸림(오탐).
+describe('verify-no-nameless-button — story #4386 빈틈 · 오탐', () => {
+  const one = (body: string) => hits(`import { X } from 'lucide-react';
+function A({ t }) {
+  return (<>
+    ${body}
+  </>);
+}`);
+
+  it.each([
+    ['A · 리터럴 빈 aria-label', '<button aria-label=""><X /></button>', ['button:4']],
+    ['A · 공백만인 aria-label', '<button aria-label="  "><X /></button>', ['button:4']],
+    ['B · 이 파일에 없는 id를 가리키는 labelledby', '<button aria-labelledby="nope"><X /></button>', ['button:4']],
+    ['D · 스스로 닫는 창', '<Dialog><DialogContent /></Dialog>', ['dialog:4']],
+    ['E · 조건부(&&) 제목만 있는 창', '<DialogContent>{t && <DialogTitle>제목</DialogTitle>}<p>본문</p></DialogContent>', ['dialog:4']],
+    ['E · 삼항 한쪽에만 제목', '<DialogContent>{t ? <DialogTitle>제목</DialogTitle> : null}<p>본문</p></DialogContent>', ['dialog:4']],
+    ['F · 작은따옴표 aria-hidden 버튼(숨김 → 안 걸림)', "<button aria-hidden='true'><X /></button>", []],
+    ['G · 작은따옴표 aria-hidden 글자는 이름 아님', "<button><span aria-hidden='true'>x</span><X /></button>", ['button:4']],
+    ['대조 · 아이콘만 있는 버튼', '<button><X /></button>', ['button:4']],
+    ['대조 · 이름 있는 버튼', '<button aria-label="닫기"><X /></button>', []],
+  ] as const)('%s', (_label, body, expected) => {
+    expect(one(body)).toEqual(expected);
+  });
+
+  it.each([
+    ['labelledby가 이 파일의 id를 가리킴', '<h2 id="t1">제목</h2><button aria-labelledby="t1"><X /></button>'],
+    ['labelledby 여러 id가 다 있음', '<h2 id="a">A</h2><p id="b">B</p><button aria-labelledby="a b"><X /></button>'],
+    ['labelledby가 식(모름 → 이름 있다고 봄)', '<button aria-labelledby={titleId}><X /></button>'],
+    ['삼항 양쪽 다 제목', '<DialogContent>{t ? <DialogTitle>가</DialogTitle> : <DialogTitle>나</DialogTitle>}</DialogContent>'],
+    ['조건부 제목 + 창 aria-label', '<DialogContent aria-label="설정">{t && <DialogTitle>제목</DialogTitle>}</DialogContent>'],
+    ['스스로 닫는 창 + aria-labelledby(있는 id)', '<h2 id="dt">제목</h2><DialogContent aria-labelledby="dt" />'],
+    ["{'true'} aria-hidden 버튼", "<button aria-hidden={'true'}><X /></button>"],
+  ] as const)('음성 대조 — %s', (_label, body) => {
+    expect(one(body)).toEqual([]);
+  });
+
+  it('labelledby 여러 id 중 하나라도 없으면 건다', () => {
+    expect(one('<h2 id="a">A</h2><button aria-labelledby="a missing"><X /></button>')).toEqual(['button:4']);
+  });
+});
+
