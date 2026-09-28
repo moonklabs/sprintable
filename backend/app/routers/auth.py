@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
@@ -746,7 +747,8 @@ async def register(
         # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
         locale = resolve_locale(user.locale)
         copy = TRANSACTIONAL_COPY["verify_email"][locale]
-        delivered = send_email(
+        delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+            send_email,
             to=user.email,
             subject=copy["subject"],
             html_body=render_action_email(
@@ -1775,7 +1777,8 @@ async def forgot_password(
         from app.services.email_copy import TRANSACTIONAL_COPY
         locale = resolve_locale(user.locale)
         copy = TRANSACTIONAL_COPY["reset_password"][locale]
-        send_email(
+        await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+            send_email,
             to=user.email,
             subject=copy["subject"],
             html_body=render_action_email(
@@ -1893,7 +1896,8 @@ async def request_set_password(
     from app.services.email_copy import TRANSACTIONAL_COPY
     locale = resolve_locale(user.locale)
     copy = TRANSACTIONAL_COPY["set_password_confirm"][locale]
-    delivered = send_email(
+    delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+        send_email,
         to=user.email,
         subject=copy["subject"],
         html_body=render_action_email(
@@ -2012,7 +2016,8 @@ async def resend_verification(
     from app.services.email_copy import TRANSACTIONAL_COPY
     locale = resolve_locale(user.locale)
     copy = TRANSACTIONAL_COPY["verify_email"][locale]
-    delivered = send_email(
+    delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+        send_email,
         to=user.email,
         subject=copy["subject"],
         html_body=render_action_email(

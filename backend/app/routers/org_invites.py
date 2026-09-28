@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -111,7 +112,9 @@ async def create_org_invite(
     )
     org_name = org.name if org else str(id)
     invitee_locale = await _resolve_invitee_locale(session, invite.email)
-    error = send_invite_email(
+    # story #4403 — send_invite_email은 동기(send_email · SMTP 10s · Resend 30s) — 이벤트 루프를 막지 않게.
+    error = await asyncio.to_thread(
+        send_invite_email,
         to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
     )
     sent_at = None if error else datetime.now(timezone.utc)
@@ -145,7 +148,9 @@ async def resend_org_invite(
     )
     org_name = org.name if org else str(id)
     invitee_locale = await _resolve_invitee_locale(session, invite.email)
-    error = send_invite_email(
+    # story #4403 — send_invite_email은 동기(send_email · SMTP 10s · Resend 30s) — 이벤트 루프를 막지 않게.
+    error = await asyncio.to_thread(
+        send_invite_email,
         to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
     )
     sent_at = None if error else datetime.now(timezone.utc)
