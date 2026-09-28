@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
-BACKGROUND_JOB_KINDS = ("channel_video_confirm",)
+BACKGROUND_JOB_KINDS = ("channel_video_confirm", "attachment_convert", "loop_context_pack", "retro_synthesis")
 BACKGROUND_JOB_STATUSES = ("pending", "in_progress", "completed", "failed")
 
 
@@ -43,7 +43,11 @@ class BackgroundJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        CheckConstraint("kind IN ('channel_video_confirm')", name="ck_background_jobs_kind"),
+        # story #4336 PR2 ②(마이그 0417) — 첨부 변환 · 컨텍스트팩(캐시 미스) · 회고 종합/추천.
+        CheckConstraint(
+            "kind IN ('channel_video_confirm', 'attachment_convert', 'loop_context_pack', 'retro_synthesis')",
+            name="ck_background_jobs_kind",
+        ),
         CheckConstraint("status IN ('pending', 'in_progress', 'completed', 'failed')", name="ck_background_jobs_status"),
         Index("ix_background_jobs_due", "created_at", postgresql_where=text("status IN ('pending', 'in_progress')")),
     )

@@ -43,6 +43,7 @@ def anyio_backend():
 
 async def _seed(s):
     for sql in [
+        f"DELETE FROM background_jobs WHERE org_id IN ('{ORG}','{ORG2}')",
         f"DELETE FROM assets WHERE org_id IN ('{ORG}','{ORG2}')",
         f"DELETE FROM project_access WHERE project_id='{PROJ}'",
         f"DELETE FROM org_members WHERE org_id IN ('{ORG}','{ORG2}')",
@@ -181,3 +182,54 @@ async def test_convert_rejects_non_office_asset():
             assert exc.value.status_code == 422
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_convert_over_the_request_budget_answers_202_and_the_worker_finishes_it(_mock_storage_and_gotenberg, monkeypatch):
+    """story #4336 PR2 ②(PO 04:32Z) — 요청 안 예산(40s — 여기선 줄여서)을 넘기면 그 요청은 롤백 · 202 + 작업(attachment_convert) · 변환물 행 0.
+    워커가 한 번 돌면 작업 result = 예전 200 본문(asset_id · name · content_type). 다른 조직은 그 작업을 못 본다(404)."""
+    import asyncio
+    import json
+
+    from app.routers import attachments
+    from app.services import office_conversion
+    from tests.background_job_helpers import read_background_job, run_one_background_job
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+            source_id = await _mk_pptx_asset(s)
+
+        async def _slow_gotenberg(filename, data):
+            await asyncio.sleep(5)
+            return b"%PDF-1.4 slow"
+
+        monkeypatch.setattr(attachments, "CONVERT_REQUEST_BUDGET_SECONDS", 0.2)
+        monkeypatch.setattr(office_conversion, "_call_gotenberg", _slow_gotenberg)
+        async with Session() as s:
+            queued = await attachments.convert_attachment(asset_id=source_id, db=s, auth=_auth(USER), org_id=ORG)
+        assert queued.status_code == 202
+        job = json.loads(queued.body)
+        assert (job["kind"], job["status"]) == ("attachment_convert", "pending")
+        async with Session() as s:
+            pdfs = (await s.execute(text(f"SELECT count(*) FROM assets WHERE org_id='{ORG}' AND content_type='application/pdf'"))).scalar_one()
+        assert pdfs == 0  # 끊긴 요청은 아무것도 남기지 않는다
+
+        async def _fast_gotenberg(filename, data):
+            return b"%PDF-1.4 fake converted bytes"
+
+        monkeypatch.setattr(office_conversion, "_call_gotenberg", _fast_gotenberg)
+        assert (await run_one_background_job(Session, job["id"]))["completed"] == 1
+        done = await read_background_job(Session, ORG, job["id"], _auth(USER))
+        assert done["result"]["content_type"] == "application/pdf"
+        assert done["result"]["name"].endswith(".pdf")
+        assert uuid.UUID(done["result"]["asset_id"]) != source_id
+
+        with pytest.raises(HTTPException) as other_org:
+            await read_background_job(Session, ORG2, job["id"], _auth(USER2))
+        assert other_org.value.status_code == 404
+    finally:
+        await engine.dispose()
+

@@ -24,6 +24,15 @@ export function isFinishedJob(job: Pick<BackgroundJob, 'status'>): boolean {
   return job.status === 'completed' || job.status === 'failed';
 }
 
+/** story #4336 PR2 ②(PO 04:32Z) — 같은 라우트가 바로 결과(캐시 적중 · 작은 파일)나 작업(202 · 요청 예산 초과 · 캐시 미스)을 돌려준다.
+ * 본문이 이 종류의 아직 안 끝난 작업이면 그 작업, 아니면 null(바로 온 결과). */
+export function asQueuedJob(body: unknown, kind: string): BackgroundJob | null {
+  if (!body || typeof body !== 'object') return null;
+  const job = body as Partial<BackgroundJob>;
+  if (job.kind !== kind || typeof job.id !== 'string') return null;
+  return job.status === 'pending' || job.status === 'in_progress' ? (job as BackgroundJob) : null;
+}
+
 /** 작업이 끝날 때까지 다시 묻는다. `signal`이 끊기면(화면을 떠남) 멈추고 null. 응답을 못 받은 한 번은 건너뛰고 계속 묻는다. */
 export async function waitForBackgroundJob<R>(
   orgId: string, jobId: string, { signal, intervalMs = BACKGROUND_JOB_POLL_MS }: { signal?: AbortSignal; intervalMs?: number } = {},
@@ -35,11 +44,14 @@ export async function waitForBackgroundJob<R>(
       signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
     });
     if (signal?.aborted) return null;
+    // story #4336 PR2 ②(까디르 codex) — 화면을 떠나면(abort) 가던 요청도 끊고, 응답이 늦게 와도 끝난 작업을 넘기지 않는다.
     const res = await fetchWithAuth(`/api/organizations/${orgId}/background-jobs/${jobId}`, {
-      timeoutMs: LONG_ROUTES.backgroundJobStatus.browserMs,
+      signal, timeoutMs: LONG_ROUTES.backgroundJobStatus.browserMs,
     }).catch(() => null);
+    if (signal?.aborted) return null;
     if (!res?.ok) continue;
     const json = (await res.json().catch(() => null)) as { data?: BackgroundJob<R> } | null;
+    if (signal?.aborted) return null;
     const job = json?.data;
     if (job && isFinishedJob(job)) return job;
   }

@@ -1291,94 +1291,7 @@ async def test_synthesize_session_cross_project_404():
         app.dependency_overrides.clear()
 
 
-@pytest.mark.anyio
-async def test_synthesize_session_200_persists_via_repo_update():
-    client, session, app = await _client()
-    try:
-        call_count = 0
 
-        async def mock_execute(stmt, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                result.scalar_one_or_none.return_value = _mock_session()
-            else:
-                result.scalars.return_value.all.return_value = []  # items/actions 빈 리스트
-            return result
-
-        session.execute = mock_execute
-
-        synthesis_result = {
-            "learned": [{"text": "배운 것", "source": "s"}],
-            "generated_at": "2026-07-03T00:00:00+00:00", "source": "ai_draft",
-        }
-        updated = _mock_session()
-        updated.synthesis = synthesis_result
-
-        with (
-            _allow_project_access(), _mock_resolve_member(),
-            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=synthesis_result)),
-            patch("app.repositories.base.BaseRepository.update", new=AsyncMock(return_value=updated)) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesize")
-
-        assert resp.status_code == 200
-        assert resp.json()["synthesis"]["learned"][0]["text"] == "배운 것"
-        mock_update.assert_awaited_once_with(SESSION_ID, synthesis=synthesis_result)
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.anyio
-async def test_synthesize_llm_failure_does_not_overwrite_existing_cache():
-    """data-loss 방지(오르테가 지적 2026-07-03) — LLM 생성 실패(svc가 None 반환) 시 502를
-    반환하고 repo.update()를 절대 호출하지 않는다(기존 good synthesis 캐시 보존)."""
-    client, session, app = await _client()
-    try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_session()
-        session.execute = AsyncMock(return_value=mock_result)
-
-        with (
-            _allow_project_access(),
-            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=None)),
-            patch("app.repositories.base.BaseRepository.update", new=AsyncMock()) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesize")
-
-        assert resp.status_code == 502
-        assert resp.json()["error"]["code"] == "SYNTHESIS_GENERATION_FAILED"
-        mock_update.assert_not_awaited()  # 핵심 — 실패 시 캐시 절대 건드리지 않음
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.anyio
-async def test_recommend_next_llm_failure_does_not_overwrite_existing_cache():
-    client, session, app = await _client()
-    try:
-        s = _mock_session()
-        s.synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "t", "source": "ai_draft"}
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = s
-        session.execute = AsyncMock(return_value=mock_result)
-
-        with (
-            _allow_project_access(),
-            patch("app.routers.retros.synth_svc.recommend_next", new=AsyncMock(return_value=None)),
-            patch("app.repositories.base.BaseRepository.update", new=AsyncMock()) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
-
-        assert resp.status_code == 502
-        assert resp.json()["error"]["code"] == "RECOMMENDATION_GENERATION_FAILED"
-        mock_update.assert_not_awaited()
-    finally:
-        app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
@@ -1457,196 +1370,8 @@ async def test_recommend_next_cross_project_404():
         app.dependency_overrides.clear()
 
 
-@pytest.mark.anyio
-async def test_recommend_next_200_when_synthesis_present():
-    client, session, app = await _client()
-    try:
-        s = _mock_session()
-        s.synthesis = {
-            "learned": [{"text": "x", "source": "s"}],
-            "generated_at": "2026-07-03T00:00:00+00:00", "source": "ai_draft",
-        }
-        call_count = 0
-
-        async def mock_execute(stmt, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                result.scalar_one_or_none.return_value = s
-            else:
-                result.scalars.return_value.all.return_value = []
-            return result
-
-        session.execute = mock_execute
-
-        candidates = [{
-            "id": str(uuid.uuid4()), "statement": "다음엔 X를 검증할 것이다.",
-            "metric_definition": {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"},
-            "measure_after": "2026-08-01T00:00:00+00:00", "confidence": 0.5,
-            "rationale": "r", "requires_confirmation": True,
-        }]
-        updated = _mock_session()
-        updated.synthesis = s.synthesis
-        updated.next_hypotheses = candidates
-
-        with (
-            _allow_project_access(), _mock_resolve_member(),
-            patch("app.routers.retros.synth_svc.recommend_next", new=AsyncMock(return_value=candidates)),
-            patch("app.repositories.base.BaseRepository.update", new=AsyncMock(return_value=updated)) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
-
-        assert resp.status_code == 200
-        assert resp.json()["next_hypotheses"][0]["statement"] == "다음엔 X를 검증할 것이다."
-        mock_update.assert_awaited_once_with(SESSION_ID, next_hypotheses=candidates)
-    finally:
-        app.dependency_overrides.clear()
 
 
-# ── story 4b87d3a6: combined POST /{id}/synthesis(FE 계약 정합) ────────────────
-
-@pytest.mark.anyio
-async def test_synthesis_combined_200_both_l2_and_l3_succeed():
-    """FE `retro/[id]/page.tsx`가 기대하는 정확한 shape — 1콜로 synthesis+next_hypotheses
-    둘 다 채워져 돌아온다."""
-    client, session, app = await _client()
-    try:
-        call_count = 0
-
-        async def mock_execute(stmt, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                result.scalar_one_or_none.return_value = _mock_session()
-            else:
-                result.scalars.return_value.all.return_value = []
-            return result
-
-        session.execute = mock_execute
-
-        synthesis_result = {
-            "learned": [{"text": "배운 것", "source": "s"}],
-            "generated_at": "2026-07-04T00:00:00+00:00", "source": "ai_draft",
-        }
-        candidates = [{
-            "id": str(uuid.uuid4()), "statement": "다음엔 X를 검증할 것이다.",
-            "metric_definition": {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"},
-            "measure_after": "2026-08-01T00:00:00+00:00", "confidence": 0.5,
-            "rationale": "r", "requires_confirmation": True,
-        }]
-
-        after_l2 = _mock_session()
-        after_l2.synthesis = synthesis_result
-        after_l3 = _mock_session()
-        after_l3.synthesis = synthesis_result
-        after_l3.next_hypotheses = candidates
-
-        with (
-            _allow_project_access(), _mock_resolve_member(),
-            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=synthesis_result)),
-            patch("app.routers.retros.synth_svc.recommend_next", new=AsyncMock(return_value=candidates)),
-            patch(
-                "app.repositories.base.BaseRepository.update",
-                new=AsyncMock(side_effect=[after_l2, after_l3]),
-            ) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesis")
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["synthesis"]["learned"][0]["text"] == "배운 것"
-        assert body["next_hypotheses"][0]["statement"] == "다음엔 X를 검증할 것이다."
-        assert mock_update.await_count == 2
-        mock_update.assert_any_await(SESSION_ID, synthesis=synthesis_result)
-        mock_update.assert_any_await(SESSION_ID, next_hypotheses=candidates)
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.anyio
-async def test_synthesis_combined_l2_failure_502_no_persist():
-    """L2(synthesize) 실패 → 기존 /synthesize와 동일하게 502, repo.update 절대 호출 안 됨
-    (data-loss 방지 — 기존 good synthesis/next_hypotheses 캐시 그대로)."""
-    client, session, app = await _client()
-    try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_session()
-        session.execute = AsyncMock(return_value=mock_result)
-
-        with (
-            _allow_project_access(),
-            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=None)),
-            patch("app.repositories.base.BaseRepository.update", new=AsyncMock()) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesis")
-
-        assert resp.status_code == 502
-        assert resp.json()["error"]["code"] == "SYNTHESIS_GENERATION_FAILED"
-        mock_update.assert_not_awaited()
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.mark.anyio
-async def test_synthesis_combined_l3_failure_still_200_preserves_cached_next_hypotheses():
-    """PO crux(2026-07-04 ①) — L2 성공+L3 실패는 combined 호출 자체를 안 죽인다. synthesis는
-    갱신 저장되고, next_hypotheses는 재저장 없이 기존(예전) 캐시가 응답에 그대로 노출된다
-    (#1863 data-loss 방지 원칙 연장 — 방금 실패한 L3로 예전 good 캐시를 지우지 않음)."""
-    client, session, app = await _client()
-    try:
-        call_count = 0
-
-        async def mock_execute(stmt, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                result.scalar_one_or_none.return_value = _mock_session()
-            else:
-                result.scalars.return_value.all.return_value = []
-            return result
-
-        session.execute = mock_execute
-
-        synthesis_result = {
-            "learned": [{"text": "새 종합", "source": "s"}],
-            "generated_at": "2026-07-04T00:00:00+00:00", "source": "ai_draft",
-        }
-        stale_candidates = [{
-            "id": str(uuid.uuid4()), "statement": "예전 추천(재생성 실패로 그대로 유지됨)",
-            "metric_definition": {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"},
-            "measure_after": "2026-08-01T00:00:00+00:00", "confidence": 0.5,
-            "rationale": "r", "requires_confirmation": True,
-        }]
-        after_l2 = _mock_session()
-        after_l2.synthesis = synthesis_result
-        after_l2.next_hypotheses = stale_candidates  # L3 미실행이라 재저장 없이 예전 값 그대로
-
-        with (
-            _allow_project_access(), _mock_resolve_member(),
-            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=synthesis_result)),
-            patch("app.routers.retros.synth_svc.recommend_next", new=AsyncMock(return_value=None)),
-            patch(
-                "app.repositories.base.BaseRepository.update",
-                new=AsyncMock(return_value=after_l2),
-            ) as mock_update,
-        ):
-            async with client as c:
-                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesis")
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["synthesis"]["learned"][0]["text"] == "새 종합"
-        assert body["next_hypotheses"][0]["statement"] == "예전 추천(재생성 실패로 그대로 유지됨)"
-        # L3 실패 시 next_hypotheses에 대한 repo.update 재호출이 없어야 함(synthesis만 1회).
-        mock_update.assert_awaited_once_with(SESSION_ID, synthesis=synthesis_result)
-    finally:
-        app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
@@ -2017,3 +1742,104 @@ async def test_adopt_no_next_sprint_skips_link_backlog_proposed():
         mock_link.assert_not_called()
     finally:
         app.dependency_overrides.clear()
+
+
+# ─── story #4336 PR2 ②(PO 04:32Z) — 회고 종합/추천: 라우트는 작업(202)만 · 생성 규칙은 run_retro_generation ─────────────────────
+# (예전 이 자리의 라우트 테스트 일곱은 라우트가 LLM을 직접 부르던 때의 것 — 같은 규칙을 이제 서비스에서 본다. 실 DB 흐름은
+# test_e_sprint_loop_dc861e44_retro_synthesis_realdb.py.)
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("path", "mode"), [("synthesize", "synthesize"), ("synthesis", "synthesis"), ("recommend-next", "recommend_next")])
+async def test_retro_generation_routes_answer_202_and_queue_a_job(path, mode):
+    client, session, app = await _client()
+    try:
+        synthesized = _mock_session()
+        synthesized.synthesis = {"learned": [{"text": "배운 것", "source": "s"}]}
+
+        async def mock_execute(stmt, *args, **kwargs):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = synthesized
+            return result
+
+        session.execute = mock_execute
+        job = MagicMock()
+        job.id, job.kind, job.status, job.result, job.error = uuid.uuid4(), "retro_synthesis", "pending", None, None
+        job.created_at = job.finished_at = None
+        with (
+            _allow_project_access(), _mock_resolve_member(),
+            patch("app.services.background_jobs.enqueue_background_job", new=AsyncMock(return_value=job)) as enqueue,
+            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock()) as synth,
+        ):
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/{path}")
+        assert resp.status_code == 202, resp.text
+        assert (resp.json()["kind"], resp.json()["status"]) == ("retro_synthesis", "pending")
+        assert enqueue.await_args.kwargs["payload"] == {"session_id": str(SESSION_ID), "mode": mode}
+        synth.assert_not_awaited()  # 요청 안에선 LLM을 부르지 않는다
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _svc_repo(existing):
+    from app.repositories.retro import RetroSessionRepository
+
+    updated = MagicMock()
+    updated.synthesis = {"learned": [{"text": "새 학습", "source": "s"}]}
+    return (
+        patch.object(RetroSessionRepository, "get", new=AsyncMock(return_value=existing)),
+        patch.object(RetroSessionRepository, "update", new=AsyncMock(return_value=updated)),
+    )
+
+
+@pytest.mark.anyio
+async def test_run_retro_generation_synthesize_persists_and_failure_keeps_cache():
+    from app.services import retro_synthesis as svc
+
+    existing = _mock_session()
+    get_p, upd_p = _svc_repo(existing)
+    with get_p, upd_p as update, patch.object(svc, "synthesize", new=AsyncMock(return_value={"learned": [{"text": "배운 것"}]})):
+        await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="synthesize")
+    update.assert_awaited_once_with(SESSION_ID, synthesis={"learned": [{"text": "배운 것"}]})
+
+    get_p, upd_p = _svc_repo(existing)
+    with get_p, upd_p as update, patch.object(svc, "synthesize", new=AsyncMock(return_value=None)):
+        with pytest.raises(svc.RetroGenerationError) as ei:
+            await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="synthesize")
+    assert (ei.value.status_code, ei.value.detail["code"]) == (502, "SYNTHESIS_GENERATION_FAILED")
+    update.assert_not_awaited()  # 좋은 캐시를 빈 결과로 덮지 않는다(#1863)
+
+
+@pytest.mark.anyio
+async def test_run_retro_generation_recommend_next_persists_and_failure_keeps_cache():
+    from app.services import retro_synthesis as svc
+
+    existing = _mock_session()
+    existing.synthesis = {"learned": [{"text": "배운 것", "source": "s"}]}
+    get_p, upd_p = _svc_repo(existing)
+    with get_p, upd_p as update, patch.object(svc, "recommend_next", new=AsyncMock(return_value=[{"statement": "다음"}])):
+        await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="recommend_next")
+    update.assert_awaited_once_with(SESSION_ID, next_hypotheses=[{"statement": "다음"}])
+
+    get_p, upd_p = _svc_repo(existing)
+    with get_p, upd_p as update, patch.object(svc, "recommend_next", new=AsyncMock(return_value=None)):
+        with pytest.raises(svc.RetroGenerationError) as ei:
+            await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="recommend_next")
+    assert (ei.value.status_code, ei.value.detail["code"]) == (502, "RECOMMENDATION_GENERATION_FAILED")
+    update.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_run_retro_generation_synthesis_combined_l3_failure_keeps_l2():
+    """combined — 종합 성공 · 추천 실패면 실패로 끝내지 않고 종합만 저장(추천 캐시는 그대로 · PO crux 2026-07-04 ①)."""
+    from app.services import retro_synthesis as svc
+
+    existing = _mock_session()
+    get_p, upd_p = _svc_repo(existing)
+    with (
+        get_p, upd_p as update,
+        patch.object(svc, "synthesize", new=AsyncMock(return_value={"learned": [{"text": "배운 것"}]})),
+        patch.object(svc, "recommend_next", new=AsyncMock(return_value=None)),
+    ):
+        await svc.run_retro_generation(AsyncMock(), org_id=ORG_ID, session_id=SESSION_ID, mode="synthesis")
+    assert [c.kwargs for c in update.await_args_list] == [{"synthesis": {"learned": [{"text": "배운 것"}]}}]
+

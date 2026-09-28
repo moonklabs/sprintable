@@ -1681,8 +1681,9 @@ export default function ChannelPostEditPage() {
 
       setVideoUploadStatus({ phase: 'confirming' });
       const confirmRes = await fetchWithAuth(
+        // story #4336 PR2 ②(까디르 codex) — 영상 확정은 요청 안이 DB + HEAD(15초)뿐이라 자기 표 줄(channelVideoConfirm) — 이미지 40초 예산을 빌리지 않는다.
         `/api/organizations/${orgId}/channel-posts/drafts/${draftId}/assets/video/confirm`,
-        { timeoutMs: LONG_ROUTES.channelAssetConfirm.browserMs, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
+        { timeoutMs: LONG_ROUTES.channelVideoConfirm.browserMs, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_path: uploadInfo.object_path }) },
       );
       if (!confirmRes.ok) {
         const body = await confirmRes.json().catch(() => null);

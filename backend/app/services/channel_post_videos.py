@@ -388,7 +388,7 @@ async def confirm_channel_post_video_upload(
 
 async def finish_channel_post_video_confirm(
     db: AsyncSession, *, org_id: uuid.UUID, draft_id: uuid.UUID, object_path: str,
-    member_id: uuid.UUID, member_kind: str,
+    member_id: uuid.UUID, member_kind: str, commit: bool = True,
 ) -> tuple[ChannelPostVersion, ChannelPostVideo]:
     """story #3554(PO 確定①~④) — 업로드 확인+MP4 규격 검증+계보. attach와 동형
     (confirm_channel_post_image_upload의 새-버전 패턴 재사용) — 매 호출이 새
@@ -483,7 +483,7 @@ async def finish_channel_post_video_confirm(
     new_version, _channel, _violations = await create_channel_post_draft_version(
         db, org_id=org_id, work_item_id=draft.work_item_id, connection_id=draft.connection_id,
         text=latest.text, link_url=latest.link_url,
-        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256,
+        author_member_id=member_id, author_kind=member_kind, image_sha256=composite_sha256, commit=commit,
     )
 
     if existing_cover is not None:
@@ -497,7 +497,12 @@ async def finish_channel_post_video_confirm(
         codec=metadata.codec, created_by=member_id,
     )
     db.add(video_row)
-    await db.commit()
+    # story #4336 PR2 ②(까디르 codex · PO 08:19Z) — 작업 워커는 commit=False로 불러 결과(새 버전 · 영상 행)와 작업 완료 표시를 **한 커밋**에
+    # 싣는다. 둘 사이에서 인스턴스가 죽어도 리스 회수 뒤 재실행이 두 번째 버전을 만들지 않는다(background_jobs 모듈 docstring).
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(video_row)
     return new_version, video_row
 

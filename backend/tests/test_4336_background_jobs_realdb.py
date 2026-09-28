@@ -349,3 +349,146 @@ async def test_another_org_cannot_see_the_job():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_worker_dying_between_result_and_completion_reruns_to_exactly_one_result():
+    """story #4336 PR2 ②(까디르 codex · PO 08:19Z) — 재실행 멱등. 처리기가 쓴 결과(새 버전 · 영상 행)와 작업 완료 표시가 한 커밋이라, 그
+    사이에서 인스턴스가 죽으면 둘 다 없다 → 리스 회수 뒤 재실행 → 버전 · 영상 **하나씩**(예전: 결과를 먼저 커밋해 하나 더 생겼다)."""
+    from sqlalchemy import func, select, update
+
+    from app.main import app
+    from app.models.background_job import BackgroundJob
+    from app.models.channel_post_version import ChannelPostVersion
+    from app.models.channel_post_video import ChannelPostVideo
+    from app.services import background_jobs as bg
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, _, connection_id, story_id = await _world(Session, app)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r, _ = await _queue_video(client, org_id, draft_id, _build_mp4(duration_seconds=6.0, **_VALID_9_16))
+        job_id = uuid.UUID(r.json()["id"])
+
+        async def versions():
+            async with Session() as s:
+                return (await s.execute(
+                    select(func.count()).select_from(ChannelPostVersion).where(ChannelPostVersion.draft_id == uuid.UUID(draft_id))
+                )).scalar_one()
+
+        before = await versions()
+        real_finish = bg._finish
+        calls = {"n": 0}
+
+        async def dies_before_completion(session, jid, **values):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("instance died between result and completion")
+            return await real_finish(session, jid, **values)
+
+        with patch.object(bg, "_finish", dies_before_completion):
+            with pytest.raises(RuntimeError, match="instance died"):
+                await run_background_jobs_once(app)
+        async with Session() as s:
+            assert (await s.execute(select(func.count()).select_from(ChannelPostVideo))).scalar_one() == 0
+            await s.execute(update(BackgroundJob).where(BackgroundJob.id == job_id).values(
+                claimed_at=datetime.now(timezone.utc) - timedelta(seconds=bg.LEASE_SECONDS + 5),
+            ))
+            await s.commit()
+        assert (await _job(Session, str(job_id))).status == "in_progress"
+
+        counts = await run_background_jobs_once(app)
+        assert counts["completed"] == 1, counts
+        async with Session() as s:
+            assert (await s.execute(select(func.count()).select_from(ChannelPostVideo))).scalar_one() == 1
+        assert await versions() == before + 1
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_handler_that_commits_is_refused_and_retried_without_writing():
+    """틀 가드 — 처리기가 커밋하면 `HandlerCommittedError`로 막혀 일시 실패(재시도) · 처리기가 쓴 것은 남지 않는다."""
+    import dataclasses
+
+    from sqlalchemy import func, select
+
+    from app.main import app
+    from app.models.channel_post_video import ChannelPostVideo
+    from app.services import background_jobs as bg
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, _, connection_id, story_id = await _world(Session, app)
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            r, _ = await _queue_video(client, org_id, draft_id, _build_mp4(duration_seconds=6.0, **_VALID_9_16))
+
+        async def committing_run(db, job):
+            from app.services.channel_post_videos import finish_channel_post_video_confirm
+
+            p = job.payload
+            await finish_channel_post_video_confirm(
+                db, org_id=job.org_id, draft_id=uuid.UUID(p["draft_id"]), object_path=p["object_path"],
+                member_id=uuid.UUID(p["member_id"]), member_kind=p["member_kind"],  # commit=True(기본) — 규칙 위반
+            )
+            return {}
+
+        rule_breaker = dataclasses.replace(bg.HANDLERS["channel_video_confirm"], run=committing_run)
+        with patch.dict(bg.HANDLERS, {"channel_video_confirm": rule_breaker}):
+            counts = await run_background_jobs_once(app)
+        assert counts["retry"] == 1, counts
+        job = await _job(Session, r.json()["id"])
+        assert (job.status, job.attempt_count) == ("pending", 1)
+        async with Session() as s:
+            assert (await s.execute(select(func.count()).select_from(ChannelPostVideo))).scalar_one() == 0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_image_confirm_request_budget_cancel_still_cleans_the_uploaded_objects():
+    """story #4336 PR2 ②(까디르 codex) — 요청 예산(`asyncio.timeout`)이 파생 업로드 도중 끊으면 `CancelledError`(BaseException)라 예전
+    `except Exception` 정리를 건너뛰어 방금 올린 파생 객체가 고아로 남았다. 이제 취소에도 원본 · 파생을 지우고 504는 그대로."""
+    import os
+    from pathlib import Path
+
+    import app.routers.channel_posts as cp_router
+    import app.services.channel_post_images as images
+    from app.main import app
+    from tests.test_620beefc_channel_post_image_upload import _png_bytes
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, _, connection_id, story_id = await _world(Session, app)
+        provider_cls = type(images.get_storage_provider())
+        original_put = provider_cls.put_object
+        written: list[str] = []
+
+        async def _put_then_hang(self, container, object_path, data, *, content_type=None):
+            ok = await original_put(self, container, object_path, data, content_type=content_type)
+            written.append(object_path)
+            await asyncio.sleep(2.0)  # 예산(아래 0.3초)이 이 사이에 끊는다 — 객체는 이미 올라간 뒤
+            return ok
+
+        root = Path(os.environ["STORAGE_LOCAL_ROOT"]) / images.CHANNEL_MEDIA_BUCKET
+        async with _client_for(app) as client:
+            draft_id = await _create_draft(client, org_id=org_id, connection_id=connection_id, story_id=story_id)
+            object_path = f"channel-media/{org_id}/{draft_id}/{uuid.uuid4().hex}.png"
+            # 흑백(L) PNG — 규격 밖 모드라 파생(JPEG)을 만들어 올린다.
+            await _put_raw_object(object_path, _png_bytes(1080, 1080, mode="L", color=128), content_type="image/png")
+            with patch.object(cp_router, "IMAGE_REQUEST_BUDGET_SECONDS", 0.3), patch.object(provider_cls, "put_object", _put_then_hang):
+                r = await client.post(
+                    f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/assets/confirm", json={"object_path": object_path},
+                )
+        assert r.status_code == 504, r.text
+        assert r.json()["error"]["code"] == "CHANNEL_ASSET_STORAGE_TIMEOUT"
+        assert written, "파생 객체가 실제로 올라간 뒤 끊겨야 이 테스트가 뜻이 있다"
+        assert not (root / written[0]).exists(), f"고아 파생 객체: {written[0]}"
+        assert not (root / object_path).exists(), "원본도 어떤 행에도 안 걸렸으니 지운다(거부 때와 같은 규칙)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

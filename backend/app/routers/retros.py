@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
@@ -335,28 +336,42 @@ async def get_session(
     return await _build_session_response(db, session, auth)
 
 
+# story #4336 PR2 ② — 종합/추천 실패 · «종합 먼저» 본문의 한 정본. 요청 안 409와 워커(retro_synthesis.run_retro_generation)가 같이 쓴다.
+SYNTHESIS_FAILED_DETAIL = {"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."}
+RECOMMENDATION_FAILED_DETAIL = {"code": "RECOMMENDATION_GENERATION_FAILED", "message": "다음가설 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요."}
+SYNTHESIS_REQUIRED_DETAIL = {"code": "SYNTHESIS_REQUIRED", "message": "종합을 먼저 생성해야 합니다."}
+
+
+async def _queue_retro_generation(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, session_id: uuid.UUID, mode: str):
+    """story #4336 PR2 ②(PO 04:32Z) — 회고 종합/추천은 늘 LLM(25s × 2 · 순차 · 캐시 적중 길 없음)이라 작업(retro_synthesis)으로 넘기고
+    202 + 작업. 워커가 `retro_synthesis.run_retro_generation`으로 예전 본문 그대로 하고, 화면은 작업 상태로 결과(회고 세션)를 받는다."""
+    from fastapi.responses import JSONResponse
+
+    from app.services.background_jobs import background_job_view, enqueue_background_job
+
+    requester = await resolve_member(auth, org_id, db)
+    job = await enqueue_background_job(
+        db, org_id=org_id, kind="retro_synthesis", requested_by_member_id=requester.id,
+        payload={"session_id": str(session_id), "mode": mode},
+    )
+    await db.commit()
+    return JSONResponse(status_code=202, content=background_job_view(job))
+
+
 @router.post("/{id}/synthesize", response_model=SessionResponse)
 async def synthesize_session(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
-) -> SessionResponse:
+) -> Any:
     """dc861e44 §3 — L2 종합(on-demand·버튼 트리거). overwrite 저장(PO 결).
 
     ⚠️ result가 None(LLM 생성 실패)이면 **저장하지 않는다** — 기존 good synthesis 캐시를
     빈 결과로 덮어써 잃는 data-loss(오르테가 지적 2026-07-03·S28 캐시게이트 버그와 동형)를
     막는다. 502로 실패를 명시하고 재시도를 유도(자동 backfill 없음)."""
-    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-    result = await synth_svc.synthesize(db, session)
-    if result is None:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
-        )
-    updated = await repo.update(id, synthesis=result)
-    assert updated is not None
-    return await _build_session_response(db, updated, auth)
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    return await _queue_retro_generation(db, auth, repo.org_id, id, "synthesize")
 
 
 @router.post("/{id}/recommend-next", response_model=SessionResponse)
@@ -365,26 +380,16 @@ async def recommend_next_session(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
-) -> SessionResponse:
+) -> Any:
     """dc861e44 §3 — L3 다음가설 추천(on-demand). synthesis 선행 필수 — PO 결(2026-07-03):
     fail-closed(409), 자동 선행 생성 안 함(HITL 순서 — 팀이 종합을 보고/편집한 뒤 추천)."""
     session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     if not _has_valid_synthesis(session.synthesis):
         raise HTTPException(
             status_code=409,
-            detail={"code": "SYNTHESIS_REQUIRED", "message": "종합을 먼저 생성해야 합니다."},
+            detail=SYNTHESIS_REQUIRED_DETAIL,
         )
-    result = await synth_svc.recommend_next(session.synthesis)
-    if result is None:
-        # synthesize_session과 동일 원칙 — 실패를 빈 배열로 조용히 저장해 기존 good
-        # next_hypotheses 캐시를 지우지 않는다(오르테가 지적 2026-07-03).
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "RECOMMENDATION_GENERATION_FAILED", "message": "다음가설 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
-        )
-    updated = await repo.update(id, next_hypotheses=result)
-    assert updated is not None
-    return await _build_session_response(db, updated, auth)
+    return await _queue_retro_generation(db, auth, repo.org_id, id, "recommend_next")
 
 
 # story 4b87d3a6: FE `retro/[id]/page.tsx`+BFF는 `POST /{id}/synthesis`(명사) 1콜로
@@ -398,31 +403,15 @@ async def synthesize_and_recommend(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
-) -> SessionResponse:
+) -> Any:
     """dc861e44 §3 L2+L3 combined(FE 계약 정합, story 4b87d3a6). L2 실패 → 502(`/synthesize`와
     동일 코드). L2 성공+L3 실패는 **combined 호출 자체를 실패시키지 않는다**(PO crux
     2026-07-04 ①): synthesis는 이미 확정 저장됐고, next_hypotheses는 기존 캐시를 그대로
     유지(#1863 data-loss 방지 원칙 연장 — 방금 실패한 L3로 예전 good 캐시를 지우지 않음).
     FE도 원래 next_hypotheses를 optional로 취급(`?? []`)이라 L3만 실패해도 L2 성과가
     죽지 않는다."""
-    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-    sresult = await synth_svc.synthesize(db, session)
-    if sresult is None:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
-        )
-    updated = await repo.update(id, synthesis=sresult)
-    assert updated is not None
-
-    nresult = await synth_svc.recommend_next(updated.synthesis)
-    if nresult is not None:
-        updated = await repo.update(id, next_hypotheses=nresult)
-        assert updated is not None
-    # nresult is None → 조용히 스킵(위 docstring 참고) — updated.next_hypotheses는 DB의
-    # 기존(가능하면 예전) 값 그대로.
-
-    return await _build_session_response(db, updated, auth)
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    return await _queue_retro_generation(db, auth, repo.org_id, id, "synthesis")
 
 
 @router.post("/{id}/next-hypotheses/adopt", response_model=SessionResponse)

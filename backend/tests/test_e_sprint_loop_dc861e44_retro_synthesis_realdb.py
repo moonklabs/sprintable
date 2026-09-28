@@ -47,6 +47,7 @@ def _auth():
 
 async def _seed(s):
     for sql in [
+        f"DELETE FROM background_jobs WHERE org_id='{ORG}'",
         f"DELETE FROM retro_sessions WHERE org_id='{ORG}'",
         f"DELETE FROM hypothesis_sprint_links WHERE hypothesis_id='{HYP}'",
         f"DELETE FROM hypotheses WHERE id='{HYP}'",
@@ -103,6 +104,28 @@ async def _seed(s):
     await s.commit()
 
 
+
+def _via_service(mode: str):
+    """story #4336 PR2 ② — 회고 종합/추천 라우트는 이제 작업만 넣는다(202). 생성 본문(저장 규칙 · 실패 본문)은 워커가 부르는
+    `retro_synthesis.run_retro_generation`으로 옮겼다 — 이 파일은 그 서비스를 예전 라우트와 같은 모양(응답 · HTTPException 502/409)으로 부른다."""
+    async def _call(session_id, *, db, auth, repo):
+        from fastapi import HTTPException
+
+        from app.routers.retros import get_session
+        from app.services.retro_synthesis import RetroGenerationError, run_retro_generation
+
+        try:
+            await run_retro_generation(db, org_id=ORG, session_id=session_id, mode=mode)
+        except RetroGenerationError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return await get_session(session_id, db=db, auth=auth, repo=repo)
+    return _call
+
+
+synthesize_session_via_job = _via_service("synthesize")
+recommend_next_session_via_job = _via_service("recommend_next")
+synthesize_and_recommend_via_job = _via_service("synthesis")
+
 async def _engine():
     eng = create_async_engine(_ASYNC)
     return eng, async_sessionmaker(eng, expire_on_commit=False)
@@ -137,7 +160,7 @@ async def test_hypotheses_embed_flattens_sprint_linked_hypothesis():
 
 @pytest.mark.anyio
 async def test_synthesize_then_recommend_next_full_flow():
-    from app.routers.retros import recommend_next_session, synthesize_session
+    recommend_next_session = recommend_next_session_via_job; synthesize_session = synthesize_session_via_job
 
     eng, Session = await _engine()
     try:
@@ -179,7 +202,7 @@ async def test_synthesis_combined_endpoint_persists_both_in_one_call():
     """story 4b87d3a6 — FE가 실제로 부르는 combined POST /{id}/synthesis 1콜로 L2+L3 둘 다
     persist되고, 그 결과가 이후 GET에도 그대로 남아있는지(라우터 표면 실증 — 서비스 유닛
     mock으론 못 잡는 엔드포인트 부재 클래스, 8236bbc3/18eefc31과 동형)."""
-    from app.routers.retros import synthesize_and_recommend
+    synthesize_and_recommend = synthesize_and_recommend_via_job
 
     eng, Session = await _engine()
     try:
@@ -213,7 +236,7 @@ async def test_synthesis_combined_l3_failure_preserves_stale_next_hypotheses_not
     """PO crux(2026-07-04 ①) — 기존 good next_hypotheses가 있는 상태에서 재종합 시 L3만
     실패하면(빈/malformed LLM 응답) combined 호출은 502가 아니라 200이고, 새 synthesis는
     갱신되지만 next_hypotheses는 예전 캐시가 그대로 응답에 남는다(overwrite 안 됨)."""
-    from app.routers.retros import synthesize_and_recommend, synthesize_session, recommend_next_session
+    synthesize_and_recommend = synthesize_and_recommend_via_job; synthesize_session = synthesize_session_via_job; recommend_next_session = recommend_next_session_via_job
 
     eng, Session = await _engine()
     try:
@@ -249,7 +272,7 @@ async def test_synthesis_combined_l3_failure_preserves_stale_next_hypotheses_not
 
 @pytest.mark.anyio
 async def test_recommend_next_without_synthesis_409():
-    from app.routers.retros import recommend_next_session
+    from app.routers.retros import recommend_next_session  # 라우트 앞단 검사(권한 404 · 종합 먼저 409)는 요청 안 그대로
 
     eng, Session = await _engine()
     try:
@@ -268,7 +291,7 @@ async def test_recommend_next_without_synthesis_409():
 async def test_synthesize_cross_project_404():
     """IDOR 가드 상속(#1801) — USER는 PROJ_B(SESSION_B) grant 없음.
     story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
-    from app.routers.retros import synthesize_session
+    from app.routers.retros import synthesize_session  # 라우트 앞단 검사(권한 404 · 종합 먼저 409)는 요청 안 그대로
 
     eng, Session = await _engine()
     try:
@@ -287,7 +310,7 @@ async def test_llm_failure_does_not_destroy_existing_good_synthesis():
     """까심 RC①(2026-07-03) — good synthesis가 이미 저장된 상태에서 [다시 생성]이 LLM 장애로
     실패하면 502를 반환하고 **DB의 기존 값은 그대로**여야 한다(재조회로 실증 — 세션 로컬 파이썬
     객체 비교가 아니라 진짜 커밋된 DB 상태 확인)."""
-    from app.routers.retros import get_session, synthesize_session
+    from app.routers.retros import get_session; synthesize_session = synthesize_session_via_job
 
     eng, Session = await _engine()
     try:
@@ -324,7 +347,7 @@ async def test_malformed_llm_response_does_not_destroy_existing_good_synthesis()
     안 지킨 텍스트**를 반환해도(raw는 존재) 기존 good synthesis가 살아남아야 한다. 1차 fix는
     raw가 None/예외인 경우만 잡았고, "raw는 있지만 malformed"는 여전히 1-bullet로 래핑해
     캐시를 덮어썼다(codex가 잡은 잔여 구멍) — 이제 이 경로도 502·캐시 보존."""
-    from app.routers.retros import get_session, synthesize_session
+    from app.routers.retros import get_session; synthesize_session = synthesize_session_via_job
 
     eng, Session = await _engine()
     try:
@@ -356,7 +379,7 @@ async def test_malformed_llm_response_does_not_destroy_existing_good_synthesis()
 @pytest.mark.anyio
 async def test_recommend_next_malformed_synthesis_in_db_returns_409_not_500():
     """까심 RC②(2026-07-03) — DB에 malformed synthesis(list)가 들어있어도 크래시 없이 409."""
-    from app.routers.retros import recommend_next_session
+    from app.routers.retros import recommend_next_session  # 라우트 앞단 검사(권한 404 · 종합 먼저 409)는 요청 안 그대로
 
     eng, Session = await _engine()
     try:
@@ -381,7 +404,7 @@ async def test_recommend_next_malformed_synthesis_in_db_returns_409_not_500():
 async def test_recommend_next_item_shape_malformed_synthesis_in_db_returns_409():
     """까심 codex RC②(2026-07-03) — learned는 비어있지 않은 list지만 아이템이 스키마 불일치
     (text 부재)면 여전히 409여야 한다(item-shape 미검증 시 통과하던 구멍)."""
-    from app.routers.retros import recommend_next_session
+    from app.routers.retros import recommend_next_session  # 라우트 앞단 검사(권한 404 · 종합 먼저 409)는 요청 안 그대로
 
     eng, Session = await _engine()
     try:
@@ -405,3 +428,67 @@ async def test_recommend_next_item_shape_malformed_synthesis_in_db_returns_409()
 def _repo(session):
     from app.repositories.retro import RetroSessionRepository
     return RetroSessionRepository(session, ORG)
+
+
+@pytest.mark.anyio
+async def test_synthesis_route_queues_a_job_and_the_worker_answers_the_old_session_shape():
+    """story #4336 PR2 ②(PO 04:32Z) — combined POST는 202 + 작업(retro_synthesis)만, 저장은 아직 0. 워커가 한 번 돌면 작업 상태 보기의
+    result.session이 예전 200 응답(SessionResponse) 모양 — 종합 · 추천 둘 다 · 이후 GET에도 남는다."""
+    import json
+
+    from app.routers.retros import get_session, synthesize_and_recommend
+    from tests.background_job_helpers import read_background_job, run_one_background_job
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            queued = await synthesize_and_recommend(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert queued.status_code == 202
+        job = json.loads(queued.body)
+        assert (job["kind"], job["status"]) == ("retro_synthesis", "pending")
+        async with Session() as s:
+            assert (await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))).synthesis is None
+
+        synth_raw = '{"items": [{"text": "작업으로 만든 학습", "source": "가설 1"}]}'
+        next_raw = '{"items": [{"statement": "작업으로 만든 추천", "rationale": "r", "confidence": 0.5}]}'
+        with patch("app.services.llm_client.generate_text", side_effect=[synth_raw, next_raw]):
+            counts = await run_one_background_job(Session, job["id"])
+        assert counts["completed"] == 1, counts
+
+        done = await read_background_job(Session, ORG, job["id"], _auth())
+        assert done["status"] == "completed"
+        session = done["result"]["session"]
+        assert session["synthesis"]["learned"][0]["text"] == "작업으로 만든 학습"
+        assert session["next_hypotheses"][0]["statement"] == "작업으로 만든 추천"
+        async with Session() as s:
+            again = await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert again.synthesis is not None and again.next_hypotheses is not None
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_failed_generation_fails_the_job_with_the_old_502_body():
+    """LLM이 빈 결과면 작업 = failed · error = 예전 요청이 받던 502 본문 그대로(SYNTHESIS_GENERATION_FAILED) — 재시도 안 함."""
+    import json
+
+    from app.routers.retros import synthesize_session
+    from tests.background_job_helpers import read_background_job, run_one_background_job
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            job = json.loads((await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))).body)
+        with patch("app.services.llm_client.generate_text", return_value=None):
+            counts = await run_one_background_job(Session, job["id"])
+        assert counts["failed"] == 1, counts
+        failed = await read_background_job(Session, ORG, job["id"], _auth())
+        assert failed["error"]["status_code"] == 502
+        assert failed["error"]["detail"]["code"] == "SYNTHESIS_GENERATION_FAILED"
+    finally:
+        await eng.dispose()
+

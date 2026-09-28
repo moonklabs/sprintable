@@ -624,6 +624,7 @@ async def create_channel_post_draft_version(
     source_content_item_id: uuid.UUID | None = None,
     hook_key: str | None = None,
     channel_payload: dict | None = None,
+    commit: bool = True,
 ) -> tuple[ChannelPostVersion, str, list[dict]]:
     """초안을 (org, work_item, connection_id)로 upsert하고 새 불변 버전을 추가한다 —
     site_posts.create_site_post_draft_version과 1:1 대응(AC1).
@@ -802,7 +803,11 @@ async def create_channel_post_draft_version(
     violations = lint_content(rule_row.rules if rule_row else None, text=text, link_url=link_url)
     draft.lint_result = {"rules_version": rule_row.version if rule_row else 0, "violations": violations}
 
-    await db.commit()
+    # story #4336 PR2 ② — 작업 워커(영상 확정)는 commit=False: 새 버전과 그 뒤 결과 · 작업 완료를 한 커밋에(background_jobs «재실행 멱등»).
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(version)
     return version, connection.channel, violations
 

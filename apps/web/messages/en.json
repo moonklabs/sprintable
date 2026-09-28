@@ -15,6 +15,7 @@
     "cta": "Back to dashboard"
   },
   "common": {
+    "backgroundJobSlow": "This is taking a while — it keeps processing even if you close this page.",
     "login": "Login",
     "logout": "Logout",
     "save": "Save",
@@ -5326,6 +5327,7 @@
     "conversionFailed": "Conversion failed.",
     "pdfConversionFailedDesc": "Couldn't convert this document to PDF.",
     "converting": "Converting…",
+    "previewPreparingLarge": "This is a large file — preparing the preview",
     "firstViewSlowNotice": "The first view can take up to 1–2 minutes ({elapsed}s elapsed).",
     "editRoomName": "Edit room name",
     "muteNotifications": "Mute notifications",

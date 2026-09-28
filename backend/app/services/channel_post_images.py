@@ -570,7 +570,9 @@ async def confirm_channel_post_image_upload(
         final_sha256 = derived_sha256 or original_sha256
 
         latest = latest_for_cover_check
-    except Exception:
+    except BaseException:
+        # story #4336 PR2 ②(까디르 codex) — 요청 예산(40초 `asyncio.timeout`)이 끊으면 `CancelledError`(BaseException)라 예전 `except Exception`을
+        # 건너뛰어 올린 파생 객체가 고아로 남았다. 취소에도 정리하고(각 삭제는 자기 시한) 그대로 다시 던진다 — 예산 초과는 여전히 504.
         await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
         raise
 
@@ -627,7 +629,7 @@ async def confirm_channel_post_image_upload(
         )
         db.add(image_row)
         await db.flush()
-    except Exception:
+    except BaseException:  # 위와 같은 까닭 — 요청 예산 취소에도 올린 객체를 정리한다
         await _discard_unreferenced_objects(provider, bucket, object_path, derived_object_path)
         raise
     try:

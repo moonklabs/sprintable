@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
+import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 import koMessages from '../../../../../../messages/ko.json';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
@@ -5830,8 +5831,14 @@ describe('ChannelPostEditPage — 릴스 영상 슬롯(story #3556)', () => {
       await flush();
       const input = container.querySelector('[data-testid="channel-post-video-file-input"]') as HTMLInputElement;
       Object.defineProperty(input, 'files', { value: [new File(['x'], 'a.mp4', { type: 'video/mp4' })] });
+      const timerSpy = vi.spyOn(globalThis, 'setTimeout');
       await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
       await flush();
+      // story #4336 PR2 ②(까디르 codex) — 영상 확정 요청은 자기 표 줄(channelVideoConfirm)의 브라우저 시한을 쓴다(이미지 40초 예산 아님).
+      const timerDelays = timerSpy.mock.calls.map((call) => call[1]);
+      timerSpy.mockRestore();
+      expect(timerDelays).toContain(LONG_ROUTES.channelVideoConfirm.browserMs);
+      expect(timerDelays).not.toContain(LONG_ROUTES.channelAssetConfirm.browserMs);
       const K = koMessages.content as Record<string, string>;
       const line = () => container.querySelector('[data-testid="channel-post-video-upload-progress"]')?.textContent ?? null;
       expect(line()).toBe(K.channelPostsImageConfirming);
