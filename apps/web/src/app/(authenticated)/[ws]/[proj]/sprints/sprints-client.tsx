@@ -971,9 +971,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                 declarations={quickDeclarations}
                 onChange={setQuickDeclarations}
               />
-              <Button size="sm" className="w-full" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
-                {activating ? '...' : t('declareSectionTitle')}
-              </Button>
+              <div className="flex gap-2">
+                {/* story #4370 — 선언 초안을 버릴 보이는 길(패널을 닫거나 옮겨도 초안은 남는다). */}
+                <Button size="sm" variant="ghost" onClick={() => { clearQuickDeclarationsDraft(); setAddingHypothesis(false); }} disabled={activating}>
+                  {t('cancel')}
+                </Button>
+                <Button size="sm" className="flex-1" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
+                  {activating ? '...' : t('declareSectionTitle')}
+                </Button>
+              </div>
             </div>
           )}
         </div>

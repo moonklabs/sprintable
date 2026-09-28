@@ -1555,3 +1555,30 @@ describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story
     expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
   });
 });
+
+// story #4370(까디르 P3) — 받은편지함 서명 창: 닫아도 사유 초안은 남고, 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+describe('ApprovalsQueue — 서명 창 «취소»는 사유 초안을 지운다(story #4370)', () => {
+  it('사유를 쓰고 «취소» → 창이 닫히고 · 다시 열면 빈 칸', async () => {
+    mockFetches([gate({ id: 'g-high-cancel', gate_type: 'merge_gate', status: 'pending', requires_human: true, can_approve: true, risk_grade: 'high', work_item_summary: { title: '고위험 항목', slug: null } })], []);
+    await mount();
+    const openSig = async () => {
+      const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+      await act(async () => { signBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    };
+    const cancelLabel = (koMessages.cage as unknown as Record<string, string>).cancel;
+    const reason = () => document.body.querySelector<HTMLTextAreaElement>('[data-slot="dialog-content"] #gate-sig-reason');
+    await openSig();
+    const el = reason()!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '버릴 사유');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-slot="dialog-content"] button')).find((b) => b.textContent?.trim() === cancelLabel)!;
+    await act(async () => { cancel.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(reason()).toBeNull();
+    await openSig();
+    expect(reason()!.value).toBe('');
+  });
+});
+

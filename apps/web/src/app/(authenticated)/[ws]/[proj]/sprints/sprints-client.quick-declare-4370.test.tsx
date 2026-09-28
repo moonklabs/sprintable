@@ -89,4 +89,15 @@ describe('스프린트 옆 패널 빠른 가설 선언 — 저장 실패는 초�
     expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull();
     expect(document.body.querySelector('[role="alert"]')).toBeNull();
   });
+
+  it('보이는 «취소»는 선언 초안을 버리고 폼을 접는다', async () => {
+    postOk = true;
+    await openQuickDeclare();
+    await act(async () => { button(sp.cancel)!.click(); });
+    await settle();
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull();
+    expect(button(sp.declareSectionTitle)).toBeUndefined();
+    expect(button(sp.declareAddCta)).toBeDefined();
+  });
 });
+

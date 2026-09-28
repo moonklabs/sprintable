@@ -894,6 +894,8 @@ export function ApprovalsQueue() {
               error={gateErrors[signatureGate.id]}
               onApprove={(reason) => resolveGate(signatureGate.id, 'approved', reason, true)}
               onReject={(reason) => resolveGate(signatureGate.id, 'rejected', reason)}
+              // story #4370(까디르 P3) — 창을 닫아도(✕ · 바깥 · Esc) 사유 초안은 남는다. 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+              onCancel={() => setSignatureTargetId(null)}
             />
           ) : null}
         </DialogContent>

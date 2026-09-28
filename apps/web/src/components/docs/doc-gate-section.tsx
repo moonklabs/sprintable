@@ -512,6 +512,8 @@ export function DocGateSection({
               onApprove={(reason) => sigApprove(reason)}
               onReject={(reason) => sigReject(reason)}
               compact
+              // story #4370 — 창을 닫아도 사유 초안은 남는다. 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
+              onCancel={() => setSigOpen(false)}
             />
           </DialogContent>
         </Dialog>
