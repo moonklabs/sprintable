@@ -158,3 +158,127 @@ describe('DocsClientLayout — 문서 트리는 한 번에 받는다(story #4376
     expect(container.textContent).not.toContain('개 표시 중');
   });
 });
+
+// story #4385 — «더 보기»가 «폴더 보기»에만 있었다(viewMode === 'folders' && docsHasMore · develop부터). 기본인 «묶음 보기»에서는
+// 서버가 has_more를 줘도 나머지를 받을 수단이 없었다(상한 5,000을 넘는 프로젝트만 닿음 · 오늘 dev 0곳). 두 보기 모두 같은 줄 · 같은 버튼.
+// 상한은 목 응답의 hasMore로 주입한다(상한 = 2개).
+describe('DocsClientLayout — «묶음 보기»에서도 나머지를 이어 받는다(story #4385)', () => {
+  const DOC_C = { ...DOC_A, id: 'd3', title: '문서C', slug: 'doc-c', sort_order: 2 };
+  function capped(calls: string[], first = [DOC_A, DOC_B]) {
+    return vi.fn(async (url: string) => {
+      calls.push(url);
+      if (!url.startsWith('/api/docs?') || url.includes('q=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
+      const cursor = new URL(url, 'http://t').searchParams.get('cursor');
+      return cursor
+        ? { ok: true, json: async () => ({ data: [DOC_C], meta: { hasMore: false, nextCursor: null, totalCount: 3 } }) }
+        : { ok: true, json: async () => ({ data: first, meta: { hasMore: true, nextCursor: 'cur-1', totalCount: 3 } }) };
+    });
+  }
+  const moreButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기');
+
+  it('묶음 보기(기본): «받은 수 / 총량» + 더 보기 → 커서 · tree=true로 이어 받고 붙인다', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', capped(calls));
+    await mount();
+    expect(container.textContent).toContain('3개 중 2개 표시 중');
+    expect(moreButton()).toBeTruthy();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const next = new URL(calls.filter((u) => u.startsWith('/api/docs?') && !u.includes('q=')).at(-1)!, 'http://t').searchParams;
+    expect(next.get('cursor')).toBe('cur-1');
+    expect(next.get('tree')).toBe('true');
+    expect(container.textContent).not.toContain('개 표시 중');
+    expect(moreButton()).toBeFalsy();
+  });
+
+  it('묶음 보기 + 태그 필터: 이어 받기 요청에 고른 태그가 실린다', async () => {
+    const calls: string[] = [];
+    const TAGGED_A = { ...DOC_A, tags: ['spec'] };
+    vi.stubGlobal('fetch', capped(calls, [TAGGED_A, DOC_B]));
+    await mount();
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.docs.tagFilter));
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const chip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#spec');
+    await act(async () => { chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(moreButton()).toBeTruthy();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const next = new URL(calls.filter((u) => u.startsWith('/api/docs?') && !u.includes('q=')).at(-1)!, 'http://t').searchParams;
+    expect(next.get('cursor')).toBe('cur-1');
+    expect(next.get('tags')).toBe('spec');
+  });
+
+  it('상한 이하(hasMore false)면 묶음 보기에도 줄 · 버튼 0 — 지금 화면 그대로', async () => {
+    const calls: string[] = [];
+    stubFetch({ onCall: (url) => calls.push(url) });
+    await mount();
+    // 묶음 보기는 묶음을 접은 채 그려 문서 제목이 곧바로 안 보인다 — 트리 요청이 실제로 나갔는지부터 본다(빈 판정 방지).
+    expect(calls.some((u) => u.startsWith('/api/docs?') && new URL(u, 'http://t').searchParams.get('tree') === 'true')).toBe(true);
+    expect(moreButton()).toBeFalsy();
+    expect(container.textContent).not.toContain('개 표시 중');
+  });
+});
+
+// story #4385(까디르 codex HIGH · PO 10:07Z) — 태그 필터를 바꿔도 새 응답 전까지 옛 cursor · hasMore가 남아 «더 보기»가 새 태그 + 옛
+// cursor로 나가거나, 옛 필터로 진행 중이던 이어 받기 응답이 새 목록에 붙었다(두 보기 모두 · 상한을 넘는 프로젝트만). 응답을 손으로 푸는 목.
+describe('DocsClientLayout — 필터가 바뀌면 옛 이어 받기를 버린다(story #4385)', () => {
+  const DOC_C = { ...DOC_A, id: 'd3', title: '문서C', slug: 'doc-c', sort_order: 2 };
+  const DOC_S = { ...DOC_A, id: 'd9', title: '문서S', slug: 'doc-s', sort_order: 0, tags: ['spec'] };
+  type Held = { url: string; resolve: (body: unknown) => Promise<void> };
+  function heldFetch(held: Held[]) {
+    return vi.fn((url: string) => {
+      if (!url.startsWith('/api/docs?') || url.includes('q=')) return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) });
+      return new Promise((done) => {
+        held.push({ url, resolve: async (body) => { await act(async () => { done({ ok: true, json: async () => body }); for (let i = 0; i < 6; i++) await Promise.resolve(); }); } });
+      });
+    });
+  }
+  const moreButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기');
+  const FIRST = { data: [{ ...DOC_A, tags: ['spec'] }, DOC_B], meta: { hasMore: true, nextCursor: 'cur-1', totalCount: 3 } };
+  async function openFoldersView() {
+    const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
+    await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  }
+  async function pickSpecTag() {
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.docs.tagFilter));
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const chip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#spec');
+    await act(async () => { chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); });
+  }
+
+  it('① 필터를 바꾼 직후(새 응답 전) «더 보기»가 옛 cursor로 나가지 않는다', async () => {
+    const held: Held[] = [];
+    vi.stubGlobal('fetch', heldFetch(held));
+    await mount();
+    await held[0].resolve(FIRST);
+    await openFoldersView();
+    expect(moreButton()).toBeTruthy();
+    await pickSpecTag();  // 새 태그 요청은 아직 안 풀림
+    const before = held.length;
+    const more = moreButton();
+    if (more) await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const sentWithOldCursor = held.slice(before).some((h) => new URL(h.url, 'http://t').searchParams.get('cursor') === 'cur-1');
+    expect(sentWithOldCursor).toBe(false);
+    expect(moreButton()).toBeFalsy();
+  });
+
+  it('② 옛 필터로 진행 중이던 이어 받기 응답이 늦게 와도 새 목록에 붙지 않는다', async () => {
+    const held: Held[] = [];
+    vi.stubGlobal('fetch', heldFetch(held));
+    await mount();
+    await held[0].resolve(FIRST);
+    await openFoldersView();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const oldMore = held.at(-1)!;
+    expect(new URL(oldMore.url, 'http://t').searchParams.get('cursor')).toBe('cur-1');
+    await pickSpecTag();
+    const fresh = held.at(-1)!;
+    expect(new URL(fresh.url, 'http://t').searchParams.get('tags')).toBe('spec');
+    await fresh.resolve({ data: [DOC_S], meta: { hasMore: false, nextCursor: null, totalCount: 1 } });
+    await oldMore.resolve({ data: [DOC_C], meta: { hasMore: false, nextCursor: null, totalCount: 3 } });
+    expect(container.textContent).toContain('문서S');
+    expect(container.textContent).not.toContain('문서C');
+  });
+});
+
