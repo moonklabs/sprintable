@@ -260,3 +260,20 @@ describe('AttentionQueueView — story #4382 BE 잘림 신호(truncated_kinds)',
     expect(container.textContent).toContain('3건은 여기 안 올림');
   });
 });
+
+describe('AttentionQueueView — story #4382 까디르 메모 ①(묶인 뒤 캡 이하여도 잘림은 보인다)', () => {
+  it('⭐gate_pending 101행이 스토리 6개로 묶여 넘침 0이어도 BE가 잘랐으면 «더 있을 수 있어요»', async () => {
+    const rows = Array.from({ length: 101 }, (_, i) => beItem({ kind: 'gate_pending', story_id: `s${i % 6}`, title: `게이트 ${i % 6}` }));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/glance/attention')) {
+        return { ok: true, json: async () => ({ data: { items: rows, truncated_kinds: ['gate_pending'] } }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { AttentionQueueView } = await import('./attention-queue-view');
+    await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('더 있을 수 있어요');
+    expect(container.textContent).not.toContain('0건');
+  });
+});

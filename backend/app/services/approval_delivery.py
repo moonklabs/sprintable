@@ -890,7 +890,8 @@ async def notify_gate_delegated_to_old_approver(
         select(ConversationMessage.conversation_id).where(
             ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
             ConversationMessage.mentioned_ids.contains([old_approver_id]),
-        ).order_by(ConversationMessage.created_at.desc()).limit(1)
+        # story #4382(까디르 메모 ⑤) — 대화 하나를 고르는 자리(메시지 흐름 순서 아님)라 동률이면 id로 고정.
+        ).order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc()).limit(1)
     )).first()
     if row is None:
         return []

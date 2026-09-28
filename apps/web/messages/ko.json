@@ -3751,6 +3751,7 @@
     "emptyBody": "모든 작업이 흐르고 있어요. 예외가 생기면 여기에 표시돼요.",
     "flowDemoted": "나머지는 흐르는 중 — {overflow}건은 여기 안 올림",
     "flowDemotedAtLeast": "나머지는 흐르는 중 — {overflow}건 이상은 여기 안 올림",
+    "flowDemotedMore": "나머지는 흐르는 중 — 더 있을 수 있어요",
     "kindVerifyFail": "검증 실패",
     "kindDecisionNeeded": "결정 필요",
     "kindBlocked": "막힘",

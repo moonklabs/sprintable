@@ -243,10 +243,14 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
               <span className="flex-1">{t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })}</span>
               <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
             </button>
-          ) : overflow > 0 ? (
+          ) : overflow > 0 || truncated ? (
+            // story #4382(까디르 메모 ①) — gate_pending · needs_input은 스토리로 묶여 서버 100행이 7개 미만이 될 수 있다. 그래도 BE가 자른
+            // 신호가 있으면(truncated_kinds) 줄을 보인다 — 남은 수를 모를 땐 수 없이 «더 있을 수 있어요».
             <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              {t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })}
+              {overflow > 0
+                ? t(truncated ? 'flowDemotedAtLeast' : 'flowDemoted', { overflow })
+                : t('flowDemotedMore')}
             </div>
           ) : null}
         </div>
