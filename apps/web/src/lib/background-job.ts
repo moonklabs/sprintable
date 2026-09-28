@@ -2,8 +2,9 @@
 // 이어서 한다. 화면은 작업 상태 보기로 끝(completed · failed)까지 다시 묻는다 — 간격은 발행 워커 폴링과 같은 값(한 곳).
 import { fetchWithAuth } from '@/lib/db/client';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
-// 발행 워커 폴링(채널 초안 상세)과 같은 5초. PR 4767이 그 값을 `lib/publish-worker-poll.ts` 한 곳으로 모으는 중 — 병합 뒤 그 상수로 합친다.
-export const BACKGROUND_JOB_POLL_MS = 5000;
+import { PUBLISH_WORKER_POLL_MS } from '@/lib/publish-worker-poll';
+// 발행 워커 폴링(채널 초안 상세 · 게이트 상세)과 같은 간격 — 정본은 `lib/publish-worker-poll.ts` 한 곳(PR 4767).
+export const BACKGROUND_JOB_POLL_MS = PUBLISH_WORKER_POLL_MS;
 /** PO 결정(05:22Z · 유나 권고) — 작업을 이만큼 넘게 기다리면 같은 진행 줄에 «시간이 걸리고 있어요 — 창을 닫아도 계속 처리돼요». 워커가 끝까지
  * 처리하고 다음 방문 때 결과가 보이니 참인 문장. */
 export const SLOW_JOB_NOTICE_MS = 10_000;
