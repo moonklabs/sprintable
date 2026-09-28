@@ -70,3 +70,40 @@ async def test_switch_on_logs_exactly_one_line_per_request(monkeypatch, capsys):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+# ── 배포: 프런트도 dev 밖은 명시 제거(까디르 렌즈 ② · PO 21:49Z) ──
+
+def _run_frontend_assembly(deploy_env: str) -> dict[str, str]:
+    """cloudbuild deploy-frontend 스텝을 실제 gcloud 호출 직전까지만 실행해 ENV_VARS · FE_REMOVE_ENV를 얻는다."""
+    import os
+    import re
+    import subprocess
+
+    from tests.test_deploy_backend_redis_secret_conflict import _apply_cloudbuild_escaping, _extract_step_script
+
+    script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
+    idx = script.index("gcloud run deploy sprintable-frontend")
+    assembly = script[:idx] + '\necho "ENV_VARS=${ENV_VARS}"\necho "FE_REMOVE_ENV=${FE_REMOVE_ENV}"\n'
+    subs = set(re.findall(r"\$\{(_[A-Z0-9_]+)\}", assembly))
+    env = {**os.environ, **{k: "x" for k in subs}, "_DEPLOY_ENV": deploy_env}
+    r = subprocess.run(["bash", "-c", assembly], env=env, capture_output=True, text=True, check=True)
+    return dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line and line.split("=", 1)[0] in ("ENV_VARS", "FE_REMOVE_ENV"))
+
+
+def test_frontend_turns_the_probe_on_in_dev_only_and_removes_it_elsewhere():
+    dev = _run_frontend_assembly("dev")
+    assert "XFF_PROBE_ENABLED=true" in dev["ENV_VARS"].split(",")
+    assert dev["FE_REMOVE_ENV"] == ""  # 같은 키를 켜면서 지우지 않는다
+    for other in ("prod", "staging"):
+        got = _run_frontend_assembly(other)
+        assert "XFF_PROBE_ENABLED" not in got["ENV_VARS"]
+        assert got["FE_REMOVE_ENV"] == "--remove-env-vars=XFF_PROBE_ENABLED"
+
+
+def test_frontend_deploy_command_carries_the_removal_flag():
+    from tests.test_deploy_backend_redis_secret_conflict import _extract_step_script
+
+    script = _extract_step_script("deploy-frontend")
+    call = script[script.index("gcloud run deploy sprintable-frontend"):]
+    assert "$${FE_REMOVE_ENV}" in call.split("--quiet")[0]
