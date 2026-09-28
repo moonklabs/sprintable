@@ -54,13 +54,10 @@ function dbOnlyRoute(basis: string): LongRoute {
 }
 
 export const LONG_ROUTES = {
-  /** 결제 시작(story #4335) — 결제 시도를 만들고 곧바로 답한다: 검증 · 슬롯 claim(DB) + 멈춘 이전 시도가 있으면 대사(Toss 조회 15).
-   * 빌링키 발급 · 청구 · 영수 메일은 응답 뒤 작업 — 결과는 시도 조회(billingAttemptStatus). */
-  billingCheckout: route(15_000, 'billing_payment_attempt.py start_checkout_attempt → _settle_other_processing → reconcile_attempt → toss_adapter.py:213(조회 15) · 청구는 run_attempt(응답 뒤)'),
-  /** 요금제 변경 시작(story #4335) — checkout과 같다(청구 · 부분 환불은 응답 뒤 작업). */
-  billingChangeTier: route(15_000, 'billing_payment_attempt.py start_change_tier_attempt → _settle_other_processing → toss_adapter.py:213(조회 15) · 청구는 run_attempt(응답 뒤)'),
-  /** 결제 시도 조회(story #4335) — 멈춘 시도면 이어받아 결론: Toss 조회 15 + change-tier 확정이면 옛 결제 부분 환불 15. */
-  billingAttemptStatus: route(30_000, 'billing_payment_attempt.py reconcile_attempt → toss_adapter.py:213(조회 15) · _finalize → refund_old_remainder → :258(환불 15)'),
+  /** 결제 시작 — 빌링키 발급 15 + 옛 키 삭제 15 + 청구 65 + 중복 주문 조회 15 + 영수 메일(청구 안에서 await). */
+  billingCheckout: route(110_000, 'toss_adapter.py:152(발급 15) · :142(삭제 15) · :196(청구 65) · :213(조회 15) · billing_charge.py:93(영수 메일 await) · org_subscription_checkout.py:199,206'),
+  /** 요금제 변경 — 청구 65 (+ 중복 조회 15) + 부분 환불 15 + 영수 메일. */
+  billingChangeTier: route(95_000, 'toss_adapter.py:196(청구 65) · :213(조회 15) · :258(환불 15) · org_subscription_tier_change.py:211,253,283'),
   /** 채널 즉시 발행(story #4336) — 요청은 공급자 호출 전 검사(DB)와 대기열 넣기뿐 · «발행 중»으로 곧바로 답한다. 공급자 호출(예전 최악:
    * 텍스트 80초 · X 스레드 ≈ 400초 · YouTube 상한 없음)은 발행 명령 워커가 하고, 화면은 초안을 다시 읽어 결과를 본다. */
   channelPublishNow: dbOnlyRoute('routers/channel_posts.py publish → services/channel_posts.py preflight_channel_post_publish(DB 읽기뿐 · 네트워크 0, test_4287 전송 층 덫) → publication_command.py requeue_for_human_publish → 200 processing · 공급자 호출은 process_due_publication_commands(워커)'),
