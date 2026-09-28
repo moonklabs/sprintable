@@ -10,7 +10,7 @@ import { fileExtLabel, formatDate, formatRelativeTime } from '@/lib/storage/form
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StorageUploaderAvatar } from './storage-uploader-avatar';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import { StorageFileGlyph } from './storage-file-glyph';
@@ -90,8 +90,10 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
         </div>
       </div>
 
-      {/* tabs — [SID:4388] shared line tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. */}
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'detail' | 'usage')} className="border-b border-border px-[14px] pt-[6px] pb-[5px]">
+      {/* tabs — [SID:4388] shared line tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it.
+          The body is the tab panel (role=tabpanel · named by its tab · a focus stop, so Tab reaches it); `contents` keeps the layout. */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'detail' | 'usage')} className="contents">
+      <div className="border-b border-border px-[14px] pt-[6px] pb-[5px]">
         <TabsList variant="line" activateOnFocus>
           <TabsTrigger value="detail">{t('tabDetail')}</TabsTrigger>
           <TabsTrigger value="usage">
@@ -100,12 +102,11 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
             <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
           </TabsTrigger>
         </TabsList>
-      </Tabs>
+      </div>
 
       {/* body */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-[14px]">
-        {tab === 'detail' ? (
-          <>
+        <TabsContent value="detail" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
             <MetaRow label={t('metaFormat')} value={asset.content_type} />
             <MetaRow label={t('metaSize')} value={formatFileSize(asset.size_bytes)} />
             <MetaRow label={t('metaFolder')} value={folderLabel ?? t('usageNone')} />
@@ -133,11 +134,12 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
                 <StorageSourceUsageList links={asset.source_links} />
               </>
             ) : null}
-          </>
-        ) : (
+        </TabsContent>
+        <TabsContent value="usage" className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
           <StorageSourceUsageList links={asset.source_links} />
-        )}
+        </TabsContent>
       </div>
+      </Tabs>
 
       {/* footer */}
       <div className="flex gap-2 border-t border-border px-4 py-3">

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 //
 // [SID:4388] The doc lists in the sidebar (auto groups · search results · recents) showed the open doc only by colour. The open
-// doc's button now carries aria-current="true" and the others carry none, so a screen reader says which one is open.
+// doc's button now carries aria-current="page" — the same as the doc tree (doc-tree.tsx), since choosing a doc opens its page —
+// and the others carry none, so a screen reader says which one is open.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,11 +61,11 @@ describe('[SID:4388] doc lists mark the open doc with aria-current', () => {
     await act(async () => { render('policy-b'); });
     await act(async () => { docButton('POLICY').click(); });
 
-    expect(docButton('제목-2').getAttribute('aria-current')).toBe('true');
+    expect(docButton('제목-2').getAttribute('aria-current')).toBe('page');
     expect(docButton('제목-1').hasAttribute('aria-current')).toBe(false);
 
     await act(async () => { render('policy-a'); });
-    expect(currentTitles()).toEqual(['true:제목-1']);
+    expect(currentTitles()).toEqual(['page:제목-1']);
 
     await act(async () => { render(null); });
     expect(currentTitles()).toEqual([]);
@@ -85,11 +86,11 @@ describe('[SID:4388] doc lists mark the open doc with aria-current', () => {
         />,
       );
     await act(async () => { render('policy-a'); });
-    expect(docButton('제목-1').getAttribute('aria-current')).toBe('true');
+    expect(docButton('제목-1').getAttribute('aria-current')).toBe('page');
     expect(docButton('제목-2').hasAttribute('aria-current')).toBe(false);
 
     await act(async () => { render('policy-b'); });
-    expect(docButton('제목-2').getAttribute('aria-current')).toBe('true');
+    expect(docButton('제목-2').getAttribute('aria-current')).toBe('page');
     expect(docButton('제목-1').hasAttribute('aria-current')).toBe(false);
   });
 
@@ -106,7 +107,7 @@ describe('[SID:4388] doc lists mark the open doc with aria-current', () => {
         />,
       );
     await act(async () => { render('policy-b'); });
-    expect(currentTitles()).toEqual(['true:제목-2']);
+    expect(currentTitles()).toEqual(['page:제목-2']);
 
     await act(async () => { render('elsewhere'); });
     expect(currentTitles()).toEqual([]);

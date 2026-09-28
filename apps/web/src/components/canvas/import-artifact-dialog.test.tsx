@@ -139,6 +139,19 @@ describe('ImportArtifactDialog — HTML 탭(story 64010b05 §3)', () => {
   });
 });
 
+function panelFacts(root: ParentNode) {
+  // Each tab points at its panel (aria-controls) and the rendered panel is named by the chosen tab and is a focus stop.
+  const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+  const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  const chosen = tabs.find((t) => t.getAttribute('aria-selected') === 'true')!;
+  return {
+    panels: panels.length,
+    namedByChosenTab: panels[0]?.getAttribute('aria-labelledby') === chosen.id,
+    chosenControlsIt: chosen.getAttribute('aria-controls') === panels[0]?.id,
+    focusable: panels[0]?.tabIndex === 0,
+  };
+}
+
 describe('[SID:4388] ImportArtifactDialog tabs announce the chosen tab', () => {
   it('«이미지» starts selected in a tablist; clicking «HTML 붙여넣기» moves aria-selected', async () => {
     await mount();
@@ -164,5 +177,17 @@ describe('[SID:4388] ImportArtifactDialog tabs announce the chosen tab', () => {
 
     await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
     expect(tabs()).toEqual(['true', 'false']);
+  });
+
+  it('each body is the tab panel of the chosen tab (named by it · a focus stop) and follows the choice', async () => {
+    await mount();
+    const full = { panels: 1, namedByChosenTab: true, chosenControlsIt: true, focusable: true };
+    expect(panelFacts(document.body)).toEqual(full);
+    expect(document.body.querySelector('[role="tabpanel"] input[type="file"]')).not.toBeNull();
+
+    const htmlTab = [...document.body.querySelectorAll('[role="tab"]')].find((b) => b.textContent === 'HTML 붙여넣기')!;
+    await act(async () => { htmlTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(panelFacts(document.body)).toEqual(full);
+    expect(document.body.querySelector('[role="tabpanel"] textarea')).not.toBeNull();
   });
 });

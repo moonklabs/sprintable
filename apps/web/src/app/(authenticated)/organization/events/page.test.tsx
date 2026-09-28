@@ -990,6 +990,19 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
   });
 });
 
+function panelFacts(root: ParentNode) {
+  // Each tab points at its panel (aria-controls) and the rendered panel is named by the chosen tab and is a focus stop.
+  const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+  const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  const chosen = tabs.find((t) => t.getAttribute('aria-selected') === 'true')!;
+  return {
+    panels: panels.length,
+    namedByChosenTab: panels[0]?.getAttribute('aria-labelledby') === chosen.id,
+    chosenControlsIt: chosen.getAttribute('aria-controls') === panels[0]?.id,
+    focusable: panels[0]?.tabIndex === 0,
+  };
+}
+
 describe('[SID:4388] event definer dialog — «기본 · 고급» uses the shared tabs (announced · arrow keys)', () => {
   it('«기본» starts selected; switching to «고급» moves aria-selected', async () => {
     mockFetches([]);
@@ -1020,5 +1033,22 @@ describe('[SID:4388] event definer dialog — «기본 · 고급» uses the shar
 
     await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
     expect(selected()).toEqual(['true', 'false']);
+  });
+
+  it('each body is the tab panel of the chosen tab (named by it · a focus stop) and follows the choice', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    const full = { panels: 1, namedByChosenTab: true, chosenControlsIt: true, focusable: true };
+    expect(panelFacts(dialog)).toEqual(full);
+    expect(dialog.querySelector('[role="tabpanel"] #event-payload-schema')).toBeNull();
+
+    await act(async () => { switchToAdvancedTab(); });
+    expect(panelFacts(dialog)).toEqual(full);
+    expect(dialog.querySelector('[role="tabpanel"] #event-payload-schema')).not.toBeNull();
+    // the name field stays outside the panels (it belongs to both tabs)
+    expect(dialog.querySelector('[role="tabpanel"] #event-name')).toBeNull();
   });
 });

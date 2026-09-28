@@ -59,6 +59,19 @@ function tabs() {
   return Array.from(container.querySelectorAll('[role="tab"]')).map((el) => `${el.textContent?.trim()}:${el.getAttribute('aria-selected')}`);
 }
 
+function panelFacts(root: ParentNode) {
+  // Each tab points at its panel (aria-controls) and the rendered panel is named by the chosen tab and is a focus stop.
+  const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+  const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  const chosen = tabs.find((t) => t.getAttribute('aria-selected') === 'true')!;
+  return {
+    panels: panels.length,
+    namedByChosenTab: panels[0]?.getAttribute('aria-labelledby') === chosen.id,
+    chosenControlsIt: chosen.getAttribute('aria-controls') === panels[0]?.id,
+    focusable: panels[0]?.tabIndex === 0,
+  };
+}
+
 describe('[SID:4388] StorageDetailPanel tabs announce the chosen tab', () => {
   it('«상세» starts selected; clicking «사용처» (with its count) moves aria-selected', async () => {
     await mount();
@@ -79,5 +92,17 @@ describe('[SID:4388] StorageDetailPanel tabs announce the chosen tab', () => {
 
     await act(async () => { tab(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); });
     expect(tabs()).toEqual(['상세:true', '사용처0:false']);
+  });
+
+  it('the body is the tab panel of the chosen tab (named by it · a focus stop) and follows the choice', async () => {
+    await mount();
+    const full = { panels: 1, namedByChosenTab: true, chosenControlsIt: true, focusable: true };
+    expect(panelFacts(container)).toEqual(full);
+    expect(container.querySelector('[role="tabpanel"]')!.textContent).toContain(koMessages.storage.metaFormat);
+
+    const usage = Array.from(container.querySelectorAll('[role="tab"]')).find((el) => el.textContent?.includes('사용처')) as HTMLElement;
+    await act(async () => { usage.click(); });
+    expect(panelFacts(container)).toEqual(full);
+    expect(container.querySelector('[role="tabpanel"]')!.textContent).not.toContain(koMessages.storage.metaFormat);
   });
 });
