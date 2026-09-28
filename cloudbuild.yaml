@@ -844,8 +844,7 @@ steps:
         else
           REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"
         fi
-        # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만). 서사는
-        # test_deploy_backend_redis_secret_conflict.py 아카이브(#3124/#3433 관례).
+        # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만 · 서사는 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
         fi
