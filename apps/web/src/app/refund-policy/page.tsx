@@ -9,7 +9,11 @@ import { BusinessInfoBlock } from '@/components/legal/legal-footer';
 // (formatScheduledAt)으로 절대 표기.
 import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
 
-export const metadata = { title: 'Refund Policy — Sprintable' };
+// story #4377 — 탭 제목도 로케일(본문은 이미 getTranslations · 예전엔 영어 고정 metadata라 한국어 화면에도 «Refund Policy — Sprintable»).
+export async function generateMetadata() {
+  const tLegal = await getTranslations('legal');
+  return { title: `${tLegal('refundPolicy')} — Sprintable` };
+}
 export const revalidate = 300;
 
 export default async function RefundPolicyPage() {

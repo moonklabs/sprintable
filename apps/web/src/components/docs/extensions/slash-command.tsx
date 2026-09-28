@@ -49,7 +49,12 @@ export function pickAndUpload(editor: Editor, accept?: string): void {
 }
 
 export interface SlashMenuItem {
+  /** 로케일 무관 고정 키(React key · 테스트). */
+  id: string;
+  /** story #4377 — 화면에 보이는 제목(로케일 · `strings.titles`). 예전엔 영어 리터럴이라 한국어 화면에 «Heading 1»이 떴다. */
   title: string;
+  /** 거르기 별칭 — 예전 영어 제목(영어로 치던 사람도 걸리게 · «/heading» · «/page»). */
+  aliases: string[];
   description: string;
   icon: FC<{ className?: string }>;
   command: (editor: Editor, range: Range) => void;
@@ -71,6 +76,8 @@ export interface SlashMenuStrings {
     media: string;
     advanced: string;
   };
+  /** story #4377 — 항목 제목(로케일). 키는 `items`와 같다. */
+  titles: SlashMenuStrings['items'];
   items: {
     heading1: string;
     heading2: string;
@@ -101,8 +108,17 @@ export interface SlashMenuStrings {
   toggleDefaultTitle: string;
 }
 
-/** title/icon/command은 리터럴로 고정(로케일 무관 검색 키), label/description/embed
- * prompt/삽입 기본값만 `strings`에서 resolve한다. */
+/** id/icon/command/aliases(영어 별칭)는 리터럴로 고정, title/label/description/embed
+ * prompt/삽입 기본값은 `strings`에서 resolve한다(story #4377 — 제목도 로케일). */
+/**
+ * story #4377 — 슬래시 거르기: 지금 로케일 제목 · 영어 별칭 둘 다에 대소문자 무시 부분일치. 예전엔 영어 제목 하나로만 걸러
+ * 한국어로 «/제목»을 치면 안 걸렸다(제목도 영어였다). 영어로 치던 사람(«/heading» · «/page»)도 그대로 걸린다.
+ */
+export function matchesSlashQuery(item: Pick<SlashMenuItem, 'title' | 'aliases'>, query: string): boolean {
+  const q = query.toLowerCase();
+  return [item.title, ...item.aliases].some((text) => text.toLowerCase().includes(q));
+}
+
 export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCategory[] {
   const mermaidStart = strings.mermaidDefault.start;
   const mermaidEnd = strings.mermaidDefault.end;
@@ -113,21 +129,27 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
       label: strings.categories.text,
       items: [
         {
-          title: 'Heading 1',
+          id: 'heading1',
+          title: strings.titles.heading1,
+          aliases: ['Heading 1'],
           description: strings.items.heading1,
           icon: Heading1,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
         },
         {
-          title: 'Heading 2',
+          id: 'heading2',
+          title: strings.titles.heading2,
+          aliases: ['Heading 2'],
           description: strings.items.heading2,
           icon: Heading2,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
         },
         {
-          title: 'Heading 3',
+          id: 'heading3',
+          title: strings.titles.heading3,
+          aliases: ['Heading 3'],
           description: strings.items.heading3,
           icon: Heading3,
           command: (editor, range) =>
@@ -139,21 +161,27 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
       label: strings.categories.list,
       items: [
         {
-          title: 'Bullet List',
+          id: 'bulletList',
+          title: strings.titles.bulletList,
+          aliases: ['Bullet List'],
           description: strings.items.bulletList,
           icon: List,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).toggleBulletList().run(),
         },
         {
-          title: 'Ordered List',
+          id: 'orderedList',
+          title: strings.titles.orderedList,
+          aliases: ['Ordered List'],
           description: strings.items.orderedList,
           icon: ListOrdered,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
         },
         {
-          title: 'Checklist',
+          id: 'checklist',
+          title: strings.titles.checklist,
+          aliases: ['Checklist'],
           description: strings.items.checklist,
           icon: ListTodo,
           command: (editor, range) =>
@@ -165,21 +193,27 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
       label: strings.categories.block,
       items: [
         {
-          title: 'Code Block',
+          id: 'codeBlock',
+          title: strings.titles.codeBlock,
+          aliases: ['Code Block'],
           description: strings.items.codeBlock,
           icon: Code,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
         },
         {
-          title: 'Blockquote',
+          id: 'blockquote',
+          title: strings.titles.blockquote,
+          aliases: ['Blockquote'],
           description: strings.items.blockquote,
           icon: Quote,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
         },
         {
-          title: 'Callout',
+          id: 'callout',
+          title: strings.titles.callout,
+          aliases: ['Callout'],
           description: strings.items.callout,
           icon: Lightbulb,
           command: (editor, range) =>
@@ -191,7 +225,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
               .run(),
         },
         {
-          title: 'Table',
+          id: 'table',
+          title: strings.titles.table,
+          aliases: ['Table'],
           description: strings.items.table,
           icon: Table,
           command: (editor, range) =>
@@ -208,7 +244,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
       label: strings.categories.media,
       items: [
         {
-          title: 'Image',
+          id: 'image',
+          title: strings.titles.image,
+          aliases: ['Image'],
           description: strings.items.image,
           icon: ImageIcon,
           command: (editor, range) => {
@@ -217,7 +255,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
           },
         },
         {
-          title: 'File',
+          id: 'file',
+          title: strings.titles.file,
+          aliases: ['File'],
           description: strings.items.file,
           icon: Paperclip,
           command: (editor, range) => {
@@ -226,7 +266,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
           },
         },
         {
-          title: 'Embed',
+          id: 'embed',
+          title: strings.titles.embed,
+          aliases: ['Embed'],
           description: strings.items.embed,
           icon: Globe,
           command: (editor, range) => {
@@ -238,7 +280,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
           },
         },
         {
-          title: 'Mermaid Diagram',
+          id: 'mermaidDiagram',
+          title: strings.titles.mermaidDiagram,
+          aliases: ['Mermaid Diagram'],
           description: strings.items.mermaidDiagram,
           icon: GitBranch,
           command: (editor, range) =>
@@ -259,7 +303,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
       label: strings.categories.advanced,
       items: [
         {
-          title: 'Columns',
+          id: 'columns',
+          title: strings.titles.columns,
+          aliases: ['Columns'],
           description: strings.items.columns,
           icon: Columns2,
           command: (editor, range) =>
@@ -273,7 +319,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
             }).run(),
         },
         {
-          title: 'Math Block',
+          id: 'mathBlock',
+          title: strings.titles.mathBlock,
+          aliases: ['Math Block'],
           description: strings.items.mathBlock,
           icon: Sigma,
           command: (editor, range) =>
@@ -283,7 +331,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
             }).run(),
         },
         {
-          title: 'Math Inline',
+          id: 'mathInline',
+          title: strings.titles.mathInline,
+          aliases: ['Math Inline'],
           description: strings.items.mathInline,
           icon: Sigma,
           command: (editor, range) =>
@@ -293,7 +343,9 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
             }).run(),
         },
         {
-          title: 'Toggle',
+          id: 'toggle',
+          title: strings.titles.toggle,
+          aliases: ['Toggle'],
           description: strings.items.toggle,
           icon: ChevronRight,
           command: (editor, range) =>
@@ -307,14 +359,18 @@ export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCa
             }).run(),
         },
         {
-          title: 'Page Embed',
+          id: 'pageEmbed',
+          title: strings.titles.pageEmbed,
+          aliases: ['Page Embed'],
           description: strings.items.pageEmbed,
           icon: FileText,
           command: (editor, range) =>
             editor.chain().focus().deleteRange(range).insertPageEmbed().run(),
         },
         {
-          title: 'Horizontal Rule',
+          id: 'horizontalRule',
+          title: strings.titles.horizontalRule,
+          aliases: ['Horizontal Rule'],
           description: strings.items.horizontalRule,
           icon: Minus,
           command: (editor, range) =>
@@ -386,7 +442,7 @@ const SlashMenu = forwardRef<
     const Icon = item.icon;
     return (
       <button
-        key={item.title}
+        key={item.id}
         type="button"
         data-active={isActive}
         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
@@ -579,10 +635,7 @@ export function createSlashCommandExtension(strings: SlashMenuStrings) {
       return {
         suggestion: {
           char: '/',
-          items: ({ query }: { query: string }) =>
-            items.filter((item) =>
-              item.title.toLowerCase().includes(query.toLowerCase()),
-            ),
+          items: ({ query }: { query: string }) => items.filter((item) => matchesSlashQuery(item, query)),
           render: () => createSuggestionRenderer(categories),
         } satisfies Partial<SuggestionOptions<SlashMenuItem>>,
       };
