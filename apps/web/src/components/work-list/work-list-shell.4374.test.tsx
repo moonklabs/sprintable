@@ -2,6 +2,7 @@
 //
 // [SID:4374] 390 작업 목록 시트 머리에 «✕»가 둘(시트 기본 닫기 + 안쪽 상세 패널 닫기 · 둘 다 접근 이름 «닫기») → 시트 안 닫기는 하나.
 // 누르면 선택 해제(= 시트와 상세가 함께 닫힘) · Esc 한 번 = 같은 동작. 1440 aside의 패널 닫기는 그대로.
+// 시트 창 접근 이름 = 열린 항목 제목(PO 01:23Z — 같은 SheetContent라 이 PR에).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -91,6 +92,17 @@ describe('[SID:4374] 390 작업 목록 시트 — 닫기 하나', () => {
     expect(sheet!.querySelector('[data-slot="sheet-close"]')).toBeNull();
     await act(async () => { closes[0]!.click(); });
     expect(replaceMock).toHaveBeenCalledWith('/work-list');
+  });
+
+  it('시트 창 접근 이름 = 열린 항목 제목(aria-labelledby → 화면 읽기 전용 제목)', async () => {
+    await mount();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const labelledby = dialog!.getAttribute('aria-labelledby');
+    expect(labelledby).toBeTruthy();
+    const title = document.getElementById(labelledby!);
+    expect(title?.textContent).toBe('할일1');
+    expect(title?.className).toContain('sr-only');
   });
 
   it('Esc 한 번 = 같은 동작(선택 해제)', async () => {
