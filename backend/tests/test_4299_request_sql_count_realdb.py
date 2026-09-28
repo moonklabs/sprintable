@@ -86,7 +86,20 @@ async def _seed(s, n: int) -> dict:
     for sql in stmts:
         await s.execute(text(sql))
     await s.commit()
-    return {"org": org, "user": user, "outsider": outsider, "proj": proj, "other_proj": other_proj}
+    return {"org": org, "other_org": other_org, "user": user, "outsider": outsider, "proj": proj, "other_proj": other_proj}
+
+
+async def _cleanup(s, seeded: dict) -> None:
+    """시드한 행을 org id로 지운다(공유 parity DB를 더럽히지 않게 · 까디르 4758 리뷰). 자식 → 부모 순."""
+    orgs = f"('{seeded['org']}','{seeded['other_org']}')"
+    for table in ("story_activities", "evidence", "gate", "item_dependency", "story_assignees"):
+        await s.execute(text(f"DELETE FROM {table} WHERE org_id IN {orgs}"))
+    await s.execute(text(f"DELETE FROM agent_project_profiles WHERE member_id IN (SELECT id FROM members WHERE org_id IN {orgs})"))
+    for table in ("stories", "members", "org_members", "projects"):
+        await s.execute(text(f"DELETE FROM {table} WHERE org_id IN {orgs}"))
+    await s.execute(text(f"DELETE FROM organizations WHERE id IN {orgs}"))
+    await s.execute(text(f"DELETE FROM users WHERE id IN ('{seeded['user']}','{seeded['outsider']}')"))
+    await s.commit()
 
 
 async def _measure(n: int) -> dict:
@@ -119,6 +132,7 @@ async def _measure(n: int) -> dict:
                 raise
 
     override_db_and_read(app, _db)
+    seeded = None
     try:
         async with Session() as s:
             seeded = await _seed(s, n)
@@ -144,6 +158,9 @@ async def _measure(n: int) -> dict:
     finally:
         app.dependency_overrides.clear()
         auth_module.async_session_factory = saved_factory
+        if seeded is not None:
+            async with Session() as s:
+                await _cleanup(s, seeded)
         await eng.dispose()
 
 
