@@ -73,10 +73,16 @@ describe('산출물 댓글 쓰기 칸은 캔버스 변환 밖 화면 층에(stor
     await mountWithDraftPin(640, 400);  // 50% · 50% → 화면 점 (640, 400) · 층 크기 0(jsdom)이면 넘침 맞춤 없이 +8
     expect(composeBox().style.left).toBe('648px');
     expect(composeBox().style.top).toBe('408px');
+    const sizeBefore = { className: composeBox().className, transform: composeBox().style.transform };
     const actual = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === canvas.viewerActualSizeAction)!;
     await act(async () => { actual.click(); });  // 뷰포트 0 → tx = -640 · ty = -400 → 핀 화면 점 (0, 0)
     expect(composeBox().style.left).toBe('8px');
     expect(composeBox().style.top).toBe('8px');
+    // AC3 — 배율이 바뀌어도 쓰기 칸 크기를 정하는 것(클래스 · 자기 변환)은 그대로, 조상 어디에도 scale이 없다.
+    expect({ className: composeBox().className, transform: composeBox().style.transform }).toEqual(sizeBefore);
+    for (let el: HTMLElement | null = compose(); el && el !== container; el = el.parentElement) {
+      expect(el.style.transform ?? '').not.toMatch(/scale\(/);
+    }
   });
 
   it('쓰기 칸 위에서 시작한 드래그는 캔버스를 움직이지 않는다(뷰포트 pan · 픽 처리 밖 — 단추 누름이 새던 원인)', async () => {

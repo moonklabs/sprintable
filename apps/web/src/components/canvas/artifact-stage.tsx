@@ -483,64 +483,64 @@ function CanvasViewport({
   return (
     <div className="flex h-full w-full flex-col">
       <div className="relative flex min-h-0 w-full flex-1 flex-col">
-      <div
-        ref={viewportRef}
-        data-artifact-canvas-viewport
-        className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
-        style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-      >
         <div
-          ref={contentRef}
-          data-artifact-canvas-content
-          className="absolute top-0 left-0"
-          style={{
-            width: bounds.w, height: bounds.h,
-            transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
-            transformOrigin: '0 0',
-          }}
+          ref={viewportRef}
+          data-artifact-canvas-viewport
+          className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
+          style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
-          {format === 'html' ? (
-            <iframe
-              title={title}
-              srcDoc={content}
-              sandbox="allow-scripts"
-              className={htmlInteractive ? 'rounded-lg bg-background' : 'pointer-events-none rounded-lg bg-background'}
-              style={{ width: bounds.w, height: bounds.h }}
-            />
-          ) : format === 'image' ? (
-            // eslint-disable-next-line @next/next/no-img-element -- artifact content는 외부/동적 URL이라 next/image 화이트리스트와 안 맞음.
-            <img
-              src={content}
-              alt={title}
-              className="pointer-events-none block h-full w-full rounded-lg object-contain"
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                if (img.naturalWidth > 0 && img.naturalHeight > 0) setImageBounds({ w: img.naturalWidth, h: img.naturalHeight });
-              }}
-            />
-          ) : mode === 'edit' ? null : (
-            <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} emptyPlaceholder={t('canvasEmptyContent')} />
-          )}
-          {overlay ? (
-            <div
-              data-artifact-canvas-overlay
-              className="absolute inset-0"
-              style={{ pointerEvents: isDragging ? 'none' : 'auto' }}
-            >
-              {overlay}
-            </div>
-          ) : null}
+          <div
+            ref={contentRef}
+            data-artifact-canvas-content
+            className="absolute top-0 left-0"
+            style={{
+              width: bounds.w, height: bounds.h,
+              transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
+              transformOrigin: '0 0',
+            }}
+          >
+            {format === 'html' ? (
+              <iframe
+                title={title}
+                srcDoc={content}
+                sandbox="allow-scripts"
+                className={htmlInteractive ? 'rounded-lg bg-background' : 'pointer-events-none rounded-lg bg-background'}
+                style={{ width: bounds.w, height: bounds.h }}
+              />
+            ) : format === 'image' ? (
+              // eslint-disable-next-line @next/next/no-img-element -- artifact content는 외부/동적 URL이라 next/image 화이트리스트와 안 맞음.
+              <img
+                src={content}
+                alt={title}
+                className="pointer-events-none block h-full w-full rounded-lg object-contain"
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img.naturalWidth > 0 && img.naturalHeight > 0) setImageBounds({ w: img.naturalWidth, h: img.naturalHeight });
+                }}
+              />
+            ) : mode === 'edit' ? null : (
+              <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} emptyPlaceholder={t('canvasEmptyContent')} />
+            )}
+            {overlay ? (
+              <div
+                data-artifact-canvas-overlay
+                className="absolute inset-0"
+                style={{ pointerEvents: isDragging ? 'none' : 'auto' }}
+              >
+                {overlay}
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
-      {screenOverlay ? (
-        <div data-artifact-screen-overlay className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg [&>*]:pointer-events-auto">
-          {screenOverlay({ place, area: viewportSize })}
-        </div>
-      ) : null}
+        {screenOverlay ? (
+          <div data-artifact-screen-overlay className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg [&>*]:pointer-events-auto">
+            {screenOverlay({ place, area: viewportSize })}
+          </div>
+        ) : null}
       </div>
       {/* [SID:4362] 좁은 폭에서 안내 글과 도구 버튼이 한 줄에 다 안 들어가면 도구 줄을 넘긴다 — 예전엔 «전체 보기» · «실제 크기»가 낱말 중간에서 꺾였다. */}
       <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
