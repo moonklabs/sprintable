@@ -3,7 +3,7 @@ import { createStorySchema } from '@sprintable/shared';
 
 import { StoryService, type CreateStoryInput } from '@/services/story';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
+import { apiSuccess, apiSuccessRawJson, apiError, ApiErrors } from '@/lib/api-response';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
@@ -69,12 +69,13 @@ export const GET = withRouteTiming('stories', async (request: Request) => {
     if (searchParams.get('unattached') === 'true' || searchParams.get('no_sprint') === 'true') {
       const _r = await proxyToFastapi(request, '/api/v2/stories');
       if (!_r.ok) return _r;
-      const data = await _r.json();
+      // [SID:4299 AC2 꼬리] 본문은 글자로만 받아 봉투에 그대로 끼운다(파싱 · 재직렬화 0 — apiSuccessRawJson).
+      const raw = await _r.text();
       markRoute('service');
       const totalHeader = _r.headers.get('x-total-count');
       // story #3761 — `total` 은퇴, 정본 `totalCount`(goals/tasks 관례) — 헤더 없으면
       // 키 생략이 아니라 `totalCount: null`로 «모른다»를 명시한다.
-      return markRouteReturn('serialize', apiSuccess(data, { totalCount: totalHeader !== null ? Number(totalHeader) : null }));
+      return markRouteReturn('serialize', apiSuccessRawJson(raw, { totalCount: totalHeader !== null ? Number(totalHeader) : null }));
     }
 
     const repo = await createStoryRepository();

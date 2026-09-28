@@ -102,6 +102,27 @@ describe('/api/stories GET — unattached=true 분기(story #2534, 카디르 QA 
     expect(body.meta).toEqual({ totalCount: null });
   });
 
+  // [SID:4299 AC2 꼬리] 본문을 파싱 · 재직렬화하지 않고 봉투에 글자 그대로 — 응답 바이트는 옛 apiSuccess(파싱 결과)와 같다.
+  it('응답 바이트 = 옛 봉투 {data, error: null, meta} 글자 그대로([SID:4299])', async () => {
+    const upstream = JSON.stringify([story('1'), { ...story('2'), title: '«한글» "따옴표"\n줄' }]);
+    h.proxyToFastapi.mockResolvedValue(new Response(upstream, { status: 200, headers: { 'Content-Type': 'application/json', 'x-total-count': '2' } }));
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true&limit=100'));
+    expect(res.headers.get('content-type')).toBe('application/json');
+    expect(await res.text()).toBe(JSON.stringify({ data: JSON.parse(upstream), error: null, meta: { totalCount: 2 } }));
+  });
+
+  it('본문을 파싱하지 않는다 — 상류 글자로 JSON.parse 0([SID:4299])', async () => {
+    const upstream = JSON.stringify([story('1')]);
+    h.proxyToFastapi.mockResolvedValue(new Response(upstream, { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
+      expect(parse.mock.calls.filter(([text]) => text === upstream)).toEqual([]);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it('BE 에러 응답이면 그대로 통과시킨다(200 아닌 응답 삼키지 않음)', async () => {
     h.proxyToFastapi.mockResolvedValue(new Response('boom', { status: 500 }));
     const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
