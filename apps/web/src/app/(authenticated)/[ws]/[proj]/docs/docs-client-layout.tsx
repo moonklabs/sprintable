@@ -220,10 +220,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // 동률이면 무동작이었다. 서버가 새 부모의 형제 번호를 한 번에 다시 매기고 그 번호를 돌려준다 — 화면은 그 번호를 그대로 반영한다
   // (낙관 추측 번호 없음). 실패하면 문장을 내고 트리를 다시 읽는다(story #3637과 같은 축).
   // story #4348 — 저장은 어댑터 한 곳(`lib/doc-reorder-api.ts` saveDocOrder · 응답 {doc, siblings} 해석 · 오류 갈래) — 끌기(여기)와 «⋮» 메뉴(아래)가 같은 길.
-  const placeDoc = useCallback(async (plan: DocMovePlan, failedTitle: string) => {
+  // story #4366(까디르) — 저장이 됐는지 돌려준다(트리는 접힌 폴더 «안으로» 떨굼 뒤 성공일 때만 펼친다).
+  const placeDoc = useCallback(async (plan: DocMovePlan, failedTitle: string): Promise<boolean> => {
     const result = await saveDocOrder(plan);
-    if (!result.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return; }
+    if (!result.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return false; }
     setTree((prev) => applyReorderResult(prev, result));
+    return true;
   }, [fetchTree, addToast]);
 
   const handleReorder = useCallback((plan: DocMovePlan) => placeDoc(plan, t('reorderFailed')), [placeDoc, t]);

@@ -59,3 +59,36 @@ export function reorderRequestBody(plan: DocMovePlan): Record<string, string | n
   if (plan.afterId !== undefined) body.after_id = plan.afterId;
   return body;
 }
+
+// story #4366 — 끌어 떨굼 판정(유나 판정 표). 판정 상자 = **행**(하위 트리 아님). 폴더로 보이는 행(폴더 아이콘 · 펼침 화살표를 그리는 행):
+// 위 25% 앞 · 가운데 50% 안(끝) · 아래 25% 뒤. 문서 행: 위 50% 앞 · 아래 50% 뒤(문서 안으로는 안 넣음 — 메뉴 «폴더로 이동…»도 폴더만 목적지).
+export type DropZone = 'before' | 'into' | 'after';
+
+export function dropZoneFor(relativeY: number, isFolderRow: boolean): DropZone {
+  if (!isFolderRow) return relativeY < 0.5 ? 'before' : 'after';
+  if (relativeY < 0.25) return 'before';
+  if (relativeY > 0.75) return 'after';
+  return 'into';
+}
+
+function isSelfOrDescendant(docs: DocPlaceable[], ancestorId: string, nodeId: string): boolean {
+  const seen = new Set<string>();
+  let current: string | null = nodeId;
+  while (current !== null && !seen.has(current)) {
+    if (current === ancestorId) return true;
+    seen.add(current);
+    current = docs.find((d) => d.id === current)?.parent_id ?? null;
+  }
+  return false;
+}
+
+/**
+ * 떨군 자리 → 서버에 보낼 한 자리. 표시(끄는 동안)와 결과(떨군 뒤)가 이 함수 하나에서 나온다 — «표시와 결과가 다름» 0.
+ * 자기 자신 · 자기 하위(순환)면 null(표시 없음 · 떨궈도 무동작). 같은 부모 안도 앞/뒤는 표시 그대로(끌기 방향으로 뜻을 바꾸지 않음).
+ */
+export function planDrop(docs: DocPlaceable[], activeId: string, overId: string, zone: DropZone): DocMovePlan | null {
+  if (!docs.some((d) => d.id === activeId) || !docs.some((d) => d.id === overId)) return null;
+  if (isSelfOrDescendant(docs, activeId, overId)) return null;
+  if (zone === 'into') return planMoveInto(activeId, overId);
+  return planMoveBeside(docs, activeId, overId, zone);
+}
