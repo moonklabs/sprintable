@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type HTMLAttributes, type KeyboardEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { clampIntoViewX, VIEWPORT_GUTTER_PX } from '@/hooks/use-viewport-clamp';
 
 /**
- * story #4349 — 트리거에 붙는 팝오버를 **부모 밖(body)**에 그린다.
+ * story #4349 — 트리거에 붙는 팝오버를 **부모 밖(body · 모달 안이면 그 모달 팝업 — 아래 `portalContainerFor`)**에 그린다.
  * 왜: 축척 사다리 안내 팝오버(`absolute top-full`)는 담는 블록이 짧은 띠(칩 줄 `overflow-x-auto` · 사다리 `overflow-hidden`) 안이라,
  *   그 띠가 팝오버 90px를 통째로 잘랐다 — 어떤 폭에서도 안 보였다(유나 실측). 부모 overflow를 풀면 칩 줄 가로 스크롤이 죽는다.
  * 처방: body로 포털 → `position: fixed`로 트리거 사각형 바로 아래(트리거 왼쪽 + offsetX, 아래 gap)에 둔다.
@@ -67,8 +67,29 @@ export function isOutsidePress(root: Element | null | undefined, target: EventTa
   return !el?.closest('[data-anchored-popover]');
 }
 
+/**
+ * story #4373(까디르 실측 · 부류) — 포털 대상. 모달 팝업(Base UI Dialog/Sheet = `role="dialog"` · AlertDialog = `role="alertdialog"`) 안의 트리거면
+ * **그 팝업 안**, 아니면 body. Base UI 모달은 열려 있는 동안 팝업(과 자기가 아는 포털) 밖의 body 자식을 전부 `aria-hidden`으로 숨긴다
+ * (floating-ui-react markOthers) — body 끝에 붙은 포털은 그 «밖»이라 보조기기에서 칸 · 단추가 사라졌고(390 작업 목록 시트 안 산출물 댓글 칸),
+ * 시트 쪽 바깥 누름 판정에서도 «밖»이었다. 팝업 안이면 둘 다 «안». 모달이 아닌 자리는 예전 그대로 body.
+ */
+export const MODAL_POPUP_SELECTOR = '[role="dialog"], [role="alertdialog"]';
+
+export function portalContainerFor(anchor: Element | null): Element | null {
+  if (typeof document === 'undefined') return null;
+  return anchor?.closest(MODAL_POPUP_SELECTOR) ?? document.body;
+}
+
 export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'start', popoverRef, trackAnchor = false, style, children, ...rest }: AnchoredPopoverProps) {
   const elRef = useRef<HTMLDivElement | null>(null);
+  // 여는 순간엔 트리거가 이미 붙어 있다(열림 = 트리거를 누른 뒤) — 첫 그림부터 제자리(팝업 안)에 그려야 연 뒤 한 번 도는 효과
+  // (첫 항목 초점 · 칸 휠 리스너)가 요소를 본다. 같은 커밋에 트리거가 늦게 붙는 드문 순서면 body로 먼저 그리고 레이아웃 단계에서 바로잡는다.
+  const [container, setContainer] = useState<Element | null>(() => portalContainerFor(anchorRef.current));
+  // 레이아웃 효과는 부모(트리거 wrapper) ref가 붙기 전에 돌 수 있다(자식 먼저) — ref가 다 붙은 뒤인 passive 효과에서 바로잡는다(아래 place()와 같은 까닭).
+  useEffect(() => {
+    const next = portalContainerFor(anchorRef.current);
+    setContainer((cur) => (cur === next ? cur : next));
+  }, [anchorRef]);
 
   const place = useCallback(() => {
     const el = elRef.current;
@@ -78,8 +99,18 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
     el.style.transform = '';
     const own = el.getBoundingClientRect();
     const v = placeVertical(a, own.height, window.innerHeight, gap);
-    el.style.top = `${Math.round(v.top)}px`;
-    el.style.left = `${Math.round(align === 'end' ? a.right - own.width - offsetX : a.left + offsetX)}px`;
+    const top = Math.round(v.top);
+    const left = Math.round(align === 'end' ? a.right - own.width - offsetX : a.left + offsetX);
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
+    // story #4373 — 모달 팝업 안에 포털되면 그 팝업에 transform이 걸린 동안(시트가 열리거나 닫히는 200ms · 가운데 다이얼로그의
+    // translate) fixed의 담는 블록은 뷰포트가 아니라 그 팝업이다 — 팝업의 안쪽 왼쪽 위만큼 되민다. body · transform 없는 팝업이면 그대로.
+    const box = el.parentElement;
+    if (box && box !== document.body && getComputedStyle(box).transform !== 'none') {
+      const b = box.getBoundingClientRect();
+      el.style.left = `${Math.round(left - b.left - box.clientLeft)}px`;
+      el.style.top = `${Math.round(top - b.top - box.clientTop)}px`;
+    }
     el.dataset.side = v.side;
     el.style.visibility = '';
     clampIntoViewX(el);
@@ -122,12 +153,12 @@ export function AnchoredPopover({ anchorRef, offsetX = 0, gap = 8, align = 'star
     return () => cancelAnimationFrame(frame);
   }, [trackAnchor, anchorRef, place]);
 
-  if (typeof document === 'undefined') return null;
+  if (typeof document === 'undefined' || !container) return null;
   return createPortal(
     <div ref={setRef} data-anchored-popover="" {...rest} style={{ ...style, position: 'fixed' }}>
       {children}
     </div>,
-    document.body,
+    container,
   );
 }
 

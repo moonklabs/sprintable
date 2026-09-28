@@ -311,3 +311,45 @@ describe('isOutsidePress', () => {
     }
   });
 });
+
+// story #4373(까디르 실측 · 부류) — 모달 팝업(role=dialog) 안 트리거면 포털 대상이 그 팝업(Base UI 모달이 팝업 밖 body 자식을 aria-hidden으로
+// 숨기므로). 팝업에 transform이 걸린 동안(시트가 열리거나 닫히는 200ms)은 fixed의 담는 블록이 그 팝업 — 팝업 안쪽 왼쪽 위만큼 되민다.
+describe('AnchoredPopover — 모달 팝업 안(story #4373)', () => {
+  function ModalHarness({ transform }: { transform?: string }) {
+    const [open, setOpen] = useState(false);
+    const anchorRef = useRef<HTMLDivElement>(null);
+    return (
+      <div role="dialog" id="modal" style={transform ? { transform } : undefined}>
+        <div id="anchor" ref={open ? anchorRef : undefined}>
+          <button type="button" id="trigger" onClick={() => setOpen((v) => !v)}>열기</button>
+          {open && <AnchoredPopover anchorRef={anchorRef} id="pop" className="w-56">안내</AnchoredPopover>}
+        </div>
+      </div>
+    );
+  }
+
+  it('포털 대상 = 트리거가 든 role=dialog 팝업 · 모달 밖 트리거는 예전처럼 body', () => {
+    act(() => { root.render(<ModalHarness />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().parentElement).toBe(document.getElementById('modal'));
+    expect(pop().style.position).toBe('fixed');
+    // transform 없는 팝업이면 fixed 기준 = 뷰포트 → 트리거 기준 좌표 그대로(아래 8px)
+    expect(pop().style.left).toBe('100px');
+    expect(pop().style.top).toBe('68px');
+  });
+
+  it('팝업에 transform이 걸린 동안엔 팝업 안쪽 왼쪽 위만큼 되민다(시트 여는 도중 translate)', () => {
+    const base = HTMLElement.prototype.getBoundingClientRect as unknown as { getMockImplementation: () => (this: HTMLElement) => DOMRect };
+    const prev = base.getMockImplementation();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.id === 'modal') return { left: 40, top: 10, right: 440, bottom: 610, width: 400, height: 600, x: 40, y: 10, toJSON: () => ({}) } as DOMRect;
+      return prev.call(this);
+    });
+    act(() => { root.render(<ModalHarness transform="translateX(40px)" />); });
+    act(() => { document.getElementById('trigger')!.click(); });
+    expect(pop().parentElement).toBe(document.getElementById('modal'));
+    expect(pop().style.left).toBe('60px');  // 뷰포트 100 − 팝업 왼쪽 40
+    expect(pop().style.top).toBe('58px');   // 뷰포트 68 − 팝업 위 10
+  });
+});
+

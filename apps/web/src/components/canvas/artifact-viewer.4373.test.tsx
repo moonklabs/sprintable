@@ -14,6 +14,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
 import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -223,6 +224,63 @@ describe('쓰기 칸 바깥 누름 닫기는 isOutsidePress(story #4373 · #4349
 
     await press(document.body);
     expect(compose()).toBeNull();
+  });
+});
+
+// story #4373(까디르 실측 · 실 Chromium) — 390 작업 목록 상세는 모달 Sheet(Base UI Dialog). 쓰기 칸이 body 끝 포털이면 Base UI가 팝업 밖 body
+// 자식을 aria-hidden으로 숨겨 ARIA 스냅숏에 글 칸 · «취소» · «코멘트» 단추가 0이었다. 이제 쓰기 칸은 시트 팝업(role=dialog) 안.
+describe('모달 Sheet 안 쓰기 칸 — 보조기기에 닿는다(story #4373)', () => {
+  const sheetChange = vi.fn();
+  async function mountInSheetWithDraftPin() {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <Sheet open onOpenChange={sheetChange}>
+            <SheetContent side="right">
+              <SheetTitle>상세</SheetTitle>
+              <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={async () => true} />
+            </SheetContent>
+          </Sheet>
+        </NextIntlClientProvider>,
+      );
+    });
+    const toggle = document.querySelector('[role="dialog"] button[aria-pressed]') as HTMLButtonElement;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const vp = document.querySelector('[role="dialog"] [data-artifact-canvas-viewport]') as HTMLDivElement;
+    await act(async () => {
+      vp.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX: 640, clientY: 400, button: 0 }));
+      vp.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 640, clientY: 400 }));
+    });
+  }
+  const hiddenAncestor = (el: Element | null) => {
+    for (let n = el; n; n = n.parentElement) if (n.getAttribute('aria-hidden') === 'true' || n.hasAttribute('inert')) return n;
+    return null;
+  };
+
+  it('쓰기 칸은 시트 팝업 안 · aria-hidden/inert 조상 0 · 글 칸과 «취소» · «코멘트» 단추가 이름으로 닿는다', async () => {
+    sheetChange.mockReset();
+    await mountInSheetWithDraftPin();
+    const popup = document.querySelector('[role="dialog"]')!;
+    const field = compose()!;
+    expect(field).not.toBeNull();
+    expect(popup.contains(field)).toBe(true);  // develop(body 포털)에선 RED
+    expect(hiddenAncestor(field)).toBeNull();
+    const box = field.closest('[data-anchored-popover]')!;
+    const names = [...box.querySelectorAll('button')].filter((b) => !hiddenAncestor(b)).map((b) => b.textContent?.trim());
+    expect(names).toEqual([canvas.newThreadCancelAction, canvas.newThreadSubmitAction]);
+    expect(field.getAttribute('placeholder')).toBe(canvas.newThreadComposePlaceholder);
+  });
+
+  it('칸 안 누름은 칸도 시트도 닫지 않는다', async () => {
+    sheetChange.mockReset();
+    await mountInSheetWithDraftPin();
+    await nextFrames();
+    await act(async () => {
+      compose()!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      compose()!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(compose()).not.toBeNull();
+    expect(sheetChange).not.toHaveBeenCalledWith(false, expect.anything());
   });
 });
 
