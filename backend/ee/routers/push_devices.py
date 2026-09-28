@@ -8,18 +8,40 @@ auth context 에서 산출(타 멤버 디바이스 등록 불가). webhook_confi
 """
 from __future__ import annotations
 
+import logging
+import math
+import time
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from limits import RateLimitItemPerHour
+from limits.errors import StorageError
+from limits.storage import storage_from_string
+from limits.strategies import MovingWindowRateLimiter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.push_device import PushDeviceRepository
-from app.schemas.push_device import PushDeviceResponse, RegisterPushDevice
+from app.schemas.push_device import (
+    PushDeviceResponse,
+    PushDiagnosticsReport,
+    RegisterPushDevice,
+)
 
 router = APIRouter(tags=["push-devices-ee"])
+_logger = logging.getLogger(__name__)
+
+# story #4394 — per-member cap on diagnostics reports (the app sends one per launch, plus one from the web view after
+# registering). Redis when configured (shared across instances), memory otherwise (single-instance dev).
+DIAGNOSTICS_PER_HOUR = 30
+_DIAGNOSTICS_WINDOW_SECONDS = 3600
+_diagnostics_rate = RateLimitItemPerHour(DIAGNOSTICS_PER_HOUR)
+_diagnostics_limiter = MovingWindowRateLimiter(
+    storage_from_string(settings.redis_url or "memory://", wrap_exceptions=True),
+)
 
 
 def _require_ee() -> None:
@@ -93,3 +115,49 @@ async def revoke_push_device(
     if not ok:
         raise HTTPException(status_code=404, detail="PushDevice not found")
     return {"ok": True}
+
+
+@router.post("/diagnostics", status_code=204)
+async def report_push_diagnostics(
+    body: PushDiagnosticsReport,
+    org_id: Annotated[uuid.UUID, Depends(get_verified_org_id)],
+    caller_member_id: Annotated[uuid.UUID, Depends(_get_caller_member_id)],
+    _ee: Annotated[None, Depends(_require_ee)],
+) -> Response:
+    """story #4394 — record where the app's push registration stopped (permission · native token · Expo token · register · ok).
+
+    No table: one structured log line per report (Cloud Logging jsonPayload, event="push_diagnostics", member_id, org_id and
+    the reported fields). The member comes from the session, never from the body. Over the per-member hourly cap → 429.
+    """
+    key = f"push-diagnostics:{caller_member_id}"
+    try:
+        allowed = _diagnostics_limiter.hit(_diagnostics_rate, key)
+    except StorageError:
+        # Best-effort channel: a limiter storage blip must not turn a diagnostics report into an error for the app.
+        _logger.warning("push diagnostics rate-limit storage unavailable — accepting the report")
+        allowed = True
+    if not allowed:
+        # Retry-After rounds up: rounding down tells the app to retry up to a second early, into another 429. If the window
+        # lookup fails (storage dropped right after the over-cap hit), it is still a 429, never a 500, with the whole window.
+        try:
+            reset_at, _remaining = _diagnostics_limiter.get_window_stats(_diagnostics_rate, key)
+            retry_after = max(1, math.ceil(reset_at - time.time()))
+        except StorageError:
+            _logger.warning("push diagnostics rate-limit storage unavailable after an over-cap hit — Retry-After = one window")
+            retry_after = _DIAGNOSTICS_WINDOW_SECONDS
+        raise HTTPException(
+            status_code=429,
+            detail="Too many push diagnostics reports",
+            headers={"Retry-After": str(retry_after)},
+        )
+    _logger.info(
+        "push diagnostics",
+        extra={"structured": {
+            "event": "push_diagnostics",
+            "member_id": str(caller_member_id),
+            "org_id": str(org_id),
+            **body.model_dump(),
+        }},
+    )
+    return Response(status_code=204)
+

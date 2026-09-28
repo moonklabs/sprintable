@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Expo push 토큰 포맷: ExponentPushToken[...] 또는 ExpoPushToken[...] (crux §2: 클라 제출값 방어적 검증).
 _EXPO_TOKEN_RE = re.compile(r"^Expo(nent)?PushToken\[[^\[\]\s]+\]$")
@@ -78,3 +78,26 @@ class PushDeviceResponse(BaseModel):
     is_active: bool
     created_at: datetime
     last_seen_at: datetime
+
+
+class PushDiagnosticsReport(BaseModel):
+    """story #4394 — the app reports where push registration stopped, so a release build that is denied permission or fails to
+    get a token leaves a trace on the server (those failures were silent: logs are debug-only in the app).
+
+    Carries **no token**: any unknown field is rejected with 422, so a client that sends expo_push_token (or any other token)
+    cannot slip it into the log line. Field names agreed with the app side (Min, 2026-09-28).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    platform: Literal["android", "ios"]
+    app_version: str = Field(min_length=1, max_length=32)
+    app_build: str = Field(min_length=1, max_length=16)
+    permission: Literal["granted", "provisional", "denied", "undetermined"]
+    can_ask_again: bool
+    # where the flow stopped: permission → device_token (native FCM/APNs token) → expo_token → register (POST /api/push/devices
+    # not 2xx) → ok (registered).
+    stage: Literal["permission", "device_token", "expo_token", "register", "ok"]
+    # a code, never a raw message (e.g. E_REGISTRATION_FAILED · FIS_AUTH_ERROR · HTTP_401 · UNKNOWN)
+    error_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z0-9_:.-]+$")
+
