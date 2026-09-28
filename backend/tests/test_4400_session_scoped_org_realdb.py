@@ -299,3 +299,56 @@ async def test_mutation_refresh_ignoring_the_token_org_makes_the_other_session_f
         assert _org_claim(rb.json()["data"]) == str(w.org2)  # B silently followed A: the ping-pong source
     finally:
         await _close(engine, w)
+
+
+# ── Qadir 01a0e9fc (PO 22:06Z): never re-issue a departed org ─────────────────────────────────────────────────────
+
+async def test_no_live_org_left_issues_a_claim_without_an_org():
+    from sqlalchemy import update
+
+    from app.models.project import OrgMember
+
+    engine, w = await _world()
+    try:
+        b = await w.login()
+        async with w.Session() as s:
+            await s.execute(update(OrgMember).where(OrgMember.user_id == w.user_id)
+                            .values(deleted_at=datetime.now(timezone.utc)))
+            await s.commit()
+        rb = await w.refresh(b["refresh_token"])
+        assert rb.status_code == 200, rb.text  # the state of a new sign-up, not 401
+        assert not _org_claim(rb.json()["data"])  # neither the session's org nor the stale last_org_id
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_membership_orphaned_by_a_deleted_org_is_not_live():
+    """org_members.org_id has no foreign key: a hard-deleted org can leave a membership row with deleted_at NULL."""
+    from sqlalchemy import delete
+
+    from app.models.organization import Organization
+
+    engine, w = await _world()
+    try:
+        b = await w.login()
+        assert _org_claim(b) == str(w.org1)
+        async with w.Session() as s:
+            await s.execute(delete(Organization).where(Organization.id == w.org1))
+            await s.commit()
+        rb = await w.refresh(b["refresh_token"])
+        assert rb.status_code == 200, rb.text
+        assert _org_claim(rb.json()["data"]) == str(w.org2)
+    finally:
+        await _close(engine, w)
+
+
+async def test_deleting_the_account_ends_every_session():
+    engine, w = await _world()
+    try:
+        a, b = await w.login(), await w.login()
+        resp = await w.client.post("/api/v2/account/delete", headers={"Authorization": f"Bearer {a['access_token']}"})
+        assert resp.status_code == 200, resp.text
+        for rt in (a["refresh_token"], b["refresh_token"]):
+            assert (await w.refresh(rt)).status_code == 401
+    finally:
+        await _close(engine, w)

@@ -122,20 +122,28 @@ async def delete_account(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> AccountDeleteResponse:
-    now = datetime.now(timezone.utc).isoformat()
+    # story #4400 — this endpoint failed on every call (asyncpg: `:uid::uuid` is a syntax error with bound parameters, and a
+    # str is not accepted for a timestamptz): CAST(... AS uuid) and a datetime.
+    now = datetime.now(timezone.utc)
     uid = auth.user_id
 
     await session.execute(
-        text("UPDATE org_members SET deleted_at = :now WHERE user_id = :uid::uuid"),
+        text("UPDATE org_members SET deleted_at = :now WHERE user_id = CAST(:uid AS uuid)"),
         {"now": now, "uid": str(uid)},
     )
     # AC3-4 2-2: team_members 뷰 전환 — anchor-only. members가 is_active/deleted_at 유일 소스.
     await session.execute(
         text(
             "UPDATE members SET deleted_at = :now, is_active = false, updated_at = :now"
-            " WHERE user_id = :uid::uuid"
+            " WHERE user_id = CAST(:uid AS uuid)"
         ),
         {"now": now, "uid": str(uid)},
     )
+    # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does
+    # (org_members._revoke_user_refresh_tokens · the same _explicit_revoke_values seam). Before, its refresh tokens stayed
+    # valid and could keep re-issuing a departed org.
+    from app.routers.org_members import _revoke_user_refresh_tokens
+
+    await _revoke_user_refresh_tokens(session, uuid.UUID(str(uid)))
 
     return AccountDeleteResponse(ok=True, grace_period_days=30)

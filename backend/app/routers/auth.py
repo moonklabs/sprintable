@@ -685,6 +685,19 @@ async def _store_refresh_token(
     return row.id
 
 
+async def _live_org_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
+    """story #4400 — the person's live orgs, oldest membership first: org_members.deleted_at IS NULL and the organization
+    still exists (a membership orphaned by a hard-deleted org does not count)."""
+    from app.models.organization import Organization
+
+    return list((await session.execute(
+        select(OrgMember.org_id)
+        .join(Organization, Organization.id == OrgMember.org_id)
+        .where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        .order_by(OrgMember.created_at.asc(), OrgMember.id)
+    )).scalars().all())
+
+
 async def _refresh_session_context(
     user: User, session: AsyncSession, rt_org_id: uuid.UUID | None, rt_project_id: uuid.UUID | None,
 ) -> dict:
@@ -696,21 +709,35 @@ async def _refresh_session_context(
     re-issued). Transition: a pre-#4400 token follows last_org_id on its first refresh only; the token issued then
     carries the org.
 
+    No live org at all (every membership left, or the account deleted): a claim without an org, the state of a new sign-up —
+    not 401, and never a departed org (Qadir 01a0e9fc: the request auth trusts the JWT org when no X-Org-Id is sent). The
+    stale last_org_id is cleared so the resolution below cannot land on it.
+
+    «Live» = org_members.deleted_at IS NULL **and** the organization still exists (an orphan membership after an org was
+    hard-deleted does not count).
+
     The session's project is re-applied the way switch-project sets it (last_project_id, and the explicit target under
     the de-fallback flag); _build_app_metadata only lands on it when it is still accessible in that org."""
-    live_orgs = list((await session.execute(
-        select(OrgMember.org_id)
-        .where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None))
-        .order_by(OrgMember.created_at.asc(), OrgMember.id)
-    )).scalars().all())
+    live_orgs = await _live_org_ids(session, user.id)
+    if not live_orgs:
+        if getattr(user, "last_org_id", None) is not None:
+            user.last_org_id = None
+        md = await _build_app_metadata(user, session)
+        # No org claim without a live membership, whatever the resolution found (a still-active legacy member row). A
+        # pending invite it accepted just now is a live membership, so it stays.
+        if md.get("org_id") and uuid.UUID(str(md["org_id"])) not in await _live_org_ids(session, user.id):
+            return {}
+        return md
     if rt_org_id is not None and rt_org_id in live_orgs:
         if rt_project_id is not None:
             user.last_project_id = rt_project_id
         return await _build_app_metadata(user, session, org_id=rt_org_id, project_id=rt_project_id)
+    # Always an explicit live org from here: the default resolution without one falls back to the oldest membership row,
+    # which may be orphaned (users.last_org_id is SET NULL when an org is deleted, the membership row is not).
     last_org_id = getattr(user, "last_org_id", None)
-    if last_org_id is not None and last_org_id not in live_orgs and live_orgs:
-        return await _build_app_metadata(user, session, org_id=live_orgs[0])
-    return await _build_app_metadata(user, session)
+    return await _build_app_metadata(
+        user, session, org_id=last_org_id if last_org_id in live_orgs else live_orgs[0],
+    )
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
