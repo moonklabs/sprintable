@@ -19,7 +19,6 @@
     "components/settings/gate-level-matrix.tsx::Button::{floorDisabled ? t('floorDisabledHint') : undefined}": 1,
     "components/settings/gate-level-matrix.tsx::button::{t('revertToDefault')}": 1,
     "components/settings/linked-accounts-section.tsx::button::{canUnlink ? undefined : t('linkedAccountsOnlyMethodTitle')}": 1,
-    "components/settings/org-members-section.tsx::Button::{invite.invite_url ? t('orgInviteCopyLinkTitle') : t('orgInviteCopyLinkUnavailableTitle')}": 1,
-    "ee/components/billing/billing-tab.tsx::Button::{t('packDialogComingSoon')}": 1
+    "components/settings/org-members-section.tsx::Button::{invite.invite_url ? t('orgInviteCopyLinkTitle') : t('orgInviteCopyLinkUnavailableTitle')}": 1
   }
 }

@@ -2388,32 +2388,12 @@
     "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
   },
   {
-    "key": "pricingPlans.orderHistoryPurposeCharge",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+    "key": "pricingPlans.packDialogComingSoon",
+    "reason": "prod 승격 판(결제 축 제외 · 2026-09-28 · story #4391) — main 판 결제 화면(billing-tab)은 이 키를 안 읽음. develop 결제 화면이 쓰는 키라 결제 승격 회차에 다시 쓰임 · 그때 이 줄을 뺄 것"
   },
   {
-    "key": "pricingPlans.orderHistoryPurposePackPurchase",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "pricingPlans.orderHistoryStatusConfirmed",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "pricingPlans.orderHistoryStatusFailed",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "pricingPlans.orderHistoryStatusPending",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "pricingPlans.packDialogConfirm",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
-  },
-  {
-    "key": "pricingPlans.packDialogNote",
-    "reason": "grandfather 최초 스캔(story #3732, 2026-09-22 — C 신호 추가 후 재계산 2026-09-22) — 개별 사유 미조사, 실제 삭제는 #3728(B) 후속 정리 카드에서"
+    "key": "pricingPlans.packDialogComingSoonNote",
+    "reason": "prod 승격 판(결제 축 제외 · 2026-09-28 · story #4391) — main 판 결제 화면(billing-tab)은 이 키를 안 읽음. develop 결제 화면이 쓰는 키라 결제 승격 회차에 다시 쓰임 · 그때 이 줄을 뺄 것"
   },
   {
     "key": "pricingPlans.tierName_business",
