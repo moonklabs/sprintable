@@ -184,7 +184,7 @@ function TreeNode({
   onAddChild,
   onAddChildFolder,
   depth = 0,
-  emptyFolderLabel = 'No child docs',
+  emptyFolderLabel,
   projectId,
   isExpanded,
   onToggleExpanded,
@@ -538,7 +538,8 @@ function TreeNode({
               className="py-1 text-[11px] italic text-muted-foreground"
               style={{ paddingLeft: `${Math.min((depth + 1) * 14 + 24, 88)}px` }}
             >
-              {emptyFolderLabel}
+              {/* story #4390 — 예전엔 기본값 'No child docs'(영어)를 호출부가 안 넘겨 한국어 화면에도 영어가 나왔다 → 로케일 문장(docs.noChildDocs). */}
+              {emptyFolderLabel ?? t('noChildDocs')}
             </p>
           )}
         </>
