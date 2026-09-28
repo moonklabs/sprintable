@@ -916,7 +916,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       root = createRoot(container);
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
-      expect(container.textContent).toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+      expect(container.textContent).toContain(koMessages.content.columnLastModified);
       expect(container.textContent).toContain(koMessages.content.authorHuman);
       expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationLabel);
       expect(container.textContent).toContain(koMessages.cage.recipeApprovalDestinationHostedSite);
@@ -991,7 +991,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
       await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
 
       expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalDestinationLabel);
-      expect(container.textContent).not.toContain(koMessages.cage.recipeApprovalLatestAuthorLabel);
+      expect(container.textContent).not.toContain(koMessages.content.columnLastModified);
     });
 
     // story #4143(2호 리허설 실측, 페드루 PO 確定 2026-09-22) — 라이브 실사고를 직접

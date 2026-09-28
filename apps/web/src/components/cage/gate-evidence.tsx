@@ -1175,7 +1175,8 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.contentVersion !== null || facts.contentSha256 ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
           <span>
-            <span>{t('recipeApprovalLatestAuthorLabel')} · </span>
+            {/* story #4336(유나 05:01Z) — «마지막 수정 주체» → «마지막 수정»(배지가 누구인지 말함) · 같은 뜻 기존 낱말 재사용. */}
+            <span>{tContent('columnLastModified')} · </span>
             <AuthorKindBadge kind={facts.latestAuthorKind} />
           </span>
           <span>
