@@ -78,8 +78,40 @@ export function toMatchable(selector: string, alias: ReadonlyMap<string, string>
   });
 }
 
-/** container 안(과 뿌리 클래스)에 나온 클래스로 CSS를 컴파일해 문서에 싣고 해석기를 돌려준다. */
-export async function loadTailwindCascade(container: Element): Promise<Cascade> {
+/**
+ * story #4406 — 화면 폭 조건 판정. `(width >= 64rem)`(Tailwind 4 변형) · `(min-width: 1024px)` · `(max-width: 1023px)` ·
+ * `(width < 40rem)` 등 폭 조건을 `and`로 이은 것만 판정한다(1rem = 16px). 폭 아닌 조건이 섞였거나 모르는 모양이면 null(호출부가 기존 규칙대로).
+ */
+export function mediaMatchesWidth(media: string, viewportWidth: number): boolean | null {
+  const parts = media.split(/\s+and\s+/i).map((p) => p.trim().replace(/^\(|\)$/g, '').trim());
+  let seen = false;
+  for (const part of parts) {
+    const px = (n: string, unit: string) => (unit === 'rem' || unit === 'em' ? parseFloat(n) * 16 : parseFloat(n));
+    let m = /^width\s*(>=|>|<=|<)\s*([\d.]+)(px|rem|em)$/.exec(part);
+    if (m) {
+      const v = px(m[2]!, m[3]!);
+      const ok = m[1] === '>=' ? viewportWidth >= v : m[1] === '>' ? viewportWidth > v : m[1] === '<=' ? viewportWidth <= v : viewportWidth < v;
+      if (!ok) return false;
+      seen = true;
+      continue;
+    }
+    m = /^(min|max)-width\s*:\s*([\d.]+)(px|rem|em)$/.exec(part);
+    if (m) {
+      const v = px(m[2]!, m[3]!);
+      if (m[1] === 'min' ? viewportWidth < v : viewportWidth > v) return false;
+      seen = true;
+      continue;
+    }
+    return null;
+  }
+  return seen ? true : null;
+}
+
+/**
+ * container 안(과 뿌리 클래스)에 나온 클래스로 CSS를 컴파일해 문서에 싣고 해석기를 돌려준다.
+ * `viewportWidth`(story #4406)를 주면 폭 조건 @media를 그 폭으로 판정한다(모바일 폭 검증용) — 안 주면 예전처럼 데스크톱 가정.
+ */
+export async function loadTailwindCascade(container: Element, { viewportWidth }: { viewportWidth?: number } = {}): Promise<Cascade> {
   // 파일 기준 경로 — CI vitest는 레포 뿌리에서 돌아 cwd에 `apps/web`이 빠진다(4681 CI RED).
   const base = path.resolve(__dirname, '../../../app');
   const compiler = await compile(readFileSync(path.join(base, 'globals.css'), 'utf8'), { base, onDependency: () => {} });
@@ -113,8 +145,10 @@ export async function loadTailwindCascade(container: Element): Promise<Cascade> 
         walk((r as unknown as { cssRules: CSSRuleList }).cssRules, layerOrder.indexOf(name));
       } else if (kind === 'CSSMediaRule') {
         const media = (r as CSSMediaRule).conditionText ?? (r as CSSMediaRule).media.mediaText;
-        // 데스크톱 화면 가정: 폭 하한(min-width) · hover · 일반 조건은 맞음 · prefers-* · print · max-width는 뺀다.
-        if (/prefers-|print|max-width|forced-colors/.test(media)) continue;
+        const byWidth = viewportWidth === undefined ? null : mediaMatchesWidth(media, viewportWidth);
+        if (byWidth === false) continue;
+        // 데스크톱 화면 가정(폭을 안 줬거나 폭 조건이 아닐 때): 폭 하한(min-width) · hover · 일반 조건은 맞음 · prefers-* · print · max-width는 뺀다.
+        if (byWidth === null && /prefers-|print|max-width|forced-colors/.test(media)) continue;
         walk((r as CSSMediaRule).cssRules, layer);
       } else if (kind === 'CSSSupportsRule') {
         walk((r as CSSSupportsRule).cssRules, layer);

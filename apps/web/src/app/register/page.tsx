@@ -110,7 +110,7 @@ export default function RegisterPage() {
             type="text"
             placeholder={t('namePlaceholder')}
             autoComplete="name"
-            className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -120,7 +120,7 @@ export default function RegisterPage() {
             type="email"
             placeholder={t('emailPlaceholder')}
             autoComplete="email"
-            className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -130,7 +130,7 @@ export default function RegisterPage() {
             type="password"
             placeholder={t('passwordPlaceholder')}
             autoComplete="new-password"
-            className={`w-full rounded-lg border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
+            className={`w-full rounded-lg border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
               showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
             }`}
             value={password}

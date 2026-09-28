@@ -388,7 +388,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
                 readOnly
                 value={apiKey}
                 onFocus={(e) => e.currentTarget.select()}
-                className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-foreground"
+                className="min-w-0 flex-1 truncate bg-transparent font-mono text-base lg:text-xs text-foreground"
                 data-testid="connect-step-desktop-key-raw"
               />
             ) : (
@@ -516,7 +516,7 @@ export function ConnectStep({ agentId, apiKey, projectId, onFinish, todayV3Enabl
               readOnly
               value={copyFailedRawConfig}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-xs text-foreground"
+              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base lg:text-xs text-foreground"
               rows={4}
               data-testid="connect-step-copy-failed-raw-config"
             />
