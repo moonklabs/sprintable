@@ -14,7 +14,7 @@ import os
 import uuid
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
@@ -181,3 +181,76 @@ async def test_projects_over_the_cap_continue_by_cursor_with_a_counted_total(mon
         assert str(seeded["newest"]) in seen
 
     await _with_client(check)
+
+
+# story #4376(까디르 codex HIGH · PO dev 실측 2026-09-28 08:36Z) — 트리 요청은 요약만 싣는데 예전엔 select(Doc)이 본문(content) ·
+# search_vector까지 읽었다(dev 1,065개 · 본문 합 9.4MB를 문서함 열 때마다). 트리 경로가 내는 SQL에 두 칸이 없고, 긴 본문 문서의 요약은
+# 전체 행으로 만든 요약과 같다.
+async def _with_client_and_sql(fn):
+    from sqlalchemy import event
+
+    captured: list[str] = []
+    real_create = create_async_engine
+
+    def _create(*a, **k):
+        eng = real_create(*a, **k)
+
+        @event.listens_for(eng.sync_engine, "before_cursor_execute")
+        def _catch(conn, cursor, statement, parameters, context, executemany):
+            captured.append(" ".join(statement.split()).lower())
+
+        return eng
+
+    globals()["create_async_engine"] = _create
+    try:
+        async def wrapped(get, seeded):
+            await fn(get, seeded, captured)
+
+        await _with_client(wrapped)
+    finally:
+        globals()["create_async_engine"] = real_create
+
+
+async def test_tree_request_reads_no_doc_body_columns():
+    async def check(get, seeded, captured):
+        for query in ("tree=true", "tree=true&tags=spec"):
+            captured.clear()
+            body = await get(query)
+            assert body["data"]
+            doc_selects = [s for s in captured if s.startswith("select") and " from docs" in s]
+            assert doc_selects, f"트리 요청이 docs를 읽지 않음 — 가드가 헛돈다: {query}"
+            for s in doc_selects:
+                assert "docs.content" not in s and "search_vector" not in s, f"{query}: 본문 칸을 읽음 — {s[:300]}"
+
+    await _with_client_and_sql(check)
+
+
+async def test_long_body_doc_summary_is_the_same_as_from_the_full_row():
+    from app.models.doc import Doc
+    from app.schemas.doc import DocSummaryResponse
+
+    async def check(get, seeded, captured):
+        eng = create_async_engine(_ASYNC)
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        long_id = uuid.uuid4()
+        try:
+            async with Session() as s:
+                await s.execute(text(
+                    "INSERT INTO docs (id,org_id,project_id,title,slug,content,doc_type,tags,sort_order) "
+                    f"VALUES ('{long_id}','{seeded['org']}','{seeded['proj']}','long body','d-{long_id.hex[:20]}',:c,'page','{{spec}}',7)"
+                ), {"c": "가" * 410_000})
+                await s.commit()
+            body = await get("tree=true")
+            got = next(d for d in body["data"] if d["id"] == str(long_id))
+            async with Session() as s:
+                full = (await s.execute(select(Doc).where(Doc.id == long_id))).scalar_one()
+                want = DocSummaryResponse.model_validate(full).model_dump(mode="json")
+            assert got == want
+            assert "content" not in got
+        finally:
+            async with Session() as s:
+                await s.execute(text(f"DELETE FROM docs WHERE id = '{long_id}'"))
+                await s.commit()
+            await eng.dispose()
+
+    await _with_client_and_sql(check)

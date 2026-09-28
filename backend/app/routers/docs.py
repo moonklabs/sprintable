@@ -228,9 +228,9 @@ async def list_docs(
         # (dev 1,065개 · 54쪽 · 부모가 뒤 쪽인 자식 37개). 트리 전체를 한 번에 — 형제 · 부모가 늘 같이 온다. 정렬 · 커서 규약은 그대로.
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
         if tag_list:
-            docs = await repo.search_by_tags(project_id, tag_list, limit=_TREE_CAP + 1, cursor=cursor)
+            docs = await repo.search_by_tags(project_id, tag_list, limit=_TREE_CAP + 1, cursor=cursor, summary_only=True)
         else:
-            docs = await repo.list(limit=_TREE_CAP + 1, cursor=cursor, project_id=project_id)
+            docs = await repo.list(limit=_TREE_CAP + 1, cursor=cursor, project_id=project_id, summary_only=True)
         envelope = _doc_page_envelope(docs, _TREE_CAP)
         # 총량: 한 번에 다 왔으면 받은 수 그대로(문장 추가 0) · 상한을 넘을 때만 따로 센다.
         envelope["meta"]["total"] = (
