@@ -332,23 +332,26 @@ export function ArtifactViewer({
                        * 항상 노출(핀 추가 자체가 항상 latest 버전 대상이라 selectedVersion과
                        * 무관 — BE CREATE는 버전 개념 없이 artifact 스코프, spec pin과 다른 계약). */}
                       {draftPin ? (
-                        <>
-                          <AnchorPin
-                            number={null}
-                            state="draft"
-                            className="absolute z-10"
-                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                          />
-                          <CommentComposePopover
-                            onSubmit={handleComposeSubmit}
-                            onCancel={handleComposeCancel}
-                            draftTargetId={artifact.id}
-                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                          />
-                        </>
+                        <AnchorPin
+                          number={null}
+                          state="draft"
+                          className="absolute z-10"
+                          style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
+                        />
                       ) : null}
                     </>
                   }
+                  // story #4373 — 쓰기 칸 · 단추는 캔버스 변환 밖 화면 층에(배율과 무관하게 화면 크기 그대로) · 자리만 핀을 따라간다.
+                  // 예전엔 위 overlay(변환 안)에 그려 무대 10%면 22×10px로 작아져 글이 안 보이고 단추가 안 눌렸다.
+                  screenOverlay={draftPin ? ({ place, area }) => (
+                    <CommentComposePopover
+                      onSubmit={handleComposeSubmit}
+                      onCancel={handleComposeCancel}
+                      draftTargetId={artifact.id}
+                      anchor={place(draftPin.x, draftPin.y)}
+                      area={area}
+                    />
+                  ) : undefined}
                 />
               </div>
             ) : null}

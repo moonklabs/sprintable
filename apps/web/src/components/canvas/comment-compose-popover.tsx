@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 import { useFieldDraft } from '@/hooks/use-field-draft';
@@ -14,6 +14,29 @@ interface CommentComposePopoverProps {
   draftTargetId: string | null;
   style?: React.CSSProperties;
   className?: string;
+  /** story #4373 — 화면 좌표 층에서 뜰 때: 핀의 화면 점(px)과 층 크기. 주면 핀 곁(오른쪽 아래)에 붙고, 층 밖으로 넘치면
+   * 반대쪽으로 넘긴 뒤 안쪽으로 붙인다. 없으면 `style`을 그대로 쓴다. */
+  anchor?: { x: number; y: number };
+  area?: { w: number; h: number };
+}
+
+const COMPOSE_GAP_PX = 8;
+const COMPOSE_EDGE_PX = 8;
+
+/** story #4373 — 핀 곁 자리: 오른쪽 아래가 기본 · 넘치면 반대쪽 · 그래도 넘치면 안쪽 가장자리에 붙인다(층 크기를 모르면 그대로). */
+export function placeComposeBox(
+  anchor: { x: number; y: number },
+  size: { w: number; h: number },
+  area: { w: number; h: number },
+): { left: number; top: number } {
+  const axis = (at: number, len: number, room: number) => {
+    let pos = at + COMPOSE_GAP_PX;
+    if (room <= 0) return pos;
+    if (pos + len > room - COMPOSE_EDGE_PX) pos = at - COMPOSE_GAP_PX - len;
+    const max = Math.max(COMPOSE_EDGE_PX, room - len - COMPOSE_EDGE_PX);
+    return Math.min(Math.max(pos, COMPOSE_EDGE_PX), max);
+  };
+  return { left: axis(anchor.x, size.w, area.w), top: axis(anchor.y, size.h, area.h) };
 }
 
 /**
@@ -22,12 +45,20 @@ interface CommentComposePopoverProps {
  * onCancel(폐기, API 호출 0) — asset-picker-popover.tsx와 동형 바깥클릭 패턴(다음 프레임에
  * 리스너 등록 — 팝오버를 여는 그 클릭 자체가 바깥클릭으로 오인돼 즉시 닫히는 것 방지).
  */
-export function CommentComposePopover({ onSubmit, onCancel, style, className, draftTargetId }: CommentComposePopoverProps) {
+export function CommentComposePopover({ onSubmit, onCancel, style, className, draftTargetId, anchor, area }: CommentComposePopoverProps) {
   const t = useTranslations('canvas');
   // story #4370 — 쓴 글은 산출물별 초안: Esc · 바깥 누름으로 닫혀도 남고 보이는 «취소» · 보내기 성공에서만 지운다(유나 규칙).
   const [body, setBody, clearBody] = useFieldDraft({ surface: 'artifact-comment-compose', targetId: draftTargetId, field: 'form' });
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // story #4373 — 자기 크기를 재서 넘침 맞춤에 쓴다(첫 그림은 w-56 기준 추정 · 잰 뒤 바로 다시 맞춤).
+  const [size, setSize] = useState({ w: 224, h: 120 });
+  const measureRef = useCallback((el: HTMLDivElement | null) => {
+    containerRef.current = el;
+    if (!el || el.offsetWidth === 0) return;
+    setSize((cur) => (cur.w === el.offsetWidth && cur.h === el.offsetHeight ? cur : { w: el.offsetWidth, h: el.offsetHeight }));
+  }, []);
+  const placed = anchor && area ? placeComposeBox(anchor, size, area) : null;
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -51,8 +82,8 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
 
   return (
     <div
-      ref={containerRef}
-      style={style}
+      ref={measureRef}
+      style={placed ? { left: placed.left, top: placed.top } : style}
       // story #3007(로드맵 P2·PR-E, L1) — 팝오버는 floating이라 --elev-overlay.
       className={`absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] outline-none ${className ?? ''}`}
       // [SID:4369] 유나 규칙의 층 뿌리 — 글 있는 칸에서 빠져나온 초점이 여기로(tabIndex=-1).
@@ -77,20 +108,22 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
         }}
         placeholder={t('newThreadComposePlaceholder')}
         rows={2}
-        className="w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        // story #4373 — 화면 크기 그대로 읽히게(모바일 16px · 확대 방지).
+        className="w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-base text-foreground sm:text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       />
       <div className="mt-1.5 flex items-center justify-end gap-1.5">
         <button
           type="button"
           onClick={() => { clearBody(); onCancel(); }}
-          className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+          // story #4373 — 누름 영역 모바일 44px · 데스크톱 32px.
+          className="min-h-11 rounded-md border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted sm:min-h-8"
         >
           {t('newThreadCancelAction')}
         </button>
         <button
           type="button"
           onClick={handleSubmit}
-          className="rounded-md bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground hover:bg-primary/90"
+          className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8"
         >
           {t('newThreadSubmitAction')}
         </button>
