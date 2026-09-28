@@ -400,6 +400,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.state.limiter = limiter
 
+# story #4389 — commit a write request's DB session **before** its response headers go out (was: in get_db's teardown, after the
+# response was sent). Added first = innermost user middleware: every response of the app (including exception-handler responses)
+# passes through it, and CORS / metering layers wrap the final status. See app/core/commit_before_response.py.
+from app.core.commit_before_response import CommitBeforeResponseMiddleware
+
+app.add_middleware(
+    CommitBeforeResponseMiddleware,
+    error_handler=unhandled_exception_handler,
+    replay_body_for=a2a.is_a2a_rpc_path,
+)
+
 
 app.add_middleware(
     CORSMiddleware,
