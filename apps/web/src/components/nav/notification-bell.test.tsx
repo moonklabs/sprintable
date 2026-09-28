@@ -619,3 +619,19 @@ describe('NotificationBell — summary 내부 HTML 주석 평문화(story #4182)
     delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
   });
 });
+
+describe('[SID:4388] NotificationBell — the chosen filter is announced as pressed', () => {
+  it('«전체» starts pressed; clicking «스토리» moves aria-pressed to it', async () => {
+    stubFetchSequenceByOffset({ 0: { items: [notif('n1')], hasMore: false } });
+    await openBell();
+    const filters = () => ['전체', '스토리', '시스템'].map((label) => {
+      const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)!;
+      return `${label}:${button.getAttribute('aria-pressed')}`;
+    });
+    expect(filters()).toEqual(['전체:true', '스토리:false', '시스템:false']);
+
+    const story = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '스토리')!;
+    await act(async () => { story.click(); });
+    expect(filters()).toEqual(['전체:false', '스토리:true', '시스템:false']);
+  });
+});

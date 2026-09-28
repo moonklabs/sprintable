@@ -1215,6 +1215,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
             key={s}
             type="button"
             onClick={() => setStatusFilter(s)}
+            aria-pressed={statusFilter === s}
             className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
               statusFilter === s
                 ? 'border-primary/40 bg-primary/10 text-primary'

@@ -70,6 +70,7 @@ export function DocSearchResults({
             <button
               type="button"
               onClick={() => onSelect(doc.slug)}
+              aria-current={selectedSlug === doc.slug ? 'page' : undefined}
               className={cn(
                 'flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors',
                 selectedSlug === doc.slug

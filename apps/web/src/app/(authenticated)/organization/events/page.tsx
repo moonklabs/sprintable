@@ -833,27 +833,22 @@ function EventFormDialog({
       onOpenChange(next);
     }}>
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
+        {/* [SID:4388] shared tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. The root
+            wraps the header and the body so the two bodies are real tab panels (role=tabpanel · named by their tab · a focus stop);
+            `contents` keeps the dialog's layout as before. */}
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'basic' | 'advanced')} className="contents">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3">
             <DialogTitle>{mode === 'create' ? t('eventCreateDialogTitle') : t('eventEditDialogTitle')}</DialogTitle>
-            <div className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
-              <button
-                type="button"
-                disabled={advancedOnly}
-                onClick={() => setTab('basic')}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tab === 'basic' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
-              >
-                {t('definerTabBasic')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab('advanced')}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${tab === 'advanced' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
-              >
-                {t('definerTabAdvanced')}
-                {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
-              </button>
-            </div>
+              <TabsList activateOnFocus className="shrink-0">
+                <TabsTrigger value="basic" disabled={advancedOnly}>
+                  {t('definerTabBasic')}
+                </TabsTrigger>
+                <TabsTrigger value="advanced">
+                  {t('definerTabAdvanced')}
+                  {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
+                </TabsTrigger>
+              </TabsList>
           </div>
           {/* story #2666(발견) — 원래 문구가 "org.{조직 slug}."처럼 한글 자리표시자를 ICU
               변수 자리에 그대로 박아 놔 next-intl이 MALFORMED_ARGUMENT로 파싱 실패하던
@@ -881,7 +876,7 @@ function EventFormDialog({
             />
             {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
           </div>
-          {tab === 'basic' ? (
+          <TabsContent value="basic" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <EventDefinerForm
               state={definerState}
               onChange={setDefinerState}
@@ -891,7 +886,8 @@ function EventFormDialog({
               testPublishing={testPublishing}
               testPublishResult={savedKey ? testPublishResult : { ok: false, message: t('definerTestPublishSaveFirst') }}
             />
-          ) : (
+          </TabsContent>
+          <TabsContent value="advanced" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-key">
@@ -931,13 +927,14 @@ function EventFormDialog({
                 />
               </div>
             </div>
-          )}
+          </TabsContent>
           {error ? (
             <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
               {error}
             </p>
           ) : null}
         </div>
+        </Tabs>
         <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => { clearFormDraft(); onOpenChange(false); }} disabled={saving}>
             {mode === 'create' && savedKey ? tc('close') /* 저장 후엔 닫기만 남는다(재저장=중복 POST·409 방지) */ : tc('cancel')}

@@ -263,3 +263,40 @@ describe('AddParticipantModal — 안내는 스크롤 목록 밖(story #4193)', 
     assertAlertOutsideScroll(koMessages.chats.addParticipants);
   });
 });
+
+describe('[SID:4388] AddParticipantModal — the picked member is announced as pressed', () => {
+  it('clicking a member sets aria-pressed=true on it only; clicking it again clears it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+      url.startsWith('/api/members')
+        ? { ok: true, json: async () => ({ data: [...MEMBERS, { id: 'm-mirko', name: '미르코', type: 'human' }] }) }
+        : { ok: true, json: async () => ({}) }
+    )));
+    await act(async () => {
+      root.render(wrap(
+        <AddParticipantModal
+          conversationId={CONV_ID}
+          conversationType="group"
+          projectId={PROJECT_ID}
+          existingParticipantIds={['m-yuna']}
+          onClose={() => {}}
+          onAdded={() => {}}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const memberButton = (name: string) => [...document.body.querySelectorAll('li button')].find((b) => b.textContent?.includes(name))!;
+    const pressed = () => [...document.body.querySelectorAll('li button')]
+      .map((b) => `${b.textContent?.includes('점검봇') ? '점검봇' : '미르코'}:${b.getAttribute('aria-pressed')}`);
+
+    expect(pressed()).toEqual(['점검봇:false', '미르코:false']);
+
+    await act(async () => { memberButton('점검봇').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pressed()).toEqual(['점검봇:true', '미르코:false']);
+
+    await act(async () => { memberButton('미르코').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pressed()).toEqual(['점검봇:false', '미르코:true']);
+
+    await act(async () => { memberButton('미르코').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pressed()).toEqual(['점검봇:false', '미르코:false']);
+  });
+});

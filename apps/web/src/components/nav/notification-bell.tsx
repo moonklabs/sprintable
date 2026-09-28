@@ -288,6 +288,7 @@ function NotificationPanel({
             key={tab.value}
             type="button"
             onClick={() => setFilterTab(tab.value)}
+            aria-pressed={filterTab === tab.value}
             className={cn(
               'shrink-0 px-3 py-2 text-xs font-medium transition',
               filterTab === tab.value

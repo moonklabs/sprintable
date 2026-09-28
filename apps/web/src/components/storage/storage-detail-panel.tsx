@@ -10,6 +10,7 @@ import { fileExtLabel, formatDate, formatRelativeTime } from '@/lib/storage/form
 import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StorageUploaderAvatar } from './storage-uploader-avatar';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import { StorageFileGlyph } from './storage-file-glyph';
@@ -89,36 +90,25 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
         </div>
       </div>
 
-      {/* tabs (line, active border-info) */}
-      <div className="flex gap-0.5 border-b border-border px-[14px] pt-[6px]">
-        <button
-          type="button"
-          onClick={() => setTab('detail')}
-          className={cn(
-            '-mb-px border-b-2 px-[11px] py-2 text-[12.5px] font-semibold',
-            tab === 'detail' ? 'border-info text-foreground' : 'border-transparent text-muted-foreground',
-          )}
-        >
-          {t('tabDetail')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('usage')}
-          className={cn(
-            '-mb-px flex items-center gap-[5px] border-b-2 px-[11px] py-2 text-[12.5px] font-semibold',
-            tab === 'usage' ? 'border-info text-foreground' : 'border-transparent text-muted-foreground',
-          )}
-        >
-          {t('tabUsage')}
-          {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-          <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
-        </button>
+      {/* tabs — [SID:4388] shared line tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it.
+          The body is the tab panel (role=tabpanel · named by its tab · a focus stop, so Tab reaches it); `contents` keeps the layout.
+          The shared TabsContent sets text-sm, whose line-height ratio (1.25/0.875) is below the inherited 1.5: the 12.5px meta rows
+          each came out 0.91px shorter (5.44px over six rows, Chromium). The panels inherit font-size and line-height instead. */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'detail' | 'usage')} className="contents">
+      <div className="border-b border-border px-[14px] pt-[6px] pb-[5px]">
+        <TabsList variant="line" activateOnFocus>
+          <TabsTrigger value="detail">{t('tabDetail')}</TabsTrigger>
+          <TabsTrigger value="usage">
+            {t('tabUsage')}
+            {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+            <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
+          </TabsTrigger>
+        </TabsList>
       </div>
 
       {/* body */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-[14px]">
-        {tab === 'detail' ? (
-          <>
+        <TabsContent value="detail" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <MetaRow label={t('metaFormat')} value={asset.content_type} />
             <MetaRow label={t('metaSize')} value={formatFileSize(asset.size_bytes)} />
             <MetaRow label={t('metaFolder')} value={folderLabel ?? t('usageNone')} />
@@ -146,11 +136,12 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
                 <StorageSourceUsageList links={asset.source_links} />
               </>
             ) : null}
-          </>
-        ) : (
+        </TabsContent>
+        <TabsContent value="usage" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <StorageSourceUsageList links={asset.source_links} />
-        )}
+        </TabsContent>
       </div>
+      </Tabs>
 
       {/* footer */}
       <div className="flex gap-2 border-t border-border px-4 py-3">

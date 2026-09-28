@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArtifactStage } from './artifact-stage';
 import { newNodeId, type ArtifactNode } from '@/services/canvas-nodes';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
@@ -90,23 +90,18 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
           <DialogTitle>{t('importDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center gap-0.5 border-b border-border pb-2">
-          {(['image', 'html'] as const).map((tabKey) => (
-            <button
-              key={tabKey}
-              type="button"
-              onClick={() => setTab(tabKey)}
-              className={cn(
-                'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                tab === tabKey ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tabKey === 'image' ? t('importTabImage') : t('importTabHtml')}
-            </button>
-          ))}
-        </div>
+        {/* [SID:4388] shared tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. The two
+            bodies are tab panels (role=tabpanel · named by their tab · a focus stop); `contents` keeps the dialog's layout. */}
+        <Tabs value={tab} onValueChange={(v) => setTab(v as ImportTab)} className="contents">
+          <TabsList variant="line" activateOnFocus>
+            {(['image', 'html'] as const).map((tabKey) => (
+              <TabsTrigger key={tabKey} value={tabKey}>
+                {tabKey === 'image' ? t('importTabImage') : t('importTabHtml')}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        {tab === 'image' ? (
+        <TabsContent value="image" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <div className="space-y-2">
             <input type="file" accept="image/*" onChange={(e) => void handleFileChange(e)} disabled={uploading} className="text-xs text-muted-foreground" />
             <p className="text-[11px] text-muted-foreground">{t('importFigmaHint')}</p>
@@ -117,7 +112,8 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
               </div>
             ) : null}
           </div>
-        ) : (
+        </TabsContent>
+        <TabsContent value="html" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <div className="space-y-2">
             <textarea
               value={htmlContent}
@@ -132,7 +128,8 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
               </div>
             ) : null}
           </div>
-        )}
+        </TabsContent>
+        </Tabs>
 
         {error ? <p className="text-[11px] text-muted-foreground">{t('importFailedNote')}</p> : null}
 
