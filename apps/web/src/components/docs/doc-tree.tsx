@@ -1,15 +1,15 @@
 'use client';
 
-import { planMoveBeside, planMoveInto, planReorder, type DocMovePlan } from './doc-move-plan';
+import { dropZoneFor, planDrop, type DocMovePlan, type DropZone } from './doc-move-plan';
 import { DocRenameDialog } from './doc-rename-dialog';
-import { createContext, useContext, useId, useState, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useId, useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
-import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
+import { DndContext, DragOverlay, type CollisionDetection, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent, type Modifier } from '@dnd-kit/core';
+import type { Coordinates } from '@dnd-kit/utilities';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
@@ -144,8 +144,9 @@ interface DocTreeProps {
   docs: Doc[];
   selectedSlug: string | null;
   onSelect: (slug: string) => void;
-  onReorder?: (plan: DocMovePlan) => Promise<void>;
-  onMove?: (plan: DocMovePlan) => Promise<void>;
+  // story #4366(까디르) — 저장이 됐는지 돌려준다(실패해도 resolve — 알림 · 트리 다시 읽기는 저장 함수 몫). 펼침은 성공일 때만.
+  onReorder?: (plan: DocMovePlan) => Promise<boolean>;
+  onMove?: (plan: DocMovePlan) => Promise<boolean>;
   onMoveDenied?: (reason: 'circular' | 'no-permission' | 'sort-mode-active') => void;
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
@@ -186,12 +187,13 @@ function TreeNode({
   isExpanded,
   onToggleExpanded,
   sortMode = 'manual',
+  dropTarget = null,
 }: {
   doc: Doc;
   allDocs: Doc[];
   selectedSlug: string | null;
   onSelect: (slug: string) => void;
-  onReorder?: (plan: DocMovePlan) => Promise<void>;
+  onReorder?: (plan: DocMovePlan) => Promise<boolean>;
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
@@ -202,6 +204,7 @@ function TreeNode({
   isExpanded: (id: string, defaultValue?: boolean) => boolean;
   onToggleExpanded: (id: string) => void;
   sortMode?: DocSortMode;
+  dropTarget?: DropTarget | null;
 }) {
   const t = useTranslations('docs');
   const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => compareDocsForSort(a, b, sortMode));
@@ -245,16 +248,23 @@ function TreeNode({
     setPreview(null);
   }, []);
 
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, isDragging } = useSortable({
     id: doc.id,
     data: { doc },
   });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+  // story #4366 — 끌 대상 상자 = **이 행**(예전엔 자식까지 감싼 바깥 상자라 펼친 폴더 행이 그 상자의 위 25% 안 → 늘 «앞/뒤»로 읽혔다).
+  // 판정 표시(아래)도 이 행 기준이라 한 묶음(ref · 표시 기준 이름)으로 둔다.
+  // 같은 행이 메뉴 포털의 기준(rowRef)이기도 하다 → ref 둘을 한 칸에.
+  const setRowNode = useCallback((node: HTMLDivElement | null) => { setNodeRef(node); rowRef.current = node; }, [setNodeRef]);
+  const dropTargetProps = { ref: setRowNode, 'data-drop-target': doc.id } as const;
+  // 끄는 동안 다른 행은 움직이지 않는다(자리 비키기 transform을 걸지 않음) — 행이 밀리면 포인터 아래 행과 판정 상자가 어긋난다.
+  // 끄는 행은 제자리에서 흐리게 · 포인터를 따라가는 건 DragOverlay 복제.
+  const style = { opacity: isDragging ? 0.5 : 1 };
+  const zone = dropTarget?.overId === doc.id ? dropTarget.zone : null;
+  const textIndent = Math.min(depth * 14 + 8, 72);
+  // 펼친 폴더의 «뒤» = 그 폴더 다음 형제 자리(자식들 아래) → 선은 하위 트리 끝에(선이 가리키는 곳 = 들어가는 곳).
+  const afterLineAtSubtreeEnd = zone === 'after' && isFolder && expanded && hasChildren;
 
   // 포털 메뉴 키보드 길(열면 첫 항목 · ↑↓ · Tab 넘김/Esc = 닫고 «⋮»로 · Esc는 서랍 트랩까지 안 감) — 공용 훅(#4349).
   const closeMenu = useCallback(() => setContextMenuOpen(false), []);
@@ -342,8 +352,11 @@ function TreeNode({
         onSubmit={(newTitle) => { if (onRename) void onRename(doc.id, newTitle); }}
         returnFocusRef={menuTriggerRef}
       />
-    <div ref={setNodeRef} style={style}>
-      <div ref={rowRef} className="group relative">
+    <div style={style}>
+      <div {...dropTargetProps} className="group relative">
+        {(zone === 'before' || (zone === 'after' && !afterLineAtSubtreeEnd)) && (
+          <DropLine edge={zone === 'before' ? 'top' : 'bottom'} indent={textIndent} />
+        )}
         {preview && <DocPreviewCard title={preview.title} snippet={preview.snippet} x={previewPos.x} y={previewPos.y} />}
         {/* Drag handle — listeners isolated here to avoid blocking click.
             story #4345(PO 08:45Z) — 마우스 전용 조작이다: 센서가 터치를 받지 않고(#1988 터치 스크롤 하이재킹 방지 · useTouchSafePointerSensor)
@@ -373,7 +386,10 @@ function TreeNode({
             isSelected
               ? 'bg-primary/10 text-primary'
               : 'text-foreground/88 hover:bg-muted hover:text-foreground',
+            // story #4366 — «안으로» = 옅은 칠 + 안쪽 테두리(칠만으론 약함 · 둘째 축) · 삽입선은 안 그림.
+            zone === 'into' && 'bg-primary/10 ring-1 ring-inset ring-primary',
           )}
+          data-drop-zone={zone ?? undefined}
           style={{ paddingLeft: `${Math.min(depth * 14 + 8, 72)}px` }}
         >
           {isFolder ? (
@@ -505,6 +521,7 @@ function TreeNode({
                   isExpanded={isExpanded}
                   onToggleExpanded={onToggleExpanded}
                   sortMode={sortMode}
+                  dropTarget={dropTarget}
                 />
               ))}
             </SortableContext>
@@ -518,10 +535,53 @@ function TreeNode({
           )}
         </>
       )}
+      {afterLineAtSubtreeEnd && (
+        <div className="relative h-0">
+          <DropLine edge="bottom" indent={textIndent} />
+        </div>
+      )}
     </div>
     </>
   );
 }
+
+interface DropTarget {
+  overId: string;
+  zone: DropZone;
+}
+
+/** 앞/뒤 삽입선 — 2px · 왼쪽 끝은 그 행 글자 들여쓰기(어느 단계에 들어가는지) · 오른쪽 행 끝까지 · 끝 둥글게. */
+function DropLine({ edge, indent }: { edge: 'top' | 'bottom'; indent: number }) {
+  return (
+    <div
+      aria-hidden="true"
+      data-drop-line={edge}
+      className={cn('pointer-events-none absolute right-0 z-20 h-0.5 rounded-full bg-primary', edge === 'top' ? '-top-px' : '-bottom-px')}
+      style={{ left: `${indent}px` }}
+    />
+  );
+}
+
+/** 끌리는 복제를 한 행 간격(36px = 행 32 + 간격 4) 아래로 — 그림만(판정은 포인터라 무관 · 유나 4752). */
+const shiftCopyOneRowDown: Modifier = ({ transform }) => ({ ...transform, y: transform.y + 36 });
+const DRAG_COPY_MODIFIERS = [shiftCopyOneRowDown];
+
+/**
+ * story #4366(유나 4752) — 겨눈 행 = **포인터가 있는 행**(가로는 트리 폭 전체라 세로만 본다). 행 사이 틈(space-y-1 · 4px)이면 가장 가까운 행.
+ * dnd-kit 기본(closestCenter 등)은 끄는 사각형 = 그린 복제로 재서, 복제 위치가 바뀌면 겨눈 행도 바뀐다 — 포인터는 그림과 무관하다.
+ */
+export const pointerRowCollision: CollisionDetection = ({ droppableContainers, droppableRects, pointerCoordinates }) => {
+  if (!pointerCoordinates) return [];
+  const y = pointerCoordinates.y;
+  let best: { id: string | number; distance: number; container: (typeof droppableContainers)[number] } | null = null;
+  for (const container of droppableContainers) {
+    const rect = droppableRects.get(container.id);
+    if (!rect) continue;
+    const distance = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+    if (!best || distance < best.distance) best = { id: container.id, distance, container };
+  }
+  return best ? [{ id: best.id, data: { droppableContainer: best.container, value: best.distance } }] : [];
+};
 
 export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual', onMenuMove, hasMore = false }: DocTreeProps) {
   const tDocs = useTranslations('docs');
@@ -572,79 +632,121 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
     if (row || pending.settled) pendingFocusRef.current = null;
   });
   const moveCtxValue = onMenuMove ? { requestMove, hasMore } : null;
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  // 까디르(4752) — 자동 스크롤이 도는 중에 놓으면, 놓는 순간 다시 판정할 때 over.rect는 그 순간의 스크롤인데 화면의 표시는 직전 렌더 것이라
+  // 표시와 저장이 갈렸다(30회 중 2회). 놓을 때는 다시 판정하지 않고 **마지막으로 그린 표시**를 그대로 쓴다 — 표시 = 결과. 표시가 없었으면 무동작.
+  // useLayoutEffect — DOM이 바뀌는 그 커밋 안에서 ref도 바뀐다. useEffect(그린 뒤)면 그 사이 놓을 때 한 걸음 전 표시로 저장했다(실 브라우저 30회 중 2회).
+  const drawnTargetRef = useRef<DropTarget | null>(null);
+  useLayoutEffect(() => { drawnTargetRef.current = dropTarget; }, [dropTarget]);
+
+  // story #4366 — 끄는 동안의 표시와 떨군 뒤의 결과가 같은 판정에서 나온다(dropZoneFor → planDrop).
+  // 판정 상자 = over.rect = 끌 대상으로 등록된 **행**(TreeNode dropTargetProps). 순환 · 자기 자신이면 표시 없음.
+  // 유나(4752 실 브라우저) — 판정은 **포인터**로만 한다. 예전엔 끄는 사각형(active.rect.current.translated)의 가운데를 썼는데, DragOverlay가
+  // 있으면 dnd-kit이 그 사각형을 **그린 복제**에서 잰다(core.esm.js:2948 · 오버레이 칸의 한 자식까지 재는 getMeasurableNode :2413) —
+  // 복제를 한 행 아래로 그리자 판정도 한 행 밀렸다. 겨눈 행 · 행 안 구역 둘 다 충돌 함수가 받은 pointerCoordinates 하나로 정한다.
+  // 「끌기 시작 좌표 + delta」는 안 쓴다 — dnd-kit의 delta는 끌기 시작 뒤 스크롤 이동량까지 더한 값(core.esm.js:2983)인데 over.rect는
+  // 스크롤을 뺀 지금의 화면 좌표(Rect 게터 :970)라, aside가 자동 스크롤되면 그만큼 구역이 밀렸다. pointerCoordinates는 시작 + 이동(:2977)으로 over.rect와 같은 화면 좌표.
+  const pointerRef = useRef<Coordinates | null>(null);
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    pointerRef.current = args.pointerCoordinates;
+    return pointerRowCollision(args);
+  }, []);
+  const resolveDrop = useCallback((event: DragMoveEvent | DragOverEvent | DragEndEvent): { target: DropTarget; plan: DocMovePlan } | null => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return null;
+    const overDoc = docs.find((d) => d.id === over.id);
+    if (!overDoc) return null;
+    const pointer = pointerRef.current;
+    if (!pointer) return null;
+    const pointerY = pointer.y;
+    const overRect = over.rect;
+    const relativeY = overRect.height > 0 ? (pointerY - overRect.top) / overRect.height : 0.5;
+    const isFolderRow = Boolean(overDoc.is_folder || docs.some((d) => d.parent_id === overDoc.id));
+    const zone = dropZoneFor(relativeY, isFolderRow);
+    const plan = planDrop(docs, String(active.id), overDoc.id, zone);
+    return plan ? { target: { overId: overDoc.id, zone }, plan } : null;
+  }, [docs]);
+
+  // 까디르 · codex(4752) — 놓은 뒤 드롭 표시가 남았다(100회 중 4 · 다음 끌기 전까지). dnd-kit이 onDragMove/onDragOver를 렌더 뒤 effect에서
+  // 부르는데(core.esm.js 3210 · 3244), pointerup에서 동기로 clearDrag한 **뒤에** 그 앞 렌더의 effect가 돌아 표시와 ref를 다시 채웠다.
+  // 끄는 중인지는 state(activeId)가 아니라 ref로 본다 — 늦게 도는 effect가 옛 클로저를 들고 있어도 지금 값을 읽는다.
+  const draggingRef = useRef(false);
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    draggingRef.current = true;
+    pointerRef.current = null;
+    drawnTargetRef.current = null;
+    setDropTarget(null);
+    setActiveId(String(event.active.id));
+  }, []);
+
+  // dnd-kit은 포인터가 움직이면 onDragMove를, 겨눈 행이 바뀌면 onDragOver를 따로 부른다 — onDragMove만 들으면 행이 바뀐 직후 표시가
+  // 한 걸음 늦어(실 브라우저: 폴더 아래 가장자리에서 «다음 행 앞»을 보이고 떨굼은 «폴더 뒤») 표시와 결과가 갈렸다. 둘 다 같은 판정.
+  const handleDragMove = useCallback((event: DragMoveEvent | DragOverEvent) => {
+    if (!dragEnabled || !draggingRef.current) return;
+    const next = resolveDrop(event)?.target ?? null;
+    setDropTarget((prev) => (prev?.overId === next?.overId && prev?.zone === next?.zone ? prev : next));
+  }, [dragEnabled, resolveDrop]);
+
+  const clearDrag = useCallback(() => {
+    draggingRef.current = false;
+    drawnTargetRef.current = null;
+    setActiveId(null);
+    setDropTarget(null);
+  }, []);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const target = drawnTargetRef.current;
+    clearDrag();
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     if (!dragEnabled) { onMoveDenied?.('sort-mode-active'); return; }
 
     const activeDoc = docs.find((d) => d.id === active.id);
-    const overDoc = docs.find((d) => d.id === over.id);
-    if (!activeDoc || !overDoc) return;
-
-    // Drop position 기반으로 reorder vs 자식 이동 구분:
-    // over 항목의 상단 25% / 하단 25% → same-level reorder
-    // 중앙 50% → overDoc을 부모로 이동
-    const overRect = over.rect;
-    const activeTranslated = active.rect.current.translated;
-    const activeCenterY = activeTranslated
-      ? activeTranslated.top + activeTranslated.height / 2
-      : overRect.top + overRect.height / 2;
-    const relativeY = (activeCenterY - overRect.top) / overRect.height;
-    const dropIntoParent = relativeY > 0.25 && relativeY < 0.75;
-
-    if (dropIntoParent) {
-      // 자식으로 이동 (overDoc이 새 부모)
-      if (activeDoc.parent_id === overDoc.id) return; // 이미 자식
-      if (isDescendant(docs, activeDoc.id, overDoc.id)) {
-        onMoveDenied?.('circular');
-        return;
-      }
-      if (!onMove) {
-        onMoveDenied?.('no-permission');
-        return;
-      }
-      // story #4353 — 폴더 안으로 = 그 부모의 맨 끝(서버가 번호를 다시 매긴다).
-      await onMove(planMoveInto(activeDoc.id, overDoc.id));
+    if (!activeDoc) return;
+    const plan = target ? planDrop(docs, activeDoc.id, target.overId, target.zone) : null;
+    if (!target || !plan) {
+      // 표시가 없던 자리(자기 하위 = 순환 포함) — 무동작 + 순환이면 기존 알림.
+      if (isDescendant(docs, activeDoc.id, String(over.id))) onMoveDenied?.('circular');
       return;
     }
-
-    // Same-level reorder (상단/하단 25% 드롭)
-    if (!onReorder) return;
-    if (activeDoc.parent_id !== overDoc.parent_id) {
-      // Cross-parent reorder: overDoc과 같은 레벨로 이동
-      if (isDescendant(docs, activeDoc.id, overDoc.id)) {
-        onMoveDenied?.('circular');
-        return;
-      }
-      if (!onMove) {
-        onMoveDenied?.('no-permission');
-        return;
-      }
-      // story #4353 — 그 문서 위쪽 가장자리면 앞, 아래쪽이면 뒤(예전엔 그 문서의 sort_order를 그대로 넣어 동률이면 무동작).
-      const plan = planMoveBeside(docs, activeDoc.id, overDoc.id, relativeY <= 0.25 ? 'before' : 'after');
-      if (plan) await onMove(plan);
+    // story #4353 — 서버(`POST /api/v2/docs/reorder`)가 형제 번호를 한 번에 다시 매긴다. 같은 부모 안 = onReorder · 부모가 바뀜 = onMove.
+    const handler = plan.parentId === activeDoc.parent_id ? onReorder : onMove;
+    if (!handler) {
+      if (plan.parentId !== activeDoc.parent_id) onMoveDenied?.('no-permission');
       return;
     }
+    const saved = await handler(plan);
+    // 접힌 폴더 «안으로» 떨구면 그 폴더를 펼친다 — 옮긴 문서가 폴더 끝에 보이게(예전엔 접힌 채라 트리에서 그냥 사라졌다).
+    // 저장이 실패하면(문서는 제자리) 펼치지 않는다 — 까디르(4752).
+    if (saved && target.zone === 'into' && !isExpanded(target.overId)) expandFolders([target.overId]);
+  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled, clearDrag, isExpanded, expandFolders]);
 
-    // story #4353 — 예전엔 대상의 sort_order를 옮긴 문서에 그대로 넣었다(바꿔치기 아님) — 형제가 0 동률(dev 대부분)이면 0 → 0으로
-    // 저장돼 새로고침하면 id 순으로 돌아갔다. 이제 «그 형제 뒤/앞»만 보내고 서버가 형제 번호를 한 번에 다시 매긴다.
-    const plan = planReorder(docs, String(active.id), String(over.id));
-    if (!plan) return;
-    await onReorder(plan);
-  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled]);
+  const activeDoc = activeId ? docs.find((d) => d.id === activeId) ?? null : null;
 
   return (
     <DocMoveCtx.Provider value={moveCtxValue}>
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragOver={handleDragMove} onDragEnd={handleDragEnd} onDragCancel={clearDrag}>
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <div data-doc-move-live="" aria-live="polite" role="status" className="sr-only">{announcement}</div>
         <nav ref={navRef} className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} onAddChildFolder={onAddChildFolder} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} sortMode={sortMode} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} onAddChildFolder={onAddChildFolder} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} sortMode={sortMode} dropTarget={dropTarget} />
           ))}
         </nav>
       </SortableContext>
+      {/* 포인터를 따라가는 복제 — 행 모양 그대로(행 호버와 같은 칠 · 테두리 없음 — 끄는 행 자체는 제자리에서 흐리게).
+          유나(4752) — 복제가 겨눈 행 위에 그려져 «안으로» 때 폴더 이름 · 칠을 가렸다 → 한 행 간격(36px = 행 32 + 간격 4) 아래로 그린다.
+          판정은 포인터로만 하니(resolveDrop · pointerRowCollision) 복제를 어디 그려도 겨눈 행 · 구역은 그대로다. 안쪽 칸만 옮기면 dnd-kit이
+          그리는 바깥 칸(투명)이 겨눈 행을 여전히 덮어(elementFromPoint = 오버레이 칸) 오버레이 전체를 옮기고, 누름도 통과시킨다. */}
+      <DragOverlay dropAnimation={null} modifiers={DRAG_COPY_MODIFIERS} className="pointer-events-none">
+        {activeDoc ? (
+          <div data-drag-copy className="flex items-center gap-2 rounded-lg bg-muted py-2 pl-3 pr-8 text-xs text-foreground">
+            {activeDoc.icon ? <span className="shrink-0 text-sm">{activeDoc.icon}</span> : activeDoc.is_folder ? <Folder className="size-4 shrink-0 text-muted-foreground" /> : <FileText className="size-4 shrink-0 text-muted-foreground" />}
+            <span className="flex-1 truncate font-semibold">{activeDoc.title}</span>
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
     </DocMoveCtx.Provider>
   );
