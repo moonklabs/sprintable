@@ -233,12 +233,14 @@ async def test_send_records_ok_tickets_by_device_not_error_ones(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_a_failing_receipt_check_does_not_stop_the_ticks_deliveries(monkeypatch):
-    """PO 17:20Z ① — the check runs isolated in the dispatcher loop: it raising must not skip that tick's claim / deliver."""
+async def test_a_failing_receipt_check_does_not_stop_the_ticks_deliveries(monkeypatch, caplog):
+    """PO 17:20Z ① — the check runs isolated in the dispatcher loop: it raising must not skip that tick's claim / deliver,
+    and the failure is logged inside the pass (not left as an unretrieved task exception)."""
     from app.core.config import settings
     from app.services import delivery_dispatcher as dd
 
     monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda self: True))
+    monkeypatch.setattr(dd, "_receipt_task", None)
 
     async def broken_check(*_a, **_k):
         raise RuntimeError("redis exploded mid-check")
@@ -273,4 +275,123 @@ async def test_a_failing_receipt_check_does_not_stop_the_ticks_deliveries(monkey
     monkeypatch.setattr(dd.asyncio, "sleep", recording_sleep)
     await dd.delivery_dispatcher_loop()  # ends on the CancelledError from the second claim
     # delivered in the same tick — no error backoff (sleep) before it
-    assert events == ["deliver"]
+    assert events[0] == "deliver" and not any(e.startswith("sleep 1") for e in events)
+    if not dd._receipt_task.done():
+        await dd._receipt_task
+    assert dd._receipt_task.exception() is None  # the pass swallowed and logged its own failure
+    assert any("expo receipt check failed" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_a_slow_receipt_check_does_not_delay_the_ticks_claim_and_delivery(monkeypatch):
+    """PO 17:27Z ① — the pass runs beside the tick. A check that never finishes (a hung Expo) must not hold up delivery."""
+    from app.core.config import settings
+    from app.services import delivery_dispatcher as dd
+
+    monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda self: True))
+    monkeypatch.setattr(dd, "_receipt_task", None)
+    never = asyncio.Event()
+
+    async def hung_check(*_a, **_k):
+        await never.wait()
+
+    monkeypatch.setattr(er, "check_due_expo_receipts", hung_check)
+
+    async def no_reap():
+        return 0
+
+    claims = iter([[{"id": uuid.uuid4(), "org_id": ORG, "kind": "expo_push", "payload": {}, "attempts": 0}]])
+
+    async def claim_once(*_a, **_k):
+        try:
+            return next(claims)
+        except StopIteration:
+            raise asyncio.CancelledError
+
+    delivered: list = []
+
+    async def fake_deliver(job):
+        delivered.append(job["id"])
+
+    monkeypatch.setattr(dd, "_reap_expired_claims", no_reap)
+    monkeypatch.setattr(dd, "_claim_batch", claim_once)
+    monkeypatch.setattr(dd, "_deliver_one", fake_deliver)
+    await asyncio.wait_for(dd.delivery_dispatcher_loop(), timeout=5)  # awaiting the check inside the tick would hang here
+    assert len(delivered) == 1
+    # the loop's shutdown cancels the pass still running beside it
+    with pytest.raises(asyncio.CancelledError):
+        await dd._receipt_task
+
+
+@pytest.mark.anyio
+async def test_only_one_receipt_pass_runs_at_a_time(monkeypatch):
+    from app.core.config import settings
+    from app.services import delivery_dispatcher as dd
+
+    monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda self: True))
+    monkeypatch.setattr(dd, "_receipt_task", None)
+    started: list = []
+    release = asyncio.Event()
+
+    async def slow_check(*_a, **_k):
+        started.append(1)
+        await release.wait()
+
+    monkeypatch.setattr(er, "check_due_expo_receipts", slow_check)
+    dd._start_receipt_check()
+    await asyncio.sleep(0)
+    dd._start_receipt_check()  # the first is still running → no second pass
+    await asyncio.sleep(0)
+    assert len(started) == 1
+    release.set()
+    await dd._receipt_task
+    dd._start_receipt_check()  # done → a new pass may start
+    await asyncio.sleep(0)
+    assert len(started) == 2
+    release.set()
+    await dd._receipt_task
+
+
+@pytest.mark.anyio
+async def test_a_hung_redis_does_not_hold_up_sending(monkeypatch):
+    """PO 17:27Z ② — recording runs on the send path; a Redis that stops answering is skipped within the bound."""
+    from ee.services import expo_push
+
+    class HungPipeline:
+        def hset(self, *a, **k): ...
+        def expire(self, *a, **k): ...
+        def zadd(self, *a, **k): ...
+
+        async def execute(self):
+            await asyncio.Event().wait()  # never answers
+
+    class HungRedis:
+        def pipeline(self, **_k):
+            return HungPipeline()
+
+    monkeypatch.setattr(er, "_redis", lambda: HungRedis())
+    monkeypatch.setattr(er, "RECORD_TIMEOUT_SECONDS", 0.2)
+
+    async def fake_send(_chunk):
+        return [{"status": "ok", "id": "tk-ok"}]
+
+    monkeypatch.setattr(expo_push, "_expo_send_chunk", fake_send)
+    devices = [{"expo_push_token": "ExponentPushToken[a]", "id": uuid.uuid4(), "platform": "ios"}]
+    dead = await asyncio.wait_for(
+        expo_push._send_expo_push_targets(devices, title="t", body="b", event_type="e", org_id=ORG), timeout=5,
+    )
+    assert dead == []
+
+
+def test_the_redis_client_gives_up_on_a_silent_server(monkeypatch):
+    import redis.asyncio as aioredis
+
+    from app.core.config import settings
+
+    captured: dict = {}
+    monkeypatch.setattr(aioredis, "from_url", lambda url, **kw: captured.update(kw) or object())
+    monkeypatch.setattr(settings, "redis_url", "redis://example.invalid:6379/0")
+    monkeypatch.setattr(er, "_client", None)
+    er._redis()
+    assert captured["socket_connect_timeout"] == er.REDIS_SOCKET_TIMEOUT_SECONDS
+    assert captured["socket_timeout"] == er.REDIS_SOCKET_TIMEOUT_SECONDS

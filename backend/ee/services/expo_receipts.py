@@ -20,6 +20,7 @@ instance whose ZREM removed it processes it, so instances never check the same t
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -38,6 +39,9 @@ CHECK_AFTER_SECONDS = 15 * 60  # Expo's recommendation
 RECEIPT_LIFETIME_SECONDS = 24 * 3600  # Expo clears receipts after 24 h
 RETRY_AFTER_SECONDS = 5 * 60  # result unknown (Expo 5xx · network · receipt not ready yet) → look again later
 MAX_IDS_PER_REQUEST = 1000
+# PO 17:27Z ② — Redis must never stall the send path: the client gives up on a silent Redis, and recording has a hard bound.
+REDIS_SOCKET_TIMEOUT_SECONDS = 2.0
+RECORD_TIMEOUT_SECONDS = 3.0
 
 _client = None
 
@@ -52,7 +56,10 @@ def _redis():
     if _client is None:
         import redis.asyncio as aioredis
 
-        _client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        _client = aioredis.from_url(
+            settings.redis_url, decode_responses=True,
+            socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS, socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+        )
     return _client
 
 
@@ -61,12 +68,20 @@ def _hash_key(ticket_id: str) -> str:
 
 
 async def record_expo_tickets(org_id: uuid.UUID, tickets: list[tuple[str, uuid.UUID, str | None]]) -> None:
-    """Remember ok tickets (ticket id · push_device id · platform) so their receipts are checked later. Best-effort: a Redis
-    failure is logged and swallowed — sending already happened and must not fail because of this."""
+    """Remember ok tickets (ticket id · push_device id · platform) so their receipts are checked later. Best-effort and
+    bounded: it runs on the send path, so a Redis failure — or a Redis that stops answering — is logged and skipped within
+    RECORD_TIMEOUT_SECONDS. Sending already happened and must not fail or wait because of this."""
     r = _redis()
     if r is None or not tickets:
         return
     now = time.time()
+    try:
+        await asyncio.wait_for(_record(r, org_id, tickets, now), RECORD_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("expo receipts: recording %d ticket(s) timed out — their receipts will not be checked", len(tickets))
+
+
+async def _record(r, org_id: uuid.UUID, tickets: list[tuple[str, uuid.UUID, str | None]], now: float) -> None:
     try:
         pipe = r.pipeline(transaction=False)
         for ticket_id, device_id, platform in tickets:

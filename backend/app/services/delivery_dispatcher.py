@@ -246,6 +246,7 @@ async def _deliver_one(job: dict) -> None:
 
 
 _RECEIPT_CHECK_INTERVAL = 60.0  # story #4396 — Expo receipts are checked at most once a minute per instance
+_receipt_task: asyncio.Task | None = None
 
 
 async def _check_expo_receipts_isolated() -> None:
@@ -261,6 +262,15 @@ async def _check_expo_receipts_isolated() -> None:
         await check_due_expo_receipts()
     except Exception:
         logger.warning("delivery_dispatcher: expo receipt check failed — deliveries unaffected", exc_info=True)
+
+
+def _start_receipt_check() -> None:
+    """story #4396 (PO 17:27Z ①) — run the receipt pass **beside** the delivery tick, never inside it: a slow Expo
+    (httpx timeout 10 s) must not delay that tick's claim and deliveries. At most one pass at a time per instance."""
+    global _receipt_task
+    if _receipt_task is not None and not _receipt_task.done():
+        return
+    _receipt_task = asyncio.create_task(_check_expo_receipts_isolated())
 
 
 async def delivery_dispatcher_loop() -> None:
@@ -281,7 +291,7 @@ async def delivery_dispatcher_loop() -> None:
         try:
             if time.monotonic() >= next_receipt_check:
                 next_receipt_check = time.monotonic() + _RECEIPT_CHECK_INTERVAL
-                await _check_expo_receipts_isolated()
+                _start_receipt_check()
             reaped = await _reap_expired_claims()
             if reaped:
                 logger.warning("delivery_dispatcher: reaped %d expired claim(s) back to pending", reaped)
@@ -296,6 +306,8 @@ async def delivery_dispatcher_loop() -> None:
             delay = 1.0
         except asyncio.CancelledError:
             logger.info("delivery_dispatcher cancelled — shutting down")
+            if _receipt_task is not None and not _receipt_task.done():
+                _receipt_task.cancel()
             break
         except Exception as exc:
             logger.warning("delivery_dispatcher error: %s — retrying in %.1fs", exc, delay)
