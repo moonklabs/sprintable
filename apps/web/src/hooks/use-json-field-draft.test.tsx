@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { fieldDraftStorageKey } from './use-field-draft';
-import { useJsonFieldDraft } from './use-json-field-draft';
+import { reconcileDraft, useJsonFieldDraft } from './use-json-field-draft';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -69,3 +69,41 @@ describe('useJsonFieldDraft(story #4370)', () => {
     expect(api.value).toEqual(SERVER);
   });
 });
+
+// 까디르 P3 — 저장된 값을 모양 검사 없이 캐스팅하던 것: 폼 모양이 바뀐 뒤 남은 옛 초안이 모르는 키 · 다른 타입을 싣고 들어왔다.
+describe('useJsonFieldDraft — 옛 모양 초안은 지금 모양에 맞춘다(story #4370 · 까디르 P3)', () => {
+  it('모르는 키는 버리고 · 글 칸에 객체가 들어 있으면 처음 값 · 맞는 칸은 살린다', async () => {
+    window.sessionStorage.setItem(fieldDraftStorageKey(KEY), JSON.stringify({ title: { 옛: '구조' }, description: '살아남는 설명', legacyNote: '옛 칸' }));
+    await mount();
+    expect(api.value).toEqual({ title: '서버 제목', description: '살아남는 설명' });
+    expect(Object.keys(api.value)).toEqual(['title', 'description']);
+  });
+
+  it('객체 자리에 배열 · 원시값이 저장돼 있으면 처음 값', async () => {
+    window.sessionStorage.setItem(fieldDraftStorageKey(KEY), JSON.stringify(['옛', '목록']));
+    await mount();
+    expect(api.value).toEqual(SERVER);
+  });
+});
+
+describe('reconcileDraft — 모양 맞추기 규칙(story #4370)', () => {
+  const ITEM = { mode: 'new', statement: '', metric: null as null | { name: string } };
+  it('배열 template: 배열만 받고 항목마다 첫 항목 모양으로 · 객체 아닌 항목은 버림', () => {
+    const out = reconcileDraft([{ mode: 'link', statement: '가설', metric: { name: '완료율' }, extra: 1 }, '문자열', null], [ITEM]);
+    expect(out).toEqual([{ mode: 'link', statement: '가설', metric: { name: '완료율' } }]);
+    expect(reconcileDraft({ not: 'array' }, [ITEM])).toEqual([ITEM]);
+  });
+  it('null template 자리는 무엇이든 받는다 · 빠진 키는 template 값', () => {
+    expect(reconcileDraft({ statement: '문장' }, ITEM)).toEqual({ mode: 'new', statement: '문장', metric: null });
+    expect(reconcileDraft({ metric: { name: 'x' } }, ITEM).metric).toEqual({ name: 'x' });
+  });
+  it('원시값 자리는 원시값만(`number | \'\'` 같은 칸이 있어 원시 타입끼리는 받는다) · 객체 · 배열 · null은 template 값', () => {
+    expect(reconcileDraft('글', '')).toBe('글');
+    expect(reconcileDraft(40, '')).toBe(40);
+    expect(reconcileDraft(true, false)).toBe(true);
+    expect(reconcileDraft({ a: 1 }, '')).toBe('');
+    expect(reconcileDraft([1], '')).toBe('');
+    expect(reconcileDraft(null, '')).toBe('');
+  });
+});
+
