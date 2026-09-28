@@ -114,6 +114,13 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
         const json = (await res.json()) as { data: DocPreview };
         const d = json.data;
 
+        // [SID:4378] 자기 자신(A에 A — slug · id 어느 쪽으로 넣어도 조회 결과 id로 가름)은 «서로를 임베드» 문구가 아니라
+        // 저장된 자기 임베드 갈래와 같은 «자기 자신» 문구로.
+        if (currentDocId && d.id === currentDocId) {
+          fail(tDocs('pageEmbedSelf'));
+          return;
+        }
+
         // Indirect circular embed check: target doc's embedChain contains currentDocId (A→B→A)
         if (isCircularEmbed(d.id, currentDocId, d.embedChain)) {
           fail(tDocs('pageEmbedCycle'));
