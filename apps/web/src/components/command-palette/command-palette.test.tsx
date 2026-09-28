@@ -234,7 +234,8 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
 
   it('selecting an action command routes (route-first) instead of performing an inline mutation', async () => {
     await mount();
-    const recruitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('에이전트 모집하기'));
+    // story #4380 — 항목 = Autocomplete option(div role="option").
+    const recruitBtn = [...document.querySelectorAll('[role="option"]')].find((b) => b.textContent?.includes('에이전트 모집하기'));
     expect(recruitBtn).toBeDefined();
     await act(async () => { recruitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/organization/workforce/recruiter');
@@ -272,3 +273,80 @@ describe('GUARD_ANCHOR_ITEMS — 앵커는 resolveResourceHref로만(#4231 4차 
     }
   });
 });
+
+// story #4380 — 화면 읽기가 지금 켜진 항목을 안다: 입력칸 = combobox · 목록 = listbox · 항목 = option · 켜진 항목 = aria-activedescendant
+// + aria-selected(Base UI Autocomplete · inline). 예전엔 입력칸 · 단추뿐이라 ↑↓로 옮긴 «켜짐»이 모양(bg-accent)으로만 보였다.
+describe('CommandPalette — 목록상자 · 켜진 항목 알림(story #4380)', () => {
+  const input = () => document.querySelector<HTMLInputElement>('input')!;
+  const options = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+  const key = async (k: string) => { await act(async () => { input().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }); };
+  const active = () => document.getElementById(input().getAttribute('aria-activedescendant') ?? '');
+
+  it('입력칸 = combobox → listbox · 항목 = option · 묶음 = 이름 붙은 group · option은 전부 대화상자 안(포털 0 · 숨은 조상 0)', async () => {
+    await mount();
+    expect(input().getAttribute('role')).toBe('combobox');
+    expect(input().getAttribute('aria-expanded')).toBe('true');  // combobox 필수 속성(inline이면 Base UI가 안 닮)
+    const listbox = document.getElementById(input().getAttribute('aria-controls') ?? '');
+    expect(listbox?.getAttribute('role')).toBe('listbox');
+    expect(options().length).toBeGreaterThan(5);
+    expect(options().every((o) => listbox!.contains(o))).toBe(true);
+    const groupNames = [...listbox!.querySelectorAll('[role="group"]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby') ?? '')?.textContent);
+    const cp = koMessages.commandPalette as LooseMessages;
+    expect(groupNames).toEqual([cp.navigate, cp.actions]);
+    const popup = input().closest('[role="dialog"]')!;
+    expect(options().every((o) => popup.contains(o) && !o.closest('[aria-hidden="true"],[inert]'))).toBe(true);
+  });
+
+  it('열면 첫 항목이 켜져 있다(activedescendant · aria-selected 하나) · ↓ 하면 둘째로 옮겨 간다 · 초점은 입력칸 그대로', async () => {
+    await mount();
+    expect(active()).toBe(options()[0]);
+    expect(options().filter((o) => o.getAttribute('aria-selected') === 'true')).toEqual([options()[0]]);
+    await key('ArrowDown');
+    expect(active()).toBe(options()[1]);
+    expect(options().filter((o) => o.getAttribute('aria-selected') === 'true')).toEqual([options()[1]]);
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('첫 Enter가 켜진 항목을 연다(목록 여는 데 안 쓰임)', async () => {
+    await mount();
+    await key('ArrowDown');
+    const target = active()!;
+    await key('Enter');
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const boardIdx = options().indexOf(target);
+    expect(boardIdx).toBe(1);
+    expect(target.getAttribute('data-command-id')).toBeTruthy();
+  });
+
+  it('맞는 항목이 없으면 aria-expanded="false" · 안내 문구', async () => {
+    await mount();
+    await act(async () => {
+      const el = input();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, 'zzzz');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(options()).toHaveLength(0);
+    expect(input().getAttribute('aria-expanded')).toBe('false');
+    expect(document.body.textContent).toContain((koMessages.commandPalette as LooseMessages).noResults as string);
+  });
+
+  it('항목을 고른 뒤 입력칸에 그 항목 이름이 채워지지 않는다(다음에 열 때 빈 칸)', async () => {
+    const onOpenChange = vi.fn();
+    await mount({ onOpenChange });
+    await key('Enter');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(input().value).toBe('');
+  });
+
+  it('스토리 맥락: 명령 묶음이 먼저 · 켜진 명령 아래에만 영향 줄', async () => {
+    await mount({ contextStoryId: 's1' });
+    const first = options()[0];
+    expect(active()).toBe(first);
+    expect(first.textContent).toContain('웰컴 이메일 시안 위임하기');
+    const impacts = () => options().filter((o) => o.querySelector('.border-info\\/40'));
+    expect(impacts()).toEqual([first]);
+    await key('ArrowDown');
+    expect(impacts()).toEqual([options()[1]]);
+  });
+});
+
