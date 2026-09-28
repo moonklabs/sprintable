@@ -270,7 +270,11 @@ def _start_receipt_check() -> None:
     global _receipt_task
     if _receipt_task is not None and not _receipt_task.done():
         return
-    _receipt_task = asyncio.create_task(_check_expo_receipts_isolated())
+    from app.services.pg_pubsub import fire_and_forget
+
+    # the codebase's fire-and-forget: holds a strong reference and is drained at shutdown (lifespan); the returned task is the
+    # «at most one at a time» guard.
+    _receipt_task = fire_and_forget(_check_expo_receipts_isolated())
 
 
 async def delivery_dispatcher_loop() -> None:
