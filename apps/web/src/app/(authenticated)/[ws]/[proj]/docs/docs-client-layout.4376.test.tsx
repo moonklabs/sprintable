@@ -130,7 +130,7 @@ describe('DocsClientLayout — 문서 트리는 한 번에 받는다(story #4376
     await openFolders();
     expect(container.textContent).toContain('문서A');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '더 보기')).toBe(false);
-    expect(container.textContent).not.toContain('개 중 ');
+    expect(container.textContent).not.toContain('개 표시 중');
   });
 
   it('상한을 넘는 프로젝트: «받은 수 / 총량» + 더 보기 → 커서와 tree=true로 이어 받고 붙인다', async () => {
@@ -146,7 +146,7 @@ describe('DocsClientLayout — 문서 트리는 한 번에 받는다(story #4376
     vi.stubGlobal('fetch', fetchMock);
     await mount();
     await openFolders();
-    expect(container.textContent).toContain('전체 3개 중 2개');
+    expect(container.textContent).toContain('3개 중 2개 표시 중');
     const more = [...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기');
     expect(more).toBeTruthy();
     await act(async () => { more!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -155,6 +155,6 @@ describe('DocsClientLayout — 문서 트리는 한 번에 받는다(story #4376
     expect(next.get('cursor')).toBe('cur-1');
     expect(next.get('tree')).toBe('true');
     expect(container.textContent).toContain('문서C');
-    expect(container.textContent).not.toContain('전체 3개 중');
+    expect(container.textContent).not.toContain('개 표시 중');
   });
 });

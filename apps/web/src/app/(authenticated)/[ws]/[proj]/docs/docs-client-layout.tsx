@@ -26,7 +26,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { applyDocMove, placedFromSiblings, planDocMove, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
+import { applyDocMove, placedFromSiblings, planDocMove, withEffectiveParents, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
 import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
@@ -247,7 +247,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const selectedTagsRef = useRef(selectedTags);
   useEffect(() => { selectedTagsRef.current = selectedTags; });
   const handleMenuMove = useCallback((docId: string, action: DocMoveAction): Promise<MenuMoveResult> => {
-    const plan = planDocMove(treeRef.current, docId, action);
+    // story #4376(유나 4766 반려) — 트리가 그린 모양(실효 부모)대로 짠다: 부모가 목록에 없는 문서는 뿌리 기준(숨은 부모 id를 요청에 싣지 않음).
+    const plan = planDocMove(withEffectiveParents(treeRef.current), docId, action);
     if (!plan.ok) return Promise.resolve({ plan, placed: null });
     const next = applyDocMove(treeRef.current, plan);
     treeRef.current = next;
@@ -275,9 +276,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     return job;
   }, [fetchTree, addToast, t]);
 
-  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
+  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active' | 'tag-filter-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
     else if (reason === 'sort-mode-active') addToast({ title: t('moveSortModeActiveError'), type: 'warning' });
+    else if (reason === 'tag-filter-active') addToast({ title: t('moveTagFilterActive'), type: 'warning' });
     else addToast({ title: t('movePermissionError'), type: 'warning' });
   }, [addToast, t]);
 
@@ -640,7 +642,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (
-              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} />
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} filtered={selectedTags.length > 0} />
             )}
             {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">
