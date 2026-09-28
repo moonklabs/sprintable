@@ -99,6 +99,11 @@ def _app(seen: dict, probe: _Probe):
         background_tasks.add_task(slow_background, db, org)
         return {"ok": True}
 
+    @app.get("/read-no-background")
+    async def read_no_background(db=Depends(get_db)):
+        await db.execute(text("SELECT 1"))
+        return {"ok": True}
+
     @app.get("/read-only")
     async def read_only(background_tasks: BackgroundTasks, db=Depends(get_read_db)):
         await db.execute(text("SELECT 1"))
@@ -182,6 +187,28 @@ async def test_a_write_is_still_committed_before_the_response():
             assert (await s.execute(select(Organization).where(Organization.id == seen["org_id"]))).scalar_one()
     finally:
         await _cleanup_org(seen.get("org_id"))
+        await probe.close()
+
+
+async def test_a_request_without_background_work_is_unchanged_one_commit_at_teardown(monkeypatch):
+    """Qadir lens ② — a request with no background tasks is exactly as before: the only COMMIT is get_db's teardown (the
+    queued task sees it is alone and does nothing). Dropping the «only with background work» guard makes it two."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    commits = {"n": 0}
+    real_commit = AsyncSession.commit
+
+    async def counting_commit(self):
+        commits["n"] += 1
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", counting_commit)
+    seen, probe = {}, _Probe()
+    try:
+        resp = await _call(_app(seen, probe), "GET", "/read-no-background")
+        assert resp.status_code == 200
+        assert commits["n"] == 1
+    finally:
         await probe.close()
 
 
@@ -278,3 +305,50 @@ async def test_dispatch_without_a_webhook_still_goes_to_sse(monkeypatch):
         async with async_session_factory() as s:
             await s.execute(delete(Organization).where(Organization.id == org_id))
             await s.commit()
+
+
+# ── the helper's conditions, one by one (no DB) ─────────────────────────────────────────────────────────────────────
+
+class _FakeSession:
+    def __init__(self, *, in_tx=True, wrote=False, commit_failed=False):
+        from app.core.commit_before_response import COMMIT_FAILED_KEY, WROTE_KEY
+
+        self.info = {WROTE_KEY: wrote, COMMIT_FAILED_KEY: commit_failed}
+        self.new, self.dirty, self.deleted = set(), set(), set()
+        self._in_tx = in_tx
+        self.commits = 0
+
+    def in_transaction(self):
+        return self._in_tx
+
+    async def commit(self):
+        self.commits += 1
+        self._in_tx = False
+
+
+async def _run_queued(session, *, other_tasks: int) -> int:
+    from fastapi import BackgroundTasks
+
+    from app.core.database import _end_read_transaction_before_background
+
+    tasks = BackgroundTasks()
+    _end_read_transaction_before_background(session, tasks)
+    for _ in range(other_tasks):
+        tasks.add_task(lambda: None)
+    await tasks.tasks[0]()  # the queued task runs first
+    return session.commits
+
+
+async def test_helper_ends_a_read_only_transaction_when_there_is_background_work():
+    assert await _run_queued(_FakeSession(), other_tasks=1) == 1
+
+
+@pytest.mark.parametrize(("label", "session_kwargs", "other_tasks"), [
+    ("alone — no background work", {}, 0),
+    ("the session wrote (left to teardown)", {"wrote": True}, 1),
+    ("the commit before response failed (teardown rolls back)", {"commit_failed": True}, 1),
+    ("no open transaction", {"in_tx": False}, 1),
+])
+async def test_helper_leaves_the_session_alone(label, session_kwargs, other_tasks):
+    assert await _run_queued(_FakeSession(**session_kwargs), other_tasks=other_tasks) == 0, label
+
