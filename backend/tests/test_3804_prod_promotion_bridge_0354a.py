@@ -19,7 +19,11 @@
   산출물)만 보는 체크로는 못 잡지만 `channel_post_versions.hook_key`(구간 끝 산출물)
   까지 보는 사후 체크는 잡는다는 것을 실증(C1 지정 케이스).
 
-구간④ 파일 목록(60개 중 57개) 자체의 드리프트 가드(C2, `_SEGMENT_*_FILES` ↔
+⛔ prod 승격 판(결제 축 제외 · 2026-09-28 · story #4391): 구간①~③(0282 · 0288 · 0291)은 결제 축이라 이 파일셋에
+없고(main이 0283←0281 · 0289←0287 · 0292←0290으로 재봉합) 0354a도 구간④만 재생한다 — 아래 단언은 구간④ 하나 기준으로
+맞췄다(스킵 줄 1 · 재생 줄 1 · 부분 실패 = 구간④ DDL 실행 뒤 예외 · 게이트 오타 뮤테이션 = 구간④ 게이트).
+
+구간④ 파일 목록(57개) 자체의 드리프트 가드(C2, `_SEGMENT_*_FILES` ↔
 `alembic/versions/` glob 대조)는 실 DB가 불필요해 `test_3804_segment_files_drift_guard.py`
 로 분리했다(destructive_schema 마커 없이 상시 스윗에서 돎).
 """
@@ -136,24 +140,7 @@ def _build_prodlike_at_0354(url: str) -> None:
     적용(develop 파일과 upgrade() 본문이 바이트동일 — down_revision·docstring만 갈림,
     2026-09-16 diff 재확認)+stamp, 나머지는 정상 upgrade. 4곳 전부 스킵된 채 "0354"에
     도달한다."""
-    r = _run_alembic(url, "upgrade", "0281")
-    assert r.returncode == 0, r.stderr
-
-    _apply_upgrade_directly(url, "0283_")
-    r = _run_alembic(url, "stamp", "0283")
-    assert r.returncode == 0, r.stderr
-    r = _run_alembic(url, "upgrade", "0287")
-    assert r.returncode == 0, r.stderr
-
-    _apply_upgrade_directly(url, "0289_")
-    r = _run_alembic(url, "stamp", "0289")
-    assert r.returncode == 0, r.stderr
-    r = _run_alembic(url, "upgrade", "0290")
-    assert r.returncode == 0, r.stderr
-
-    _apply_upgrade_directly(url, "0292_")
-    r = _run_alembic(url, "stamp", "0292")
-    assert r.returncode == 0, r.stderr
+    # 결제 제외 승격 판: 0283 · 0289 · 0292는 이 파일셋에서 이미 0281 · 0287 · 0290에 이어져 있어 정상 체인으로 0295까지 간다.
     r = _run_alembic(url, "upgrade", "0295")
     assert r.returncode == 0, r.stderr
 
@@ -196,11 +183,11 @@ def fresh_db(new_test_db):
     return new_test_db()
 
 
-def test_ac2_fresh_env_head_upgrade_is_noop_four_skip_lines(fresh_db):
+def test_ac2_fresh_env_head_upgrade_is_noop_one_skip_line(fresh_db):
     r = _run_alembic(fresh_db, "upgrade", "head")
     assert r.returncode == 0, r.stderr
     combined = r.stdout + r.stderr
-    assert combined.count("skip(이미 존재)") == 4, combined
+    assert combined.count("skip(이미 존재)") == 1, combined
 
     r = _run_alembic(fresh_db, "current")
     assert "head" in (r.stdout + r.stderr), r.stdout + r.stderr
@@ -210,7 +197,7 @@ def test_ac3_prodlike_replay_matches_devfresh_schema(prodlike_db, fresh_db):
     r = _run_alembic(prodlike_db, "upgrade", "head")
     assert r.returncode == 0, r.stderr
     combined = r.stdout + r.stderr
-    assert combined.count("재생함") == 4, combined
+    assert combined.count("재생함") == 1, combined
 
     r = _run_alembic(fresh_db, "upgrade", "head")
     assert r.returncode == 0, r.stderr
@@ -221,8 +208,8 @@ def test_ac3_prodlike_replay_matches_devfresh_schema(prodlike_db, fresh_db):
 
 
 def test_ac3_partial_failure_rolls_back_all_segments(prodlike_db, monkeypatch):
-    """구간④ 재생 도중 예외를 주입 — 이미 실행된 구간①②③ DDL까지 전부 롤백되는지
-    (단일 트랜잭션, 추가 코드 없이 env.py 기본 설정만으로 보장)를 직접 실증."""
+    """구간④ 재생을 끝까지 실행한 **뒤** 예외를 주입 — 이미 실행된 구간④ DDL(channel_connections 등)까지 전부
+    롤백되는지(단일 트랜잭션, 추가 코드 없이 env.py 기본 설정만으로 보장)를 직접 실증."""
     engine = create_engine(prodlike_db)
 
     spec = importlib.util.spec_from_file_location("mig0354a_partial_fail", str(_BRIDGE_FILE))
@@ -234,9 +221,8 @@ def test_ac3_partial_failure_rolls_back_all_segments(prodlike_db, monkeypatch):
 
     def _replay_boom(filenames: list[str]) -> None:
         call_order.append(filenames)
-        if filenames is mig._SEGMENT_4_FILES:
-            raise RuntimeError("injected failure — story #3804 부분 실패 시뮬레이션")
         original_replay(filenames)
+        raise RuntimeError("injected failure — story #3804 부분 실패 시뮬레이션")
 
     monkeypatch.setattr(mig, "_replay", _replay_boom)
 
@@ -247,19 +233,13 @@ def test_ac3_partial_failure_rolls_back_all_segments(prodlike_db, monkeypatch):
         op_module._proxy = op_obj
         mig.upgrade()
 
-    # 구간④ 전에 구간①②③이 먼저 호출됐음을 확認(순서 전제 검증) — 그래야 "이미 실행된
-    # DDL이 롤백됐다"는 주장이 의미가 있다.
-    assert len(call_order) == 4
+    # 구간④가 실제로 재생된 뒤 터졌음을 확認 — 그래야 "이미 실행된 DDL이 롤백됐다"는 주장이 의미가 있다.
+    assert call_order == [mig._SEGMENT_4_FILES]
 
     with engine.connect() as verify_conn:
         insp = sa.inspect(verify_conn)
-        ps_cols = {c["name"] for c in insp.get_columns("platform_settings")}
-        os_cols = {c["name"] for c in insp.get_columns("org_subscriptions")}
-        bo_cols = {c["name"] for c in insp.get_columns("billing_orders")}
-        assert "vat_rate_bp" not in ps_cols, "구간① DDL이 롤백 안 됨"
-        assert "au_warn_80_notified_at" not in os_cols, "구간② DDL이 롤백 안 됨"
-        assert "receipt_url" not in bo_cols, "구간③ DDL이 롤백 안 됨"
-        assert "channel_connections" not in insp.get_table_names(), "구간④는 실패해 애초에 미적용"
+        assert "channel_connections" not in insp.get_table_names(), "구간④ DDL이 롤백 안 됨"
+        assert "channel_post_versions" not in insp.get_table_names(), "구간④ DDL이 롤백 안 됨"
 
     engine.dispose()
 
@@ -274,8 +254,9 @@ def test_ac3_dry_run_leaves_schema_and_alembic_version_unchanged(prodlike_db):
     assert r.returncode != 0, f"dry-run은 상위 트랜잭션까지 롤백시키려 의도적으로 실패해야 한다:\n{combined}"
     assert "SAVEPOINT 롤백" in combined
     assert combined.count("재생함") == 0 or "판정" in combined  # 요약은 찍히되 실적용은 없다
-    for expect in ("구간① 0282", "구간② 0288", "구간③ 0291", "구간④ 0296~0353"):
-        assert expect in combined, combined
+    assert "구간④ 0296~0353" in combined, combined
+    for gone in ("구간① 0282", "구간② 0288", "구간③ 0291"):
+        assert gone not in combined, combined
 
     r = _run_alembic(prodlike_db, "current")
     assert "0354 " in (r.stdout + r.stderr) or (r.stdout + r.stderr).strip().startswith("0354"), r.stdout + r.stderr
@@ -283,8 +264,6 @@ def test_ac3_dry_run_leaves_schema_and_alembic_version_unchanged(prodlike_db):
     engine = create_engine(prodlike_db)
     with engine.connect() as conn:
         insp = sa.inspect(conn)
-        ps_cols = {c["name"] for c in insp.get_columns("platform_settings")}
-        assert "vat_rate_bp" not in ps_cols
         assert "channel_connections" not in insp.get_table_names()
     engine.dispose()
 
@@ -304,19 +283,17 @@ def _load_mutant(mutated_src: str, tmp_dir: Path):
     return mig
 
 
-def test_mutation_segment2_gate_column_typo_now_caught_by_posthoc_check(prodlike_db):
-    """양성대조 — 구간② 게이트가 실재하는 무관 컬럼(org_subscriptions.tier, 훨씬 이른
-    공통 조상에서 이미 생긴 컬럼)을 잘못 확認하도록 오타를 주입하면, prodlike에서
-    "이미 있다"고 오판해 구간②를 잘못 skip한다. C1(사후 존재-체크) 도입 전에는 이
-    결함이 devfresh 대비 schema diff에서만 드러났지만, 지금은 `_require_exists`가
-    구간② 직후 `au_warn_80_notified_at` 부재를 즉시 잡아 RuntimeError로 트랜잭션
-    전체를 롤백시킨다 — 더 이른(더 정확한) 지점에서 잡히는지 직접 실증한다."""
+def test_mutation_segment4_gate_table_typo_now_caught_by_posthoc_check(prodlike_db):
+    """양성대조 — 구간④ 게이트가 실재하는 무관 테이블(platform_settings, 훨씬 이른 공통 조상에서 이미 생긴 표)을
+    잘못 확認하도록 오타를 주입하면, prodlike에서 "이미 있다"고 오판해 구간④를 잘못 skip한다. `_require_exists`가
+    구간④ 직후 `channel_connections` 부재를 즉시 잡아 RuntimeError로 트랜잭션 전체를 롤백시키는지 직접 실증한다.
+    (결제 제외 승격 판: 원래의 구간② 게이트 뮤테이션은 구간②가 없어져 같은 형태로 구간④ 게이트에 옮겼다.)"""
     import tempfile
 
     src = _BRIDGE_FILE.read_text(encoding="utf-8")
     mutated_src = src.replace(
-        'if "au_warn_80_notified_at" not in os_cols:',
-        'if "tier" not in os_cols:',
+        'if "channel_connections" not in inspector.get_table_names():',
+        'if "platform_settings" not in inspector.get_table_names():',
     )
     assert mutated_src != src, "치환 대상 문자열을 못 찾음 — 마이그 본문이 바뀐 것"
 
@@ -324,7 +301,7 @@ def test_mutation_segment2_gate_column_typo_now_caught_by_posthoc_check(prodlike
     try:
         mig = _load_mutant(mutated_src, tmp_dir)
         engine = create_engine(prodlike_db)
-        with pytest.raises(RuntimeError, match="au_warn_80_notified_at"), engine.begin() as conn:
+        with pytest.raises(RuntimeError, match="channel_connections"), engine.begin() as conn:
             ctx = MigrationContext.configure(conn)
             op_obj = Operations(ctx)
             import alembic.op as op_module

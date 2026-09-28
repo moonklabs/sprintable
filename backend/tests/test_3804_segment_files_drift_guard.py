@@ -1,5 +1,5 @@
 """story #3804 PO CHANGES 1회차(2026-09-16 11:24Z) C2 — 0354a의 `_SEGMENT_*_FILES`
-하드코딩 60개 ↔ `alembic/versions/` 실물 드리프트 가드.
+하드코딩(결제 제외 승격 판에선 구간④ 57개) ↔ `alembic/versions/` 실물 드리프트 가드.
 
 파일명이 바뀌거나(리넘버) 빠지면 지금은 prod 적용 순간에야 `FileNotFoundError`로
 드러난다 — 그 전에 이 테스트가 develop 착지 시점마다 정적으로 잡는다. 실 DB가
@@ -50,11 +50,14 @@ def _find_drift(live: list[str], declared: list[str]) -> str | None:
     )
 
 
-def test_segment1_2_3_single_files_exist():
+def test_payment_segments_1_2_3_are_absent_in_exclude_payment_promotion():
+    """prod 승격 판(결제 축 제외 · 2026-09-28 · story #4391): 구간①~③(0282 · 0288 · 0291)은 결제 축이라 파일도 없고
+    0354a도 재생하지 않는다 — 둘 중 하나만 돌아오면(파일만 복원 · 목록만 복원) 여기서 잡힌다."""
     mig = _load_bridge_module()
-    assert len(mig._SEGMENT_1_FILES) == 1 and (_VERSIONS_DIR / mig._SEGMENT_1_FILES[0]).is_file()
-    assert len(mig._SEGMENT_2_FILES) == 1 and (_VERSIONS_DIR / mig._SEGMENT_2_FILES[0]).is_file()
-    assert len(mig._SEGMENT_3_FILES) == 1 and (_VERSIONS_DIR / mig._SEGMENT_3_FILES[0]).is_file()
+    for name in ("_SEGMENT_1_FILES", "_SEGMENT_2_FILES", "_SEGMENT_3_FILES"):
+        assert not hasattr(mig, name), f"{name}가 0354a에 다시 생김 — 결제 구간 재생은 결제 승격 회차 몫"
+    for prefix in ("0282_", "0288_", "0291_"):
+        assert not list(_VERSIONS_DIR.glob(f"{prefix}*.py")), f"{prefix} 결제 마이그가 승격 파일셋에 있음"
 
 
 def test_segment4_file_list_matches_versions_dir_glob_exactly_in_order():
@@ -72,13 +75,10 @@ def test_segment4_file_list_matches_versions_dir_glob_exactly_in_order():
     assert drift is None, drift
 
 
-def test_total_segment_count_is_60():
+def test_total_segment_count_is_57():
     mig = _load_bridge_module()
-    total = (
-        len(mig._SEGMENT_1_FILES) + len(mig._SEGMENT_2_FILES)
-        + len(mig._SEGMENT_3_FILES) + len(mig._SEGMENT_4_FILES)
-    )
-    assert total == 60, f"리허설 doc·카드 전제(60개)와 어긋남 — 실측 {total}개"
+    total = len(mig._SEGMENT_4_FILES)
+    assert total == 57, f"결제 제외 승격 판 전제(구간④ 57개)와 어긋남 — 실측 {total}개"
 
 
 def test_positive_control_missing_file_is_detected():
