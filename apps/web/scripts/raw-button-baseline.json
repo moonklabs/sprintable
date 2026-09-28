@@ -117,7 +117,7 @@
     "components/docs/doc-search-results.tsx": 1,
     "components/docs/doc-share-dialog.tsx": 1,
     "components/docs/doc-toc.tsx": 3,
-    "components/docs/doc-tree.tsx": 5,
+    "components/docs/doc-tree.tsx": 1,
     "components/docs/doc-url-chip.tsx": 2,
     "components/docs/doc-url-dialog.tsx": 2,
     "components/docs/extensions/code-block-copy.tsx": 3,

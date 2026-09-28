@@ -8,7 +8,7 @@ import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
-import { reorderRequestBody, type DocMovePlan } from '@/components/docs/doc-move-plan';
+import type { DocMovePlan } from '@/components/docs/doc-move-plan';
 import { DocAutoGroups } from '@/components/docs/doc-auto-groups';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
@@ -26,6 +26,8 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { applyDocMove, placedFromSiblings, planDocMove, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
+import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
 // 낼 때 실제 서버 cap과 어긋나지 않게 한 곳에서만 선언한다.
@@ -217,27 +219,56 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // story #4353 — 재정렬 · 폴더로 옮기기 한 길(`POST /api/docs/reorder`). 예전 PATCH {sort_order}는 그 한 문서 값만 바꿔 형제가 0
   // 동률이면 무동작이었다. 서버가 새 부모의 형제 번호를 한 번에 다시 매기고 그 번호를 돌려준다 — 화면은 그 번호를 그대로 반영한다
   // (낙관 추측 번호 없음). 실패하면 문장을 내고 트리를 다시 읽는다(story #3637과 같은 축).
+  // story #4348 — 저장은 어댑터 한 곳(`lib/doc-reorder-api.ts` saveDocOrder · 응답 {doc, siblings} 해석 · 오류 갈래) — 끌기(여기)와 «⋮» 메뉴(아래)가 같은 길.
   const placeDoc = useCallback(async (plan: DocMovePlan, failedTitle: string) => {
-    try {
-      const res = await fetchWithAuth('/api/docs/reorder', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reorderRequestBody(plan)),
-      });
-      if (!res.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return; }
-      const json = (await res.json().catch(() => null)) as
-        { data?: { doc?: { id: string; parent_id: string | null }; siblings?: Array<{ id: string; sort_order: number }> } } | null;
-      const placed = json?.data?.doc;
-      const numbers = new Map((json?.data?.siblings ?? []).map((sib) => [sib.id, sib.sort_order]));
-      if (!placed) { await fetchTree(); return; }
-      setTree((prev) => prev.map((doc) => {
-        const nextOrder = numbers.get(doc.id);
-        if (doc.id === placed.id) return { ...doc, parent_id: placed.parent_id, sort_order: nextOrder ?? doc.sort_order };
-        return nextOrder === undefined ? doc : { ...doc, sort_order: nextOrder };
-      }));
-    } catch { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); }
+    const result = await saveDocOrder(plan);
+    if (!result.ok) { addToast({ title: failedTitle, type: 'error' }); await fetchTree(); return; }
+    setTree((prev) => applyReorderResult(prev, result));
   }, [fetchTree, addToast]);
 
   const handleReorder = useCallback((plan: DocMovePlan) => placeDoc(plan, t('reorderFailed')), [placeDoc, t]);
   const handleMove = useCallback((plan: DocMovePlan) => placeDoc(plan, t('moveFailed')), [placeDoc, t]);
+
+  // story #4348 — «⋮» 위로 · 아래로 · 폴더로. 화면엔 바로 옮기고(낙관) 저장은 상대 이동 API(/api/docs/reorder) 하나로.
+  // - 저장은 한 줄로 보낸다: 앞 이동이 서버에 닿은 뒤 다음을 보내야 after_id가 서버에서도 같은 자리를 가리킨다.
+  // - 응답(서버 번호)을 반영한 위에 아직 안 닿은 뒤 이동들을 다시 얹는다 — 앞 응답이 뒤 이동의 낙관 순서를 되돌리지 않게.
+  // - 실패(409 낡은 순서 포함) = moveFailed + 서버 트리 다시 읽기(끌기 이동과 같은 규칙) · 줄에 선 뒤 이동은 보내지 않는다(없던 자리를 기준으로 짠 것).
+  const treeRef = useRef(tree);
+  useEffect(() => { treeRef.current = tree; });
+  const moveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const moveSeqRef = useRef(0);
+  const pendingMovesRef = useRef(new Map<number, Extract<MenuMovePlan, { ok: true }>>());
+  // 까디르 #4730 P3 — 실패 뒤 다시 읽기는 **지금** 고른 태그로(저장 중에 태그를 바꿨으면 시작 때 태그로 읽어 필터와 목록이 어긋났다).
+  const selectedTagsRef = useRef(selectedTags);
+  useEffect(() => { selectedTagsRef.current = selectedTags; });
+  const handleMenuMove = useCallback((docId: string, action: DocMoveAction): Promise<MenuMoveResult> => {
+    const plan = planDocMove(treeRef.current, docId, action);
+    if (!plan.ok) return Promise.resolve({ plan, placed: null });
+    const next = applyDocMove(treeRef.current, plan);
+    treeRef.current = next;
+    setTree(next);
+    const seq = ++moveSeqRef.current;
+    const pending = pendingMovesRef.current;
+    pending.set(seq, plan);
+    const job = moveChainRef.current.then(async (): Promise<MenuMoveResult> => {
+      if (!pending.has(seq)) return null;
+      const result = await saveDocOrder(plan.placement);
+      pending.delete(seq);
+      if (result.ok) {
+        const later = [...pending.values()];
+        setTree((prev) => later.reduce<Doc[]>((acc, p) => applyDocMove(acc, p), applyReorderResult(prev, result)));
+        // 알림의 «N개 중 M번째»는 응답의 새 부모 형제 전부로 센다(불러온 20개가 아니라 · 까디르 #4730 P3).
+        return { plan, placed: placedFromSiblings(result.doc, result.siblings) };
+      }
+      pending.clear();
+      addToast({ title: t('moveFailed'), type: 'error' });
+      const tags = selectedTagsRef.current;
+      await fetchTree(tags.length ? tags : undefined);
+      return null;
+    });
+    moveChainRef.current = job.catch(() => undefined);
+    return job;
+  }, [fetchTree, addToast, t]);
 
   const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
@@ -604,7 +635,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (
-              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} />
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} onMenuMove={handleMenuMove} hasMore={docsHasMore} />
             )}
             {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">

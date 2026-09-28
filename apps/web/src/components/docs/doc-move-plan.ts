@@ -14,10 +14,15 @@ export interface DocMovePlan {
   afterId?: string | null;
 }
 
+/** 서버 목록과 같은 (sort_order, id) 비교 — 형제 순서 · «⋮» 옮기기 고르개(story #4348)가 같은 비교를 쓴다. */
+export function compareServerOrder(a: DocPlaceable, b: DocPlaceable): number {
+  return a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 export function siblingsInServerOrder<T extends DocPlaceable>(docs: T[], parentId: string | null): T[] {
   return docs
     .filter((d) => d.parent_id === parentId)
-    .sort((a, b) => a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort(compareServerOrder);
 }
 
 /** 같은 부모 안 재정렬 — 끌기 라이브러리의 자리 바꾸기와 같은 뜻: 아래로 끌면 대상 뒤, 위로 끌면 대상 앞. */
@@ -43,8 +48,8 @@ export function planMoveBeside(docs: DocPlaceable[], activeId: string, overId: s
   return { docId: activeId, parentId: over.parent_id, afterId: i > 0 ? siblings[i - 1]!.id : null };
 }
 
-/** 폴더(문서) 안으로 — 그 부모의 맨 끝. */
-export function planMoveInto(activeId: string, parentId: string): DocMovePlan {
+/** 폴더(문서) 안으로 — 그 부모의 맨 끝. `null` = 맨 위 단계의 맨 끝(«⋮» 옮기기 · story #4348). */
+export function planMoveInto(activeId: string, parentId: string | null): DocMovePlan {
   return { docId: activeId, parentId };
 }
 
