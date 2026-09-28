@@ -215,3 +215,24 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     expect(container.querySelector('.bg-proof-citron')).toBeNull();
   });
 });
+
+describe('[SID:4388] DocsIndex — the chosen category filter is announced as pressed', () => {
+  const tree = [
+    { id: 'f1', parent_id: null, title: '제품 스펙', slug: 'f1', icon: null, sort_order: 0, is_folder: true },
+    { id: 'd1', parent_id: 'f1', title: '결제 스펙 v2', slug: 'payments-v2', icon: null, sort_order: 0, status: 'confirmed', updated_at: '2026-08-21T00:00:00Z' },
+    { id: 'd2', parent_id: null, title: 'API 계약', slug: 'api-contract', icon: null, sort_order: 1, status: 'pending', updated_at: '2026-08-22T00:00:00Z' },
+  ];
+
+  it('«전체» starts pressed; the folder and «미분류» filters take aria-pressed in turn', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
+    await mount();
+    const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith(label))!;
+    const pressed = () => ['전체', '제품 스펙', '미분류'].map((label) => `${label}:${button(label).getAttribute('aria-pressed')}`);
+
+    expect(pressed()).toEqual(['전체:true', '제품 스펙:false', '미분류:false']);
+    await act(async () => { button('제품 스펙').click(); });
+    expect(pressed()).toEqual(['전체:false', '제품 스펙:true', '미분류:false']);
+    await act(async () => { button('미분류').click(); });
+    expect(pressed()).toEqual(['전체:false', '제품 스펙:false', '미분류:true']);
+  });
+});

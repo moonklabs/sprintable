@@ -985,3 +985,19 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
     expect(payload().value).toBe('{}');
   });
 });
+
+describe('[SID:4388] event definer dialog — «기본 · 고급» is a tablist that announces the chosen tab', () => {
+  it('«기본» starts selected; switching to «고급» moves aria-selected', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    const tabs = () => [...dialog.querySelectorAll('[role="tablist"] [role="tab"]')]
+      .map((el) => `${el.textContent?.startsWith(koMessages.organization.definerTabBasic) ? 'basic' : 'advanced'}:${el.getAttribute('aria-selected')}`);
+
+    expect(tabs()).toEqual(['basic:true', 'advanced:false']);
+    await act(async () => { switchToAdvancedTab(); });
+    expect(tabs()).toEqual(['basic:false', 'advanced:true']);
+  });
+});

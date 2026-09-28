@@ -130,3 +130,19 @@ describe('ImportArtifactDialog — HTML 탭(story 64010b05 §3)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('[SID:4388] ImportArtifactDialog tabs announce the chosen tab', () => {
+  it('«이미지» starts selected in a tablist; clicking «HTML 붙여넣기» moves aria-selected', async () => {
+    await mount();
+    const tabs = () => [...document.body.querySelectorAll('[role="tab"]')].map((el) => `${el.textContent}:${el.getAttribute('aria-selected')}`);
+    expect(document.body.querySelector('[role="tablist"]')).not.toBeNull();
+    expect(tabs()).toHaveLength(2);
+    expect(tabs()[0]).toMatch(/:true$/);
+    expect(tabs()[1]).toBe('HTML 붙여넣기:false');
+
+    const htmlTab = [...document.body.querySelectorAll('[role="tab"]')].find((b) => b.textContent === 'HTML 붙여넣기')!;
+    await act(async () => { htmlTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(tabs()[0]).toMatch(/:false$/);
+    expect(tabs()[1]).toBe('HTML 붙여넣기:true');
+  });
+});

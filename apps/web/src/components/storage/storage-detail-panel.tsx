@@ -90,9 +90,11 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
       </div>
 
       {/* tabs (line, active border-info) */}
-      <div className="flex gap-0.5 border-b border-border px-[14px] pt-[6px]">
+      <div role="tablist" className="flex gap-0.5 border-b border-border px-[14px] pt-[6px]">
         <button
           type="button"
+          role="tab"
+          aria-selected={tab === 'detail'}
           onClick={() => setTab('detail')}
           className={cn(
             '-mb-px border-b-2 px-[11px] py-2 text-[12.5px] font-semibold',
@@ -103,6 +105,8 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={tab === 'usage'}
           onClick={() => setTab('usage')}
           className={cn(
             '-mb-px flex items-center gap-[5px] border-b-2 px-[11px] py-2 text-[12.5px] font-semibold',

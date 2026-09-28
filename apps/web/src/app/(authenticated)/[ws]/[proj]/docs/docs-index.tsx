@@ -187,6 +187,7 @@ export function DocsIndex() {
         <button
           type="button"
           onClick={() => setCategoryFilter(null)}
+          aria-pressed={categoryFilter === null}
           className={`px-2.5 py-1 text-[13px] font-semibold transition ${categoryFilter === null ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
         >
           {t('indexCategoryAll')} <span className="font-mono text-[11px] text-muted-foreground">{items.length}</span>
@@ -196,6 +197,7 @@ export function DocsIndex() {
             key={f.id}
             type="button"
             onClick={() => setCategoryFilter(f.id)}
+            aria-pressed={categoryFilter === f.id}
             className={`px-2.5 py-1 text-[13px] font-medium transition ${categoryFilter === f.id ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {f.title} <span className="font-mono text-[11px] text-muted-foreground">{categoryCounts[f.id] ?? 0}</span>
@@ -205,6 +207,7 @@ export function DocsIndex() {
           <button
             type="button"
             onClick={() => setCategoryFilter(UNCATEGORIZED)}
+            aria-pressed={categoryFilter === UNCATEGORIZED}
             className={`px-2.5 py-1 text-[13px] font-medium transition ${categoryFilter === UNCATEGORIZED ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {t('indexCategoryUncategorized')} <span className="font-mono text-[11px] text-muted-foreground">{categoryCounts[UNCATEGORIZED]}</span>

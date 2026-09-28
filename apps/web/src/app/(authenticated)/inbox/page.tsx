@@ -547,6 +547,7 @@ export default function InboxPage() {
               key={key}
               type="button"
               onClick={() => router.replace(flatHref(`/inbox${key === 'notifications' ? '' : `?tab=${key}`}`), { scroll: false })}
+              aria-current={activeTab === key ? 'page' : undefined}
               className={`border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
                 activeTab === key
                   ? 'border-primary text-foreground'

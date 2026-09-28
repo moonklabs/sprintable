@@ -836,9 +836,11 @@ function EventFormDialog({
         <DialogHeader>
           <div className="flex items-center justify-between gap-3">
             <DialogTitle>{mode === 'create' ? t('eventCreateDialogTitle') : t('eventEditDialogTitle')}</DialogTitle>
-            <div className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
+            <div role="tablist" className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
               <button
                 type="button"
+                role="tab"
+                aria-selected={tab === 'basic'}
                 disabled={advancedOnly}
                 onClick={() => setTab('basic')}
                 className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tab === 'basic' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
@@ -847,6 +849,8 @@ function EventFormDialog({
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={tab === 'advanced'}
                 onClick={() => setTab('advanced')}
                 className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${tab === 'advanced' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
               >

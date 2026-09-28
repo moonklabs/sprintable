@@ -90,11 +90,13 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
           <DialogTitle>{t('importDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center gap-0.5 border-b border-border pb-2">
+        <div role="tablist" className="flex items-center gap-0.5 border-b border-border pb-2">
           {(['image', 'html'] as const).map((tabKey) => (
             <button
               key={tabKey}
               type="button"
+              role="tab"
+              aria-selected={tab === tabKey}
               onClick={() => setTab(tabKey)}
               className={cn(
                 'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
